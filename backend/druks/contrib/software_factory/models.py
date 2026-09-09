@@ -288,7 +288,10 @@ class WorkItem(StoredSubject):
             found = (await db_session().scalars(stmt)).first()
             if found:
                 return found
-        return await cls.get_for_branch(repo=repo, branch=branch) if branch else None
+        if branch:
+            found = await cls.get_for_branch(repo=repo, branch=branch)
+            if found and (not pr_number or not found.pr_number or found.pr_number == pr_number):
+                return found
 
     @classmethod
     async def get_for_branch(cls, *, repo: str, branch: str) -> "WorkItem | None":
@@ -309,13 +312,17 @@ class WorkItem(StoredSubject):
         await db_session().flush()
 
     async def resolve(self, *, merged: bool, at: datetime) -> None:
-        # cycle: the app imports this module at file scope.
-        import druks.contrib.software_factory.app as software_factory_app
-
         self.resolution = "merged" if merged else "closed"
         self.resolved_at = at
         self.updated_at = Base.utc_now()
-        await software_factory_app.SoftwareFactory.record_event(type=self.resolution, subject=self)
+        await self.announce(self.resolution)
+        await db_session().flush()
+
+    async def stop(self) -> None:
+        """End the attempt after an operator stop, without a GitHub outcome."""
+        self.resolution = "closed"
+        self.resolved_at = Base.utc_now()
+        self.updated_at = self.resolved_at
         await db_session().flush()
 
     async def ship(self) -> None:

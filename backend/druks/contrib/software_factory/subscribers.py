@@ -4,7 +4,6 @@ from druks.contrib.software_factory.github import get_review_actor
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Build, Profile, PullRequestReview
-from druks.db import Base
 from druks.signals import subscribe
 from druks.workflows import WorkflowEvent
 
@@ -18,7 +17,7 @@ async def new_build_claims_the_item(*, subject: WorkItem, **_: object) -> None:
 async def cancelled_build_settles_the_item(*, subject: WorkItem, **_: object) -> None:
     """An operator cancellation explicitly abandons the work item."""
     if not subject.resolution:
-        await subject.resolve(merged=False, at=Base.utc_now())
+        await subject.stop()
 
 
 @subscribe("pr.opened", workflow=Build)

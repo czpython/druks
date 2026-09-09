@@ -154,6 +154,9 @@ class PlanOutput(AgentOutput):
     def get_artifact(self) -> dict[str, str]:
         return {"kind": "markdown", "title": "Implementation plan", "content": self.plan_markdown}
 
+    def get_activity(self) -> dict[str, str]:
+        return {"kind": "plan.prepared"}
+
     def to_result(self) -> PlanData:
         return PlanData(
             plan_markdown=self.plan_markdown,
@@ -172,6 +175,9 @@ class ContractRevisionOutput(AgentOutput):
 
     def get_artifact(self) -> dict[str, str]:
         return {"kind": "markdown", "title": "Implementation plan", "content": self.plan_markdown}
+
+    def get_activity(self) -> dict[str, str]:
+        return {"kind": "plan.revised"}
 
     def to_result(self) -> PlanData:
         # A revision resolves the questions, so none carry over;
@@ -273,6 +279,25 @@ class ReviewReport(AgentOutput):
     summary: str
     findings: list[FindingOutput]
     context_repos: list[str]
+
+    def get_artifact(self) -> dict[str, str]:
+        sections = [f"Decision: {self.decision}", self.summary]
+        for finding in self.findings:
+            sections.extend([f"## {finding.summary}", finding.evidence])
+            if finding.path:
+                location = finding.path
+                if finding.line:
+                    lines = (
+                        f"{finding.start_line}-{finding.line}"
+                        if finding.start_line and finding.start_line != finding.line
+                        else str(finding.line)
+                    )
+                    location = f"{location}:{lines}"
+                sections.append(f"Source: `{location}`")
+        return {"kind": "markdown", "title": "Review", "content": "\n\n".join(sections)}
+
+    def get_activity(self) -> dict[str, str]:
+        return {"kind": "review.completed", "summary": self.summary}
 
 
 class EvalCheckOutput(AgentOutput):

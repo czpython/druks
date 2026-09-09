@@ -27,7 +27,7 @@ export interface EventLine {
 
 export function eventLine(event: FeedItem): EventLine {
   return {
-    label: label(event),
+    label: (event.app && getAppUI(event.app)?.activityLabel?.(event)) || label(event),
     subject: event.subjectLabel ?? '',
     source: localName(event.workflow) || appLabel(event.app || 'druks'),
     path: subjectPath(event),

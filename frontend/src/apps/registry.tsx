@@ -1,9 +1,15 @@
 import type { ReactNode } from 'react'
+import type { FeedItem, InputRequest } from '../api/types'
 
 export interface AppRoute {
   /** A wouter pattern under the router base, such as /notes/:id. */
   path: string
   render: (params: Record<string, string>) => ReactNode
+}
+
+export type ActivityEvent = Pick<FeedItem, 'kind' | 'workflow'> & {
+  gate?: string | null
+  inputRequest?: InputRequest | null
 }
 
 export interface AppUI {
@@ -18,6 +24,7 @@ export interface AppUI {
   // Where a feed row about one of this app's subjects navigates. The shell knows
   // an app has subjects, never where its pages put them.
   subjectPath?: (subject: { type: string; id: string }, target?: SubjectTarget) => string | undefined
+  activityLabel?: (event: ActivityEvent) => string | undefined
   parentPath?: (location: string) => string | undefined
 }
 

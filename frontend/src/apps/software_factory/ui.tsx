@@ -1,5 +1,6 @@
 import { registerAppUI, targetQuery } from '../registry'
 import { SOFTWARE_FACTORY } from './api'
+import { activityLabel } from './activity'
 import { parseLeadingId } from './slug'
 import { AgentCallPage } from './AgentCallPage'
 import { HistoryPage } from './HistoryPage'
@@ -16,8 +17,7 @@ registerAppUI({
     [`/${SOFTWARE_FACTORY}/history`, 'history'],
     [`/${SOFTWARE_FACTORY}/projects`, 'projects'],
   ],
-  // Software Factory's other subject, a project repo, has no page of its own — a row about one
-  // stays unclickable rather than landing on the work item that shares its id.
+  activityLabel,
   parentPath: (location) => {
     const workItem = /^(\/software_factory\/work-items\/[^/]+)/.exec(location)?.[1]
     return workItem && (location.startsWith(`${workItem}/agent-calls/`) ? workItem : `/${SOFTWARE_FACTORY}`)
@@ -25,7 +25,9 @@ registerAppUI({
   subjectPath: ({ type, id }, target) =>
     type === 'work_item'
       ? `/${SOFTWARE_FACTORY}/work-items/${encodeURIComponent(id)}${targetQuery(target)}`
-      : undefined,
+      : type === 'pull_request'
+        ? `https://github.com/${id.replace('#', '/pull/')}`
+        : undefined,
   routes: [
     { path: `/${SOFTWARE_FACTORY}`, render: () => <WorkItemsPage /> },
     { path: `/${SOFTWARE_FACTORY}/history`, render: () => <HistoryPage /> },
