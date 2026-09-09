@@ -14,11 +14,11 @@ async def test_operator_stop_records_its_reason_and_exact_run_once(druks_client,
     note = await Note.create(body="Stop this work")
     run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
 
-    response = druks_client.post(f"/api/runs/{run.id}/cancel", json={"reason": "Wrong source"})
+    response = await druks_client.post(f"/api/runs/{run.id}/cancel", json={"reason": "Wrong source"})
     assert response.status_code == 200
     assert response.json() == {"run": run.id, "result": "cancelled"}
 
-    repeated = druks_client.post(f"/api/runs/{run.id}/cancel", json={"reason": "Wrong source"})
+    repeated = await druks_client.post(f"/api/runs/{run.id}/cancel", json={"reason": "Wrong source"})
     assert repeated.json() == {"run": run.id, "result": "already_cancelled"}
     events = list(await druks_db.scalars(select(Event).filter_by(type=WorkflowEvent.CANCELLED)))
     assert len(events) == 1
@@ -37,7 +37,7 @@ async def test_failed_operator_cancellation_records_no_stop(druks_client, druks_
 
     monkeypatch.setattr("dbos.DBOS.cancel_workflow_async", unavailable)
     with pytest.raises(RuntimeError, match="Cancellation unavailable"):
-        druks_client.post(f"/api/runs/{run.id}/cancel", json={"reason": "Wrong source"})
+        await druks_client.post(f"/api/runs/{run.id}/cancel", json={"reason": "Wrong source"})
 
     assert not list(await druks_db.scalars(select(Event).filter_by(type=WorkflowEvent.CANCELLED)))
 
@@ -47,7 +47,7 @@ async def test_inactive_run_has_no_operator_stop(druks_client, druks_db, state):
     note = await Note.create(body="Finished work")
     run = await seed_run(druks_db, kind=Summarize.kind, subject=note, state=state)
 
-    response = druks_client.post(f"/api/runs/{run.id}/cancel", json={"reason": "Wrong source"})
+    response = await druks_client.post(f"/api/runs/{run.id}/cancel", json={"reason": "Wrong source"})
 
     assert response.status_code == 409
     assert not list(await druks_db.scalars(select(Event).filter_by(type=WorkflowEvent.CANCELLED)))
