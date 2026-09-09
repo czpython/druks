@@ -1,0 +1,54 @@
+.page-work-items .row-work-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(130px, .3fr) 140px; gap: 20px; height: auto; min-height: 84px; padding: 18px var(--page-gutter); }
+.work-item-identity { min-width: 0; }
+.work-item-title { display: block; color: var(--text); font-size: 15px; font-weight: 500; text-decoration: none; overflow-wrap: anywhere; }
+.work-item-title:hover { text-decoration: underline; }
+.work-item-references { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 8px; }
+.work-item-references :is(a, span) { font-size: 13px; min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.work-item-state { display: flex; align-items: center; gap: 8px; font-size: 14px; overflow-wrap: anywhere; }
+.work-item-updated { font: 13px var(--font-mono); text-align: right; color: var(--text-dim); }
+.page-work-items .wi-group-head { font: 14px var(--font-sans); letter-spacing: 0; text-transform: none; }
+.page-work-items .active-filters { min-width: 0; max-width: 100%; }
+.page-work-items .history-search { width: min(320px, 100%); min-width: 0; min-height: 40px; font: 15px var(--font-sans); }
+.page-events .events-filter-pill { min-height: 40px; padding: 8px 12px; font: 15px var(--font-sans); }
+.page-events :is(.event-time, .event-kind-pill, .event-source) { font-size: 13px; }
+.page-events .event-summary { font-size: 15px; }
+.page-events .event-kind-failed { color: var(--outcome-failed); border-color: var(--outcome-failed); }
+.page-events .event-kind-running { color: var(--bucket-run); border-color: var(--bucket-run); }
+.page-events .event-kind-parked { color: var(--accent-amber); border-color: var(--accent-amber); }
+.page-events .event-kind-finished { color: var(--outcome-merged); border-color: var(--outcome-merged); }
+.page-events .event-kind-cancelled { color: var(--text-dim); border-color: var(--text-dim); }
+.us-head-title, .us-prov-name { margin: 0; }
+.us-prov-identity { min-width: 0; flex: 1 1 160px; }
+.page-usage .us-prov-spacer { display: none; }
+.page-usage .us-prov-scraped { flex-basis: 100%; padding-left: 18px; }
+.us-prov-identity > span { display: block; margin-top: 5px; color: var(--text-mid); font-size: 13px; overflow-wrap: anywhere; }
+.page-usage .us-refresh { height: auto; min-height: 40px; font: 15px var(--font-sans); }
+.page-usage :is(.us-head-updated, .us-prov-plan, .us-prov-warn, .us-win-label, .us-win-pct-unit, .us-burn, .us-reset, .us-unmetered-used, .us-unmetered-used-label, .us-spark-cap, .us-split-row, .us-hours-axis, .us-alert-tag, .us-alert-count-label) { font-size: 13px; letter-spacing: 0; }
+.page-usage .us-spark-cap { color: var(--text-dim); text-transform: none; }
+.page-usage .us-win-meta { flex-wrap: wrap; gap: 8px; }
+.page-usage .us-burn { white-space: normal; }
+.page-usage :is(.us-win-label, .us-alert-title, .us-alert-tag) { white-space: normal; overflow-wrap: anywhere; }
+.page-usage .us-win-top { gap: 12px; flex-wrap: wrap; }
+.page-usage .us-alert-sub { font-size: 13px; }
+.page-usage .usage-raw summary { min-height: 44px; padding: 12px 0; font-size: 13px; }
+.page-usage .usage-raw-pre { font-size: 13px; }
+.us-read-error { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; color: var(--outcome-failed); }
+.us-read-error p { flex: 1 1 240px; margin: 0; }
+@media (max-width: 649px) {
+  .page-work-items .row-work-item { grid-template-columns: minmax(0, 1fr); gap: 12px; padding-block: 20px; }
+  .work-item-references { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .work-item-references a { display: inline-flex; align-items: center; min-height: 44px; }
+  .work-item-title { min-height: 44px; }
+  .work-item-updated { text-align: left; }
+  .page-work-items .history-search { min-height: 44px; font-size: 16px; }
+  .page-events .events-filter-pill { min-height: 44px; }
+  .page-usage .us-head { flex-wrap: wrap; }
+  .page-usage .us-head-updated { order: 1; width: 100%; }
+  .page-usage .us-refresh { min-height: 44px; }
+  .page-usage :is(.us-week-arrow, .us-week-dot) { width: 44px; height: 44px; }
+  .page-usage .us-week-dots { gap: 0; flex-wrap: wrap; }
+  .page-usage .us-spark-cap { flex-wrap: wrap; white-space: normal; }
+  .page-usage .us-alert { display: grid; grid-template-columns: 24px minmax(0, 1fr); }
+  .page-usage .us-alert-glyph { width: auto; }
+  .page-usage .us-alert-right { grid-column: 1 / -1; align-items: flex-start; border-left: 0; border-top: 1px solid var(--border); }
+}

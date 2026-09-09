@@ -27,7 +27,3 @@ def get_runs_root(ssh_username: str) -> str:
 
 def get_related_root(ssh_username: str) -> str:
     return f"{get_work_root(ssh_username)}/related"
-
-
-def get_github_token_remote_path(ssh_username: str) -> str:
-    return f"{get_work_root(ssh_username)}/github-token"

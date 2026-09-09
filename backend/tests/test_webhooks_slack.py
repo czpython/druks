@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from urllib.parse import urlencode
 
 import pytest
+from druks.accounts.models import Account
 from druks.core.webhooks.slack import SlackInteractivity, verify_slack_signature
 from druks.database import db_session as ambient_db_session
 from druks.durable import Run
@@ -29,6 +30,7 @@ _IN_APP_ASK = {
 
 async def _parked_notification(druks_db):
     run = Run(
+        account_id=(await Account.get_or_create("op@example.com")).id,
         id=str(uuid7()),
         kind="notifications.test",
         input_gate="review",

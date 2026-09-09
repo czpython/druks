@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from druks.database import create_async_engine_from_url, db_session, get_session, session_scope
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
 from druks.settings import load_settings
-from druks.user_settings.models import UserSettings
+from druks.user_settings.models import SettingsProfile
 
 if TYPE_CHECKING:
     from druks.workflows import Workflow
@@ -79,11 +79,9 @@ async def apply_schedules() -> None:
     for existing in await DBOS.list_schedules_async():
         if existing["schedule_name"] not in declared:
             await DBOS.delete_schedule_async(existing["schedule_name"])
-    # Crons fire on the operator's clock: "daily at midnight" means their
-    # midnight. Evaluating in-zone (rather than converting to a UTC cron once)
-    # keeps wall-clock cadences honest across DST. The timezone setting is
-    # validated at its write boundary, so it's a real IANA name here.
-    timezone = (await UserSettings.get()).timezone
+    # Evaluate in the installation timezone so daily cadence follows DST.
+    # Personal display preferences must not move a shared schedule.
+    timezone = (await SettingsProfile.get()).timezone
     for cls, fn in _scheduled:
         await DBOS.delete_schedule_async(cls.kind)
         cron = await cls.get_schedule()

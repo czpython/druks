@@ -24,7 +24,7 @@ class LinearEvents(Webhook):
         except ServiceNotConnectedError as error:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
-                "Linear is not connected — connect it in Settings → Services.",
+                "Linear is not connected — connect it in Settings → Connections → Services.",
             ) from error
         verify_hmac_sha256(
             self.raw_body,
@@ -100,7 +100,7 @@ class JiraEvents(Webhook):
         except ServiceNotConnectedError as error:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
-                "Jira is not connected — connect it in Settings → Services.",
+                "Jira is not connected — connect it in Settings → Connections → Services.",
             ) from error
         provided = self.request.headers.get("x-druks-webhook-token") or ""
         if not hmac.compare_digest(provided, webhook_secret):
@@ -129,6 +129,7 @@ class JiraEvents(Webhook):
         fields = issue["fields"]
         issue_status = fields["status"]
         key = issue["key"]
+        base_url = (await services.Jira.get()).identity["base_url"]
         # Unassigned issues carry a null assignee; privacy settings can hide the email.
         assignee = fields["assignee"] or {}
         await publish(
@@ -138,7 +139,7 @@ class JiraEvents(Webhook):
                 "identifier": key,
                 "status": issue_status["name"],
                 "title": fields["summary"],
-                "url": await self._issue_url(key),
+                "url": f"{base_url.rstrip('/')}/browse/{key}",
                 "project_name": fields["project"]["name"],
                 "labels": fields["labels"],
                 "assignee_email": assignee.get("emailAddress"),
@@ -150,8 +151,3 @@ class JiraEvents(Webhook):
             },
         )
         return JSONResponse({"accepted": True})
-
-    async def _issue_url(self, key: str) -> str:
-        # Dispatch runs after request_is_authentic, so the row is connected here.
-        base_url = (await services.Jira.get()).identity["base_url"]
-        return f"{base_url.rstrip('/')}/browse/{key}"

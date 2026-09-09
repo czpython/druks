@@ -8,8 +8,8 @@ import {
   type RefObject,
 } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, ChartNoAxesCombined, Search, Settings } from 'lucide-react'
-import { Link, Route, Router, Switch, useLocation, useSearch, type RouterProps } from 'wouter'
+import { Activity, ChartNoAxesCombined, LayoutGrid, Search, Settings } from 'lucide-react'
+import { Link, Route, Router, Switch, useLocation, type RouterProps } from 'wouter'
 import { navigate as browserNavigate, useLocationProperty } from 'wouter/use-browser-location'
 
 import { api } from './api/client'
@@ -23,8 +23,8 @@ import { Page } from './components/Page'
 import { SettingsPages } from './components/SettingsPages'
 import { Sidebar } from './components/Sidebar'
 import { EventsPage } from './pages/EventsPage'
+import { DashboardPage } from './pages/DashboardPage'
 import { LoginWindowPage } from './pages/LoginWindowPage'
-import { SystemStrip } from './components/SystemStrip'
 import { UsagePage } from './pages/UsagePage'
 import { appAccent } from './lib/appColors'
 import './apps'
@@ -32,6 +32,7 @@ import { registerInstalledApps } from './apps/installed'
 import { appHome, appLabel, appOwning, getAppUI, registeredApps } from './apps/registry'
 
 const ROUTER_BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
+const SHELL_PAGES: Record<string, string> = { '/': 'Dashboard', '/events': 'Events', '/usage': 'Usage' }
 
 export function App({ account }: { account: Account }) {
   const unsavedFormRef = useRef<UnsavedForm | null>(null)
@@ -146,7 +147,8 @@ function AppContexts({
   aroundNav: NonNullable<RouterProps['aroundNav']>
 }) {
   const [location] = useLocation()
-  const search = useSearch()
+  const search = useLocationProperty(() => window.location.search.slice(1))
+  const rawPath = useLocationProperty(() => window.location.pathname)
   const hash = useLocationProperty(() => window.location.hash)
   const isSettings = location === '/settings' || location.startsWith('/settings/')
   const wasSettings = useRef(isSettings)
@@ -159,11 +161,8 @@ function AppContexts({
   const [work, setWork] = useState<{ path: string; search: string; hash: string }>(
     () => window.history.state?.druksWork ?? { path: `${ROUTER_BASE}/`, search: '', hash: '' },
   )
-  if (
-    !isSettings &&
-    (work.path !== `${ROUTER_BASE}${location}` || work.search !== search || work.hash !== hash)
-  )
-    setWork({ path: `${ROUTER_BASE}${location}`, search, hash })
+  if (!isSettings && (work.path !== rawPath || work.search !== search || work.hash !== hash))
+    setWork({ path: rawPath, search, hash })
   if (
     isSettings &&
     storedWork &&
@@ -229,23 +228,10 @@ function AppShell({
   const app = urlApp ?? lastApp ?? defaultApp
   const ui = app ? getAppUI(app) : undefined
   const [search, setSearch] = useState('')
-  const wantsHealth = Boolean(ui?.systemStrip)
-  const healthQuery = useQuery({
-    queryKey: ['system-health'],
-    queryFn: api.systemHealth,
-    enabled: wantsHealth,
-    refetchInterval: wantsHealth ? 4000 : false,
-  })
   const navCount = useRef(-1)
   useEffect(() => {
     navCount.current += 1
   }, [location])
-
-  useEffect(() => {
-    if (!hidden && (location === '' || location === '/') && defaultApp) {
-      navigate(appHome(defaultApp), { replace: true })
-    }
-  }, [location, navigate, defaultApp, hidden])
 
   useEffect(() => {
     if (app) document.body.dataset.app = app
@@ -261,61 +247,33 @@ function AppShell({
         return
       }
       if (event.key === 'Escape') {
-        const workItemPath = /^(\/software_factory\/work-items\/[^/]+)\/agent-calls\//.exec(
-          location,
-        )?.[1]
-        if (workItemPath) {
-          navigate(workItemPath)
-          return
-        }
-        if (
-          location.startsWith('/software_factory/work-items/') ||
-          location === '/usage' ||
-          location === '/events'
-        ) {
+        const sharedDetail = location === '/usage' || location === '/events'
+        const parent = ui?.parentPath?.(location) ?? (sharedDetail && app ? appHome(app) : undefined)
+        if (parent) {
           if (navCount.current > 0) window.history.back()
-          else if (app) navigate(appHome(app))
+          else navigate(parent)
         }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [location, app, navigate, defaultApp, hidden])
+  }, [location, app, ui, navigate, defaultApp, hidden])
 
   const declaredNavigation =
     ui?.navigation ?? rosterQuery.data?.find((entry) => entry.name === app)?.navigation
-  const appSettings = settingsQuery.data?.apps.find((entry) => entry.name === app)
-  const hasSettings = Boolean(
-    appSettings &&
-      (appSettings.settings.length ||
-        appSettings.agents.length ||
-        appSettings.workflows.some((workflow) => workflow.fields.length)),
-  )
-  const navigation: [string, string][] = urlApp
-    ? [
-        ...(declaredNavigation?.length
-          ? declaredNavigation
-          : hasSettings
-            ? [[appHome(urlApp), 'Home'] as [string, string]]
-            : []),
-        ...(hasSettings ? [[`/apps/${urlApp}/settings`, 'Settings'] as [string, string]] : []),
-      ]
-    : []
+  const appSettingsPath =
+    urlApp && settingsQuery.data?.apps.some((entry) => entry.name === urlApp)
+      ? `/apps/${urlApp}/settings`
+      : undefined
+  const navigation = urlApp ? (declaredNavigation ?? []) : []
   const activeTab = navigation
-    ?.map(([url]) => url)
+    .map(([url]) => url)
     .filter((url) => location === url || location.startsWith(`${url}/`))
     .sort((left, right) => right.length - left.length)[0]
   const visibleApps = registered.filter((name) =>
     appLabel(name).toLowerCase().includes(search.toLowerCase().trim()),
   )
-  const title =
-    location === '/events'
-      ? 'Events'
-      : location === '/usage'
-        ? 'Usage'
-        : app
-          ? appLabel(app)
-          : 'Druks'
+  const title = SHELL_PAGES[location] ?? (app ? appLabel(app) : 'Druks')
 
   return (
     <div className="command-center" hidden={hidden}>
@@ -323,8 +281,16 @@ function AppShell({
         Skip to content
       </a>
       <header className="command-header">
-        <Sidebar account={account} home={defaultApp ? appHome(defaultApp) : '/'}>
+        <Sidebar account={account} home="/">
           <nav className="sidebar-work" aria-label="Work">
+            <Link
+              href="/"
+              className="sidebar-link"
+              aria-current={location === '/' ? 'page' : undefined}
+            >
+              <LayoutGrid size={17} aria-hidden="true" />
+              Dashboard
+            </Link>
             <Link
               href="/events"
               className="sidebar-link"
@@ -406,13 +372,28 @@ function AppShell({
         <div className="command-breadcrumb">
           <span>Command center /</span>
           <strong className="app-name">{title}</strong>
+          {appSettingsPath && (
+            <Link
+              href={appSettingsPath}
+              className="command-app-settings"
+              aria-label={`${title} settings`}
+              title={`${title} settings`}
+              aria-current={
+                location === appSettingsPath || location.startsWith(`${appSettingsPath}/`)
+                  ? 'page'
+                  : undefined
+              }
+            >
+              <Settings size={17} aria-hidden="true" />
+            </Link>
+          )}
         </div>
         <div className="command-utilities">
           <WakeLockIndicator />
           <span className="mono command-timezone">{timezone}</span>
         </div>
       </header>
-      {urlApp && navigation && navigation.length > 0 && (
+      {urlApp && navigation.length > 0 && (
         <nav className="command-app-navigation" aria-label={`${appLabel(urlApp)} pages`}>
           {navigation.map(([url, name]) => (
             <Link
@@ -428,13 +409,14 @@ function AppShell({
         </nav>
       )}
       <main id="main-content" tabIndex={-1} className="app-main" data-app={app ?? undefined}>
-        {wantsHealth && healthQuery.data && <SystemStrip health={healthQuery.data} />}
-        {wantsHealth && healthQuery.isError && (
-          <p className="command-health-error" role="status">
-            Health information is unavailable.
-          </p>
-        )}
         <Switch>
+          <Route path="/">
+            <DashboardPage
+              apps={
+                rosterQuery.data?.filter((entry) => !entry.builtin).map((entry) => entry.name) ?? []
+              }
+            />
+          </Route>
           <Route path="/apps/:name/settings/:tab?">
             {(params) => (
               <SettingsPages

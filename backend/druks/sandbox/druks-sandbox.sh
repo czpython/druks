@@ -4,7 +4,7 @@
 # Uploaded by Druks to <home>/druks-sandbox (the SSH user's home; the
 # previous /usr/local/bin path needed root and broke when the image
 # SSHes as a non-root user like ``exedev``) at sandbox-acquire time and
-# invoked over SSH by the runner. Four verbs:
+# invoked over SSH by the runner. Three verbs:
 #
 #   exec-start --run-id ID --cwd PATH [--env-file PATH]
 #               [--stdin-from PATH] -- CMD [ARGS...]
@@ -26,30 +26,22 @@
 #       to stdout. Rejects missing paths, non-files, symlink escapes,
 #       and oversized files with a distinct exit code.
 #
-#   git-credential <get|store|erase>
-#       git credential helper. Configured via
-#       `credential.https://github.com.helper '!druks-sandbox git-credential'`
-#       so every in-VM git operation against github.com reads the
-#       installation token from $DRUKS_GITHUB_TOKEN_FILE on demand.
-#       The file is written once at acquire time and is NOT refreshed —
-#       a run that outlives the ~60 min token expiry will 401 on a late
-#       push. TODO: mint a fresh token here on demand instead of catting
-#       a static file (see druks/sandbox/credentials.py).
+# GitHub credentials never pass through here. The box holds a placeholder
+# in GH_TOKEN, and Drukbox points git and gh at it.
 #
 # Env:
 #   DRUKS_SANDBOX_RUNS_ROOT   default $HOME/work/runs
-#   DRUKS_GITHUB_TOKEN_FILE   default $HOME/work/github-token
 #
 # Defaults derive from $HOME so the script resolves to the SSH user's
 # home regardless of which user invokes it (nohup/setsid don't switch
-# users, git's credential helper inherits env). Previously the
-# defaults hardcoded /work/* which only root could create.
+# users). Previously the defaults hardcoded /work/* which only root
+# could create.
 
 set -u
 
 # Nested fallback so a stripped env (no HOME, no DRUKS_*) doesn't
 # trip `set -u`. Real VMs always set HOME; tests that override
-# DRUKS_SANDBOX_RUNS_ROOT or DRUKS_GITHUB_TOKEN_FILE don't need it.
+# DRUKS_SANDBOX_RUNS_ROOT don't need it.
 runs_root="${DRUKS_SANDBOX_RUNS_ROOT:-${HOME:-/root}/work/runs}"
 
 die() {
@@ -58,7 +50,7 @@ die() {
 }
 
 verb="${1:-}"
-[ -z "$verb" ] && die "usage: druks-sandbox <exec-start|exec-kill|git-credential|read-file> [options]"
+[ -z "$verb" ] && die "usage: druks-sandbox <exec-start|exec-kill|read-file> [options]"
 shift
 
 # read-file streams a bounded regular file that must resolve inside the given
@@ -82,24 +74,6 @@ if [ "$verb" = "read-file" ]; then
     size=$(wc -c < "$resolved")
     [ "$size" -le "$limit" ] || die "reported file exceeds the $limit-byte limit: $reported" 4
     cat "$resolved"
-    exit 0
-fi
-
-# git-credential is special: git invokes it as
-#   druks-sandbox git-credential <get|store|erase>
-# with the credential request on stdin. It has nothing to do with the
-# run-oriented --run-id/--cwd options below, so handle it before the
-# shared parser (which would reject the missing --run-id).
-if [ "$verb" = "git-credential" ]; then
-    op="${1:-}"
-    # Only 'get' needs an answer. store/erase are deliberate no-ops:
-    # the token file is managed out-of-band by Druks over SFTP, not
-    # by git, so there's nothing to persist or clear git-side.
-    [ "$op" = "get" ] || exit 0
-    token_file="${DRUKS_GITHUB_TOKEN_FILE:-${HOME:-/root}/work/github-token}"
-    [ -r "$token_file" ] || exit 0
-    echo "username=x-access-token"
-    printf 'password=%s\n' "$(cat "$token_file")"
     exit 0
 fi
 
@@ -155,17 +129,6 @@ if [ -n "$env_file" ] && [ -f "$env_file" ]; then
     # shellcheck disable=SC1090
     . "$env_file"
     set +a
-fi
-
-# Authenticate `gh` (and any GITHUB_TOKEN-aware tool) with the same
-# installation token git's credential helper serves. Re-read per spawn
-# so a token rotation between runs is picked up; mid-run rotations stay
-# invisible to a long-running agent (env vars don't update post-exec).
-token_file="${DRUKS_GITHUB_TOKEN_FILE:-${HOME:-/root}/work/github-token}"
-if [ -r "$token_file" ]; then
-    GH_TOKEN="$(cat "$token_file")"
-    GITHUB_TOKEN="$GH_TOKEN"
-    export GH_TOKEN GITHUB_TOKEN
 fi
 
 # cd is a fatal failure path because the agent obviously can't run if

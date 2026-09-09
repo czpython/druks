@@ -25,8 +25,7 @@ runs lint, tests, and build for PRs into `main` and `codex/` stack branches.
 
 - The work sidebar and searchable installed app roster
 - Settings
-- The Events and Usage pages
-- The optional system-health strip
+- Dashboard, Events, and Usage
 - Shared routing and fallback behavior.
 
 Bundled app UI lives under `src/apps/<name>/`. Its module calls
@@ -35,22 +34,29 @@ declares the subnav tabs. The roster supplies these tabs to the frontend.
 Import the module one time from `src/apps/index.ts`. The shell finds the
 registration and does not hardcode the app name.
 
-The work sidebar keeps the same destinations across app pages. Events and
-Usage have shared routes. App-declared navigation appears below the page
+The work sidebar keeps the same destinations across app pages. The Dashboard
+opens at `/`. Events and Usage have shared routes. App-declared navigation appears below the page
 header. Settings opens from the bottom of the sidebar. Below 650 px, a
 navigation button opens a modal drawer. Escape closes the drawer and returns
 focus to the button.
 
-Shared settings use `/settings/<section>` routes. Search matches section names
-and field labels. General and Agent defaults retain separate
-drafts across settings pages. Save changes applies only the current page.
+Settings use `/settings/<section>` routes. `/settings/personal` edits the current
+account through `/api/settings/personal`; `/settings/general` and
+`/settings/agents` edit installation defaults through `/api/settings`. The
+preferences provider uses the personal endpoint for timestamp display. Search
+matches section names and app field labels. Preferences, General, and Agents
+retain separate drafts across settings pages. Save changes applies only the current page.
 Leaving Settings offers Save, Discard, and Stay. Save applies each dirty page;
 a failed request keeps the operator on that page with its draft. Resource
 actions, such as connecting a provider or minting an API token, apply at once.
 Back to Druks restores the previous work URL and keeps the work page mounted.
 
-App settings use `/apps/<name>/settings` in the work context. The app's page
-navigation and the central App settings index link to this same route.
+Connections groups Services, Accounts, Browser, and Revoked. Its `tab` query
+parameter selects the active tab. The Browser profiles page manages saved browser state
+and login windows at `/settings/connections?tab=browser`.
+
+App settings use `/apps/<name>/settings` in the work context. A gear beside the
+app name in the header and the central App settings index link to this same route.
 Options and Agents appear only when the app declares those controls. Both
 sections share one app draft. Leaving the app form offers Save, Discard, and
 Stay. An app without controls has no Settings destination. Backend app schemas
@@ -67,13 +73,40 @@ Backend and frontend app discovery are intentionally separate:
 
 An installed Python distribution cannot put JavaScript into an existing
 dashboard build. A backend-only app can still use the platform API, settings,
-events, and generic subject read-side. Custom pages require a dashboard build
-that contains the UI module.
+events, generic subject read-side, and declared Python pages. Custom React
+pages require a dashboard build that contains the UI module.
 
 A separate app package can ship a built ES module in `<package>/dist/`. This
 module exposes `mount(el, ctx)`. Druks serves the module under `/app/<name>`.
 The shell imports and mounts it below the chrome. An import map (`src/runtime/`)
 supplies one shared React instance. See the app-author guide.
+
+## Dashboard and owner links
+
+The Dashboard makes one current-work read and one schedule read, refreshed every
+30 seconds and on window focus, and sorts the rows into sections in the
+browser. A failed refresh keeps the last read visible and offers Retry. See
+[the current-work contract](../docs/concepts.md#current-work-on-the-dashboard) for
+selection, authorization, and limits.
+
+An app's `subjectPath(subject, target?)` returns its own destination. For
+the Dashboard, `target` carries `run` and, for a decision, `parkedAt`. Build the
+query with `targetQuery` from the registry. The owner selects that run and
+passes `parkedAt` to `GateControls`, which shows a stale-link message when the
+current round differs. Return `undefined` when the app has no destination.
+
+Python apps can select a decision page with
+[`@ui.page(..., subject=...)`](../docs/druks-ui.md#declare-pages).
+The roster exposes this declaration as `PageEntry.subjectType`. The shell fills
+the route parameter and keeps the exact target. Without this declaration, the
+generic subject page opens. An app's standalone JavaScript frontend supplies
+its own navigation to a specific run.
+
+Keep raw paths and queries in the retained work context. Wouter's public
+`useLocation` and `useSearch` decode URI escapes. Subject pages read the raw
+router hooks, decode each subject component once, and let `subjectApi` encode
+the HTTP path. Canonical slug replacement preserves the raw query and hash
+and only runs while the owner page is visible.
 
 ## API and live data
 

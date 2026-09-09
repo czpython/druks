@@ -3,12 +3,14 @@ import base64
 import hashlib
 import json
 import secrets
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from urllib.parse import urlencode
 
 import httpx
 
 from druks.redis import get_client
+from druks.secrets.models import VaultSecret
 
 from .constants import (
     OAUTH_CONNECT_STATE_TTL_SECONDS,
@@ -18,7 +20,6 @@ from .constants import (
     OAUTH_TOKEN_TTL_SKEW_SECONDS,
 )
 from .exceptions import OauthExchangeError, OauthRefreshError
-from .models import OauthConnection
 
 
 def _http() -> httpx.AsyncClient:
@@ -62,7 +63,7 @@ class OauthClient:
     ``complete_connect`` consumes the callback's single-use state and
     exchanges the code; ``get_access_token`` serves delivery from the Redis
     token cache, electing one refresher per connection. The caller stores an
-    ``OauthConnection`` from the completed exchange and hands it back to
+    grant in the vault from the completed exchange and hands it back to
     ``get_access_token``. A ``Service`` with declared OAuth endpoints hands back a
     configured client via ``get_oauth_client()`` — construct directly only
     when no service holds the client credentials.
@@ -163,13 +164,15 @@ class OauthClient:
     async def get_access_token(
         self,
         *,
-        connection: OauthConnection,
+        connection: VaultSecret,
         scopes: tuple[str, ...] = (),
         cached: bool = True,
-    ) -> str:
-        """The delivery-side token for one connection: the cached access
-        token while it lives, else one refreshed through the stored refresh
-        token. The provider may rotate the refresh token on use — two
+    ) -> tuple[str, datetime | None]:
+        """The token for one grant and its expiry: the cached access token
+        while it lives, else one refreshed through the stored refresh token.
+        The expiry is the cache lifetime, the provider's ``expires_in`` less
+        the skew, or one hour when it gives none, and None for a cached token
+        without a lifetime. The provider may rotate the refresh token on use — two
         concurrent refreshes trip its reuse detection and can revoke the
         whole connection — so Redis elects one refresher per (connection,
         scope set) (SET NX; the TTL is a crash backstop a live refresh cannot
@@ -206,7 +209,8 @@ class OauthClient:
             if cached:
                 cached_token = await redis.get(token_key)
                 if cached_token:
-                    return cast(bytes, cached_token).decode()
+                    ttl = await redis.ttl(token_key)
+                    return cast(bytes, cached_token).decode(), _expiry(ttl)
             if await redis.set(lock_key, "1", nx=True, ex=OAUTH_REFRESH_LOCK_TTL_SECONDS):
                 break
             await asyncio.sleep(self.mint_wait_interval_seconds)
@@ -267,7 +271,7 @@ class OauthClient:
                 ) from error
             if ttl > 0:
                 await redis.set(token_key, tokens["access_token"], ex=ttl)
-            return tokens["access_token"]
+            return tokens["access_token"], _expiry(ttl)
         finally:
             await redis.delete(lock_key)
 
@@ -277,11 +281,18 @@ class OauthClient:
         async for key in redis.scan_iter(match=f"{self.provider}:access_token:{connection_id}*"):
             await redis.delete(key)
 
-    async def disconnect(self, connection: OauthConnection, *, reason: str) -> None:
-        """Revoke the connection and evict its cached access token. The row
-        and its facts survive; the refresh token dies with the consent."""
+    async def disconnect(self, connection: VaultSecret, *, reason: str) -> None:
+        """Revoke the grant and evict its cached access token. The row and
+        its facts survive; the secrets die with the consent."""
         await connection.revoke(reason)
         await self.evict_access_token(connection.id)
+
+
+def _expiry(seconds: int) -> datetime | None:
+    # Redis answers -1 for a key without a lifetime and -2 for a gone key.
+    if seconds <= 0:
+        return None
+    return datetime.now(UTC) + timedelta(seconds=seconds)
 
 
 async def complete_connect(*, state: str, code: str) -> tuple[dict, dict]:

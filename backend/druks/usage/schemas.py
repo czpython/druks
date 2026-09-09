@@ -38,8 +38,7 @@ class UsageProviderSummary(Schema):
     # Seconds since the snapshot was persisted. None when ``available``
     # is False from "no row yet".
     age_seconds: int | None = None
-    # True once a row is >24h old. The pill switches to a warning
-    # glyph and the panel surfaces a "scraper hasn't run" message.
+    # True once a row is >24h old; the Usage page reports the scraper as stalled.
     stale: bool = False
     # Short tag from the snapshot: "auth_required" / "not_installed"
     # / "parse_failed" / "timeout" / "crashed". Drives the panel's

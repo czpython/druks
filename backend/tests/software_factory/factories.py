@@ -38,7 +38,7 @@ async def seed_build_run(
         input_gate=input_gate,
         input_request=input_request,
         failure=failure,
-        account_id=account_id or "system",
+        account_id=account_id,
     )
     await session.flush()
     return run

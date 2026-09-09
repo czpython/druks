@@ -8,7 +8,8 @@ from fastapi.responses import HTMLResponse
 from druks.core.apis.github import GITHUB
 from druks.core.services import Github
 from druks.core.templates import render_page
-from druks.services.models import ServiceIdentity
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 
 # Mounted by the loader under /api/core, like any app's routes.
 router = APIRouter(prefix="/github", tags=["services"])
@@ -60,8 +61,9 @@ async def github_manifest_callback(request: Request, code: str = "") -> HTMLResp
         )
     app = converted.json()
     slug = app["slug"]
-    await ServiceIdentity.connect(
-        GITHUB,
+    await VaultSecret.store(
+        Github.secret_kind,
+        Audience.service(GITHUB),
         identity={"app_id": str(app["id"]), "slug": slug},
         secrets={"private_key": app["pem"], "webhook_secret": app["webhook_secret"]},
     )

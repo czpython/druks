@@ -94,6 +94,16 @@ timeout = 180
     assert settings.sandbox.timeout == 180.0
 
 
+def test_only_an_explicit_issuer_url_changes_the_mint_base(tmp_path):
+    public = {"endpoint": "https://druks.example.com", "webhook_host": "hooks.example.com"}
+    assert make_settings(tmp_path, urls=public).sandbox.issuer_url == "http://127.0.0.1:8001"
+
+    settings = make_settings(tmp_path, urls=public, sandbox={"issuer_url": "http://10.0.0.5:8001"})
+
+    assert settings.sandbox.issuer_url == "http://10.0.0.5:8001"
+    assert settings.sandbox.exchange_url == "http://127.0.0.1:8781"
+
+
 def test_auth_mode_environment_variable_is_ignored(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DRUKS_CONFIG", raising=False)

@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from druks.accounts.models import Account
-from druks.contrib.review.github import get_review_actor
 from druks.contrib.software_factory.contracts import ImplementationOutput, ReviewWork
 from druks.contrib.software_factory.enums import (
     EvaluationVerdict,
@@ -13,17 +12,12 @@ from druks.contrib.software_factory.enums import (
     ReviewDecision,
 )
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
-from druks.core.apis.github import GITHUB, get_github_client
-from druks.sandbox import repo as _repo
+from druks.core.apis.github import get_github_client
+from druks.core.services import Github
 from druks.sandbox.datastructures import RequiredMcpServer
-from druks.sandbox.layout import (
-    get_github_token_remote_path,
-    get_related_root,
-    get_repo_root,
-    get_work_root,
-)
+from druks.sandbox.layout import get_related_root, get_work_root
+from druks.sandbox.models import SecretRef
 from druks.services.exceptions import ServiceNotConnectedError
-from druks.services.models import ServiceIdentity
 from druks.settings import load_settings
 from druks.skills.models import Skill
 from druks.workflows import FatalError, Workflow, step
@@ -31,6 +25,8 @@ from druks.workspaces import RepoWorkspace
 
 from .app import SoftwareFactory
 from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
+from .datastructures import PullRequest
+from .github import get_review_actor
 from .journal import BuildJournal
 from .policy import PlanGate, RepoPolicy
 from .prompt_context import BuildPromptContext
@@ -43,26 +39,33 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, kw_only=True)
 class BuildWorkspace(RepoWorkspace):
-    # The base RepoWorkspace brings the cloned repo + token; a build run adds its
-    # curated skills, PR branch, and github MCP token.
     skills: tuple[str, ...]
-    branch: str | None = None
-    # Installation token for build's github MCP server, minted per repo from
-    # the identity reviews act as. Required — there is no build without github.
-    mcp_token: str
 
     @property
     def workspace_root(self) -> str:
         return get_work_root(self.host.ssh_username)
 
-    def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
-        return (RequiredMcpServer(name=GITHUB_MCP_NAME, url=GITHUB_MCP_URL, token=self.mcp_token),)
+    @classmethod
+    async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
+        # GitHub MCP acts as the review actor; the clone acts as the operator.
+        actor = await get_review_actor()
+        return (
+            RequiredMcpServer(
+                name=GITHUB_MCP_NAME,
+                url=GITHUB_MCP_URL,
+                secret_id=(await actor.service.get()).id,
+                resource=cls.get_repo(subject),
+            ),
+        )
+
+    async def run_agent(self, *, account_id: str | None, **kwargs: Any):
+        # Agents clone related repos on demand; Claude's --add-dir target must exist first.
+        related_root = get_related_root(self.host.ssh_username)
+        await self.host.exec(["mkdir", "-p", related_root], timeout=10.0)
+        return await super().run_agent(account_id=account_id, **kwargs)
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
-        # Agents clone related repos on demand under get_related_root; grant file-tool
-        # access to the whole dir (Claude scopes file access to cwd + add_dirs;
-        # Codex has full FS access and ignores it). get_related_root is never the repo
-        # cwd — Claude wedges (no stdout, forever) on ``--add-dir <cwd>``.
+        # Never the repo cwd — Claude wedges (no stdout, forever) on ``--add-dir <cwd>``.
         kwargs = super().get_agent_run_kwargs(**kwargs)
         kwargs["add_dirs"] = (get_related_root(self.host.ssh_username),)
         kwargs["skills"] = self.skills
@@ -80,14 +83,33 @@ class Build(Workflow):
         plan_gate: PlanGate = Field(
             default="human",
             title="Plan gate",
-            description=(
-                "human — Operator reviews every plan; the machine reviewer never runs. "
-                "machine — The machine reviewer critiques once; the plan implements without "
-                "operator review. machine_then_human — The machine reviewer critiques once, "
-                "then the operator approves every plan. adaptive — The machine reviewer "
-                "critiques once; a high-confidence plan it approved implements directly, "
-                "anything less parks for the operator."
-            ),
+            description="Choose who approves the plan before implementation.",
+            json_schema_extra={
+                "choice_details": {
+                    "human": {
+                        "label": "Human review",
+                        "help": "You approve every plan. The machine reviewer does not run.",
+                    },
+                    "machine": {
+                        "label": "Machine review",
+                        "help": (
+                            "The machine reviewer checks once. "
+                            "Implementation starts without your approval."
+                        ),
+                    },
+                    "machine_then_human": {
+                        "label": "Machine then human",
+                        "help": "The machine reviewer checks once. You then approve the plan.",
+                    },
+                    "adaptive": {
+                        "label": "Adaptive review",
+                        "help": (
+                            "An approved high-confidence plan starts directly. "
+                            "All other plans need your approval."
+                        ),
+                    },
+                },
+            },
         )
         max_implementation_revisions: int = Field(
             default=5,
@@ -133,7 +155,7 @@ class Build(Workflow):
                 logger.info("Ticket %s has no routable repo; skipping.", ticket["identifier"])
                 return
         try:
-            await ServiceIdentity.get(GITHUB)
+            await Github.get()
         except ServiceNotConnectedError as error:
             # A raise would 5xx the tracker's webhook and put the delivery into
             # provider redelivery; the delivery itself succeeded. Log the
@@ -167,46 +189,11 @@ class Build(Workflow):
             await self._implement_phase()
 
     async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
-        # The BuildWorkspace fields: mint a fresh GitHub token, push it, and clone the
-        # primary repo (at branch) into the VM. Re-runs per agent call — the clone is
-        # idempotent (one test -d on a warm VM) so it's cheap, and the ~60min token
-        # mints fresh each time. Warm-host rotation depends on this per-call rebuild:
-        # never hoist the clone to a once-per-run step, or a rotated-in bare VM would
-        # have no working tree. Related repos are NOT pre-cloned: agents clone the
-        # ones they actually need under get_related_root (the prompt names them, the
-        # credential helper handles auth). The mkdir keeps Claude's --add-dir target
-        # valid before the first on-demand clone.
-        repo = (await self.subject).repo
-        # Planning agents run before the first implement provisions the branch — their
-        # VMs clone the default branch; every agent after delivery gets the PR branch.
-        branch = self.branch
-        github_token = await (await get_github_client()).token_for_repo(repo)
-        await host.write_secret(
-            secret=github_token, remote=get_github_token_remote_path(host.ssh_username)
-        )
-        await _repo.ensure(
-            host,
-            repo_url=f"https://github.com/{repo}",
-            ref=branch,
-            target_path=get_repo_root(host.ssh_username),
-        )
-        await host.exec(["mkdir", "-p", get_related_root(host.ssh_username)], timeout=10.0)
-        try:
-            mcp_token = await (await get_review_actor()).client.token_for_repo(repo)
-        except Exception as error:
-            # There is no build without github: agents push and review through
-            # the github MCP, so a run that can't mint its token fails here,
-            # loudly, instead of degrading mid-run.
-            raise FatalError(
-                f"Could not mint the GitHub token for {repo}; build requires it "
-                "for its github MCP server."
-            ) from error
+        kwargs = await super().get_workspace_kwargs(host)
         return {
-            **await super().get_workspace_kwargs(host),
-            "repo": repo,
-            "branch": branch,
-            "github_token": github_token,
-            "mcp_token": mcp_token,
+            **kwargs,
+            # None until the first implement provisions the PR branch.
+            "branch": self.branch,
             "skills": tuple(self._profile.get("recommended_skills", [])),
         }
 
@@ -418,6 +405,12 @@ class Build(Workflow):
                 logger.warning("Could not set draft=%s on %s#%s.", draft, repo, self.pr_number)
 
 
+class ProfileWorkspace(RepoWorkspace):
+    @classmethod
+    def get_repo(cls, subject: Any) -> str:
+        return subject.full_name
+
+
 class Profile(Workflow):
     """Profiles a repo once, when it joins a project: the repo_profiler agent
     reads the checkout and reports stack, verification commands, and recommended
@@ -426,14 +419,14 @@ class Profile(Workflow):
     the reaction to a .druks/software_factory/config.yml push."""
 
     subject = ProjectRepo
-    workspace_class = RepoWorkspace
+    workspace_class = ProfileWorkspace
 
     @classmethod
     async def dispatch(cls, repo: ProjectRepo, *, refresh_only: bool = False) -> str:
         # The profiler clones with an operator-App token, so resolve the
         # identity before the start spends a run and provisions a VM — the
         # raising lookup surfaces the actionable not-connected error.
-        await ServiceIdentity.get(GITHUB)
+        await Github.get()
         return await cls.start(
             subject=repo,
             repo_id=repo.id,
@@ -464,24 +457,6 @@ class Profile(Workflow):
             )
         await project_repo.set_profile(baseline=baseline, effective=effective)
 
-    async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
-        repo = (await ProjectRepo.get(self.input.repo_id)).full_name
-        github_token = await (await get_github_client()).token_for_repo(repo)
-        await host.write_secret(
-            secret=github_token, remote=get_github_token_remote_path(host.ssh_username)
-        )
-        await _repo.ensure(
-            host,
-            repo_url=f"https://github.com/{repo}",
-            ref=None,
-            target_path=get_repo_root(host.ssh_username),
-        )
-        return {
-            **await super().get_workspace_kwargs(host),
-            "repo": repo,
-            "github_token": github_token,
-        }
-
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         return {
             "repo": (await ProjectRepo.get(self.input.repo_id)).full_name,
@@ -489,5 +464,68 @@ class Profile(Workflow):
                 {"name": skill.name, "description": skill.description}
                 for skill in await Skill.list_enabled()
             ],
+            **await super().get_prompt_context(**context),
+        }
+
+
+class ReviewWorkspace(RepoWorkspace):
+    # The default-branch checkout (the reviewer checks the PR out itself) plus room
+    # beside it for siblings; Claude's add_dirs grant needs the directory to exist.
+    @classmethod
+    async def get_secret_refs(cls, subject: Any) -> list[SecretRef]:
+        # The review is authored under the review actor's identity.
+        actor = await get_review_actor()
+        return [
+            SecretRef(
+                name=Github.secret_name,
+                secret_id=(await actor.service.get()).id,
+                resource=cls.get_repo(subject),
+            )
+        ]
+
+    @property
+    def related_root(self) -> str:
+        return get_related_root(self.host.ssh_username)
+
+    async def run_agent(self, *, account_id: str | None, **kwargs: Any):
+        await self.host.exec(["mkdir", "-p", self.related_root], timeout=10.0)
+        return await super().run_agent(account_id=account_id, **kwargs)
+
+    def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
+        kwargs = super().get_agent_run_kwargs(**kwargs)
+        kwargs["add_dirs"] = (self.related_root,)
+        return kwargs
+
+
+class PullRequestReview(Workflow):
+    """Reviews one pull request against a checkout of the repo it targets and the
+    repos around it; the reviewer reads, judges, and posts the review itself."""
+
+    subject = PullRequest
+    workspace_class = ReviewWorkspace
+
+    @classmethod
+    async def dispatch(cls, *, repo: str, pr_number: int, requested_by: str) -> str:
+        # Even a distinct review identity clones alongside the operator App, so
+        # resolve the operator identity before the start spends a run and
+        # provisions a VM — the raising lookup surfaces the actionable error.
+        await Github.get()
+        # Attribution follows the requester when druks knows them by that name; a
+        # review asked for by someone with no account runs as the system's.
+        account = await Account.get_for_username(requested_by)
+        return await cls.start(
+            subject=PullRequest.get(repo, pr_number),
+            account_id=account.id if account else None,
+            requested_by=requested_by,
+        )
+
+    async def run(self, requested_by: str) -> None:
+        await SoftwareFactory.review_pull_request()
+
+    async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
+        target = await ProjectRepo.get_for_repo((await self.subject).repo, raise_on_missing=True)
+        return {
+            "siblings": await target.siblings(),
+            "review_mode": (await get_review_actor()).mode,
             **await super().get_prompt_context(**context),
         }

@@ -1,34 +1,37 @@
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 
-from druks.accounts.dependencies import current_session_account
+from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
 from druks.apps.loader import get_app, iter_apps
 from druks.apps.registry import agents, workflows
+from druks.database import db_session
 from druks.durable.engine import apply_schedules
 from druks.harnesses.base import Harness
-from druks.harnesses.execution import check_execution
+from druks.harnesses.exceptions import ProfileSettingsError
+from druks.harnesses.profiles import check_profile
 from druks.harnesses.registry import get_harnesses
 from druks.notifications.models import Destination
 
 from . import reads
 from .datastructures import ALLOWED_EFFORTS
-from .models import SettingsOverride, UserSettings
+from .models import SettingsOverride, SettingsProfile
 from .schemas import (
     AgentsAppResponse,
     AgentsResponse,
     AppsSettingsResponse,
     AppsSettingsUpdate,
     HarnessResponse,
-    UpdateUserSettingsRequest,
-    UserSettingsResponse,
+    SettingsResponse,
+    UpdateSettingsRequest,
 )
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 agents_router = APIRouter(prefix="/api/agents", tags=["settings"])
 
-_EXECUTION_DEFAULTS = (
+_PROFILE_DEFAULTS = (
     "default_harness",
     "default_model",
     "default_billing",
@@ -55,70 +58,80 @@ async def list_harnesses() -> tuple[type[Harness], ...]:
 
 
 @agents_router.get("", response_model=AgentsResponse, response_model_by_alias=True)
-async def list_agents() -> AgentsResponse:
+async def list_agents(account: Account = Depends(current_account)) -> AgentsResponse:
+    settings = await SettingsProfile.get(account.id)
     projected = [
         AgentsAppResponse(
             name=app.name,
-            agents=[await reads.get_agent_setting(agent) for agent in app.agents()],
+            agents=[
+                await reads.get_agent_setting(agent, settings=settings) for agent in app.agents()
+            ],
         )
         for app in iter_apps()
     ]
     return AgentsResponse(apps=[app for app in projected if app.agents])
 
 
-@router.get("", response_model=UserSettingsResponse, response_model_by_alias=True)
-async def get_user_settings() -> UserSettings:
-    return await UserSettings.get()
+@router.get("", response_model=SettingsResponse, response_model_by_alias=True)
+async def get_settings() -> SettingsProfile:
+    return await SettingsProfile.get()
 
 
-@router.patch("", response_model=UserSettingsResponse, response_model_by_alias=True)
-async def update_user_settings(
-    body: UpdateUserSettingsRequest,
-) -> UserSettings:
-    row = await UserSettings.get()
-    if body.timezone:
-        tz = _validate_timezone(body.timezone)
-        if tz != row.timezone:
-            await row.update_profile(timezone=tz)
-            # Crons are evaluated in this timezone — repoint them now, not at
-            # the next launch.
-            await apply_schedules()
-    defaults = {
-        field: value
-        for field, value in body.model_dump(exclude_unset=True, exclude_none=True).items()
-        if field in _EXECUTION_DEFAULTS
-    }
-    if defaults:
-        await check_execution(
-            defaults.get("default_harness", row.default_harness),
-            defaults.get("default_model", row.default_model),
-            defaults.get("default_billing", row.default_billing),
+@router.get("/personal", response_model=SettingsResponse, response_model_by_alias=True)
+async def get_personal_settings(account: Account = Depends(current_account)) -> SettingsProfile:
+    return await SettingsProfile.get(account.id)
+
+
+async def check_agent_profiles(settings: SettingsProfile) -> None:
+    await check_profile(settings.default_harness, settings.default_model, settings.default_billing)
+    for agent in agents.all():
+        await check_profile(
+            (await SettingsOverride.agent_harness(agent.id, settings=settings)).value,
+            (await SettingsOverride.agent_model(agent.id, settings=settings)).value,
+            (await SettingsOverride.agent_billing(agent.id, settings=settings)).value,
         )
-        await row.update_profile(**defaults)
-        for agent in agents.all():
-            name = agent.id
-            await check_execution(
-                (await SettingsOverride.agent_harness(name)).value,
-                (await SettingsOverride.agent_model(name)).value,
-                (await SettingsOverride.agent_billing(name)).value,
-            )
-    if body.fallback_account_id:
-        if not await Account.get(body.fallback_account_id, exclude_system=True):
-            raise HTTPException(
-                status_code=422, detail=f"Unknown account {body.fallback_account_id!r}"
-            )
-        await row.set_fallback_account(body.fallback_account_id)
+
+
+async def save_settings(
+    body: UpdateSettingsRequest, account_id: str | None = None
+) -> SettingsProfile:
+    fields = body.model_dump(exclude_unset=True, exclude_none=True)
+    if "timezone" in fields:
+        fields["timezone"] = _validate_timezone(fields["timezone"])
     if "gate_park_destination_id" in body.model_fields_set:
         destination_id = body.gate_park_destination_id
         if destination_id and not await Destination.get(destination_id):
             raise HTTPException(status_code=422, detail=f"Unknown destination {destination_id!r}")
-        await row.set_gate_park_destination(destination_id)
+        fields["gate_park_destination_id"] = destination_id
+    row = await SettingsProfile.get(account_id)
+    if fields:
+        if account_id and not row.account_id:
+            row = await row.copy_for_account(account_id)
+        timezone_changed = "timezone" in fields and fields["timezone"] != row.timezone
+        await row.update_profile(**fields)
+        if any(field in fields for field in _PROFILE_DEFAULTS):
+            await check_agent_profiles(row)
+        if not account_id and timezone_changed:
+            await apply_schedules()
     return row
 
 
+@router.patch("", response_model=SettingsResponse, response_model_by_alias=True)
+async def update_settings(body: UpdateSettingsRequest) -> SettingsProfile:
+    return await save_settings(body)
+
+
+@router.patch("/personal", response_model=SettingsResponse, response_model_by_alias=True)
+async def update_personal_settings(
+    body: UpdateSettingsRequest, account: Account = Depends(current_account)
+) -> SettingsProfile:
+    return await save_settings(body, account.id)
+
+
 @router.get("/apps", response_model=AppsSettingsResponse, response_model_by_alias=True)
-async def get_app_settings() -> AppsSettingsResponse:
-    projected = [await reads.get_app_settings(m) for m in iter_apps()]
+async def get_app_settings(account: Account = Depends(current_account)) -> AppsSettingsResponse:
+    settings = await SettingsProfile.get(account.id)
+    projected = [await reads.get_app_settings(m, settings=settings) for m in iter_apps()]
     return AppsSettingsResponse(
         allowed_efforts=list(ALLOWED_EFFORTS),
         apps=[out for out in projected if out.agents or out.workflows or out.settings],
@@ -129,9 +142,10 @@ async def get_app_settings() -> AppsSettingsResponse:
     "/apps",
     response_model=AppsSettingsResponse,
     response_model_by_alias=True,
-    dependencies=[Depends(current_session_account)],
 )
-async def update_app_settings(body: AppsSettingsUpdate) -> AppsSettingsResponse:
+async def update_app_settings(
+    body: AppsSettingsUpdate, account: Account = Depends(current_session_account)
+) -> AppsSettingsResponse:
     for name, harness in body.agent_harnesses.items():
         await SettingsOverride.set_agent_harness(name, harness)
     for name, model in body.agent_models.items():
@@ -143,11 +157,17 @@ async def update_app_settings(body: AppsSettingsUpdate) -> AppsSettingsResponse:
     for name in {*body.agent_harnesses, *body.agent_models, *body.agent_billings}:
         if name not in agents:
             raise HTTPException(status_code=422, detail=f"Unknown agent {name!r}")
-        await check_execution(
-            (await SettingsOverride.agent_harness(name)).value,
-            (await SettingsOverride.agent_model(name)).value,
-            (await SettingsOverride.agent_billing(name)).value,
+    if body.agent_harnesses or body.agent_models or body.agent_billings:
+        installation = await SettingsProfile.get()
+        await check_agent_profiles(installation)
+        profiles = await db_session().execute(
+            select(SettingsProfile, Account.username).join(Account)
         )
+        for settings, username in profiles:
+            try:
+                await check_agent_profiles(settings)
+            except ProfileSettingsError as error:
+                raise ProfileSettingsError(f"Personal profile for {username}: {error}") from error
 
     for name, effort in body.agent_efforts.items():
         await SettingsOverride.set_agent_effort(name, effort)
@@ -193,4 +213,4 @@ async def update_app_settings(body: AppsSettingsUpdate) -> AppsSettingsResponse:
         # the just-written overrides off this request's session.
         await apply_schedules()
 
-    return await get_app_settings()
+    return await get_app_settings(account)

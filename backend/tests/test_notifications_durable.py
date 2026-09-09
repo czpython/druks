@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import psycopg
 import pytest
 from dbos import DBOS
+from druks.accounts.models import Account
 from druks.apps.registry import workflows
 from druks.database import configure_session, db_session, get_session
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
@@ -16,7 +17,7 @@ from druks.notifications.models import Destination, Notification
 from druks.notifications.outbox import notifications_queue, send_notification
 from druks.notifications.services import respond_to_notification
 from druks.testing import configure_app_for_test, init_db, make_settings
-from druks.user_settings.models import UserSettings
+from druks.user_settings.models import SettingsProfile
 from druks.workflows import Gate, OperatorReply, Run, Workflow
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
@@ -132,6 +133,7 @@ async def rt():
     schema_engine = create_engine(URL)
     init_db(schema_engine)
     with Session(schema_engine) as session:
+        session.add(Account(username="op@example.com", is_default=True))
         session.add_all(
             NotificationProbe(id=subject_id)
             for subject_id in (9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008, 9009, 9010, 9014)
@@ -396,7 +398,7 @@ async def _set_gate_park_pointer(rt, destination_id):
     session = get_session(rt.engine)
     db_session.registry.set(session)
     try:
-        await (await UserSettings.get()).set_gate_park_destination(destination_id)
+        await (await SettingsProfile.get()).set_gate_park_destination(destination_id)
         await session.commit()
     finally:
         await db_session.remove()
@@ -529,7 +531,9 @@ async def test_deleted_designated_destination_notifies_nothing(rt, deliver_spy):
     # ON DELETE SET NULL cleared the pointer itself.
     session = get_session(rt.engine)
     try:
-        settings = await session.get(UserSettings, UserSettings.SINGLETON_ID)
+        settings = await session.scalar(
+            select(SettingsProfile).where(SettingsProfile.account_id.is_(None))
+        )
         assert settings.gate_park_destination_id is None
     finally:
         await session.close()
@@ -725,3 +729,29 @@ async def test_concurrent_responds_resolve_to_one_answer(rt, deliver_spy):
     assert _dbos_replies(rt, workflow_id) == 1
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FINISHED)
     assert (await _notifications_for_run(rt, workflow_id))[0].state == "acknowledged"
+
+
+@pytest.mark.parametrize("unattended", [True, False])
+async def test_gate_notifications_use_the_selected_personal_profile(rt, deliver_spy, unattended):
+    destination = await _seed_destination(rt, f"personal-{unattended}")
+
+    async def configure_profile():
+        await Account.get_or_create("default@example.com")
+        default = await Account.get_default()
+        explicit = await Account.get_or_create("explicit@example.com")
+        account = default if unattended else explicit
+        installation = await SettingsProfile.get()
+        personal = await installation.copy_for_account(account.id)
+        await personal.set_gate_park_destination(destination.id)
+        subject = NotificationProbe(id=9020 if unattended else 9021)
+        db_session.add(subject)
+        return account.id, subject
+
+    account_id, subject = await _seed(rt, configure_profile)
+    workflow_id = await rt.ExternalFlow.start(
+        subject=subject, account_id=None if unattended else account_id
+    )
+    notification = await _wait_notification(rt, workflow_id, "delivered")
+    assert notification.destination_id == destination.id
+    run = await _run_snapshot(rt, workflow_id)
+    assert run.account_id == account_id

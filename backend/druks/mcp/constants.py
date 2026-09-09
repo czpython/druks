@@ -11,6 +11,11 @@ TOKEN_ENV_SUFFIX = "_TOKEN"
 # two names never collapse to one env var.
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
+# The header a server's bearer fills, and its prefix. A secret header keeps
+# its own name and no prefix.
+BEARER_HEADER = "Authorization"
+BEARER_PREFIX = "Bearer "
+
 # The official MCP registry the picker resolves against; search results
 # cache briefly in Redis so typing in the picker doesn't hammer it.
 REGISTRY_SEARCH_URL = "https://registry.modelcontextprotocol.io/v0/servers"

@@ -12,9 +12,9 @@ from .constants import GATE_USERS_PREFIX, MAX_AGENT_TIMEOUT_SECONDS, ROTATING_PR
 # register in a zset scored by expiry, so a crashed caller ages out.
 _RUN_HORIZON = MAX_AGENT_TIMEOUT_SECONDS  # a sandbox run never outlives this; caps every wait
 _POLL = 2.0
-# The gate is only shut for the seconds a refresh takes; a short TTL means a
-# crashed holder frees the subscription fast instead of blocking it for the horizon.
-_SHUT_TTL_SECONDS = 60
+# The gate is shut for a rotation, a wait on another refresher's row lock, and
+# the refresh requests. A crashed holder frees the subscription when this lapses.
+_SHUT_TTL_SECONDS = 90
 
 
 @asynccontextmanager
@@ -43,11 +43,13 @@ async def use(subscription_id: str, call_id: str) -> AsyncIterator[None]:
 @asynccontextmanager
 async def shut(subscription_id: str) -> AsyncIterator[bool]:
     """Shut the connection's gate; yield True when idle — rotate now — else
-    defer to the next tick. Reopens on exit either way."""
+    defer. One holder at a time: a later rotator waits for the gate to reopen,
+    then holds it. Reopens on exit either way."""
     client = get_client()
     rotating = f"{ROTATING_PREFIX}{subscription_id}"
     users = f"{GATE_USERS_PREFIX}{subscription_id}"
-    await client.set(rotating, "1", ex=_SHUT_TTL_SECONDS)
+    while not await client.set(rotating, "1", nx=True, ex=_SHUT_TTL_SECONDS):
+        await asyncio.sleep(_POLL)
     try:
         await client.zremrangebyscore(users, "-inf", time.time())
         yield not await client.zcard(users)

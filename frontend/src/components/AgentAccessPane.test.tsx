@@ -82,7 +82,7 @@ describe('AgentAccessPane', () => {
     expect(screen.getByText(/AbCdEf123456…/)).toBeTruthy()
     expect(screen.getByText('active')).toBeTruthy()
     expect(screen.getByText('revoked')).toBeTruthy()
-    expect(screen.getAllByText('✕ revoke')).toHaveLength(1)
+    expect(screen.getAllByText('Revoke')).toHaveLength(1)
   })
 
   it('mints and keeps the copy-once secret visible across the list refetch', async () => {
@@ -117,13 +117,13 @@ describe('AgentAccessPane', () => {
     vi.stubGlobal('confirm', confirm)
     renderPane()
 
-    fireEvent.click(await screen.findByText('✕ revoke'))
+    fireEvent.click(await screen.findByText('Revoke'))
     await flush()
     expect(confirm).toHaveBeenCalledWith('Revoke ci bot? Agents using it lose access immediately.')
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false)
 
     confirm.mockReturnValue(true)
-    fireEvent.click(screen.getByText('✕ revoke'))
+    fireEvent.click(screen.getByText('Revoke'))
     await flush()
     const revokeCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'DELETE')
     expect(revokeCall?.[0]).toBe('/api/auth/personal-tokens/p1')

@@ -39,8 +39,10 @@ class AgentCallResponse(Schema):
     id: str
     # Which agent made this call ("scope", "implement") — the timeline's row label.
     agent: str
-    # The account charged — differs from the run's on fallback.
-    account_username: str = Field(validation_alias=AliasPath("account", "username"))
+    # Null identifies an installation API-key charge.
+    account_username: str | None = Field(
+        default=None, validation_alias=AliasPath("subscription", "account", "username")
+    )
     status: AgentCallStatus = Field(validation_alias="live_status")
     # started_at + finished_at are the facts; the client derives elapsed (a live
     # tick off started_at while running), so nothing here churns between polls.
@@ -100,7 +102,6 @@ class RunResponse(Schema):
     input_request: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
-    # Who asked; "system" when nobody did.
     account_username: str
     agent_calls: list[AgentCallResponse] = Field(default_factory=list)
 

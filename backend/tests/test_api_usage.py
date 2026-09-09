@@ -4,12 +4,13 @@ from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import pytest
-from conftest import connect_provider
-from druks.accounts.constants import SYSTEM_ACCOUNT_ID
+from conftest import connect_anthropic_subscription, connect_provider
 from druks.accounts.models import Account
 from druks.harnesses.datastructures import ParsedMetric, ParsedUsage
-from druks.harnesses.models import ProviderKey, ProviderSubscription
-from druks.harnesses.providers import AnthropicProvider
+from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.settings import Settings
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
 from druks.usage.models import UsageScrape
@@ -50,20 +51,25 @@ def _provider(body: dict, provider_id: str) -> dict:
     return next(entry for entry in body["providers"] if entry["id"] == provider_id)
 
 
-async def _seed_agent_call(druks_db, *, model: str = "openai/gpt-5.5"):
+async def _seed_agent_call(
+    druks_db, *, model: str = "openai/gpt-5.5", subscription_id: str | None = None
+):
     note = await Note.create(body="usage accounting")
     run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
-    return await seed_call(druks_db, run, "summarize", status="running", model=model)
+    return await seed_call(
+        druks_db, run, "summarize", status="running", model=model, subscription_id=subscription_id
+    )
 
 
 async def test_usage_today_counts_calls_whose_model_no_picker_claims(client, druks_db) -> None:
     # Model ids churn on deploys (opus-4-7 → 4-8), so a call finished earlier today
     # can carry an id no picker claims any more. Money spent must not vanish from
-    # the display — the sys-strip's total_run_spend_between counts every call, and
-    # the two surfaces must quote the same number. Unclaimed models land in the
-    # "unattributed" bucket the panel's grand total sums.
-    call = await _seed_agent_call(druks_db, model="claude-opus-4-5")
-    call.account_id = await _account_id()
+    # the display. Unclaimed models land in the "unattributed" bucket the panel's
+    # grand total sums.
+    subscription = await connect_anthropic_subscription("op@example.com")
+    call = await _seed_agent_call(
+        druks_db, model="claude-opus-4-5", subscription_id=subscription.id
+    )
     call.finished_at = datetime.now(UTC)
     call.cost_usd = 2.5
     await druks_db.flush()
@@ -75,14 +81,13 @@ async def test_usage_today_counts_calls_whose_model_no_picker_claims(client, dru
 
 
 async def test_usage_today_splits_the_shared_keys_spend_from_the_viewers(client, druks_db) -> None:
-    # A key is the system account's subscription, so a run billed to it is charged
-    # there; the card shows that spend beside the viewer's own.
-    mine = await _seed_agent_call(druks_db, model="anthropic/claude-opus-4-7")
-    mine.account_id = await _account_id()
+    subscription = await connect_anthropic_subscription("op@example.com")
+    mine = await _seed_agent_call(
+        druks_db, model="anthropic/claude-opus-4-7", subscription_id=subscription.id
+    )
     mine.finished_at = datetime.now(UTC)
     mine.cost_usd = 1.5
     keyed = await _seed_agent_call(druks_db, model="anthropic/claude-opus-4-7")
-    keyed.account_id = SYSTEM_ACCOUNT_ID
     keyed.finished_at = datetime.now(UTC)
     keyed.cost_usd = 4.0
     await druks_db.flush()
@@ -238,8 +243,8 @@ async def test_usage_history_serializes_series_oldest_first(client, app_settings
 async def test_usage_today_aggregates_spend_and_tokens_by_provider(
     client, app_settings, druks_db
 ) -> None:
-    codex_run = await _seed_agent_call(druks_db, model="openai/gpt-5.5")
-    codex_run.account_id = await _account_id()
+    openai = await connect_provider(OpenAiProvider, {"tokens": {"access_token": "test"}})
+    codex_run = await _seed_agent_call(druks_db, model="openai/gpt-5.5", subscription_id=openai.id)
     codex_run.cost_usd = 1.25
     codex_run.cost_metadata = {
         "provider": "openai",
@@ -249,8 +254,10 @@ async def test_usage_today_aggregates_spend_and_tokens_by_provider(
     }
     codex_run.finished_at = datetime.now(UTC)
 
-    claude_run = await _seed_agent_call(druks_db, model="anthropic/claude-opus-4-7")
-    claude_run.account_id = await _account_id()
+    anthropic = await connect_anthropic_subscription("op@example.com")
+    claude_run = await _seed_agent_call(
+        druks_db, model="anthropic/claude-opus-4-7", subscription_id=anthropic.id
+    )
     claude_run.cost_usd = 2.5
     claude_run.cost_metadata = {
         "provider": "anthropic",
@@ -300,23 +307,25 @@ async def test_usage_excludes_another_accounts_scrape(client, druks_db) -> None:
 
 
 async def test_usage_reports_viewers_subscription_identity(client, druks_db) -> None:
-    await ProviderSubscription.connect(
-        provider="anthropic",
-        account=await Account.get_or_create("other@example.com"),
-        payload={"claudeAiOauth": {"accessToken": "other"}},
+    await VaultSecret.store(
+        SecretKind.SUBSCRIPTION,
+        Audience.provider("anthropic"),
+        account_id=(await Account.get_or_create("other@example.com")).id,
+        secrets={"claudeAiOauth": {"accessToken": "other"}},
+        identity={"email": "other-seat@example.com"},
         expires_at=None,
-        provider_email="other-seat@example.com",
     )
     body = client.get("/api/usage").json()
     assert _provider(body, "anthropic")["connected"] is False
     assert _provider(body, "anthropic")["providerEmail"] is None
 
-    await ProviderSubscription.connect(
-        provider="anthropic",
-        account=await Account.get_or_create("op@example.com"),
-        payload={"claudeAiOauth": {"accessToken": "mine"}},
+    await VaultSecret.store(
+        SecretKind.SUBSCRIPTION,
+        Audience.provider("anthropic"),
+        account_id=(await Account.get_or_create("op@example.com")).id,
+        secrets={"claudeAiOauth": {"accessToken": "mine"}},
+        identity={"email": "subscription@example.com"},
         expires_at=None,
-        provider_email="subscription@example.com",
     )
     body = client.get("/api/usage").json()
     assert _provider(body, "anthropic")["connected"] is True
@@ -324,13 +333,17 @@ async def test_usage_reports_viewers_subscription_identity(client, druks_db) -> 
 
 
 async def test_usage_today_counts_only_the_viewers_calls(client, druks_db) -> None:
-    mine = await _seed_agent_call(druks_db, model="anthropic/claude-opus-4-7")
-    mine.account_id = await _account_id()
+    subscription = await connect_anthropic_subscription("op@example.com")
+    mine = await _seed_agent_call(
+        druks_db, model="anthropic/claude-opus-4-7", subscription_id=subscription.id
+    )
     mine.cost_usd = 2.0
     mine.finished_at = datetime.now(UTC)
 
-    other = await _seed_agent_call(druks_db, model="anthropic/claude-opus-4-7")
-    other.account_id = (await Account.get_or_create("other@example.com")).id
+    other_subscription = await connect_anthropic_subscription("other@example.com")
+    other = await _seed_agent_call(
+        druks_db, model="anthropic/claude-opus-4-7", subscription_id=other_subscription.id
+    )
     other.cost_usd = 5.0
     other.finished_at = datetime.now(UTC)
 
@@ -379,8 +392,10 @@ async def test_refresh_scrapes_only_the_viewers_logins(client, druks_db, monkeyp
 
 async def test_refresh_never_scrapes_a_key(client, druks_db, monkeypatch) -> None:
     # A key has no quota; only a subscription is polled.
-    await ProviderKey.create(
-        provider="anthropic", key="sk", account=await Account.get_or_create("op@example.com")
+    await VaultSecret.paste(
+        Audience.provider("anthropic"),
+        "sk",
+        pasted_by=await Account.get_or_create("op@example.com"),
     )
     poll_usage = AsyncMock()
     monkeypatch.setattr(AnthropicProvider, "poll_usage", poll_usage)

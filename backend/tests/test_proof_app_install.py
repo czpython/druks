@@ -12,7 +12,7 @@ _CHECK = textwrap.dedent(
     assert "field_notes" in names, names
 
     app = load_app("field_notes")
-    assert [subject.__name__ for subject in app.subjects()] == ["Note"]
+    assert [subject.__name__ for subject in app.subjects()] == ["Note", "Repository"]
     assert app.settings_model is not None
     assert list(app.settings_model.model_fields) == [
         "board_size",
@@ -20,7 +20,7 @@ _CHECK = textwrap.dedent(
         "sync_signing_key",
         "sync_token",
     ]
-    assert [workflow.__name__ for workflow in app.workflows()] == ["Summarize"]
+    assert [workflow.__name__ for workflow in app.workflows()] == ["Summarize", "Survey"]
     assert {router.prefix for router in app.routers()} >= {"/notes", "/note"}
     assert app.migrations_dir() is not None
     print("ok")
