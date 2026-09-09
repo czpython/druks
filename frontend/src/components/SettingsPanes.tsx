@@ -45,10 +45,13 @@ import { useUsageToday } from '../lib/useUsage'
 import { useTicker } from '../lib/useTicker'
 import { Bar } from './UsagePanel'
 import { harnessColors } from '../lib/harnessColors'
-import { isFieldVisible, type Catalog, type CatalogChoice, type Defaults } from './settings'
+import { SETTINGS_FIELDS, isFieldVisible, type Catalog, type CatalogChoice, type Defaults } from './settings'
 
 const keyOnly = (harness: Harness | undefined) =>
   Boolean(harness) && !harness!.billingOptions.includes('subscription')
+
+const harnessNeedsKey = (harness: Harness, catalog: Catalog) =>
+  keyOnly(harness) && !catalog.hasApiKeyFor(harness)
 
 const BILLINGS: Billing[] = ['subscription', 'api_key']
 const billingLabel = (billing: string) => (billing === 'api_key' ? 'API key' : 'subscription')
@@ -126,9 +129,16 @@ function Menu({
         onClose()
       }
     }
+    const onScroll = (event: Event) => {
+      if (!menu.current?.contains(event.target as Node)) onClose()
+    }
+    document.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onClose)
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => {
+      document.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onClose)
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
     }
@@ -150,15 +160,22 @@ function MenuOption({
   main,
   sub,
   onClick,
+  disabled,
 }: {
   selected: boolean
   harnessColor?: string
   main: string
   sub?: string
   onClick: () => void
+  disabled?: boolean
 }) {
   return (
-    <button type="button" className={'menu-opt' + (selected ? ' sel' : '')} onClick={onClick}>
+    <button
+      type="button"
+      className={'menu-opt' + (selected ? ' sel' : '')}
+      onClick={onClick}
+      disabled={disabled}
+    >
       <span className="mo-check">{selected ? '✓' : ''}</span>
       {harnessColor && <span className="mo-fam" style={{ background: harnessColor }} />}
       <span className="mo-main">
@@ -194,7 +211,7 @@ function ModelChooser({
 }) {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
   const [search, setSearch] = useState('')
-  const selected = choices.find((choice) => choice.id === value)
+  const selected = choices.find((choice) => choice.id === (value ?? displayValue))
 
   const query = search.trim().toLocaleLowerCase()
   const visible = choices.filter((choice) =>
@@ -224,19 +241,21 @@ function ModelChooser({
         type="button"
         className={
           inheritLabel
-            ? `set-cell ${isOverride ? 'override' : 'inherit'}`
+            ? `set-cell model-chooser-trigger ${isOverride ? 'override' : 'inherit'}`
             : 'set-select model-chooser-trigger'
         }
-        aria-label={label}
+        aria-label={`${label}: ${inheritLabel && !isOverride ? 'Inherit · ' : ''}${selected?.label ?? displayValue} · ${value ?? displayValue}`}
         title={selected?.label ?? displayValue}
         aria-haspopup="listbox"
         aria-expanded={Boolean(anchor)}
         disabled={disabled}
         onClick={(event) => setAnchor((current) => (current ? null : event.currentTarget))}
       >
-        {inheritLabel &&
-          (isOverride ? <span className="ov-dot" /> : <span className="inh-glyph">↳</span>)}
-        <span className="cell-val">{selected?.label ?? displayValue}</span>
+        <span className="cell-val">
+          {inheritLabel && !isOverride && <span className="cell-inherit">Inherit</span>}
+          <span>{selected?.label ?? displayValue}</span>
+          <code>{value ?? displayValue}</code>
+        </span>
         <span className="cell-arrow" aria-hidden="true">
           ▾
         </span>
@@ -319,6 +338,7 @@ function InheritCell({
   onPick,
   onAddProvider,
   disabled,
+  fixed = false,
 }: {
   kind: 'harness' | 'model' | 'billing' | 'effort' | 'timeout'
   value: CellValue
@@ -333,6 +353,7 @@ function InheritCell({
   onPick: (value: CellValue) => void
   onAddProvider: () => void
   disabled: boolean
+  fixed?: boolean
 }) {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
   const isOverride = value !== null && value !== undefined
@@ -372,6 +393,8 @@ function InheritCell({
               selected={value === harness.name}
               harnessColor={harnessColor[harness.name]}
               main={harness.name}
+              sub={harnessNeedsKey(harness, catalog) ? 'Add a provider API key first' : undefined}
+              disabled={harnessNeedsKey(harness, catalog)}
               onClick={() => pick(harness.name)}
             />
           ))}
@@ -445,24 +468,16 @@ function InheritCell({
       <button
         type="button"
         className={'set-cell ' + (isOverride ? 'override' : 'inherit')}
+        aria-label={`${kind}: ${fixed ? 'Fixed · ' : isOverride ? '' : 'Inherit · '}${resolvedLabel}`}
+        aria-expanded={Boolean(anchor)}
         onClick={(e) => setAnchor((a) => (a ? null : e.currentTarget))}
         disabled={disabled}
       >
-        {isOverride ? <span className="ov-dot" /> : <span className="inh-glyph">↳</span>}
-        <span className="cell-val">{resolvedLabel}</span>
+        <span className="cell-val">
+          {(fixed || !isOverride) && <span className="cell-inherit">{fixed ? 'Fixed' : 'Inherit'}</span>}
+          <span>{resolvedLabel}</span>
+        </span>
         <span className="cell-arrow">▾</span>
-        {isOverride && (
-          <span
-            className="cell-reset"
-            onClick={(e) => {
-              e.stopPropagation()
-              onPick(null)
-            }}
-            title="reset to inherited"
-          >
-            ×
-          </span>
-        )}
       </button>
       {anchor && (
         <Menu anchor={anchor} onClose={() => setAnchor(null)}>
@@ -479,25 +494,32 @@ export function GeneralPane({
   timezones,
   clock,
   busy,
+  personal = false,
 }: {
   timezone: string
   setTimezone: (timezone: string) => void
   timezones: string[]
   clock: string
   busy: boolean
+  personal?: boolean
 }) {
+  const timezoneId = personal ? 'personal-timezone' : 'settings-timezone'
   return (
     <div className="set-pane">
       <div className="set-pane-head">
-        <div className="set-pane-sub">Account-wide preferences.</div>
+        <div className="set-pane-sub">
+          {personal
+            ? "Your timezone controls timestamp display. Schedules use the installation timezone."
+            : "The installation timezone controls schedules and operational day boundaries."}
+        </div>
       </div>
-      <div className="set-group">
-        <label className="set-group-label" htmlFor="settings-timezone">
+      <div className="set-group" data-setting={SETTINGS_FIELDS.timezone.field}>
+        <label className="set-group-label" htmlFor={timezoneId}>
           Timezone
         </label>
         <div className="set-field" style={{ maxWidth: 320 }}>
           <select
-            id="settings-timezone"
+            id={timezoneId}
             className="set-select"
             value={timezone}
             onChange={(e) => setTimezone(e.target.value)}
@@ -530,6 +552,7 @@ export function AgentsPane({
   onOpenApp,
   onAddProvider,
   busy,
+  personal = false,
 }: {
   defaults: Defaults
   onDefaults: (next: Defaults) => void
@@ -542,6 +565,7 @@ export function AgentsPane({
   onOpenApp: (app: string) => void
   onAddProvider: () => void
   busy: boolean
+  personal?: boolean
 }) {
   const fieldId = useId()
   const id = (field: string) => `${fieldId}-${field}`
@@ -570,15 +594,17 @@ export function AgentsPane({
 
   return (
     <div className="set-pane mcp-pane settings-agents">
-      <header className="mcp-pane-head">
-        <p className="mcp-pane-sub">Shared execution settings. An app can override each value.</p>
-      </header>
+      {!personal && (
+        <header className="mcp-pane-head">
+          <p className="mcp-pane-sub">Installation defaults. Personal profiles and agent overrides take priority.</p>
+        </header>
+      )}
 
       <section className="set-group settings-default-execution">
         <h2>Default execution</h2>
-        <p>These defaults apply where an app uses inheritance.</p>
+        <p>{personal ? "These values apply to your runs." : "Accounts use these defaults until their first personal edit."}</p>
         <div className="set-defaults">
-          <div className="mcp-field">
+          <div className="mcp-field" data-setting={SETTINGS_FIELDS.harness.field}>
             <label className="mcp-label" htmlFor={id('harness')}>
               Harness
             </label>
@@ -590,13 +616,18 @@ export function AgentsPane({
               disabled={busy}
             >
               {harnesses.map((harness) => (
-                <option key={harness.name} value={harness.name}>
+                <option
+                  key={harness.name}
+                  value={harness.name}
+                  disabled={harnessNeedsKey(harness, catalog)}
+                >
                   {harness.name}
+                  {harnessNeedsKey(harness, catalog) ? ' — add an API key' : ''}
                 </option>
               ))}
             </select>
           </div>
-          <div className="mcp-field">
+          <div className="mcp-field" data-setting={SETTINGS_FIELDS.model.field}>
             <label className="mcp-label" htmlFor={id('model')}>
               Model
             </label>
@@ -611,7 +642,7 @@ export function AgentsPane({
               onAddProvider={onAddProvider}
             />
           </div>
-          <div className="mcp-field">
+          <div className="mcp-field" data-setting={SETTINGS_FIELDS.billing.field}>
             <label className="mcp-label" htmlFor={id('billing')}>
               Billing
             </label>
@@ -629,7 +660,7 @@ export function AgentsPane({
               ))}
             </select>
           </div>
-          <div className="mcp-field">
+          <div className="mcp-field" data-setting={SETTINGS_FIELDS.effort.field}>
             <label className="mcp-label" htmlFor={id('effort')}>
               Effort
             </label>
@@ -647,7 +678,7 @@ export function AgentsPane({
               ))}
             </select>
           </div>
-          <div className="mcp-field">
+          <div className="mcp-field" data-setting={SETTINGS_FIELDS.timeout.field}>
             <label className="mcp-label" htmlFor={id('timeout')}>
               Timeout
             </label>
@@ -665,30 +696,21 @@ export function AgentsPane({
               ))}
             </select>
           </div>
-          <div className="mcp-field">
-            <label className="mcp-label" htmlFor={id('unattended-account')}>
-              Unattended runs use
-            </label>
-            <select
-              id={id('unattended-account')}
-              className="set-select"
-              value={defaults.fallbackAccountId ?? ''}
-              onChange={(event) => set({ fallbackAccountId: event.target.value || null })}
-              disabled={busy}
-            >
-              {!defaults.fallbackAccountId && <option value="">no account yet</option>}
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.username}
-                </option>
-              ))}
-            </select>
-            <span className="set-field-help">
-              Applies to subscription billing for schedules and webhooks.
-            </span>
-          </div>
+          {!personal && (
+            <div className="mcp-field" data-setting={SETTINGS_FIELDS.unattendedAccount.field}>
+              <label className="mcp-label" htmlFor={id('unattended-account')}>Unattended runs use</label>
+              <TextInput
+                id={id('unattended-account')}
+                readOnly
+                value={accounts.find((account) => account.isDefault)?.username ?? 'Complete account setup'}
+              />
+              <span className="set-field-help">
+                The default account supplies unattended preferences and subscriptions.
+              </span>
+            </div>
+          )}
         </div>
-        <div className="settings-fast-mode">
+        <div className="settings-fast-mode" data-setting={SETTINGS_FIELDS.fastMode.field}>
           <div>
             <label className="mcp-label" htmlFor={id('fast')}>
               Fast mode
@@ -714,6 +736,7 @@ export function AgentsPane({
 
       <div className="set-group">
         <div className="set-group-label">Resolved agents</div>
+        <p className="set-field-help">These agents use your saved profile and the shared app overrides.</p>
         <div className="set-table agents-table">
           <div className="set-thead">
             <div>agent</div>
@@ -777,7 +800,7 @@ function ResolvedAgentRow({
   return (
     <div className="set-trow">
       <div className="agent-cell agents-agent">
-        <span className="agent-name">{agent.name}</span>
+        <span className="agent-name">{agent.label}</span>
         <span className="agent-desc">{agent.description}</span>
       </div>
       <div>
@@ -847,32 +870,58 @@ export function ServicesPane() {
               Configure the services your apps use. Manage account access in Accounts.
             </p>
           </header>
-          <div className="svc-grid">
-            {services.map((service) => {
-              const identity = service.connected
-                ? (service.facts.slug ?? Object.values(service.facts)[0])
-                : undefined
-              return (
-                <button
-                  key={service.slug}
-                  type="button"
-                  className="set-card svc-card"
-                  onClick={() => setSelectedSlug(service.slug)}
-                >
-                  <span className="svc-card-top">
-                    <span className="svc-card-name">{service.title}</span>
-                    <ServiceStatus connected={service.connected} />
-                  </span>
-                  <span className="svc-card-desc">{service.description}</span>
-                  <span className="svc-card-foot">
-                    {identity && <span className="svc-card-id">{identity}</span>}
-                    <span className="svc-card-cue">Configure</span>
-                    <span className="chev" aria-hidden="true" />
-                  </span>
-                </button>
-              )
-            })}
-          </div>
+          <table className="connections-table" aria-label="Services">
+            <thead>
+              <tr>
+                <th scope="col">Service</th>
+                <th scope="col">Setup</th>
+                <th scope="col">Access</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {services.map((service) => {
+                const accounts = service.connections.filter((connection) => !connection.revokedAt)
+                return (
+                  <tr key={service.slug}>
+                    <th scope="row">
+                      <span className="connection-name">{service.title}</span>
+                      {service.usedBy.length > 0 && (
+                        <span className="connection-context">
+                          Used by {service.usedBy.map(appLabel).join(', ')}
+                        </span>
+                      )}
+                    </th>
+                    <td data-label="Setup">
+                      <ServiceStatus
+                        connected={service.connected}
+                        label={service.connected ? 'Configured' : 'Not configured'}
+                      />
+                    </td>
+                    <td data-label="Access">
+                      {service.isOauth
+                        ? accounts.length === 1
+                          ? (connectionIdentity(accounts[0]!) ?? '1 connected account')
+                          : accounts.length > 1
+                            ? `${accounts.length} connected accounts`
+                            : 'No connected accounts'
+                        : 'Service credentials'}
+                    </td>
+                    <td className="connection-actions">
+                      <button
+                        type="button"
+                        className="set-btn ghost"
+                        aria-label={`Configure ${service.title}`}
+                        onClick={() => setSelectedSlug(service.slug)}
+                      >
+                        Configure
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </>
       )}
     </div>
@@ -953,14 +1002,17 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
       )}
       {service.connected && (
         <section className="mcp-section">
-          <div className="set-card svc-facts">
+          <details className="set-card svc-facts">
+            <summary>Connection details</summary>
             {Object.entries(service.facts).map(([key, value]) => (
               <div className="svc-fact" key={key}>
-                <span className="svc-fact-key">{key}</span>
+                <span className="svc-fact-key">
+                  {key.replaceAll('_', ' ').replace(/\bid\b/gi, 'ID').replace(/^./, (letter) => letter.toUpperCase())}
+                </span>
                 <span className="svc-fact-val">{value}</span>
               </div>
             ))}
-          </div>
+          </details>
           {service.connectedAt && (
             <p className="svc-meta">Connected {new Date(service.connectedAt).toLocaleString()}</p>
           )}
@@ -1112,7 +1164,7 @@ function ServiceAccess({ service }: { service: Service }) {
       {service.usedBy.length > 0 && (
         <div className="svc-fact">
           <span className="svc-fact-key">used by</span>
-          <span className="svc-fact-val">{service.usedBy.join(', ')}</span>
+          <span className="svc-fact-val">{service.usedBy.map(appLabel).join(', ')}</span>
         </div>
       )}
       {live.map((connection) => (
@@ -1133,7 +1185,7 @@ function ServiceAccess({ service }: { service: Service }) {
               </button>
             )}
             <button
-              className="set-btn ghost"
+              className="set-btn danger"
               onClick={() => disconnect(connection)}
               disabled={busy}
             >
@@ -1176,15 +1228,24 @@ export function ConnectionsPane({ revokedOnly = false }: { revokedOnly?: boolean
     queryFn: () => api.listConnections(),
     staleTime: 60_000,
   })
+  const servicesQuery = useQuery({
+    queryKey: ['services'],
+    queryFn: api.services,
+    staleTime: 60_000,
+  })
+  const serviceTitles = Object.fromEntries(
+    (servicesQuery.data ?? []).map((service) => [service.slug, service.title]),
+  )
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
 
   const revoke = (connection: Connection) => {
     const identity = connectionIdentity(connection) ?? connection.provider
+    const service = serviceTitles[connection.provider] ?? connection.provider
     if (
       !window.confirm(
-        `Disconnect ${identity} from ${connection.provider}? Its access will be revoked.`,
+        `Disconnect ${identity} from ${service}? Its access will be revoked.`,
       )
     )
       return
@@ -1204,8 +1265,7 @@ export function ConnectionsPane({ revokedOnly = false }: { revokedOnly?: boolean
   }
 
   const connections = query.data ?? []
-  const live = connections.filter((connection) => !connection.revokedAt)
-  const revoked = connections.filter((connection) => connection.revokedAt)
+  const visible = connections.filter((connection) => Boolean(connection.revokedAt) === revokedOnly)
 
   return (
     <div className="set-pane mcp-pane svc-pane">
@@ -1233,44 +1293,72 @@ export function ConnectionsPane({ revokedOnly = false }: { revokedOnly?: boolean
       )}
       {busy && <p role="status">Disconnecting account…</p>}
       {notice && <p role="status">{notice}</p>}
-      {query.isSuccess && (revokedOnly ? revoked : live).length === 0 && (
+      {query.isSuccess && visible.length === 0 && (
         <p className="mcp-pane-sub">
           {revokedOnly ? 'No revoked accounts.' : 'No connected accounts.'}
         </p>
       )}
-      {connections.length > 0 && (
-        <div className="set-card svc-facts">
-          {!revokedOnly &&
-            live.map((connection) => (
-              <div className="svc-fact" key={connection.id}>
-                <span className="svc-fact-key">{connection.provider}</span>
-                <span className="svc-fact-val">
-                  {connectionIdentity(connection) ??
-                    (connection.scopes.join(', ') || 'unlabeled')}{' '}
-                  · {new Date(connection.connectedAt).toLocaleDateString()}
-                </span>
-                <button
-                  className="set-btn ghost"
-                  onClick={() => revoke(connection)}
-                  disabled={busy}
-                >
-                  Disconnect
-                </button>
-              </div>
+      {visible.length > 0 && (
+        <table
+          className="connections-table"
+          aria-label={revokedOnly ? 'Revoked accounts' : 'Accounts'}
+        >
+          <thead>
+            <tr>
+              <th scope="col">Account</th>
+              <th scope="col">Service</th>
+              <th scope="col">Access</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((connection) => (
+              <tr key={connection.id}>
+                <th scope="row">
+                  <span className="connection-name">
+                    {connectionIdentity(connection) ?? 'Account identity unavailable'}
+                  </span>
+                  {revokedOnly && (
+                    <span className="connection-context">{revokedCopy(connection)}</span>
+                  )}
+                </th>
+                <td data-label="Service">
+                  {serviceTitles[connection.provider] ?? connection.provider}
+                </td>
+                <td>
+                  <details className="connection-details">
+                    <summary>Access details</summary>
+                    <dl>
+                      <dt>Connected</dt>
+                      <dd>
+                        <time dateTime={connection.connectedAt}>
+                          {new Date(connection.connectedAt).toLocaleString()}
+                        </time>
+                      </dd>
+                      <dt>Permissions</dt>
+                      <dd>
+                        {connection.scopes.length > 0
+                          ? connection.scopes.join(', ')
+                          : 'No scopes recorded'}
+                      </dd>
+                    </dl>
+                  </details>
+                </td>
+                <td className="connection-actions">
+                  {!revokedOnly && (
+                    <button
+                      className="set-btn danger"
+                      onClick={() => revoke(connection)}
+                      disabled={busy}
+                    >
+                      Disconnect
+                    </button>
+                  )}
+                </td>
+              </tr>
             ))}
-          {revokedOnly &&
-            revoked.map((connection) => (
-              <div className="svc-fact svc-revoked" key={connection.id}>
-                <span className="svc-fact-key">{connection.provider}</span>
-                <span className="svc-fact-val">
-                  {connectionIdentity(connection) ??
-                    (connection.scopes.join(', ') || 'unlabeled')}{' '}
-                  · connected {new Date(connection.connectedAt).toLocaleDateString()} ·{' '}
-                  {revokedCopy(connection)}
-                </span>
-              </div>
-            ))}
-        </div>
+          </tbody>
+        </table>
       )}
     </div>
   )
@@ -1284,6 +1372,7 @@ export function ProvidersPane({
   catalogs,
   loading,
   requestError,
+  onRetry,
 }: {
   providers: Provider[]
   registeredProviders: Provider[]
@@ -1292,6 +1381,7 @@ export function ProvidersPane({
   catalogs: ProviderCatalog[]
   loading: boolean
   requestError: string | null
+  onRetry: () => void
 }) {
   const [adding, setAdding] = useState(false)
   const [managing, setManaging] = useState<string | null>(null)
@@ -1469,7 +1559,10 @@ export function ProvidersPane({
       )}
       {requestError && (
         <div className="mcp-error" role="alert">
-          {requestError}
+          {requestError}{' '}
+          <button className="set-btn ghost" onClick={onRetry}>
+            Try again
+          </button>
         </div>
       )}
       {!loading && !requestError && configured.length === 0 && (
@@ -1654,13 +1747,13 @@ export function ProviderConnect({
   const acceptsSubscription = provider.billingOptions.includes('subscription')
   const acceptsApiKey = provider.billingOptions.includes('api_key')
 
-  const run = (action: () => Promise<unknown>, after: () => Promise<unknown>) => {
+  const run = (action: () => Promise<unknown>, after: () => Promise<unknown>, done: string) => {
     setBusy(true)
     setError(null)
     setNotice('')
     void action()
       .then(after)
-      .then(() => setNotice('Saved.'))
+      .then(() => setNotice(done))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false))
   }
@@ -1672,7 +1765,7 @@ export function ProviderConnect({
       )
     )
       return
-    run(() => api.disconnectProvider(provider.id), refresh)
+    run(() => api.disconnectProvider(provider.id), refresh, 'Subscription disconnected.')
   }
 
   const removeKey = () => {
@@ -1680,7 +1773,7 @@ export function ProviderConnect({
       !window.confirm(`Remove the ${provider.label} API key? Agents billed to it stop running.`)
     )
       return
-    run(() => api.removeProviderKey(provider.id), refreshKeys)
+    run(() => api.removeProviderKey(provider.id), refreshKeys, 'API key removed.')
   }
 
   const createKey = (event: FormEvent<HTMLFormElement>) => {
@@ -1690,7 +1783,7 @@ export function ProviderConnect({
       setKey('')
       setReplacing(false)
       setKeyFormOpen(false)
-    }, refreshKeys)
+    }, refreshKeys, 'API key saved.')
   }
 
   const connected = Boolean(subscription?.connected)
@@ -1747,22 +1840,11 @@ export function ProviderConnect({
                 {usage?.planTier ? `${usage.planTier} · ` : ''}
                 {subscription.providerEmail}
               </p>
-              <div className="provider-quotas">
-                {usage?.unlimited ? (
-                  <p>Quota: unmetered</p>
-                ) : (
-                  <>
-                    {usage?.fiveHour && <QuotaRow label="5-hour" metric={usage.fiveHour} />}
-                    {usage?.weeks.map((week) => (
-                      <QuotaRow
-                        key={week.model ?? 'all'}
-                        label={week.model ? `Weekly · ${week.model}` : 'Weekly'}
-                        metric={week}
-                      />
-                    ))}
-                  </>
-                )}
-              </div>
+              {usage?.fiveHour && !usage.unlimited && (
+                <div className="provider-quotas">
+                  <QuotaRow label="5-hour" metric={usage.fiveHour} />
+                </div>
+              )}
             </>
           ) : (
             <p className="provider-account">Not connected</p>
@@ -2147,7 +2229,7 @@ function CollectionCard({
             Sync now
           </button>
           <button
-            className="set-btn danger quiet"
+            className="set-btn danger"
             onClick={remove}
             disabled={busy}
             title="Remove the collection and its skills"
@@ -2294,6 +2376,7 @@ export function McpServersPane() {
   }
 
   async function remove(name: string) {
+    if (!window.confirm(`Remove ${name} from every sandbox?`)) return
     setBusy(true)
     setError(null)
     try {
@@ -2325,6 +2408,7 @@ export function McpServersPane() {
   }
 
   async function disconnect(name: string) {
+    if (!window.confirm(`Disconnect ${name}? Agents lose its tools until it is connected again.`)) return
     setBusy(true)
     setError(null)
     try {
@@ -2354,7 +2438,7 @@ export function McpServersPane() {
       )}
       <header className="mcp-pane-head">
         <p className="mcp-pane-sub">
-          Tools your agents can call. Enable installed servers or add one from the registry.
+          Connect tools for your agents. Enable a server to make its tools available on new runs.
         </p>
       </header>
 
@@ -2576,9 +2660,6 @@ export function McpServersPane() {
 }
 
 function tokenStatusLabel(server: McpServer): string {
-  if (server.tokenSource === 'static_from_env') {
-    return `${server.sourceEnvVar} ${server.hasToken ? 'set' : 'unset'}`
-  }
   if (server.tokenSource === 'oauth') {
     return server.hasToken ? 'Connected' : 'Not connected'
   }
@@ -2679,7 +2760,7 @@ function McpServerRow({
           {/* A built-in (catalog entry) is managed by druks: disable, never remove. */}
           {!server.builtin && (
             <button
-              className="set-btn danger quiet"
+              className="set-btn danger"
               onClick={() => void onRemove(server.name)}
               disabled={busy}
               title="Remove this server from every sandbox."
@@ -2863,12 +2944,12 @@ function PatRow({
       <span className={'hr-chip ' + (active ? 'hr-chip-on' : 'hr-chip-off')}>{pat.status}</span>
       {pat.status !== 'revoked' && (
         <button
-          className="sc-remove"
+          className="set-btn danger"
           onClick={() => void onRevoke(pat)}
           disabled={busy}
           title="revoke token"
         >
-          ✕ revoke
+          Revoke
         </button>
       )}
     </div>
@@ -2994,6 +3075,7 @@ export function AppPane({
                           <div
                             key={option.scope + '.' + option.kind + '.' + option.field.name}
                             className="set-app-toggle"
+                            data-setting={`${option.scope}.${option.kind}.${option.field.name}`}
                           >
                             <div className="mt-text">
                               <span className="mt-name">{option.field.label}</span>
@@ -3024,10 +3106,12 @@ export function AppPane({
                         return (
                           <SettingField
                             key={option.scope + '.' + option.kind + '.' + option.field.name}
+                            setting={`${option.scope}.${option.kind}.${option.field.name}`}
                             label={option.field.label}
                             help={option.field.help}
                             type={option.field.type}
                             choices={option.field.choices}
+                            choiceDetails={option.field.choiceDetails}
                             multiline={option.field.multiline}
                             secretSet={option.field.secretSet}
                             // A secret's stored value never reaches the client, so its
@@ -3056,7 +3140,7 @@ export function AppPane({
       {section === 'agents' && app.agents.length > 0 && defaults && (
         <div className="set-group">
           <div className="set-group-label">agents</div>
-          <AgentTable
+          <AgentRecords
             app={app}
             edits={edits}
             harnessByName={harnessByName}
@@ -3078,7 +3162,7 @@ export function AppPane({
   )
 }
 
-function AgentTable({
+function AgentRecords({
   app,
   edits,
   harnessByName,
@@ -3116,15 +3200,7 @@ function AgentTable({
     saved: T | null,
   ) => (pending && name in pending ? (pending[name] ?? null) : saved)
   return (
-    <div className="set-table">
-      <div className="set-thead">
-        <div>agent</div>
-        <div>harness</div>
-        <div>model</div>
-        <div>billing</div>
-        <div>effort</div>
-        <div>timeout</div>
-      </div>
+    <div className="agent-records">
       {app.agents.map((agent) => {
         const harnessOverride = override(
           edits.agentHarnesses,
@@ -3195,12 +3271,13 @@ function AgentTable({
           disabled: busy,
         }
         return (
-          <div key={agent.name} className="set-trow">
-            <div className="agent-cell">
-              <span className="agent-name">{agent.name}</span>
-              <span className="agent-desc">{agent.description}</span>
-            </div>
-            <div>
+          <section key={agent.name} className="agent-record" aria-label={agent.label}>
+            <header className="agent-identity">
+              <h3>{agent.label}</h3>
+              <p>{agent.description}</p>
+            </header>
+            <div className="agent-field agent-field-harness" role="group" aria-label="Harness" data-setting={`agent.${agent.name}.${SETTINGS_FIELDS.harness.field}`}>
+              <span className="agent-field-label">Harness</span>
               <InheritCell
                 kind="harness"
                 value={harnessOverride}
@@ -3210,7 +3287,8 @@ function AgentTable({
                 {...shared}
               />
             </div>
-            <div>
+            <div className="agent-field agent-field-model" role="group" aria-label="Model" data-setting={`agent.${agent.name}.${SETTINGS_FIELDS.model.field}`}>
+              <span className="agent-field-label">Model</span>
               <InheritCell
                 kind="model"
                 value={modelOverride}
@@ -3220,18 +3298,22 @@ function AgentTable({
                 {...shared}
               />
             </div>
-            <div>
+            <div className="agent-field agent-field-billing" role="group" aria-label="Billing" data-setting={`agent.${agent.name}.${SETTINGS_FIELDS.billing.field}`}>
+              <span className="agent-field-label">Billing</span>
               <InheritCell
                 kind="billing"
                 value={locked ? null : billingOverride}
-                resolvedLabel={billingLabel(billing) + (locked ? ' ⚬' : '')}
+                resolvedLabel={billingLabel(billing)}
                 inheritLabel={'default · ' + billingLabel(defaults.defaultBilling)}
                 onPick={pickBilling}
                 {...shared}
                 disabled={busy || locked}
+                fixed={locked}
               />
+              {locked && <span className="agent-field-help">This harness uses API keys only.</span>}
             </div>
-            <div>
+            <div className="agent-field agent-field-effort" role="group" aria-label="Effort" data-setting={`agent.${agent.name}.${SETTINGS_FIELDS.effort.field}`}>
+              <span className="agent-field-label">Effort</span>
               <InheritCell
                 kind="effort"
                 value={effortOverride}
@@ -3241,7 +3323,8 @@ function AgentTable({
                 {...shared}
               />
             </div>
-            <div>
+            <div className="agent-field agent-field-timeout" role="group" aria-label="Timeout" data-setting={`agent.${agent.name}.${SETTINGS_FIELDS.timeout.field}`}>
+              <span className="agent-field-label">Timeout</span>
               <InheritCell
                 kind="timeout"
                 value={timeoutOverride}
@@ -3251,7 +3334,7 @@ function AgentTable({
                 {...shared}
               />
             </div>
-          </div>
+          </section>
         )
       })}
     </div>

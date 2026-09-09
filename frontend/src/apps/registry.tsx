@@ -17,15 +17,28 @@ export interface AppUI {
   navigation?: [string, string][]
   // Where a feed row about one of this app's subjects navigates. The shell knows
   // an app has subjects, never where its pages put them.
-  subjectPath?: (subject: { type: string; id: string }) => string | undefined
-  // Whether the persistent system-health strip (webhook + spend) rides above this
-  // app's list and detail surfaces. Opt-in — an app that doesn't track
-  // code hosts leaves it off and the band never renders.
-  systemStrip?: boolean
+  subjectPath?: (subject: { type: string; id: string }, target?: SubjectTarget) => string | undefined
+  parentPath?: (location: string) => string | undefined
+}
+
+/** The run an owner link selects and, for a decision, its request round. */
+export interface SubjectTarget {
+  run: string
+  parkedAt?: string
+}
+
+export function targetQuery(target?: SubjectTarget): string {
+  const query = new URLSearchParams()
+  if (target) query.set('run', target.run)
+  if (target?.parkedAt) query.set('parkedAt', target.parkedAt)
+  return query.size ? `?${query}` : ''
 }
 
 export function appLabel(name: string): string {
-  return name.replace(/_/g, ' ')
+  return name
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
 }
 
 const REGISTRY = new Map<string, AppUI>()

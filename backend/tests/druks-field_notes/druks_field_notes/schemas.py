@@ -9,3 +9,8 @@ class NoteSummary(SubjectSummary):
     body: str
     gist: str | None = None
     created_at: datetime
+
+
+class RepositorySummary(SubjectSummary):
+    repo: str
+    gist: str | None = None

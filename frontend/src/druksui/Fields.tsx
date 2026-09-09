@@ -218,7 +218,7 @@ function Input({
         <input
           {...shared}
           className="dui-input"
-          // The set the settings modal uses for its bearer token. Keep them
+          // The set the settings page uses for its bearer token. Keep them
           // together.
           type="password"
           autoComplete="new-password"

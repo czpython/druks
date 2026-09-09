@@ -17,7 +17,6 @@ from druks.browser.sessions import BrowserSession
 from druks.browser.subscribers import signed_out_session_goes_stale
 from druks.database import db_session
 from druks.sandbox.datastructures import ExecResult
-from druks.secrets import utils as secret_utils
 from druks.testing import make_settings
 
 
@@ -87,7 +86,6 @@ class FakeRedis:
 @pytest.fixture
 def borrow(druks_db, tmp_path, monkeypatch):
     settings = make_settings(tmp_path)
-    monkeypatch.setattr(secret_utils, "load_settings", lambda: settings)
     monkeypatch.setattr(sessions_module, "load_settings", lambda: settings)
     redis = FakeRedis()
     monkeypatch.setattr(locks, "get_client", lambda: redis)

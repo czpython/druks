@@ -1,15 +1,15 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from dbos import DBOS
-from sqlalchemy import ForeignKey, Index, Select, String, func, select, update
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Select, String, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship, selectinload
 
-from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.accounts.models import Account
 from druks.core.models import Uuid7Pk
 from druks.database import db_session, get_session
@@ -32,6 +32,7 @@ from druks.durable.exceptions import AgentCallNotFound
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
 from druks.notifications.models import Notification
+from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
 from druks.signals import publish
 
@@ -70,13 +71,8 @@ class Run(Base):
     # How the subject showed itself when this run started — read with the row, so
     # every event the run writes names it without a second lookup.
     subject_label: Mapped[str | None] = column_property(subject_label_expression(id))
-    # Who asked; the system account when nobody did (crons, background work).
-    account_id: Mapped[str] = mapped_column(
-        ForeignKey("accounts.id", ondelete="RESTRICT"), default=SYSTEM_ACCOUNT_ID
-    )
-    account: Mapped[Account] = relationship(
-        lazy="joined", innerjoin=True, foreign_keys=[account_id]
-    )
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
+    account: Mapped[Account] = relationship(lazy="joined", foreign_keys=[account_id])
     # The run's agent calls in execution order — lazy, so a parked board row that
     # never reads them costs no query; the timeline read eager-loads them.
     agent_calls: Mapped[list["AgentCall"]] = relationship(
@@ -110,9 +106,7 @@ class Run(Base):
             return self.agent_calls[-1].last_error
 
     @classmethod
-    async def create_row(
-        cls, engine, *, workflow_id: str, kind: str, account_id: str | None
-    ) -> None:
+    async def create_row(cls, engine, *, workflow_id: str, kind: str, account_id: str) -> None:
         # Own committed transaction (not the caller's request txn) so the row
         # exists before the running workflow's first lifecycle event. Idempotent:
         # a scheduled run creates its row inside the (replayable) body, and a
@@ -120,7 +114,7 @@ class Run(Base):
         async with get_session(engine) as session:
             await session.execute(
                 pg_insert(cls)
-                .values(id=workflow_id, kind=kind, account_id=account_id or SYSTEM_ACCOUNT_ID)
+                .values(id=workflow_id, kind=kind, account_id=account_id)
                 .on_conflict_do_nothing()
             )
             await session.commit()
@@ -240,35 +234,50 @@ class Run(Base):
         )
 
     @classmethod
-    def get_open_subjects(cls) -> Select:
-        """Every open workflow — the newest run of each kind on each subject, still
-        going or failed — newest first across every installed app."""
+    def get_open_subjects(
+        cls,
+        *,
+        kinds: Sequence[str] | None = None,
+        states: Sequence[RunState] = OPEN_STATES,
+        include_subjectless: bool = False,
+    ) -> Select:
+        """Current runs per kind and subject, ranked before state filtering."""
         state = state_expression(cls.id, cls.input_gate, cls.created_at).label("state")
         attributes = workflow_status.c.attributes
         subject_type = attributes["subject_type"].as_string().label("subject_type")
         subject_id = attributes["subject_id"].as_string().label("subject_id")
         subject_label = attributes["subject_label"].as_string().label("subject_label")
-        driving = (
-            select(
-                subject_type,
-                subject_id,
-                subject_label,
-                cls.id.label("run_id"),
-                cls.kind,
-                cls.failure,
-                cls.created_at,
-                state,
-                func.row_number()
-                .over(
-                    partition_by=(cls.kind, subject_type, subject_id),
-                    order_by=(cls.created_at.desc(), cls.id.desc()),
-                )
-                .label("rank"),
+        driving = select(
+            subject_type,
+            subject_id,
+            subject_label,
+            cls.id.label("run_id"),
+            cls.kind,
+            cls.failure,
+            cls.created_at,
+            cls.updated_at.label("updated_at"),
+            cls.input_requested_at,
+            func.left(cls.input_request["label"].as_string(), 240).label("request_label"),
+            cls.input_request["presentation"].as_string().label("presentation"),
+            cls.input_request["url"].as_string().label("request_url"),
+            state,
+            func.row_number()
+            .over(
+                partition_by=(cls.kind, subject_type, func.coalesce(subject_id, cls.id)),
+                order_by=(cls.created_at.desc(), cls.id.desc()),
             )
-            .join_from(cls, workflow_status, workflow_status.c.workflow_uuid == cls.id)
-            .where(subject_id.is_not(None))
-            .subquery()
+            .label("rank"),
+        ).join_from(
+            cls,
+            workflow_status,
+            workflow_status.c.workflow_uuid == cls.id,
+            isouter=include_subjectless,
         )
+        if kinds is not None:
+            driving = driving.where(cls.kind.in_(kinds))
+        if not include_subjectless:
+            driving = driving.where(subject_id.is_not(None))
+        driving = driving.subquery()
         latest_call_id = (
             select(AgentCall.id)
             .where(AgentCall.run_id == driving.c.run_id)
@@ -281,7 +290,7 @@ class Run(Base):
             select(driving, latest_call_id)
             .where(
                 driving.c.rank == 1,
-                driving.c.state.in_([run_state.value for run_state in OPEN_STATES]),
+                driving.c.state.in_([run_state.value for run_state in states]),
             )
             .order_by(driving.c.created_at.desc(), driving.c.run_id.desc())
         )
@@ -446,7 +455,11 @@ class AgentCall(Base, Uuid7Pk):
     __tablename__ = "agent_calls"
     __table_args__ = (
         Index("agent_calls_run_idx", "run_id"),
-        Index("agent_calls_account_finished_idx", "account_id", "finished_at"),
+        Index("agent_calls_subscription_finished_idx", "subscription_id", "finished_at"),
+        CheckConstraint(
+            "(subscription_id IS NOT NULL) <> (api_key_id IS NOT NULL)",
+            name="agent_calls_billing_source_check",
+        ),
     )
 
     # Which model ran this row, snapshotted at dispatch — the model is resolved
@@ -460,12 +473,12 @@ class AgentCall(Base, Uuid7Pk):
     # timeline's grouping label. An agent is what makes a call, so there is no
     # unattributed one: the row is written from the registered agent's own id.
     agent: Mapped[str] = mapped_column(String)
-    # The subscription actually charged — differs from the run's account on
-    # fallback.
-    account_id: Mapped[str] = mapped_column(
-        ForeignKey("accounts.id", ondelete="RESTRICT"), default=SYSTEM_ACCOUNT_ID
+    subscription_id: Mapped[str | None] = mapped_column(ForeignKey("vault.id", ondelete="RESTRICT"))
+    api_key_id: Mapped[str | None] = mapped_column(ForeignKey("vault.id", ondelete="RESTRICT"))
+    subscription: Mapped[VaultSecret | None] = relationship(
+        lazy="selectin", foreign_keys=[subscription_id]
     )
-    account: Mapped[Account] = relationship(lazy="joined", innerjoin=True)
+    api_key: Mapped[VaultSecret | None] = relationship(lazy="selectin", foreign_keys=[api_key_id])
 
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     started_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -541,7 +554,8 @@ class AgentCall(Base, Uuid7Pk):
         model: str,
         agent: str,
         host_id: str,
-        account_id: str,
+        subscription_id: str | None,
+        api_key_id: str | None,
     ) -> None:
         # Recorded RUNNING once the agent starts on its host (id = its on-disk
         # transcript dir) in its own committed transaction, so the live step
@@ -564,7 +578,8 @@ class AgentCall(Base, Uuid7Pk):
                     agent=agent,
                     model=model,
                     sandbox_host_id=host_id,
-                    account_id=account_id,
+                    subscription_id=subscription_id,
+                    api_key_id=api_key_id,
                 )
             )
             await session.commit()
@@ -614,24 +629,6 @@ class AgentCall(Base, Uuid7Pk):
             .order_by(cls.created_at, cls.id)
         )
         return list(await db_session().scalars(stmt))
-
-    @classmethod
-    async def total_run_spend_between(cls, *, start: datetime, end: datetime) -> tuple[float, int]:
-        stmt = (
-            select(cls.cost_usd, cls.cost_metadata)
-            .where(cls.finished_at.is_not(None))
-            .where(cls.finished_at >= start)
-            .where(cls.finished_at < end)
-        )
-        cost = 0.0
-        tokens = 0
-        for cost_usd, metadata in await db_session().execute(stmt):
-            if cost_usd is not None:
-                cost += float(cost_usd)
-            canonical = normalize_token_usage(metadata)
-            if canonical:
-                tokens += canonical["total_tokens"]
-        return cost, tokens
 
     async def record_cost(self, *, cost_usd: float | None, cost_metadata: dict | None) -> None:
         if cost_usd is None and not cost_metadata:

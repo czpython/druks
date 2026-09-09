@@ -103,6 +103,19 @@ response model, so writing it again on every function says nothing.
 Each page has a name. The name is the function name. `Link` and
 `App.navigation` reference a page by that name.
 
+A subject detail page can be the destination for Dashboard decisions:
+
+```python
+@ui.page("/peers/{peer_id}", subject=Peer)
+async def peer(peer_id: int): ...
+```
+
+The route must have exactly one parameter. Druks fills it with the subject ID.
+An app can declare one decision page for each subject type. Dashboard keeps
+the requested run and decision round in the URL. The page shows controls only
+for that run. A changed or missing decision shows an unavailable message.
+Ordinary subject links still open the platform subject page.
+
 Each page has a label. Druks derives the label from the name: underscores
 become spaces. `peer_history` becomes "peer history". Pass `label=` to
 override it:
@@ -143,10 +156,10 @@ The app roster at `GET /api/apps` carries the page table. The shell resolves a
 ```json
 {
   "pages": [
-    {"name": "overview", "label": "overview", "path": "/night_watch", "parent": "", "order": 0},
-    {"name": "peers", "label": "peers", "path": "/night_watch/peers", "parent": "", "order": 1},
-    {"name": "peer", "label": "peer", "path": "/night_watch/peers/{peer_id}", "parent": "", "order": 2},
-    {"name": "peer_history", "label": "peer history", "path": "/night_watch/peers/{peer_id}/history", "parent": "peer", "order": 3}
+    {"name": "overview", "label": "overview", "path": "/night_watch", "parent": "", "subjectType": "", "order": 0},
+    {"name": "peers", "label": "peers", "path": "/night_watch/peers", "parent": "", "subjectType": "", "order": 1},
+    {"name": "peer", "label": "peer", "path": "/night_watch/peers/{peer_id}", "parent": "", "subjectType": "", "order": 2},
+    {"name": "peer_history", "label": "peer history", "path": "/night_watch/peers/{peer_id}/history", "parent": "peer", "subjectType": "", "order": 3}
   ]
 }
 ```
@@ -281,6 +294,11 @@ A `Page` or a named region declares what it watches:
 @ui.page("/peers/{peer_id}")
 async def peer(peer_id: int):
     watched = await Peer.get(peer_id)
+    status = await watched.get_status()
+    if status.gate:
+        decision = [ui.GateControls(status.run)]
+    else:
+        decision = [ui.Text("No decision is waiting.")]
     return ui.Page(
         title=watched.name,
         blocks=[
@@ -288,7 +306,7 @@ async def peer(peer_id: int):
                 name="decision",
                 title="Decision",
                 follows=watched,
-                blocks=[ui.GateControls(watched.active_run)],
+                blocks=decision,
             )
         ],
     )
@@ -347,7 +365,9 @@ A `follows=` on the `Page` itself replaces the whole page body.
 `GateControls` declares only the run:
 
 ```python
-ui.GateControls(peer.active_run)
+status = await peer.get_status()
+if status.gate:
+    decision = ui.GateControls(status.run)
 ```
 
 The shell derives everything else from the parked run: the questions, the

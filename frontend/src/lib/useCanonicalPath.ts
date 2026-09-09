@@ -1,22 +1,18 @@
 import { useEffect } from 'react'
 import { useLocation } from 'wouter'
+import { useLocationProperty } from 'wouter/use-browser-location'
 
-/**
- * Replace the current URL with ``canonical`` if they differ. Used by
- * detail pages once they've loaded enough data to compute their
- * canonical ``/<type>/<id>-<slug>`` form. Pass ``null`` while the data
- * is still loading — the hook is a no-op until you have something to
- * navigate to.
- *
- * ``replace: true`` so the user's back button doesn't get a duplicate
- * non-canonical history entry.
- */
+import { useRawLocation } from './useRawLocation'
+
+/** Keep one history entry for the loaded detail page, including its run target. */
 export function useCanonicalPath(canonical: string | null | undefined): void {
   const [location, navigate] = useLocation()
+  const { path: rawPath, search: rawSearch } = useRawLocation()
+  const search = rawSearch.replace(/^\?/, '')
+  const visiblePath = useLocationProperty(() => window.location.pathname)
   useEffect(() => {
-    if (!canonical) return
-    if (location !== canonical) {
-      navigate(canonical, { replace: true })
+    if (canonical && location !== canonical && visiblePath === rawPath) {
+      navigate(`${canonical}${search ? `?${search}` : ''}${window.location.hash}`, { replace: true })
     }
-  }, [location, canonical, navigate])
+  }, [location, canonical, navigate, visiblePath, rawPath, search])
 }

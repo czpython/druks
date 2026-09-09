@@ -15,17 +15,18 @@ import type { ReactNode } from 'react'
  */
 interface PageProps {
   children: ReactNode
-  /** Page-specific styling (max-width, background, padding). Don't
-   * override flex / overflow / min-height — .page-shell owns those. */
+  /** Page-specific styling. Page owns width, gutters, and scrolling. */
   className?: string
   header?: ReactNode
   scroll?: 'page' | 'internal'
+  /** Apply shared content spacing. Omit for full-width lists and split panes. */
+  inset?: boolean
 }
 
-export function Page({ children, className, header, scroll = 'page' }: PageProps) {
+export function Page({ children, className, header, scroll = 'page', inset = false }: PageProps) {
   const cls = ['page-shell', className].filter(Boolean).join(' ')
   return (
-    <div className={cls} data-scroll={scroll}>
+    <div className={cls} data-scroll={scroll} data-inset={inset}>
       {header !== undefined && <div className="page-shell-header">{header}</div>}
       <div className="page-shell-body">{children}</div>
     </div>

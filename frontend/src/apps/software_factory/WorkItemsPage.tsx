@@ -1,6 +1,6 @@
 import { EmptyState, Page, PageHeader, StatusGlyph } from '@druks/ui'
 import { useMemo, useState } from 'react'
-import { useLocation } from 'wouter'
+import { Link, useLocation } from 'wouter'
 
 import { useSSE } from '../../api/sse'
 import { buildApi } from './api'
@@ -11,6 +11,7 @@ import { TicketCell } from '../../components/TicketCell'
 import { relTime, secondsSince, updatedAtSortKey } from '../../lib/format'
 import { statusLine } from './statusLine'
 import { workItemPathFromSummary } from './slug'
+import '../../operations.css'
 
 
 function isInFlight(row: WorkItemRow): boolean {
@@ -37,24 +38,26 @@ function WorkItemRowView({
   const failed = status.state === 'failed'
   const parked = status.state === 'parked'
   const live = isInFlight(row)
-  const next = statusLine(status, wi.resolution)
+  const next = statusLine(status, wi.resolution) || status.state || 'Not started'
   const when = relTime(secondsSince(wi.updatedAt))
   return (
-    <div className={`row row-work-item${failed ? ' row-failed' : ''}`} onClick={() => onOpen(row)}>
-      <StatusGlyph state={status.state} />
-      <TicketCell ticketKey={wi.ticketKey} ticketUrl={wi.links.ticket} />
-      <span className="row-title" title={wi.title}>
-        {wi.title}
-      </span>
-      <span />
-      <RepoCell repo={wi.repo} project={wi.projectName} />
-      <PRCell prNumber={wi.prNumber} prUrl={wi.links.pr} />
-      {/* The line is the ask ("Review plan", "Merge or close the PR"), the live
-          step ("Implementing…"), or the timeout hint — build's copy over the
-          platform's status facts. */}
-      <span className="wi-next mono dim">{live ? `${next}…` : next}</span>
-      <span className="wi-updated mono dim">
-        {failed ? `failed ${when}` : parked ? `parked ${when}` : when}
+    <div className={`row row-work-item${failed ? ' row-failed' : ''}`} onClick={(event) => { if (!(event.target as Element).closest('a')) onOpen(row) }}>
+      <div className="work-item-identity">
+        <Link className="work-item-title" href={workItemPathFromSummary(wi)}>
+          {wi.title}
+        </Link>
+        <div className="work-item-references">
+          <TicketCell ticketKey={wi.ticketKey} ticketUrl={wi.links.ticket} />
+          <RepoCell repo={wi.repo} project={wi.projectName} />
+          <PRCell prNumber={wi.prNumber} prUrl={wi.links.pr} />
+        </div>
+      </div>
+      <div className="work-item-state">
+        <StatusGlyph state={status.state} />
+        <span>{live ? `${next}…` : next}</span>
+      </div>
+      <span className="work-item-updated">
+        {failed ? `Failed ${when}` : parked ? `Waiting ${when}` : `Updated ${when}`}
       </span>
     </div>
   )
@@ -143,7 +146,8 @@ export function WorkItemsPage() {
         <div className="active-filters mono">
           <input
             type="text"
-            className="history-search mono"
+            className="history-search"
+            aria-label="Filter work items"
             placeholder="filter by ticket, title, or repo…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}

@@ -279,6 +279,7 @@ def test_an_apps_subjects_come_from_its_workflows():
 
     assert [subject.subject_type for subject in software_factory.subjects()] == [
         "project_repo",
+        "pull_request",
         "work_item",
     ]
 

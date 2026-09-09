@@ -107,7 +107,7 @@ function renderPane() {
   )
 }
 async function openGithubForm() {
-  fireEvent.click(await screen.findByText('GitHub'))
+  fireEvent.click(await screen.findByRole('button', { name: 'Configure GitHub' }))
   fireEvent.click(await screen.findByText('Connect an existing GitHub App'))
 }
 
@@ -123,13 +123,13 @@ async function flush() {
 }
 
 describe('ServicesPane', () => {
-  it('shows compact cards with no credential fields on the overview', async () => {
+  it('shows compact rows with no credential fields on the overview', async () => {
     stubFetch([[disconnected, pasteOnly]])
     renderPane()
 
     expect(await screen.findByText('GitHub')).toBeTruthy()
     expect(screen.getByText('Google OAuth client')).toBeTruthy()
-    expect(screen.getAllByText('Not connected')).toHaveLength(2)
+    expect(screen.getAllByText('Not configured')).toHaveLength(2)
     expect(screen.queryByLabelText('App ID')).toBeNull()
     expect(screen.queryByLabelText('Client ID')).toBeNull()
     expect(document.body.textContent).not.toContain('service identity')
@@ -139,7 +139,7 @@ describe('ServicesPane', () => {
     stubFetch([[disconnected, pasteOnly]])
     renderPane()
 
-    fireEvent.click(await screen.findByText('Google OAuth client'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure Google OAuth client' }))
     expect(screen.getByText('← Services')).toBeTruthy()
     expect(screen.queryByLabelText('Client ID')).toBeNull()
 
@@ -155,7 +155,7 @@ describe('ServicesPane', () => {
     stubFetch([[disconnected]])
     renderPane()
 
-    fireEvent.click(await screen.findByText('GitHub'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure GitHub' }))
     expect(screen.getByText('Create GitHub App')).toBeTruthy()
     expect(screen.queryByLabelText('App ID')).toBeNull()
 
@@ -238,7 +238,7 @@ describe('ServicesPane', () => {
     stubFetch([[connected]])
     renderPane()
 
-    fireEvent.click(await screen.findByText('GitHub'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure GitHub' }))
     expect(screen.getByText('Connected')).toBeTruthy()
     expect(screen.getByText('12345')).toBeTruthy()
     expect(screen.queryByLabelText('Private key (PEM)')).toBeNull()
@@ -255,7 +255,7 @@ describe('ServicesPane', () => {
     vi.stubGlobal('open', open)
     renderPane()
 
-    fireEvent.click(await screen.findByText('GitHub'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure GitHub' }))
     fireEvent.click(screen.getByText('Create GitHub App'))
     expect(open).toHaveBeenCalledWith('/api/core/github/manifest')
 
@@ -270,7 +270,7 @@ describe('ServicesPane', () => {
     stubFetch([[connected]])
     renderPane()
 
-    fireEvent.click(await screen.findByText('GitHub'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure GitHub' }))
     const link = screen.getByText('Manage installations')
 
     expect(link.getAttribute('href')).toBe(

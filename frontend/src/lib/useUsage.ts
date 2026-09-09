@@ -60,7 +60,7 @@ export function useUsageHistory() {
 
 /**
  * Today's spend/tokens split by provider (same day boundary as the
- * sys-strip's spend-today figure). Aggregated from druks' own run
+ * Usage page's spend-today figure). Aggregated from druks' own run
  * records, so it moves when runs finish — not on the scrape cadence.
  */
 export function useUsageToday() {

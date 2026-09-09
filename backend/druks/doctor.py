@@ -24,16 +24,16 @@ from .apps.loader import iter_apps
 from .apps.registry import _ROLES, agents, autodiscover, services, webhooks, workflows
 from .core.apis.github import get_github_client
 from .database import create_async_engine_from_url, create_engine_from_url, session_scope
-from .harnesses.models import ProviderKey, ProviderSubscription
 from .harnesses.providers import get_providers
 from .harnesses.registry import get_harnesses
 from .sandbox.client import sandbox_client
 from .sandbox.exceptions import TemplateNotFound
 from .sandbox.templates import get_declared_sandboxes, prepare_sandbox_templates
+from .secrets.datastructures import Audience
+from .secrets.enums import SecretKind
+from .secrets.models import VaultSecret
 from .services import Service, ServiceNotConnectedError
-from .services.models import ServiceIdentity
 from .settings import Settings, load_settings
-from .user_settings.models import UserSettings
 from .webhooks.base import Webhook
 from .workflows import Workflow, _Task
 
@@ -68,13 +68,13 @@ async def check_service_identities(settings: Settings) -> list[CheckResult]:
     for app in iter_apps():
         app.discover()
 
-    async def _read() -> list[CheckResult]:
+    try:
         async with _check_engine(settings) as engine, session_scope(engine):
             results: list[CheckResult] = []
             for service in services.all():
                 name = f"{service.slug}_identity"
                 try:
-                    row = await ServiceIdentity.get(service.slug)
+                    row = await service.get()
                 except ServiceNotConnectedError:
                     results.append(
                         CheckResult(
@@ -82,16 +82,13 @@ async def check_service_identities(settings: Settings) -> list[CheckResult]:
                             ok=not service.required,
                             pending=service.required,
                             detail=f"not connected — connect {service.title} in "
-                            "Settings → Services.",
+                            "Settings → Connections → Services.",
                         )
                     )
                     continue
                 facts = " ".join(f"{key}={value}" for key, value in row.identity.items())
                 results.append(CheckResult(name=name, ok=True, detail=f"connected; {facts}"))
             return results
-
-    try:
-        return await _read()
     except Exception as error:  # noqa: BLE001 — a DB-read failure is a fail, not a crash
         return [
             CheckResult(
@@ -106,20 +103,17 @@ async def check_installations(settings: Settings) -> CheckResult:
     factory reads the service-identity row, so a one-off Session is bound
     into the ambient ``db_session`` registry for the duration."""
 
-    async def _list_accounts() -> tuple[str, ...]:
+    try:
         async with _check_engine(settings) as engine:
             async with session_scope(engine):
                 client = await get_github_client()
-            return await client.list_installation_accounts()
-
-    try:
-        accounts = await _list_accounts()
+            accounts = await client.list_installation_accounts()
     except ServiceNotConnectedError:
         return CheckResult(
             name="installations",
             ok=False,
             pending=True,
-            detail="github is not connected — connect it in Settings → Services.",
+            detail="github is not connected — connect it in Settings → Connections → Services.",
         )
     except Exception as exc:  # noqa: BLE001 — doctor reports, never raises
         return CheckResult(
@@ -148,7 +142,7 @@ def _credentials_check(
     expires_at: datetime | None,
     key_set_by: str | None = None,
 ) -> CheckResult:
-    """``connected`` is the fallback account's subscription; ``key_set_by``
+    """``connected`` is the default account's subscription; ``key_set_by``
     names who pasted the provider's API key, when one exists."""
     check_name = f"{provider_id}_credentials"
     key_note = f"API key set by {key_set_by}" if key_set_by else ""
@@ -181,23 +175,30 @@ def check_provider_credentials(settings: Settings) -> list[CheckResult]:
     engine = create_engine_from_url(settings.database_url)
     try:
         with Session(engine) as session:
-            fallback_id = session.scalar(
-                select(UserSettings.fallback_account_id).where(
-                    UserSettings.id == UserSettings.SINGLETON_ID
-                )
-            )
+            default_account_id = session.scalar(select(Account.id).where(Account.is_default))
             results: list[CheckResult] = []
             for provider in get_providers():
                 row = session.scalar(
-                    select(ProviderSubscription).where(
-                        ProviderSubscription.provider == provider.id,
-                        ProviderSubscription.account_id == fallback_id,
+                    select(VaultSecret).where(
+                        VaultSecret.kind == SecretKind.SUBSCRIPTION,
+                        VaultSecret.audience == Audience.provider(provider.id),
+                        VaultSecret.account_id == default_account_id,
+                        VaultSecret.revoked_at.is_(None),
                     )
                 )
-                key_set_by = session.scalar(
-                    select(Account.username)
-                    .join(ProviderKey, ProviderKey.updated_by_account_id == Account.id)
-                    .where(ProviderKey.provider == provider.id)
+                key = session.scalar(
+                    select(VaultSecret).where(
+                        VaultSecret.kind == SecretKind.STATIC,
+                        VaultSecret.audience == Audience.provider(provider.id),
+                        VaultSecret.revoked_at.is_(None),
+                    )
+                )
+                key_set_by = (
+                    session.scalar(
+                        select(Account.username).where(Account.id == key.identity["pasted_by"])
+                    )
+                    if key
+                    else None
                 )
                 results.append(
                     _credentials_check(
@@ -300,6 +301,32 @@ async def _drukbox_doctor(settings: Settings):
         return await api.doctor()
     finally:
         await api.aclose()
+
+
+async def check_secrets_exchange(settings: Settings) -> CheckResult:
+    if not settings.sandbox.service_url:
+        return CheckResult(
+            name="secrets_exchange", ok=True, detail="not configured (sandbox execution is off)"
+        )
+    url = f"{settings.sandbox.exchange_url.rstrip('/')}/healthz"
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as http:
+            status = (await http.get(url)).status_code
+    except httpx.HTTPError as error:
+        return CheckResult(
+            name="secrets_exchange",
+            ok=False,
+            detail=f"drukbox-exchange is unreachable at {url}: {error}. "
+            "Start it: docker compose up -d drukbox-exchange",
+        )
+    if status != 200:
+        return CheckResult(
+            name="secrets_exchange",
+            ok=False,
+            detail=f"drukbox-exchange answered {status} at {url}. "
+            "Read its log: docker compose logs drukbox-exchange",
+        )
+    return CheckResult(name="secrets_exchange", ok=True, detail=url)
 
 
 async def check_sandbox_e2e(settings: Settings) -> CheckResult | list[CheckResult]:
@@ -506,40 +533,37 @@ async def check_apps(settings: Settings) -> list[CheckResult]:
     """Each installed app's resolved settings and own checks, namespaced under it.
     Read off the class headlessly through the loader, so doctor never imports an
     app's private modules. A check or settings clean that raises is contained
-    under the app's name, and core checks remain separate ``CHECKS`` entries."""
+    under the app's name. Core checks remain separate from app checks."""
 
-    async def _read() -> list[CheckResult]:
-        async with _check_engine(settings) as engine, session_scope(engine):
-            results: list[CheckResult] = []
-            for app in iter_apps():
-                if settings_model := app.settings_model:
-                    try:
-                        problems = (await app.settings()).clean()
-                        detail = "; ".join(
-                            f"{settings_model.model_fields[field].title or field}: {message}"
-                            for field, message in problems.items()
+    async with _check_engine(settings) as engine, session_scope(engine):
+        results: list[CheckResult] = []
+        for app in iter_apps():
+            if settings_model := app.settings_model:
+                try:
+                    problems = (await app.settings()).clean()
+                    detail = "; ".join(
+                        f"{settings_model.model_fields[field].title or field}: {message}"
+                        for field, message in problems.items()
+                    )
+                except Exception as error:  # noqa: BLE001 — settings fail, doctor continues
+                    results.append(
+                        CheckResult(
+                            name=f"{app.name}:settings",
+                            ok=False,
+                            detail=f"check raised: {error}",
                         )
-                    except Exception as error:  # noqa: BLE001 — settings fail, doctor continues
-                        results.append(
-                            CheckResult(
-                                name=f"{app.name}:settings",
-                                ok=False,
-                                detail=f"check raised: {error}",
-                            )
+                    )
+                else:
+                    results.append(
+                        CheckResult(
+                            name=f"{app.name}:settings",
+                            ok=not problems,
+                            detail=detail or "coherent",
                         )
-                    else:
-                        results.append(
-                            CheckResult(
-                                name=f"{app.name}:settings",
-                                ok=not problems,
-                                detail=detail or "coherent",
-                            )
-                        )
-                for check in app.checks or ():
-                    results.append(await _run_app_check(app.name, check))
-            return results
-
-    return await _read()
+                    )
+            for check in app.checks or ():
+                results.append(await _run_app_check(app.name, check))
+        return results
 
 
 async def _run_app_check(app_name: str, check) -> CheckResult:
@@ -572,6 +596,7 @@ CHECKS = (
     check_database,
     check_redis,
     check_drukbox,
+    check_secrets_exchange,
     check_capability_modules,
     check_apps,
     check_declared_sandboxes,

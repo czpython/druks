@@ -2,24 +2,13 @@ import json
 import shlex
 from pathlib import Path
 
-import pytest
-from conftest import connect_provider
+from drukbox_sdk import Secret
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
-from druks.harnesses.models import ProviderSubscription
-from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.sandbox.datastructures import McpServer
 
 _CODEX_MODEL = CodexHarness.default_model
-
-
-@pytest.fixture(autouse=True)
-async def _connected_harnesses(druks_db):
-    # build_invocation renders each subscription bundle from the DB row and
-    # raises when that harness isn't connected.
-    await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "t"}})
-    await connect_provider(OpenAiProvider, {"tokens": {"access_token": "t"}})
 
 
 def _sandbox_config():
@@ -42,7 +31,7 @@ async def test_claude_build_invocation_carries_every_flag():
         effort="high",
         sandbox=_sandbox_config(),
     ).build_invocation(
-        subscription=await ProviderSubscription.get_for_account("anthropic", fallback=True),
+        identity={"email": "op@example.com"},
         prompt="hello",
         schema=schema,
         run_id="run-1",
@@ -98,7 +87,7 @@ async def test_codex_build_invocation_carries_every_flag():
         effort="high",
         sandbox=_sandbox_config(),
     ).build_invocation(
-        subscription=await ProviderSubscription.get_for_account("openai", fallback=True),
+        identity={"email": "op@example.com", "account_id": "acc-1"},
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",
@@ -144,36 +133,53 @@ async def test_codex_build_invocation_carries_every_flag():
     assert inv.extra_artifact_filenames == ("output.json", "session.jsonl")
 
 
-async def test_claude_runs_a_key_from_the_environment():
-    # A key ships as ANTHROPIC_API_KEY; no credentials file lands in the home.
+async def test_claude_reads_its_key_from_a_placeholder_in_the_vm():
+    # Drukbox delivers the key as a placeholder under ANTHROPIC_API_KEY. The
+    # invocation carries no key and no credentials file.
+    assert ClaudeHarness.get_secrets("anthropic", "sk-secret") == {
+        "anthropic": Secret(
+            "sk-secret",
+            host="api.anthropic.com",
+            auth_variable="ANTHROPIC_API_KEY",
+            auth_header="x-api-key",
+            auth_prefix="",
+        )
+    }
     inv = await ClaudeHarness(
         model="anthropic/claude-x", fast_mode=False, effort=None, sandbox=_sandbox_config()
     ).build_invocation(
-        key="sk-secret",
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",
         ssh_username="exedev",
         extra_env={"TOK": "secret"},
     )
-    assert inv.env == {"TOK": "secret", "ANTHROPIC_API_KEY": "sk-secret"}
+    assert inv.env == {"TOK": "secret"}
     assert not any(file.path == ".claude/.credentials.json" for file in inv.credentials.home)
     assert "sk-secret" not in inv.args[2]
 
 
-async def test_codex_runs_a_key_from_auth_json():
-    # The CLI reads OPENAI_API_KEY from auth.json for usage-based billing.
+async def test_codex_reads_its_key_from_a_placeholder_in_the_vm():
+    # Drukbox delivers the key as a placeholder under CODEX_API_KEY, the one
+    # variable codex exec reads. The invocation carries no key and no auth.json.
+    assert CodexHarness.get_secrets("openai", "sk-secret") == {
+        "openai": Secret(
+            "sk-secret",
+            host="api.openai.com",
+            auth_variable="CODEX_API_KEY",
+            auth_header="Authorization",
+            auth_prefix="Bearer ",
+        )
+    }
     inv = await CodexHarness(
         model=_CODEX_MODEL, fast_mode=False, effort=None, sandbox=_sandbox_config()
     ).build_invocation(
-        key="sk-secret",
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",
         ssh_username="exedev",
     )
-    [auth] = [file for file in inv.credentials.home if file.path == ".codex/auth.json"]
-    assert json.loads(auth.content) == {"OPENAI_API_KEY": "sk-secret"}
+    assert not any(file.path == ".codex/auth.json" for file in inv.credentials.home)
     assert inv.env is None
     assert "sk-secret" not in inv.args[2]
 

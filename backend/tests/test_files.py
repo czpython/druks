@@ -72,7 +72,7 @@ async def test_create_stores_an_upload_against_its_account(druks_db, tmp_path, m
         content_type="image/jpeg",
         content=b"jpeg bytes",
         app="site_builder",
-        uploaded_by="system",
+        uploaded_by=None,
     )
 
     record = await druks_db.get(FileRecord, file.id)
@@ -84,7 +84,7 @@ async def test_create_stores_an_upload_against_its_account(druks_db, tmp_path, m
     )
     assert (record.app, record.uploaded_by, record.agent_call_id) == (
         "site_builder",
-        "system",
+        None,
         None,
     )
     assert record.sha256 == hashlib.sha256(b"jpeg bytes").hexdigest()
@@ -101,7 +101,7 @@ async def test_create_refuses_an_oversized_upload(monkeypatch):
             content_type="image/jpeg",
             content=b"jpeg bytes",
             app="site_builder",
-            uploaded_by="system",
+            uploaded_by=None,
         )
 
 
@@ -113,7 +113,7 @@ async def test_uploaded_file_delete_and_reap(druks_db, tmp_path, monkeypatch):
         content_type="image/jpeg",
         content=b"jpeg bytes",
         app="site_builder",
-        uploaded_by="system",
+        uploaded_by=None,
     )
     await file.delete()
     record = await druks_db.get(FileRecord, file.id)

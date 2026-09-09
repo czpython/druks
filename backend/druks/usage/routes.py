@@ -2,13 +2,14 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 
-from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
 from druks.core.utils.time import operator_local_day
 from druks.harnesses.artifacts import normalize_token_usage
-from druks.harnesses.models import ProviderSubscription
 from druks.harnesses.providers import Provider, get_providers
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.usage.models import UsageScrape
 from druks.usage.reads import list_finished_calls
 from druks.usage.schemas import (
@@ -23,7 +24,7 @@ from druks.usage.schemas import (
     UsageWindowHistory,
 )
 from druks.usage.trends import FIVE_HOUR_RANGE, WEEK_RANGE, downsample
-from druks.user_settings.models import UserSettings
+from druks.user_settings.models import SettingsProfile
 
 router = APIRouter()
 
@@ -33,10 +34,8 @@ UNATTRIBUTED = "unattributed"
 # An open tab must not hammer the providers.
 _REFRESH_FLOOR_SECONDS = 60
 
-# When a snapshot crosses this age, the pill flips to a warning glyph
-# and the panel surfaces "scraper hasn't run in a while". Tunable but
-# 24h is a reasonable "yeah that's actually broken" threshold given the
-# default 5-min poll cadence.
+# When a snapshot crosses this age the Usage page reports the scraper as
+# stalled. 24h is "actually broken" given the default 5-minute poll cadence.
 _STALE_AFTER_SECONDS = 24 * 60 * 60
 
 # The dashboard sparklines keep this many points regardless of poll cadence.
@@ -52,14 +51,16 @@ async def get_usage(account: Account = Depends(current_account)) -> UsageRespons
     now = datetime.now(UTC)
     summaries = []
     for provider in get_providers():
-        subscription = await ProviderSubscription.get_for_account(provider.id, account.id)
+        subscription = await VaultSecret.lookup(
+            SecretKind.SUBSCRIPTION, Audience.provider(provider.id), account.id
+        )
         summaries.append(
             _summarize(
                 await UsageScrape.latest_for(provider.id, account.id),
                 provider=provider,
                 now=now,
                 connected=bool(subscription),
-                provider_email=subscription.provider_email if subscription else None,
+                provider_email=subscription.identity["email"] if subscription else None,
             )
         )
     return UsageResponse(providers=summaries)
@@ -69,7 +70,9 @@ async def get_usage(account: Account = Depends(current_account)) -> UsageRespons
 async def refresh_usage(account: Account = Depends(current_account)) -> None:
     now = datetime.now(UTC)
     for provider in get_providers():
-        subscription = await ProviderSubscription.get_for_account(provider.id, account.id)
+        subscription = await VaultSecret.lookup(
+            SecretKind.SUBSCRIPTION, Audience.provider(provider.id), account.id
+        )
         row = await UsageScrape.latest_for(provider.id, account.id)
         age = _age_seconds(row.scraped_at, now=now) if row else None
         if subscription and (age is None or age >= _REFRESH_FLOOR_SECONDS):
@@ -100,7 +103,7 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
     # Deriving the operator-local-day window here (the query just takes it) keeps
     # this total identical to the sys-strip's and the agent surface's figures.
     timezone, local_start = operator_local_day(
-        (await UserSettings.get()).timezone, datetime.now(UTC)
+        (await SettingsProfile.get()).timezone, datetime.now(UTC)
     )
     rows = await list_finished_calls(
         account.id, since=local_start, until=local_start + timedelta(days=1)
@@ -108,8 +111,7 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
     timezone_name = str(timezone)
 
     # Every call counts, even one whose model names no provider (a pre-namespace
-    # id): money spent must not vanish from the display, and the strip's
-    # total_run_spend_between counts them too.
+    # id): money spent must not vanish from the display.
     # Unclaimed calls land in an extra "unattributed" entry — the panel's
     # per-provider cards look up by id and skip it, its grand total sums the
     # whole list.
@@ -128,10 +130,10 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
             bucket["spend"] += cost_usd
             hours[name][finished_at.astimezone(timezone).hour] += cost_usd
 
-    # A call billed to the API key is charged to the system account.
+    # A call billed to the API key is charged to the installation.
     key_spend = dict.fromkeys(ids, 0.0)
     for model, cost_usd, _metadata, _finished_at in await list_finished_calls(
-        SYSTEM_ACCOUNT_ID, since=local_start, until=local_start + timedelta(days=1)
+        None, since=local_start, until=local_start + timedelta(days=1)
     ):
         provider = model.partition("/")[0]
         if provider in key_spend and cost_usd is not None:

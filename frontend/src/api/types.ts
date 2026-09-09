@@ -1,19 +1,5 @@
-/**
- * Hand-written aliases for the API response shapes.
- *
- * Replace these with `openapi-typescript` output once the backend is running:
- *
- *     npm run types:openapi
- *
- * That generates `src/api/openapi.ts` from `/openapi.json`; re-export the
- * components you need from there. For now we keep these typed by hand so the
- * frontend compiles without a running backend.
- *
- * Build-domain shapes (work items, runs, scope, plan) live in
- * ``build.ts``; this file holds the shared types.
- */
+/** Shared API response shapes. App-specific types stay with their app. */
 
-// --- Platform: subjects, runs, agent calls ---------------------------------
 
 // Served by the platform layer (durable/schemas.py) for every app. An
 // app keys its board/detail on its own subject summary; SubjectRow and
@@ -29,6 +15,40 @@ export type RunState =
   | 'cancelled'
   // The run's DBOS workflow row is gone; it will never start.
   | 'orphaned'
+
+export interface DashboardRun {
+  app: string
+  run: string
+  kind: string
+  state: RunState
+  subjectType: string | null
+  subjectId: string | null
+  subjectLabel: string | null
+  updatedAt: string
+  parkedAt: string | null
+  requestLabel: string | null
+  artifactTitle: string | null
+  presentation: string | null
+  requestUrl: string | null
+  failure: string | null
+}
+
+export interface DashboardWork {
+  rows: DashboardRun[]
+  hasMore: boolean
+}
+
+export interface DashboardSchedule {
+  app: string
+  kind: string
+  cron: string | null
+  enabled: boolean
+  timezone: string
+}
+
+export interface DashboardSchedules {
+  rows: DashboardSchedule[]
+}
 
 // The base every app's subject summary satisfies; ``id`` keys its status,
 // timeline, and detail URL.
@@ -79,8 +99,8 @@ export interface AgentCallSummary {
   // Which agent made this call ("scope", "implement"); label is its display name.
   agent: string
   label: string
-  /** The account charged for this call — differs from the run's on fallback. */
-  accountUsername: string
+  /** The subscription owner. Null for installation API keys. */
+  accountUsername: string | null
   status: 'running' | 'succeeded' | 'failed' | 'abandoned'
   startedAt: string
   finishedAt?: string | null
@@ -124,12 +144,10 @@ export interface RunSummary {
   state: RunState
   failure?: string | null
   gate: string | null
-  // The structured ask while this run is parked on the operator. Presence means
-  // "needs you".
+  // A retained ask is current only while the run is parked.
   inputRequest?: InputRequest | null
   createdAt: string
   updatedAt: string
-  /** Who asked; "system" when nobody did. */
   accountUsername: string
   agentCalls: AgentCallSummary[]
 }
@@ -202,7 +220,6 @@ export interface App {
   operations: Operation[]
 }
 
-// --- Druks UI --------------------------------------------------------------
 // The app's Python page declarations, as the shell sees them. They mirror
 // docs/druks-ui.md, and arrive in route-match order.
 export interface PageEntry {
@@ -211,6 +228,7 @@ export interface PageEntry {
   path: string
   parent: string
   order: number
+  subjectType: string
 }
 
 export interface Link {
@@ -470,24 +488,6 @@ export interface GateAnswer {
   note: string
 }
 
-// --- System health ---------------------------------------------------------
-
-export interface WebhookSource {
-  source: string
-  lastAt?: string | null
-}
-
-export interface WebhookFreshness {
-  // One tile per active source (code host + configured tracker).
-  sources: WebhookSource[]
-}
-
-export interface DashboardHealth {
-  web: 'ok' | 'degraded'
-  webhookFreshness: WebhookFreshness
-  spendTodayUsd: number | null
-  tokensToday: number
-}
 
 export type AgentEffort = 'low' | 'medium' | 'high'
 
@@ -497,9 +497,7 @@ export interface CatalogModel {
   label: string
 }
 
-/** One coding-agent harness's operator config — a DB record seeded from the
- * registry. Model ids are `provider/model`; the models a harness can run are
- * the catalogs of the providers it drives. */
+/** A registered harness's provider and billing capabilities. */
 export interface Harness {
   name: string
   /** Null for a key-only CLI. */
@@ -533,7 +531,6 @@ export interface ProviderDirectoryEntry {
   models: CatalogModel[]
 }
 
-/** One account's subscription at one provider. */
 /** The requester's subscription at a provider. */
 export interface ProviderSubscription {
   provider: string
@@ -556,6 +553,7 @@ export interface ProviderKey {
 export interface Account {
   id: string
   username: string
+  isDefault: boolean
 }
 
 /** What /api/auth/me answers: how this deployment authenticates, who the
@@ -610,11 +608,11 @@ export interface Service {
   connections: Connection[]
 }
 
-// --- Settings --------------------------------------------------------------
 
 export type Billing = 'subscription' | 'api_key'
 
-export interface UserSettings {
+export interface SettingsProfile {
+  accountId: string | null
   timezone: string
   defaultHarness: string
   defaultModel: string
@@ -622,11 +620,11 @@ export interface UserSettings {
   defaultEffort: string
   fastMode: boolean
   defaultTimeout: number
-  fallbackAccountId: string | null
+  gateParkDestinationId: string | null
   updatedAt: string
 }
 
-export interface UpdateUserSettingsRequest {
+export interface UpdateSettingsRequest {
   timezone?: string
   defaultHarness?: string
   defaultModel?: string
@@ -634,7 +632,7 @@ export interface UpdateUserSettingsRequest {
   defaultEffort?: string
   fastMode?: boolean
   defaultTimeout?: number
-  fallbackAccountId?: string
+  gateParkDestinationId?: string | null
 }
 
 export type BrowserSessionStatus = 'needs_login' | 'ready' | 'stale' | 'anonymous'
@@ -659,7 +657,10 @@ export type Source = 'agent' | 'default'
 export type TimeoutSource = 'agent' | 'declared' | 'default'
 
 export interface AgentSetting {
+  /** The agent's durable id, `<app>.<attribute>` — the key in an update's agent maps. */
   name: string
+  /** The declared display name, else the attribute name. */
+  label: string
   /** Short human-friendly blurb of what the agent does. */
   description: string
   harness: string
@@ -684,7 +685,6 @@ export interface AgentsResponse {
   apps: AgentsApp[]
 }
 
-// --- Per-app settings (declaration-driven) --------------------------------
 
 export interface WorkflowSettingField {
   name: string
@@ -697,6 +697,7 @@ export interface WorkflowSettingField {
   default: unknown
   /** An enum field's allowed values; null for every other kind. */
   choices: string[] | null
+  choiceDetails: Record<string, { label: string; help: string }>
   /** The heading this field groups under; empty for an ungrouped one. */
   section: string
   /** The sibling field this one is shown for, and the value that field must hold.
@@ -720,7 +721,7 @@ export interface AppSettings {
   description: string
   /** Lucide icon name for the rail glyph (see APP_ICONS); falls back if unknown. */
   icon: string
-  /** Built-in (platform-core) apps render under the Druks tab, not their own. */
+  /** Platform apps are excluded from the installed app roster. */
   builtin: boolean
   agents: AgentSetting[]
   workflows: WorkflowSettings[]
@@ -747,7 +748,6 @@ export interface UpdateAppsSettingsRequest {
   appSettings?: Record<string, Record<string, unknown>>
 }
 
-// --- Activity feed ---------------------------------------------------------
 
 export interface FeedItem {
   id: string
@@ -771,7 +771,6 @@ export interface FeedResponse {
   nextCursor: string | null
 }
 
-// --- Usage tab -------------------------------------------------------------
 
 export interface UsageMetric {
   percentLeft: number | null
@@ -906,9 +905,6 @@ export interface McpServer {
   // A catalog-declared server — managed by druks, can't be removed here,
   // only disabled.
   builtin: boolean
-  // The deployment env var an env-sourced server reads its token from
-  // ('' otherwise) — a var name, never a value.
-  sourceEnvVar: string
   // The raw token never leaves the backend; ``hasToken`` says whether one is
   // configured without revealing it.
   hasToken: boolean

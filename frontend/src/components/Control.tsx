@@ -31,6 +31,7 @@ export function Button({ variant = 'ghost', ...props }: ButtonProps) {
 }
 
 interface FieldProps {
+  setting?: string
   label?: string
   help?: string
   error?: string | null | false
@@ -38,9 +39,9 @@ interface FieldProps {
 }
 
 // Every slot is optional: a bare <Field error={…} /> is the error line alone.
-export function Field({ label, help, error, children }: FieldProps) {
+export function Field({ label, help, error, children, setting }: FieldProps) {
   return (
-    <div className="set-field">
+    <div className="set-field" data-setting={setting}>
       {label && <span className="set-field-label">{label}</span>}
       {help && <span className="set-field-help">{help}</span>}
       {children}

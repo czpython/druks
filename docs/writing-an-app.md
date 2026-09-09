@@ -189,17 +189,18 @@ resolved account, and `start()` inherits it. A route does not require more
 attribution code. If the dispatcher has a better account, pass `account_id`.
 For example, a webhook can resolve the ticket assignee.
 
-Each agent call uses the subscription of the run account. A run with no
-account uses the installation fallback account's subscription. A missing
-subscription refuses the call; Druks never falls through to another account
-or to an API key. An API key is the installation's, owned by no account, so a
-call billed to it records the system account as the charged account. The call
-records the charged account. Thus, you can see fallback use.
+`Run.account_id` is required. A browser start records the authenticated account.
+An unattended start records the default account. Druks refuses to start a run
+before an account is available. A parked run keeps its account after resume.
 
-A cron or background run
-without an account uses the system account. A parked run keeps its original
-attribution after resume. The person who selects **Resume** does not become the
-payer.
+Each agent call uses that account's profile. Agent overrides take priority.
+The call records exactly one billing reference: `subscription_id` or
+`api_key_provider`. Druks uses that selected credential for execution. Missing
+credentials refuse the call. A workflow can use different providers across its
+agent calls. Disconnect clears the credential secret and retains its billing
+identity for call history.
+See [personal and installation settings](configuration.md#personal-and-installation-settings)
+for profile creation and timezone rules.
 
 ### The journal
 
@@ -279,7 +280,7 @@ class Engage(Workflow):
 ```
 
 A scheduled `dispatch()` fires with no arguments, so it must be nullary. Druks
-evaluates cron expressions in the operator timezone. The dashboard can retune or
+evaluates cron expressions in the installation timezone. The dashboard can retune or
 disable a declared schedule but cannot invent a new workflow schedule.
 
 ### Background tasks
@@ -325,7 +326,7 @@ class Sweep(Workflow):
 
     @step
     async def load_settings(self) -> "Sweep.Settings":
-        return self.settings()
+        return await self.settings()
 ```
 
 Reading settings inside a step snapshots them for replay. Reading them directly
@@ -349,12 +350,17 @@ class ReportOutput(AgentOutput):
 
 
 class NightWatch(App):
+    name = "night_watch"
+
     report = Agent(
         prompt="night_watch/report.md",
         contract=ReportOutput,
         description="Turns findings into an operator report.",
     )
 ```
+
+The app name and the attribute name form the agent's id: `night_watch.report`.
+Settings overrides, the timeline, and the step name use that id.
 
 Call it only inside a workflow:
 
@@ -380,19 +386,134 @@ If an agent produces a file, use [`File` and `FileField`](files.md).
 The contract declares the file, Druks transports and serves it, and the app can
 persist its stable reference on an app row.
 
+An app that runs a CLI of its own inside the sandbox reads how a declared agent
+would run, and hands that to the CLI. Declare the agent and never call it; the
+operator configures it in the app's **Settings → Agents**. Shared defaults
+are in **Settings → Agents**:
+
+```python
+profile = await NightWatch.auditor.get_profile()
+profile.harness   # "claude" | "codex" | "opencode" | "pi"
+profile.model_id  # the model as that CLI names it, provider prefix stripped
+profile.model     # "provider/model"
+profile.effort
+profile.billing   # "subscription" | "api_key"
+profile.secrets   # the Drukbox entries that put the key in the VM as a placeholder
+```
+
+`get_profile()` runs inside a workflow and reads the settings at call time for
+the run's own actor, the same read Druks makes for the calling agent. A
+missing login or key raises before any sandbox work. Under subscription
+billing there is no key. The VM home holds the login of the calling agent's
+subscription only, so a nested CLI on another provider needs `api_key` billing.
+Under `api_key` billing, the VM holds the key as a placeholder in the variable
+the entry names: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `CODEX_API_KEY` for
+Codex. A nested CLI reads it from the environment. The
+[configuration guide](configuration.md#harnesses) lists the variable, host, and
+header per harness.
+
 Do not ask the framework to infer domain side effects from agent prose.
 The prompt or a subsequent explicit step owns those actions.
 
 ## Customize the workspace
 
-Every agent uses a `Workspace` around a Drukbox sandbox. Override
-`Workflow.workspace_class` and `get_workspace_kwargs()` for app-specific
-workspace behavior. This behavior can clone a repository, mint a short-lived
-token, or require an MCP server.
+Every agent uses a `Workspace` around a Drukbox sandbox. `Workflow.workspace_class`
+names the kind. A workflow about a GitHub repository declares `RepoWorkspace`
+and nothing else:
+
+```python
+from druks.workspaces import RepoWorkspace
+
+
+class Sweep(Workflow):
+    subject = Repository  # a StoredSubject with a ``repo`` column, "owner/name"
+    workspace_class = RepoWorkspace
+```
+
+Before every agent call Druks clones the default branch into
+`workspace.repo_path`. Prompts read `{{ workspace.repo_path }}`. The sandbox
+holds a placeholder for its GitHub token in `GH_TOKEN`, and Drukbox points git
+and `gh` at it. The Drukbox secrets proxy swaps the placeholder for a token
+that Druks mints on demand, so a long run never outlives its token. The clone
+is idempotent, so a warm host keeps its working tree and a host rotated in
+bare gets one back.
+
+Every workspace holds the run's `subject`. `RepoWorkspace.get_repo(subject)`
+reads its `repo` column. Override it when the subject names the repository
+differently:
+
+```python
+class SweepWorkspace(RepoWorkspace):
+    @classmethod
+    def get_repo(cls, subject) -> str:
+        return subject.full_name
+```
+
+The sandbox's GitHub token comes from a connected service of the appliance.
+`RepoWorkspace` names the operator App, `Github`. An app that acts as another
+identity declares its own service in its `services` module, a subclass with
+its own connect card, and names it on its workspace:
+
+```python
+from pydantic import BaseModel, Field, SecretStr
+
+from druks.core.services import Github
+from druks.workspaces import RepoWorkspace
+
+
+class GithubReviewer(Github):
+    required = False
+
+    class Settings(BaseModel):
+        app_id: str = Field(title="App ID")
+        private_key: SecretStr = Field(title="Private key (PEM)")
+
+
+class ReviewWorkspace(RepoWorkspace):
+    github = GithubReviewer
+```
+
+The operator connects the service in **Settings → Connections → Services**. The
+sandbox's identity stores the service and the repo. The issuer reads only
+those two, so a request cannot select another repo or identity.
+
+Override `Workflow.get_workspace_kwargs()` to pass `branch` or the fields a
+subclass adds. Extend `RepoWorkspace` by adding fields, not by cloning again.
+Override `run_agent()` to prepare the VM before the call, `get_agent_run_kwargs()`
+to grant directories or skills, and `get_required_mcp_servers(subject)` to
+require an MCP server with its own vault row:
+
+```python
+from druks.sandbox.datastructures import RequiredMcpServer
+
+
+class BuildWorkspace(RepoWorkspace):
+    @classmethod
+    async def get_required_mcp_servers(cls, subject) -> tuple[RequiredMcpServer, ...]:
+        actor = await get_review_actor()
+        return (
+            RequiredMcpServer(
+                name="github",
+                url="https://api.githubcopilot.com/mcp/",
+                secret_id=(await actor.service.get()).id,
+                resource=cls.get_repo(subject),
+            ),
+        )
+```
+
+The server names the vault row the issuer answers from and what the token is
+for: here a connected GitHub service and its repo. Druks binds the server's
+host and the variable `MCP_GITHUB_TOKEN` to the entry when it creates the
+sandbox. The harness configuration names the variable, and the sandbox never
+holds the token. A required server owns its name, so a same-named registry
+server is not delivered. `Workspace.get_mcp_delivery(subject, account_id)`
+returns the wire shapes and the secret refs for every MCP server of a sandbox.
+Override it to deliver none.
 
 Keep durable state outside the VM. A workflow can set
 `steps_reuse_sandbox = True` to retain one host across a segment. Druks releases
-the host at a gate and at workflow exit. It rotates the host near lease expiry.
+the host at a gate and at workflow exit. It rotates the host near lease expiry,
+and when the next agent call needs other secret entries.
 
 ### Borrow a browser session
 
@@ -544,17 +665,21 @@ subclass `StoredSubject` instead of `Base`. The class name is the subject type:
 
 ```python
 from druks.db import StoredSubject
+from druks.workflows import SubjectSummary
 
 
 class Repository(StoredSubject):
-    __tablename__ = "repositories"
+    __tablename__ = "night_watch_repositories"
 
     def get_label(self) -> str:
         return self.full_name
 
+    def get_summary(self) -> SubjectSummary:
+        return SubjectSummary.model_validate(self)
+
     @classmethod
-    def list_summaries(cls, account_id: str | None) -> list[SubjectSummary]:
-        return [repository.get_summary() for repository in cls.list_open()]
+    async def list_summaries(cls, account_id: str | None) -> list[SubjectSummary]:
+        return [repository.get_summary() for repository in await cls.list_open()]
 ```
 
 Select the rows for the board. Druks supplies the other behavior. Each subject
@@ -578,13 +703,16 @@ If you keep no row for a subject, subclass `Subject`. The platform requires only
 an identity. The ID is the full record and its label:
 
 ```python
-from druks.workflows import Subject
+from druks.workflows import Subject, SubjectSummary
 
 
 class PullRequest(Subject):
+    def get_summary(self) -> SubjectSummary:
+        return SubjectSummary.model_validate(self)
+
     @classmethod
-    def list_summaries(cls, account_id: str | None) -> list[SubjectSummary]:
-        return [pull_request.get_summary() for pull_request in cls.list_open()]
+    async def list_summaries(cls, account_id: str | None) -> list[SubjectSummary]:
+        return [pull_request.get_summary() for pull_request in await cls.list_open()]
 ```
 
 Each ID names one of these subjects, so a detail read always answers. Override
@@ -612,7 +740,7 @@ Pass the subject instance to each component that requires one. This includes a
 workflow start, gate answer, or event:
 
 ```python
-await NightWatch.dispatch(subject=repository)
+await Sweep.start(subject=repository, repo=repository.full_name)
 ```
 
 Inside the workflow, `self.subject` resolves through the declared class. It is
@@ -624,7 +752,7 @@ Your app names domain outcomes. For example, a work item ships or an operator ca
 Druks owns the active run state. Read this state from the status:
 
 ```python
-status = repository.get_status()
+status = await repository.get_status()
 if status.is_parked:
     ...  # a run stopped to ask a human something
 ```
@@ -634,7 +762,7 @@ question it stopped on. While a run is active, `await repository.get_phase()`
 returns the step it is on.
 
 A subject that Druks did not run has no state: `status.state` is None, and so
-is `status.run`. `get_status(workflow=NightWatch)` narrows the read to one
+is `status.run`. `await repository.get_status(workflow=Sweep)` narrows the read to one
 workflow's runs. It answers the same way when the subject has no run of that
 kind.
 
@@ -654,7 +782,7 @@ fifty rows costs one query rather than fifty.
 Record an event through the app. Druks stamps its ownership:
 
 ```python
-NightWatch.record_event(
+await NightWatch.record_event(
     type="report.published",
     subject=repository,
     payload={"url": report_url},
@@ -712,7 +840,7 @@ class NightWatchWebhook(Webhook):
     provider = "night_watch"
     category = "events"
 
-    def request_is_authentic(self) -> bool:
+    async def request_is_authentic(self) -> bool:
         verify_hmac_sha256(
             self.raw_body,
             self.request.headers.get("x-signature"),
@@ -800,10 +928,11 @@ Two spellings run through druks, and which one a segment wears says who owns it:
 | `snake_case` | an identity the platform serves — your app name, a subject type |
 | `kebab-case` | a resource you named — your route prefixes, your frontend paths |
 
-Thus, `/api/review/pull_request` is the subject board for review runs.
-`/api/review/reviews` is the resource that your POST creates. The platform
-matches `<subject_type>`, `transcripts`, and `pages` before your routers. A
-custom router cannot take a platform read, including through a catch-all.
+Thus, `/api/software_factory/pull_request` is the subject board for pull request
+review runs. `/api/software_factory/reviews` is the resource that your POST
+creates. The platform matches `<subject_type>`, `transcripts`, and `pages` before
+your routers. A custom router cannot take a platform read, including through a
+catch-all.
 `transcripts` and `pages` are reserved: a subject type or a router prefix that
 takes one fails the load. Name the router for its resource to prevent a
 conflict.
@@ -842,15 +971,15 @@ class Gmail(Service):
         client_secret: SecretStr = Field(title="Client secret")
 ```
 
-The slug keys the `service_identities` row and the connect wire. A class
+The slug names the service's vault row and the connect wire. A class
 rename changes the slug, rekeys the card, and orphans the connected identity.
 Set `slug = "gmail"` on the class to keep the old key.
 
 Read it back through the same class:
 
 ```python
-Gmail.get().secrets["client_secret"]   # raises ServiceNotConnectedError when unset
-Gmail.is_connected()
+(await Gmail.get()).secrets["client_secret"]   # raises ServiceNotConnectedError when unset
+await Gmail.is_connected()
 ```
 
 An optional `verify` classmethod proves the paste against the live provider
@@ -968,13 +1097,13 @@ connection. Workflow code reads them through the declaration. It gets one token
 for each connection:
 
 ```python
-for connection in NightWatch.acme.list_for_account(account_id):
+for connection in await NightWatch.acme.list_for_account(account_id):
     token = await connection.get_access_token()
 ```
 
 `account_id` is the caller: `self.account_id` in a run body,
 `current_account_id.get()` in a route, the handler's argument in a
-subscriber, the platform's argument in `list_summaries`. `NightWatch.acme.get(connection_id)` returns one connection
+subscriber, the platform's argument in `list_summaries`. `await NightWatch.acme.get(connection_id)` returns one connection
 when your own row stored its id. Each connection carries `id`, `scopes`, `identity` — the
 provider's facts for the sign-in — `account_id` — the druks account that
 signed it in — and `connected_at`. The handle serves
@@ -994,7 +1123,7 @@ Reconsent names the row, so it also makes a revoked connection live again
 under its old id. A fresh sign-in that matches the `identity_key` does the
 same.
 
-Add `?next=/app/night_watch/accounts` to land the user back on your
+Add `?next=/night_watch/accounts` to land the user back on your
 page after consent instead of the generic "connected" page. `next`
 must be a bare path that starts with `/`. Druks rejects a URL with a scheme or
 host. Thus, the connection flow cannot redirect away from the host. Register
@@ -1082,6 +1211,24 @@ Supported display shapes are scalar values, `Literal` choices, and
 It redacts secret values and submitted validation errors. Declare a secret
 field as `Secret`.
 
+A `Literal` field can give each value a label and description through
+`json_schema_extra`. `choice_details` maps each value to its `label` and `help`.
+Druks rejects a key outside the declared choices when it loads the declaration.
+The form shows only the selected value's help and saves the original value:
+
+```python
+review: Literal["human", "automatic"] = Field(
+    default="human",
+    title="Review policy",
+    json_schema_extra={
+        "choice_details": {
+            "human": {"label": "Human review", "help": "Wait for your approval."},
+            "automatic": {"label": "Automatic review", "help": "Continue after the automated checks pass."},
+        },
+    },
+)
+```
+
 An unset field is an empty, false `SecretStr`. Thus,
 `if self.service_token:` reads its state without a guard for
 `.get_secret_value()`. A multiline secret, such as a PEM private key, can use
@@ -1094,7 +1241,7 @@ equality condition. Its controller must be non-secret and unconditional, and a
 `Literal` controller requires one of its declared members.
 
 Hidden fields keep their stored values. Read the resolved model with
-`NightWatch.settings()`. The settings form runs `clean()` against the
+`await NightWatch.settings()`. The settings form runs `clean()` against the
 resolved settings after the proposed edits and rejects an incoherent save. `druks doctor`
 runs the same method over stored settings so rows from older releases or manual database
 edits remain visible. Workflow settings stay plain Pydantic `BaseModel` declarations.
@@ -1111,7 +1258,7 @@ fixtures directly without a `conftest.py` or `pytest_plugins` declaration:
 
 | Fixture | Contract |
 | --- | --- |
-| `druks_db` | A SQLAlchemy `Session` bound to a per-test transaction. Commits become savepoints, and teardown rolls the outer transaction back. |
+| `druks_db` | A SQLAlchemy `AsyncSession` bound to a per-test transaction. Commits become savepoints, and teardown rolls the outer transaction back. |
 | `druks_client` | An authenticated `TestClient` with installed apps mounted, sharing `druks_db`'s connection. |
 | `druks_redis` | The test Redis database, flushed before the test. |
 | `druks_without_dispatch` | Workflow starts and run-phase writes become no-ops, for tests that stand up no durable engine. |
@@ -1126,7 +1273,7 @@ no lifecycle events, no retries:
 ```python
 from druks.testing import run_workflow
 
-summary = await run_workflow(Sweep, subject=repository, since="2026-07-01")
+summary = await run_workflow(RecordHeartbeat, subject=None, source="night_watch")
 ```
 
 `@step` calls inside a `run_multistep` body still need the real engine.
@@ -1136,24 +1283,23 @@ Seed platform-owned run and agent-call rows with plain functions:
 ```python
 from druks.testing import seed_call, seed_run
 
-run = seed_run(
+run = await seed_run(
     druks_db,
     kind=Sweep.kind,
     subject=repository,
     state="running",
 )
-call = seed_call(
+call = await seed_call(
     druks_db,
     run,
-    NightWatch.report,
+    NightWatch.report.id,
     status="running",
 )
 ```
 
 `seed_run` writes both the run row and its DBOS workflow status. That status
 determines `Run.state`. `seed_run` requires `kind`. If you seed
-`state="pending_input"`, pass `input_gate`. `seed_call` accepts an `Agent` or
-its string ID.
+`state="parked"`, pass `input_gate`. `seed_call` accepts an agent's string ID.
 
 `make_settings(tmp_path, **overrides)` builds isolated Druks settings.
 `configure_app_for_test(settings=..., authenticated=False)` returns the mounted
@@ -1170,10 +1316,9 @@ Create the database one time with `createdb druks_test`. The
 development Compose project already creates it.
 
 On that database, the plugin creates `citext` and imports installed app models.
-It runs SQLAlchemy `create_all` and seeds platform reference rows. It builds the
-DBOS system tables through DBOS database migrations. It does not reset or drop a
-schema. It rolls back each test write through `druks_db`. `druks_redis`
-runs `FLUSHDB` on the test index.
+It runs SQLAlchemy `create_all`. It builds the DBOS system tables through DBOS
+database migrations. It does not reset or drop a schema. It rolls back each test
+write through `druks_db`. `druks_redis` runs `FLUSHDB` on the test index.
 
 ## Declare pages
 
@@ -1276,7 +1421,7 @@ async def note(note_id: int):
 
 The shell replaces the named region and leaves the rest of the page alone, so
 scroll position, focus, and half-filled inputs outside it survive. A region
-that follows a subject must have a name; that is how the shell finds it.
+that follows a subject must have a name. That is how the shell finds it.
 
 `GateControls` names only the run. The shell reads the ask, its options, its
 context, and its artifact from the parked run, and submits the operator's
@@ -1351,12 +1496,12 @@ parameters and a JSON body.
 
 ### What V1 leaves out
 
-V1 has no `Tabs` block, no accordion, no expandable table row, no modal, no
-inline reveal form, and no general client-state API. Static child pages already
-give tabs, and the URL holds the current one.
+V1 has no `Tabs` block, no accordion, no general modal block, no inline reveal
+form, and no general client-state API. Static child pages give tabs, and the URL
+holds the current one. Use `TableRow.detail` for expandable row text.
 
 `MoneyValue`, `PercentValue`, `DurationValue`, and date and time input fields
-are agreed and named. Druks adds each one when an app needs it; ask rather than
+are agreed and named. Druks adds each one when an app needs it. Ask instead of
 working around it.
 
 The [Druks UI contract](druks-ui.md) holds the block, value, and field catalog,
@@ -1366,17 +1511,17 @@ actions, and liveness.
 
 An installed app is visible in the dashboard without a custom UI. The shell
 reads the installed roster from `/api/apps`. It gives each app an entry in the
-app switcher and generic pages. Each subject type gets a board. Each subject
+Apps sidebar and generic pages. Each subject type gets a board. Each subject
 gets a page with its timeline, transcripts, and gate controls. The subject
 summary fields form the board row.
 
 No additional declaration is necessary.
-The shell derives the switcher label from `name` (underscores become spaces).
+The shell derives the sidebar label from `name` (underscores become spaces).
 
 An app that needs full control of its interface ships a frontend instead — the
 escape hatch, not the ordinary path. Its pages are its own JavaScript, so it
 declares its own tabs there and leaves `App.navigation` empty. The scaffold
-writes no JavaScript and no `dist/`; add one only when the block catalog cannot
+writes no JavaScript and no `dist/`. Add one only when the block catalog cannot
 say what your app needs to say.
 
 The frontend is an ES module that the shell mounts
@@ -1420,9 +1565,10 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.agents` | `Agent`, `AgentOutput` |
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox` |
+| `druks.workspaces` | `Workspace`, `RepoWorkspace` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
 | `druks.schemas` | `Schema` |
-| `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |
+| `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `MultiUploadField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `Quote`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |
 | `druks.files` | `File`, `FileField` |

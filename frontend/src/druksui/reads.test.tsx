@@ -39,7 +39,14 @@ const ROSTER = [
     hasFrontend: false,
     navigation: [],
     operations: [],
-    pages: [{ name: 'note', label: 'note', path: '/field_notes/notes/{note_id}', parent: '', order: 0 }],
+    pages: [{
+      name: 'note',
+      label: 'note',
+      path: '/field_notes/notes/{note_id}',
+      parent: '',
+      subjectType: '',
+      order: 0,
+    }],
   },
 ] as App[]
 
@@ -104,7 +111,6 @@ describe('a read that is still in flight', () => {
     await fireSnapshot()
     await waitFor(() => expect(screen.getByText('newest')).toBeTruthy())
 
-    // The older read finishes last and must not put its answer on screen.
     await act(async () => {
       releaseSlow(snapshot([region('decision', 'stale')]))
     })

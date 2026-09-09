@@ -2,8 +2,10 @@ import ast
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 import httpx
+import httpx2
 import pytest
 from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed_note_run
 from druks.accounts.models import Account, PersonalAccessToken
@@ -90,17 +92,17 @@ def resume_spy(monkeypatch):
     return calls
 
 
-def _client(app, token: str) -> Client:
+def _client(app, token: str, *, mode: Literal["auto", "legacy"] = "auto") -> Client:
     def factory(**kwargs):
         kwargs.pop("verify", None)  # meaningless for the in-process transport
-        return httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://druks.test", **kwargs
+        return httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app), base_url="http://druks.test", **kwargs
         )
 
     transport = StreamableHttpTransport(
         "http://druks.test/mcp", auth=token, httpx_client_factory=factory
     )
-    return Client(transport)
+    return Client(transport, mode=mode)
 
 
 async def _call_error(client: Client, name: str, arguments: dict) -> dict:
@@ -157,14 +159,17 @@ async def test_mcp_subpaths_never_reach_the_spa(app):
             assert stray.headers["content-type"].startswith("application/json")
 
 
-async def test_tools_list_pins_platform_and_app_tools(app, pat_token):
-    async with live(app), _client(app, pat_token) as client:
-        assert "list_open_subjects" in (client.initialize_result.instructions or "")
-        assert "parkedAt" in (client.initialize_result.instructions or "")
+@pytest.mark.parametrize("mode", ["auto", "legacy"])
+async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
+    async with live(app), _client(app, pat_token, mode=mode) as client:
+        if mode == "auto":
+            assert client.protocol_version == "2026-07-28"
+        assert "list_open_subjects" in (client.instructions or "")
+        assert "parkedAt" in (client.instructions or "")
         tools = {tool.name: tool for tool in await client.list_tools()}
 
     assert list(tools)[:7] == _TOOL_NAMES
-    assert list(tools)[7:] == ["review_request", "software_factory_start"]
+    assert list(tools)[7:] == ["software_factory_start", "software_factory_review"]
 
     expected_annotations = {
         "cancel_run": (False, True, True),
@@ -178,29 +183,29 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token):
     for name, expected in expected_annotations.items():
         annotations = tools[name].annotations
         assert (
-            annotations.readOnlyHint,
-            annotations.destructiveHint,
-            annotations.idempotentHint,
+            annotations.read_only_hint,
+            annotations.destructive_hint,
+            annotations.idempotent_hint,
         ) == expected
         assert tools[name].description
 
-    for name in ("review_request", "software_factory_start"):
+    for name in ("software_factory_review", "software_factory_start"):
         app_tool = tools[name]
         assert (
-            app_tool.annotations.readOnlyHint,
-            app_tool.annotations.destructiveHint,
-            app_tool.annotations.idempotentHint,
+            app_tool.annotations.read_only_hint,
+            app_tool.annotations.destructive_hint,
+            app_tool.annotations.idempotent_hint,
         ) == (False, True, False)
         assert app_tool.description
 
     # Derived schemas keep the routes' own shapes and constraints.
-    assert tools["answer_gate"].inputSchema["required"] == ["run", "parkedAt", "control"]
-    assert tools["answer_gate"].inputSchema["properties"]["control"]["description"] == (
+    assert tools["answer_gate"].input_schema["required"] == ["run", "parkedAt", "control"]
+    assert tools["answer_gate"].input_schema["properties"]["control"]["description"] == (
         "The decision to take: one of the ids the ask offers as controls, e.g. approve."
     )
-    reason = tools["cancel_run"].inputSchema["properties"]["reason"]
+    reason = tools["cancel_run"].input_schema["properties"]["reason"]
     assert (reason["minLength"], reason["maxLength"]) == (1, 500)
-    assert tools["software_factory_start"].inputSchema["properties"]["ticket"]["description"] == (
+    assert tools["software_factory_start"].input_schema["properties"]["ticket"]["description"] == (
         "The tracker's ticket key, e.g. ENG-831."
     )
     # software_factory_start moves the tracker ticket and waits on webhook intake — its
@@ -208,8 +213,8 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token):
     assert "trigger status" in tools["software_factory_start"].description
     assert "webhook intake" in tools["software_factory_start"].description
     assert "list_open_subjects" in tools["software_factory_start"].description
-    assert not tools["list_open_subjects"].inputSchema.get("required")
-    assert not tools["get_usage"].inputSchema.get("required")
+    assert not tools["list_open_subjects"].input_schema.get("required")
+    assert not tools["get_usage"].input_schema.get("required")
 
 
 @pytest.mark.parametrize(
@@ -234,14 +239,14 @@ def test_invalid_app_agent_route_stops_boot(operation_id, docstring, message):
         operation_id=operation_id,
         tags=["agent"],
     )
-    api.include_router(router, prefix="/api/review", tags=["review"])
+    api.include_router(router, prefix="/api/software_factory", tags=["software_factory"])
 
     with pytest.raises(InvalidAgentToolError, match=message):
         create_mcp_app(api)
 
 
 def test_derived_operation_id_collision_stops_boot():
-    # The 'review' app's unprefixed 'scan' derives to 'review_scan', which
+    # software_factory's unprefixed 'scan' derives to 'software_factory_scan', which
     # another route already claims explicitly — the framework must reject the
     # clash rather than silently mint two operations sharing an id.
     api = FastAPI()
@@ -250,22 +255,26 @@ def test_derived_operation_id_collision_stops_boot():
     async def scan():
         """Scan the review target."""
 
-    async def review_scan():
+    async def software_factory_scan():
         """Re-run the review scan."""
 
     router.add_api_route("/scans", scan, methods=["POST"], operation_id="scan", tags=["agent"])
     router.add_api_route(
-        "/rescans", review_scan, methods=["POST"], operation_id="review_scan", tags=["agent"]
+        "/rescans",
+        software_factory_scan,
+        methods=["POST"],
+        operation_id="software_factory_scan",
+        tags=["agent"],
     )
-    api.include_router(router, prefix="/api/review", tags=["review"])
+    api.include_router(router, prefix="/api/software_factory", tags=["software_factory"])
 
     with pytest.raises(InvalidAgentToolError, match="collides with existing operation id"):
         create_mcp_app(api)
 
 
 def _agent_route_app(operation_id: str) -> FastAPI:
-    # A synthetic agent route owned by the installed 'review' app — the
-    # loader-stamped 'review' tag names the owner, exactly as a real router does.
+    # A synthetic agent route owned by the installed software_factory app — the
+    # loader-stamped app tag names the owner, exactly as a real router does.
     # The endpoint mounts the same /mcp Route and mcp lifespan as the real app so
     # tools/list resolves in-process.
     held: dict[str, object] = {}
@@ -284,7 +293,7 @@ def _agent_route_app(operation_id: str) -> FastAPI:
     router.add_api_route(
         "/scans", endpoint, methods=["POST"], operation_id=operation_id, tags=["agent"]
     )
-    api.include_router(router, prefix="/api/review", tags=["review"])
+    api.include_router(router, prefix="/api/software_factory", tags=["software_factory"])
 
     mcp = create_mcp_app(api)
     held["mcp"] = mcp
@@ -301,8 +310,9 @@ def _served_operation_id(schema: dict, path: str) -> str:
 @pytest.mark.parametrize(
     ("operation_id", "expected"),
     [
-        ("scan", "review_scan"),  # an unprefixed id gains its owner's prefix
-        ("review_scan", "review_scan"),  # an already-prefixed id passes through, never doubled
+        ("scan", "software_factory_scan"),  # an unprefixed id gains its owner's prefix
+        # an already-prefixed id passes through, never doubled
+        ("software_factory_scan", "software_factory_scan"),
     ],
 )
 async def test_app_agent_route_derives_the_namespaced_tool(
@@ -312,9 +322,9 @@ async def test_app_agent_route_derives_the_namespaced_tool(
 
     # The document the provider consumed and every later regeneration carry the
     # derived id, not the bare one the author declared.
-    assert _served_operation_id(api.openapi(), "/api/review/scans") == expected
+    assert _served_operation_id(api.openapi(), "/api/software_factory/scans") == expected
     api.openapi_schema = None
-    assert _served_operation_id(api.openapi(), "/api/review/scans") == expected
+    assert _served_operation_id(api.openapi(), "/api/software_factory/scans") == expected
 
     async with live(api), _client(api, pat_token) as client:
         tools = {tool.name for tool in await client.list_tools()}
@@ -533,7 +543,7 @@ async def test_lifespan_composes_the_endpoint_once(app, monkeypatch):
 
     monkeypatch.setattr(mcp_app.router, "lifespan_context", counting)
     async with app.router.lifespan_context(app), asgi_client(app) as client:
-        assert (await client.get("/api/system/health")).status_code == 200
+        assert (await client.get("/health")).status_code == 200
     assert entered == [1]
 
 

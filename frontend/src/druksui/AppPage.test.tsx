@@ -28,14 +28,36 @@ const ROSTER = [
     navigation: [['/field_notes', 'notes']],
     operations: [{ id: 'write_note', method: 'POST', path: '/api/field_notes/notes' }],
     pages: [
-      { name: 'notes', label: 'notes', path: '/field_notes', parent: '', order: 0 },
-      { name: 'new_note', label: 'new note', path: '/field_notes/notes/new', parent: '', order: 2 },
-      { name: 'note', label: 'note', path: '/field_notes/notes/{note_id}', parent: '', order: 3 },
+      {
+        name: 'notes',
+        label: 'notes',
+        path: '/field_notes',
+        parent: '',
+        subjectType: '',
+        order: 0,
+      },
+      {
+        name: 'new_note',
+        label: 'new note',
+        path: '/field_notes/notes/new',
+        parent: '',
+        subjectType: '',
+        order: 2,
+      },
+      {
+        name: 'note',
+        label: 'note',
+        path: '/field_notes/notes/{note_id}',
+        parent: '',
+        subjectType: '',
+        order: 3,
+      },
       {
         name: 'note_history',
         label: 'note history',
         path: '/field_notes/notes/{note_id}/history',
         parent: 'note',
+        subjectType: '',
         order: 4,
       },
       {
@@ -43,6 +65,7 @@ const ROSTER = [
         label: 'note run',
         path: '/field_notes/notes/{note_id}/runs/{run_id}',
         parent: 'note',
+        subjectType: '',
         order: 5,
       },
       {
@@ -50,6 +73,7 @@ const ROSTER = [
         label: 'recent notes',
         path: '/field_notes/recent',
         parent: 'notes',
+        subjectType: '',
         order: 1,
       },
     ],
@@ -153,7 +177,7 @@ describe('a declared page', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByText('field_notes could not render this page')).toBeTruthy(),
+      expect(screen.getByText('Field Notes could not render this page')).toBeTruthy(),
     )
     expect(screen.getByText('try again')).toBeTruthy()
   })
@@ -239,7 +263,6 @@ describe('the parent link', () => {
     expect(screen.getByRole('link', { name: 'note' }).getAttribute('href')).toBe(
       '/field_notes/notes/7',
     )
-    // A detail page is not one of its parent's tabs, so it shows none.
     expect(container.querySelector('.dui-tabs')).toBeNull()
   })
 
@@ -257,7 +280,7 @@ describe('a page snapshot the renderer cannot walk', () => {
     renderAt('/field_notes', 'notes', broken as unknown as PageSnapshot)
 
     await waitFor(() =>
-      expect(screen.getByText('field_notes could not render this page')).toBeTruthy(),
+      expect(screen.getByText('Field Notes could not render this page')).toBeTruthy(),
     )
     expect(screen.getByText('the page snapshot was not renderable')).toBeTruthy()
   })

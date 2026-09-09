@@ -4,7 +4,7 @@ import hmac
 import secrets
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, LargeBinary, String, select
+from sqlalchemy import ForeignKey, Index, LargeBinary, String, select, text
 from sqlalchemy.dialects.postgresql import CITEXT, insert
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -16,9 +16,8 @@ from druks.accounts.constants import (
     PAT_PREFIX_LENGTH,
     PAT_SECRET_BYTES,
     PAT_TOKEN_TAG,
-    SYSTEM_ACCOUNT_ID,
 )
-from druks.accounts.exceptions import InvalidPatError
+from druks.accounts.exceptions import AuthConfigurationError, InvalidPatError
 from druks.core.models import Uuid7Pk
 from druks.database import db_session
 from druks.models import Base
@@ -26,22 +25,35 @@ from druks.models import Base
 
 class Account(Base, Uuid7Pk):
     __tablename__ = "accounts"
+    __table_args__ = (
+        Index(
+            "accounts_default_idx", "is_default", unique=True, postgresql_where=text("is_default")
+        ),
+    )
 
     # citext: the column compares and enforces uniqueness case-insensitively,
     # so a lookup or a duplicate check needs no normalization — the username is
-    # stored as the provider gave it and matched regardless of case. Usually a
-    # provider email, but not always: the system account holds "system".
+    # stored as the provider gave it and matched regardless of case.
     username: Mapped[str] = mapped_column(CITEXT, unique=True)
-    # No updated_at: an account is insert-once — username never changes and there
-    # is no other field to mutate — so the column would only ever equal
-    # created_at, and nothing reads it.
+    is_default: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @classmethod
-    async def get(cls, account_id: str, *, exclude_system: bool = False) -> "Account | None":
-        if exclude_system and account_id == SYSTEM_ACCOUNT_ID:
-            return
+    async def get(cls, account_id: str) -> "Account | None":
         return await db_session().get(cls, account_id)
+
+    @classmethod
+    async def get_default(cls) -> "Account | None":
+        """The unattended account, or None before account setup."""
+        return await db_session().scalar(select(cls).where(cls.is_default))
+
+    @classmethod
+    async def get_for_run(cls, account_id: str | None) -> "Account":
+        """Resolve the supplied account or the default before a run starts."""
+        account = await cls.get(account_id) if account_id else await cls.get_default()
+        if not account:
+            raise AuthConfigurationError("No run account is available. Complete account setup.")
+        return account
 
     @classmethod
     async def get_for_username(cls, username: str) -> "Account | None":
@@ -49,23 +61,21 @@ class Account(Base, Uuid7Pk):
 
     @classmethod
     async def get_or_create(cls, username: str) -> "Account":
-        """Concurrency-safe lookup-or-create: racing requests both INSERT with
-        ON CONFLICT DO NOTHING, then converge on the one row through the
-        canonical CITEXT lookup."""
+        """Return the account, or create it. The first account becomes the default."""
         account = await cls.get_for_username(username)
         if account:
             return account
         session = db_session()
         await session.execute(
             insert(cls)
-            .values(username=username)
+            .values(username=username, is_default=~select(cls.id).exists())
             .on_conflict_do_nothing(index_elements=["username"])
         )
         return (await session.scalars(select(cls).where(cls.username == username))).one()
 
     @classmethod
-    async def list_non_system(cls) -> list["Account"]:
-        stmt = select(cls).where(cls.username != SYSTEM_ACCOUNT_ID).order_by(cls.created_at)
+    async def list_all(cls) -> list["Account"]:
+        stmt = select(cls).order_by(cls.created_at, cls.id)
         return list(await db_session().scalars(stmt))
 
 

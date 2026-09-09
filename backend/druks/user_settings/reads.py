@@ -7,7 +7,7 @@ from pydantic.fields import FieldInfo
 from druks.apps.settings import field_kind
 from druks.database import db_session
 
-from .models import SettingsOverride
+from .models import SettingsOverride, SettingsProfile
 from .schemas import (
     AgentSettingResponse,
     AppSettingsResponse,
@@ -21,14 +21,15 @@ if TYPE_CHECKING:
     from druks.workflows import Workflow
 
 
-async def get_agent_setting(agent: "Agent") -> AgentSettingResponse:
-    harness = await SettingsOverride.agent_harness(agent.id)
-    model = await SettingsOverride.agent_model(agent.id)
-    billing = await SettingsOverride.agent_billing(agent.id)
-    effort = await SettingsOverride.agent_effort(agent.id)
-    timeout = await SettingsOverride.agent_timeout(agent.id, agent.timeout)
+async def get_agent_setting(agent: "Agent", *, settings: SettingsProfile) -> AgentSettingResponse:
+    harness = await SettingsOverride.agent_harness(agent.id, settings=settings)
+    model = await SettingsOverride.agent_model(agent.id, settings=settings)
+    billing = await SettingsOverride.agent_billing(agent.id, settings=settings)
+    effort = await SettingsOverride.agent_effort(agent.id, settings=settings)
+    timeout = await SettingsOverride.agent_timeout(agent.id, agent.timeout, settings=settings)
     return AgentSettingResponse(
-        name=agent.name or agent.id,
+        name=agent.id,
+        label=agent.name or agent.id.rsplit(".", 1)[-1],
         description=agent.description,
         harness=harness.value,
         harness_source=harness.source,
@@ -69,7 +70,7 @@ async def get_workflow_settings(workflow: "type[Workflow]") -> WorkflowSettingsR
             SettingsFieldResponse(
                 name="schedule",
                 label=f"{label} schedule",
-                help="How often the scheduled run fires, in your configured timezone.",
+                help="How often the scheduled run fires, in the installation timezone.",
                 # "cron" is a UI kind like enum/secret: the frontend renders
                 # cadence presets with a raw-cron escape hatch.
                 type="cron",
@@ -101,14 +102,14 @@ async def get_workflow_settings(workflow: "type[Workflow]") -> WorkflowSettingsR
     return WorkflowSettingsResponse(kind=kind, fields=fields)
 
 
-async def get_app_settings(app: "type[App]") -> AppSettingsResponse:
+async def get_app_settings(app: "type[App]", *, settings: SettingsProfile) -> AppSettingsResponse:
     model = app.settings_model
     return AppSettingsResponse(
         name=app.name,
         description=app.description,
         icon=app.icon,
         builtin=app.builtin,
-        agents=[await get_agent_setting(agent) for agent in app.agents()],
+        agents=[await get_agent_setting(agent, settings=settings) for agent in app.agents()],
         # Surface only the workflows with operator knobs: tunable settings or a
         # schedule to retune.
         workflows=[

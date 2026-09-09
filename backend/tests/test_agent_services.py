@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
-from conftest import make_test_note, seed_note_run
+from conftest import connect_anthropic_subscription, make_test_note, seed_note_run
 from druks.accounts.models import Account
 from druks.api import runs
 from druks.api.exceptions import RunNotActive, RunNotFailed, RunNotFound, SubjectBusy
@@ -417,7 +417,7 @@ async def test_get_usage_is_a_bounded_pure_read(druks_db, account):
             AgentCall(
                 run_id=run.id,
                 agent="summarize",
-                account_id=account.id,
+                subscription_id=(await connect_anthropic_subscription(account.username)).id,
                 sandbox_host_id="host",
                 model="gpt-5.5",
                 status="succeeded",
@@ -477,7 +477,7 @@ async def test_get_usage_only_counts_the_callers_spend(druks_db, account):
         AgentCall(
             run_id=run.id,
             agent="summarize",
-            account_id=other.id,
+            subscription_id=(await connect_anthropic_subscription(other.username)).id,
             sandbox_host_id="host",
             model="gpt-5.5",
             status="succeeded",

@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field, create_model
 from uuid_utils import uuid7
 
 from druks.accounts.context import current_account_id
+from druks.accounts.models import Account
 from druks.apps.loader import resolve_workflow_app
 from druks.apps.registry import workflows
 from druks.apps.settings import (
@@ -51,12 +52,13 @@ from druks.events.models import Event
 from druks.harnesses.exceptions import HarnessError
 from druks.models import StoredSubject, snake_name
 from druks.notifications.outbox import notifications_queue, send_notification
-from druks.sandbox.client import sandbox_client
+from druks.sandbox.client import provisioning_key, sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.sandbox.datastructures import Sandbox
+from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
 from druks.signals import publish
-from druks.user_settings.models import SettingsOverride, UserSettings
+from druks.user_settings.models import SettingsOverride, SettingsProfile
 from druks.workspaces import Workspace
 
 # druks.workflows is the author door for workflow authoring: Workflow, Gate,
@@ -84,6 +86,7 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
+    from druks.harnesses.profiles import Profile
     from druks.sandbox.host import Host
 
 # A human gate can park for days; a long recv TTL still caps zombie parks.
@@ -165,9 +168,8 @@ class _DeclaredSubject:
         async def resolve() -> Any:
             if "subject" in run.__dict__:
                 return run.__dict__["subject"]
-            if not run._subject:
-                return None
-            return await self.subject_class.get_for_subject_id(str(run._subject["id"]))
+            if run._subject:
+                return await self.subject_class.get_for_subject_id(str(run._subject["id"]))
 
         return resolve()
 
@@ -370,9 +372,9 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
     # the settings pointer is the operator's off-switch.
     async def _create() -> str | None:
         async with step_session():
-            destination_id = (await UserSettings.get()).gate_park_destination_id
+            run = await Run.get(workflow_id)
+            destination_id = (await SettingsProfile.get(run.account_id)).gate_park_destination_id
             if destination_id:
-                run = await Run.get(workflow_id)
                 return await run.create_park_notification(destination_id, subject)
 
     notification_id = await DBOS.run_step_async(
@@ -636,7 +638,7 @@ async def _execute_run(
     workflow_id: str,
     kind: str,
     subject: dict[str, Any] | None,
-    account_id: str | None,
+    account_id: str,
     body: Callable,
 ) -> Any:
     # Ensure the row (idempotent, so a scheduled run with no start() makes it
@@ -768,13 +770,13 @@ class Workflow:
         # run()'s validated input bundle (the model synthesized from its signature),
         # set before run() — for templates and derived properties. None = no input.
         self.input: BaseModel | None = None
-        # Who requested/triggered the run, replayed off the reserved input
-        # key; None on system-owned runs (crons, old checkpoints).
-        self.account_id: str | None = None
+        # The dispatcher binds the authenticated or default account before execution.
+        self.account_id: str
         self.journal = self.journal_class()
         # The run's warm VM, provisioned lazily and reaped at segment boundaries;
         # its lease expiry decides when it must rotate.
         self._host: Host | None = None
+        self._host_secrets_id = ""
 
     async def announce(self, topic: str, **facts: Any) -> None:
         # The workflow announcing a domain event in its app's vocabulary
@@ -824,20 +826,34 @@ class Workflow:
         return dict(context)
 
     async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
-        # Extend via super() to add the fields workspace_class needs (an app clones + mints
-        # here). Base: just the VM.
-        return {"host": host}
+        # Extend via super() to add the fields workspace_class needs beyond these.
+        return {"host": host, "subject": await self.subject}
 
     async def get_workspace(self, host: "Host") -> Workspace:
-        # What an agent runs in on this run's VM, built per agent call from workspace_class
-        # + the app's kwargs — so short-lived tokens (git) mint fresh each call.
+        # Built per agent call, so nothing is held across steps.
         return self.workspace_class(**await self.get_workspace_kwargs(host))
 
-    async def _lease_host(self) -> str | None:
+    async def get_secret_refs(self) -> list[SecretRef]:
+        # The secrets a box of this run fetches beyond its profile's: the
+        # workspace's and its MCP servers', read before the box exists.
+        subject = await self.subject
+        _, mcp = await self.workspace_class.get_mcp_delivery(subject, self.account_id)
+        return [*await self.workspace_class.get_secret_refs(subject), *mcp]
+
+    async def _lease_host(self, profile: "Profile") -> str | None:
         # The warm VM, provisioned once per segment; state is carried in git, so
         # only the host-id matters across steps — held-across-steps never fights replay.
         if not self.steps_reuse_sandbox:
             return
+        refs = [*profile.secret_refs, *await self.get_secret_refs()]
+        # A crashed process left its box behind. Its identity finds it again.
+        if (
+            not self._host
+            and refs
+            and (identity := await SandboxIdentity.lookup(self._workflow_id, "workflow", refs))
+        ):
+            self._host = await sandbox_client.reattach(host_id=identity.host_id)
+            self._host_secrets_id = profile.secrets_id
         if self._host and self._host.expires_at:
             remaining = (self._host.expires_at - datetime.now(UTC)).total_seconds()
             if remaining < SANDBOX_HOST_ROTATE_BEFORE_SECONDS:
@@ -845,15 +861,30 @@ class Workflow:
                 # host. Safe because each call rebuilds its workspace on whatever
                 # host it lands on (state lives in git), so a bare VM is fine.
                 await self._reap_run()
+        if self._host and self._host_secrets_id != profile.secrets_id:
+            # Drukbox binds entries at creation.
+            await self._reap_run()
         if not self._host:
             template = None
             if self.sandbox:
                 template = await get_template_id(self.sandbox)
                 await set_run_phase("provisioning_vm")
+            # The key names the pasted key the VM holds, so a replay finds its VM.
+            # A box that fetches gets its own identity, and the key names that
+            # instead. A replay finds the box through the identity, above.
+            identity, entries, key = None, {}, profile.secrets_id
+            if refs:
+                identity, entries = await SandboxIdentity.create(
+                    run_id=self._workflow_id, scoped_to="workflow", secret_refs=refs
+                )
+                key = identity.id
             self._host = await sandbox_client.provision(
-                idempotency_key=f"{self._workflow_id}:sandbox",
+                idempotency_key=provisioning_key(self._workflow_id, "workflow", key),
+                secrets={**profile.secrets, **entries},
                 template=template,
+                identity=identity,
             )
+            self._host_secrets_id = profile.secrets_id
         return self._host.id
 
     async def _reap_run(self) -> None:
@@ -952,17 +983,14 @@ class Workflow:
         # subject is required (no default) so a run can't silently lose its
         # timeline by omission — pass subject=None explicitly for a background run.
         cls._validate_subject(subject)
-        if not account_id:
-            # Browser-origin starts inherit the request's authenticated account;
-            # dispatchers that know better pass account_id explicitly.
-            account_id = current_account_id.get()
+        account = await Account.get_for_run(account_id or current_account_id.get())
+        account_id = account.id
         wire: dict[str, Any] = {}
         if cls._run_input_model:
             wire = cls._run_input_model.model_validate(input).model_dump(mode="json")
         elif input:
             raise WorkflowError(f"{cls.__name__}.{cls._body_method}() takes no input")
-        if account_id:
-            wire[_ACCOUNT_INPUT_KEY] = account_id
+        wire[_ACCOUNT_INPUT_KEY] = account_id
         workflow_id = str(uuid7())
         # A subject has at most one active run per workflow kind, enforced by
         # DBOS queue deduplication: the slot is claimed atomically at enqueue,
@@ -1043,15 +1071,16 @@ def _bind_instance(
     cls: type[Workflow],
     subject: dict[str, Any] | None = None,
     input: dict[str, Any] | None = None,
+    *,
+    account_id: str,
 ) -> tuple[Workflow, dict[str, Any]]:
     """A workflow instance carrying its subject and validated input, with the
     keyword arguments its body takes."""
     instance = cls()
     instance._subject = subject
-    # Platform routing comes off before body validation; an old checkpoint
-    # without the key replays account-less.
     input = dict(input or {})
-    instance.account_id = input.pop(_ACCOUNT_INPUT_KEY, None)
+    input.pop(_ACCOUNT_INPUT_KEY, None)
+    instance.account_id = account_id
     # The body's input re-validates from its wire dict; a cron fires with no
     # input, so a scheduled workflow must default every parameter. The validated
     # bundle also lands on the instance for templates / derived properties.
@@ -1068,7 +1097,9 @@ async def _run_instance(
     subject: dict[str, Any] | None = None,
     input: dict[str, Any] | None = None,
 ) -> Any:
-    instance, run_kwargs = _bind_instance(cls, subject, input)
+    async with step_session():
+        account_id = (await Account.get_for_run((input or {}).get(_ACCOUNT_INPUT_KEY))).id
+    instance, run_kwargs = _bind_instance(cls, subject, input, account_id=account_id)
     instance._workflow_id = DBOS.workflow_id  # type: ignore[assignment]
     token = current_workflow.set(instance)
     try:

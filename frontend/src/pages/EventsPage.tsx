@@ -1,3 +1,4 @@
+import '../operations.css'
 import { useCallback, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useLocation, useSearch } from 'wouter'
@@ -5,10 +6,9 @@ import { useLocation, useSearch } from 'wouter'
 import { api } from '../api/client'
 import { useSSE } from '../api/sse'
 import type { FeedItem } from '../api/types'
-import { BackToApp } from '../components/BackToApp'
 import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
-import { registeredApps } from '../apps/registry'
+import { appLabel, registeredApps } from '../apps/registry'
 import { eventLine } from '../lib/feed'
 import { relTimeFromIso } from '../lib/format'
 import { useFormatters } from '../lib/preferences'
@@ -149,7 +149,6 @@ function EventsHeader({
         </div>
         <AppFilter filter={filter} onPick={onPick} />
       </div>
-      <BackToApp />
     </div>
   )
 }
@@ -184,9 +183,10 @@ function AppFilter({
           key={name ?? 'all'}
           type="button"
           className={`events-filter-pill mono${name === filter ? ' active' : ''}`}
+          aria-pressed={name === filter}
           onClick={() => onPick(name)}
         >
-          {name ?? 'all'}
+          {name ? appLabel(name) : 'All'}
         </button>
       ))}
     </div>
@@ -210,6 +210,9 @@ function EventRow({
     <div
       className={`event-row${line.path ? ' event-row-clickable' : ''}`}
       onClick={line.path ? handleClick : undefined}
+      role={line.path ? 'link' : undefined}
+      tabIndex={line.path ? 0 : undefined}
+      onKeyDown={line.path ? (event) => { if (event.key === 'Enter') handleClick() } : undefined}
       title={absTime(event.at)}
     >
       <span className="event-time mono dim">{relTimeFromIso(event.at)}</span>

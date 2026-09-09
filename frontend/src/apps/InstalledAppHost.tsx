@@ -5,7 +5,7 @@ import { EmptyState } from '../components/EmptyState'
 import { Markdown } from '../components/Markdown'
 import { Page } from '../components/Page'
 import { appAccent } from '../lib/appColors'
-import { registeredApps } from './registry'
+import { appLabel, registeredApps } from './registry'
 
 // The shell↔app mount contract. A dist app's entry module exports
 // ``shellApi`` (the contract version it was built against) and
@@ -66,7 +66,7 @@ export function InstalledAppHost({ name }: { name: string }) {
     document.head.appendChild(stylesheet)
 
     // The accent the shell assigned this app: the same registry-order
-    // palette the appbar reads, resolved here so the route needs no plumbing.
+    // palette the shell reads, resolved here so the route needs no plumbing.
     const names = registeredApps().map((ui) => ui.name)
     const ctx: ShellContext = {
       shellApi: SHELL_API,
@@ -110,7 +110,7 @@ export function InstalledAppHost({ name }: { name: string }) {
   if (error) {
     return (
       <Page>
-        <EmptyState glyph="✕" msg={`${name} failed to mount: ${error}`} />
+        <EmptyState glyph="✕" msg={`${appLabel(name)} failed to mount: ${error}`} />
       </Page>
     )
   }

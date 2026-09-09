@@ -1,13 +1,18 @@
-from datetime import datetime
-from typing import Annotated
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Annotated
 
-from pydantic import BeforeValidator, ConfigDict, Field
+from pydantic import BeforeValidator, ConfigDict
 
 from druks.accounts.schemas import AccountResponse
 from druks.schemas import Schema
 
 # A set of names on the wire, in a stable order.
 SortedNames = Annotated[list[str], BeforeValidator(sorted)]
+
+
+if TYPE_CHECKING:
+    from druks.accounts.models import Account
+    from druks.secrets.models import VaultSecret
 
 
 class ProviderResponse(Schema):
@@ -19,23 +24,39 @@ class ProviderResponse(Schema):
 
 
 class ProviderSubscriptionResponse(Schema):
-    model_config = ConfigDict(from_attributes=True)
-
     provider: str
     # The email the provider reported at connect — display, never authority.
     provider_email: str
     expires_at: datetime | None
     updated_at: datetime
-    connected: bool = Field(validation_alias="is_connected")
+    # False once the token has expired.
+    connected: bool
+
+    @classmethod
+    def from_secret(cls, row: "VaultSecret") -> "ProviderSubscriptionResponse":
+        return cls(
+            provider=row.audience_name,
+            provider_email=row.identity["email"],
+            expires_at=row.expires_at,
+            updated_at=row.updated_at,
+            connected=row.is_live and (not row.expires_at or row.expires_at > datetime.now(UTC)),
+        )
 
 
 class ProviderKeyResponse(Schema):
-    model_config = ConfigDict(from_attributes=True)
-
     provider: str
     key_tail: str
-    updated_by: AccountResponse
+    updated_by: AccountResponse | None
     updated_at: datetime
+
+    @classmethod
+    def from_secret(cls, row: "VaultSecret", pasted_by: "Account | None") -> "ProviderKeyResponse":
+        return cls(
+            provider=row.audience_name,
+            key_tail=row.secrets["value"][-4:],
+            updated_by=AccountResponse.model_validate(pasted_by) if pasted_by else None,
+            updated_at=row.updated_at,
+        )
 
 
 class CatalogModel(Schema):

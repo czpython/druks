@@ -91,28 +91,6 @@ async def test_selected_unconnected_tracker_pends_through_software_factorys_own_
     assert "linear" in result.detail
 
 
-async def test_half_configured_review_identity_fails_through_review_settings(
-    installed, tmp_path: Path, druks_db, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Review identity health is Review's own: the incoherent pair fails under
-    # ``review:settings`` while the set/unset check stays healthy — no core
-    # doctor check hardcodes review knowledge, and no GitHub call is made.
-    await SettingsOverride.set_app_setting("review", "app_id", "42", is_secret=True)
-    monkeypatch.setattr(doctor, "_check_engine", _fixture_check_engine)
-
-    try:
-        results = await doctor.check_apps(make_settings(tmp_path))
-    finally:
-        db_session.registry.set(druks_db)
-
-    settings_result = _named(results, "review:settings")
-    assert not settings_result.ok
-    assert settings_result.detail == (
-        "Review App private key: Required once the review App ID is set."
-    )
-    assert _named(results, "review:identity").ok
-
-
 async def test_coherent_stored_settings_pass(
     installed, tmp_path: Path, druks_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:

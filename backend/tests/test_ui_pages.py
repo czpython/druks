@@ -7,6 +7,7 @@ from druks.apps.loader import load_app
 from druks.ui import Page, page
 from druks.ui.exceptions import PageRouteError
 from druks.ui.page import PageRoute, list_pages_for_app
+from druks_field_notes.models import Note
 from fastapi import APIRouter
 
 
@@ -278,3 +279,28 @@ def test_two_children_of_different_parents_with_one_name_fail():
 
     with pytest.raises(PageRouteError, match="two pages named 'history'"):
         list_pages_for_app("shared_child_name", "shared_child_name")
+
+
+@pytest.mark.parametrize(
+    "path, parameters", [("/review", []), ("/{account}/{note}", ["account", "note"])]
+)
+def test_subject_page_requires_one_id_parameter(path, parameters):
+    package = f"subject_parameters_{len(parameters)}"
+    declare(package, "/", "home")
+    declaration = declare(package, path, "decision", *parameters)
+    declaration.subject = Note
+
+    with pytest.raises(PageRouteError, match="exactly one route parameter"):
+        routes_for(package)
+
+
+def test_subject_page_destination_is_unique():
+    declare("subject_destinations", "/", "home")
+    for index in range(2):
+        declaration = declare(
+            "subject_destinations", f"/review{index}/{{id}}", f"review{index}", "id"
+        )
+        declaration.subject = Note
+
+    with pytest.raises(PageRouteError, match="two destinations"):
+        routes_for("subject_destinations")

@@ -10,6 +10,9 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy_encrypted_field import configure
+
+from druks.settings import load_settings
 
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 _MIGRATION_SUPPORT_ONLY = "migration_support_only"
@@ -91,6 +94,11 @@ def _app_migration_dirs() -> list[tuple[str, Path]]:
         if package_dir and (package_dir / "migrations" / "versions").is_dir():
             found.append((app.name, package_dir / "migrations"))
     return found
+
+
+# Every encrypted column reads its keys from the settings at each use. The
+# HKDF info predates the library and must never change: stored rows carry it.
+configure(lambda: load_settings().secrets.secrets_key, info=b"druks-secrets-v1")
 
 
 def create_engine_from_url(database_url: str):

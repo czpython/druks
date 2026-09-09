@@ -72,7 +72,7 @@ app.
 
 To use it:
 
-1. Open **Settings → Services**.
+1. Open **Settings → Connections → Services**.
 2. Create or connect the operator GitHub App.
 3. Install that GitHub App on the repository that Druks will use.
 4. Open **Software Factory → Projects**.
