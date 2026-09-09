@@ -1,5 +1,5 @@
 from druks.sandbox import Sandbox
-from druks.workflows import Workflow
+from druks.workflows import Workflow, step
 from druks.workspaces import RepoWorkspace
 
 from druks_field_notes.app import FieldNotes
@@ -7,18 +7,27 @@ from druks_field_notes.models import Note, Repository
 
 
 class Summarize(Workflow):
-    """Reads one note and writes its gist — a single durable operation: the agent
-    produces the line, and the run stores it on the note."""
+    """Reads one note and saves the gist that the operator approves."""
 
     subject = Note
     sandbox = Sandbox(setup="sandboxes/setup.sh")
 
-    async def run(self) -> None:
+    async def run_multistep(self) -> None:
         note = await self.subject
-        # The note body is the agent's prompt context; the gist it returns is the
-        # app's own domain result, saved onto the note.
-        result = await FieldNotes.summarize(note_body=note.body)
-        await note.save_gist(result.gist)
+        operator_note = ""
+        while True:
+            result = await FieldNotes.summarize(note_body=note.body, operator_note=operator_note)
+            reply = await self.review()
+            if reply.action == "approve":
+                break
+            operator_note = reply.note
+        await self.save_gist(result.gist)
+        await self.announce("note.gist_approved")
+
+    @step
+    async def save_gist(self, gist: str) -> None:
+        note = await self.subject
+        await note.save_gist(gist)
 
     @classmethod
     async def dispatch(cls, *, note: Note) -> str:

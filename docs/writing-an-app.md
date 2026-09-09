@@ -10,6 +10,61 @@ Druks supplies durable execution and shared operating services. Read
 [the app boundary](concepts.md#the-app-boundary)
 before you assign ownership of a capability.
 
+## Publish useful activity
+
+An agent output declares its saved result and its Activity topic:
+
+```python
+from druks.agents import AgentOutput
+
+
+class GistOutput(AgentOutput):
+    gist: str
+
+    def to_artifact(self) -> dict[str, str]:
+        return {"kind": "markdown", "title": "Gist", "content": self.gist}
+
+    def to_event(self) -> dict[str, str]:
+        return {"topic": "gist.prepared", "summary": self.gist}
+```
+
+A workflow asks the operator to review the result. It announces the outcome that
+it owns:
+
+```python
+from druks.workflows import Workflow, step
+
+from druks_field_notes.app import FieldNotes
+from druks_field_notes.models import Note
+
+
+class Summarize(Workflow):
+    subject = Note
+
+    async def run_multistep(self) -> None:
+        note = await self.subject
+        operator_note = ""
+        while True:
+            result = await FieldNotes.summarize(note_body=note.body, operator_note=operator_note)
+            reply = await self.review()
+            if reply.action == "approve":
+                break
+            operator_note = reply.note
+        await self.save_gist(result.gist)
+        await self.announce("note.gist_approved")
+
+    @step
+    async def save_gist(self, gist: str) -> None:
+        note = await self.subject
+        await note.save_gist(gist)
+```
+
+The independently installed Field Notes proof app uses these classes. The
+operator answers the review from the dashboard. Druks records the accepted work,
+each saved result, each request, and each validated reply. It also records a
+terminal failure. Authors supply no routing IDs, timestamps, sessions, or event
+rows. See [Activity facts](#activity-facts-and-signals) for the ownership rules.
+
 ## Scaffold and prove the package
 
 ```bash
@@ -405,7 +460,15 @@ refuses before any sandbox work when the login is missing, then provisions or
 attaches a sandbox, executes the CLI, validates the structured output, and
 records the call. Override
 `AgentOutput.to_result()` to map the strict agent contract to a domain value.
-Override `to_artifact()` to publish a reviewable artifact.
+Override `to_artifact()` to publish a reviewable artifact. Override `to_event()`
+to record that saved result in Activity: return a `topic` and an optional
+`summary`. An output that returns an event must also return an artifact.
+Otherwise the agent call fails with `WorkflowError`.
+
+Druks records one Activity row with the artifact and its producing agent call.
+The row and the artifact share a transaction. Recovery reuses a completed call
+and does not create a second row. Two new calls can produce two rows with the
+same topic. The saved result has its own identity in each row.
 
 Pass `contract=OutputType` on an agent call when its required output fields
 depend on the input. Druks uses that type for the harness schema, validation,
@@ -808,33 +871,38 @@ statuses = await Repository.get_statuses([summary.id for summary in summaries])
 This is the read the platform's own board uses, so a declared page listing
 fifty rows costs one query rather than fifty.
 
-## Record events and react to signals
+## Activity facts and signals
 
-Record an event through the app. Druks stamps its ownership:
+Use [announcements](#announcing-domain-events) for facts the app owns.
+Use an agent output's `to_artifact()` and `to_event()` for a saved result.
+Do not announce that same result again from a completion subscriber. Field Notes
+records `gist.prepared` for each gist that its agent prepares. It announces
+`note.gist_approved` when the operator approves a gist.
 
-```python
-await NightWatch.record_event(
-    type="report.published",
-    subject=repository,
-    payload={"url": report_url},
-)
-```
+Druks records these workflow facts without app calls:
 
-`type` is the milestone word that the feed reads. There is no presentation hook
-to implement. Lifecycle events for subjected workflows are
-recorded automatically. Call `record_event()` inside a platform-bound
-transaction such as a request, durable step, or subscriber.
+- Accepted work: a new subject run entered the queue. A deduplicated start adds
+  no second row.
+- Input requested: the workflow reached a gate. The record holds the gate and
+  the request time for that round.
+- Response received: the concrete gate validated a reply. This does not mean
+  that the domain accepted the reply's proposal. The workflow decides that.
+- Run failed: the run ended with a terminal failure. Routine running and
+  finished signals remain available to subscribers but do not enter Activity.
+- Run cancelled: an operator cancelled the run through the cancel route. Domain
+  cleanup that cancels a run records no row and announces no owner outcome.
 
-A feed row contains facts, not prose. It contains its kind, workflow, subject
-identity, and event payload. A client supplies the words. Give the subject a
-``label`` for its one-line description. Each later event for the subject keeps
-that label:
+An external owner can announce an outcome after the run stops. Record that
+outcome when the owner reports it. Do not infer it from the run state.
 
-```python
-class Repository(StoredSubject):
-    def get_label(self) -> str:
-        return self.full_name
-```
+Each Activity row stores the subject label at the time of the event. Search
+matches that recorded label. The dashboard supplies readable labels. For
+example, it shows `gist.prepared` as "Gist prepared". Keep UI wording out of the
+event identity.
+
+A gate request and its reply retain the same run, gate, and request-time
+identity. A result retains its artifact identity. These references describe the
+recorded occurrence even when the current subject, run, or file is unavailable.
 
 React with filters rather than body guards:
 

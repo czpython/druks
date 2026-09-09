@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import os
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import psycopg
 import pytest
@@ -18,7 +19,9 @@ from druks.models import StoredSubject
 from druks.signals import subscribe
 from druks.testing import init_db
 from druks.user_settings.models import InstallationSettings
-from druks.workflows import Gate, Subject, Workflow, step, task
+from druks.workflows import Gate, OperatorReply, Subject, Workflow, step, task
+from druks_field_notes.models import Note
+from druks_field_notes.workflows import Summarize
 from pydantic import BaseModel
 from sqlalchemy import NullPool, create_engine, select
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -704,9 +707,9 @@ async def test_subjectless_review_fails_loudly(rt):
     assert "'review'" in failed.failure
 
 
-def _fake_ephemeral_returning(action: str, seen: list[dict], held: list[bool]):
+def _fake_ephemeral_returning(output: dict, seen: list[dict], held: list[bool]):
     # Class-method stand-in for Client.ephemeral: a VM whose agent returns
-    # ``action``.
+    # ``output``.
     from datetime import UTC, datetime
 
     from druks.durable.enums import AgentCallStatus
@@ -727,7 +730,7 @@ def _fake_ephemeral_returning(action: str, seen: list[dict], held: list[bool]):
             # The harness names the on-disk dir (and the row) from the supplied
             # call_id, so the result echoes it back as run_id.
             return AgentResult(
-                output={"action": action},
+                output=output,
                 run_id=kwargs["call_id"],
                 sandbox_host_id="host-test",
                 model="claude",
@@ -755,7 +758,8 @@ async def test_run_agent_step(rt, monkeypatch):
     # Patch the class method (not the singleton instance): an instance-attr
     # patch leaves a shadowing leftover that breaks later sandbox tests.
     monkeypatch.setattr(
-        "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning("stop", seen, held)
+        "druks.sandbox.client.Client.ephemeral",
+        _fake_ephemeral_returning({"action": "stop"}, seen, held),
     )
     monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
 
@@ -788,7 +792,8 @@ async def test_body_level_agent_output_lands_on_the_journal(rt, monkeypatch):
     seen: list[dict] = []
     held: list[bool] = []
     monkeypatch.setattr(
-        "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning("ship", seen, held)
+        "druks.sandbox.client.Client.ephemeral",
+        _fake_ephemeral_returning({"action": "ship"}, seen, held),
     )
     monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
 
@@ -1385,7 +1390,8 @@ async def test_output_event_survives_completed_step_replay(rt, monkeypatch, tmp_
     calls = []
     held = []
     monkeypatch.setattr(
-        "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning("reviewed", calls, held)
+        "druks.sandbox.client.Client.ephemeral",
+        _fake_ephemeral_returning({"action": "reviewed"}, calls, held),
     )
     monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
     completed = []
@@ -1420,3 +1426,65 @@ async def test_output_event_survives_completed_step_replay(rt, monkeypatch, tmp_
         assert {event.payload["run"] for event in events} == {workflow_id}
     finally:
         workflows._items.pop(OutputFlow.kind)
+
+
+async def test_field_notes_activity_through_admission_review_failure_and_replay(
+    rt, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+    calls = []
+    monkeypatch.setattr(
+        "druks.sandbox.client.Client.ephemeral",
+        _fake_ephemeral_returning({"gist": "The pump ran hot."}, calls, []),
+    )
+    monkeypatch.setattr("druks.agents.get_template_id", AsyncMock(return_value="template-test"))
+    monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
+    completed = []
+    body = Summarize.run_multistep
+
+    async def interrupt_after_approval(self):
+        await body(self)
+        completed.append(self.workflow_id)
+        if len(completed) == 1:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(Summarize, "run_multistep", interrupt_after_approval)
+    async with session_scope(rt.engine):
+        approved_note = await Note.create(body="The pump ran hot.")
+        failed_note = await Note.create(body="The reading is unclear.")
+
+    approved_id = await Summarize.dispatch(note=approved_note)
+    await _wait_for(rt.engine, approved_id, lambda run: run.is_parked)
+    async with session_scope(rt.engine):
+        await OperatorReply.answer(approved_note, action="request_changes", note="Name the pump.")
+    await _wait_for(rt.engine, approved_id, lambda run: len(calls) == 2 and run.is_parked)
+    async with session_scope(rt.engine):
+        await OperatorReply.answer(approved_note, action="approve")
+    await _wait_for(rt.engine, approved_id, lambda run: len(completed) == 1)
+    await DBOS.resume_workflow_async(approved_id)
+    await _wait_for(rt.engine, approved_id, lambda run: run.state == RunState.FINISHED)
+
+    monkeypatch.setattr(
+        "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning({}, calls, [])
+    )
+    failed_id = await Summarize.dispatch(note=failed_note)
+    await _wait_for(rt.engine, failed_id, lambda run: run.state == RunState.FAILED)
+
+    assert completed == [approved_id, approved_id]
+    async with session_scope(rt.engine):
+        assert (await Note.get(approved_note.id)).gist == "The pump ran hot."
+        activity = list(
+            await db_session().scalars(Event.get_history(app="field_notes").order_by(Event.id))
+        )
+    kinds = {
+        run_id: [event.type for event in activity if event.payload.get("run") == run_id]
+        for run_id in (approved_id, failed_id)
+    }
+    review_round = ["gist.prepared", "workflow.parked", "workflow.running"]
+    assert kinds[approved_id] == [
+        "workflow.scheduled",
+        *review_round,
+        *review_round,
+        "note.gist_approved",
+    ]
+    assert kinds[failed_id] == ["workflow.scheduled", "workflow.failed"]

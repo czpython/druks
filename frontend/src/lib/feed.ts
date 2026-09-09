@@ -11,7 +11,7 @@ const LIFECYCLE_VERBS: Record<string, string> = {
 }
 
 export interface EventLine {
-  // What happened, in words: "build queued", "merged".
+  // What happened, in words: "Build queued", "Pull request merged".
   label: string
   // Who it happened to, as it showed itself. Empty for a row about nothing in
   // particular.
@@ -38,10 +38,8 @@ function label(event: FeedItem): string {
   const verb = LIFECYCLE_VERBS[event.kind]
   if (verb) {
     const workflow = localName(event.workflow)
-    return workflow ? `${workflow} ${verb}` : verb
+    return words(workflow ? `${workflow} ${verb}` : verb)
   }
-  // An app's milestone type is its own word ("merged", "needs_answers"), and an
-  // unrecognised kind reads as itself rather than disappearing.
   return words(event.kind)
 }
 
@@ -66,5 +64,6 @@ function localName(kind: string | null | undefined): string {
 }
 
 function words(identifier: string): string {
-  return identifier.replace(/_/g, ' ')
+  const text = identifier.replace(/[._]/g, ' ')
+  return text.charAt(0).toUpperCase() + text.slice(1)
 }

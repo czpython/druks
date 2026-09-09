@@ -19,13 +19,13 @@ describe('eventLine', () => {
   it('names the workflow and what it did', () => {
     const line = eventLine(event({ kind: 'workflow.running', workflow: 'software_factory.build' }))
 
-    expect(line.label).toBe('build response received')
+    expect(line.label).toBe('Build response received')
     expect(line.source).toBe('build')
   })
 
   it('calls a parked run waiting on you', () => {
     expect(eventLine(event({ kind: 'workflow.parked', workflow: 'software_factory.build' })).label).toBe(
-      'build waiting on you',
+      'Build waiting on you',
     )
   })
 
@@ -65,15 +65,15 @@ describe('eventLine', () => {
       }),
     )
 
-    expect(line.label).toBe('profile response received')
+    expect(line.label).toBe('Profile response received')
     expect(line.subject).toBe('acme/widget')
     expect(line.path).toBeUndefined()
   })
 
-  it('reads an unregistered app without words or a page', () => {
+  it("words an unregistered app's topic and gives it no page", () => {
     const line = eventLine(
       event({
-        kind: 'summarized',
+        kind: 'note.gist_approved',
         app: 'field_notes',
         subjectType: 'note',
         subjectId: '7',
@@ -81,7 +81,7 @@ describe('eventLine', () => {
       }),
     )
 
-    expect(line.label).toBe('summarized')
+    expect(line.label).toBe('Note gist approved')
     expect(line.subject).toBe('note 7')
     expect(line.path).toBeUndefined()
   })

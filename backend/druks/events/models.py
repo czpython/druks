@@ -6,8 +6,10 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
+from druks.apps.loader import iter_apps, resolve_workflow_app
 from druks.database import db_session
 from druks.models import Base, StoredSubject
+from druks.signals import publish
 
 if TYPE_CHECKING:
     from druks.durable.datastructures import Subject
@@ -47,8 +49,7 @@ class Event(Base):
     ) -> Select[tuple["Event"]]:
         """The recorded Activity that matches these filters, as a query. Search reads the
         recorded subject label literally; from is inclusive and until is exclusive."""
-        # App imports Event while the loader imports App, and durable imports this module.
-        from druks.apps.loader import iter_apps
+        # The durable package imports this module.
         from druks.durable.enums import WorkflowEvent
 
         owners = [owner.name for owner in iter_apps() if not owner.builtin]
@@ -114,10 +115,8 @@ class Event(Base):
     ) -> None:
         """Record a subject's domain fact and notify subscribers, in the current
         transaction. A failing subscriber rolls the domain change back with it."""
-        # The apps package, the signals bus, and the durable engine are built on this log.
-        from druks.apps.loader import resolve_workflow_app
+        # The durable package imports this module.
         from druks.durable.exceptions import WorkflowError
-        from druks.signals import publish
 
         try:
             app = resolve_workflow_app(type(subject).__module__)

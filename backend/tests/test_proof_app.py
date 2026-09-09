@@ -18,8 +18,6 @@ def test_discovery_registers_the_tables_and_capabilities():
     assert "field_notes_notes" in Base.metadata.tables
     assert [workflow.__name__ for workflow in app.workflows()] == ["Summarize", "Survey"]
 
-    capability_modules = {module.__name__ for module in app.capability_modules()}
-    assert f"{_PACKAGE}.subscribers" in capability_modules
     prefixes = {router.prefix for router in app.routers()}
     assert prefixes >= {"/notes", "/transcripts/{call_id}", "/note"}
 
