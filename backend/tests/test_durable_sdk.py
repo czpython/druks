@@ -1396,7 +1396,8 @@ async def test_failed_retry_attempts_keep_separate_terminal_records(rt):
         workflows._items.pop(FailingAttempt.kind)
 
 
-async def test_output_activity_survives_completed_step_replay(rt, monkeypatch):
+async def test_output_activity_survives_completed_step_replay(rt, monkeypatch, tmp_path):
+    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     calls = []
     held = []
     monkeypatch.setattr(

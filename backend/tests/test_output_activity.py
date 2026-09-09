@@ -30,6 +30,7 @@ async def output_calls(druks_db):
     ]
     druks_db.add_all(calls)
     await druks_db.flush()
+    druks_db.expunge_all()
     return note, run, calls
 
 
