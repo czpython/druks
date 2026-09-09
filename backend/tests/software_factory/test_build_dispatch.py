@@ -4,6 +4,7 @@ from conftest import connect_service
 from druks.contrib.software_factory import subscribers  # noqa: F401 (the import registers them)
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import ReviewWork
+from druks.contrib.software_factory.enums import Resolution
 from druks.contrib.software_factory.workflows import Build
 from druks.events.models import Event
 from druks.signals import publish
@@ -46,7 +47,7 @@ async def test_dispatch_leaves_the_item_alone(druks_db, monkeypatch) -> None:
     await seed_run(druks_db, kind=Build.kind, run_id="run-new")
     item = await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-2")
     await item.update(pr_number=7, branch="agent/old")
-    await item.resolve(merged=False, at=datetime.now(UTC))
+    await item.resolve(Resolution.CLOSED, at=datetime.now(UTC))
 
     async def fake_start(cls, **kwargs):
         return "run-new"
@@ -117,7 +118,7 @@ async def test_dispatch_merged_noop_still_precedes_the_identity_guard(
     """A redelivery for a merged item does nothing, before the identity check runs."""
     item = await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-10")
     await item.update(pr_number=7, branch="agent/old")
-    await item.resolve(merged=True, at=datetime.now(UTC))
+    await item.resolve(Resolution.MERGED, at=datetime.now(UTC))
 
     async def fake_start(cls, **kwargs):
         raise AssertionError("a merged item never starts")

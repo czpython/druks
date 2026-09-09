@@ -21,6 +21,21 @@ class FeedItem(Schema):
     subject_type: str | None = None
     subject_id: str | None = None
     subject_label: str | None = None
+    run: str | None = Field(default=None, validation_alias=AliasPath("payload", "run"))
+    gate: str | None = Field(default=None, validation_alias=AliasPath("payload", "gate"))
+    parked_at: datetime | None = Field(
+        default=None, validation_alias=AliasPath("payload", "input_requested_at")
+    )
+    input_request: dict | None = Field(
+        default=None, validation_alias=AliasPath("payload", "input_request")
+    )
+    result: dict | None = Field(default=None, validation_alias=AliasPath("payload", "result"))
+    summary: str | None = Field(default=None, validation_alias=AliasPath("payload", "summary"))
+    failure: str | None = Field(default=None, validation_alias=AliasPath("payload", "failure"))
+    reason: str | None = Field(default=None, validation_alias=AliasPath("payload", "reason"))
+    artifact_id: str | None = Field(
+        default=None, validation_alias=AliasPath("payload", "artifact_id")
+    )
 
     @computed_field
     @property
@@ -32,3 +47,9 @@ class FeedResponse(Schema):
     items: list[FeedItem]
     # Event sequence cursor for the next (older) page; None at the tail.
     next_cursor: str | None = None
+
+
+class FeedDestinations(Schema):
+    is_subject_available: bool
+    is_run_available: bool
+    is_artifact_available: bool

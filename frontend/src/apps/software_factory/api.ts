@@ -29,8 +29,8 @@ export const buildApi = {
   },
 }
 
-// GitHub's verdict on the item's PR, verbatim from the backend.
-export type PRResolution = 'merged' | 'closed'
+// How the attempt ended: GitHub's verdict on its PR, or the operator's cancel.
+export type Resolution = 'merged' | 'closed' | 'cancelled'
 
 export interface Links {
   repo: string
@@ -46,7 +46,7 @@ export interface WorkItemSummary extends SubjectSummary {
   ticketKey: string
   prNumber?: number | null
   branch?: string | null
-  resolution: PRResolution | null
+  resolution: Resolution | null
   createdAt: string
   updatedAt: string
   links: Links
@@ -61,7 +61,7 @@ export interface DashboardItem {
   repo?: string | null
   prNumber?: number | null
   projectName?: string | null
-  resolution: PRResolution
+  resolution: Resolution
   createdAt: string
   updatedAt: string
 }

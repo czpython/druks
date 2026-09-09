@@ -9,6 +9,7 @@ from druks.contrib.software_factory.contracts import ImplementationOutput, Revie
 from druks.contrib.software_factory.enums import (
     EvaluationVerdict,
     HumanFeedbackAction,
+    Resolution,
     ReviewDecision,
 )
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
@@ -135,7 +136,7 @@ class Build(Workflow):
             source=ticket["source"], ticket_key=ticket["identifier"]
         )
         if item:
-            if item.resolution == "merged":
+            if item.resolution == Resolution.MERGED:
                 logger.info(
                     "Ticket %s is already merged. The redelivery does nothing.",
                     ticket["identifier"],

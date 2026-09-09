@@ -1,79 +1,119 @@
 import asyncio
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
+from pydantic import AwareDatetime
 
 from druks.api.dependencies import EngineDep
-from druks.database import session_scope
+from druks.database import db_session, session_scope
 from druks.durable.live import SSE_HEADERS
-from druks.events.builder import build_feed
-from druks.events.feed import FeedResponse
+from druks.events import reads
+from druks.events.feed import FeedDestinations, FeedItem, FeedResponse
+from druks.events.models import Event
 
 router = APIRouter(prefix="/api/events", tags=["feed"])
 
-# Per-connection SSE poll cadence. Short enough that the operator's screen feels
-# live, long enough that we're not hammering the DB; the cost is one bounded
-# read per tick, so cadence is set by perceived latency rather than load.
 _SSE_POLL_INTERVAL_SECONDS = 2.0
+_SSE_PAGE_SIZE = 100
 
 
 def _parse_cursor(raw: str | None) -> int | None:
-    # The cursor is a feed sequence (an event's monotonic pk), opaque to the client —
-    # it hands back whatever ``next_cursor`` returned.
     if raw is None:
-        return None
+        return
     try:
-        return int(raw)
-    except ValueError as exc:
+        cursor = int(raw)
+        if cursor < 1:
+            raise ValueError
+        return cursor
+    except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid ``before`` cursor: {raw!r}",
-        ) from exc
+            detail=f"Invalid event cursor: {raw!r}. Use a returned sequence.",
+        ) from error
+
+
+def _check_range(from_at: AwareDatetime | None, until: AwareDatetime | None) -> None:
+    if from_at and until and from_at >= until:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"until {until.isoformat()} is not after from {from_at.isoformat()}. "
+            "Send a later until.",
+        )
 
 
 @router.get("", response_model=FeedResponse, response_model_by_alias=True)
 async def list_feed(
-    limit: int = Query(default=200, ge=1, le=500),
-    before: str | None = Query(default=None),
-    app: str | None = Query(default=None),
+    app: Annotated[str | None, Query()] = None,
+    search: Annotated[str | None, Query(alias="q")] = None,
+    kind: Annotated[str | None, Query()] = None,
+    from_at: Annotated[AwareDatetime | None, Query(alias="from")] = None,
+    until: Annotated[AwareDatetime | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    before: Annotated[str | None, Query()] = None,
 ) -> FeedResponse:
+    _check_range(from_at, until)
+    history = Event.get_history(app=app, search=search, kind=kind, from_at=from_at, until=until)
     cursor = _parse_cursor(before)
-    items, next_cursor = await build_feed(app=app, before=cursor, limit=limit)
-    return FeedResponse(items=items, next_cursor=next_cursor)
+    if cursor:
+        history = history.where(Event.id < cursor)
+    events = list(await db_session().scalars(history.order_by(Event.id.desc()).limit(limit + 1)))
+    next_cursor = str(events[limit - 1].id) if len(events) > limit else None
+    return FeedResponse.model_validate({"items": events[:limit], "next_cursor": next_cursor})
+
+
+@router.get("/kinds", response_model=list[str])
+async def list_feed_kinds(app: Annotated[str | None, Query()] = None) -> list[str]:
+    return await reads.list_kinds(app)
+
+
+@router.get("/{seq}/destinations", response_model=FeedDestinations, response_model_by_alias=True)
+async def get_feed_destinations(seq: int) -> FeedDestinations:
+    event = await db_session().scalar(Event.get_history().where(Event.id == seq))
+    if not event:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"No Activity event {seq}. Use a seq from the feed."
+        )
+    return await reads.get_destinations(event)
 
 
 @router.get("/stream")
 async def stream_feed(
     request: Request,
     engine: EngineDep,
-    app: str | None = Query(default=None),
+    app: Annotated[str | None, Query()] = None,
+    search: Annotated[str | None, Query(alias="q")] = None,
+    kind: Annotated[str | None, Query()] = None,
+    from_at: Annotated[AwareDatetime | None, Query(alias="from")] = None,
+    until: Annotated[AwareDatetime | None, Query()] = None,
+    after: Annotated[str | None, Query()] = None,
 ) -> StreamingResponse:
+    _check_range(from_at, until)
+    history = Event.get_history(app=app, search=search, kind=kind, from_at=from_at, until=until)
+    last_seq = _parse_cursor(request.headers.get("last-event-id") or after)
+
     async def feed_stream():
-        last_seq: int | None = None
-        first = True
-        while True:
-            if await request.is_disconnected():
-                return
-            # New Session per tick so we don't hold a transaction open across the
-            # sleep; the open/close cost is irrelevant against the poll cadence.
+        nonlocal last_seq
+        while not await request.is_disconnected():
+            # Without a cursor the stream opens on the newest page; with one it reads forward.
+            if last_seq:
+                statement = history.where(Event.id > last_seq).order_by(Event.id)
+            else:
+                statement = history.order_by(Event.id.desc())
             async with session_scope(engine):
-                items, _next_cursor = await build_feed(
-                    app=app,
-                    before=None,
-                    limit=100 if first else 50,
-                )
-            # Strictly past the last emitted sequence — the monotonic pk never ties,
-            # so this neither re-sends the boundary event nor drops a same-second one.
-            fresh = items if last_seq is None else [e for e in items if e.seq > last_seq]
-            for item in reversed(fresh):  # oldest-first within a tick
-                yield f"data: {item.model_dump_json(by_alias=True)}\n\n"
-            if fresh:
-                last_seq = fresh[0].seq  # newest just-emitted (page is seq-desc)
-            first = False
-            try:
-                await asyncio.sleep(_SSE_POLL_INTERVAL_SECONDS)
-            except asyncio.CancelledError:
-                return
+                events = await db_session().scalars(statement.limit(_SSE_PAGE_SIZE))
+                items = [FeedItem.model_validate(event) for event in events]
+            if not last_seq:
+                items.reverse()
+            for item in items:
+                yield f"id: {item.seq}\ndata: {item.model_dump_json(by_alias=True)}\n\n"
+            if items:
+                last_seq = items[-1].seq
+            if len(items) < _SSE_PAGE_SIZE:
+                try:
+                    await asyncio.sleep(_SSE_POLL_INTERVAL_SECONDS)
+                except asyncio.CancelledError:
+                    return
 
     return StreamingResponse(
         feed_stream(),

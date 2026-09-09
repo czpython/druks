@@ -53,3 +53,11 @@ class Priority(StrEnum):
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
+
+
+class Resolution(StrEnum):
+    """How a work item's attempt ended: GitHub's verdict on its PR, or an operator's cancel."""
+
+    MERGED = "merged"
+    CLOSED = "closed"
+    CANCELLED = "cancelled"

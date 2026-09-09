@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useLocation } from 'wouter'
 
 import { buildApi } from './api'
-import type { PRResolution } from './api'
+import type { Resolution } from './api'
 import { FilterChip } from '../../components/FilterChip'
 import { StatusTag } from './StatusTag'
 import { PRCell } from '../../components/PRCell'
@@ -13,7 +13,7 @@ import { RepoCell } from '../../components/RepoCell'
 import { relTime, secondsSince, updatedAtSortKey } from '../../lib/format'
 import { dashboardItemPath } from './slug'
 
-type ResolutionFilter = 'all' | PRResolution
+type ResolutionFilter = 'all' | Resolution
 
 
 export function HistoryPage() {
@@ -29,9 +29,10 @@ export function HistoryPage() {
   if (gate) return <Page scroll="internal" className="page-history">{gate}</Page>
 
   const items = historyQuery.data!.items
-  const counts: Record<PRResolution, number> = {
+  const counts: Record<Resolution, number> = {
     merged: items.filter((item) => item.resolution === 'merged').length,
     closed: items.filter((item) => item.resolution === 'closed').length,
+    cancelled: items.filter((item) => item.resolution === 'cancelled').length,
   }
 
   const filtered = items
@@ -87,6 +88,12 @@ export function HistoryPage() {
             current={resolutionFilter}
             onSelect={setResolutionFilter}
             label={`closed (${counts.closed})`}
+          />
+          <FilterChip<ResolutionFilter>
+            value="cancelled"
+            current={resolutionFilter}
+            onSelect={setResolutionFilter}
+            label={`cancelled (${counts.cancelled})`}
           />
         </div>
       }

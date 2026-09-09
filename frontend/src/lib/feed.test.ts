@@ -19,7 +19,7 @@ describe('eventLine', () => {
   it('names the workflow and what it did', () => {
     const line = eventLine(event({ kind: 'workflow.running', workflow: 'software_factory.build' }))
 
-    expect(line.label).toBe('build started')
+    expect(line.label).toBe('build response received')
     expect(line.source).toBe('build')
   })
 
@@ -65,7 +65,7 @@ describe('eventLine', () => {
       }),
     )
 
-    expect(line.label).toBe('profile started')
+    expect(line.label).toBe('profile response received')
     expect(line.subject).toBe('acme/widget')
     expect(line.path).toBeUndefined()
   })
@@ -85,4 +85,13 @@ describe('eventLine', () => {
     expect(line.subject).toBe('note 7')
     expect(line.path).toBeUndefined()
   })
+})
+
+
+it('retains the recorded run and decision round in Factory links', () => {
+  const line = eventLine(event({ app: 'software_factory', subjectType: 'work_item', subjectId: '42',
+    run: 'older-run', parkedAt: '2026-09-09T01:00:00Z' }))
+  const target = new URL(line.path!, 'https://druks.test')
+  expect(target.searchParams.get('run')).toBe('older-run')
+  expect(target.searchParams.get('parkedAt')).toBe('2026-09-09T01:00:00Z')
 })

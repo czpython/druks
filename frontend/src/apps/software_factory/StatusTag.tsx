@@ -1,12 +1,13 @@
-import type { PRResolution } from './api'
+import type { Resolution } from './api'
 
-const GLYPH: Record<PRResolution, string> = {
+const GLYPH: Record<Resolution, string> = {
   merged: '✓',
   closed: '◯',
+  cancelled: '✕',
 }
 
 interface Props {
-  resolution: PRResolution
+  resolution: Resolution
 }
 
 export function StatusTag({ resolution }: Props) {

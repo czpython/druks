@@ -8,6 +8,8 @@ import type {
   Connection,
   App,
   FeedResponse,
+  FeedDestinations,
+  EventFilters,
   FileSummary,
   AppSettingChoices,
   AppsSettingsResponse,
@@ -262,14 +264,18 @@ export const api = {
     postJSON<{ run: string; result: string }>(`/api/runs/${runId}/cancel`, { reason }),
   retryRun: (runId: string) =>
     postJSON<{ run: string }>(`/api/runs/${runId}/retry`, undefined),
-  listEvents: (params: { limit?: number; before?: string; app?: string } = {}) => {
+  listEvents: (params: EventFilters & { limit?: number; before?: string } = {}) => {
     const query = new URLSearchParams()
-    if (params.limit !== undefined) query.set('limit', String(params.limit))
-    if (params.before !== undefined) query.set('before', params.before)
-    if (params.app !== undefined) query.set('app', params.app)
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) query.set(key, String(value))
+    }
     const qs = query.toString()
     return getJSON<FeedResponse>(`/api/events${qs ? `?${qs}` : ''}`)
   },
+  listEventKinds: (app?: string) =>
+    getJSON<string[]>(`/api/events/kinds${app ? `?app=${encodeURIComponent(app)}` : ''}`),
+  getEventDestinations: (seq: number) =>
+    getJSON<FeedDestinations>(`/api/events/${seq}/destinations`),
   getSettings: () => getJSON<InstallationSettings>('/api/settings'),
   updateSettings: (body: UpdateSettingsRequest) =>
     patchJSON<InstallationSettings>('/api/settings', body),

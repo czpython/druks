@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from druks.accounts.models import Account
-from druks.contrib.software_factory.enums import Priority, Status
+from druks.contrib.software_factory.enums import Priority, Resolution, Status
 from druks.contrib.software_factory.exceptions import PrefixTakenError
 from druks.contrib.software_factory.policy import RepoPolicy
 from druks.contrib.software_factory.schemas import ProjectRepoSummary, WorkItemSummary
@@ -244,8 +244,8 @@ class WorkItem(StoredSubject):
     repo: Mapped[str]
     pr_number: Mapped[int | None]
     branch: Mapped[str | None]
-    # GitHub sets "merged" or "closed" for a PR outcome. An operator cancel sets
-    # "closed". The value is None while the work is open.
+    # GitHub's verdict on the PR, or "cancelled" after an operator cancel. None while
+    # the work is open.
     resolution: Mapped[str | None] = mapped_column(default=None)
     # The time of the GitHub verdict, or of the cancel reaction.
     resolved_at: Mapped[datetime | None] = mapped_column(default=None)
@@ -313,43 +313,34 @@ class WorkItem(StoredSubject):
         self.updated_at = Base.utc_now()
         await db_session().flush()
 
-    async def resolve(self, *, merged: bool, at: datetime) -> None:
-        self.resolution = "merged" if merged else "closed"
+    async def resolve(self, resolution: Resolution, *, at: datetime) -> None:
+        """End the attempt and do what its resolution requires. Only GitHub's verdict is
+        announced. The cancel route already records an operator's cancel."""
+        from druks.contrib.software_factory.workflows import Build
+
+        self.resolution = resolution
         self.resolved_at = at
         self.updated_at = Base.utc_now()
-        await self.announce(self.resolution)
         await db_session().flush()
-
-    async def stop(self) -> None:
-        """End the attempt after an operator stop, without a GitHub outcome."""
-        self.resolution = "closed"
-        self.resolved_at = Base.utc_now()
-        self.updated_at = self.resolved_at
-        await db_session().flush()
-
-    async def ship(self) -> None:
-        # A merge strands a build that is parked on review, so cancel it. A running build
-        # finishes by itself, because its merge step finds the PR closed.
-        from druks.contrib.software_factory.workflows import Build
-
-        build = await self.get_status(workflow=Build)
-        if build.is_parked:
-            await Build.cancel(self, failure="pr merged while parked")
-        await self.set_ticket_status(TicketStatus.DONE)
-
-    async def close_external(self) -> None:
-        # The attempt stopped, not the ticket, so the ticket goes back to its resting
-        # status. Branch cleanup is best effort, and a failure must not block that move.
-        from druks.contrib.software_factory.workflows import Build
-
-        await Build.cancel(self, failure="pr closed without merge")
-        await db_session().flush()
-        try:
-            if (await RepoPolicy.resolve(self.repo)).delete_branch:
-                await (await get_github_client()).delete_branch(self.repo, self.branch)
-        except Exception:  # noqa: BLE001 — cleanup only
-            logger.warning("Skipped branch cleanup for %s.", self.repo, exc_info=True)
-        await self.set_ticket_status(TicketStatus.BACKLOG)
+        if resolution in (Resolution.MERGED, Resolution.CLOSED):
+            await self.announce(resolution)
+        if resolution == Resolution.MERGED:
+            # A merge strands a build that is parked on review. A running build finishes
+            # by itself, because its merge step finds the PR closed.
+            if (await self.get_status(workflow=Build)).is_parked:
+                await Build.cancel(self, failure="pr merged while parked")
+            await self.set_ticket_status(TicketStatus.DONE)
+        if resolution == Resolution.CLOSED:
+            # The attempt ended, not the ticket, so the ticket goes back to its resting
+            # status. Branch cleanup is best effort, and a failure must not block that move.
+            await Build.cancel(self, failure="pr closed without merge")
+            await db_session().flush()
+            try:
+                if (await RepoPolicy.resolve(self.repo)).delete_branch:
+                    await (await get_github_client()).delete_branch(self.repo, self.branch)
+            except Exception:  # noqa: BLE001 — cleanup only
+                logger.warning("Skipped branch cleanup for %s.", self.repo, exc_info=True)
+            await self.set_ticket_status(TicketStatus.BACKLOG)
 
     @classmethod
     async def get_for_ticket_key(

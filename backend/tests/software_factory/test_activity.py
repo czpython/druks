@@ -9,6 +9,7 @@ from druks.contrib.software_factory.contracts import (
     ReviewReport,
 )
 from druks.contrib.software_factory.datastructures import PullRequest
+from druks.contrib.software_factory.enums import Resolution
 from druks.contrib.software_factory.models import WorkItem
 from druks.contrib.software_factory.subscribers import pr_close_settles_the_item
 from druks.contrib.software_factory.workflows import Build, PullRequestReview
@@ -122,7 +123,7 @@ async def test_owner_outcome_and_announcement_roll_back_together(druks_db):
     item_id = item.id
     with pytest.raises(RuntimeError, match="Roll back the delivery"):
         async with druks_db.begin_nested():
-            await item.resolve(merged=True, at=datetime.now(UTC))
+            await item.resolve(Resolution.MERGED, at=datetime.now(UTC))
             raise RuntimeError("Roll back the delivery")
     druks_db.expunge_all()
     assert not (await WorkItem.get(item_id)).resolution
@@ -154,7 +155,7 @@ async def test_operator_stop_records_no_owner_close(druks_db, druks_client, pr_n
     events = list(await druks_db.scalars(select(Event).where(Event.subject_id == str(item.id))))
     assert [event.type for event in events] == ["workflow.cancelled"]
     druks_db.expunge_all()
-    assert (await WorkItem.get(item.id)).resolution == "closed"
+    assert (await WorkItem.get(item.id)).resolution == Resolution.CANCELLED
 
 
 @pytest.mark.parametrize("state", ["parked", "failed"])
@@ -177,3 +178,24 @@ async def test_owner_merge_records_once_without_an_operator_stop(druks_db, state
     events = list(await druks_db.scalars(select(Event).where(Event.subject_id == str(item.id))))
     assert [event.type for event in events] == ["merged"]
     assert item.resolution == "merged"
+
+
+async def test_owner_merge_replaces_an_operator_cancel(druks_db, druks_client):
+    db_session.registry.set(druks_db)
+    item = await make_test_work_item(repo="acme/widget", title="Merged after a cancel")
+    await item.update(pr_number=42, branch="agent/cancelled")
+    run = await seed_run(druks_db, kind=Build.kind, subject=item)
+    response = await druks_client.post(
+        f"/api/runs/{run.id}/cancel", json={"reason": "Operator stopped work"}
+    )
+    assert response.status_code == 200
+    druks_db.expunge_all()
+    await pr_close_settles_the_item(
+        repo="acme/widget",
+        pr_number=42,
+        payload={"branch": "agent/cancelled", "merged": True, "resolved_at": datetime.now(UTC)},
+    )
+    events = list(await druks_db.scalars(select(Event).where(Event.subject_id == str(item.id))))
+    assert [event.type for event in events] == ["workflow.cancelled", "merged"]
+    druks_db.expunge_all()
+    assert (await WorkItem.get(item.id)).resolution == Resolution.MERGED

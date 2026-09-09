@@ -796,6 +796,14 @@ export interface UpdateAppsSettingsRequest {
 }
 
 
+export interface EventFilters {
+  q?: string
+  app?: string
+  kind?: string
+  from?: string
+  until?: string
+}
+
 export interface FeedItem {
   id: string
   seq: number
@@ -811,11 +819,27 @@ export interface FeedItem {
   // How the subject showed itself ("ENG-767"), snapshotted at write. Absent
   // exactly when the subject is.
   subjectLabel?: string | null
+  run?: string | null
+  gate?: string | null
+  parkedAt?: string | null
+  inputRequest?: InputRequest | null
+  result?: Record<string, unknown> | null
+  summary?: string | null
+  failure?: string | null
+  reason?: string | null
+  artifactId?: string | null
 }
 
 export interface FeedResponse {
   items: FeedItem[]
   nextCursor: string | null
+}
+
+// Whether the subject, run, and artifact that one Activity row recorded still exist.
+export interface FeedDestinations {
+  isSubjectAvailable: boolean
+  isRunAvailable: boolean
+  isArtifactAvailable: boolean
 }
 
 

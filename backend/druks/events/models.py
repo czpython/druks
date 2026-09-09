@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Index
+from sqlalchemy import Index, Select, and_, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -34,6 +34,53 @@ class Event(Base):
     # Append-only, so creation time is the event time. No updated_at.
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+
+    @classmethod
+    def get_history(
+        cls,
+        *,
+        app: str | None = None,
+        search: str | None = None,
+        kind: str | None = None,
+        from_at: datetime | None = None,
+        until: datetime | None = None,
+    ) -> Select[tuple["Event"]]:
+        """The recorded Activity that matches these filters, as a query. Search reads the
+        recorded subject label literally; from is inclusive and until is exclusive."""
+        # App imports Event while the loader imports App, and durable imports this module.
+        from druks.apps.loader import iter_apps
+        from druks.durable.enums import WorkflowEvent
+
+        owners = [owner.name for owner in iter_apps() if not owner.builtin]
+        statement = select(cls).where(
+            cls.app.in_(owners),
+            or_(
+                cls.type.not_like("workflow.%"),
+                cls.type.in_(
+                    [
+                        WorkflowEvent.SCHEDULED,
+                        WorkflowEvent.PARKED,
+                        WorkflowEvent.FAILED,
+                        WorkflowEvent.CANCELLED,
+                    ]
+                ),
+                # A validated gate reply records its result; a routine start records none.
+                and_(cls.type == WorkflowEvent.RUNNING, cls.payload.has_key("result")),
+            ),
+        )
+        if app:
+            statement = statement.where(cls.app == app)
+        if search and search.strip():
+            statement = statement.where(
+                cls.subject_label.icontains(search.strip(), autoescape=True)
+            )
+        if kind:
+            statement = statement.where(cls.type == kind)
+        if from_at:
+            statement = statement.where(cls.created_at >= from_at)
+        if until:
+            statement = statement.where(cls.created_at < until)
+        return statement
 
     @classmethod
     async def emit(

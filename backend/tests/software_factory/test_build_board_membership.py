@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import druks.contrib.software_factory.workflows  # noqa: F401  # registers software_factory.build, the seeded kind
 import pytest
+from druks.contrib.software_factory.enums import Resolution
 from druks.contrib.software_factory.models import WorkItem
 
 from software_factory.factories import make_test_work_item, seed_build_run
@@ -13,7 +14,8 @@ async def _board_ids(druks_db):
 
 
 async def _resolve(item, *, merged=True, at=None):
-    await item.resolve(merged=merged, at=at or datetime.now(UTC))
+    resolution = Resolution.MERGED if merged else Resolution.CLOSED
+    await item.resolve(resolution, at=at or datetime.now(UTC))
 
 
 @pytest.mark.parametrize(

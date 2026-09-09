@@ -1,4 +1,4 @@
-import type { PRResolution } from './api'
+import type { Resolution } from './api'
 import type { RunSummary, SubjectStatus } from '../../api/types'
 import { phaseLine } from '../../lib/phase'
 
@@ -21,7 +21,7 @@ function kindLabel(kind: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
 
-export function statusLine(status: SubjectStatus, resolution: PRResolution | null): string {
+export function statusLine(status: SubjectStatus, resolution: Resolution | null): string {
   if (status.state === 'parked') {
     return parkedLine(status.gate) ?? 'Waiting on you'
   }

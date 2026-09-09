@@ -5,7 +5,7 @@ import { Link, useLocation } from 'wouter'
 
 import { useSSE } from '../../api/sse'
 import { buildApi } from './api'
-import type { PRResolution, WorkItemDetail, WorkItemSummary } from './api'
+import type { Resolution, WorkItemDetail, WorkItemSummary } from './api'
 import type {
   AgentCallSummary,
   RunState,
@@ -123,7 +123,7 @@ const STATE_CLS: Record<RunState, string> = {
   orphaned: 'failed',
 }
 
-function statusView(status: SubjectStatus, resolution: PRResolution | null): Status {
+function statusView(status: SubjectStatus, resolution: Resolution | null): Status {
   const live = status.state === 'running' || status.state === 'parked'
   const className = status.state ? STATE_CLS[status.state] : 'cancelled'
   return { className, label: statusLine(status, resolution), live }

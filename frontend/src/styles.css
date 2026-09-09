@@ -236,6 +236,7 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 }
 .outcome-merged    { color: var(--outcome-merged); }
 .outcome-closed    { color: var(--outcome-abandoned); }
+.outcome-cancelled { color: var(--outcome-abandoned); }
 .outcome-failed    { color: var(--outcome-failed); }
 .outcome-abandoned { color: var(--outcome-abandoned); }
 

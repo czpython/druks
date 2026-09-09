@@ -3,15 +3,15 @@ import { appLabel, getAppUI } from '../apps/registry'
 
 // What a workflow doing something is called when its app gives no label of its own.
 const LIFECYCLE_VERBS: Record<string, string> = {
-  'workflow.running': 'started',
+  'workflow.scheduled': 'queued',
+  'workflow.running': 'response received',
   'workflow.parked': 'waiting on you',
-  'workflow.finished': 'finished',
   'workflow.failed': 'failed',
   'workflow.cancelled': 'cancelled',
 }
 
 export interface EventLine {
-  // What happened, in words: "build started", "merged".
+  // What happened, in words: "build queued", "merged".
   label: string
   // Who it happened to, as it showed itself. Empty for a row about nothing in
   // particular.
@@ -48,7 +48,10 @@ function label(event: FeedItem): string {
 function subjectPath(event: FeedItem): string | undefined {
   if (event.app && event.subjectType && event.subjectId) {
     const ui = getAppUI(event.app)
-    return ui?.subjectPath?.({ type: event.subjectType, id: event.subjectId })
+    const target = event.run
+      ? { run: event.run, parkedAt: event.parkedAt ?? undefined }
+      : undefined
+    return ui?.subjectPath?.({ type: event.subjectType, id: event.subjectId }, target)
   }
   return undefined
 }

@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from druks.contrib.software_factory.enums import Resolution
 from druks.contrib.software_factory.models import WorkItem
 from druks.durable.reads import list_subject_timeline
 from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_call
@@ -54,7 +55,8 @@ async def _resolve(repo, pr_number, *, merged=True):
     merge handler stores it."""
     item = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number)
     if item:
-        await item.resolve(merged=merged, at=datetime.now(UTC))
+        resolution = Resolution.MERGED if merged else Resolution.CLOSED
+        await item.resolve(resolution, at=datetime.now(UTC))
 
 
 # The generic subject read-side — Build declares subject = WorkItem, so the

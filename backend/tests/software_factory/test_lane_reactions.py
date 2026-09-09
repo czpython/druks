@@ -4,6 +4,7 @@ import druks.contrib.software_factory.subscribers  # noqa: F401 — registers th
 import pytest
 from druks.accounts.models import Account
 from druks.contrib.software_factory.contracts import ReviewWork
+from druks.contrib.software_factory.enums import Resolution
 from druks.contrib.software_factory.models import WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Build
@@ -25,7 +26,7 @@ async def test_new_build_claims_the_item(druks_db):
         repo="acme/widget", title="t", source="linear", ticket_key="ACME-1"
     )
     await item.update(pr_number=7, branch="agent/old")
-    await item.resolve(merged=False, at=datetime.now(UTC))
+    await item.resolve(Resolution.CLOSED, at=datetime.now(UTC))
 
     await publish(WorkflowEvent.SCHEDULED, subject=item.identity, kind=Build.kind)
 
@@ -47,19 +48,19 @@ async def test_cancelled_build_settles_the_item(druks_db):
     )
 
     refreshed = await WorkItem.get(item.id)
-    assert refreshed.resolution == "closed"
+    assert refreshed.resolution == Resolution.CANCELLED
     assert refreshed.resolved_at
     druks_db.expunge_all()
     assert str(item.id) not in {summary.id for summary in await WorkItem.list_summaries(None)}
 
 
-@pytest.mark.parametrize(("merged", "resolution"), [(True, "merged"), (False, "closed")])
-async def test_cancelled_build_preserves_an_existing_resolution(druks_db, merged, resolution):
+@pytest.mark.parametrize("resolution", [Resolution.MERGED, Resolution.CLOSED])
+async def test_cancelled_build_preserves_an_existing_resolution(druks_db, resolution):
     item = await make_test_work_item(
         repo="acme/widget", title="t", source="linear", ticket_key="ACME-3"
     )
     resolved_at = datetime(2026, 8, 8, 12, tzinfo=UTC)
-    await item.resolve(merged=merged, at=resolved_at)
+    await item.resolve(resolution, at=resolved_at)
 
     await publish(
         WorkflowEvent.CANCELLED,
