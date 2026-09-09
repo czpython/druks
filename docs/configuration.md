@@ -367,6 +367,11 @@ model catalog timestamp. The weekly quota stays in the provider row.
 Anthropic and OpenAI fetch separate model lists.
 Added providers use the cached Models.dev directory.
 
+Druks polls subscription usage every five minutes, with intervals up to one hour
+while values stay unchanged. An exhausted window waits for its reset unless an
+agent call finishes on the subscription. Manual refresh keeps a 60-second
+minimum between polls.
+
 The `claude` and `codex` CLIs run on their own vendor's subscription or key.
 `opencode` and `pi` run on an API key only, for Anthropic or OpenAI. A key for
 a Models.dev provider stores, but an agent on that provider refuses to run: no
