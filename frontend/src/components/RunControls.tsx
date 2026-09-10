@@ -84,6 +84,8 @@ const CONTROL_LABEL: Record<string, string> = {
   approve: 'Approve',
   request_changes: 'Request changes',
   revise_contract: 'Revise contract',
+  send: 'Send',
+  stop: 'Stop',
 }
 
 export function InAppReview({

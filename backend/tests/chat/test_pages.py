@@ -96,7 +96,12 @@ async def test_a_parked_turn_puts_gate_controls_on_the_thread(druks_client, druk
         subject=conversation,
         state="parked",
         input_gate=ChatTurn.name,
-        input_request={"presentation": "in_app", "label": "Chat turn"},
+        input_request={
+            "presentation": "in_app",
+            "label": "Message",
+            "controls": ["send", "stop"],
+            "questions": [],
+        },
     )
     run.input_requested_at = datetime.now(UTC)
     await druks_db.flush()
