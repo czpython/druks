@@ -36,6 +36,7 @@ import type {
   Skill,
   SkillCollection,
   InstallationSettings,
+  DashboardOverview,
   DashboardSchedules,
   DashboardWork,
 } from './types'
@@ -225,6 +226,9 @@ async function sendOperation(method: string, path: string, body: unknown): Promi
 }
 
 export const api = {
+  dashboardOverview: (app?: string) => getJSON<DashboardOverview>(
+    `/api/dashboard/overview${app === undefined ? '' : `?app=${encodeURIComponent(app)}`}`,
+  ),
   dashboardWork: () => getJSON<DashboardWork>('/api/dashboard/work'),
   dashboardSchedules: () => getJSON<DashboardSchedules>('/api/dashboard/schedules'),
   listApps: () => getJSON<App[]>('/api/apps'),
