@@ -50,3 +50,17 @@ async def test_messages_are_rows_and_empty_is_a_list():
     assert listed[0].id == first.id
     assert listed[1].id == second.id
     assert all(isinstance(message, Message) for message in listed)
+
+
+async def test_list_summaries_is_this_accounts_threads():
+    owner = await Account.get_or_create("op@example.com")
+    other = await Account.get_or_create("dev@example.com")
+    mine = await Conversation.create(account_id=owner.id, title="mine")
+    await Conversation.create(account_id=other.id, title="theirs")
+
+    listed = await Conversation.list_summaries(owner.id)
+    assert [summary.id for summary in listed] == [str(mine.id)]
+    assert listed[0].title == "mine"
+    assert listed[0].autonomy == Autonomy.PROPOSE
+    assert listed[0].label == mine.label
+    assert await Conversation.list_summaries(None) == []

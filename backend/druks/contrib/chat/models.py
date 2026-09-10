@@ -4,6 +4,7 @@ from sqlalchemy import ForeignKey, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from druks.contrib.chat.enums import Autonomy, Role
+from druks.contrib.chat.schemas import ConversationSummary
 from druks.db import Base, StoredSubject, db_session
 
 
@@ -53,6 +54,20 @@ class Conversation(StoredSubject):
 
     async def list_messages(self) -> list["Message"]:
         return await Message.list_for_conversation(self.id)
+
+    def get_summary(self) -> ConversationSummary:
+        return ConversationSummary.model_validate(self)
+
+    @classmethod
+    async def list_summaries(cls, account_id: str | None) -> list[ConversationSummary]:
+        """This account's threads. A missing caller is not a shared board —
+        conversations are per-account, so the list is empty."""
+        if account_id:
+            return [
+                conversation.get_summary()
+                for conversation in await cls.list_for_account(account_id)
+            ]
+        return []
 
 
 class Message(Base):
