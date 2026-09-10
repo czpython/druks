@@ -93,14 +93,14 @@ async def create_ticket(
         ..., embed=True, description="the GitHub repo this ticket's PR will target"
     ),
     description: str = Body("", embed=True),
-    status: Status = Body(Status.TODO, embed=True),
+    status: Status = Body(Status.BACKLOG, embed=True),
     priority: Priority = Body(Priority.NONE, embed=True),
     assignee_id: str | None = Body(None, embed=True),
     account: Account = Depends(current_account),
 ) -> TicketDetail:
     """Write a ticket down. It takes the next number in its repo's project's
     sequence. Creating in Ready for Agent is a transition into the trigger, so a
-    build can open. Creating in Todo publishes nothing."""
+    build can open. Creating in Backlog publishes nothing."""
     title = required_text(title, "title")
     # An assignee select with nobody picked submits "", and the shell sends
     # every field the form shows. Blank is nobody, not an account id to look up.

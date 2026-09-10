@@ -24,7 +24,7 @@ class Ticket(StoredSubject):
     # Status and priority are String columns driven by this app's closed
     # StrEnums, not native PG enum types: the workflow stays in code and a label
     # change never needs an ALTER TYPE.
-    status: Mapped[str] = mapped_column(default=Status.TODO)
+    status: Mapped[str] = mapped_column(default=Status.BACKLOG)
     priority: Mapped[str] = mapped_column(default=Priority.NONE)
     # Required: a ticket names the repo its PR will land in, and the identifier
     # is minted from that repo's project.
@@ -49,7 +49,7 @@ class Ticket(StoredSubject):
         repo_id: int,
         title: str,
         description: str = "",
-        status: Status = Status.TODO,
+        status: Status = Status.BACKLOG,
         priority: Priority = Priority.NONE,
         assignee_id: str | None = None,
         creator_id: str | None = None,
@@ -71,7 +71,7 @@ class Ticket(StoredSubject):
         session.add(ticket)
         await session.flush()
         # Creating already in Ready for Agent is arriving at the trigger, the
-        # same as a later move into it. Todo and the rest stay quiet: drafting
+        # same as a later move into it. Backlog and the rest stay quiet: drafting
         # is not a funnel event.
         if status == Status.READY_FOR_AGENT:
             await ticket._emit_transitioned(status)

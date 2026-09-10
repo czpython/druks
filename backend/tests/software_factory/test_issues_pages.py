@@ -5,7 +5,6 @@ from software_factory.factories import make_test_work_item
 
 BOARD_COLUMNS = [
     "Backlog",
-    "Todo",
     "Ready for Agent",
     "In Progress",
     "In Review",
@@ -13,7 +12,6 @@ BOARD_COLUMNS = [
 ]
 LIST_SECTIONS = [
     "Backlog",
-    "Todo",
     "Ready for Agent",
     "In Progress",
     "In Review",
@@ -104,7 +102,6 @@ async def test_empty_board_shows_columns_and_create_actions(druks_client):
         assert cards["empty"]["title"] == "Nothing here"
     assert [column["blocks"][0]["drop"]["arguments"]["status"] for column in columns] == [
         "backlog",
-        "todo",
         "ready_for_agent",
         "in_progress",
         "in_review",
@@ -112,34 +109,34 @@ async def test_empty_board_shows_columns_and_create_actions(druks_client):
     ]
 
 
-async def test_created_ticket_lands_in_todo_on_board_and_issues(druks_client):
+async def test_created_ticket_lands_in_backlog_on_board_and_issues(druks_client):
     repo = await _open_repo(druks_client)
     ticket = await _open_ticket(druks_client, repo["id"], title="Ship the board")
 
     board = (await druks_client.get(f"{_PAGES}/board")).json()
     by_title = {column["title"]: column for column in _columns(board)}
-    (card,) = _cards_in(by_title["Todo"])
+    (card,) = _cards_in(by_title["Backlog"])
     assert card["title"] == "Ship the board"
     assert card["description"].startswith("DRU-1")
     assert card["link"]["arguments"] == {"identifier": ticket["identifier"]}
     assert card["drag"] == {"identifier": ticket["identifier"]}
     assert card["controls"] == []
     for title in BOARD_COLUMNS:
-        if title != "Todo":
+        if title != "Backlog":
             assert _cards_in(by_title[title]) == []
 
     listed = (await druks_client.get(f"{_PAGES}/issues")).json()
     by_section = _by_section(listed)
     assert listed["title"] == "Issues"
     assert listed["description"] == ""
-    assert [table["title"] for table in _tables(listed)] == _section_titles({"Todo": 1})
-    (row,) = by_section["Todo"]["rows"]
+    assert [table["title"] for table in _tables(listed)] == _section_titles({"Backlog": 1})
+    (row,) = by_section["Backlog"]["rows"]
     assert row["cells"][0]["text"] == "DRU-1"
     assert row["cells"][1]["text"] == "Ship the board"
     assert row["cells"][1]["link"]["arguments"] == {"identifier": ticket["identifier"]}
     assert row["cells"][4]["text"] == "acme/druks"
     for title in LIST_SECTIONS:
-        if title != "Todo":
+        if title != "Backlog":
             assert by_section[title]["rows"] == []
 
 
@@ -155,12 +152,12 @@ async def test_moving_a_ticket_updates_board_and_issues(druks_client):
     board = (await druks_client.get(f"{_PAGES}/board")).json()
     by_title = {column["title"]: column for column in _columns(board)}
     assert [card["title"] for card in _cards_in(by_title["In Progress"])] == ["In flight"]
-    assert _cards_in(by_title["Todo"]) == []
+    assert _cards_in(by_title["Backlog"]) == []
 
     listed = (await druks_client.get(f"{_PAGES}/issues")).json()
     by_section = _by_section(listed)
     assert [row["cells"][1]["text"] for row in by_section["In Progress"]["rows"]] == ["In flight"]
-    assert by_section["Todo"]["rows"] == []
+    assert by_section["Backlog"]["rows"] == []
 
 
 async def test_cancelled_tickets_are_off_the_board_and_last_on_issues(druks_client):
@@ -178,7 +175,7 @@ async def test_cancelled_tickets_are_off_the_board_and_last_on_issues(druks_clie
 
     listed = (await druks_client.get(f"{_PAGES}/issues")).json()
     tables = _tables(listed)
-    assert [table["title"] for table in tables] == _section_titles({"Todo": 1, "Cancelled": 1})
+    assert [table["title"] for table in tables] == _section_titles({"Backlog": 1, "Cancelled": 1})
     assert _section_name(tables[-1]["title"]) == "Cancelled"
     assert [row["cells"][1]["text"] for row in tables[-1]["rows"]] == ["gone"]
 
@@ -325,10 +322,10 @@ async def test_board_status_filter_keeps_columns_and_shows_cancelled_when_asked(
         json={"status": "cancelled"},
     )
 
-    todo = (await druks_client.get(f"{_PAGES}/board", params={"status": "todo"})).json()
-    cards = [card["title"] for column in _columns(todo) for card in _cards_in(column)]
+    backlog = (await druks_client.get(f"{_PAGES}/board", params={"status": "backlog"})).json()
+    cards = [card["title"] for column in _columns(backlog) for card in _cards_in(column)]
     assert cards == ["live"]
-    assert [column["title"] for column in _columns(todo)] == BOARD_COLUMNS
+    assert [column["title"] for column in _columns(backlog)] == BOARD_COLUMNS
 
     cancelled = (await druks_client.get(f"{_PAGES}/board", params={"status": "cancelled"})).json()
     assert [column["title"] for column in _columns(cancelled)] == [*BOARD_COLUMNS, "Cancelled"]
