@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -94,10 +94,12 @@ class _FakeAPI:
     created_secrets: list[dict[str, Secret] | None] = field(default_factory=list)
     created_expires_at: list[datetime | None] = field(default_factory=list)
     deleted_ids: list[str] = field(default_factory=list)
+    renewed: list[tuple[str, datetime | None]] = field(default_factory=list)
     get_host_responses: list[SandboxHostRecord] = field(default_factory=list)
     create_record: SandboxHostRecord | None = None
     create_raises: Exception | None = None
     delete_raises: Exception | None = None
+    renew_raises: Exception | None = None
     # When set, every get_host call raises this exception instead of
     # returning from get_host_responses. Used by the attach() tests
     # to simulate the provider 404'ing a host we still have in our
@@ -136,6 +138,17 @@ class _FakeAPI:
         self.deleted_ids.append(host_id)
         if self.delete_raises is not None:
             raise self.delete_raises
+
+    async def renew_host(
+        self,
+        host_id: str,
+        *,
+        expires_at: datetime | None = None,
+    ) -> SandboxHostRecord:
+        self.renewed.append((host_id, expires_at))
+        if self.renew_raises is not None:
+            raise self.renew_raises
+        return _record(host_id=host_id)
 
 
 def _record(
@@ -923,3 +936,35 @@ async def test_a_gone_box_loses_its_identity_and_the_retry_provisions_anew(
     await db_session().refresh(identity)
     assert not identity.is_live
     assert await SandboxIdentity.lookup("run-1", "workflow", identity.secret_refs) is None
+
+
+async def test_set_expiry_forwards_expires_at_to_sdk_renew(
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """Clipping a lease is a renew, not a delete: the caller's expiry goes
+    through to the SDK verbatim — no druks-side clamp — and the VM stays up."""
+    api = _FakeAPI(create_record=None)
+    patched_sandbox_api.append(api)
+    expires_at = datetime.now(UTC) + timedelta(seconds=90)
+
+    await sandbox_client.set_expiry(host_id="host-xyz", expires_at=expires_at)
+
+    assert api.renewed == [("host-xyz", expires_at)]
+    assert api.deleted_ids == []
+
+
+async def test_set_expiry_surfaces_missing_host(patched_sandbox_api: list[_FakeAPI]):
+    """A host drukbox no longer knows about surfaces as the SDK's
+    ``SandboxNotFoundError`` — the idle-hold caller decides what "gone"
+    means, so it is neither swallowed nor remapped to ``HostGone``."""
+    missing = SandboxNotFoundError("host-xyz not found")
+    api = _FakeAPI(create_record=None, renew_raises=missing)
+    patched_sandbox_api.append(api)
+
+    with pytest.raises(SandboxNotFoundError) as excinfo:
+        await sandbox_client.set_expiry(
+            host_id="host-xyz",
+            expires_at=datetime.now(UTC) + timedelta(seconds=90),
+        )
+
+    assert excinfo.value is missing
