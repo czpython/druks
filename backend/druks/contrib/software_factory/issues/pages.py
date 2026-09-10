@@ -16,26 +16,6 @@ BOARD_STATUSES = (
     Status.IN_REVIEW,
     Status.DONE,
 )
-# The issues page's sections, left to right through the workflow, then parked
-# and cancelled at the bottom. Ready for Agent stays: it is still a live status.
-LIST_STATUSES = (
-    Status.BACKLOG,
-    Status.READY_FOR_AGENT,
-    Status.IN_PROGRESS,
-    Status.IN_REVIEW,
-    Status.DONE,
-    Status.BLOCKED,
-    Status.CANCELLED,
-)
-
-ISSUE_COLUMNS = [
-    ui.TableColumn("Identifier", width="8rem"),
-    ui.TableColumn("Title"),
-    ui.TableColumn("Priority", width="8rem"),
-    ui.TableColumn("Assignee", width="14rem"),
-    ui.TableColumn("Repo", width="12rem"),
-    ui.TableColumn("Updated", align="end", width="9rem"),
-]
 
 # The words the screens spell a priority with. The stored value stays
 # snake_case; only these strings change when the board wants different words.
@@ -95,8 +75,8 @@ def _creator_name(creator_id: str | None, account_names: dict[str, str]) -> str:
 
 
 def _create_actions(repos: list[ProjectRepo], accounts: list[Account]) -> list[ui.Action]:
-    """Creation is a control on the board and the issues page, not a destination:
-    a page that lists nothing is not where a ticket gets written."""
+    """Creation is a control on the board, not a destination: a page that lists
+    nothing is not where a ticket gets written."""
     repo_choices = _repo_options(repos)
     return [
         ui.Action(
@@ -175,22 +155,6 @@ def _ticket_card(ticket: Ticket, account_names: dict[str, str]) -> ui.Card:
         description=" · ".join(description),
         link=_ticket_link(ticket, ticket.title),
         drag={"identifier": ticket.identifier},
-    )
-
-
-def _ticket_row(ticket: Ticket, account_names: dict[str, str]) -> ui.TableRow:
-    return ui.TableRow(
-        [
-            ui.TextValue(
-                ticket.identifier,
-                link=_ticket_link(ticket, ticket.identifier),
-            ),
-            ui.TextValue(ticket.title, link=_ticket_link(ticket, ticket.title)),
-            ui.TextValue(PRIORITY_LABELS[Priority(ticket.priority)]),
-            ui.TextValue(_assignee_name(ticket.assignee_id, account_names)),
-            ui.TextValue(ticket.repo.full_name),
-            ui.TimeValue(ticket.updated_at),
-        ]
     )
 
 
@@ -575,44 +539,4 @@ async def ticket(identifier: str):
                 layout="sidebar",
             )
         ],
-    )
-
-
-@ui.page("/issues")
-async def issues(
-    status: str = "",
-    priority: str = "",
-    updated: str = "",
-    assignee: str = "",
-    creator: str = "",
-    project: str = "",
-    repo: str = "",
-):
-    tickets, repos, accounts, filters = await _ticket_collection(
-        exclude_cancelled=False,
-        status=status,
-        priority=priority,
-        updated=updated,
-        assignee=assignee,
-        creator=creator,
-        project=project,
-        repo=repo,
-    )
-    account_names = {account.id: account.username for account in accounts}
-    sections = []
-    for item in LIST_STATUSES:
-        rows = [ticket for ticket in tickets if ticket.status == item]
-        sections.append(
-            ui.Table(
-                title=f"{item.label} ({len(rows)})",
-                columns=ISSUE_COLUMNS,
-                rows=[_ticket_row(row, account_names) for row in rows],
-                empty_text=f"No ticket is in {item.label}.",
-            )
-        )
-    return ui.Page(
-        "Issues",
-        controls=_create_actions(repos, accounts),
-        filters=filters,
-        blocks=[ui.Stack(sections, gap="large")],
     )

@@ -144,19 +144,19 @@ describe('ProjectsPage create row', () => {
 })
 
 describe('ProjectsPage prefix note', () => {
-  it('notes that a project without a prefix cannot be selected in Issues', async () => {
+  it('notes that a project without a prefix cannot be selected on the board', async () => {
     renderPage([project({ name: 'Bare' })])
 
     expect(
-      await screen.findByText(/cannot be selected in Issues/),
+      await screen.findByText(/cannot be selected on the board/),
     ).toBeTruthy()
   })
 
-  it('does not note Issues when the project has a prefix', async () => {
+  it('does not note the board when the project has a prefix', async () => {
     renderPage([project({ name: 'Acme', prefix: 'ACM' })])
 
     expect(await screen.findByText('Acme')).toBeTruthy()
-    expect(screen.queryByText(/cannot be selected in Issues/)).toBeNull()
+    expect(screen.queryByText(/cannot be selected on the board/)).toBeNull()
   })
 
   it('hides the prefix field and note when the tracker is not druks', async () => {
@@ -164,7 +164,7 @@ describe('ProjectsPage prefix note', () => {
 
     expect(await screen.findByText('Bare')).toBeTruthy()
     expect(screen.queryByPlaceholderText(/prefix/)).toBeNull()
-    expect(screen.queryByText(/cannot be selected in Issues/)).toBeNull()
+    expect(screen.queryByText(/cannot be selected on the board/)).toBeNull()
     expect(screen.queryByText('prefix')).toBeNull()
   })
 
