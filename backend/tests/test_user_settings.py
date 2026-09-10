@@ -8,7 +8,7 @@ from druks.apps.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
-from druks.user_settings.models import SettingsProfile
+from druks.user_settings.models import InstallationSettings
 from druks.user_settings.schemas import SettingsFieldResponse
 from druks.workflows import Workflow
 from pydantic import BaseModel, Field, SecretStr, field_validator
@@ -21,9 +21,8 @@ def session(druks_db):
 
 
 async def test_get_lazy_creates_row_with_the_shipped_defaults(session):
-    row = await SettingsProfile.get()
+    row = await InstallationSettings.get()
     await session.commit()
-    assert row.timezone == "UTC"
     assert (row.default_harness, row.default_model, row.default_billing) == (
         "claude",
         "anthropic/claude-opus-4-7",
@@ -32,11 +31,11 @@ async def test_get_lazy_creates_row_with_the_shipped_defaults(session):
     assert (row.default_effort, row.fast_mode, row.default_timeout) == ("high", False, 1800)
 
 
-async def test_update_profile_persists_the_defaults(session):
-    row = await SettingsProfile.get()
-    await row.update_profile(default_harness="codex", fast_mode=True)
+async def test_update_persists_the_defaults(session):
+    row = await InstallationSettings.get()
+    await row.update(default_harness="codex", fast_mode=True)
     await session.commit()
-    row = await SettingsProfile.get()
+    row = await InstallationSettings.get()
     assert (row.default_harness, row.fast_mode) == ("codex", True)
 
 

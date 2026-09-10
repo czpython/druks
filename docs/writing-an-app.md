@@ -193,14 +193,15 @@ For example, a webhook can resolve the ticket assignee.
 An unattended start records the default account. Druks refuses to start a run
 before an account is available. A parked run keeps its account after resume.
 
-Each agent call uses that account's profile. Agent overrides take priority.
+Each agent call uses the installation execution defaults. Agent overrides take
+priority. Subscription billing uses the run account's subscription.
 The call records exactly one billing reference: `subscription_id` or
 `api_key_provider`. Druks uses that selected credential for execution. Missing
 credentials refuse the call. A workflow can use different providers across its
 agent calls. Disconnect clears the credential secret and retains its billing
 identity for call history.
 See [personal and installation settings](configuration.md#personal-and-installation-settings)
-for profile creation and timezone rules.
+for execution defaults, personal preferences, and timezone rules.
 
 ### The journal
 
@@ -392,19 +393,20 @@ operator configures it in the app's **Settings → Agents**. Shared defaults
 are in **Settings → Agents**:
 
 ```python
-profile = await NightWatch.auditor.get_profile()
-profile.harness   # "claude" | "codex" | "opencode" | "pi"
-profile.model_id  # the model as that CLI names it, provider prefix stripped
-profile.model     # "provider/model"
-profile.effort
-profile.billing   # "subscription" | "api_key"
-profile.secrets   # the Drukbox entries that put the key in the VM as a placeholder
+config = await NightWatch.auditor.get_config()
+config.harness   # "claude" | "codex" | "opencode" | "pi"
+config.model_id  # the model as that CLI names it, provider prefix stripped
+config.model     # "provider/model"
+config.effort
+config.billing   # "subscription" | "api_key"
+config.secrets   # the Drukbox entries that put the key in the VM as a placeholder
 ```
 
-`get_profile()` runs inside a workflow and reads the settings at call time for
-the run's own actor, the same read Druks makes for the calling agent. A
-missing login or key raises before any sandbox work. Under subscription
-billing there is no key. The VM home holds the login of the calling agent's
+`get_config()` returns an `AgentConfig` inside a workflow. This temporary value
+contains shared execution settings and the run account's selected credential.
+Druks resolves it at call time, as it does for an agent call. It stores no
+personal preferences and has no database table. A missing login or key raises
+before any sandbox work. Under subscription billing there is no key. The VM home holds the login of the calling agent's
 subscription only, so a nested CLI on another provider needs `api_key` billing.
 Under `api_key` billing, the VM holds the key as a placeholder in the variable
 the entry names: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `CODEX_API_KEY` for

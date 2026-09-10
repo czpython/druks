@@ -38,7 +38,7 @@ from .layout import get_helper_script_path, get_work_root
 
 if TYPE_CHECKING:
     from druks.harnesses.base import Harness
-    from druks.harnesses.profiles import Profile
+    from druks.harnesses.config import AgentConfig
 
     from .runner import Exec
 
@@ -203,7 +203,7 @@ class Host:
         self,
         *,
         agent: str,
-        profile: "Profile",
+        config: "AgentConfig",
         prompt: str,
         schema: dict[str, Any],
         artifact_dir: Path,
@@ -214,7 +214,7 @@ class Host:
         extra_env: dict[str, Any] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
     ) -> AgentResult:
-        """Run ``agent`` with ``profile`` and return a pure ``AgentResult`` —
+        """Run ``agent`` with ``config`` and return a pure ``AgentResult`` —
         no database write. A failure is carried on the result's ``error``, not
         raised, so the call still records what it cost before the agent call
         re-raises it.
@@ -224,11 +224,11 @@ class Host:
         ``include_plugins=False`` (Claude only) skips uploading the operator's plugin
         state — for prompts that hit no MCP server; a no-op for codex.
         """
-        model, timeout = profile.model, profile.timeout
-        harness = profile.harness_class(
+        model, timeout = config.model, config.timeout
+        harness = config.harness_class(
             model=model,
-            fast_mode=profile.fast_mode,
-            effort=profile.effort,
+            fast_mode=config.fast_mode,
+            effort=config.effort,
             sandbox=SandboxSettings.maybe_from_settings(load_settings()),
         )
 
@@ -252,7 +252,7 @@ class Host:
                 extra_env=extra_env,
                 mcp_servers=mcp_servers,
                 call_id=run_id,
-                identity=profile.identity,
+                identity=config.identity,
             )
         except HarnessError as exc:
             error = exc

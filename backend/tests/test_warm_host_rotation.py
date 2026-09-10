@@ -9,7 +9,7 @@ from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.workflows import Workflow
 
 
-def _profile(secrets: dict[str, Secret], secrets_id: str = "") -> SimpleNamespace:
+def _config(secrets: dict[str, Secret], secrets_id: str = "") -> SimpleNamespace:
     return SimpleNamespace(secrets=secrets, secret_refs=[], secrets_id=secrets_id)
 
 
@@ -20,8 +20,8 @@ _ENTRY = Secret(
     auth_header="x-api-key",
     auth_prefix="",
 )
-_NONE = _profile({})
-_ANTHROPIC = _profile({"anthropic": _ENTRY}, "anthropic.20260907T110000")
+_NONE = _config({})
+_ANTHROPIC = _config({"anthropic": _ENTRY}, "anthropic.20260907T110000")
 
 
 @dataclass
@@ -113,7 +113,7 @@ async def test_warm_host_keeps_its_entries_across_calls(monkeypatch):
     flow = _warm_workflow()
 
     first = await flow._lease_host(_ANTHROPIC)
-    second = await flow._lease_host(_profile({"anthropic": _ENTRY}, _ANTHROPIC.secrets_id))
+    second = await flow._lease_host(_config({"anthropic": _ENTRY}, _ANTHROPIC.secrets_id))
 
     assert first == second == "host-1"
     assert fake.provisions == ["wf-1:workflow:anthropic.20260907T110000"]
@@ -145,7 +145,7 @@ async def test_provisioning_key_names_the_pasted_key(monkeypatch):
     The same pasted key finds the host. A replaced key asks for a fresh host."""
     fake = _FakeSandboxClient(lease=timedelta(hours=2))
     monkeypatch.setattr(sdk, "sandbox_client", fake)
-    replaced = _profile({"anthropic": _ENTRY}, "anthropic.20260907T120000")
+    replaced = _config({"anthropic": _ENTRY}, "anthropic.20260907T120000")
 
     await _warm_workflow()._lease_host(_ANTHROPIC)
     await _warm_workflow()._lease_host(_ANTHROPIC)
@@ -192,9 +192,9 @@ async def test_a_replay_finds_the_warm_box_through_its_identity(
     client = _FakeSandboxClient(lease=timedelta(hours=2))
     monkeypatch.setattr(sdk, "sandbox_client", client)
     flow = _warm_workflow()
-    profile = SimpleNamespace(secrets={}, secret_refs=secrets, secrets_id=subscription.id)
+    config = SimpleNamespace(secrets={}, secret_refs=secrets, secrets_id=subscription.id)
 
-    assert await flow._lease_host(profile) == "host-crashed"
+    assert await flow._lease_host(config) == "host-crashed"
 
     assert client.reattached == ["host-crashed"]
     assert client.provisions == []

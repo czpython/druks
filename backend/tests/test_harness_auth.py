@@ -12,7 +12,7 @@ from druks.database import db_session
 from druks.harnesses.claude import ClaudeHarness, _get_credentials
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
-from druks.harnesses.exceptions import HarnessNotConnectedError, ProfileSettingsError
+from druks.harnesses.exceptions import AgentConfigError, HarnessNotConnectedError
 from druks.harnesses.opencode import OpenCodeHarness
 from druks.harnesses.pi import PiHarness
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider, jwt_claims
@@ -309,7 +309,7 @@ def test_key_entries_follow_the_proven_transport_of_each_harness():
 
 
 def test_an_unproven_provider_key_refuses_instead_of_entering_the_box():
-    with pytest.raises(ProfileSettingsError, match="'openrouter'"):
+    with pytest.raises(AgentConfigError, match="'openrouter'"):
         OpenCodeHarness.get_secrets("openrouter", "sk-1")
 
 

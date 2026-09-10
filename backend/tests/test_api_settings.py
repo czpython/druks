@@ -10,13 +10,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 
-def test_get_settings_returns_default_utc_when_no_row_exists(tmp_path: Path):
+def test_get_settings_returns_shared_defaults(tmp_path: Path):
     with settings_client(tmp_path) as client:
         response = client.get("/api/settings")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["timezone"] == "UTC"
+    assert "timezone" not in body
     assert "updatedAt" in body
 
 
@@ -44,7 +44,7 @@ def test_get_settings_carries_the_execution_defaults(tmp_path: Path):
         False,
         1800,
     )
-    assert body["accountId"] is None
+    assert "accountId" not in body
 
 
 def test_patch_settings_judges_the_default_triple_together(tmp_path: Path):
@@ -80,47 +80,12 @@ async def test_accounts_report_the_default_without_a_fallback_setting(tmp_path: 
         )
 
 
-def test_patch_settings_persists_valid_iana_zone(tmp_path: Path, monkeypatch):
-    async def _noop_schedules():
-        return
-
-    monkeypatch.setattr("druks.user_settings.routes.apply_schedules", _noop_schedules)
+def test_installation_timezone_cannot_be_changed_through_settings(tmp_path: Path):
     with settings_client(tmp_path) as client:
-        patch = client.patch("/api/settings", json={"timezone": "Europe/Madrid"})
-        assert patch.status_code == 200
-        assert patch.json()["timezone"] == "Europe/Madrid"
-
-        get = client.get("/api/settings")
-        assert get.status_code == 200
-        assert get.json()["timezone"] == "Europe/Madrid"
-
-
-def test_patch_settings_rejects_invalid_timezone(tmp_path: Path):
-    with settings_client(tmp_path) as client:
-        response = client.patch("/api/settings", json={"timezone": "Not/A/Zone"})
-
-    assert response.status_code == 422
-    body = response.json()
-    assert "Not/A/Zone" in body["detail"]
-
-
-def test_timezone_change_reconciles_schedules(tmp_path: Path, monkeypatch):
-    """Crons are evaluated in the operator's timezone, so changing it repoints
-    the DBOS schedules now; re-asserting the same zone doesn't churn them."""
-    reconciled = []
-
-    async def record():
-        reconciled.append(True)
-
-    monkeypatch.setattr("druks.user_settings.routes.apply_schedules", record)
-    with settings_client(tmp_path) as client:
-        patch = client.patch("/api/settings", json={"timezone": "Europe/Madrid"})
-        assert patch.status_code == 200
-        assert len(reconciled) == 1
-
-        patch = client.patch("/api/settings", json={"timezone": "Europe/Madrid"})
-        assert patch.status_code == 200
-        assert len(reconciled) == 1
+        assert client.patch("/api/settings", json={"timezone": "Europe/Madrid"}).status_code == 422
+        response = client.patch("/api/settings/personal", json={"timezone": "Europe/Madrid"})
+        assert response.status_code == 200
+        assert client.get("/api/settings/personal").json()["timezone"] == "Europe/Madrid"
 
 
 def test_patch_settings_updates_the_defaults_every_agent_inherits(tmp_path: Path):

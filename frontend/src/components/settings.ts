@@ -6,12 +6,12 @@ import type {
   ProviderCatalog,
   ProviderKey,
   ProviderSubscription,
-  SettingsProfile,
+  InstallationSettings,
   WorkflowSettingField,
 } from '../api/types'
 
 export const SETTINGS_FIELDS = {
-  timezone: { section: 'general', label: 'Timezone', field: 'timezone', terms: 'time zone clock' },
+  timezone: { section: 'personal', label: 'Timezone', field: 'timezone', terms: 'time zone clock' },
   harness: { section: 'agents', label: 'Harness', field: 'harness', terms: 'execution' },
   model: { section: 'agents', label: 'Model', field: 'model', terms: 'execution' },
   billing: { section: 'agents', label: 'Billing', field: 'billing', terms: 'subscription API key' },
@@ -90,7 +90,7 @@ export function buildCatalog(
 }
 
 export type Defaults = Pick<
-  SettingsProfile,
+  InstallationSettings,
   | 'defaultHarness'
   | 'defaultModel'
   | 'defaultBilling'
@@ -99,7 +99,7 @@ export type Defaults = Pick<
   | 'defaultTimeout'
 >
 
-export const defaultsOf = (settings: SettingsProfile): Defaults => ({
+export const defaultsOf = (settings: InstallationSettings): Defaults => ({
   defaultHarness: settings.defaultHarness,
   defaultModel: settings.defaultModel,
   defaultBilling: settings.defaultBilling,

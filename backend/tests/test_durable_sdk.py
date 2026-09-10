@@ -13,6 +13,7 @@ from druks.durable.dbos_state import workflow_status
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.models import StoredSubject
 from druks.testing import init_db
+from druks.user_settings.models import InstallationSettings
 from druks.workflows import Gate, Subject, Workflow, step, task
 from pydantic import BaseModel
 from sqlalchemy import NullPool, create_engine, select
@@ -269,7 +270,6 @@ async def rt():
     from druks.secrets.datastructures import Audience
     from druks.secrets.enums import SecretKind
     from druks.secrets.models import VaultSecret
-    from druks.user_settings.models import SettingsProfile
 
     session = get_session(engine)
     try:
@@ -289,7 +289,6 @@ async def rt():
                 secrets={"claudeAiOauth": {"accessToken": "t"}},
             )
         )
-        session.add(SettingsProfile())
         await session.commit()
     finally:
         await session.close()
@@ -395,6 +394,14 @@ async def _account_id(engine, email: str) -> str:
         return row.id
     finally:
         await session.close()
+
+
+async def test_launch_commits_installation_settings_before_serving(rt):
+    # This session must see the row committed by launch(), before any settings request.
+    async with get_session(rt.engine) as session:
+        settings = await session.get(InstallationSettings, 1)
+        assert settings is not None
+        assert settings.default_harness == "claude"
 
 
 async def test_attribution_rides_the_run_and_survives_resume(rt):
@@ -946,31 +953,11 @@ async def test_session_scope_commits_writes(rt):
         await session.close()
 
 
-async def test_launch_commits_the_user_settings_seed(rt):
-    # launch()'s reconcile touches the settings singleton (apply_schedules
-    # reads its timezone), and the row must land committed before the app
-    # serves: two requests racing the first-touch insert wait on its key lock
-    # synchronously on the event loop and deadlock the whole process.
-    from druks.user_settings.models import SettingsProfile
-
-    session = get_session(rt.engine)
-    try:
-        assert (
-            await session.scalar(
-                select(SettingsProfile).where(SettingsProfile.account_id.is_(None))
-            )
-            is not None
-        )
-    finally:
-        await session.close()
-
-
-async def test_apply_schedules_evaluates_cron_in_operator_timezone(rt):
+async def test_apply_schedules_evaluates_cron_in_installation_timezone(rt, monkeypatch):
     # The cron is stored verbatim and evaluated in the operator's timezone, so
     # "daily at midnight" is their midnight and stays honest across DST.
     from dbos import DBOS
     from druks.durable.engine import apply_schedules
-    from druks.user_settings.models import SettingsProfile
 
     def sweep_timezone():
         rows = {s["schedule_name"]: s["cron_timezone"] for s in DBOS.list_schedules()}
@@ -979,12 +966,10 @@ async def test_apply_schedules_evaluates_cron_in_operator_timezone(rt):
     await apply_schedules()
     assert sweep_timezone() == "UTC"  # the settings default
 
-    # Commit the write — a bare test-task session stays idle-in-transaction and
-    # its row lock deadlocks any later test that touches user_settings.
-    from druks.database import session_scope
+    from druks.durable import engine
 
-    async with session_scope(rt.engine):
-        await (await SettingsProfile.get()).update_profile(timezone="Europe/Madrid")
+    settings = engine.load_settings().model_copy(update={"timezone": "Europe/Madrid"})
+    monkeypatch.setattr(engine, "load_settings", lambda: settings)
     await apply_schedules()
     assert sweep_timezone() == "Europe/Madrid"
 
@@ -993,15 +978,15 @@ async def test_user_settings_get_recreates_the_singleton(rt):
     # get() is the first-touch creator; its ON CONFLICT insert lets two
     # processes booting one fresh database both call it safely.
     from druks.database import db_session, session_scope
-    from druks.user_settings.models import SettingsProfile
+    from druks.user_settings.models import InstallationSettings
     from sqlalchemy import delete
 
     async with session_scope(rt.engine):
-        await db_session().execute(delete(SettingsProfile))
+        await db_session().execute(delete(InstallationSettings))
     async with session_scope(rt.engine):
-        assert (await SettingsProfile.get()).timezone == "UTC"
+        assert (await InstallationSettings.get()).default_harness == "claude"
     async with session_scope(rt.engine):
-        assert (await SettingsProfile.get()).account_id is None
+        assert (await InstallationSettings.get()).id == 1
 
 
 async def test_a_run_hydrates_the_subject_row_it_was_started_for(rt):

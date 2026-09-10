@@ -598,3 +598,20 @@ def test_exe_template_registry_uses_existing_provider_contract(tmp_path, reposit
     assert "registry-token" not in "\n".join(printed)
     assert stat.S_IMODE(env_path.stat().st_mode) == 0o600
     assert stat.S_IMODE((tmp_path / "druks.toml").stat().st_mode) == 0o600
+
+
+def test_setup_writes_and_preserves_installation_timezone(tmp_path, monkeypatch):
+    env_path = tmp_path / ".env"
+    _run(env_path)
+    assert _read_toml(tmp_path / "druks.toml")["timezone"] == "UTC"
+    _run(env_path, set_values=("timezone=Europe/Madrid",))
+    _run(env_path)
+    assert _read_toml(tmp_path / "druks.toml")["timezone"] == "Europe/Madrid"
+    monkeypatch.setenv("DRUKS_CONFIG", str(tmp_path / "druks.toml"))
+    assert Settings().timezone == "Europe/Madrid"
+
+
+@pytest.mark.parametrize("timezone", ["Not/A/Zone", "/etc/passwd", ""])
+def test_setup_rejects_invalid_installation_timezone(tmp_path, timezone):
+    with pytest.raises(ValueError, match="Unknown IANA timezone"):
+        _run(tmp_path / ".env", set_values=(f"timezone={timezone}",))

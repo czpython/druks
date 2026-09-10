@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from unittest import mock
 
 import pytest
-from conftest import PROFILE_PROBE
+from conftest import CONFIG_PROBE
 from dbos._error import DBOSWorkflowCancelledError
 from druks.accounts.models import Account
 from druks.database import db_session as ambient_session
@@ -10,8 +10,8 @@ from druks.durable.dbos_state import workflow_status
 from druks.durable.enums import RunState
 from druks.durable.models import Run
 from druks.events.models import Event
+from druks.harnesses.config import get_config
 from druks.harnesses.exceptions import HarnessNotConnectedError
-from druks.harnesses.profiles import get_profile
 from druks.models import Base
 from druks.signals import subscribe
 from druks.testing import seed_run
@@ -294,7 +294,7 @@ async def test_unattended_execution_without_subscription_records_not_connected(
     item, run = await _item_and_run(druks_db, "running")
 
     async def body() -> None:
-        await get_profile(PROFILE_PROBE.id, None)
+        await get_config(CONFIG_PROBE.id, None)
 
     with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
         await _execute_run(run.id, run.kind, {"type": "note", "id": item.id}, run.account_id, body)

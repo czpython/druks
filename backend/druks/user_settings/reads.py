@@ -7,7 +7,7 @@ from pydantic.fields import FieldInfo
 from druks.apps.settings import field_kind
 from druks.database import db_session
 
-from .models import SettingsOverride, SettingsProfile
+from .models import InstallationSettings, SettingsOverride
 from .schemas import (
     AgentSettingResponse,
     AppSettingsResponse,
@@ -21,7 +21,9 @@ if TYPE_CHECKING:
     from druks.workflows import Workflow
 
 
-async def get_agent_setting(agent: "Agent", *, settings: SettingsProfile) -> AgentSettingResponse:
+async def get_agent_setting(
+    agent: "Agent", *, settings: InstallationSettings
+) -> AgentSettingResponse:
     harness = await SettingsOverride.agent_harness(agent.id, settings=settings)
     model = await SettingsOverride.agent_model(agent.id, settings=settings)
     billing = await SettingsOverride.agent_billing(agent.id, settings=settings)
@@ -102,7 +104,9 @@ async def get_workflow_settings(workflow: "type[Workflow]") -> WorkflowSettingsR
     return WorkflowSettingsResponse(kind=kind, fields=fields)
 
 
-async def get_app_settings(app: "type[App]", *, settings: SettingsProfile) -> AppSettingsResponse:
+async def get_app_settings(
+    app: "type[App]", *, settings: InstallationSettings
+) -> AppSettingsResponse:
     model = app.settings_model
     return AppSettingsResponse(
         name=app.name,

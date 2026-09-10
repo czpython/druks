@@ -33,11 +33,11 @@ for test_module in ("test_durable_sdk", "test_notifications_durable"):
 IDENTITY_HEADER = "X-ExeDev-Email"
 
 
-class ProfileOutput(agents.AgentOutput):
+class ConfigOutput(agents.AgentOutput):
     ok: bool
 
 
-PROFILE_PROBE = agents.Agent(id="profile_probe", prompt="probe.md", contract=ProfileOutput)
+CONFIG_PROBE = agents.Agent(id="config_probe", prompt="probe.md", contract=ConfigOutput)
 
 
 def settings_client(tmp_path: Path) -> TestClient:

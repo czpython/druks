@@ -6,7 +6,7 @@ from druks.apps.loader import iter_apps
 from druks.database import db_session
 from druks.durable.enums import OPEN_STATES, RunState
 from druks.durable.models import Artifact, Run
-from druks.user_settings.models import SettingsProfile
+from druks.settings import load_settings
 
 PAGE_SIZE = 200
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -59,7 +59,7 @@ async def list_current_work(response: Response) -> DashboardWork:
 async def list_current_schedules(response: Response) -> DashboardSchedules:
     """Configured cadence, not scheduler health."""
     response.headers["Cache-Control"] = "no-store"
-    timezone = (await SettingsProfile.get()).timezone
+    timezone = load_settings().timezone
     return DashboardSchedules(
         rows=[
             DashboardSchedule(
