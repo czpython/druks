@@ -10,6 +10,7 @@ class Chat(App):
     # Every table this app owns carries the ``chat_`` prefix, so the thread's
     # schema can never collide with core's or another app's.
     prefix_tables = True
+    navigation = ["list"]
 
     reply = Agent(
         description="replies to the operator on one conversation turn",

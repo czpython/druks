@@ -64,3 +64,14 @@ async def test_list_summaries_is_this_accounts_threads():
     assert listed[0].autonomy == Autonomy.PROPOSE
     assert listed[0].label == mine.label
     assert await Conversation.list_summaries(None) == []
+
+
+async def test_get_for_account_misses_another_operators_thread():
+    owner = await Account.get_or_create("op@example.com")
+    other = await Account.get_or_create("dev@example.com")
+    mine = await Conversation.create(account_id=owner.id, title="mine")
+    theirs = await Conversation.create(account_id=other.id, title="theirs")
+
+    assert (await Conversation.get_for_account(mine.id, owner.id)).id == mine.id
+    assert await Conversation.get_for_account(theirs.id, owner.id) is None
+    assert await Conversation.get_for_account(mine.id, None) is None
