@@ -94,7 +94,6 @@ class Ticket(StoredSubject):
     async def list_matching(
         cls,
         *,
-        exclude_cancelled: bool = False,
         status: str = "",
         priority: str = "",
         owner: str = "",
@@ -104,8 +103,6 @@ class Ticket(StoredSubject):
         updated_since: datetime | None = None,
     ) -> list["Ticket"]:
         statement = select(cls)
-        if exclude_cancelled:
-            statement = statement.where(cls.status.notin_((Status.CANCELLED, Status.BLOCKED)))
         if status:
             statement = statement.where(cls.status == status)
         if priority:
@@ -129,9 +126,8 @@ class Ticket(StoredSubject):
 
     @classmethod
     async def list_board(cls) -> list["Ticket"]:
-        """Everything on the board — cancelled and blocked tickets are off it.
-        The page groups these by status; the model just says which rows are live."""
-        return await cls.list_matching(exclude_cancelled=True)
+        """Every ticket. The page groups these by status."""
+        return await cls.list_matching()
 
     @classmethod
     async def list_for_status(cls, status: Status) -> list["Ticket"]:

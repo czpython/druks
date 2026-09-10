@@ -122,25 +122,26 @@ async def test_set_status_publishes_one_transition_with_display_labels(druks_cli
     assert len(events) == 1
 
 
-async def test_set_status_marks_done_completed_and_cancelled_terminal(druks_client, monkeypatch):
+async def test_set_status_marks_done_completed_and_terminal(druks_client, monkeypatch):
     events = _published(monkeypatch)
     repo = await _open_repo(druks_client)
     ticket = await _open_ticket(druks_client, repo["id"])
+    stuck = await _open_ticket(druks_client, repo["id"])
 
     done = await druks_client.post(
         f"{_TICKETS}/{ticket['identifier']}/status",
         json={"status": "done"},
     )
-    cancelled = await druks_client.post(
-        f"{_TICKETS}/{ticket['identifier']}/status",
-        json={"status": "cancelled"},
+    blocked = await druks_client.post(
+        f"{_TICKETS}/{stuck['identifier']}/status",
+        json={"status": "blocked"},
     )
 
     assert done.status_code == 200
-    assert cancelled.status_code == 200
-    assert [payload["status"] for _, payload in events] == ["Done", "Cancelled"]
+    assert blocked.status_code == 200
+    assert [payload["status"] for _, payload in events] == ["Done", "Blocked"]
     assert [payload["completed"] for _, payload in events] == [True, False]
-    assert [payload["terminal"] for _, payload in events] == [True, True]
+    assert [payload["terminal"] for _, payload in events] == [True, False]
 
 
 async def test_update_ticket_never_publishes_and_cannot_set_status(druks_client, monkeypatch):

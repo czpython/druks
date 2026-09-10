@@ -8,10 +8,9 @@ class Status(StrEnum):
     BACKLOG = "backlog"
     READY_FOR_AGENT = "ready_for_agent"
     IN_PROGRESS = "in_progress"
+    BLOCKED = "blocked"
     IN_REVIEW = "in_review"
     DONE = "done"
-    BLOCKED = "blocked"
-    CANCELLED = "cancelled"
 
     @property
     def label(self) -> str:
@@ -20,8 +19,7 @@ class Status(StrEnum):
 
     @property
     def completed(self) -> bool:
-        """The work got done. Cancelled is finished but not completed — the
-        difference is what a funnel counts."""
+        """The work got done. Funnel readers count this, not the display label."""
         return self is Status.DONE
 
     @property
@@ -30,7 +28,7 @@ class Status(StrEnum):
         enum, not on the display label: a board that renames a column has not
         changed its workflow, and every reader of ``ticket.transitioned`` reads
         this rather than guessing from a string."""
-        return self in (Status.DONE, Status.CANCELLED)
+        return self is Status.DONE
 
 
 # Pinned display labels — the stored value stays snake_case forever; only these
@@ -39,10 +37,9 @@ STATUS_LABELS: dict[Status, str] = {
     Status.BACKLOG: "Backlog",
     Status.READY_FOR_AGENT: "Ready for Agent",
     Status.IN_PROGRESS: "In Progress",
+    Status.BLOCKED: "Blocked",
     Status.IN_REVIEW: "In Review",
     Status.DONE: "Done",
-    Status.BLOCKED: "Blocked",
-    Status.CANCELLED: "Cancelled",
 }
 
 

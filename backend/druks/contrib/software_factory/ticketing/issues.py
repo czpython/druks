@@ -7,7 +7,7 @@ from druks.core.apis.exceptions import UnknownTicketError
 _BOARD = {
     TicketStatus.TRIGGER: Status.READY_FOR_AGENT,
     TicketStatus.BACKLOG: Status.BACKLOG,
-    TicketStatus.CANCELED: Status.CANCELLED,
+    TicketStatus.CANCELED: Status.DONE,
     TicketStatus.IN_PROGRESS: Status.IN_PROGRESS,
     TicketStatus.IN_REVIEW: Status.IN_REVIEW,
     TicketStatus.DONE: Status.DONE,

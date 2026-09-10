@@ -143,16 +143,16 @@ async def test_comments_are_rows_and_empty_is_a_list():
     assert all(isinstance(comment, Comment) for comment in listed)
 
 
-async def test_list_board_omits_cancelled():
+async def test_list_board_includes_blocked():
     repo = await _open_repo(name="Board", prefix="brd", full_name="acme/board")
     live = await Ticket.create(repo_id=repo.id, title="live")
-    gone = await Ticket.create(repo_id=repo.id, title="gone")
-    await gone.set_status(Status.CANCELLED)
+    stuck = await Ticket.create(repo_id=repo.id, title="stuck")
+    await stuck.set_status(Status.BLOCKED)
 
     board = await Ticket.list_board()
     identifiers = {ticket.identifier for ticket in board}
     assert live.identifier in identifiers
-    assert gone.identifier not in identifiers
+    assert stuck.identifier in identifiers
     found = await Ticket.get_for_identifier(live.identifier)
     assert found is not None
     assert found.id == live.id

@@ -45,7 +45,7 @@ async def _connect_github() -> None:
         (TicketStatus.IN_REVIEW, Status.IN_REVIEW),
         (TicketStatus.DONE, Status.DONE),
         (TicketStatus.BACKLOG, Status.BACKLOG),
-        (TicketStatus.CANCELED, Status.CANCELLED),
+        (TicketStatus.CANCELED, Status.DONE),
     ],
 )
 async def test_issues_tracker_maps_ticket_status_onto_the_board(druks_db, asked, board):
