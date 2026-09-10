@@ -10,6 +10,9 @@ Druks supplies durable execution and shared operating services. Read
 [the app boundary](concepts.md#the-app-boundary)
 before you assign ownership of a capability.
 
+The bundled `chat` and `software_factory` apps register through the same
+`druks.apps` entry point. They ship with Druks. They are not optional packages.
+
 ## Scaffold and prove the package
 
 ```bash
@@ -544,7 +547,8 @@ Override it to deliver none.
 
 Keep durable state outside the VM. A workflow can set
 `steps_reuse_sandbox = True` to retain one host across a segment. Druks releases
-the host at a gate and at workflow exit. It rotates the host near lease expiry,
+the host at a gate and at workflow exit, unless `Gate.wait` passes
+`hold_sandbox`. It rotates the host near lease expiry,
 and when the next agent call needs other secret entries.
 
 ### Borrow a browser session
@@ -632,7 +636,31 @@ reply = await ApproveReport.wait(
 ```
 
 `on_wait()` is a checkpointed notification step. The workflow then parks
-durably and releases its warm sandbox. The owning external system resumes the
+durably. By default it releases its warm sandbox. Pass `hold_sandbox` to keep
+the VM across a short idle window instead:
+
+```python
+from datetime import timedelta
+
+reply = await ApproveReport.wait(
+    input_request={
+        "presentation": "external",
+        "label": "Review the night-watch report",
+        "url": review_url,
+    },
+    hold_sandbox=timedelta(minutes=15),
+)
+```
+
+Default `False` reaps. `True` holds for as long as the remaining
+lease could still cover one more worst-case agent call. A `timedelta` holds
+for at most that span. A hold never extends the lease Drukbox already granted.
+The park itself still lasts up to 14 days. The clipped lease is what ends the
+hold if nobody answers.
+
+`review()` calls the park path without `hold_sandbox`, so it still reaps.
+
+The owning external system resumes the
 workflow through the gate and its subject:
 
 ```python

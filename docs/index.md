@@ -47,8 +47,9 @@ isolated agent calls, or waits. Examples include software delivery, incident
 investigation, research review, approval flows, and periodic operational checks.
 
 The bundled **Software Factory** app coordinates coding agents from a work item
-to a reviewed pull request. It demonstrates the framework. GitHub policy and
-software-delivery behavior belong to the app, not to Druks.
+to a reviewed pull request. The bundled **Chat** app keeps operator conversations
+on this appliance. Both demonstrate the framework. Domain policy belongs to the
+app, not to Druks.
 
 ## Choose a path
 
@@ -58,6 +59,7 @@ software-delivery behavior belong to the app, not to Druks.
 - **Give it screens:** Read the [Druks UI contract](druks-ui.md).
 - **Run a production stack:** Follow the [deployment runbook](deployment.md).
 - **Diagnose a failure:** Use [troubleshooting](troubleshooting.md).
+- **Chat on this appliance:** Read [Chat](chat.md).
 
 ## What Druks is not
 

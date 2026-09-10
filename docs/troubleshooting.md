@@ -15,8 +15,9 @@ docker compose logs --tail=200 web
 
 `druks doctor` examines the full platform. It covers settings, secrets, service
 credentials, data-directory writes, Postgres, Redis, Drukbox, harnesses, app
-imports, capability modules, and app-owned checks. A failed check exits with a
-nonzero status.
+imports, capability modules, bundled Chat, and app-owned checks. A failed
+check exits with a nonzero status. Chat is always installed. Its `/mcp` probe
+skips with a reason when sandbox execution is off.
 
 If the normal Drukbox check passes but real execution fails, use the opt-in
 sandbox check:
@@ -173,6 +174,14 @@ The exchange binds `127.0.0.1:8781` on the Druks host. Until it answers, a
 sandbox gets no value for its placeholders, and each agent call fails at the
 provider with an authentication error.
 
+### Chat cannot reach `/mcp`
+
+Talk injects this appliance's `/mcp` into the sandbox. `druks doctor` reports
+`chat:appliance_mcp`. A skip means sandbox execution is off. Pending means
+`urls.endpoint` is unset. An unreachable URL means the VM cannot operate as the
+operator. Set `urls.endpoint`. A Docker sandbox rewrites loopback to
+`host.docker.internal`. See [Chat](chat.md).
+
 ### A sandbox process appears stuck
 
 Druks copies the dashboard transcript from files that a detached VM process writes.
@@ -185,7 +194,8 @@ agent process. Recovery follows the durable operation boundary.
 
 `parked` means that DBOS suspended the workflow on a gate. The workflow did not stall.
 Open the subject detail page to see its current ask. In-app review offers
-approve, request changes, or cancel. The owner system answers an external gate.
+approve, request changes, or cancel. Chat parks send and stop. Confirm parks
+approve and reject. The owner system answers an external gate.
 
 If no notification arrived:
 

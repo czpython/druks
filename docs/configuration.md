@@ -137,7 +137,7 @@ caches, and the sandbox provisioning gate.
 
 | TOML key | Purpose |
 | --- | --- |
-| `urls.endpoint` | Browser-visible dashboard base URL used to build MCP OAuth callbacks |
+| `urls.endpoint` | Browser-visible dashboard base URL. MCP OAuth callbacks and sandbox hops to this appliance's `/mcp` use it |
 | `urls.webhook_host` | Public webhook hostname used by `druks doctor` for its ingress probe |
 | `identity.mode` | `none` (default, no authentication, single operator), `header` (edge-asserted identity), or `jwt` (validated edge-signed assertion) |
 | `identity.header` | The trusted identity header. The shipped Caddy edge also uses it. Header and JWT modes have no default and require it |
@@ -152,6 +152,10 @@ address, collides with it on port 443. One of the two stops. To keep the
 other addresses free, set `DRUKS_WEBHOOK_BIND_HOST` in `[env]` to the public
 address. Caddy then serves only that address. To keep IPv6, list the IPv4
 and the IPv6 addresses.
+
+A Docker sandbox cannot use the host loopback. Druks rewrites a loopback
+`urls.endpoint` to `host.docker.internal` for that hop. An exe VM uses
+`urls.endpoint` as given. See [Chat](chat.md).
 
 `urls.endpoint` and `urls.webhook_host` are different. The first is where an
 operator's browser reaches Druks. The second is the public ingress host for

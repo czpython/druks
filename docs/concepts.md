@@ -54,8 +54,9 @@ name must match `App.name`. The same name scopes:
 - Optional static frontend assets in the app package.
 
 The bundled `software_factory` app owns projects, work items, ticket intake,
-GitHub branches, pull requests, coding-agent policy, and dashboard pages. These
-features are examples, not platform guarantees.
+GitHub branches, pull requests, coding-agent policy, and dashboard pages. The
+bundled `chat` app owns operator conversations. These features are examples, not
+platform guarantees.
 
 ## Durability and recovery
 
@@ -170,11 +171,16 @@ does not infer access health from configuration.
 A `Gate` defines a typed reply and a durable receive topic. When a workflow
 waits at a gate, Druks:
 
-1. Releases each warm sandbox that the workflow holds.
+1. Releases each warm sandbox that the workflow holds, unless the wait passes
+   `hold_sandbox`. A hold clips the Drukbox lease. It is shorter than the
+   remaining lease. The park itself still lasts up to 14 days.
 2. Records `parked` and the request for the operator.
 3. Sends an optional notification.
 4. Suspends the workflow until a reply arrives or the 14-day timeout expires.
 5. Clears the gate and returns the validated reply after the workflow resumes.
+
+`review()` does not pass `hold_sandbox`, so it still reaps. See
+[`Gate.wait`](writing-an-app.md#wait-for-input).
 
 Each parked round accepts one answer through an idempotency key. In-app review
 requires a subject because the subject read-side is where the question appears.
@@ -205,8 +211,10 @@ not write provider-specific execution code.
 
 By default, each agent call uses an ephemeral sandbox. A workflow can retain one
 warm sandbox across a segment. Druks releases it before a gate and at workflow
-exit. Druks also rotates it before the lease becomes too short for another
-call. Store durable state in an external system such as Git, not only on the VM.
+exit, unless that gate wait passes `hold_sandbox`. A hold clips the lease. It
+never extends it. Druks also rotates the host before the lease becomes too
+short for another call. Store durable state in an external system such as Git,
+not only on the VM.
 
 A sandbox never holds a subscription token. Druks gives each sandbox that
 fetches one an identity at its issuer, before Drukbox provisions it. The
