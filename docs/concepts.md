@@ -121,7 +121,7 @@ that policy on subjectless background runs.
 The Dashboard reads current runs across the installed apps with the same identity
 gate as the shared run API. An authenticated operator sees installation-wide
 run facts. `Run.account_id` records attribution and does not restrict this
-read.
+read. Only the workflows of installed apps count.
 
 For each workflow kind and subject, the newest run counts. As a result, a newer
 successful run removes an older failure. A run without a subject counts on its
@@ -135,26 +135,34 @@ review content.
 
 Needs you is parked runs that carry a request that the operator can answer. The
 oldest request comes first. Failed is runs in the failed or orphaned state.
-Running is runs in the running state. Queued runs and parked runs without an
-operator request are not current work.
+Running is runs in the running state. In these two states, the most recently
+updated run comes first. Queued runs and parked runs without an operator
+request are not current work.
 
 The read also carries the time of the last recorded run finish and the time of
-the last recorded failure. If no record exists, the time is null. An optional
-app filter limits every fact to one installed app.
+the last recorded failure. If no record exists, the time is null. These times
+do not show an external outcome or scheduler health. An optional app filter
+limits every fact to one installed app. An unknown app is an error, not a read
+of all apps.
 
 The Dashboard shows one state as its main content. If there are requests, it
 shows the requests. If there are no requests, it shows the failures. If there
-are no requests and no failures, it shows the running work. The other states
-appear in a compact status panel with their totals.
+are no requests and no failures, it shows the running work. Each card is one
+run. The other states appear in a compact status panel with their totals.
 
-The page has no full list. Declared schedules have their own page below Usage.
+The page has no full list and no decision controls. It refreshes every 30
+seconds and on window focus. A failed refresh keeps the last read visible and
+offers Retry. Declared schedules have their own page below Usage. See
+[schedule settings](configuration.md#personal-and-installation-settings) for
+cadence, pause state, defaults, and timezone rules.
 
 Review opens the owning app at the selected run. The link names the request
 round by its `parkedAt` timestamp. The owner reads the current gate. If the
 current round is different, the owner shows a stale-link message. An answer
 echoes the round that it read, so the server rejects a stale answer.
 
-An external request opens the app-declared HTTP or HTTPS address. The Dashboard
+An external request opens the app-declared HTTP or HTTPS address. A card
+without a valid destination keeps its context and has no action. The Dashboard
 does not infer access health from configuration.
 
 ## Waiting for people and systems
