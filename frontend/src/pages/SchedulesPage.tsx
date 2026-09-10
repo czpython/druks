@@ -15,7 +15,7 @@ import '../schedules.css'
 const POLL = { refetchInterval: 30_000, refetchOnWindowFocus: true, retry: false } as const
 
 // A null edit removes the override, which restores the declared value.
-interface ScheduleEdits {
+type ScheduleEdits = {
   schedule?: string | null
   schedule_enabled?: boolean | null
 }
