@@ -1,0 +1,30 @@
+.schedules-page .page-shell-body { max-width: 1040px; margin-inline: auto; }
+.schedules-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.schedules-head h1 { margin: 0 0 10px; font-size: 26px; font-weight: 500; }
+.schedules-head p { margin: 0; color: var(--text-mid); }
+.schedules-head > select { max-width: 240px; }
+.schedules-page .set-select { min-height: 44px; font-family: var(--font-sans); font-size: 15px; }
+.schedules-page .set-field-label { font-family: var(--font-sans); font-size: 15px; letter-spacing: 0; }
+.schedules-app { margin-top: 40px; }
+.schedules-app > header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+.schedules-app h2 { margin: 0; font-size: 20px; font-weight: 500; }
+.schedules-app > header a { min-height: 44px; display: inline-flex; align-items: center; color: var(--text-mid); text-underline-offset: 3px; }
+.schedule-form { padding: 24px 0; border-top: 1px solid var(--border); }
+.schedule-form > header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px 20px; overflow-wrap: anywhere; }
+.schedule-form h3 { margin: 0; font-size: 17px; font-weight: 500; }
+.schedule-form > header :is(span, code) { font-size: 13px; color: var(--text-mid); }
+.schedule-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 24px; margin-top: 22px; }
+.schedule-controls .set-field { min-width: 0; }
+.schedule-enabled { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; }
+.schedule-form footer { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 22px; }
+.schedule-form footer .set-btn { min-height: 44px; }
+.schedule-form footer [role="status"] { color: var(--text-mid); font-size: 13px; }
+.schedules-alert { margin-top: 20px; color: var(--outcome-failed); }
+.schedules-empty { margin-top: 32px; color: var(--text-mid); }
+@media (max-width: 649px) {
+  .schedules-head { flex-direction: column; }
+  .schedules-head > select { max-width: none; width: 100%; }
+  .schedules-page .set-select { font-size: 16px; }
+  .schedule-controls { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .schedules-app > header { flex-wrap: wrap; }
+}

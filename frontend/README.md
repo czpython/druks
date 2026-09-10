@@ -25,7 +25,7 @@ runs lint, tests, and build for PRs into `main` and `codex/` stack branches.
 
 - The work sidebar and searchable installed app roster
 - Settings
-- Dashboard, Events, and Usage
+- Dashboard, Events, Usage, and Schedules
 - Shared routing and fallback behavior.
 
 Bundled app UI lives under `src/apps/<name>/`. Its module calls
@@ -35,7 +35,8 @@ Import the module one time from `src/apps/index.ts`. The shell finds the
 registration and does not hardcode the app name.
 
 The work sidebar keeps the same destinations across app pages. The Dashboard
-opens at `/`. Events and Usage have shared routes. App-declared navigation appears below the page
+opens at `/`. Events, Usage, and Schedules have shared routes. Schedules appears
+directly below Usage. App-declared navigation appears below the page
 header. Settings opens from the bottom of the sidebar. Below 650 px, a
 navigation button opens a modal drawer. Escape closes the drawer and returns
 focus to the button.
@@ -64,6 +65,13 @@ sections share one app draft. Leaving the app form offers Save, Discard, and
 Stay. An app without controls has no Settings destination. Backend app schemas
 supply these forms without a frontend module. Schedule controls use the
 existing workflow overrides.
+
+Schedules at `/schedules` groups declared workflows by app. The `app` query
+parameter filters the list. Operators change cadence and pause state here with
+the same controls as app settings. Each schedule saves through
+`PATCH /api/settings/apps`. Use defaults removes both overrides. A failed save
+keeps the draft. Polling and focus refresh preserve unsaved edits. The page shows
+the installation timezone beside the saved cadence.
 
 Normal interface text uses IBM Plex Sans at 15 px. Technical values use
 IBM Plex Mono. Phone inputs use at least 16 px.

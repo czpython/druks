@@ -181,6 +181,7 @@ async def list_current_schedules(response: Response) -> DashboardSchedules:
                 app=owner.name,
                 kind=workflow.kind,
                 cron=await workflow.get_schedule(),
+                default_cron=workflow.every,
                 enabled=await workflow.has_enabled_schedule(),
                 timezone=timezone,
             )

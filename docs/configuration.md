@@ -101,6 +101,16 @@ Your personal timezone controls timestamp display. Gate notifications use the
 run account's preferences. Unattended runs record the default account.
 Druks refuses to start a run before account setup.
 
+**Schedules**, below **Usage**, lists workflows that declare a schedule. You can
+change cadence, pause, or resume each schedule. **Save changes** applies the
+workflow overrides and updates the scheduler at once. **Use defaults** selects
+the declared cadence and enabled state. Save these changes to remove both
+overrides. The same fields remain in app settings.
+
+The page shows the installation timezone. Account timezone preferences do not
+change schedule timing. A failed save keeps your edits. A read refresh also
+preserves unsaved edits. The `?app=` filter selects one installed app.
+
 The API exposes installation settings at `GET/PATCH /api/settings` and your
 preferences at `GET/PATCH /api/settings/personal`. The personal route uses the
 authenticated account. It returns `timezone` and `gateParkDestinationId`. It
