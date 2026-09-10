@@ -7,8 +7,9 @@ import psycopg
 import pytest
 from dbos import DBOS
 from druks.agents import Agent, AgentOutput
+from druks.apps import loader
 from druks.apps.registry import agents, workflows
-from druks.database import configure_session, get_session
+from druks.database import configure_session, db_session, get_session, session_scope
 from druks.durable import FatalError, Run, RunState
 from druks.durable.dbos_state import workflow_status
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
@@ -1262,3 +1263,77 @@ async def test_announcements_survive_subscriber_retry_and_workflow_replay(rt):
         assert deliveries == [(1, 1), (1, 1), (2, 2)]
     finally:
         await DBOS.cancel_workflow_async(workflow_id)
+
+
+async def test_admission_commits_before_the_request_and_deduplicates(rt, monkeypatch):
+    monkeypatch.setitem(loader._workflow_packages, "test_admission", "admission")
+
+    class AdmissionFlow(Workflow):
+        __module__ = "test_admission"
+        subject = Widget
+
+        async def run_multistep(self) -> None:
+            await DBOS.recv_async("finish")
+
+    subject = Widget(id=7)
+    workflow_id = ""
+    try:
+        with pytest.raises(ValueError, match="Roll back the request"):
+            async with session_scope(rt.engine):
+                request_session = db_session()
+                await request_session.execute(select(Widget).where(Widget.id == 7))
+                workflow_id = await AdmissionFlow.start(subject=subject)
+                assert await AdmissionFlow.start(subject=subject) == workflow_id
+                assert db_session() is request_session
+                assert request_session.in_transaction()
+
+                async with get_session(rt.engine) as reader:
+                    events = list(
+                        await reader.scalars(
+                            select(Event).filter_by(type="workflow.scheduled", app="admission")
+                        )
+                    )
+                assert len(events) == 1
+                assert events[0].payload == {"run": workflow_id, "kind": AdmissionFlow.kind}
+                assert events[0].subject_id == "7"
+                assert events[0].subject_label == "W-7"
+                raise ValueError("Roll back the request")
+
+        async with get_session(rt.engine) as reader:
+            events = list(
+                await reader.scalars(
+                    select(Event).filter_by(type="workflow.scheduled", app="admission")
+                )
+            )
+        assert len(events) == 1
+    finally:
+        if workflow_id:
+            await DBOS.send_async(workflow_id, "done", topic="finish")
+            await _wait_for(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+        workflows._items.pop(AdmissionFlow.kind)
+
+
+async def test_failed_retry_attempts_keep_separate_terminal_records(rt):
+    class FailingAttempt(Workflow):
+        subject = Widget
+
+        async def run(self) -> None:
+            raise FatalError("Source unavailable")
+
+    try:
+        first_id = await FailingAttempt.start(subject=Widget(id=7))
+        await _wait_for(rt.engine, first_id, lambda run: run.state == RunState.FAILED)
+        async with session_scope(rt.engine):
+            first_run = await Run.get(first_id)
+            retry_id = await first_run.retry()
+        await _wait_for(rt.engine, retry_id, lambda run: run.state == RunState.FAILED)
+
+        assert retry_id != first_id
+        async with get_session(rt.engine) as reader:
+            events = list(await reader.scalars(select(Event).filter_by(type="workflow.failed")))
+        failures = [event for event in events if event.payload["run"] in {first_id, retry_id}]
+        assert len(failures) == 2
+        assert {event.payload["run"] for event in failures} == {first_id, retry_id}
+        assert {event.payload["failure"] for event in failures} == {"Source unavailable"}
+    finally:
+        workflows._items.pop(FailingAttempt.kind)
