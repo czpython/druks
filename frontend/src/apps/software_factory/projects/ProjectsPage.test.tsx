@@ -116,6 +116,7 @@ describe('ProjectsPage create row', () => {
     fireEvent.change(await screen.findByPlaceholderText(/new project name/), {
       target: { value: 'Acme' },
     })
+    expect((screen.getByPlaceholderText(/prefix/) as HTMLInputElement).value).toBe('ACM')
     const create = screen.getByText('+ create').closest('button')!
     await waitFor(() => expect(create.disabled).toBe(false))
     fireEvent.click(create)
@@ -123,7 +124,22 @@ describe('ProjectsPage create row', () => {
     // react-query hands the mutationFn a context argument too; the payload is
     // the first one.
     await waitFor(() => expect(createMock).toHaveBeenCalled())
-    expect(createMock.mock.calls[0]![0]).toEqual({ name: 'Acme' })
+    expect(createMock.mock.calls[0]![0]).toEqual({ name: 'Acme', prefix: 'ACM' })
+  })
+
+  it('does not overwrite a prefix the operator edited', async () => {
+    renderPage([project()])
+
+    fireEvent.change(await screen.findByPlaceholderText(/new project name/), {
+      target: { value: 'Acme' },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/prefix/), {
+      target: { value: 'box' },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/new project name/), {
+      target: { value: 'Acme Tools' },
+    })
+    expect((screen.getByPlaceholderText(/prefix/) as HTMLInputElement).value).toBe('box')
   })
 
   it('sends the prefix when one is typed', async () => {

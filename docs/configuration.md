@@ -296,8 +296,10 @@ a setting. `druks doctor` reports the tracker as healthy.
 
 The dashboard shows the board and ticket pages only for
 **druks**. Each ticket picks a GitHub repository from a Software Factory
-project. Set that project's ticket prefix (2–6 letters A–Z) on
-**Software Factory → Projects**. Druks mints identifiers as `{prefix}-{n}` once.
+project. Set that project's ticket prefix (2–6 letters A–Z, or two letters and a
+digit 1–9) on **Software Factory → Projects**. Creating a project fills the
+first three letters of its name; change the field before save if you want
+another. Druks mints identifiers as `{prefix}-{n}` once.
 Changing the ticket's repository does not remint the identifier. A project
 without a prefix cannot mint tickets.
 

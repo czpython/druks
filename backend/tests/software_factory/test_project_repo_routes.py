@@ -68,7 +68,7 @@ async def test_a_taken_prefix_is_a_conflict(client: TestClient):
     assert "already in use" in refused.json()["detail"]
     assert (await client.get(f"/api/software_factory/projects/{acme['id']}")).json()[
         "prefix"
-    ] is None
+    ] == "ACM"
 
     created = await client.post(
         "/api/software_factory/projects", json={"name": "Other", "prefix": "BOX"}
