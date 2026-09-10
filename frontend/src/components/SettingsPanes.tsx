@@ -58,7 +58,7 @@ const billingLabel = (billing: string) => (billing === 'api_key' ? 'API key' : '
 
 const TIMEOUTS = [600, 900, 1800, 3600]
 
-function Switch({
+export function Switch({
   on,
   onClick,
   disabled,

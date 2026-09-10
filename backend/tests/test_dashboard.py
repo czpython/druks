@@ -128,8 +128,6 @@ async def test_schedules_resolve_paused_override_and_operator_timezone(
     monkeypatch.setattr(Summarize, "every", "0 9 * * *")
     await SettingsOverride.set_workflow_setting(Summarize.kind, "schedule", "15 10 * * 1")
     await SettingsOverride.set_workflow_setting(Summarize.kind, "schedule_enabled", False)
-    from druks.api import dashboard
-
     settings = dashboard.load_settings().model_copy(update={"timezone": "Europe/Madrid"})
     monkeypatch.setattr(dashboard, "load_settings", lambda: settings)
 
