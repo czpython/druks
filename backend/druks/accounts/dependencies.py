@@ -12,7 +12,7 @@ from druks.accounts.exceptions import (
     InvalidPatError,
 )
 from druks.accounts.jwt import verify_assertion
-from druks.accounts.models import Account, PersonalAccessToken
+from druks.accounts.models import Account, OperatorToken, PersonalAccessToken
 from druks.api.dependencies import SessionDep
 
 _BEARER_CHALLENGE = 'Bearer realm="druks"'
@@ -29,6 +29,9 @@ async def resolve_pat_account(
     token limited to agent tools passes only their routes."""
     if credentials:
         try:
+            operator = await OperatorToken.lookup(credentials.credentials)
+            if operator:
+                return await Account.get_for_run(session, operator.account_id)
             pat = await PersonalAccessToken.authenticate(session, credentials.credentials)
         except InvalidPatError as error:
             raise HTTPException(
