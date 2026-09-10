@@ -46,13 +46,13 @@ def test_get_and_comment_are_agent_operations():
     assert add_comment["operationId"] in {"add_comment", "software_factory_add_comment"}
 
 
-async def test_create_as_todo_does_not_publish(druks_client, monkeypatch):
+async def test_create_as_backlog_does_not_publish(druks_client, monkeypatch):
     events = _published(monkeypatch)
     repo = await _open_repo(druks_client)
     ticket = await _open_ticket(druks_client, repo["id"], title="quiet")
 
     assert ticket["identifier"] == "DRU-1"
-    assert ticket["status"] == "todo"
+    assert ticket["status"] == "backlog"
     assert ticket["comments"] == []
     assert events == []
 
@@ -157,7 +157,7 @@ async def test_update_ticket_never_publishes_and_cannot_set_status(druks_client,
     body = edited.json()
     assert body["title"] == "new"
     assert body["priority"] == "high"
-    assert body["status"] == "todo"
+    assert body["status"] == "backlog"
     assert events == []
 
 
