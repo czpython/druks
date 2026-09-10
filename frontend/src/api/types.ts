@@ -38,6 +38,19 @@ export interface DashboardWork {
   hasMore: boolean
 }
 
+export interface DashboardSection {
+  total: number
+  rows: DashboardRun[]
+}
+
+export interface DashboardOverview {
+  needsYou: DashboardSection
+  running: DashboardSection
+  failed: DashboardSection
+  lastFinishedAt: string | null
+  lastFailedAt: string | null
+}
+
 export interface DashboardSchedule {
   app: string
   kind: string

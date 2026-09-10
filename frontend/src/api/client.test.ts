@@ -19,6 +19,27 @@ function failWith(status: number, statusText: string, body: string) {
 
 afterEach(() => vi.unstubAllGlobals())
 
+describe('dashboard overview', () => {
+  it('reads all apps or the exact encoded app filter', async () => {
+    const overview = {
+      needsYou: { total: 0, rows: [] },
+      running: { total: 205, rows: [] },
+      failed: { total: 0, rows: [] },
+      lastFinishedAt: null,
+      lastFailedAt: null,
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(overview)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(api.dashboardOverview()).resolves.toEqual(overview)
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard/overview', expect.objectContaining({ credentials: 'same-origin' }))
+    await api.dashboardOverview('')
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard/overview', expect.anything())
+    await api.dashboardOverview('notes & more')
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard/overview?app=notes%20%26%20more', expect.anything())
+  })
+})
+
 describe('API error messages', () => {
   it('shows a gateway conflict message without its JSON envelope', async () => {
     failWith(409, 'Conflict', JSON.stringify({ code: 'stale_gate', message: 'This request has changed.', retryable: false }))
