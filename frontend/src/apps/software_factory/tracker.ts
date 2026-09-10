@@ -22,7 +22,6 @@ export function softwareFactoryNavigation(settings?: AppsSettingsResponse): [str
     return [
       overview,
       [`/${SOFTWARE_FACTORY}/board`, 'board'],
-      [`/${SOFTWARE_FACTORY}/issues`, 'issues'],
       history,
       projects,
     ]

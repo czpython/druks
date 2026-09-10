@@ -324,7 +324,7 @@ function ProjectCard({
           showPrefix &&
           !project.prefix && (
             <p className="pj-prefix-note">
-              Without a prefix, this project's repos cannot be selected in Issues.
+              Without a prefix, this project's repos cannot be selected on the board.
             </p>
           )
         )}

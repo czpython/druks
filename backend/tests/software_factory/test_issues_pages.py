@@ -10,15 +10,6 @@ BOARD_COLUMNS = [
     "In Review",
     "Done",
 ]
-LIST_SECTIONS = [
-    "Backlog",
-    "Ready for Agent",
-    "In Progress",
-    "In Review",
-    "Done",
-    "Blocked",
-    "Cancelled",
-]
 
 _PAGES = "/api/software_factory/pages"
 _TICKETS = "/api/software_factory/tickets"
@@ -51,22 +42,6 @@ def _columns(page: dict) -> list[dict]:
 
 def _cards_in(column: dict) -> list[dict]:
     return column["blocks"][0]["cards"]
-
-
-def _tables(page: dict) -> list[dict]:
-    return page["blocks"][0]["blocks"]
-
-
-def _section_name(title: str) -> str:
-    return title[: title.rindex(" (")]
-
-
-def _by_section(page: dict) -> dict[str, dict]:
-    return {_section_name(table["title"]): table for table in _tables(page)}
-
-
-def _section_titles(counts: dict[str, int]) -> list[str]:
-    return [f"{label} ({counts.get(label, 0)})" for label in LIST_SECTIONS]
 
 
 def _comments(page: dict) -> dict:
@@ -109,7 +84,7 @@ async def test_empty_board_shows_columns_and_create_actions(druks_client):
     ]
 
 
-async def test_created_ticket_lands_in_backlog_on_board_and_issues(druks_client):
+async def test_created_ticket_lands_in_backlog_on_the_board(druks_client):
     repo = await _open_repo(druks_client)
     ticket = await _open_ticket(druks_client, repo["id"], title="Ship the board")
 
@@ -125,22 +100,8 @@ async def test_created_ticket_lands_in_backlog_on_board_and_issues(druks_client)
         if title != "Backlog":
             assert _cards_in(by_title[title]) == []
 
-    listed = (await druks_client.get(f"{_PAGES}/issues")).json()
-    by_section = _by_section(listed)
-    assert listed["title"] == "Issues"
-    assert listed["description"] == ""
-    assert [table["title"] for table in _tables(listed)] == _section_titles({"Backlog": 1})
-    (row,) = by_section["Backlog"]["rows"]
-    assert row["cells"][0]["text"] == "DRU-1"
-    assert row["cells"][1]["text"] == "Ship the board"
-    assert row["cells"][1]["link"]["arguments"] == {"identifier": ticket["identifier"]}
-    assert row["cells"][4]["text"] == "acme/druks"
-    for title in LIST_SECTIONS:
-        if title != "Backlog":
-            assert by_section[title]["rows"] == []
 
-
-async def test_moving_a_ticket_updates_board_and_issues(druks_client):
+async def test_moving_a_ticket_updates_the_board(druks_client):
     repo = await _open_repo(druks_client)
     ticket = await _open_ticket(druks_client, repo["id"], title="In flight")
     moved = await druks_client.post(
@@ -154,13 +115,8 @@ async def test_moving_a_ticket_updates_board_and_issues(druks_client):
     assert [card["title"] for card in _cards_in(by_title["In Progress"])] == ["In flight"]
     assert _cards_in(by_title["Backlog"]) == []
 
-    listed = (await druks_client.get(f"{_PAGES}/issues")).json()
-    by_section = _by_section(listed)
-    assert [row["cells"][1]["text"] for row in by_section["In Progress"]["rows"]] == ["In flight"]
-    assert by_section["Backlog"]["rows"] == []
 
-
-async def test_cancelled_tickets_are_off_the_board_and_last_on_issues(druks_client):
+async def test_cancelled_tickets_are_off_the_board(druks_client):
     repo = await _open_repo(druks_client)
     await _open_ticket(druks_client, repo["id"], title="live")
     gone = await _open_ticket(druks_client, repo["id"], title="gone")
@@ -172,12 +128,6 @@ async def test_cancelled_tickets_are_off_the_board_and_last_on_issues(druks_clie
     board = (await druks_client.get(f"{_PAGES}/board")).json()
     cards = [card["title"] for column in _columns(board) for card in _cards_in(column)]
     assert cards == ["live"]
-
-    listed = (await druks_client.get(f"{_PAGES}/issues")).json()
-    tables = _tables(listed)
-    assert [table["title"] for table in tables] == _section_titles({"Backlog": 1, "Cancelled": 1})
-    assert _section_name(tables[-1]["title"]) == "Cancelled"
-    assert [row["cells"][1]["text"] for row in tables[-1]["rows"]] == ["gone"]
 
 
 async def test_ticket_page_follows_the_row_and_comments_refresh_the_region(druks_client):
@@ -304,12 +254,11 @@ async def test_unknown_ticket_page_is_an_empty_state(druks_client):
     assert page["blocks"][0]["controls"][0]["page"] == "board"
 
 
-async def test_roster_names_the_board_and_issues_pages(druks_client):
+async def test_roster_names_the_board_and_ticket_pages(druks_client):
     roster = {entry["name"]: entry for entry in (await druks_client.get("/api/apps")).json()}
 
     names = [page["name"] for page in roster["software_factory"]["pages"]]
-    # Route-match order: the static issues page wins over the parameterized ticket.
-    assert names == ["board", "issues", "ticket"]
+    assert names == ["board", "ticket"]
     assert roster["software_factory"]["navigation"] == []
 
 
@@ -359,6 +308,6 @@ async def test_board_filters_by_repo_assignee_and_creator(druks_client):
     titles = [card["title"] for column in _columns(mine) for card in _cards_in(column)]
     assert set(titles) == {"assigned", "open", "elsewhere"}
 
-    issues = (await druks_client.get(f"{_PAGES}/issues", params={"project": acme["id"]})).json()
-    titles = [row["cells"][1]["text"] for table in _tables(issues) for row in table["rows"]]
+    by_project = (await druks_client.get(f"{_PAGES}/board", params={"project": acme["id"]})).json()
+    titles = [card["title"] for column in _columns(by_project) for card in _cards_in(column)]
     assert set(titles) == {"assigned", "open"}
