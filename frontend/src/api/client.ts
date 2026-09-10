@@ -227,7 +227,7 @@ async function sendOperation(method: string, path: string, body: unknown): Promi
 
 export const api = {
   dashboardOverview: (app?: string) => getJSON<DashboardOverview>(
-    `/api/dashboard/overview${app === undefined ? '' : `?app=${encodeURIComponent(app)}`}`,
+    `/api/dashboard/overview${app ? `?app=${encodeURIComponent(app)}` : ''}`,
   ),
   dashboardWork: () => getJSON<DashboardWork>('/api/dashboard/work'),
   dashboardSchedules: () => getJSON<DashboardSchedules>('/api/dashboard/schedules'),

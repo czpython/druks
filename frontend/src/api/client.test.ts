@@ -33,6 +33,8 @@ describe('dashboard overview', () => {
 
     await expect(api.dashboardOverview()).resolves.toEqual(overview)
     expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard/overview', expect.objectContaining({ credentials: 'same-origin' }))
+    await api.dashboardOverview('')
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard/overview', expect.anything())
     await api.dashboardOverview('notes & more')
     expect(fetchMock).toHaveBeenLastCalledWith('/api/dashboard/overview?app=notes%20%26%20more', expect.anything())
   })
