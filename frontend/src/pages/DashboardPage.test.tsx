@@ -127,8 +127,8 @@ describe('Dashboard', () => {
     work.mockResolvedValue({ rows: [pending, { ...pending, run: 'other', app: 'other' }], hasMore: false })
     schedules.mockResolvedValue({
       rows: [
-        { app: 'notes', kind: 'notes.daily', cron: '0 9 * * *', enabled: false, timezone: 'Europe/Madrid' },
-        { app: 'other', kind: 'other.daily', cron: '0 9 * * *', enabled: true, timezone: 'Europe/Madrid' },
+        { app: 'notes', kind: 'notes.daily', cron: '0 9 * * *', defaultCron: '0 9 * * *', enabled: false, timezone: 'Europe/Madrid' },
+        { app: 'other', kind: 'other.daily', cron: '0 9 * * *', defaultCron: '0 9 * * *', enabled: true, timezone: 'Europe/Madrid' },
       ],
     })
     mount(['notes', 'other'])

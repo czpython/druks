@@ -443,7 +443,10 @@ function AppShell({
             <UsagePage />
           </Route>
           <Route path="/schedules">
-            <SchedulesPage apps={rosterQuery.data?.map((entry) => entry.name) ?? []} />
+            <SchedulesPage
+              apps={rosterQuery.data?.map((entry) => entry.name) ?? []}
+              unsavedFormRef={unsavedFormRef}
+            />
           </Route>
           <Route path="/events">
             <EventsPage />

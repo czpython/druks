@@ -88,6 +88,7 @@ class DashboardSchedule(Schema):
     app: str
     kind: str
     cron: str | None
+    default_cron: str
     enabled: bool
     timezone: str
 

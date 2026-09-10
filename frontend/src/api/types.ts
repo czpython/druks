@@ -55,6 +55,7 @@ export interface DashboardSchedule {
   app: string
   kind: string
   cron: string | null
+  defaultCron: string
   enabled: boolean
   timezone: string
 }

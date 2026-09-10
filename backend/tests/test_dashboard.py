@@ -138,6 +138,7 @@ async def test_schedules_resolve_paused_override_and_operator_timezone(
         "app": "field_notes",
         "kind": Summarize.kind,
         "cron": "15 10 * * 1",
+        "defaultCron": "0 9 * * *",
         "enabled": False,
         "timezone": "Europe/Madrid",
     } in response.json()["rows"]
