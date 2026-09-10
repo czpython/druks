@@ -176,6 +176,7 @@ def _ticket_card(ticket: Ticket, account_names: dict[str, str]) -> ui.Card:
         title=ticket.title,
         description=" · ".join(description),
         link=_ticket_link(ticket, ticket.title),
+        drag={"identifier": ticket.identifier},
     )
 
 
@@ -384,6 +385,13 @@ async def board(
                         title=item.label,
                         blocks=[
                             ui.Cards(
+                                layout="stack",
+                                drop=ui.Action(
+                                    label=f"Move to {item.label}",
+                                    operation="set_status",
+                                    arguments={"status": item.value},
+                                    refresh="page",
+                                ),
                                 cards=[
                                     _ticket_card(ticket, account_names)
                                     for ticket in tickets

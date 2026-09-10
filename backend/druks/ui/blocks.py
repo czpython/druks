@@ -602,13 +602,15 @@ class Columns(BlockParent):
 
 class Card(BlockParent):
     """A titled panel. ``link`` is its destination. The shell makes the whole
-    panel the control when ``controls`` is empty."""
+    panel the control when ``controls`` is empty. ``drag`` is what a drop
+    action receives; empty means the card does not move."""
 
     block: Literal["card"] = "card"
     title: str = ""
     description: str = ""
     controls: list[Action | Link] = Field(default_factory=list)
     link: Link | None = None
+    drag: dict[str, Any] = Field(default_factory=dict)
 
     def iter_actions(self) -> "Iterable[Action]":
         yield from super().iter_actions()
@@ -624,21 +626,34 @@ class Card(BlockParent):
 
 
 class Cards(PageBlock):
-    """One card for each of a set of things. The shell arranges them, so a page
-    that wants a particular geometry reaches for ``Columns`` instead."""
+    """One card for each of a set of things. ``wrap`` lets the shell fit as
+    many across as the screen takes. ``stack`` is one column. ``drop`` is the
+    action a dragged card submits onto this list."""
 
     block: Literal["cards"] = "cards"
     title: str = ""
     cards: list[Card] = Field(default_factory=list)
     empty: EmptyState | None = None
+    layout: Literal["wrap", "stack"] = "wrap"
+    drop: Action | None = None
+
+    @model_validator(mode="after")
+    def _drop_is_immediate(self) -> "Cards":
+        if self.drop and (self.drop.fields or self.drop.confirm):
+            raise ValueError("Cards.drop cannot collect fields or confirm — the drop is the submit")
+        return self
 
     def iter_actions(self) -> "Iterable[Action]":
+        if self.drop:
+            yield from self.drop.iter_actions()
         for card in self.cards:
             yield from card.iter_actions()
         if self.empty:
             yield from self.empty.iter_actions()
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        if self.drop:
+            self.drop.check_placement(followed=followed, regions=regions, region=region)
         for card in self.cards:
             card.check_placement(followed=followed, regions=regions, region=region)
         if self.empty:

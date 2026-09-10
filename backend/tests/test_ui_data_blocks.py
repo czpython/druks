@@ -23,6 +23,7 @@ from druks.ui import (
     TableColumn,
     TableRow,
     Text,
+    TextField,
     TextValue,
     TimeValue,
 )
@@ -162,10 +163,50 @@ def test_cards_finds_an_action_in_a_card_and_in_its_empty_state():
     block = Cards(
         cards=[Card(title="Peer 7", controls=[Action(label="Retire", operation="retire_peer")])],
         empty=EmptyState("No peer yet", controls=[Action(label="Scan", operation="scan")]),
+        drop=Action(label="Move", operation="move_peer"),
     )
 
-    assert [action.operation for action in block.iter_actions()] == ["retire_peer", "scan"]
+    assert [action.operation for action in block.iter_actions()] == [
+        "move_peer",
+        "retire_peer",
+        "scan",
+    ]
+
+
+def test_cards_drop_cannot_collect_fields_or_confirm():
+    with pytest.raises(ValueError, match="drop is the submit"):
+        Cards(
+            drop=Action(
+                label="Move",
+                operation="move_peer",
+                fields=[TextField(name="reason", label="Reason")],
+            )
+        )
+    with pytest.raises(ValueError, match="drop is the submit"):
+        Cards(drop=Action(label="Move", operation="move_peer", confirm="Move this peer?"))
+
+
+def test_cards_carries_stack_layout_drop_and_card_drag():
+    (block,) = wire(
+        Cards(
+            layout="stack",
+            drop=Action(
+                label="Move",
+                operation="move_peer",
+                arguments={"status": "todo"},
+            ),
+            cards=[Card(title="peer-7", drag={"identifier": "P-7"})],
+        )
+    )
+
+    assert block["layout"] == "stack"
+    assert block["drop"]["operation"] == "move_peer"
+    assert block["drop"]["arguments"] == {"status": "todo"}
+    assert block["cards"][0]["drag"] == {"identifier": "P-7"}
 
 
 def test_cards_with_none_and_nothing_to_say_carries_no_empty_state():
     assert Cards().empty is None
+    assert Cards().layout == "wrap"
+    assert Cards().drop is None
+    assert Card().drag == {}

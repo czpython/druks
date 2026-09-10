@@ -710,6 +710,7 @@ class Card:
     blocks: list[Block] = []
     controls: list[Action | Link] = []
     link: Link | None = None
+    drag: dict = {}
 ```
 
 ```json
@@ -719,7 +720,8 @@ class Card:
   "description": "Last answered 4 minutes ago.",
   "blocks": [{"block": "text", "text": "Healthy."}],
   "controls": [],
-  "link": {"block": "link", "label": "peer-7", "page": "peer", "arguments": {"peer_id": "7"}, "url": ""}
+  "link": {"block": "link", "label": "peer-7", "page": "peer", "arguments": {"peer_id": "7"}, "url": ""},
+  "drag": {}
 }
 ```
 
@@ -727,6 +729,9 @@ class Card:
 panel the control. With `controls`, the title carries the link so a button is
 not nested inside an anchor. A linked card should not hold other links in
 `blocks`.
+
+`drag` is what a [`Cards.drop`](#cards) action receives. Empty means the card
+does not move.
 
 ### Cards
 
@@ -736,14 +741,18 @@ class Cards:
     title: str = ""
     cards: list[Card] = []
     empty: EmptyState | None = None
+    layout: Literal["wrap", "stack"] = "wrap"
+    drop: Action | None = None
 ```
 
 ```json
 {
   "block": "cards",
   "title": "Peers",
-  "cards": [{"block": "card", "title": "peer-7", "description": "", "blocks": [], "controls": []}],
-  "empty": null
+  "cards": [{"block": "card", "title": "peer-7", "description": "", "blocks": [], "controls": [], "drag": {}}],
+  "empty": null,
+  "layout": "wrap",
+  "drop": null
 }
 ```
 
@@ -764,11 +773,19 @@ ui.Cards(
 )
 ```
 
-The shell arranges the cards. It fits as many across as the screen takes, so
-`Cards` sets no geometry of its own.
+`wrap` (the default) fits as many cards across as the screen takes. `stack`
+is one column, for a board of statuses.
+
+`drop` is the action a dragged card submits onto this list. The shell merges
+the card's `drag` into the action arguments and runs the operation. The drop
+is the submit: `drop` cannot set `fields` or `confirm`. A drop onto the same
+list does nothing. Clicking a linked card still opens it. While a card is
+dragged, the shell dims it and shows a placeholder in the list under the
+pointer. The action runs only on drop.
 
 With no cards, the shell shows the title and `empty` in their place. With no
-cards and no `empty`, it shows nothing. `Table` reads the same way.
+cards and no `empty`, it shows nothing unless `drop` is set, so an empty
+column can still receive a card. `Table` reads the same way for `empty`.
 
 `empty` takes an `EmptyState`, not a line of text, because an empty page
 usually has to say what to do next.

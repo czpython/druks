@@ -315,6 +315,7 @@ export interface CardBlock {
   blocks: Block[]
   controls: (Action | Link)[]
   link?: Link | null
+  drag?: Record<string, unknown>
 }
 
 export interface EmptyStateBlock {
@@ -455,7 +456,14 @@ export type Block =
       layout?: 'stack' | 'prose' | 'row'
     }
   | CardBlock
-  | { block: 'cards'; title: string; cards: CardBlock[]; empty: EmptyStateBlock | null }
+  | {
+      block: 'cards'
+      title: string
+      cards: CardBlock[]
+      empty: EmptyStateBlock | null
+      layout?: 'wrap' | 'stack'
+      drop?: Action | null
+    }
   | {
       block: 'callout'
       tone: 'info' | 'success' | 'warning' | 'danger'
