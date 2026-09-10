@@ -2163,7 +2163,9 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 .dui-table-block > .dui-block-title { margin: 0 0 10px; padding: 0 2px; }
 .dui-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 14px; line-height: 20px; font-variant-numeric: tabular-nums; }
 .dui-table thead th { text-align: left; font-size: 12px; line-height: 16px; color: var(--text-dim); padding: 14px 16px; border-bottom: 1px solid var(--border); background: color-mix(in oklch, var(--surface-2) 45%, var(--surface)); font-weight: 500; white-space: nowrap; }
-.dui-table :is(td, tbody th) { text-align: left; font-weight: 400; vertical-align: middle; padding: 16px; border-bottom: 1px solid var(--border-soft); transition: background-color 160ms ease; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Table links are a 32px hit target. Cells use that line-height so linked and
+   unlinked labels share one baseline. */
+.dui-table :is(td, tbody th) { text-align: left; font-weight: 400; vertical-align: middle; padding: 16px; border-bottom: 1px solid var(--border-soft); transition: background-color 160ms ease; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 32px; }
 .dui-table tbody tr:last-child > * { border-bottom: none; }
 .dui-table tbody tr:hover > * { background: var(--surface-2); }
 .dui-table [data-align='end'] { text-align: right; }
@@ -2363,7 +2365,7 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 .dui-action-danger:hover:not(:disabled) { border-color: color-mix(in oklch, var(--outcome-failed) 64%, var(--border)); background: color-mix(in oklch, var(--outcome-failed) 15%, var(--surface)); color: var(--outcome-failed); }
 .dui-action-broken { color: var(--text-faint); text-decoration: line-through; cursor: help; }
 .dui-table :is(.dui-action, .dui-link) {
-  min-height: 32px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;
+  min-height: 32px; line-height: 32px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;
 }
 
 .dui-value { display: inline-flex; flex-direction: column; gap: 2px; }
