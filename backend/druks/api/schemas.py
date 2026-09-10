@@ -66,11 +66,6 @@ class DashboardRun(Schema):
     failure: str | None
 
 
-class DashboardWork(Schema):
-    rows: list[DashboardRun]
-    has_more: bool
-
-
 class DashboardSection(Schema):
     total: int
     rows: list[DashboardRun]

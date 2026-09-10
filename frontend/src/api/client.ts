@@ -38,7 +38,6 @@ import type {
   InstallationSettings,
   DashboardOverview,
   DashboardSchedules,
-  DashboardWork,
 } from './types'
 
 // A 401 means the request's identity did not resolve: typed to branch on,
@@ -229,7 +228,6 @@ export const api = {
   dashboardOverview: (app?: string) => getJSON<DashboardOverview>(
     `/api/dashboard/overview${app ? `?app=${encodeURIComponent(app)}` : ''}`,
   ),
-  dashboardWork: () => getJSON<DashboardWork>('/api/dashboard/work'),
   dashboardSchedules: () => getJSON<DashboardSchedules>('/api/dashboard/schedules'),
   listApps: () => getJSON<App[]>('/api/apps'),
   // ``path`` is the location under the app's own root: "" for the landing

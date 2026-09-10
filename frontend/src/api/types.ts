@@ -33,11 +33,6 @@ export interface DashboardRun {
   failure: string | null
 }
 
-export interface DashboardWork {
-  rows: DashboardRun[]
-  hasMore: boolean
-}
-
 export interface DashboardSection {
   total: number
   rows: DashboardRun[]

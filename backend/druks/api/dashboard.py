@@ -10,16 +10,14 @@ from druks.api.schemas import (
     DashboardSchedule,
     DashboardSchedules,
     DashboardSection,
-    DashboardWork,
 )
 from druks.apps.loader import iter_apps
 from druks.database import db_session
-from druks.durable.enums import OPEN_STATES, RunState
+from druks.durable.enums import RunState
 from druks.durable.models import Artifact, Run
 from druks.events.models import Event
 from druks.settings import load_settings
 
-PAGE_SIZE = 200
 PREVIEW_SIZE = 4
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -124,49 +122,6 @@ async def get_overview(response: Response, app: str | None = None) -> DashboardO
     times = (await session.execute(history)).one()
     return DashboardOverview(
         **sections, last_finished_at=times.last_finished_at, last_failed_at=times.last_failed_at
-    )
-
-
-@router.get("/work", response_model=DashboardWork)
-async def list_current_work(response: Response) -> DashboardWork:
-    response.headers["Cache-Control"] = "no-store"
-    owners = {workflow.kind: owner.name for owner in iter_apps() for workflow in owner.workflows()}
-    current = (
-        Run.get_open_subjects(
-            kinds=list(owners),
-            states=(*OPEN_STATES, RunState.ORPHANED),
-            include_subjectless=True,
-        )
-        .order_by(None)
-        .subquery()
-    )
-    statement = (
-        select(
-            current.c.run_id.label("run"),
-            current.c.kind,
-            current.c.state,
-            current.c.subject_type,
-            current.c.subject_id,
-            func.left(current.c.subject_label, 240).label("subject_label"),
-            current.c.updated_at,
-            current.c.input_requested_at.label("parked_at"),
-            current.c.request_label,
-            func.left(Artifact.title, 240).label("artifact_title"),
-            current.c.presentation,
-            current.c.request_url,
-            func.left(current.c.failure, 2048).label("failure"),
-        )
-        .outerjoin(Artifact, Artifact.agent_call_id == current.c.latest_call_id)
-        .order_by(current.c.updated_at.desc(), current.c.run_id.desc())
-        .limit(PAGE_SIZE + 1)
-    )
-    rows = (await db_session().execute(statement)).all()
-    return DashboardWork(
-        rows=[
-            DashboardRun.model_validate({**row._mapping, "app": owners[row.kind]})
-            for row in rows[:PAGE_SIZE]
-        ],
-        has_more=len(rows) > PAGE_SIZE,
     )
 
 
