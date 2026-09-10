@@ -58,7 +58,7 @@ async def test_empty_board_shows_columns_and_create_actions(druks_client):
         "status",
         "priority",
         "updated",
-        "assignee",
+        "owner",
         "creator",
         "project",
         "repo",
@@ -66,6 +66,11 @@ async def test_empty_board_shows_columns_and_create_actions(druks_client):
     assert [control["label"] for control in page["controls"]] == ["New ticket"]
     assert [control["operation"] for control in page["controls"]] == ["create_ticket"]
     assert page["controls"][0]["fields"][1]["name"] == "repo_id"
+    me = (await druks_client.get("/api/auth/me")).json()["account"]["id"]
+    owner = next(field for field in page["controls"][0]["fields"] if field["name"] == "owner_id")
+    assert owner["label"] == "Owner"
+    assert owner["value"] == me
+    assert owner["options"][0]["label"] == "Unowned"
     columns = _columns(page)
     assert [column["title"] for column in columns] == BOARD_COLUMNS
     for column in columns:
@@ -151,6 +156,9 @@ async def test_ticket_page_follows_the_row_and_comments_refresh_the_region(druks
     status = columns["blocks"][1]["blocks"][0]
     assert status["action"]["operation"] == "set_status"
     assert status["submit"] == "change"
+    owner = columns["blocks"][1]["blocks"][2]
+    assert owner["fields"][0]["name"] == "owner_id"
+    assert owner["fields"][0]["label"] == "Owner"
     repo = columns["blocks"][1]["blocks"][3]
     assert repo["fields"][0]["name"] == "repo_id"
     assert repo["fields"][0]["options"][0]["group"] == "Acme"
@@ -282,14 +290,14 @@ async def test_board_status_filter_keeps_columns_and_shows_cancelled_when_asked(
     assert cards == ["gone"]
 
 
-async def test_board_filters_by_repo_assignee_and_creator(druks_client):
+async def test_board_filters_by_repo_owner_and_creator(druks_client):
     acme = (await druks_client.post(_PROJECTS, json={"name": "Acme", "prefix": "acm"})).json()
     acme_repo = (
         await druks_client.post(f"{_PROJECTS}/{acme['id']}/repos", json={"fullName": "acme/one"})
     ).json()
     beta_repo = await _open_repo(druks_client, project="Beta", prefix="bet", repo="beta/app")
     me = (await druks_client.get("/api/auth/me")).json()["account"]["id"]
-    await _open_ticket(druks_client, acme_repo["id"], title="assigned", assignee_id=me)
+    await _open_ticket(druks_client, acme_repo["id"], title="assigned", owner_id=me)
     await _open_ticket(druks_client, acme_repo["id"], title="open")
     await _open_ticket(druks_client, beta_repo["id"], title="elsewhere")
 
@@ -298,8 +306,8 @@ async def test_board_filters_by_repo_assignee_and_creator(druks_client):
         "elsewhere"
     ]
 
-    unassigned = (await druks_client.get(f"{_PAGES}/board", params={"assignee": "none"})).json()
-    assert {card["title"] for column in _columns(unassigned) for card in _cards_in(column)} == {
+    unowned = (await druks_client.get(f"{_PAGES}/board", params={"owner": "none"})).json()
+    assert {card["title"] for column in _columns(unowned) for card in _cards_in(column)} == {
         "elsewhere",
         "open",
     }

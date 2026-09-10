@@ -31,7 +31,7 @@ class Ticket(StoredSubject):
     repo_id: Mapped[int] = mapped_column(ForeignKey("project_repos.id"))
     repo: Mapped[ProjectRepo] = relationship(lazy="joined")
     # Optional: a ticket exists before anyone picks it up.
-    assignee_id: Mapped[str | None] = mapped_column(
+    owner_id: Mapped[str | None] = mapped_column(
         ForeignKey("accounts.id", ondelete="RESTRICT"), default=None
     )
     # Who opened it. Optional on the row so a ticket minted outside the HTTP
@@ -51,7 +51,7 @@ class Ticket(StoredSubject):
         description: str = "",
         status: Status = Status.BACKLOG,
         priority: Priority = Priority.NONE,
-        assignee_id: str | None = None,
+        owner_id: str | None = None,
         creator_id: str | None = None,
     ) -> "Ticket":
         session = db_session()
@@ -65,7 +65,7 @@ class Ticket(StoredSubject):
             description=description,
             status=status,
             priority=priority,
-            assignee_id=assignee_id,
+            owner_id=owner_id,
             creator_id=creator_id,
         )
         session.add(ticket)
@@ -97,7 +97,7 @@ class Ticket(StoredSubject):
         exclude_cancelled: bool = False,
         status: str = "",
         priority: str = "",
-        assignee: str = "",
+        owner: str = "",
         creator: str = "",
         project_id: int | None = None,
         repo_id: int | None = None,
@@ -105,17 +105,15 @@ class Ticket(StoredSubject):
     ) -> list["Ticket"]:
         statement = select(cls)
         if exclude_cancelled:
-            statement = statement.where(
-                cls.status.notin_((Status.CANCELLED, Status.BLOCKED))
-            )
+            statement = statement.where(cls.status.notin_((Status.CANCELLED, Status.BLOCKED)))
         if status:
             statement = statement.where(cls.status == status)
         if priority:
             statement = statement.where(cls.priority == priority)
-        if assignee == "none":
-            statement = statement.where(cls.assignee_id.is_(None))
-        elif assignee:
-            statement = statement.where(cls.assignee_id == assignee)
+        if owner == "none":
+            statement = statement.where(cls.owner_id.is_(None))
+        elif owner:
+            statement = statement.where(cls.owner_id == owner)
         if creator:
             statement = statement.where(cls.creator_id == creator)
         if repo_id:
@@ -163,7 +161,7 @@ class Ticket(StoredSubject):
 
     async def _emit_transitioned(self, status: Status) -> None:
         repo = await ProjectRepo.get(self.repo_id)
-        assignee = await Account.get(self.assignee_id) if self.assignee_id else None
+        owner = await Account.get(self.owner_id) if self.owner_id else None
         await publish(
             "ticket.transitioned",
             payload={
@@ -178,8 +176,8 @@ class Ticket(StoredSubject):
                 # find the PR target the operator picked.
                 "project_name": repo.full_name.rsplit("/", 1)[-1],
                 "labels": [],
-                "assignee_email": assignee.username if assignee else None,
-                "assignee_name": assignee.username if assignee else None,
+                "assignee_email": owner.username if owner else None,
+                "assignee_name": owner.username if owner else None,
                 "completed": status.completed,
                 "terminal": status.terminal,
             },
@@ -190,8 +188,8 @@ class Ticket(StoredSubject):
         self.updated_at = Base.utc_now()
         await db_session().flush()
 
-    async def assign(self, assignee_id: str | None) -> None:
-        self.assignee_id = assignee_id
+    async def set_owner(self, owner_id: str | None) -> None:
+        self.owner_id = owner_id
         self.updated_at = Base.utc_now()
         await db_session().flush()
 

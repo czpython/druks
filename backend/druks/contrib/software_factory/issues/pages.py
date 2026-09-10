@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from druks import ui
+from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
 from druks.contrib.software_factory.issues.enums import Priority, Status
 from druks.contrib.software_factory.issues.models import Comment, Ticket
@@ -27,14 +28,14 @@ PRIORITY_LABELS: dict[Priority, str] = {
     Priority.LOW: "Low",
 }
 
-UNASSIGNED = "Unassigned"
+UNOWNED = "Unowned"
 # An account that has since gone, or druks' own system actor: the row still
 # reads, it just carries no name.
 UNATTRIBUTED = "Unattributed"
-# Empty value on a page filter: any ticket. Assignee uses ``none`` for
-# unassigned because this empty value already means "no filter".
+# Empty value on a page filter: any ticket. Owner uses ``none`` for
+# unowned because this empty value already means "no filter".
 FILTER_ANY = "Any"
-UNASSIGNED_FILTER = "none"
+UNOWNED_FILTER = "none"
 UPDATED_WINDOWS = ("today", "week", "month")
 
 
@@ -46,10 +47,10 @@ def _repo_options(repos: list[ProjectRepo]) -> list[ui.Option]:
     ]
 
 
-def _assignee_options(accounts: list[Account]) -> list[ui.Option]:
-    """Who work can be handed to, plus nobody. Unassigned carries the empty
-    value the doors read back as "no assignee"."""
-    return [ui.Option(UNASSIGNED, value="")] + [
+def _owner_options(accounts: list[Account]) -> list[ui.Option]:
+    """Who work can be handed to, plus nobody. Unowned carries the empty
+    value the doors read back as "no owner"."""
+    return [ui.Option(UNOWNED, value="")] + [
         ui.Option(account.username, value=account.id) for account in accounts
     ]
 
@@ -62,10 +63,10 @@ def _status_options() -> list[ui.Option]:
     return [ui.Option(status.label, value=status.value) for status in Status]
 
 
-def _assignee_name(assignee_id: str | None, account_names: dict[str, str]) -> str:
-    if not assignee_id:
-        return UNASSIGNED
-    return account_names.get(assignee_id, UNATTRIBUTED)
+def _owner_name(owner_id: str | None, account_names: dict[str, str]) -> str:
+    if not owner_id:
+        return UNOWNED
+    return account_names.get(owner_id, UNATTRIBUTED)
 
 
 def _creator_name(creator_id: str | None, account_names: dict[str, str]) -> str:
@@ -109,9 +110,10 @@ def _create_actions(repos: list[ProjectRepo], accounts: list[Account]) -> list[u
                     value=Priority.NONE.value,
                 ),
                 ui.SelectField(
-                    name="assignee_id",
-                    label="Assignee",
-                    options=_assignee_options(accounts),
+                    name="owner_id",
+                    label="Owner",
+                    options=_owner_options(accounts),
+                    value=current_account_id.get() or "",
                 ),
             ],
         ),
@@ -148,8 +150,8 @@ def _ticket_card(ticket: Ticket, account_names: dict[str, str]) -> ui.Card:
     priority = Priority(ticket.priority)
     if priority is not Priority.NONE:
         description.append(PRIORITY_LABELS[priority])
-    if ticket.assignee_id:
-        description.append(_assignee_name(ticket.assignee_id, account_names))
+    if ticket.owner_id:
+        description.append(_owner_name(ticket.owner_id, account_names))
     return ui.Card(
         title=ticket.title,
         description=" · ".join(description),
@@ -195,7 +197,7 @@ def _ticket_filters(
     status: str,
     priority: str,
     updated: str,
-    assignee: str,
+    owner: str,
     creator: str,
     project: str,
     repo: str,
@@ -229,14 +231,14 @@ def _ticket_filters(
             value=updated,
         ),
         ui.SelectField(
-            name="assignee",
-            label="Assignee",
+            name="owner",
+            label="Owner",
             options=[
                 ui.Option(FILTER_ANY, value=""),
-                ui.Option(UNASSIGNED, value=UNASSIGNED_FILTER),
+                ui.Option(UNOWNED, value=UNOWNED_FILTER),
                 *[ui.Option(account.username, value=account.id) for account in accounts],
             ],
-            value=assignee,
+            value=owner,
         ),
         _filter_select(
             "creator",
@@ -260,7 +262,7 @@ async def _ticket_collection(
     status: str = "",
     priority: str = "",
     updated: str = "",
-    assignee: str = "",
+    owner: str = "",
     creator: str = "",
     project: str = "",
     repo: str = "",
@@ -285,7 +287,7 @@ async def _ticket_collection(
         exclude_cancelled=exclude_cancelled and not status,
         status=status,
         priority=priority,
-        assignee=assignee,
+        owner=owner,
         creator=creator,
         project_id=_optional_int(project),
         repo_id=_optional_int(repo),
@@ -299,7 +301,7 @@ async def _ticket_collection(
             status=status,
             priority=priority,
             updated=updated,
-            assignee=assignee,
+            owner=owner,
             creator=creator,
             project=project,
             repo=repo,
@@ -315,7 +317,7 @@ async def board(
     status: str = "",
     priority: str = "",
     updated: str = "",
-    assignee: str = "",
+    owner: str = "",
     creator: str = "",
     project: str = "",
     repo: str = "",
@@ -325,7 +327,7 @@ async def board(
         status=status,
         priority=priority,
         updated=updated,
-        assignee=assignee,
+        owner=owner,
         creator=creator,
         project=project,
         repo=repo,
@@ -498,10 +500,10 @@ async def ticket(identifier: str):
                             _live_form(
                                 found,
                                 ui.SelectField(
-                                    name="assignee_id",
-                                    label="Assignee",
-                                    options=_assignee_options(accounts),
-                                    value=found.assignee_id or "",
+                                    name="owner_id",
+                                    label="Owner",
+                                    options=_owner_options(accounts),
+                                    value=found.owner_id or "",
                                 ),
                                 operation="update_ticket",
                                 layout="row",

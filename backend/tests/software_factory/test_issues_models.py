@@ -125,19 +125,19 @@ async def test_list_board_omits_cancelled():
     assert found.get_summary().title == "live"
 
 
-async def test_list_matching_filters_by_assignee_creator_and_repo():
+async def test_list_matching_filters_by_owner_creator_and_repo():
     account = await Account.get_or_create("op@example.com")
     dru = await _open_repo(name="Filter", prefix="flt", full_name="acme/filter")
     other = await _open_repo(name="Other", prefix="oth", full_name="acme/other")
-    await Ticket.create(repo_id=dru.id, title="mine", assignee_id=account.id, creator_id=account.id)
+    await Ticket.create(repo_id=dru.id, title="mine", owner_id=account.id, creator_id=account.id)
     await Ticket.create(repo_id=dru.id, title="open")
     await Ticket.create(repo_id=other.id, title="elsewhere")
 
-    assert {ticket.title for ticket in await Ticket.list_matching(assignee="none")} == {
+    assert {ticket.title for ticket in await Ticket.list_matching(owner="none")} == {
         "open",
         "elsewhere",
     }
-    assert {ticket.title for ticket in await Ticket.list_matching(assignee=account.id)} == {"mine"}
+    assert {ticket.title for ticket in await Ticket.list_matching(owner=account.id)} == {"mine"}
     assert {ticket.title for ticket in await Ticket.list_matching(creator=account.id)} == {"mine"}
     assert {ticket.title for ticket in await Ticket.list_matching(repo_id=other.id)} == {
         "elsewhere"
