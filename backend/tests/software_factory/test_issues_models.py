@@ -11,7 +11,7 @@ from druks.contrib.software_factory.exceptions import (
 )
 from druks.contrib.software_factory.issues.enums import Status
 from druks.contrib.software_factory.issues.models import Comment, Ticket
-from druks.contrib.software_factory.models import Project, ProjectRepo
+from druks.contrib.software_factory.models import Project, ProjectRepo, prefix_candidates
 from sqlalchemy.exc import IntegrityError
 
 
@@ -46,7 +46,7 @@ async def test_unknown_repo_refuses_a_ticket():
 
 
 async def test_a_project_without_a_prefix_refuses_a_ticket():
-    project = await Project.create(name="bare")
+    project = await Project.create(name="A")
     repo = await ProjectRepo.create(project_id=project.id, full_name="acme/bare")
     with pytest.raises(MissingPrefix):
         await Ticket.create(repo_id=repo.id, title="orphan")
@@ -73,11 +73,46 @@ async def test_set_prefix_refuses_a_prefix_another_project_holds():
         await acme.set_prefix("box")
 
 
-async def test_prefix_must_be_two_to_six_letters():
+async def test_prefix_must_be_two_to_six_letters_or_two_letters_and_a_digit():
     with pytest.raises(InvalidPrefix):
         await Project.create(name="short", prefix="A")
     with pytest.raises(InvalidPrefix):
-        await Project.create(name="digits", prefix="DR1")
+        await Project.create(name="zero", prefix="DR0")
+    with pytest.raises(InvalidPrefix):
+        await Project.create(name="long", prefix="ABCDEFG")
+    project = await Project.create(name="digits", prefix="DR1")
+    assert project.prefix == "DR1"
+
+
+def test_prefix_candidates_walk_letters_then_digits():
+    assert prefix_candidates("Acme") == [
+        "ACM",
+        "ACE",
+        "AC1",
+        "AC2",
+        "AC3",
+        "AC4",
+        "AC5",
+        "AC6",
+        "AC7",
+        "AC8",
+        "AC9",
+    ]
+    assert prefix_candidates("Go") == [f"GO{digit}" for digit in range(1, 10)]
+    assert prefix_candidates("A") == []
+    assert prefix_candidates("Acme Tools")[0] == "ACM"
+    assert prefix_candidates("Acme Tools")[1] == "ACE"
+
+
+async def test_create_walks_derived_prefixes_on_clash():
+    first = await Project.create(name="Acme")
+    assert first.prefix == "ACM"
+    second = await Project.create(name="Acme Tools")
+    assert second.prefix == "ACE"
+    third = await Project.create(name="Go")
+    assert third.prefix == "GO1"
+    fourth = await Project.create(name="Go 2")
+    assert fourth.prefix == "GO2"
 
 
 async def test_prefix_cannot_change_after_a_ticket_is_minted():
