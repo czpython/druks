@@ -11,7 +11,6 @@ from druks.db import Base
 # it: ``Ticket.list_board`` leaves those rows out.
 BOARD_STATUSES = (
     Status.BACKLOG,
-    Status.TODO,
     Status.READY_FOR_AGENT,
     Status.IN_PROGRESS,
     Status.IN_REVIEW,
@@ -21,7 +20,6 @@ BOARD_STATUSES = (
 # and cancelled at the bottom. Ready for Agent stays: it is still a live status.
 LIST_STATUSES = (
     Status.BACKLOG,
-    Status.TODO,
     Status.READY_FOR_AGENT,
     Status.IN_PROGRESS,
     Status.IN_REVIEW,
@@ -122,7 +120,7 @@ def _create_actions(repos: list[ProjectRepo], accounts: list[Account]) -> list[u
                     name="status",
                     label="Status",
                     options=_status_options(),
-                    value=Status.TODO.value,
+                    value=Status.BACKLOG.value,
                 ),
                 ui.SelectField(
                     name="priority",

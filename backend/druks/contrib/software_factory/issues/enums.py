@@ -6,7 +6,6 @@ class Status(StrEnum):
     column can never hold a status no screen knows how to render."""
 
     BACKLOG = "backlog"
-    TODO = "todo"
     READY_FOR_AGENT = "ready_for_agent"
     IN_PROGRESS = "in_progress"
     IN_REVIEW = "in_review"
@@ -38,7 +37,6 @@ class Status(StrEnum):
 # strings change when the board wants different words.
 STATUS_LABELS: dict[Status, str] = {
     Status.BACKLOG: "Backlog",
-    Status.TODO: "Todo",
     Status.READY_FOR_AGENT: "Ready for Agent",
     Status.IN_PROGRESS: "In Progress",
     Status.IN_REVIEW: "In Review",
