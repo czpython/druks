@@ -14,6 +14,13 @@ function pickPlaceholder(loading: boolean, available: number): string {
   return '— pick a repo —'
 }
 
+function suggestedPrefix(name: string): string {
+  const letters = name.toUpperCase().replace(/[^A-Z]/g, '')
+  if (letters.length >= 3) return letters.slice(0, 3)
+  if (letters.length === 2) return `${letters}1`
+  return ''
+}
+
 function splitRepo(full: string): { org: string; short: string } {
   const i = full.indexOf('/')
   if (i < 0) return { org: '', short: full }
@@ -35,6 +42,7 @@ export function ProjectsPage() {
 
   const [draftName, setDraftName] = useState('')
   const [draftPrefix, setDraftPrefix] = useState('')
+  const [prefixDirty, setPrefixDirty] = useState(false)
   // A project delete can still fail (a race, a server error); surface it here at
   // page level as a transient error toast so it's never a silent no-op.
   const [deleteError, setDeleteError] = useFlashNote<string>()
@@ -43,6 +51,7 @@ export function ProjectsPage() {
     onSuccess: () => {
       setDraftName('')
       setDraftPrefix('')
+      setPrefixDirty(false)
       void queryClient.invalidateQueries({ queryKey: ['projects'] })
     },
   })
@@ -52,6 +61,14 @@ export function ProjectsPage() {
       const prefix = isDruksIssues ? draftPrefix.trim() : ''
       createMutation.mutate(prefix ? { name, prefix } : { name })
     }
+  }
+  const onNameChange = (value: string) => {
+    setDraftName(value)
+    if (isDruksIssues && !prefixDirty) setDraftPrefix(suggestedPrefix(value))
+  }
+  const onPrefixChange = (value: string) => {
+    setPrefixDirty(true)
+    setDraftPrefix(value)
   }
 
   if (isLoading) {
@@ -93,8 +110,8 @@ export function ProjectsPage() {
                   name={draftName}
                   prefix={draftPrefix}
                   showPrefix={isDruksIssues}
-                  onNameChange={setDraftName}
-                  onPrefixChange={setDraftPrefix}
+                  onNameChange={onNameChange}
+                  onPrefixChange={onPrefixChange}
                   onCreate={onCreate}
                   pending={createMutation.isPending}
                 />
@@ -108,8 +125,8 @@ export function ProjectsPage() {
               name={draftName}
               prefix={draftPrefix}
               showPrefix={isDruksIssues}
-              onNameChange={setDraftName}
-              onPrefixChange={setDraftPrefix}
+              onNameChange={onNameChange}
+              onPrefixChange={onPrefixChange}
               onCreate={onCreate}
               pending={createMutation.isPending}
             />

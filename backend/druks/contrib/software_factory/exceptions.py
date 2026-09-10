@@ -13,7 +13,9 @@ class RepoNotFound(Exception):
 
 class InvalidPrefix(Exception):
     def __init__(self, prefix: str) -> None:
-        super().__init__(f"project prefix {prefix!r} must be 2-6 letters A-Z")
+        super().__init__(
+            f"project prefix {prefix!r} must be 2-6 letters A-Z, or two letters and a digit 1-9"
+        )
 
 
 class MissingPrefix(Exception):
