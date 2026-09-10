@@ -7,6 +7,7 @@ BOARD_COLUMNS = [
     "Backlog",
     "Ready for Agent",
     "In Progress",
+    "Blocked",
     "In Review",
     "Done",
 ]
@@ -84,9 +85,16 @@ async def test_empty_board_shows_columns_and_create_actions(druks_client):
         "backlog",
         "ready_for_agent",
         "in_progress",
+        "blocked",
         "in_review",
         "done",
     ]
+    status_filter = next(field for field in page["filters"] if field["name"] == "status")
+    assert [option["label"] for option in status_filter["options"]] == ["Any", *BOARD_COLUMNS]
+    create_status = next(
+        field for field in page["controls"][0]["fields"] if field["name"] == "status"
+    )
+    assert [option["label"] for option in create_status["options"]] == BOARD_COLUMNS
 
 
 async def test_created_ticket_lands_in_backlog_on_the_board(druks_client):
@@ -121,18 +129,20 @@ async def test_moving_a_ticket_updates_the_board(druks_client):
     assert _cards_in(by_title["Backlog"]) == []
 
 
-async def test_cancelled_tickets_are_off_the_board(druks_client):
+async def test_blocked_tickets_stay_on_the_board(druks_client):
     repo = await _open_repo(druks_client)
     await _open_ticket(druks_client, repo["id"], title="live")
-    gone = await _open_ticket(druks_client, repo["id"], title="gone")
-    await druks_client.post(
-        f"{_TICKETS}/{gone['identifier']}/status",
-        json={"status": "cancelled"},
+    stuck = await _open_ticket(druks_client, repo["id"], title="stuck")
+    moved = await druks_client.post(
+        f"{_TICKETS}/{stuck['identifier']}/status",
+        json={"status": "blocked"},
     )
+    assert moved.status_code == 200
 
     board = (await druks_client.get(f"{_PAGES}/board")).json()
-    cards = [card["title"] for column in _columns(board) for card in _cards_in(column)]
-    assert cards == ["live"]
+    by_title = {column["title"]: column for column in _columns(board)}
+    assert [card["title"] for card in _cards_in(by_title["Blocked"])] == ["stuck"]
+    assert [card["title"] for card in _cards_in(by_title["Backlog"])] == ["live"]
 
 
 async def test_ticket_page_follows_the_row_and_comments_refresh_the_region(druks_client):
@@ -270,13 +280,13 @@ async def test_roster_names_the_board_and_ticket_pages(druks_client):
     assert roster["software_factory"]["navigation"] == []
 
 
-async def test_board_status_filter_keeps_columns_and_shows_cancelled_when_asked(druks_client):
+async def test_board_status_filter_keeps_columns(druks_client):
     repo = await _open_repo(druks_client)
     await _open_ticket(druks_client, repo["id"], title="live")
-    gone = await _open_ticket(druks_client, repo["id"], title="gone")
+    stuck = await _open_ticket(druks_client, repo["id"], title="stuck")
     await druks_client.post(
-        f"{_TICKETS}/{gone['identifier']}/status",
-        json={"status": "cancelled"},
+        f"{_TICKETS}/{stuck['identifier']}/status",
+        json={"status": "blocked"},
     )
 
     backlog = (await druks_client.get(f"{_PAGES}/board", params={"status": "backlog"})).json()
@@ -284,10 +294,10 @@ async def test_board_status_filter_keeps_columns_and_shows_cancelled_when_asked(
     assert cards == ["live"]
     assert [column["title"] for column in _columns(backlog)] == BOARD_COLUMNS
 
-    cancelled = (await druks_client.get(f"{_PAGES}/board", params={"status": "cancelled"})).json()
-    assert [column["title"] for column in _columns(cancelled)] == [*BOARD_COLUMNS, "Cancelled"]
-    cards = [card["title"] for column in _columns(cancelled) for card in _cards_in(column)]
-    assert cards == ["gone"]
+    blocked = (await druks_client.get(f"{_PAGES}/board", params={"status": "blocked"})).json()
+    assert [column["title"] for column in _columns(blocked)] == BOARD_COLUMNS
+    cards = [card["title"] for column in _columns(blocked) for card in _cards_in(column)]
+    assert cards == ["stuck"]
 
 
 async def test_board_filters_by_repo_owner_and_creator(druks_client):

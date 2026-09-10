@@ -8,12 +8,13 @@ from druks.contrib.software_factory.issues.models import Comment, Ticket
 from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
 from druks.db import Base
 
-# The board's columns, worked-on left to right. Cancelled and blocked are off
-# it: ``Ticket.list_board`` leaves those rows out.
+# The board's columns, worked-on left to right. Blocked sits next to In
+# Progress so stuck work stays visible beside work in flight.
 BOARD_STATUSES = (
     Status.BACKLOG,
     Status.READY_FOR_AGENT,
     Status.IN_PROGRESS,
+    Status.BLOCKED,
     Status.IN_REVIEW,
     Status.DONE,
 )
@@ -258,7 +259,6 @@ def _ticket_filters(
 
 async def _ticket_collection(
     *,
-    exclude_cancelled: bool,
     status: str = "",
     priority: str = "",
     updated: str = "",
@@ -284,7 +284,6 @@ async def _ticket_collection(
     repos = await ProjectRepo.list_for_tickets()
     accounts = await Account.list_all()
     tickets = await Ticket.list_matching(
-        exclude_cancelled=exclude_cancelled and not status,
         status=status,
         priority=priority,
         owner=owner,
@@ -323,7 +322,6 @@ async def board(
     repo: str = "",
 ):
     tickets, repos, accounts, filters = await _ticket_collection(
-        exclude_cancelled=True,
         status=status,
         priority=priority,
         updated=updated,
@@ -333,9 +331,6 @@ async def board(
         repo=repo,
     )
     account_names = {account.id: account.username for account in accounts}
-    columns = BOARD_STATUSES
-    if status in {Status.CANCELLED, Status.BLOCKED}:
-        columns = BOARD_STATUSES + (Status(status),)
     return ui.Page(
         "Board",
         # Built from the repos and accounts alone, so an empty install still
@@ -368,7 +363,7 @@ async def board(
                             )
                         ],
                     )
-                    for item in columns
+                    for item in BOARD_STATUSES
                 ]
             )
         ],
