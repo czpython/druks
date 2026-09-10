@@ -156,19 +156,18 @@ class _DeclaredSubject:
         self.subject_class = subject_class
 
     def __get__(self, run: "Workflow | None", owner: type) -> Any:
-        if run is None:
-            return self.subject_class
+        if run:
+            # Live, not a snapshot taken at dispatch: a long-parked run resumes against
+            # whatever the declared class says then, and finds nothing if it went away.
+            # Awaitable either way, so ``await self.subject`` is the one shape.
+            async def resolve() -> Any:
+                if "subject" in run.__dict__:
+                    return run.__dict__["subject"]
+                if run._subject:
+                    return await self.subject_class.get_for_subject_id(str(run._subject["id"]))
 
-        # Live, not a snapshot taken at dispatch: a long-parked run resumes against
-        # whatever the declared class says then, and finds nothing if it went away.
-        # Awaitable either way, so ``await self.subject`` is the one shape.
-        async def resolve() -> Any:
-            if "subject" in run.__dict__:
-                return run.__dict__["subject"]
-            if run._subject:
-                return await self.subject_class.get_for_subject_id(str(run._subject["id"]))
-
-        return resolve()
+            return resolve()
+        return self.subject_class
 
     def __set__(self, run: "Workflow", value: Any) -> None:
         # A test hands the run its subject directly; ``await self.subject``
@@ -777,19 +776,28 @@ class Workflow:
         self._host_secrets_id = ""
 
     async def announce(self, topic: str, **facts: Any) -> None:
-        # The workflow announcing a domain event in its app's vocabulary
-        # ("pr.opened", pr_number=12, branch="agent/eng-8"). The platform injects
-        # the routing subscribers filter on, and the publish runs as its own
-        # retrying checkpoint so a recovery replay doesn't re-fire it. Body-only,
-        # enforced: the checkpoint is a step, so it can't nest inside one.
+        """Record a domain fact, then notify subscribers in a separate checkpoint."""
         if _in_step.get():
             raise WorkflowError("announce() runs in the workflow body, not inside a @step")
 
-        async def _fan_out() -> None:
+        async def record() -> None:
+            async with step_session():
+                run = await Run.get(self.workflow_id)
+                await Event.emit(
+                    type=topic,
+                    subject=self._subject,
+                    label=run.subject_label,
+                    payload={**facts, "run": self.workflow_id, "kind": self.kind},
+                    app=self.app,
+                )
+
+        await DBOS.run_step_async(StepOptions(name=topic, **_IO_RETRIES), record)
+
+        async def notify() -> None:
             async with step_session():
                 await publish(topic, subject=self._subject, kind=self.kind, **facts)
 
-        await DBOS.run_step_async(StepOptions(name=topic, **_IO_RETRIES), _fan_out)
+        await DBOS.run_step_async(StepOptions(name=f"{topic}:propagate", **_IO_RETRIES), notify)
 
     async def review(
         self, *, questions: list[BaseModel] | None = None, context: str = ""
@@ -945,14 +953,13 @@ class Workflow:
         if cls.subject:
             if isinstance(subject, cls.subject):
                 return
-            given = "nothing" if subject is None else type(subject).__name__
+            given = type(subject).__name__ if subject else "nothing"
             raise WorkflowError(f"{cls.__name__} is about {cls.subject.__name__}, not {given}")
-        if subject is None:
-            return
-        raise WorkflowError(
-            f"{cls.__name__} declares no subject — declare "
-            f"``subject = {type(subject).__name__}`` on it, or pass subject=None"
-        )
+        if subject:
+            raise WorkflowError(
+                f"{cls.__name__} declares no subject — declare "
+                f"``subject = {type(subject).__name__}`` on it, or pass subject=None"
+            )
 
     @classmethod
     async def cancel(cls, subject: Subject | StoredSubject, *, failure: str | None = None) -> None:

@@ -74,6 +74,13 @@ class StoredSubject(Base):
     def label(self) -> str:
         return self.get_label()
 
+    async def announce(self, topic: str, **facts: Any) -> None:
+        """Record and deliver a domain fact in the current transaction."""
+        # The event log is built on this module's Base.
+        from druks.events.models import Event
+
+        await Event.announce(self, topic, facts)
+
     @classmethod
     async def get_for_subject_id(cls, subject_id: str) -> Self | None:
         """The row this subject id names. A subject id is free text and reaches the

@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
+from druks.events.models import Event
 from druks.models import snake_name
 
 if TYPE_CHECKING:
@@ -37,6 +38,10 @@ class Subject:
         # An identity-only subject is already named by its id — "owner/repo#7" is
         # the handle, not a surrogate key.
         return self.id
+
+    async def announce(self, topic: str, **facts: Any) -> None:
+        """Record and deliver a domain fact in the current transaction."""
+        await Event.announce(self, topic, facts)
 
     @classmethod
     async def get_for_subject_id(cls, subject_id: str) -> Self | None:
