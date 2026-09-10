@@ -18,19 +18,10 @@ from druks.contrib.software_factory.ticketing.base import Tracker
 from druks.contrib.software_factory.ticketing.jira import Jira
 from druks.contrib.software_factory.ticketing.linear import Linear
 from druks.core import services
-from druks.db import StoredSubject
 from druks.doctor import CheckResult
 from druks.services import ServiceNotConnectedError
-from druks.workflows import SubjectActivity
 
 from .services import GithubReviewer
-
-# Only what the timeline can't already show. A running agent has an agent call
-# to name it, so the phase that clears provisioning maps to nothing.
-_PHASE_META: dict[str, SubjectActivity] = {
-    "provisioning_vm": SubjectActivity(label="Provisioning sandbox VM…", kind="infra"),
-    "sandbox_building": SubjectActivity(label="Building sandbox…", kind="infra"),
-}
 
 
 async def check_tracker_identity() -> CheckResult:
@@ -196,8 +187,3 @@ class SoftwareFactory(App):
         prompt="software_factory/review/review_pull_request.md",
         contract=ReviewReport,
     )
-
-    @classmethod
-    async def get_subject_activity(cls, subject: StoredSubject) -> SubjectActivity | None:
-        phase = await subject.get_phase()
-        return _PHASE_META.get(phase or "")

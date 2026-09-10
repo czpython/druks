@@ -91,13 +91,6 @@ export interface SubjectStatus {
   accountUsername: string | null
 }
 
-// The live sub-phase a running run pushes ("Provisioning sandbox VM…", "Working…") —
-// finer than the lifecycle status; null unless something is actively running.
-export interface SubjectActivity {
-  label: string
-  kind: string
-}
-
 export interface TokenUsage {
   inputTokens: number
   outputTokens: number
@@ -173,12 +166,14 @@ export interface SubjectRow<S extends SubjectSummary = SubjectSummary> {
 
 // A subject's full read view: domain summary, status, the platform timeline
 // (the subject's runs, oldest first, each with its agent calls), and the
-// app's optional live activity (the running sub-phase).
+// driving run's sandbox phase while it starts.
 export interface SubjectResponse<S extends SubjectSummary = SubjectSummary> {
   summary: S
   status: SubjectStatus
   timeline: RunSummary[]
-  activity?: SubjectActivity | null
+  // The driving run's sandbox phase while it starts ("provisioning_vm"). The shell
+  // supplies the words.
+  phase?: string | null
 }
 
 export interface ArtifactFile {

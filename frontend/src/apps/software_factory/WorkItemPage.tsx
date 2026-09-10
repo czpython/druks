@@ -10,7 +10,6 @@ import type {
   AgentCallSummary,
   RunState,
   RunSummary,
-  SubjectActivity,
   SubjectStatus,
 } from '../../api/types'
 import { DetailLayout } from '../../components/DetailLayout'
@@ -19,6 +18,7 @@ import { CancelRun, RetryRun } from '../../components/RunControls'
 import { GateControls } from '../../druksui/GateControls'
 import { RunTranscript } from '../../components/RunTranscript'
 import { computeElapsed, dur, formatTokenCount, relTime, secondsSince } from '../../lib/format'
+import { phaseLine } from '../../lib/phase'
 import { parkedLine, runSubLine, statusLine } from './statusLine'
 import { agentCallPath, workItemPath } from './slug'
 import { useRawLocation } from '../../lib/useRawLocation'
@@ -190,7 +190,7 @@ function WorkItemView({ data }: { data: WorkItemDetail }) {
             />
             <TimelinePanel
               runs={runs}
-              activity={data.activity}
+              phase={data.phase}
               selection={selection}
               onSelect={(id) => setSelected(id)}
             />
@@ -308,12 +308,12 @@ function InfoPanel({
 
 function TimelinePanel({
   runs,
-  activity,
+  phase,
   selection,
   onSelect,
 }: {
   runs: RunSummary[]
-  activity?: SubjectActivity | null
+  phase?: string | null
   selection: Selection | null
   onSelect: (id: string) => void
 }) {
@@ -331,7 +331,7 @@ function TimelinePanel({
             <RunRow
               key={run.id}
               run={run}
-              activity={activity}
+              phase={phase}
               selection={selection}
               onSelect={onSelect}
             />
@@ -343,12 +343,12 @@ function TimelinePanel({
 
 function RunRow({
   run,
-  activity,
+  phase,
   selection,
   onSelect,
 }: {
   run: RunSummary
-  activity?: SubjectActivity | null
+  phase?: string | null
   selection: Selection | null
   onSelect: (id: string) => void
 }) {
@@ -357,7 +357,7 @@ function RunRow({
   // A single call duplicates the run's own row (same label, same ledger) —
   // fold it into the parent instead of showing both.
   const collapseCalls = run.agentCalls.length <= 1
-  const subtitle = runSubLine(run, activity, collapseCalls)
+  const subtitle = runSubLine(run, phase, collapseCalls)
   return (
     <div className="wic-run">
       <div
@@ -634,16 +634,16 @@ function TranscriptBody({
 }) {
   const isLive = call?.status === 'running'
 
-  // Running but no agent call yet → the sandbox spin-up window. The live phase
-  // (the app's activity: "Building sandbox VM…", "Working…") names what's
-  // happening in that window; falls back to a generic phrase before it's pushed.
+  // Running but no agent call yet → the sandbox spin-up window. The run's sandbox
+  // phase, in words ("Building sandbox…"), names what's happening in that window;
+  // falls back to a generic phrase before it's pushed.
   if (call == null) {
     if (isRunning(run)) {
       return (
         <div className="ins-infra">
           <span className="ins-infra-glyph">◍</span>
           <div className="ins-infra-text">
-            <div className="ins-infra-phrase">{data.activity?.label ?? 'Starting up…'}</div>
+            <div className="ins-infra-phrase">{phaseLine(data.phase) ?? 'Starting up…'}</div>
             <div className="ins-infra-sub">
               no agent call yet — the transcript begins once the agent starts
             </div>

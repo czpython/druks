@@ -2,7 +2,7 @@ from .activity import get_run_phase, set_run_phase
 from .enums import AgentCallStatus, RunState
 from .exceptions import FatalError, WorkflowError
 from .models import AgentCall, Run
-from .schemas import AgentCallResponse, SubjectActivity, SubjectSummary
+from .schemas import AgentCallResponse, SubjectSummary
 
 # The durable-execution engine. Internal — authors never import druks.durable; the
 # doors are druks.workflows (Workflow, Gate, step + these records) and druks.agents
@@ -15,7 +15,6 @@ __all__ = [
     "FatalError",
     "Run",
     "RunState",
-    "SubjectActivity",
     "SubjectSummary",
     "WorkflowError",
     "get_run_phase",
