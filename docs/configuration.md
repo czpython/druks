@@ -107,7 +107,7 @@ caches, and the sandbox provisioning gate.
 
 | TOML key | Purpose |
 | --- | --- |
-| `urls.endpoint` | Browser-visible dashboard base URL used to build MCP OAuth callbacks |
+| `urls.endpoint` | Browser-visible dashboard base URL for MCP OAuth callbacks and sandbox access to this appliance's `/mcp` |
 | `urls.webhook_host` | Public webhook hostname used by `druks doctor` for its ingress probe |
 | `identity.mode` | `none` (default, no authentication, single operator), `header` (edge-asserted identity), or `jwt` (validated edge-signed assertion) |
 | `identity.header` | The trusted identity header. The shipped Caddy edge also uses it. Header and JWT modes have no default and require it |
@@ -280,16 +280,38 @@ client at another compatible GitHub API endpoint.
 
 ## Ticketing integrations
 
-Tracker credentials are service identities. Connect Linear or Jira Cloud from
+Select the tracker in **Software Factory → Settings**. The default is Linear.
+**none** leaves Software Factory without a ticket tracker.
+
+**Linear** and **Jira** are service identities. Connect them from
 **Settings → Connections → Services**. The Linear identity uses an API key
-and webhook secret. The Jira identity uses a base URL, email, API token, and webhook secret. Druks
-validates the credentials before it stores them. Select the tracker and its
-workflow statuses in **Software Factory → Settings**. Select **druks** to use
-Software Factory's local issue board on this appliance. That choice needs no
-credentials. The dashboard shows the board, the Issues list, and project ticket
-prefixes only for that tracker. `druks doctor` reports it as healthy. Each build then ships this
-appliance's `/mcp` into the sandbox so the agent can read and comment on the
-ticket. Set `urls.endpoint` so the VM can reach it.
+and webhook secret. The Jira identity uses a base URL, email, API token, and
+webhook secret. Druks validates the credentials before it stores them. Those
+trackers show status-name knobs for the trigger status and the resting status.
+
+Select **druks** to use Software Factory's local issue board on this appliance.
+The stored value is `issues`. That choice needs no credentials. Linear and Jira
+status-name knobs stay hidden. The trigger status is Ready for Agent. It is not
+a setting. `druks doctor` reports the tracker as healthy.
+
+The dashboard shows the board, the Issues list, and ticket pages only for
+**druks**. Each ticket picks a GitHub repository from a Software Factory
+project. Set that project's ticket prefix (2–6 letters A–Z) on
+**Software Factory → Projects**. Druks mints identifiers as `{prefix}-{n}` once.
+Changing the ticket's repository does not remint the identifier. A project
+without a prefix cannot mint tickets.
+
+A ticket that enters Ready for Agent opens a build against the selected
+repository. If a scheduled, running, or parked run already exists for that
+ticket, Software Factory does not start another.
+
+Each local-board build ships this appliance's `/mcp` into the sandbox as the
+`druks` server. The sandbox authenticates with a PAT for the run account. The
+agent reads the ticket with `software_factory_get_ticket` and posts with
+`software_factory_add_comment`. The Druks identifier is not a GitHub issue
+number. Linear and Jira builds do not receive this MCP. Set `urls.endpoint` so
+the VM can reach `/mcp`. `druks doctor` also checks that `/mcp` answers when the
+tracker is **druks**.
 
 Webhook URLs remain `/_external/linear/events/` and
 `/_external/jira/events/`. The Jira webhook uses a Jira Automation
@@ -297,8 +319,9 @@ Webhook URLs remain `/_external/linear/events/` and
 
 Select **Issue data (Jira format)** as its body.
 Druks accepts the REST issue JSON under `issue`. Put the shared token in the
-`x-druks-webhook-token` header. `druks doctor` treats a disconnected tracker as
-optional. It reports pending setup if the selected tracker lacks a connection.
+`x-druks-webhook-token` header. `druks doctor` treats a disconnected Linear or
+Jira identity as optional when that tracker is not selected. It reports pending
+setup if the selected tracker is Linear or Jira and that identity is missing.
 
 ## Harnesses
 

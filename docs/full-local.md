@@ -153,6 +153,12 @@ workflow and its trigger. In the bundled distribution, `software_factory` is
 the reference app. Register a project in its dashboard. Use its configured
 ticket or GitHub trigger.
 
+To run without Linear or Jira, select **druks** in
+**Software Factory → Settings** and use the local board. GitHub remains
+required for pull requests. Set a ticket prefix on the project before you mint
+tickets. See
+[ticketing integrations](configuration.md#ticketing-integrations).
+
 The run appears on the subject page and in the Events
 feed. Agent-call pages stream transcript and artifact data.
 
@@ -185,8 +191,10 @@ value.
 ## Webhook caveat
 
 GitHub, Linear, and Jira cannot connect to a loopback listener. Dashboard-initiated
-actions work locally, but provider-driven flows need an HTTPS tunnel forwarding
-to `127.0.0.1:8001`. Connect tracker credentials under **Settings → Connections → Services** and
+actions work locally, including Software Factory's **druks** board, which needs
+no tracker credentials. Provider-driven Linear and Jira flows need an HTTPS
+tunnel forwarding to `127.0.0.1:8001`. Connect Linear or Jira under
+**Settings → Connections → Services** when you use those trackers, and
 keep the exact public paths:
 
 ```text
