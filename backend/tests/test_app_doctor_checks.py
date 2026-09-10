@@ -150,6 +150,7 @@ async def test_app_checks_are_wired_into_the_check_battery(installed, tmp_path: 
     app_results = await doctor.check_apps(settings)
     assert isinstance(app_results, list)
     assert "field_notes:summary_api_key" in {result.name for result in app_results}
+    assert "chat:appliance_mcp" in {result.name for result in app_results}
 
 
 async def test_raising_app_check_is_isolated_and_does_not_stop_siblings(

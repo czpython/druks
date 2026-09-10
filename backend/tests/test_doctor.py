@@ -616,3 +616,4 @@ async def test_run_checks_includes_sandbox_e2e_only_when_flagged(tmp_path: Path)
 
     assert "sandbox_e2e" not in default
     assert "sandbox_e2e" in flagged
+    assert "chat" in default
