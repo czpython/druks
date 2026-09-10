@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 
 import tomlkit
 
+from druks.core.utils.time import validate_timezone
+
 GAPS_EXIT_CODE = 3
 
 _COMPOSE_ENV_KEYS = (
@@ -58,6 +60,7 @@ _OWNED_ENV_KEYS = frozenset(
         "DRUKS_SECRETS_PROXY_BIND_HOST",
     }
 )
+_KNOWN_TOP_LEVEL_KEYS = frozenset({"timezone"})
 _KNOWN_TOML_KEYS = {
     "identity": (
         "mode",
@@ -161,6 +164,9 @@ _TOML_TEMPLATE = """\
 # druks.toml — the deployment. Edit this file, then re-run the installer
 # to render and apply it. `druks setup` alone re-renders .env but does
 # not restart services.
+
+# Schedule timezone and initial timezone for new accounts.
+timezone = "UTC"
 
 # Browser identity: "header", "jwt", or "none".
 [identity]
@@ -287,6 +293,10 @@ def _canonical_config(raw: dict[str, Any]) -> dict[str, Any]:
     additions are welcome as flat scalars, one table deep; anything more
     structured is refused with its key named."""
     config = copy.deepcopy(raw)
+    timezone = config.setdefault("timezone", "UTC")
+    if not isinstance(timezone, str):
+        raise ValueError("druks.toml: timezone must be a string")
+    validate_timezone(timezone)
     for table_name, keys in _KNOWN_TOML_KEYS.items():
         table = config.setdefault(table_name, {})
         if not isinstance(table, dict):
@@ -361,7 +371,11 @@ def _set_value(target: MutableMapping[str, Any], path: tuple[str, ...], value: s
 def _parse_assignment(assignment: str) -> tuple[tuple[str, ...], str]:
     path_text, separator, value = assignment.partition("=")
     path = tuple(path_text.split("."))
-    if not separator or len(path) < 2 or any(not part for part in path):
+    if (
+        not separator
+        or (len(path) < 2 and path[0] not in _KNOWN_TOP_LEVEL_KEYS)
+        or any(not part for part in path)
+    ):
         raise ValueError(f"invalid --set {assignment!r}; expected key.path=value")
     return path, value
 

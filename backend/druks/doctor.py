@@ -24,14 +24,15 @@ from .apps.loader import iter_apps
 from .apps.registry import _ROLES, agents, autodiscover, services, webhooks, workflows
 from .core.apis.github import get_github_client
 from .database import create_async_engine_from_url, create_engine_from_url, session_scope
-from .harnesses.models import ProviderKey, ProviderSubscription
 from .harnesses.providers import get_providers
 from .harnesses.registry import get_harnesses
 from .sandbox.client import sandbox_client
 from .sandbox.exceptions import TemplateNotFound
 from .sandbox.templates import get_declared_sandboxes, prepare_sandbox_templates
+from .secrets.datastructures import Audience
+from .secrets.enums import SecretKind
+from .secrets.models import VaultSecret
 from .services import Service, ServiceNotConnectedError
-from .services.models import ServiceIdentity
 from .settings import Settings, load_settings
 from .webhooks.base import Webhook
 from .workflows import Workflow, _Task
@@ -73,7 +74,7 @@ async def check_service_identities(settings: Settings) -> list[CheckResult]:
             for service in services.all():
                 name = f"{service.slug}_identity"
                 try:
-                    row = await ServiceIdentity.get(service.slug)
+                    row = await service.get()
                 except ServiceNotConnectedError:
                     results.append(
                         CheckResult(
@@ -178,18 +179,26 @@ def check_provider_credentials(settings: Settings) -> list[CheckResult]:
             results: list[CheckResult] = []
             for provider in get_providers():
                 row = session.scalar(
-                    select(ProviderSubscription).where(
-                        ProviderSubscription.provider == provider.id,
-                        ProviderSubscription.account_id == default_account_id,
-                        ProviderSubscription.disconnected_at.is_(None),
+                    select(VaultSecret).where(
+                        VaultSecret.kind == SecretKind.SUBSCRIPTION,
+                        VaultSecret.audience == Audience.provider(provider.id),
+                        VaultSecret.account_id == default_account_id,
+                        VaultSecret.revoked_at.is_(None),
                     )
                 )
-                key_set_by = session.scalar(
-                    select(Account.username)
-                    .join(ProviderKey, ProviderKey.updated_by_account_id == Account.id)
-                    .where(
-                        ProviderKey.provider == provider.id, ProviderKey.disconnected_at.is_(None)
+                key = session.scalar(
+                    select(VaultSecret).where(
+                        VaultSecret.kind == SecretKind.STATIC,
+                        VaultSecret.audience == Audience.provider(provider.id),
+                        VaultSecret.revoked_at.is_(None),
                     )
+                )
+                key_set_by = (
+                    session.scalar(
+                        select(Account.username).where(Account.id == key.identity["pasted_by"])
+                    )
+                    if key
+                    else None
                 )
                 results.append(
                     _credentials_check(
@@ -292,6 +301,32 @@ async def _drukbox_doctor(settings: Settings):
         return await api.doctor()
     finally:
         await api.aclose()
+
+
+async def check_secrets_exchange(settings: Settings) -> CheckResult:
+    if not settings.sandbox.service_url:
+        return CheckResult(
+            name="secrets_exchange", ok=True, detail="not configured (sandbox execution is off)"
+        )
+    url = f"{settings.sandbox.exchange_url.rstrip('/')}/healthz"
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as http:
+            status = (await http.get(url)).status_code
+    except httpx.HTTPError as error:
+        return CheckResult(
+            name="secrets_exchange",
+            ok=False,
+            detail=f"drukbox-exchange is unreachable at {url}: {error}. "
+            "Start it: docker compose up -d drukbox-exchange",
+        )
+    if status != 200:
+        return CheckResult(
+            name="secrets_exchange",
+            ok=False,
+            detail=f"drukbox-exchange answered {status} at {url}. "
+            "Read its log: docker compose logs drukbox-exchange",
+        )
+    return CheckResult(name="secrets_exchange", ok=True, detail=url)
 
 
 async def check_sandbox_e2e(settings: Settings) -> CheckResult | list[CheckResult]:
@@ -561,6 +596,7 @@ CHECKS = (
     check_database,
     check_redis,
     check_drukbox,
+    check_secrets_exchange,
     check_capability_modules,
     check_apps,
     check_declared_sandboxes,

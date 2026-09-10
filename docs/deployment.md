@@ -203,7 +203,21 @@ the hosts with a registered secret. No service in the deployment uses that CA.
 The exchange fetches an issuer value from the Druks web process at
 `[sandbox].issuer_url`, `http://127.0.0.1:8001` on every shape, over plain
 HTTP on the host loopback. The API and the exchange trust no extra CA. There
-is no public mint route.
+is no public issuer route.
+
+A subscription token is such a value. The issuer route is
+`GET /api/secrets/<identity id>/<name>`. It authenticates the sandbox's
+identity bearer and nothing else, and it answers `value` and the provider's
+`expires_at`. After every rotation Druks requests a refresh at
+`POST /refresh/<host id>/<service>` on `[sandbox].exchange_url`, one request for
+each live sandbox on the subscription.
+
+An identity dies with its sandbox. Druks revokes it before it deletes the
+sandbox, and the issuer denies a terminal run's identity before any cleanup.
+A run that dies without its cleanup leaves its sandbox until the lease ends.
+The `release_orphan_boxes` task runs every hour and releases such a sandbox
+sooner. Drukbox reaps a sandbox at the end of its lease in any case. `druks doctor` probes the exchange at
+`[sandbox].exchange_url` on `/healthz` and names the corrective action.
 
 Drukbox encrypts the secret entries of each sandbox with `SECRETS_KEY`. The
 installer generates `[secrets].drukbox_secrets_key` and renders it as

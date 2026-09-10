@@ -37,10 +37,6 @@
 .settings-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--border); margin-bottom: 28px; }
 .settings-tabs button { min-height: 44px; color: var(--text-dim); border-bottom: 2px solid transparent; }
 .settings-tabs button[aria-current="page"] { color: var(--text); border-color: var(--text); }
-.settings-app-index { display: flex; flex-direction: column; }
-.settings-app-index a { display: flex; flex-direction: column; gap: 6px; padding: 18px 0; color: var(--text); text-decoration: none; border-bottom: 1px solid var(--border); }
-.settings-app-index strong { font-size: 18px; font-weight: 500; text-transform: capitalize; }
-.settings-app-index span { color: var(--text-dim); }
 .settings-error { color: var(--outcome-failed); padding: 12px 0; }
 .settings-error button { text-decoration: underline; }
 .settings-save-bar { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 16px; min-height: 72px; padding: 12px var(--page-gutter); border-top: 1px solid var(--border); background: var(--surface); }

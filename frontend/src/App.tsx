@@ -8,7 +8,7 @@ import {
   type RefObject,
 } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, ChartNoAxesCombined, LayoutGrid, Search, Settings } from 'lucide-react'
+import { Activity, CalendarDays, ChartNoAxesCombined, LayoutGrid, Search, Settings } from 'lucide-react'
 import { Link, Route, Router, Switch, useLocation, type RouterProps } from 'wouter'
 import { navigate as browserNavigate, useLocationProperty } from 'wouter/use-browser-location'
 
@@ -26,13 +26,16 @@ import { EventsPage } from './pages/EventsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { LoginWindowPage } from './pages/LoginWindowPage'
 import { UsagePage } from './pages/UsagePage'
+import { SchedulesPage } from './pages/SchedulesPage'
 import { appAccent } from './lib/appColors'
 import './apps'
 import { registerInstalledApps } from './apps/installed'
 import { appHome, appLabel, appOwning, getAppUI, registeredApps } from './apps/registry'
 
 const ROUTER_BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
-const SHELL_PAGES: Record<string, string> = { '/': 'Dashboard', '/events': 'Events', '/usage': 'Usage' }
+const SHELL_PAGES: Record<string, string> = {
+  '/': 'Dashboard', '/events': 'Events', '/usage': 'Usage', '/schedules': 'Schedules',
+}
 
 export function App({ account }: { account: Account }) {
   const unsavedFormRef = useRef<UnsavedForm | null>(null)
@@ -247,7 +250,7 @@ function AppShell({
         return
       }
       if (event.key === 'Escape') {
-        const sharedDetail = location === '/usage' || location === '/events'
+        const sharedDetail = location === '/usage' || location === '/events' || location === '/schedules'
         const parent = ui?.parentPath?.(location) ?? (sharedDetail && app ? appHome(app) : undefined)
         if (parent) {
           if (navCount.current > 0) window.history.back()
@@ -306,6 +309,14 @@ function AppShell({
             >
               <ChartNoAxesCombined size={17} aria-hidden="true" />
               Usage
+            </Link>
+            <Link
+              href="/schedules"
+              className="sidebar-link"
+              aria-current={location === '/schedules' ? 'page' : undefined}
+            >
+              <CalendarDays size={17} aria-hidden="true" />
+              Schedules
             </Link>
           </nav>
           <div className="sidebar-apps">
@@ -430,6 +441,12 @@ function AppShell({
           </Route>
           <Route path="/usage">
             <UsagePage />
+          </Route>
+          <Route path="/schedules">
+            <SchedulesPage
+              apps={rosterQuery.data?.map((entry) => entry.name) ?? []}
+              unsavedFormRef={unsavedFormRef}
+            />
           </Route>
           <Route path="/events">
             <EventsPage />

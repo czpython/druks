@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import Field
 
 from druks.agents import Agent
-from druks.apps import App, AppSettings, Secret
+from druks.apps import App, AppSettings
 from druks.contrib.software_factory.contracts import (
     ContractRevisionOutput,
     EvaluationOutput,
@@ -18,17 +18,10 @@ from druks.contrib.software_factory.ticketing.base import Tracker
 from druks.contrib.software_factory.ticketing.jira import Jira
 from druks.contrib.software_factory.ticketing.linear import Linear
 from druks.core import services
-from druks.db import StoredSubject
 from druks.doctor import CheckResult
 from druks.services import ServiceNotConnectedError
-from druks.workflows import SubjectActivity
 
-# Only what the timeline can't already show. A running agent has an agent call
-# to name it, so the phase that clears provisioning maps to nothing.
-_PHASE_META: dict[str, SubjectActivity] = {
-    "provisioning_vm": SubjectActivity(label="Provisioning sandbox VM…", kind="infra"),
-    "sandbox_building": SubjectActivity(label="Building sandbox…", kind="infra"),
-}
+from .services import GithubReviewer
 
 
 async def check_tracker_identity() -> CheckResult:
@@ -50,15 +43,15 @@ async def check_tracker_identity() -> CheckResult:
 
 
 async def check_review_identity() -> CheckResult:
-    """Set or unset, both healthy: an empty pair is comment mode by design. A
-    half-configured pair fails the settings check, not this one."""
-    settings = await SoftwareFactory.settings()
-    if settings.review_app_id and settings.review_private_key:
+    """Connected or not, both healthy: no reviewer is comment mode by design."""
+    if await GithubReviewer.is_connected():
         return CheckResult(
-            name="review_identity", ok=True, detail="set — reviews approve as the distinct App"
+            name="review_identity",
+            ok=True,
+            detail="connected — reviews approve as the reviewer App",
         )
     return CheckResult(
-        name="review_identity", ok=True, detail="unset — reviews post as operator comments"
+        name="review_identity", ok=True, detail="unset — reviews publish as operator comments"
     )
 
 
@@ -110,19 +103,6 @@ class SoftwareFactory(App):
             ),
             json_schema_extra={"section": "Jira", "visible_when": {"tracker": "jira"}},
         )
-        # The optional distinct review identity. An empty pair borrows the operator
-        # client in comment mode. A complete pair posts verdict reviews as this App.
-        # App-owned: a posting identity for one app is not a platform service identity.
-        review_app_id: Secret = Field(
-            title="Review App ID",
-            description="GitHub App ID of the distinct review identity; empty posts as comments.",
-            json_schema_extra={"section": "Review identity"},
-        )
-        review_private_key: Secret = Field(
-            title="Review App private key",
-            description="PEM private key of the review App, pasted as issued.",
-            json_schema_extra={"section": "Review identity", "multiline": True},
-        )
 
         @property
         def trigger_status(self) -> str:
@@ -132,14 +112,6 @@ class SoftwareFactory(App):
             if self.tracker == "jira":
                 return self.jira_trigger_status
             return ""
-
-        def clean(self) -> dict[str, str]:
-            problems: dict[str, str] = {}
-            if self.review_app_id and not self.review_private_key:
-                problems["review_private_key"] = "Required once the review App ID is set."
-            if self.review_private_key and not self.review_app_id:
-                problems["review_app_id"] = "Required once the review App private key is set."
-            return problems
 
     checks = [check_tracker_identity, check_review_identity]
 
@@ -215,8 +187,3 @@ class SoftwareFactory(App):
         prompt="software_factory/review/review_pull_request.md",
         contract=ReviewReport,
     )
-
-    @classmethod
-    async def get_subject_activity(cls, subject: StoredSubject) -> SubjectActivity | None:
-        phase = await subject.get_phase()
-        return _PHASE_META.get(phase or "")

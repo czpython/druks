@@ -25,7 +25,7 @@ runs lint, tests, and build for PRs into `main` and `codex/` stack branches.
 
 - The work sidebar and searchable installed app roster
 - Settings
-- Dashboard, Events, and Usage
+- Dashboard, Events, Usage, and Schedules
 - Shared routing and fallback behavior.
 
 Bundled app UI lives under `src/apps/<name>/`. Its module calls
@@ -35,29 +35,45 @@ Import the module one time from `src/apps/index.ts`. The shell finds the
 registration and does not hardcode the app name.
 
 The work sidebar keeps the same destinations across app pages. The Dashboard
-opens at `/`. Events and Usage have shared routes. App-declared navigation appears below the page
+opens at `/`. Events, Usage, and Schedules have shared routes. Schedules appears
+directly below Usage. App-declared navigation appears below the page
 header. Settings opens from the bottom of the sidebar. Below 650 px, a
 navigation button opens a modal drawer. Escape closes the drawer and returns
 focus to the button.
 
 Settings use `/settings/<section>` routes. `/settings/personal` edits the current
-account through `/api/settings/personal`; `/settings/general` and
-`/settings/agents` edit installation defaults through `/api/settings`. The
-preferences provider uses the personal endpoint for timestamp display. Search
-matches section names and app field labels. Preferences, General, and Agents
+account's preferences through `/api/settings/personal`. `/settings/agents` edits
+shared execution defaults through `/api/settings`. The
+preferences provider uses the personal endpoint for timestamp display. Preferences
+contains only timezone and does not depend on execution catalogs. All accounts
+use the shared execution defaults in Agents and the app agent overrides. Search
+matches section names and app field labels. Preferences and Agents
 retain separate drafts across settings pages. Save changes applies only the current page.
 Leaving Settings offers Save, Discard, and Stay. Save applies each dirty page;
 a failed request keeps the operator on that page with its draft. Resource
 actions, such as connecting a provider or minting an API token, apply at once.
 Back to Druks restores the previous work URL and keeps the work page mounted.
 
+Connections groups Services, Accounts, Browser, and Revoked. Its `tab` query
+parameter selects the active tab. The Browser profiles page manages saved browser state
+and login windows at `/settings/connections?tab=browser`.
+
 App settings use `/apps/<name>/settings` in the work context. A gear beside the
-app name in the header and the central App settings index link to this same route.
+app name in the header opens this route. Settings search also links to app settings.
 Options and Agents appear only when the app declares those controls. Both
 sections share one app draft. Leaving the app form offers Save, Discard, and
 Stay. An app without controls has no Settings destination. Backend app schemas
 supply these forms without a frontend module. Schedule controls use the
 existing workflow overrides.
+
+Schedules at `/schedules` groups declared workflows by app. The `app` query
+parameter filters the list. Operators change cadence and pause state here with
+the same controls as app settings. Each schedule saves through
+`PATCH /api/settings/apps`. Use defaults removes both overrides.
+
+A failed save keeps the draft. Polling and focus refresh preserve unsaved edits.
+If you leave the page with unsaved edits, the shell asks first, as Settings
+does. The page shows the installation timezone beside the saved cadence.
 
 Normal interface text uses IBM Plex Sans at 15 px. Technical values use
 IBM Plex Mono. Phone inputs use at least 16 px.
@@ -79,17 +95,32 @@ supplies one shared React instance. See the app-author guide.
 
 ## Dashboard and owner links
 
-The Dashboard makes one current-work read and one schedule read, refreshed every
-30 seconds and on window focus, and sorts the rows into sections in the
-browser. A failed refresh keeps the last read visible and offers Retry. See
-[the current-work contract](../docs/concepts.md#current-work-on-the-dashboard) for
-selection, authorization, and limits.
+The Dashboard reads `/api/dashboard/overview` every 30 seconds and on window
+focus. The `app` query parameter filters exact totals, previews, and recorded
+timestamps on the server.
+
+Requests get the main space. If there are no requests, failures get it. If there
+are no failures, running work gets it. The main section shows at most four
+cards. The compact status panel shows the other totals and at most two names
+per state. Overflow is plain text, and the Dashboard has no full-list
+destination.
+
+Initial loading and read failure do not show an empty result. A failed refresh
+keeps the last successful read visible, marks it stale, and offers Retry.
+Recovery clears the stale message. The account timezone controls the greeting
+and the time labels. If the API supplies a recorded timestamp, the Dashboard
+shows its age. See [the current-work contract](../docs/concepts.md#current-work-on-the-dashboard)
+for selection, authorization, and limits.
 
 An app's `subjectPath(subject, target?)` returns its own destination. For
 the Dashboard, `target` carries `run` and, for a decision, `parkedAt`. Build the
 query with `targetQuery` from the registry. The owner selects that run and
-passes `parkedAt` to `GateControls`, which shows a stale-link message when the
-current round differs. Return `undefined` when the app has no destination.
+passes `parkedAt` to `GateControls`. If the current round is different,
+`GateControls` shows a stale-link message.
+
+If the app has no destination, return `undefined`. The Dashboard then keeps the
+context of the card without an action. External requests open only their
+supplied HTTP(S) URL. The home page has no decision controls.
 
 Python apps can select a decision page with
 [`@ui.page(..., subject=...)`](../docs/druks-ui.md#declare-pages).

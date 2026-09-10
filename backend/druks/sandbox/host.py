@@ -38,8 +38,7 @@ from .layout import get_helper_script_path, get_work_root
 
 if TYPE_CHECKING:
     from druks.harnesses.base import Harness
-    from druks.harnesses.models import ProviderSubscription
-    from druks.harnesses.profiles import Profile
+    from druks.harnesses.config import AgentConfig
 
     from .runner import Exec
 
@@ -204,19 +203,18 @@ class Host:
         self,
         *,
         agent: str,
-        profile: "Profile",
+        config: "AgentConfig",
         prompt: str,
         schema: dict[str, Any],
         artifact_dir: Path,
         call_id: str | None = None,
-        github_token: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
         skills: tuple[str, ...] = (),
         extra_env: dict[str, Any] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
     ) -> AgentResult:
-        """Run ``agent`` with ``profile`` and return a pure ``AgentResult`` —
+        """Run ``agent`` with ``config`` and return a pure ``AgentResult`` —
         no database write. A failure is carried on the result's ``error``, not
         raised, so the call still records what it cost before the agent call
         re-raises it.
@@ -226,11 +224,11 @@ class Host:
         ``include_plugins=False`` (Claude only) skips uploading the operator's plugin
         state — for prompts that hit no MCP server; a no-op for codex.
         """
-        model, timeout = profile.model, profile.timeout
-        harness = profile.harness_class(
+        model, timeout = config.model, config.timeout
+        harness = config.harness_class(
             model=model,
-            fast_mode=profile.fast_mode,
-            effort=profile.effort,
+            fast_mode=config.fast_mode,
+            effort=config.effort,
             sandbox=SandboxSettings.maybe_from_settings(load_settings()),
         )
 
@@ -248,15 +246,13 @@ class Host:
                 schema=schema,
                 artifact_dir=artifact_dir,
                 timeout=timeout,
-                github_token=github_token,
                 include_plugins=include_plugins,
                 add_dirs=add_dirs,
                 skills=skills,
                 extra_env=extra_env,
                 mcp_servers=mcp_servers,
                 call_id=run_id,
-                subscription=profile.subscription,
-                key=profile.key,
+                identity=config.identity,
             )
         except HarnessError as exc:
             error = exc
@@ -288,15 +284,13 @@ class Host:
         schema: dict[str, Any],
         artifact_dir: Path,
         timeout: int,
-        github_token: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         call_id: str | None = None,
-        subscription: "ProviderSubscription | None" = None,
-        key: str | None = None,
+        identity: dict | None = None,
     ) -> Any:
         """Drive one prompt through ``harness`` on this VM: the harness
         builds the invocation and parses the result; this sandbox executes it."""
@@ -306,11 +300,7 @@ class Host:
         persist_manifest(
             artifact_dir,
             call_id=run_id,
-            manifest=await harness.get_manifest(
-                mcp_servers=mcp_servers,
-                skills=skills,
-                extra_env=extra_env,
-            ),
+            manifest=await harness.get_manifest(mcp_servers=mcp_servers, skills=skills),
         )
 
         invocation = await harness.build_invocation(
@@ -318,14 +308,12 @@ class Host:
             schema=schema,
             run_id=run_id,
             ssh_username=self.ssh_username,
-            github_token=github_token,
             include_plugins=include_plugins,
             add_dirs=add_dirs,
             skills=skills,
             extra_env=extra_env,
             mcp_servers=mcp_servers,
-            subscription=subscription,
-            key=key,
+            identity=identity,
             timeout=timeout,
         )
         result = await self._exec(

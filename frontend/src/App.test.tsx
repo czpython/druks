@@ -16,6 +16,7 @@ vi.mock('./components/SettingsPages', () => ({ SettingsPages: () => <h1>Settings
 vi.mock('./pages/DashboardPage', () => ({ DashboardPage: () => <h1>Dashboard page</h1> }))
 vi.mock('./pages/EventsPage', () => ({ EventsPage: () => <h1>Events feed</h1> }))
 vi.mock('./pages/UsagePage', () => ({ UsagePage: () => <h1>Usage report</h1> }))
+vi.mock('./pages/SchedulesPage', () => ({ SchedulesPage: () => <h1>Schedule list</h1> }))
 vi.mock('./pages/AppHomePage', () => ({
   AppHomePage: ({ app }: { app: string }) => <h1>{app} home</h1>,
 }))
@@ -106,6 +107,24 @@ beforeEach(() => {
 })
 
 describe('command center navigation', () => {
+  it('puts Schedules below Usage in the shared navigation and phone drawer', async () => {
+    renderApp('/schedules?app=notes')
+    await screen.findByRole('heading', { name: 'Schedule list' })
+    const navigation = screen.getByRole('navigation', { name: 'Work' })
+    expect(within(navigation).getAllByRole('link').map((link) => link.textContent)).toEqual([
+      'Dashboard', 'Events', 'Usage', 'Schedules',
+    ])
+    expect(within(navigation).getByRole('link', { name: 'Schedules' }).getAttribute('aria-current')).toBe('page')
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
+    const drawer = screen.getByRole('dialog', { name: 'Druks navigation' })
+    const phoneNavigation = within(drawer).getByRole('navigation', { name: 'Work' })
+    expect(within(phoneNavigation).getAllByRole('link').map((link) => link.textContent)).toEqual([
+      'Dashboard', 'Events', 'Usage', 'Schedules',
+    ])
+    fireEvent.click(within(drawer).getByRole('link', { name: 'Schedules' }))
+    await waitFor(() => expect(drawer.hasAttribute('open')).toBe(false))
+  })
+
   it('keeps app destinations stable on list and detail pages', async () => {
     renderApp()
     const apps = await screen.findByRole('navigation', { name: 'Apps' })

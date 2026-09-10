@@ -1,12 +1,13 @@
+import asyncio
 import logging
-import shlex
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import asyncssh
-from drukbox_sdk import SandboxAPI, SandboxHost, Secret
+import httpx
+from drukbox_sdk import Issuer, SandboxAPI, SandboxHost, Secret
 from drukbox_sdk.exceptions import (
     SandboxAPIError,
     SandboxNotFoundError,
@@ -15,15 +16,21 @@ from drukbox_sdk.exceptions import (
 )
 from uuid_utils import uuid7
 
+from druks.durable.engine import _step_engine
 from druks.harnesses.exceptions import HarnessSandboxProvisioningError
 from druks.settings import load_settings
 
 from .constants import SANDBOX_HOST_LEASE_SECONDS
-from .exceptions import HostGone, SandboxError, SandboxUnreachable, TemplateNotFound
+from .exceptions import HostGone, SandboxError, TemplateNotFound
 from .host import Host
-from .layout import get_helper_script_path, get_remote_home
+from .layout import get_helper_script_path
+from .models import SandboxIdentity
 
 logger = logging.getLogger(__name__)
+
+# The exchange answers a refresh request after it fetched the value again, so
+# one request takes one fetch round trip.
+_REQUEST_TIMEOUT_SECONDS = 5.0
 
 _DRUKS_SANDBOX_LOCAL_SCRIPT = Path(__file__).parent / "druks-sandbox.sh"
 
@@ -53,8 +60,9 @@ class Client:
         image_override: str | None = None,
         provider: str | None = None,
         sandbox_env: dict[str, str] | None = None,
-        secrets: dict[str, Secret] | None = None,
+        secrets: dict[str, Secret | Issuer] | None = None,
         template: str | None = None,
+        identity: SandboxIdentity | None = None,
     ) -> AsyncIterator[Host]:
         """Acquire, yield, release: for a sandbox bound to one context manager body."""
         host_id: str | None = None
@@ -67,6 +75,7 @@ class Client:
                 sandbox_env=sandbox_env,
                 secrets=secrets,
                 template=template,
+                identity=identity,
             ) as host:
                 host_id = host.id
                 yield host
@@ -82,13 +91,15 @@ class Client:
         image_override: str | None = None,
         provider: str | None = None,
         sandbox_env: dict[str, str] | None = None,
-        secrets: dict[str, Secret] | None = None,
+        secrets: dict[str, Secret | Issuer] | None = None,
         template: str | None = None,
+        identity: SandboxIdentity | None = None,
     ) -> AsyncIterator[Host]:
         """Create a new host (or reuse one matching ``idempotency_key``)
         and yield it with SSH connected. Closes SSH on exit but does NOT
         release the VM — pair with ``release`` for long-lived flows or
-        use ``ephemeral`` for one-shots."""
+        use ``ephemeral`` for one-shots. ``identity`` is the box at the issuer:
+        bound to the box once it exists, revoked when no box comes."""
         key = idempotency_key or str(uuid7())
         api = self._api()
         try:
@@ -98,27 +109,35 @@ class Client:
             # worker dies frees its VM without a druks-side reconciler.
             expires_at = datetime.now(UTC) + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
             try:
-                record = await api.create_host(
-                    expires_at=expires_at,
-                    env=sandbox_env,
-                    idempotency_key=key,
-                    image=image or None,
-                    provider=provider,
-                    secrets=secrets,
-                    template=template,
-                )
-            except (SandboxProvisioningError, SandboxUnavailableError) as exc:
-                # Transient control-plane failures — a 502 the service raises
-                # when the provider/Tailscale/keyscan step fails, or a
-                # transport/503 SandboxUnavailableError. Classify them into the
-                # in-run retry path so a slow provider window recovers instead
-                # of dead-ending the run. Fatal SDK errors (auth, validation,
-                # conflict, not-found, generic response) are subclasses of the
-                # untouched SandboxAPIError base and fall through unretried.
-                raise HarnessSandboxProvisioningError(
-                    f"sandbox host provisioning failed: {exc}"
-                ) from exc
+                try:
+                    record = await api.create_host(
+                        expires_at=expires_at,
+                        env=sandbox_env,
+                        idempotency_key=key,
+                        image=image or None,
+                        provider=provider,
+                        secrets=secrets,
+                        template=template,
+                    )
+                except (SandboxProvisioningError, SandboxUnavailableError) as exc:
+                    # Transient control-plane failures — a 502 the service raises
+                    # when the provider/Tailscale/keyscan step fails, or a
+                    # transport/503 SandboxUnavailableError. Classify them into the
+                    # in-run retry path so a slow provider window recovers instead
+                    # of dead-ending the run. Fatal SDK errors (auth, validation,
+                    # conflict, not-found, generic response) are subclasses of the
+                    # untouched SandboxAPIError base and fall through unretried.
+                    raise HarnessSandboxProvisioningError(
+                        f"sandbox host provisioning failed: {exc}"
+                    ) from exc
+            except BaseException:
+                # The next attempt presents a new identity and a new key.
+                if identity:
+                    await identity.revoke()
+                raise
             logger.info("sandbox host created id=%s", record.id)
+            if identity:
+                await identity.bind(record.id)
             key_path = settings.sandbox_keys_dir / record.id
             if record.private_key:
                 settings.sandbox_keys_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -180,7 +199,17 @@ class Client:
         raise TemplateNotFound(f"sandbox template {setup_script_hash} does not exist")
 
     @staticmethod
+    async def _revoke_identity(host_id: str) -> None:
+        """The denial comes first, and its failure must not stop the cleanup
+        behind it."""
+        try:
+            await SandboxIdentity.revoke_for_host(_step_engine(), host_id)
+        except Exception:  # noqa: BLE001 — a cleanup surface; log and move on
+            logger.exception("failed to revoke the identity of sandbox host %s", host_id)
+
+    @staticmethod
     async def _best_effort_delete(api: SandboxAPI, host_id: str) -> None:
+        await Client._revoke_identity(host_id)
         try:
             await api.delete_host(host_id)
         except SandboxNotFoundError:
@@ -224,8 +253,9 @@ class Client:
         image_override: str | None = None,
         provider: str | None = None,
         sandbox_env: dict[str, str] | None = None,
-        secrets: dict[str, Secret] | None = None,
+        secrets: dict[str, Secret | Issuer] | None = None,
         template: str | None = None,
+        identity: SandboxIdentity | None = None,
     ) -> Host:
         """Create a host and return its handle without holding an SSH connection —
         the handle reconnects lazily when used (its id and lease expiry are readable
@@ -237,17 +267,85 @@ class Client:
             sandbox_env=sandbox_env,
             secrets=secrets,
             template=template,
+            identity=identity,
         ) as host:
             return host
+
+    async def reattach(self, *, host_id: str) -> Host:
+        """The handle of a box a crashed process left behind, found through its
+        identity. A box that is gone loses it, and the retry provisions anew."""
+        try:
+            async with self.attach(host_id=host_id) as host:
+                return host
+        except HostGone as exc:
+            await self._revoke_identity(host_id)
+            raise HarnessSandboxProvisioningError(f"sandbox host {host_id} is gone") from exc
+
+    @asynccontextmanager
+    async def resume(self, *, host_id: str) -> AsyncIterator[Host]:
+        """``ephemeral`` for a box that exists: reattach, then release on exit."""
+        host = await self.reattach(host_id=host_id)
+        try:
+            yield host
+        finally:
+            await host.aclose()
+            await self.release(host_id=host_id)
+
+    async def request_refreshes(self, secret_id: str, *, except_host_id: str = "") -> None:
+        """Tell the exchange to fetch again for every live box on the
+        secret: a rotation ended the value they hold. One attempt per
+        box, side by side, and a failure is a log line. The exchange refreshes
+        at expiry in any case. The box whose answer carries the new token
+        needs no request."""
+        boxes = [
+            (identity.host_id, ref.name)
+            for identity in await SandboxIdentity.list_for_secret(secret_id)
+            if identity.host_id != except_host_id
+            for ref in identity.secret_refs
+            if ref.secret_id == secret_id
+        ]
+        exchange_url = load_settings().sandbox.exchange_url.rstrip("/")
+        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_SECONDS) as client:
+            answers = await asyncio.gather(
+                *(
+                    client.post(f"{exchange_url}/refresh/{host_id}/{service}")
+                    for host_id, service in boxes
+                ),
+                return_exceptions=True,
+            )
+        for (host_id, service), answer in zip(boxes, answers, strict=True):
+            if isinstance(answer, BaseException) or answer.status_code != 200:
+                logger.warning(
+                    "refresh request for box %s service %s failed: %s", host_id, service, answer
+                )
+
+    async def set_expiry(self, *, host_id: str, expires_at: datetime) -> None:
+        """Move a host's lease to ``expires_at`` without touching the VM.
+
+        Clipping the expiry down is how an idle hold ends: the host keeps
+        running until the new expiry, and drukbox's janitor reaps it then,
+        so druks needs no reconciler of its own. ``release`` remains the
+        hard delete for callers that want the VM gone now.
+
+        A host the control plane no longer knows about raises the SDK's
+        ``SandboxNotFoundError`` — it is not swallowed here.
+        """
+        api = self._api()
+        try:
+            await api.renew_host(host_id, expires_at=expires_at)
+        finally:
+            await api.aclose()
 
     async def release(self, *, host_id: str) -> None:
         """Terminate the VM. Idempotent and infallible — already-gone hosts
         no-op silently; any other failure is logged but not surfaced so
-        cleanup paths don't have to handle SDK errors at every call site."""
+        cleanup paths don't have to handle SDK errors at every call site.
+        The box's identity dies first, so the denial never waits on the VM."""
         api = self._api()
         settings = load_settings()
 
         try:
+            await self._revoke_identity(host_id)
             try:
                 await api.delete_host(host_id)
             except SandboxNotFoundError:
@@ -285,25 +383,6 @@ async def _upload_helper_script(host: Host) -> None:
         remote=helper_path,
     )
     await host.exec(["chmod", "755", helper_path], timeout=10.0)
-
-    # Direct .gitconfig write — scope helper to github.com so it never
-    # intercepts auth for other hosts. The ``!`` tells git to run the
-    # value as a shell command rather than appending it to
-    # ``git credential-``.
-    gitconfig_path = f"{get_remote_home(host.ssh_username)}/.gitconfig"
-    gitconfig_body = (
-        f'[credential "https://github.com"]\n\thelper = !{helper_path} git-credential\n'
-    )
-    write_cmd = f"printf %s {shlex.quote(gitconfig_body)} > {shlex.quote(gitconfig_path)}"
-    write_result = await host.exec(
-        ["sh", "-c", write_cmd],
-        timeout=10.0,
-    )
-    if not write_result.ok:
-        raise SandboxUnreachable(
-            f"failed to write {gitconfig_path}: "
-            f"exit={write_result.exit_code} stderr={write_result.stderr.strip()}",
-        )
 
 
 sandbox_client = Client()

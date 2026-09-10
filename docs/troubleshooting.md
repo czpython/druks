@@ -160,6 +160,19 @@ Make sure that the service listens at `[sandbox].service_url` in `druks.toml`.
 For remote providers, a healthy Drukbox API does not prove SSH access. Then
 follow with `druks doctor --sandbox`.
 
+### The secrets exchange is unreachable
+
+`druks doctor` reports `secrets_exchange` with the URL it probed. Run:
+
+```bash
+docker compose up -d drukbox-exchange
+docker compose logs --tail=200 drukbox-exchange
+```
+
+The exchange binds `127.0.0.1:8781` on the Druks host. Until it answers, a
+sandbox gets no value for its placeholders, and each agent call fails at the
+provider with an authentication error.
+
 ### A sandbox process appears stuck
 
 Druks copies the dashboard transcript from files that a detached VM process writes.

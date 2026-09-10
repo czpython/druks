@@ -5,13 +5,15 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from conftest import connect_service
 from druks import workspaces as workspace_mod
 from druks.contrib.software_factory.constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
-from druks.contrib.software_factory.workflows import Build, BuildWorkspace
+from druks.contrib.software_factory.services import GithubReviewer
+from druks.contrib.software_factory.workflows import Build, BuildWorkspace, ReviewWorkspace
+from druks.core.services import Github
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox import host as host_mod
 from druks.sandbox.layout import get_related_root, get_repo_root
-from druks.workflows import FatalError
 from druks.workspaces import RepoWorkspace
 
 
@@ -27,7 +29,6 @@ def test_build_workspace_grants_related_root_add_dir():
         host=_FakeSandbox(),  # type: ignore[arg-type]
         subject=SimpleNamespace(repo="o/main"),
         branch="b",
-        mcp_token="ghs_review",
         skills=("python-house-rules",),
     )
     kwargs = workspace.get_agent_run_kwargs(model="m")
@@ -55,7 +56,6 @@ async def test_build_workspace_makes_the_related_root_before_the_clone(
         host=host_mod.Host(record=SimpleNamespace(id="h1", ssh_username="exedev")),  # type: ignore[arg-type]
         subject=SimpleNamespace(repo="o/main"),
         branch="b",
-        mcp_token="ghs_review",
         skills=(),
     )
     monkeypatch.setattr(host_mod.Host, "exec", fake_exec)
@@ -65,44 +65,34 @@ async def test_build_workspace_makes_the_related_root_before_the_clone(
     assert execs == [["mkdir", "-p", get_related_root("exedev")], ["run_agent"]]
 
 
-async def test_build_workspace_declares_its_github_mcp(druks_db):
-    # The github MCP is build's own declaration, credentialed with the per-repo
-    # review-actor token — never an operator catalog entry, never optional (there
-    # is no build without github). Delivery ships it whole: wire shape + token
-    # in the run env.
-    workspace = BuildWorkspace(
-        host=_FakeSandbox(),  # type: ignore[arg-type]
-        subject=SimpleNamespace(repo="o/main"),
-        branch="b",
-        mcp_token="ghs_review",
-        skills=("python-house-rules",),
+async def test_build_workspace_declares_its_github_mcp_as_the_review_actor(druks_db):
+    # The github MCP is build's own declaration, issued through the review
+    # actor's vault row for the subject's repo — never an operator catalog
+    # entry, never optional (there is no build without github). The clone
+    # stays the operator's: two identities, two entries in the box.
+    operator = await connect_service(
+        "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
     )
-    kwargs = await workspace.with_mcp_servers(None, **workspace.get_agent_run_kwargs())
+    reviewer = await connect_service(
+        "github_reviewer",
+        identity={"app_id": "2", "slug": "druks-reviewer"},
+        secrets={"private_key": "reviewer-pem"},
+    )
+    subject = SimpleNamespace(repo="o/main")
 
-    assert kwargs["extra_env"] == {get_bearer_token_env_var(GITHUB_MCP_NAME): "ghs_review"}
-    github = next(s for s in kwargs["mcp_servers"] if s.name == GITHUB_MCP_NAME)
+    wire, refs = await BuildWorkspace.get_mcp_delivery(subject, None)
+
+    github = next(s for s in wire if s.name == GITHUB_MCP_NAME)
     assert github.url == GITHUB_MCP_URL
-    assert "ghs_review" not in repr(github)
-
-
-def _review_actor_stub(monkeypatch: pytest.MonkeyPatch, *, review_actor) -> None:
-    async def _review_actor():
-        return review_actor()
-
-    monkeypatch.setattr("druks.contrib.software_factory.workflows.get_review_actor", _review_actor)
+    assert github.bearer_token_env_var == get_bearer_token_env_var(GITHUB_MCP_NAME)
+    [ref] = refs
+    assert ref.key == ("mcp_github_token", reviewer.id, "o/main", "api.githubcopilot.com")
+    [clone] = await BuildWorkspace.get_secret_refs(subject)
+    assert clone.key == ("github", operator.id, "o/main", "")
 
 
 @pytest.mark.asyncio
-async def test_get_workspace_kwargs_carries_the_build_fields(monkeypatch: pytest.MonkeyPatch):
-    async def _review_token(_repo: str) -> str:
-        return "ghs_review"
-
-    _review_actor_stub(
-        monkeypatch,
-        review_actor=lambda: SimpleNamespace(
-            client=SimpleNamespace(token_for_repo=_review_token), mode="approve"
-        ),
-    )
+async def test_get_workspace_kwargs_carries_the_build_fields():
     sandbox = host_mod.Host(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
 
     workflow = Build()
@@ -115,35 +105,38 @@ async def test_get_workspace_kwargs_carries_the_build_fields(monkeypatch: pytest
         "host": sandbox,
         "subject": workflow.__dict__["subject"],
         "branch": None,
-        "mcp_token": "ghs_review",
         "skills": ("python-house-rules",),
     }
 
 
-@pytest.mark.asyncio
-async def test_get_workspace_kwargs_fails_loudly_when_the_token_wont_mint(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    # There is no build without github: a run that can't mint its MCP token
-    # fails at workspace setup, never degrades mid-run.
-    async def _no_token(_repo: str) -> str:
-        raise RuntimeError("app not installed on this repo")
+def _review_actor_stub(monkeypatch: pytest.MonkeyPatch, *, review_actor) -> None:
+    async def _review_actor():
+        return review_actor()
 
+    monkeypatch.setattr("druks.contrib.software_factory.workflows.get_review_actor", _review_actor)
+
+
+def test_the_build_clones_as_the_operator():
+    assert BuildWorkspace.github is Github
+
+
+@pytest.mark.asyncio
+async def test_the_review_workspace_names_the_review_actors_identity(
+    monkeypatch: pytest.MonkeyPatch, druks_db
+):
+    row = await connect_service(
+        "github_reviewer",
+        identity={"app_id": "2", "slug": "reviewer"},
+        secrets={"private_key": "pem"},
+    )
     _review_actor_stub(
         monkeypatch,
-        review_actor=lambda: SimpleNamespace(
-            client=SimpleNamespace(token_for_repo=_no_token), mode="comment"
-        ),
+        review_actor=lambda: SimpleNamespace(service=GithubReviewer, client=None, mode="approve"),
     )
-    sandbox = host_mod.Host(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
 
-    workflow = Build()
-    workflow.input = Build._run_input_model()
-    workflow.subject = SimpleNamespace(repo="o/app")
-    workflow._profile = {"recommended_skills": ["python-house-rules"]}
+    [secret] = await ReviewWorkspace.get_secret_refs(SimpleNamespace(repo="o/app"))
 
-    with pytest.raises(FatalError, match="github MCP server"):
-        await workflow.get_workspace_kwargs(sandbox)
+    assert secret.key == ("github", row.id, "o/app", "")
 
 
 class _IdentitySandbox:

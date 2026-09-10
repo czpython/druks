@@ -21,6 +21,8 @@ from druks.accounts.exceptions import AuthConfigurationError, InvalidPatError
 from druks.core.models import Uuid7Pk
 from druks.database import db_session
 from druks.models import Base
+from druks.settings import load_settings
+from druks.user_settings.models import InstallationSettings
 
 
 class Account(Base, Uuid7Pk):
@@ -36,6 +38,10 @@ class Account(Base, Uuid7Pk):
     # stored as the provider gave it and matched regardless of case.
     username: Mapped[str] = mapped_column(CITEXT, unique=True)
     is_default: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    timezone: Mapped[str] = mapped_column(String, default="UTC")
+    gate_park_destination_id: Mapped[str | None] = mapped_column(
+        ForeignKey("notification_destinations.id", ondelete="SET NULL"), default=None
+    )
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @classmethod
@@ -65,13 +71,24 @@ class Account(Base, Uuid7Pk):
         account = await cls.get_for_username(username)
         if account:
             return account
+        installation = await InstallationSettings.get()
         session = db_session()
         await session.execute(
             insert(cls)
-            .values(username=username, is_default=~select(cls.id).exists())
+            .values(
+                username=username,
+                is_default=~select(cls.id).exists(),
+                timezone=load_settings().timezone,
+                gate_park_destination_id=installation.gate_park_destination_id,
+            )
             .on_conflict_do_nothing(index_elements=["username"])
         )
         return (await session.scalars(select(cls).where(cls.username == username))).one()
+
+    async def update_preferences(self, **fields: object) -> None:
+        for field, value in fields.items():
+            setattr(self, field, value)
+        await db_session().flush()
 
     @classmethod
     async def list_all(cls) -> list["Account"]:

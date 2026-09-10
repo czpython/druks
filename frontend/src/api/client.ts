@@ -13,9 +13,11 @@ import type {
   Harness,
   Identity,
   Pat,
+  PersonalSettings,
   SubjectResponse,
   SubjectSummary,
   UpdateAppsSettingsRequest,
+  UpdatePersonalSettingsRequest,
   UpdateSettingsRequest,
   UsageHistoryResponse,
   UsageResponse,
@@ -33,9 +35,9 @@ import type {
   ProviderSubscription,
   Skill,
   SkillCollection,
-  SettingsProfile,
+  InstallationSettings,
+  DashboardOverview,
   DashboardSchedules,
-  DashboardWork,
 } from './types'
 
 // A 401 means the request's identity did not resolve: typed to branch on,
@@ -223,7 +225,9 @@ async function sendOperation(method: string, path: string, body: unknown): Promi
 }
 
 export const api = {
-  dashboardWork: () => getJSON<DashboardWork>('/api/dashboard/work'),
+  dashboardOverview: (app?: string) => getJSON<DashboardOverview>(
+    `/api/dashboard/overview${app ? `?app=${encodeURIComponent(app)}` : ''}`,
+  ),
   dashboardSchedules: () => getJSON<DashboardSchedules>('/api/dashboard/schedules'),
   listApps: () => getJSON<App[]>('/api/apps'),
   // ``path`` is the location under the app's own root: "" for the landing
@@ -264,12 +268,12 @@ export const api = {
     const qs = query.toString()
     return getJSON<FeedResponse>(`/api/events${qs ? `?${qs}` : ''}`)
   },
-  getSettings: () => getJSON<SettingsProfile>('/api/settings'),
+  getSettings: () => getJSON<InstallationSettings>('/api/settings'),
   updateSettings: (body: UpdateSettingsRequest) =>
-    patchJSON<SettingsProfile>('/api/settings', body),
-  getPersonalSettings: () => getJSON<SettingsProfile>('/api/settings/personal'),
-  updatePersonalSettings: (body: UpdateSettingsRequest) =>
-    patchJSON<SettingsProfile>('/api/settings/personal', body),
+    patchJSON<InstallationSettings>('/api/settings', body),
+  getPersonalSettings: () => getJSON<PersonalSettings>('/api/settings/personal'),
+  updatePersonalSettings: (body: UpdatePersonalSettingsRequest) =>
+    patchJSON<PersonalSettings>('/api/settings/personal', body),
   harnesses: () => getJSON<Harness[]>('/api/settings/harnesses'),
   agents: () => getJSON<AgentsResponse>('/api/agents'),
   accounts: () => getJSON<Account[]>('/api/auth/accounts'),

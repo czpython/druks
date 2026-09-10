@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import json
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qsl, urlparse
 
 import druks.redis
@@ -18,9 +19,12 @@ from druks.mcp.exceptions import (
     UnresolvedGrantAccountError,
 )
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
-from druks.mcp.models import McpClientRegistration, McpServer
+from druks.mcp.models import McpServer
 from druks.redis import close_client, get_client
-from druks.services.models import OauthConnection
+from druks.sandbox.models import SecretRef
+from druks.secrets.datastructures import Audience
+from druks.secrets.exceptions import SecretRevokedError
+from druks.secrets.models import VaultSecret
 from druks.testing import configure_app_for_test, make_settings
 from druks.workspaces import Workspace
 from fastapi.testclient import TestClient
@@ -30,10 +34,6 @@ _SERVER_URL = "https://mcp.linear.test/sse"
 _AUTH_BASE = "https://auth.linear.test"
 _ENDPOINT = "https://druks.example"
 _CALLBACK = f"{_ENDPOINT}/api/mcp-servers/oauth/callback"
-
-
-class _FakeSandbox:
-    ssh_username = "exedev"
 
 
 class FakeAuthServer:
@@ -110,7 +110,6 @@ def _register_oauth_server(name: str = _NAME, enabled: bool = True) -> None:
             "name": name,
             "url": _SERVER_URL,
             "token_source": TokenSource.OAUTH,
-            "source_env_var": "",
             "enabled": enabled,
         }
     )
@@ -121,7 +120,7 @@ async def _store_grant(
     *,
     account_id: str | None = None,
     identity_mode: IdentityMode = IdentityMode.SHARED,
-) -> OauthConnection:
+) -> VaultSecret:
     server = await McpServer.get_for_name(_NAME)
     if not server:
         server = await McpServer.create(
@@ -130,17 +129,12 @@ async def _store_grant(
             token_source=TokenSource.OAUTH,
         )
     server.identity_mode = identity_mode
-    await McpClientRegistration.store(
-        server_id=server.id,
-        account_id=account_id,
-        token_endpoint=f"{_AUTH_BASE}/token",
-        client_id="client-123",
-    )
-    return await OauthConnection.create(
-        provider=f"mcp:{_NAME}",
+    return await VaultSecret.connect(
+        Audience.mcp(_NAME),
         account_id=account_id,
         refresh_token=refresh_token,
         scopes=[],
+        secrets={"token_endpoint": f"{_AUTH_BASE}/token", "client_id": "client-123"},
     )
 
 
@@ -309,11 +303,10 @@ async def test_complete_connect_exchanges_code_and_stores_the_grant(auth_server,
 
     assert name == _NAME
     grant = await oauth.get_connection(_NAME, None)
-    assert grant.refresh_token.decrypt() == "rt-1"
+    assert grant.secrets["refresh_token"] == "rt-1"
     assert grant.identity == {"email": "op@linear.test"}
-    registration = await McpClientRegistration.get_for_account(_NAME, None)
-    assert registration.client_id == "client-123"
-    assert registration.token_endpoint == f"{_AUTH_BASE}/token"
+    assert grant.secrets["client_id"] == "client-123"
+    assert grant.secrets["token_endpoint"] == f"{_AUTH_BASE}/token"
     exchange = auth_server.token_requests[0]
     assert exchange["grant_type"] == "authorization_code"
     assert exchange["code"] == "code-1"
@@ -323,7 +316,7 @@ async def test_complete_connect_exchanges_code_and_stores_the_grant(auth_server,
     # Nothing is cached at connect (the grant is real only once this commits);
     # the first delivery mints from it, carrying the grant's resource binding.
     assert not await get_client().get(await _token_key(None))
-    assert await oauth.get_access_token(_NAME, None) == "at-1"
+    assert (await oauth.get_access_token(_NAME, None))[0] == "at-1"
     refresh = auth_server.token_requests[1]
     assert refresh["grant_type"] == "refresh_token"
     assert refresh["resource"] == _SERVER_URL
@@ -382,7 +375,7 @@ async def test_reconsent_replaces_the_grant_and_evicts_the_stale_token(auth_serv
     await oauth.complete_connect(state=state, code="code-1")
 
     grant = await oauth.get_connection(_NAME, None)
-    assert grant.refresh_token.decrypt() == "rt-1"
+    assert grant.secrets["refresh_token"] == "rt-1"
     # The stale narrow token must not keep serving until its TTL runs out.
     assert not await get_client().get(await _token_key(None))
 
@@ -410,7 +403,7 @@ async def test_reconnect_after_disconnect_creates_a_new_grant(auth_server, druks
     # so at most one live connection holds the (server, account) slot.
     grant = await oauth.get_connection(_NAME, None)
     assert grant.id != revoked.id
-    assert grant.refresh_token.decrypt() == "rt-1"
+    assert grant.secrets["refresh_token"] == "rt-1"
     assert revoked.revoked_at
 
 
@@ -493,9 +486,11 @@ async def test_get_refreshes_on_cache_miss_and_persists_rotation(auth_server, dr
         "expires_in": 300,
     }
 
-    token = await oauth.get_access_token(_NAME, None)
+    token, expires_at = await oauth.get_access_token(_NAME, None)
 
     assert token == "at-2"
+    # The expiry is the cache lifetime: the provider's 300s less the skew.
+    assert timedelta(seconds=230) < expires_at - datetime.now(UTC) <= timedelta(seconds=240)
     refresh = auth_server.token_requests[0]
     assert refresh["grant_type"] == "refresh_token"
     # The wire request carries the plaintext; the row carried only ciphertext.
@@ -503,10 +498,10 @@ async def test_get_refreshes_on_cache_miss_and_persists_rotation(auth_server, dr
     assert refresh["resource"] == _SERVER_URL
     # Rotation: the provider's new refresh token replaced the stored one.
     stored = await oauth.get_connection(_NAME, None)
-    assert stored.refresh_token.decrypt() == "rt-new"
+    assert stored.secrets["refresh_token"] == "rt-new"
 
     # A second call within the TTL reuses the cache — no second refresh.
-    assert await oauth.get_access_token(_NAME, None) == "at-2"
+    assert (await oauth.get_access_token(_NAME, None))[0] == "at-2"
     assert len(auth_server.token_requests) == 1
 
 
@@ -556,7 +551,7 @@ async def test_get_losing_the_refresh_lock_polls_for_the_winners_token(
         await redis.delete(await _lock_key(None))
 
     winner = asyncio.create_task(_winner_finishes())
-    assert await oauth.get_access_token(_NAME, None) == "at-winner"
+    assert await oauth.get_access_token(_NAME, None) == ("at-winner", None)
     await winner
     assert not auth_server.token_requests
 
@@ -579,28 +574,37 @@ async def test_get_cache_and_refresh_lock_are_per_account(auth_server, druks_db)
     redis = get_client()
     await redis.set(await _lock_key(first.id), "1")
 
-    assert await oauth.get_access_token(_NAME, second.id) == "at-1"
+    assert (await oauth.get_access_token(_NAME, second.id))[0] == "at-1"
     assert not await redis.get(await _token_key(first.id))
     assert await redis.get(await _token_key(second.id)) == b"at-1"
 
 
-# --- delivery: the oauth branch of the fold ---------------------------------
+# --- delivery: the oauth ref and the row that issues -------------------------
 
 
-async def test_delivery_mints_and_injects_the_oauth_token(registry_state, auth_server, druks_db):
+async def _ref(account_id: str | None = None) -> SecretRef:
+    _, refs = await Workspace.get_mcp_delivery(None, account_id)
+    return next(ref for ref in refs if ref.name == get_bearer_token_env_var(_NAME).lower())
+
+
+async def test_delivery_binds_the_grant_and_the_row_issues_the_token(
+    registry_state, auth_server, druks_db
+):
     _register_oauth_server()
-    await _store_grant()
+    grant = await _store_grant()
 
-    kwargs = await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
-        None
-    )
+    wire, refs = await Workspace.get_mcp_delivery(None, None)
 
     var = get_bearer_token_env_var(_NAME)
-    assert kwargs["extra_env"][var] == "at-1"
-    entry = next(s for s in kwargs["mcp_servers"] if s.name == _NAME)
+    entry = next(s for s in wire if s.name == _NAME)
     assert entry.url == _SERVER_URL
     assert entry.bearer_token_env_var == var
-    assert "at-1" not in repr(entry)
+    [ref] = refs
+    assert ref.key == (var.lower(), grant.id, "", "mcp.linear.test")
+    token, expires_at = await grant.issue_token("")
+    assert token == "at-1"
+    assert expires_at > datetime.now(UTC)
+    assert "at-1" not in repr(wire) + repr(refs)
 
 
 async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
@@ -611,9 +615,7 @@ async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
     server.identity_mode = IdentityMode.SHARED
 
     with pytest.raises(MissingGrantError, match=_NAME):
-        await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
-            None
-        )
+        await Workspace.get_mcp_delivery(None, None)
 
 
 async def test_delivery_names_the_account_missing_its_per_user_grant(druks_db):
@@ -622,9 +624,7 @@ async def test_delivery_names_the_account_missing_its_per_user_grant(druks_db):
     server.identity_mode = IdentityMode.PER_USER
 
     with pytest.raises(MissingGrantError) as error:
-        await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
-            account.id
-        )
+        await Workspace.get_mcp_delivery(None, account.id)
 
     assert error.value.name == _NAME
     assert error.value.account_id == account.id
@@ -634,13 +634,11 @@ async def test_delivery_names_the_account_missing_its_per_user_grant(druks_db):
 
 async def test_delivery_without_a_run_account_uses_the_default_account(auth_server, druks_db):
     default_account = await Account.get_or_create("default@example.com")
-    await _store_grant(account_id=default_account.id, identity_mode=IdentityMode.PER_USER)
+    grant = await _store_grant(account_id=default_account.id, identity_mode=IdentityMode.PER_USER)
 
-    kwargs = await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
-        None
-    )
+    ref = await _ref()
 
-    assert kwargs["extra_env"][get_bearer_token_env_var(_NAME)] == "at-1"
+    assert ref.secret_id == grant.id
 
 
 async def test_delivery_with_a_named_account_does_not_use_the_default_account(
@@ -651,11 +649,32 @@ async def test_delivery_with_a_named_account_does_not_use_the_default_account(
     await _store_grant(account_id=default_account.id, identity_mode=IdentityMode.PER_USER)
 
     with pytest.raises(MissingGrantError) as error:
-        await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
-            named.id
-        )
+        await Workspace.get_mcp_delivery(None, named.id)
 
     assert error.value.account_id == named.id
+
+
+async def test_the_ref_binds_the_accounts_own_grant(auth_server, druks_db):
+    # The ref binds the grant row at creation: a held box keeps that account's
+    # grant whatever account asks later.
+    first = await Account.get_or_create("first@example.com")
+    second = await Account.get_or_create("second@example.com")
+    grant = await _store_grant(account_id=first.id, identity_mode=IdentityMode.PER_USER)
+    await _store_grant(account_id=second.id, identity_mode=IdentityMode.PER_USER)
+
+    ref = await _ref(first.id)
+
+    assert ref.secret_id == grant.id
+    assert (await VaultSecret.get(ref.secret_id)).account_id == first.id
+
+
+async def test_a_disconnected_grant_issues_nothing(auth_server, druks_db):
+    await _store_grant()
+    ref = await _ref()
+    await oauth.disconnect(_NAME, None)
+
+    with pytest.raises(SecretRevokedError, match=_NAME):
+        await (await VaultSecret.get(ref.secret_id)).issue_token("")
 
 
 # --- API: connect / callback / disconnect / badge ---------------------------
@@ -747,7 +766,6 @@ async def test_disconnect_route_drops_grant_and_cache(
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         assert client.delete(f"/api/mcp-servers/{_NAME}/grant").status_code == 204
         assert not await oauth.get_connection(_NAME, None)
-        assert not await McpClientRegistration.get_for_account(_NAME, None)
         # The mirror of connect-enables: no grant, no calls, so no dead entry
         # riding into VMs.
         assert (await McpServer.get_for_name(_NAME)).is_enabled is False

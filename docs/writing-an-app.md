@@ -193,14 +193,15 @@ For example, a webhook can resolve the ticket assignee.
 An unattended start records the default account. Druks refuses to start a run
 before an account is available. A parked run keeps its account after resume.
 
-Each agent call uses that account's profile. Agent overrides take priority.
+Each agent call uses the installation execution defaults. Agent overrides take
+priority. Subscription billing uses the run account's subscription.
 The call records exactly one billing reference: `subscription_id` or
 `api_key_provider`. Druks uses that selected credential for execution. Missing
 credentials refuse the call. A workflow can use different providers across its
 agent calls. Disconnect clears the credential secret and retains its billing
 identity for call history.
 See [personal and installation settings](configuration.md#personal-and-installation-settings)
-for profile creation and timezone rules.
+for execution defaults, personal preferences, and timezone rules.
 
 ### The journal
 
@@ -241,15 +242,43 @@ Two rules:
 
 ### Announcing domain events
 
-If another component must react to a body action, announce the action:
+Announce a domain fact from the workflow body:
 
 ```python
 await self.announce("pr.opened", pr_number=delivery.pr_number, branch=delivery.branch)
 ```
 
-The platform routes it to subscribers that filter on your workflow and subject.
-The publication is a durable checkpoint. Recovery does not publish it again.
-Announce from the body, not inside a `@step`.
+Druks records the event in one checkpoint. It notifies subscribers in a second
+checkpoint. A subscriber retry cannot insert the completed event again. Recovery
+reuses completed checkpoints. An interrupted operation can run again, so
+subscribers must remain idempotent. Call this method outside a `@step`.
+
+A domain method announces through its subject:
+
+```python
+from druks.db import StoredSubject
+from sqlalchemy.orm import Mapped
+
+
+class Report(StoredSubject):
+    __tablename__ = "night_watch_reports"
+
+    published_url: Mapped[str | None]
+
+    async def publish(self, url: str) -> None:
+        if self.published_url != url:
+            self.published_url = url
+            await self.announce("report.published", url=url)
+```
+
+`Subject` and `StoredSubject` both supply `announce()`. Druks gets the owner from
+the registered app package. The call records the subject identity, its current
+label, and the supplied facts. It then notifies subscribers in the same
+transaction as the domain change. A rollback removes the change and its event.
+The app must prevent duplicate domain changes on webhook redelivery.
+
+Authors supply no app ID, run ID, timestamp, or session. Frontend code owns the
+wording.
 
 ### Schedules and settings
 
@@ -280,8 +309,9 @@ class Engage(Workflow):
 ```
 
 A scheduled `dispatch()` fires with no arguments, so it must be nullary. Druks
-evaluates cron expressions in the installation timezone. The dashboard can retune or
-disable a declared schedule but cannot invent a new workflow schedule.
+evaluates cron expressions in the installation timezone. An operator can change
+the cadence or pause a declared schedule on the Schedules page or in the app
+settings. Druks cannot add a schedule to a workflow that declares none.
 
 ### Background tasks
 
@@ -310,8 +340,9 @@ annotated. `enqueue()` validates them and stores JSON. A task keeps no run row
 and never reaches the timeline.
 
 It has no subject, gate, or operator settings.
-It cannot make agent calls. `every=` uses a fixed UTC cadence that the code
-owns. An operator can retune the `every=` value of a workflow.
+It cannot make agent calls. `every=` on a task is a fixed UTC cadence that the
+code owns. An operator can change only a workflow schedule, on the Schedules
+page or in the app settings.
 `retries=` sets retries after the first attempt, both here and on `@step`.
 
 A workflow can declare its own operator settings:
@@ -392,24 +423,26 @@ operator configures it in the app's **Settings → Agents**. Shared defaults
 are in **Settings → Agents**:
 
 ```python
-profile = await NightWatch.auditor.get_profile()
-profile.harness   # "claude" | "codex" | "opencode" | "pi"
-profile.model_id  # the model as that CLI names it, provider prefix stripped
-profile.model     # "provider/model"
-profile.effort
-profile.billing   # "subscription" | "api_key"
-profile.secrets   # the Drukbox entries that put the key in the VM as a placeholder
-profile.key       # an API key the CLI reads from its invocation, else None
+config = await NightWatch.auditor.get_config()
+config.harness   # "claude" | "codex" | "opencode" | "pi"
+config.model_id  # the model as that CLI names it, provider prefix stripped
+config.model     # "provider/model"
+config.effort
+config.billing   # "subscription" | "api_key"
+config.secrets   # the Drukbox entries that put the key in the VM as a placeholder
 ```
 
-`get_profile()` runs inside a workflow and reads the settings at call time for
-the run's own actor, the same read Druks makes for the calling agent. A
-missing login or key raises before any sandbox work. Under subscription
-billing there is no key. The VM home holds the login of the calling agent's
+`get_config()` returns an `AgentConfig` inside a workflow. This temporary value
+contains shared execution settings and the run account's selected credential.
+Druks resolves it at call time, as it does for an agent call. It stores no
+personal preferences and has no database table. A missing login or key raises
+before any sandbox work. Under subscription billing there is no key. The VM home holds the login of the calling agent's
 subscription only, so a nested CLI on another provider needs `api_key` billing.
-Under `api_key` billing on `claude`, the VM holds the key as a placeholder in
-`ANTHROPIC_API_KEY`, the variable the entry names. A nested CLI reads it from
-the environment. Codex, Pi, and OpenCode read the key from `profile.key`.
+Under `api_key` billing, the VM holds the key as a placeholder in the variable
+the entry names: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `CODEX_API_KEY` for
+Codex. A nested CLI reads it from the environment. The
+[configuration guide](configuration.md#harnesses) lists the variable, host, and
+header per harness.
 
 Do not ask the framework to infer domain side effects from agent prose.
 The prompt or a subsequent explicit step owns those actions.
@@ -429,29 +462,85 @@ class Sweep(Workflow):
     workspace_class = RepoWorkspace
 ```
 
-Before every agent call Druks mints the GitHub App token for the subject's
-`repo`, writes it into the VM, and clones the default branch into
-`workspace.repo_path`. Prompts read `{{ workspace.repo_path }}`. In the VM,
-git and `gh` read the token through the sandbox helper. The clone is
-idempotent, so a warm host keeps its working tree and a host rotated in bare
-gets one back.
+Before every agent call Druks clones the default branch into
+`workspace.repo_path`. Prompts read `{{ workspace.repo_path }}`. The sandbox
+holds a placeholder for its GitHub token in `GH_TOKEN`, and Drukbox points git
+and `gh` at it. The Drukbox secrets proxy swaps the placeholder for a token
+that Druks mints on demand, so a long run never outlives its token. The clone
+is idempotent, so a warm host keeps its working tree and a host rotated in
+bare gets one back.
 
-Every workspace holds the run's `subject`. `RepoWorkspace.get_repo()` reads
-its `repo` column. Override it when the subject names the repository
+Every workspace holds the run's `subject`. `RepoWorkspace.get_repo(subject)`
+reads its `repo` column. Override it when the subject names the repository
 differently:
 
 ```python
 class SweepWorkspace(RepoWorkspace):
-    def get_repo(self) -> str:
-        return self.subject.full_name
+    @classmethod
+    def get_repo(cls, subject) -> str:
+        return subject.full_name
 ```
+
+The sandbox's GitHub token comes from a connected service of the appliance.
+`RepoWorkspace` names the operator App, `Github`. An app that acts as another
+identity declares its own service in its `services` module, a subclass with
+its own connect card, and names it on its workspace:
+
+```python
+from pydantic import BaseModel, Field, SecretStr
+
+from druks.core.services import Github
+from druks.workspaces import RepoWorkspace
+
+
+class GithubReviewer(Github):
+    required = False
+
+    class Settings(BaseModel):
+        app_id: str = Field(title="App ID")
+        private_key: SecretStr = Field(title="Private key (PEM)")
+
+
+class ReviewWorkspace(RepoWorkspace):
+    github = GithubReviewer
+```
+
+The operator connects the service in **Settings → Connections → Services**. The
+sandbox's identity stores the service and the repo. The issuer reads only
+those two, so a request cannot select another repo or identity.
 
 Override `Workflow.get_workspace_kwargs()` to pass `branch` or the fields a
 subclass adds. Extend `RepoWorkspace` by adding fields, not by cloning again.
-Override `get_github_token()` to clone and act as another identity,
-`run_agent()` to prepare the VM before the call, `get_agent_run_kwargs()` to
-grant directories or skills, and `get_required_mcp_servers()` to require an
-MCP server the workspace credentials itself.
+Override `run_agent()` to prepare the VM before the call, `get_agent_run_kwargs()`
+to grant directories or skills, and `get_required_mcp_servers(subject)` to
+require an MCP server with its own vault row:
+
+```python
+from druks.sandbox.datastructures import RequiredMcpServer
+
+
+class BuildWorkspace(RepoWorkspace):
+    @classmethod
+    async def get_required_mcp_servers(cls, subject) -> tuple[RequiredMcpServer, ...]:
+        actor = await get_review_actor()
+        return (
+            RequiredMcpServer(
+                name="github",
+                url="https://api.githubcopilot.com/mcp/",
+                secret_id=(await actor.service.get()).id,
+                resource=cls.get_repo(subject),
+            ),
+        )
+```
+
+The server names the vault row the issuer answers from and what the token is
+for: here a connected GitHub service and its repo. Druks binds the server's
+host and the variable `MCP_GITHUB_TOKEN` to the entry when it creates the
+sandbox. The harness configuration names the variable, and the sandbox never
+holds the token. A required server owns its name, so a same-named registry
+server is not delivered. `Workspace.get_mcp_delivery(subject, account_id)`
+returns the wire shapes and the secret refs for every MCP server of a sandbox.
+Override it to deliver none.
 
 Keep durable state outside the VM. A workflow can set
 `steps_reuse_sandbox = True` to retain one host across a segment. Druks releases
@@ -675,9 +764,8 @@ method.
 Druks serves the same `/api/night_watch/repository` surface for both subject
 types. This surface contains a board, detail pages, and a live stream. Druks
 mounts it for each declared subject. Each response contains your summary, run
-status, timeline, agent calls, artifacts, and active question. Override
-`get_subject_activity()` only to add transient app detail, such as
-"Building sandbox VM…".
+status, timeline, agent calls, artifacts, active question, and the sandbox
+phase while a run starts.
 
 Pass the subject instance to each component that requires one. This includes a
 workflow start, gate answer, or event:
@@ -914,7 +1002,7 @@ class Gmail(Service):
         client_secret: SecretStr = Field(title="Client secret")
 ```
 
-The slug keys the `service_identities` row and the connect wire. A class
+The slug names the service's vault row and the connect wire. A class
 rename changes the slug, rekeys the card, and orphans the connected identity.
 Set `slug = "gmail"` on the class to keep the old key.
 

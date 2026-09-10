@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { BrowserSession } from '../api/types'
 import { api } from '../api/client'
-import { BrowserSessionsPane } from './BrowserSessionsPane'
+import { BrowserProfilesPane } from './BrowserProfilesPane'
 
 function browserSession(overrides: Partial<BrowserSession> = {}): BrowserSession {
   return {
@@ -43,7 +43,7 @@ function renderPane() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={queryClient}>
-      <BrowserSessionsPane />
+      <BrowserProfilesPane />
     </QueryClientProvider>,
   )
 }
@@ -55,15 +55,15 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('BrowserSessionsPane', () => {
+describe('BrowserProfilesPane', () => {
   it('shows a failed read without a false empty state and retries', async () => {
     vi.spyOn(api, 'browserSessions').mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce([])
     renderPane()
-    expect(screen.getByRole('status').textContent).toBe('Loading browser sessions…')
-    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Could not load browser sessions. Try again')
-    expect(screen.queryByText('No installed app declares a browser session.')).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('Loading browser profiles…')
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Could not load browser profiles. Try again')
+    expect(screen.queryByText('No installed app declares a browser profile.')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(await screen.findByText('No installed app declares a browser session.')).toBeTruthy()
+    expect(await screen.findByText('No installed app declares a browser profile.')).toBeTruthy()
   })
   it('lists status, base-aware login actions, and refresh timestamps', async () => {
     vi.stubEnv('BASE_URL', '/druks/')

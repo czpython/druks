@@ -66,15 +66,24 @@ class DashboardRun(Schema):
     failure: str | None
 
 
-class DashboardWork(Schema):
+class DashboardSection(Schema):
+    total: int
     rows: list[DashboardRun]
-    has_more: bool
+
+
+class DashboardOverview(Schema):
+    needs_you: DashboardSection
+    running: DashboardSection
+    failed: DashboardSection
+    last_finished_at: datetime | None
+    last_failed_at: datetime | None
 
 
 class DashboardSchedule(Schema):
     app: str
     kind: str
     cron: str | None
+    default_cron: str
     enabled: bool
     timezone: str
 

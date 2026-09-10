@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from unittest import mock
 
 import pytest
-from conftest import PROFILE_PROBE
+from conftest import CONFIG_PROBE
 from dbos._error import DBOSWorkflowCancelledError
 from druks.accounts.models import Account
 from druks.database import db_session as ambient_session
@@ -10,8 +10,8 @@ from druks.durable.dbos_state import workflow_status
 from druks.durable.enums import RunState
 from druks.durable.models import Run
 from druks.events.models import Event
+from druks.harnesses.config import get_config
 from druks.harnesses.exceptions import HarnessNotConnectedError
-from druks.harnesses.profiles import get_profile
 from druks.models import Base
 from druks.signals import subscribe
 from druks.testing import seed_run
@@ -222,7 +222,7 @@ async def test_cancellation_passes_through_untouched(druks_db, _inline_steps):
         )
 
     ambient_session().expunge_all()
-    assert (await Run.get(run.id)).failure is None
+    assert not (await Run.get(run.id)).failure
     rows = (
         await ambient_session().execute(select(Event).filter_by(subject_id=str(item.id)))
     ).scalars()
@@ -258,8 +258,8 @@ async def test_failure_writes_the_reason_and_reraises(druks_db, _inline_steps):
     assert row.failure == "closed at review"
     # A bare FatalError carries no distinguishing code — only its message.
     assert row.failure_code == ""
-    assert row.input_gate is None
-    assert row.input_request is None
+    assert not row.input_gate
+    assert not row.input_request
     failed = (
         await ambient_session().execute(
             select(Event).filter_by(type="workflow.failed", subject_id=str(item.id))
@@ -294,7 +294,7 @@ async def test_unattended_execution_without_subscription_records_not_connected(
     item, run = await _item_and_run(druks_db, "running")
 
     async def body() -> None:
-        await get_profile(PROFILE_PROBE.id, None)
+        await get_config(CONFIG_PROBE.id, None)
 
     with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
         await _execute_run(run.id, run.kind, {"type": "note", "id": item.id}, run.account_id, body)
@@ -364,11 +364,10 @@ async def test_a_foreign_code_never_becomes_the_failure_code(druks_db, _inline_s
 
 @pytest.mark.asyncio
 async def test_announce_carries_the_runs_routing(druks_db):
-    # The body states its facts; the platform injects what subscribers filter on,
-    # and the publish rides its own named checkpoint — the boundary that keeps a
-    # recovery replay from re-firing it.
-    workflow = Workflow()
-    workflow._subject = {"type": "note", "id": 7}
+    note, run = await _item_and_run(druks_db, "running")
+    workflow = Summarize()
+    workflow._workflow_id = run.id
+    workflow._subject = note.identity
     received = []
     checkpoints = []
 
@@ -383,8 +382,12 @@ async def test_announce_carries_the_runs_routing(druks_db):
     with mock.patch("druks.workflows.DBOS.run_step_async", side_effect=run_inline):
         await workflow.announce("test.announced", pr_number=12)
 
-    assert received == [({"type": "note", "id": 7}, {"pr_number": 12})]
-    assert checkpoints == ["test.announced"]
+    assert received == [(note.identity, {"pr_number": 12})]
+    assert checkpoints == ["test.announced", "test.announced:propagate"]
+    event = (await ambient_session().scalars(select(Event).filter_by(type="test.announced"))).one()
+    assert event.app == "field_notes"
+    assert event.subject_label == note.label
+    assert event.payload == {"pr_number": 12, "run": run.id, "kind": workflow.kind}
 
 
 @pytest.mark.asyncio

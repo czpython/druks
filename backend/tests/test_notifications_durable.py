@@ -17,7 +17,6 @@ from druks.notifications.models import Destination, Notification
 from druks.notifications.outbox import notifications_queue, send_notification
 from druks.notifications.services import respond_to_notification
 from druks.testing import configure_app_for_test, init_db, make_settings
-from druks.user_settings.models import SettingsProfile
 from druks.workflows import Gate, OperatorReply, Run, Workflow
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
@@ -398,7 +397,8 @@ async def _set_gate_park_pointer(rt, destination_id):
     session = get_session(rt.engine)
     db_session.registry.set(session)
     try:
-        await (await SettingsProfile.get()).set_gate_park_destination(destination_id)
+        account = await Account.get_default()
+        await account.update_preferences(gate_park_destination_id=destination_id)
         await session.commit()
     finally:
         await db_session.remove()
@@ -531,9 +531,7 @@ async def test_deleted_designated_destination_notifies_nothing(rt, deliver_spy):
     # ON DELETE SET NULL cleared the pointer itself.
     session = get_session(rt.engine)
     try:
-        settings = await session.scalar(
-            select(SettingsProfile).where(SettingsProfile.account_id.is_(None))
-        )
+        settings = await session.scalar(select(Account).where(Account.is_default))
         assert settings.gate_park_destination_id is None
     finally:
         await session.close()
@@ -732,22 +730,22 @@ async def test_concurrent_responds_resolve_to_one_answer(rt, deliver_spy):
 
 
 @pytest.mark.parametrize("unattended", [True, False])
-async def test_gate_notifications_use_the_selected_personal_profile(rt, deliver_spy, unattended):
+async def test_gate_notifications_use_the_selected_personal_preferences(
+    rt, deliver_spy, unattended
+):
     destination = await _seed_destination(rt, f"personal-{unattended}")
 
-    async def configure_profile():
+    async def configure_preferences():
         await Account.get_or_create("default@example.com")
         default = await Account.get_default()
         explicit = await Account.get_or_create("explicit@example.com")
         account = default if unattended else explicit
-        installation = await SettingsProfile.get()
-        personal = await installation.copy_for_account(account.id)
-        await personal.set_gate_park_destination(destination.id)
+        await account.update_preferences(gate_park_destination_id=destination.id)
         subject = NotificationProbe(id=9020 if unattended else 9021)
         db_session.add(subject)
         return account.id, subject
 
-    account_id, subject = await _seed(rt, configure_profile)
+    account_id, subject = await _seed(rt, configure_preferences)
     workflow_id = await rt.ExternalFlow.start(
         subject=subject, account_id=None if unattended else account_id
     )

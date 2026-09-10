@@ -44,7 +44,6 @@ from druks.durable.models import AgentCall, Run
 from druks.durable.schemas import (
     AgentCallResponse,
     RunResponse,
-    SubjectActivity,
     SubjectStatus,
     SubjectSummary,
 )
@@ -55,9 +54,10 @@ from druks.notifications.outbox import notifications_queue, send_notification
 from druks.sandbox.client import provisioning_key, sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.sandbox.datastructures import Sandbox
+from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
 from druks.signals import publish
-from druks.user_settings.models import SettingsOverride, SettingsProfile
+from druks.user_settings.models import SettingsOverride
 from druks.workspaces import Workspace
 
 # druks.workflows is the author door for workflow authoring: Workflow, Gate,
@@ -73,19 +73,17 @@ __all__ = [
     "OperatorReply",
     "RunResponse",
     "Subject",
-    "SubjectActivity",
     "SubjectStatus",
     "SubjectSummary",
     "Workflow",
     "WorkflowError",
     "WorkflowEvent",
-    "set_run_phase",
     "step",
     "task",
 ]
 
 if TYPE_CHECKING:
-    from druks.harnesses.profiles import Profile
+    from druks.harnesses.config import AgentConfig
     from druks.sandbox.host import Host
 
 # A human gate can park for days; a long recv TTL still caps zombie parks.
@@ -158,19 +156,18 @@ class _DeclaredSubject:
         self.subject_class = subject_class
 
     def __get__(self, run: "Workflow | None", owner: type) -> Any:
-        if run is None:
-            return self.subject_class
+        if run:
+            # Live, not a snapshot taken at dispatch: a long-parked run resumes against
+            # whatever the declared class says then, and finds nothing if it went away.
+            # Awaitable either way, so ``await self.subject`` is the one shape.
+            async def resolve() -> Any:
+                if "subject" in run.__dict__:
+                    return run.__dict__["subject"]
+                if run._subject:
+                    return await self.subject_class.get_for_subject_id(str(run._subject["id"]))
 
-        # Live, not a snapshot taken at dispatch: a long-parked run resumes against
-        # whatever the declared class says then, and finds nothing if it went away.
-        # Awaitable either way, so ``await self.subject`` is the one shape.
-        async def resolve() -> Any:
-            if "subject" in run.__dict__:
-                return run.__dict__["subject"]
-            if run._subject:
-                return await self.subject_class.get_for_subject_id(str(run._subject["id"]))
-
-        return resolve()
+            return resolve()
+        return self.subject_class
 
     def __set__(self, run: "Workflow", value: Any) -> None:
         # A test hands the run its subject directly; ``await self.subject``
@@ -386,7 +383,8 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
     async def _create() -> str | None:
         async with step_session():
             run = await Run.get(workflow_id)
-            destination_id = (await SettingsProfile.get(run.account_id)).gate_park_destination_id
+            account = await Account.get_for_run(run.account_id)
+            destination_id = account.gate_park_destination_id
             if destination_id:
                 return await run.create_park_notification(destination_id, subject)
 
@@ -792,19 +790,28 @@ class Workflow:
         self._host_secrets_id = ""
 
     async def announce(self, topic: str, **facts: Any) -> None:
-        # The workflow announcing a domain event in its app's vocabulary
-        # ("pr.opened", pr_number=12, branch="agent/eng-8"). The platform injects
-        # the routing subscribers filter on, and the publish runs as its own
-        # retrying checkpoint so a recovery replay doesn't re-fire it. Body-only,
-        # enforced: the checkpoint is a step, so it can't nest inside one.
+        """Record a domain fact, then notify subscribers in a separate checkpoint."""
         if _in_step.get():
             raise WorkflowError("announce() runs in the workflow body, not inside a @step")
 
-        async def _fan_out() -> None:
+        async def record() -> None:
+            async with step_session():
+                run = await Run.get(self.workflow_id)
+                await Event.emit(
+                    type=topic,
+                    subject=self._subject,
+                    label=run.subject_label,
+                    payload={**facts, "run": self.workflow_id, "kind": self.kind},
+                    app=self.app,
+                )
+
+        await DBOS.run_step_async(StepOptions(name=topic, **_IO_RETRIES), record)
+
+        async def notify() -> None:
             async with step_session():
                 await publish(topic, subject=self._subject, kind=self.kind, **facts)
 
-        await DBOS.run_step_async(StepOptions(name=topic, **_IO_RETRIES), _fan_out)
+        await DBOS.run_step_async(StepOptions(name=f"{topic}:propagate", **_IO_RETRIES), notify)
 
     async def review(
         self, *, questions: list[BaseModel] | None = None, context: str = ""
@@ -846,11 +853,27 @@ class Workflow:
         # Built per agent call, so nothing is held across steps.
         return self.workspace_class(**await self.get_workspace_kwargs(host))
 
-    async def _lease_host(self, profile: "Profile") -> str | None:
+    async def get_secret_refs(self) -> list[SecretRef]:
+        # The secrets a box of this run fetches beyond its config's: the
+        # workspace's and its MCP servers', read before the box exists.
+        subject = await self.subject
+        _, mcp = await self.workspace_class.get_mcp_delivery(subject, self.account_id)
+        return [*await self.workspace_class.get_secret_refs(subject), *mcp]
+
+    async def _lease_host(self, config: "AgentConfig") -> str | None:
         # The warm VM, provisioned once per segment; state is carried in git, so
         # only the host-id matters across steps — held-across-steps never fights replay.
         if not self.steps_reuse_sandbox:
             return
+        refs = [*config.secret_refs, *await self.get_secret_refs()]
+        # A crashed process left its box behind. Its identity finds it again.
+        if (
+            not self._host
+            and refs
+            and (identity := await SandboxIdentity.lookup(self._workflow_id, "workflow", refs))
+        ):
+            self._host = await sandbox_client.reattach(host_id=identity.host_id)
+            self._host_secrets_id = config.secrets_id
         if self._host and self._host.expires_at:
             remaining = (self._host.expires_at - datetime.now(UTC)).total_seconds()
             if remaining < SANDBOX_HOST_ROTATE_BEFORE_SECONDS:
@@ -858,7 +881,7 @@ class Workflow:
                 # host. Safe because each call rebuilds its workspace on whatever
                 # host it lands on (state lives in git), so a bare VM is fine.
                 await self._reap_run()
-        if self._host and self._host_secrets_id != profile.secrets_id:
+        if self._host and self._host_secrets_id != config.secrets_id:
             # Drukbox binds entries at creation.
             await self._reap_run()
         if not self._host:
@@ -866,13 +889,22 @@ class Workflow:
             if self.sandbox:
                 template = await get_template_id(self.sandbox)
                 await set_run_phase("provisioning_vm")
+            # The key names the pasted key the VM holds, so a replay finds its VM.
+            # A box that fetches gets its own identity, and the key names that
+            # instead. A replay finds the box through the identity, above.
+            identity, entries, key = None, {}, config.secrets_id
+            if refs:
+                identity, entries = await SandboxIdentity.create(
+                    run_id=self._workflow_id, scoped_to="workflow", secret_refs=refs
+                )
+                key = identity.id
             self._host = await sandbox_client.provision(
-                # The key names the pasted key the VM holds, so a replay finds its VM.
-                idempotency_key=provisioning_key(self._workflow_id, "sandbox", profile.secrets_id),
-                secrets=profile.secrets,
+                idempotency_key=provisioning_key(self._workflow_id, "workflow", key),
+                secrets={**config.secrets, **entries},
                 template=template,
+                identity=identity,
             )
-            self._host_secrets_id = profile.secrets_id
+            self._host_secrets_id = config.secrets_id
         return self._host.id
 
     async def _reap_run(self) -> None:
@@ -954,14 +986,13 @@ class Workflow:
         if cls.subject:
             if isinstance(subject, cls.subject):
                 return
-            given = "nothing" if subject is None else type(subject).__name__
+            given = type(subject).__name__ if subject else "nothing"
             raise WorkflowError(f"{cls.__name__} is about {cls.subject.__name__}, not {given}")
-        if subject is None:
-            return
-        raise WorkflowError(
-            f"{cls.__name__} declares no subject — declare "
-            f"``subject = {type(subject).__name__}`` on it, or pass subject=None"
-        )
+        if subject:
+            raise WorkflowError(
+                f"{cls.__name__} declares no subject — declare "
+                f"``subject = {type(subject).__name__}`` on it, or pass subject=None"
+            )
 
     @classmethod
     async def cancel(cls, subject: Subject | StoredSubject, *, failure: str | None = None) -> None:

@@ -10,16 +10,18 @@ from druks.durable.models import AgentCall, Artifact, Run
 from druks.durable.reads import read_slice
 from druks.durable.schemas import AgentCallResponse
 from druks.harnesses.artifacts import normalize_token_usage
-from druks.harnesses.models import ProviderSubscription
 from druks.harnesses.providers import get_providers
 from druks.mcp.gateway import exceptions, schemas
 from druks.notifications.exceptions import InvalidChoiceError
 from druks.notifications.services import validate_in_app_answer
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
+from druks.settings import load_settings
 from druks.usage.models import UsageScrape
 from druks.usage.reads import list_finished_calls
 from druks.usage.schemas import UsageHistoryPoint
 from druks.usage.trends import FIVE_HOUR_RANGE, WEEK_RANGE, downsample
-from druks.user_settings.models import SettingsProfile
 
 _TRANSCRIPT_TAIL_BYTES = 8 * 1024
 _STDERR_TAIL_BYTES = 4 * 1024
@@ -105,7 +107,7 @@ async def _artifact_content(artifact: Artifact | None) -> schemas.ArtifactConten
 
 async def get_usage(account: Account) -> schemas.AgentUsageResponse:
     now = datetime.now(UTC)
-    timezone, local_start = operator_local_day((await SettingsProfile.get()).timezone, now)
+    timezone, local_start = operator_local_day(load_settings().timezone, now)
     rows = await list_finished_calls(
         account.id, since=local_start, until=local_start + timedelta(days=1)
     )
@@ -130,7 +132,11 @@ async def get_usage(account: Account) -> schemas.AgentUsageResponse:
 async def _provider_usage(
     provider_id: str, account_id: str, *, now: datetime
 ) -> schemas.AgentProviderUsage:
-    is_connected = bool(await ProviderSubscription.get_for_account(provider_id, account_id))
+    is_connected = bool(
+        await VaultSecret.lookup(
+            SecretKind.SUBSCRIPTION, Audience.provider(provider_id), account_id
+        )
+    )
     row = await UsageScrape.latest_for(provider_id, account_id)
     if not row:
         return schemas.AgentProviderUsage(id=provider_id, is_connected=is_connected)

@@ -8,6 +8,7 @@ import type {
   Account,
   AppSettingsProblems,
   UpdateAppsSettingsRequest,
+  UpdatePersonalSettingsRequest,
   UpdateSettingsRequest,
 } from '../api/types'
 import { appLabel } from '../apps/registry'
@@ -16,13 +17,13 @@ import { absTime } from '../lib/format'
 import { harnessColors } from '../lib/harnessColors'
 import { Page } from './Page'
 import { Sidebar } from './Sidebar'
-import { BrowserSessionsPane } from './BrowserSessionsPane'
+import { BrowserProfilesPane } from './BrowserProfilesPane'
 import {
   AgentAccessPane,
   AgentsPane,
   AppPane,
   ConnectionsPane,
-  GeneralPane,
+  PreferencesPane,
   McpServersPane,
   ProvidersPane,
   ServicesPane,
@@ -44,11 +45,15 @@ const SECTIONS = [
   { id: 'connections', label: 'Connections', group: 'Tools & access' },
   { id: 'mcp', label: 'MCP servers', group: 'Tools & access' },
   { id: 'skills', label: 'Skills', group: 'Tools & access' },
-  { id: 'browser-sessions', label: 'Browser sessions', group: 'Tools & access' },
-  { id: 'general', label: 'General', group: 'Installation' },
   { id: 'personal', label: 'Preferences', group: 'Personal' },
   { id: 'api-tokens', label: 'API tokens', group: 'Personal' },
-  { id: 'apps', label: 'App settings', group: 'Apps' },
+]
+
+const CONNECTION_TABS = [
+  { id: 'services', label: 'Services' },
+  { id: 'accounts', label: 'Accounts' },
+  { id: 'browser', label: 'Browser' },
+  { id: 'revoked', label: 'Revoked' },
 ]
 
 function withField(
@@ -76,7 +81,10 @@ export function SettingsPages({
   active?: boolean
 }) {
   const [location, navigate] = useLocation()
-  const fieldTarget = new URLSearchParams(useSearch()).get('field')
+  const searchParams = new URLSearchParams(useSearch())
+  const fieldTarget = searchParams.get('field')
+  const connectionsTab =
+    CONNECTION_TABS.find((tab) => tab.id === searchParams.get('tab'))?.id ?? 'services'
   const content = useRef<HTMLElement>(null)
   const section = appName ? `apps/${appName}` : location.slice('/settings/'.length) || 'providers'
   const formPath = `${import.meta.env.BASE_URL.replace(/\/$/, '')}${appName ? `/apps/${appName}/settings` : '/settings'}`
@@ -96,7 +104,6 @@ export function SettingsPages({
   const catalogsQuery = useQuery({ queryKey: ['providerCatalogs'], queryFn: api.providerCatalogs })
   const executionQueries = [
     settingsQuery,
-    personalQuery,
     appsQuery,
     harnessesQuery,
     providersQuery,
@@ -121,16 +128,13 @@ export function SettingsPages({
   const harnessByName = Object.fromEntries(harnesses.map((harness) => [harness.name, harness]))
   const harnessColor = harnessColors(harnesses.map((harness) => harness.name))
   const savedDefaults = settingsQuery.data ? defaultsOf(settingsQuery.data) : null
-  const savedPersonal = personalQuery.data ? defaultsOf(personalQuery.data) : null
-  const [personalEdits, setPersonalEdits] = useState<UpdateSettingsRequest>({})
-  const [timezone, setTimezone] = useState<string | null>(null)
+  const [personalEdits, setPersonalEdits] = useState<UpdatePersonalSettingsRequest>({})
   const [defaults, setDefaults] = useState<Defaults | null>(null)
   const [appEdits, setAppEdits] = useState<Record<string, UpdateAppsSettingsRequest>>({})
   const [appProblems, setAppProblems] = useState<AppSettingsProblems>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
-  const [connectionsTab, setConnectionsTab] = useState('services')
   const [visited, setVisited] = useState([section])
   if (!visited.includes(section)) setVisited([...visited, section])
   const tick = useTicker()
@@ -140,25 +144,20 @@ export function SettingsPages({
   const leaving = useRef(false)
   const heading = useRef<HTMLHeadingElement>(null)
   const errorNotice = useRef<HTMLParagraphElement>(null)
-  const effectiveTimezone = timezone ?? settingsQuery.data?.timezone ?? 'UTC'
   const effectiveDefaults = defaults ?? savedDefaults
-  const personalDefaults = personalQuery.data ? defaultsOf({ ...personalQuery.data, ...personalEdits }) : null
   const personalTimezone = personalEdits.timezone ?? personalQuery.data?.timezone ?? 'UTC'
   const personalChanges = Object.fromEntries(
     Object.entries(personalEdits).filter(([field, value]) =>
-      value !== personalQuery.data?.[field as keyof UpdateSettingsRequest],
+      value !== personalQuery.data?.[field as keyof UpdatePersonalSettingsRequest],
     ),
   )
   const timezones = useMemo(() => ['UTC', ...Intl.supportedValuesOf('timeZone')], [])
   const clock = useMemo(() => {
     void tick
-    return absTime(new Date().toISOString(), effectiveTimezone)
-  }, [tick, effectiveTimezone])
+    return absTime(new Date().toISOString(), personalTimezone)
+  }, [tick, personalTimezone])
   const dirtyPages = [
     ...(Object.keys(personalChanges).length > 0 ? ['personal'] : []),
-    ...(timezone !== null && settingsQuery.data && timezone !== settingsQuery.data.timezone
-      ? ['general']
-      : []),
     ...(defaults && savedDefaults && JSON.stringify(defaults) !== JSON.stringify(savedDefaults)
       ? ['agents']
       : []),
@@ -186,11 +185,11 @@ export function SettingsPages({
     app && (app.settings.length || app.workflows.some((workflow) => workflow.fields.length)),
   )
   const paneSection = app?.agents.length && !hasOptions ? 'agents' : appTab
-  const executionPage = section === 'agents' || section === 'personal' || Boolean(appName && paneSection === 'agents')
+  const executionPage = section === 'agents' || Boolean(appName && paneSection === 'agents')
   const Content = appName ? 'section' : 'main'
   const title =
     SECTIONS.find((entry) => entry.id === section)?.label ?? (app ? appLabel(app.name) : 'Settings')
-  const formPage = section === 'general' || section === 'agents' || section === 'personal' || Boolean(app && validAppPage)
+  const formPage = section === 'agents' || section === 'personal' || Boolean(app && validAppPage)
   const executionChanged =
     defaults &&
     savedDefaults &&
@@ -205,19 +204,9 @@ export function SettingsPages({
         .some((model) => model.id === defaults.defaultModel && model.enabled),
   )
 
-  const personalExecutionChanged = personalDefaults && savedPersonal && (
-    personalDefaults.defaultHarness !== savedPersonal.defaultHarness ||
-    personalDefaults.defaultModel !== savedPersonal.defaultModel ||
-    personalDefaults.defaultBilling !== savedPersonal.defaultBilling
-  )
-  const personalExecutionInvalid = Boolean(
-    personalExecutionChanged && personalDefaults && !catalog
-      .modelsOf(personalDefaults.defaultHarness, personalDefaults.defaultBilling)
-      .some((model) => model.id === personalDefaults.defaultModel && model.enabled),
-  )
-
   useEffect(() => {
     if (location === '/settings') navigate('/settings/providers', { replace: true })
+    if (location === '/settings/general') navigate('/settings/personal', { replace: true })
     const movedApp = /^\/settings\/apps\/([^/]+)/.exec(location)?.[1]
     if (movedApp) navigate(`/apps/${movedApp}/settings`, { replace: true })
   }, [location, navigate])
@@ -255,8 +244,7 @@ export function SettingsPages({
   }, [dirtyPages.length])
 
   function discard(page: string) {
-    if (page === 'general') setTimezone(null)
-    else if (page === 'personal') setPersonalEdits({})
+    if (page === 'personal') setPersonalEdits({})
     else if (page === 'agents') setDefaults(null)
     else
       setAppEdits((current) => {
@@ -284,7 +272,7 @@ export function SettingsPages({
   }
 
   async function save(pages: string[], proceed?: () => void) {
-    if (saving || !settingsQuery.data) return
+    if (saving || (pages.some((page) => page !== 'personal') && !settingsQuery.data)) return
     setSaving(true)
     let page = pages[0] ?? section
     try {
@@ -296,16 +284,8 @@ export function SettingsPages({
           return next
         })
         if (page === 'personal') {
-          if (personalExecutionInvalid)
-            throw new Error('Choose a model with a connected credential before you save.')
           const saved = await api.updatePersonalSettings(personalChanges)
           queryClient.setQueryData(['personalSettings'], saved)
-          await queryClient.invalidateQueries({ queryKey: ['agents'] })
-          await queryClient.invalidateQueries({ queryKey: ['appSettings'] })
-        } else if (page === 'general') {
-          const saved = await api.updateSettings({ timezone: effectiveTimezone })
-          queryClient.setQueryData(['settings'], saved)
-          await queryClient.invalidateQueries({ queryKey: ['personalSettings'] })
         } else if (page === 'agents' && defaults && savedDefaults) {
           if (executionInvalid)
             throw new Error('Choose a model with a connected credential before you save.')
@@ -316,7 +296,6 @@ export function SettingsPages({
           }
           const saved = await api.updateSettings(body)
           queryClient.setQueryData(['settings'], saved)
-          await queryClient.invalidateQueries({ queryKey: ['personalSettings'] })
           await queryClient.invalidateQueries({ queryKey: ['agents'] })
           await queryClient.invalidateQueries({ queryKey: ['appSettings'] })
         } else {
@@ -398,7 +377,11 @@ export function SettingsPages({
   const searchResults = SECTIONS.map((entry) => ({
     label: entry.label, owner: entry.group, kind: 'Section', terms: '',
     path: `/settings/${entry.id}`,
-  })).concat(Object.values(SETTINGS_FIELDS).map((field) => ({
+  })).concat([{
+    label: 'Browser profiles', owner: 'Connections', kind: 'Section',
+    terms: 'browser sessions sign-ins saved logins',
+    path: '/settings/connections?tab=browser',
+  }], Object.values(SETTINGS_FIELDS).map((field) => ({
     label: field.label, owner: SECTIONS.find((entry) => entry.id === field.section)!.label,
     kind: 'Field', terms: field.terms,
     path: `/settings/${field.section}?field=${field.field}`,
@@ -434,7 +417,7 @@ export function SettingsPages({
       // Drop the query after the focus, so a data refresh does not focus again.
       navigate(location, { replace: true })
     }
-  }, [active, fieldTarget, location, navigate, executionReady, appsQuery.data, settingsQuery.data])
+  }, [active, fieldTarget, location, navigate, executionReady, appsQuery.data, settingsQuery.data, personalQuery.data])
 
   return (
     <div
@@ -446,7 +429,6 @@ export function SettingsPages({
           dirty &&
           !saving &&
           !(section === 'agents' && executionInvalid) &&
-          !(section === 'personal' && personalExecutionInvalid) &&
           !confirmation.current?.open
         ) {
           event.preventDefault()
@@ -496,7 +478,7 @@ export function SettingsPages({
               </Link>
               <h2 className="settings-sidebar-title">Settings</h2>
               <nav className="settings-navigation" aria-label="Settings">
-                {['AI execution', 'Tools & access', 'Installation', 'Personal', 'Apps'].map((group) => (
+                {['AI execution', 'Tools & access', 'Personal'].map((group) => (
                   <div key={group}>
                     <div className="sidebar-group-title">{group}</div>
                     {SECTIONS.filter((entry) => entry.group === group).map((entry) => (
@@ -508,11 +490,7 @@ export function SettingsPages({
                         }
                         href={`/settings/${entry.id}`}
                         className="sidebar-link"
-                        aria-current={
-                          section === entry.id || (entry.id === 'apps' && Boolean(app))
-                            ? 'page'
-                            : undefined
-                        }
+                        aria-current={section === entry.id ? 'page' : undefined}
                       >
                         {entry.label}
                         {dirtyPages.includes(entry.id) && <span aria-hidden="true">•</span>}
@@ -600,6 +578,15 @@ export function SettingsPages({
             </p>
           )}
           {appName && appsQuery.isPending && <p role="status">Loading app settings…</p>}
+          {section === 'personal' && personalQuery.isPending && (
+            <p role="status">Loading preferences…</p>
+          )}
+          {section === 'personal' && personalQuery.isError && (
+            <p role="alert" className="settings-error">
+              Could not load preferences.{' '}
+              <button onClick={() => void personalQuery.refetch()}>Try again</button>
+            </p>
+          )}
           {executionPage && !executionReady &&
             (executionFailed ? (
               <p role="alert" className="settings-error">
@@ -617,7 +604,8 @@ export function SettingsPages({
             ))}
           {(settingsQuery.isError || appsQuery.isError) &&
             !executionPage &&
-            (appName || formPage || section === 'apps') && (
+            section !== 'personal' &&
+            (appName || formPage) && (
               <p role="alert" className="settings-error">
                 Could not load settings.{' '}
                 <button
@@ -632,45 +620,13 @@ export function SettingsPages({
             )}
           {visited.map((page) => (
             <div key={page} hidden={page !== section} className="settings-pane">
-              {page === 'personal' && executionReady && personalDefaults && personalQuery.data && (
-                <div className="set-group">
-                  <p className="set-field-help">
-                    {personalQuery.data.accountId
-                      ? 'Your saved profile applies to your runs. Agent overrides take priority.'
-                      : 'You use installation defaults. Your first save creates a personal profile with the current defaults.'}
-                    {account.isDefault && ' Unattended runs also use this profile.'}
-                  </p>
-                  <GeneralPane
-                    personal
-                    timezone={personalTimezone}
-                    setTimezone={(value) => setPersonalEdits((current) => ({ ...current, timezone: value }))}
-                    timezones={timezones}
-                    clock={absTime(new Date().toISOString(), personalTimezone)}
-                    busy={saving}
-                  />
-                  <AgentsPane
-                    personal
-                    defaults={personalDefaults}
-                    onDefaults={(value) => setPersonalEdits((current) => ({ ...current, ...value }))}
-                    accounts={accountsQuery.data ?? []}
-                    resolved={agentsQuery.data ?? { apps: [] }}
-                    harnessByName={harnessByName}
-                    harnessColor={harnessColor}
-                    catalog={catalog}
-                    allowedEfforts={appsQuery.data?.allowedEfforts ?? []}
-                    onOpenApp={(name) => navigate(`/apps/${name}/settings`)}
-                    onAddProvider={() => navigate('/settings/providers')}
-                    busy={saving}
-                  />
-                </div>
-              )}
-              {page === 'general' && (
-                <GeneralPane
-                  timezone={effectiveTimezone}
-                  setTimezone={setTimezone}
+              {page === 'personal' && personalQuery.isSuccess && (
+                <PreferencesPane
+                  timezone={personalTimezone}
+                  setTimezone={(value) => setPersonalEdits((current) => ({ ...current, timezone: value }))}
                   timezones={timezones}
                   clock={clock}
-                  busy={saving || !settingsQuery.isSuccess}
+                  busy={saving}
                 />
               )}
               {page === 'agents' && executionReady && effectiveDefaults && (
@@ -717,30 +673,24 @@ export function SettingsPages({
               {page === 'connections' && (
                 <>
                   <nav className="settings-tabs" aria-label="Connections">
-                    <button
-                      onClick={() => setConnectionsTab('services')}
-                      aria-current={connectionsTab === 'services' ? 'page' : undefined}
-                    >
-                      Services
-                    </button>
-                    <button
-                      onClick={() => setConnectionsTab('accounts')}
-                      aria-current={connectionsTab === 'accounts' ? 'page' : undefined}
-                    >
-                      Accounts
-                    </button>
-                    <button
-                      onClick={() => setConnectionsTab('revoked')}
-                      aria-current={connectionsTab === 'revoked' ? 'page' : undefined}
-                    >
-                      Revoked
-                    </button>
+                    {CONNECTION_TABS.map((tab) => (
+                      <Link
+                        key={tab.id}
+                        href={`/settings/connections?tab=${tab.id}`}
+                        aria-current={connectionsTab === tab.id ? 'page' : undefined}
+                      >
+                        {tab.label}
+                      </Link>
+                    ))}
                   </nav>
                   <div hidden={connectionsTab !== 'services'}>
                     <ServicesPane />
                   </div>
                   <div hidden={connectionsTab !== 'accounts'}>
                     <ConnectionsPane />
+                  </div>
+                  <div hidden={connectionsTab !== 'browser'}>
+                    <BrowserProfilesPane />
                   </div>
                   <div hidden={connectionsTab !== 'revoked'}>
                     <ConnectionsPane revokedOnly />
@@ -749,26 +699,7 @@ export function SettingsPages({
               )}
               {page === 'mcp' && <McpServersPane />}
               {page === 'skills' && <SkillsPane />}
-              {page === 'browser-sessions' && <BrowserSessionsPane />}
               {page === 'api-tokens' && <AgentAccessPane />}
-              {page === 'apps' && !search.trim() && (
-                <div className="settings-app-index">
-                  {apps.map((entry) => (
-                    <Link
-                      key={entry.name}
-                      aria-label={appLabel(entry.name)}
-                      href={`/apps/${entry.name}/settings`}
-                    >
-                      <strong>{appLabel(entry.name)}</strong>
-                      <span>{entry.description}</span>
-                    </Link>
-                  ))}
-                  {appsQuery.isPending && <p role="status">Loading app settings…</p>}
-                  {!appsQuery.isPending && !appsQuery.isError && apps.length === 0 && (
-                    <p>No installed app declares settings.</p>
-                  )}
-                </div>
-              )}
               {apps
                 .filter(
                   (entry) =>
@@ -785,7 +716,7 @@ export function SettingsPages({
                       harnessColor={harnessColor}
                       catalog={catalog}
                       harnessByName={harnessByName}
-                      defaults={savedPersonal}
+                      defaults={savedDefaults}
                       allowedEfforts={appsQuery.data?.allowedEfforts ?? []}
                       busy={saving}
                       onAgentHarness={(name, value) =>
@@ -877,9 +808,9 @@ export function SettingsPages({
                 saving ||
                 !dirty ||
                 (section === 'agents' && executionInvalid) ||
-                (section === 'personal' && (personalExecutionInvalid || !personalQuery.isSuccess)) ||
-                settingsQuery.isPending ||
-                appsQuery.isPending
+                (section === 'personal'
+                  ? !personalQuery.isSuccess
+                  : settingsQuery.isPending || appsQuery.isPending)
               }
             >
               Save changes

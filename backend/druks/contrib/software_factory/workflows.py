@@ -12,11 +12,12 @@ from druks.contrib.software_factory.enums import (
     ReviewDecision,
 )
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
-from druks.core.apis.github import GITHUB, get_github_client
+from druks.core.apis.github import get_github_client
+from druks.core.services import Github
 from druks.sandbox.datastructures import RequiredMcpServer
 from druks.sandbox.layout import get_related_root, get_work_root
+from druks.sandbox.models import SecretRef
 from druks.services.exceptions import ServiceNotConnectedError
-from druks.services.models import ServiceIdentity
 from druks.settings import load_settings
 from druks.skills.models import Skill
 from druks.workflows import FatalError, Workflow, step
@@ -39,16 +40,23 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True, kw_only=True)
 class BuildWorkspace(RepoWorkspace):
     skills: tuple[str, ...]
-    # Installation token for build's github MCP server, minted per repo from
-    # the identity reviews act as. Required — there is no build without github.
-    mcp_token: str
 
     @property
     def workspace_root(self) -> str:
         return get_work_root(self.host.ssh_username)
 
-    def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
-        return (RequiredMcpServer(name=GITHUB_MCP_NAME, url=GITHUB_MCP_URL, token=self.mcp_token),)
+    @classmethod
+    async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
+        # GitHub MCP acts as the review actor; the clone acts as the operator.
+        actor = await get_review_actor()
+        return (
+            RequiredMcpServer(
+                name=GITHUB_MCP_NAME,
+                url=GITHUB_MCP_URL,
+                secret_id=(await actor.service.get()).id,
+                resource=cls.get_repo(subject),
+            ),
+        )
 
     async def run_agent(self, *, account_id: str | None, **kwargs: Any):
         # Agents clone related repos on demand; Claude's --add-dir target must exist first.
@@ -147,7 +155,7 @@ class Build(Workflow):
                 logger.info("Ticket %s has no routable repo; skipping.", ticket["identifier"])
                 return
         try:
-            await ServiceIdentity.get(GITHUB)
+            await Github.get()
         except ServiceNotConnectedError as error:
             # A raise would 5xx the tracker's webhook and put the delivery into
             # provider redelivery; the delivery itself succeeded. Log the
@@ -182,22 +190,10 @@ class Build(Workflow):
 
     async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
         kwargs = await super().get_workspace_kwargs(host)
-        repo = kwargs["subject"].repo
-        try:
-            mcp_token = await (await get_review_actor()).client.token_for_repo(repo)
-        except Exception as error:
-            # There is no build without github: agents push and review through
-            # the github MCP, so a run that can't mint its token fails here,
-            # loudly, instead of degrading mid-run.
-            raise FatalError(
-                f"Could not mint the GitHub token for {repo}; build requires it "
-                "for its github MCP server."
-            ) from error
         return {
             **kwargs,
             # None until the first implement provisions the PR branch.
             "branch": self.branch,
-            "mcp_token": mcp_token,
             "skills": tuple(self._profile.get("recommended_skills", [])),
         }
 
@@ -410,8 +406,9 @@ class Build(Workflow):
 
 
 class ProfileWorkspace(RepoWorkspace):
-    def get_repo(self) -> str:
-        return self.subject.full_name
+    @classmethod
+    def get_repo(cls, subject: Any) -> str:
+        return subject.full_name
 
 
 class Profile(Workflow):
@@ -429,7 +426,7 @@ class Profile(Workflow):
         # The profiler clones with an operator-App token, so resolve the
         # identity before the start spends a run and provisions a VM — the
         # raising lookup surfaces the actionable not-connected error.
-        await ServiceIdentity.get(GITHUB)
+        await Github.get()
         return await cls.start(
             subject=repo,
             repo_id=repo.id,
@@ -474,14 +471,21 @@ class Profile(Workflow):
 class ReviewWorkspace(RepoWorkspace):
     # The default-branch checkout (the reviewer checks the PR out itself) plus room
     # beside it for siblings; Claude's add_dirs grant needs the directory to exist.
+    @classmethod
+    async def get_secret_refs(cls, subject: Any) -> list[SecretRef]:
+        # The review is authored under the review actor's identity.
+        actor = await get_review_actor()
+        return [
+            SecretRef(
+                name=Github.secret_name,
+                secret_id=(await actor.service.get()).id,
+                resource=cls.get_repo(subject),
+            )
+        ]
 
     @property
     def related_root(self) -> str:
         return get_related_root(self.host.ssh_username)
-
-    async def get_github_token(self) -> str:
-        # The review is authored under the review actor's identity.
-        return await (await get_review_actor()).client.token_for_repo(self.get_repo())
 
     async def run_agent(self, *, account_id: str | None, **kwargs: Any):
         await self.host.exec(["mkdir", "-p", self.related_root], timeout=10.0)
@@ -505,7 +509,7 @@ class PullRequestReview(Workflow):
         # Even a distinct review identity clones alongside the operator App, so
         # resolve the operator identity before the start spends a run and
         # provisions a VM — the raising lookup surfaces the actionable error.
-        await ServiceIdentity.get(GITHUB)
+        await Github.get()
         # Attribution follows the requester when druks knows them by that name; a
         # review asked for by someone with no account runs as the system's.
         account = await Account.get_for_username(requested_by)

@@ -1,6 +1,9 @@
 # Host-run development configuration. Copy to `druks.toml`.
 # Reference: docs/configuration.md.
 
+# Schedule timezone and initial timezone for new accounts.
+timezone = "UTC"
+
 [identity]
 mode = "none"
 header = ""

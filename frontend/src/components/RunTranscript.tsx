@@ -129,5 +129,5 @@ function RunTranscriptLive({
     ),
   })
 
-  return <StreamTranscript text={text} complete={complete} />
+  return <StreamTranscript text={text} complete={complete} isLive={!complete} />
 }

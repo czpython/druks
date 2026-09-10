@@ -33,15 +33,24 @@ export interface DashboardRun {
   failure: string | null
 }
 
-export interface DashboardWork {
+export interface DashboardSection {
+  total: number
   rows: DashboardRun[]
-  hasMore: boolean
+}
+
+export interface DashboardOverview {
+  needsYou: DashboardSection
+  running: DashboardSection
+  failed: DashboardSection
+  lastFinishedAt: string | null
+  lastFailedAt: string | null
 }
 
 export interface DashboardSchedule {
   app: string
   kind: string
   cron: string | null
+  defaultCron: string
   enabled: boolean
   timezone: string
 }
@@ -76,13 +85,6 @@ export interface SubjectStatus {
   // with a row of its own would keep in its own columns.
   triggeredAt: string | null
   accountUsername: string | null
-}
-
-// The live sub-phase a running run pushes ("Provisioning sandbox VM…", "Working…") —
-// finer than the lifecycle status; null unless something is actively running.
-export interface SubjectActivity {
-  label: string
-  kind: string
 }
 
 export interface TokenUsage {
@@ -160,12 +162,14 @@ export interface SubjectRow<S extends SubjectSummary = SubjectSummary> {
 
 // A subject's full read view: domain summary, status, the platform timeline
 // (the subject's runs, oldest first, each with its agent calls), and the
-// app's optional live activity (the running sub-phase).
+// driving run's sandbox phase while it starts.
 export interface SubjectResponse<S extends SubjectSummary = SubjectSummary> {
   summary: S
   status: SubjectStatus
   timeline: RunSummary[]
-  activity?: SubjectActivity | null
+  // The driving run's sandbox phase while it starts ("provisioning_vm"). The shell
+  // supplies the words.
+  phase?: string | null
 }
 
 export interface ArtifactFile {
@@ -611,28 +615,35 @@ export interface Service {
 
 export type Billing = 'subscription' | 'api_key'
 
-export interface SettingsProfile {
-  accountId: string | null
+export interface PersonalSettings {
   timezone: string
+  gateParkDestinationId: string | null
+}
+
+export interface InstallationSettings {
+  gateParkDestinationId: string | null
+  updatedAt: string
   defaultHarness: string
   defaultModel: string
   defaultBilling: Billing
   defaultEffort: string
   fastMode: boolean
   defaultTimeout: number
-  gateParkDestinationId: string | null
-  updatedAt: string
+}
+
+export interface UpdatePersonalSettingsRequest {
+  timezone?: string
+  gateParkDestinationId?: string | null
 }
 
 export interface UpdateSettingsRequest {
-  timezone?: string
+  gateParkDestinationId?: string | null
   defaultHarness?: string
   defaultModel?: string
   defaultBilling?: Billing
   defaultEffort?: string
   fastMode?: boolean
   defaultTimeout?: number
-  gateParkDestinationId?: string | null
 }
 
 export type BrowserSessionStatus = 'needs_login' | 'ready' | 'stale' | 'anonymous'
@@ -905,9 +916,6 @@ export interface McpServer {
   // A catalog-declared server — managed by druks, can't be removed here,
   // only disabled.
   builtin: boolean
-  // The deployment env var an env-sourced server reads its token from
-  // ('' otherwise) — a var name, never a value.
-  sourceEnvVar: string
   // The raw token never leaves the backend; ``hasToken`` says whether one is
   // configured without revealing it.
   hasToken: boolean

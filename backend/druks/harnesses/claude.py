@@ -5,8 +5,6 @@ import shlex
 from pathlib import Path
 from typing import Any
 
-from drukbox_sdk import Secret
-
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
@@ -16,6 +14,8 @@ from druks.sandbox.datastructures import (
     McpServer,
 )
 from druks.sandbox.layout import get_runs_root
+from druks.sandbox.models import SecretRef
+from druks.secrets.models import VaultSecret
 from druks.skills.models import Skill
 
 from . import exceptions
@@ -23,7 +23,6 @@ from .artifacts import call_dir, write_cost
 from .base import Harness
 from .constants import CLAUDE_DISALLOWED_TOOLS
 from .datastructures import SandboxSettings
-from .models import ProviderSubscription
 from .providers import AnthropicProvider
 
 logger = logging.getLogger(__name__)
@@ -63,15 +62,12 @@ class ClaudeHarness(Harness):
         schema: dict[str, object],
         run_id: str,
         ssh_username: str,
-        github_token: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        subscription: ProviderSubscription | None = None,
-        # Accepted for signature parity. The sandbox entry carries the key.
-        key: str | None = None,
+        identity: dict | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:
@@ -129,10 +125,8 @@ class ClaudeHarness(Harness):
             stdin=prompt.encode("utf-8"),
             credentials=await _get_credentials(
                 self.sandbox,
-                github_token=github_token,
                 include_plugins=include_plugins,
                 skills=skills,
-                subscription=subscription,
             ),
             env=extra_env,
             extra_artifact_filenames=("debug.log", "session.jsonl"),
@@ -189,20 +183,10 @@ class ClaudeHarness(Harness):
         return ("--mcp-config", json.dumps({"mcpServers": entries}))
 
     @classmethod
-    def auth_file(cls, subscription: ProviderSubscription) -> HomeFile:
-        return HomeFile(".claude/.credentials.json", json.dumps(dict(subscription.payload)))
-
-    @classmethod
-    def get_secrets(cls, key: str) -> dict[str, Secret]:
-        return {
-            AnthropicProvider.id: Secret(
-                key,
-                host="api.anthropic.com",
-                auth_variable="ANTHROPIC_API_KEY",
-                auth_header="x-api-key",
-                auth_prefix="",
-            )
-        }
+    def get_secret_refs(cls, subscription: VaultSecret) -> list[SecretRef]:
+        # The catalog entry puts the placeholder in ANTHROPIC_AUTH_TOKEN, which
+        # the CLI sends as a bearer. It never refreshes a token from there.
+        return [SecretRef(name=AnthropicProvider.id, secret_id=subscription.id)]
 
     def _command_args(self) -> tuple[str, ...]:
         args = (self.command,)
@@ -218,21 +202,24 @@ class ClaudeHarness(Harness):
 async def _get_credentials(
     sandbox: SandboxSettings,
     *,
-    github_token: str | None,
     include_plugins: bool = True,
     skills: tuple[str, ...] = (),
-    subscription: ProviderSubscription | None,
 ) -> Credentials:
-    """The Credentials bundle the runner pushes into the sandbox: the rendered
-    credentials file, plus any local config, plugins, and skills.
-    ``include_plugins=False`` skips the operator's plugin state, for prompts
-    that use no MCP server and would otherwise die on a misconfigured plugin."""
+    """The Credentials bundle the runner pushes into the sandbox: the local
+    config, plugins, and skills. No credential file: the sandbox holds a
+    placeholder for its token or key. ``include_plugins=False`` skips the
+    operator's plugin state, for prompts that use no MCP server and would
+    otherwise die on a misconfigured plugin."""
     config_dir = sandbox.harness_config_root / ClaudeHarness.name
     home: list[HomeFile | HomeCopy] = []
-    if subscription:
-        home.append(ClaudeHarness.auth_file(subscription))
+    claude_json = config_dir / ".claude.json"
+    if claude_json.is_file():
+        # The operator's own MCP servers stay out of the box: Druks delivers
+        # every server it manages, and a copied entry could carry a token.
+        config = json.loads(claude_json.read_text())
+        config.pop("mcpServers", None)
+        home.append(HomeFile(".claude.json", json.dumps(config)))
     home += [
-        HomeCopy(".claude.json", config_dir / ".claude.json"),
         HomeCopy(".claude/settings.json", config_dir / "settings.json"),
         HomeCopy(".claude/CLAUDE.md", config_dir / "CLAUDE.md"),
     ]
@@ -250,7 +237,7 @@ async def _get_credentials(
     home.append(
         HomeCopy(".claude/skills", skills_dir, excludes=await Skill.delivery_excludes(skills))
     )
-    return Credentials(home=tuple(home), github_token=github_token)
+    return Credentials(home=tuple(home))
 
 
 def collapse_claude_stream(stdout: bytes) -> dict[str, Any]:

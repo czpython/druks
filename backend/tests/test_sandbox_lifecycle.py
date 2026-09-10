@@ -1,9 +1,10 @@
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import connect_provider
 from drukbox_sdk import SandboxHost as SandboxHostRecord
 from drukbox_sdk import Secret
 from drukbox_sdk.exceptions import (
@@ -14,7 +15,9 @@ from drukbox_sdk.exceptions import (
     SandboxUnavailableError,
     SandboxValidationError,
 )
+from druks.database import db_session
 from druks.harnesses.exceptions import HarnessSandboxProvisioningError, Retry
+from druks.harnesses.providers import AnthropicProvider
 from druks.sandbox import credentials as creds_module
 from druks.sandbox import layout, repo
 from druks.sandbox.client import sandbox_client
@@ -22,6 +25,9 @@ from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.datastructures import Credentials, HomeCopy, HomeFile
 from druks.sandbox.exceptions import ExecFailed, HostGone, SandboxUnreachable
 from druks.sandbox.host import ExecResult
+from druks.sandbox.models import SandboxIdentity, SecretRef
+from druks.testing import seed_run
+from druks_field_notes.workflows import Summarize
 
 
 @dataclass
@@ -88,10 +94,12 @@ class _FakeAPI:
     created_secrets: list[dict[str, Secret] | None] = field(default_factory=list)
     created_expires_at: list[datetime | None] = field(default_factory=list)
     deleted_ids: list[str] = field(default_factory=list)
+    renewed: list[tuple[str, datetime | None]] = field(default_factory=list)
     get_host_responses: list[SandboxHostRecord] = field(default_factory=list)
     create_record: SandboxHostRecord | None = None
     create_raises: Exception | None = None
     delete_raises: Exception | None = None
+    renew_raises: Exception | None = None
     # When set, every get_host call raises this exception instead of
     # returning from get_host_responses. Used by the attach() tests
     # to simulate the provider 404'ing a host we still have in our
@@ -130,6 +138,17 @@ class _FakeAPI:
         self.deleted_ids.append(host_id)
         if self.delete_raises is not None:
             raise self.delete_raises
+
+    async def renew_host(
+        self,
+        host_id: str,
+        *,
+        expires_at: datetime | None = None,
+    ) -> SandboxHostRecord:
+        self.renewed.append((host_id, expires_at))
+        if self.renew_raises is not None:
+            raise self.renew_raises
+        return _record(host_id=host_id)
 
 
 def _record(
@@ -179,7 +198,7 @@ async def test_push_writes_one_credential_file():
     assert sandbox.secrets == [("{}", "/root/.claude/.credentials.json")]
 
 
-async def test_push_writes_all_three_when_supplied():
+async def test_push_writes_every_credential_file():
     sandbox = _FakeSandbox()
 
     await creds_module.push(
@@ -189,7 +208,6 @@ async def test_push_writes_all_three_when_supplied():
                 HomeFile(".claude/.credentials.json", '{"claude": 1}'),
                 HomeFile(".codex/auth.json", '{"codex": 1}'),
             ),
-            github_token="gho_xxx",
         ),
     )
 
@@ -197,7 +215,6 @@ async def test_push_writes_all_three_when_supplied():
     assert set(sandbox.secrets) == {
         ('{"claude": 1}', "/root/.claude/.credentials.json"),
         ('{"codex": 1}', "/root/.codex/auth.json"),
-        ("gho_xxx", layout.get_github_token_remote_path(sandbox.ssh_username)),
     }
 
 
@@ -489,6 +506,7 @@ async def test_acquire_uploads_helper_and_closes_ssh_without_releasing(
 
 
 async def test_acquire_releases_host_when_helper_upload_fails(
+    druks_db,
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
@@ -585,6 +603,7 @@ async def test_provision_hands_the_entries_to_drukbox(
 
 
 async def test_ephemeral_hands_the_entries_to_drukbox_and_releases(
+    druks_db,
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
@@ -645,6 +664,7 @@ async def test_acquire_passes_through_fatal_create_failure(
 
 
 async def test_acquire_classifies_setup_reachability_failure_after_rollback(
+    druks_db,
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
@@ -672,6 +692,7 @@ async def test_acquire_classifies_setup_reachability_failure_after_rollback(
 
 
 async def test_acquire_setup_cancellation_propagates_unclassified(
+    druks_db,
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
@@ -746,7 +767,7 @@ async def test_attach_raises_host_gone_on_not_found(
             pass
 
 
-async def test_release_calls_sdk_delete(patched_sandbox_api: list[_FakeAPI]):
+async def test_release_calls_sdk_delete(druks_db, patched_sandbox_api: list[_FakeAPI]):
 
     api = _FakeAPI(create_record=None)
     patched_sandbox_api.append(api)
@@ -757,6 +778,7 @@ async def test_release_calls_sdk_delete(patched_sandbox_api: list[_FakeAPI]):
 
 
 async def test_release_swallows_sdk_delete_failure(
+    druks_db,
     patched_sandbox_api: list[_FakeAPI],
 ):
 
@@ -772,3 +794,177 @@ async def test_release_swallows_sdk_delete_failure(
     await sandbox_client.release(host_id="host-xyz")
 
     assert api.deleted_ids == ["host-xyz"]
+
+
+async def _identity() -> SandboxIdentity:
+    await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
+    subscription = await connect_provider(
+        AnthropicProvider, {"claudeAiOauth": {"accessToken": "test-token"}}
+    )
+    identity, _ = await SandboxIdentity.create(
+        run_id="run-1",
+        scoped_to="workflow",
+        secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],
+    )
+    return identity
+
+
+async def test_acquire_binds_the_identity_to_the_box(
+    druks_db,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    api = _FakeAPI(create_record=_record(status="active"))
+    patched_sandbox_api.append(api)
+    identity = await _identity()
+
+    async with sandbox_client.acquire(identity=identity):
+        pass
+
+    assert identity.host_id == "host-xyz"
+    assert not identity.revoked_at
+
+
+async def test_a_failed_create_revokes_the_unbound_identity(
+    druks_db,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    api = _FakeAPI(create_raises=SandboxProvisioningError("create timed out"))
+    patched_sandbox_api.append(api)
+    identity = await _identity()
+
+    with pytest.raises(HarnessSandboxProvisioningError):
+        async with sandbox_client.acquire(identity=identity):
+            pass
+
+    assert identity.revoked_at
+    assert not identity.host_id
+
+
+async def test_a_failed_setup_revokes_the_bound_identity(
+    druks_db,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    api = _FakeAPI(create_record=_record(status="active"))
+    patched_sandbox_api.append(api)
+    identity = await _identity()
+
+    async def _fake_upload(sandbox: Any) -> None:
+        raise SandboxUnreachable("failed to write /root/.gitconfig")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("druks.sandbox.client._upload_helper_script", _fake_upload)
+        with pytest.raises(HarnessSandboxProvisioningError):
+            async with sandbox_client.acquire(identity=identity):
+                pass
+
+    await db_session().refresh(identity)
+    assert identity.host_id == "host-xyz"
+    assert identity.revoked_at
+    assert api.deleted_ids == ["host-xyz"]
+
+
+async def test_release_revokes_the_boxs_identity(druks_db, patched_sandbox_api: list[_FakeAPI]):
+    api = _FakeAPI(create_record=None)
+    patched_sandbox_api.append(api)
+    identity = await _identity()
+    await identity.bind("host-xyz")
+
+    await sandbox_client.release(host_id="host-xyz")
+
+    await db_session().refresh(identity)
+    assert identity.revoked_at
+    assert api.deleted_ids == ["host-xyz"]
+
+
+async def test_attach_reuses_a_bound_box_without_the_bearer(
+    druks_db,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """A process that reattaches never held the bearer. The box keeps its identity."""
+    api = _FakeAPI(get_host_responses=[_record(status="active")])
+    patched_sandbox_api.append(api)
+    identity = await _identity()
+    await identity.bind("host-xyz")
+
+    async with sandbox_client.attach(host_id="host-xyz") as host:
+        assert host.id == "host-xyz"
+
+    await db_session().refresh(identity)
+    assert identity.is_live
+
+
+async def test_resume_reattaches_the_box_and_releases_it_on_exit(
+    druks_db,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """A replay resumes the box a crashed attempt left behind. The exit releases
+    the box and revokes its identity, like an ephemeral box."""
+    api = _FakeAPI(get_host_responses=[_record(status="active")])
+    patched_sandbox_api.append(api)
+    identity = await _identity()
+    await identity.bind("host-xyz")
+
+    async with sandbox_client.resume(host_id="host-xyz") as host:
+        assert host.id == "host-xyz"
+        assert api.deleted_ids == []
+
+    assert api.deleted_ids == ["host-xyz"]
+    await db_session().refresh(identity)
+    assert not identity.is_live
+
+
+async def test_a_gone_box_loses_its_identity_and_the_retry_provisions_anew(
+    druks_db,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """The identity outlived its box. The reattach revokes the identity and fails as
+    transient, so the retry finds no identity and provisions anew."""
+    api = _FakeAPI(get_host_raises=SandboxNotFoundError("host-xyz not found"))
+    patched_sandbox_api.append(api)
+    identity = await _identity()
+    await identity.bind("host-xyz")
+
+    with pytest.raises(HarnessSandboxProvisioningError):
+        await sandbox_client.reattach(host_id="host-xyz")
+
+    await db_session().refresh(identity)
+    assert not identity.is_live
+    assert await SandboxIdentity.lookup("run-1", "workflow", identity.secret_refs) is None
+
+
+async def test_set_expiry_forwards_expires_at_to_sdk_renew(
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """Clipping a lease is a renew, not a delete: the caller's expiry goes
+    through to the SDK verbatim — no druks-side clamp — and the VM stays up."""
+    api = _FakeAPI(create_record=None)
+    patched_sandbox_api.append(api)
+    expires_at = datetime.now(UTC) + timedelta(seconds=90)
+
+    await sandbox_client.set_expiry(host_id="host-xyz", expires_at=expires_at)
+
+    assert api.renewed == [("host-xyz", expires_at)]
+    assert api.deleted_ids == []
+
+
+async def test_set_expiry_surfaces_missing_host(patched_sandbox_api: list[_FakeAPI]):
+    """A host drukbox no longer knows about surfaces as the SDK's
+    ``SandboxNotFoundError`` — the idle-hold caller decides what "gone"
+    means, so it is neither swallowed nor remapped to ``HostGone``."""
+    missing = SandboxNotFoundError("host-xyz not found")
+    api = _FakeAPI(create_record=None, renew_raises=missing)
+    patched_sandbox_api.append(api)
+
+    with pytest.raises(SandboxNotFoundError) as excinfo:
+        await sandbox_client.set_expiry(
+            host_id="host-xyz",
+            expires_at=datetime.now(UTC) + timedelta(seconds=90),
+        )
+
+    assert excinfo.value is missing

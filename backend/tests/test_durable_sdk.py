@@ -5,14 +5,18 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
+from dbos import DBOS
 from druks.agents import Agent, AgentOutput
 from druks.apps.registry import agents, workflows
 from druks.database import configure_session, get_session
 from druks.durable import FatalError, Run, RunState
 from druks.durable.dbos_state import workflow_status
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
+from druks.events.models import Event
 from druks.models import StoredSubject
+from druks.signals import subscribe
 from druks.testing import init_db
+from druks.user_settings.models import InstallationSettings
 from druks.workflows import Gate, Subject, Workflow, step, task
 from pydantic import BaseModel
 from sqlalchemy import NullPool, create_engine, select
@@ -227,6 +231,18 @@ def _build_units():
             await Approve.wait()
             SINK.append(f"acct-after:{self.account_id}")
 
+    class AnnounceFlow(Workflow):
+        subject = Widget
+
+        async def run_multistep(self) -> None:
+            await self.announce("test.revision", revision=1)
+            await self.announce("test.revision", revision=2)
+            marker = f"announced:{self.workflow_id}"
+            SINK.append(marker)
+            if SINK.count(marker) == 1:
+                # A worker interruption leaves the run available for recovery.
+                raise asyncio.CancelledError("Simulated worker interruption")
+
     return (
         SampleFlow,
         AgentFlow,
@@ -238,6 +254,7 @@ def _build_units():
         SubjectlessConfirmFlow,
         ReviewFlow,
         AttributedFlow,
+        AnnounceFlow,
         ScheduledDispatch,
         RetryingStepFlow,
         EnqueueInStepFlow,
@@ -266,8 +283,9 @@ async def rt():
     # AgentFlow's decider resolves to claude, so connect anthropic for the module —
     # and mark its account as the default.
     from druks.accounts.models import Account
-    from druks.harnesses.models import ProviderSubscription
-    from druks.user_settings.models import SettingsProfile
+    from druks.secrets.datastructures import Audience
+    from druks.secrets.enums import SecretKind
+    from druks.secrets.models import VaultSecret
 
     session = get_session(engine)
     try:
@@ -279,14 +297,14 @@ async def rt():
             for subject_id in (7, 4242, 636363, 424242, 515151, 878787, 909090, 313131)
         )
         session.add(
-            ProviderSubscription(
-                provider="anthropic",
+            VaultSecret(
+                kind=SecretKind.SUBSCRIPTION,
+                audience=Audience.provider("anthropic"),
                 account_id=account.id,
-                provider_email=account.username,
-                payload={"claudeAiOauth": {"accessToken": "t"}},
+                identity={"email": account.username},
+                secrets={"claudeAiOauth": {"accessToken": "t"}},
             )
         )
-        session.add(SettingsProfile())
         await session.commit()
     finally:
         await session.close()
@@ -302,6 +320,7 @@ async def rt():
         subjectless_confirm_flow,
         review_flow,
         attributed_flow,
+        announce_flow,
         scheduled_dispatch,
         retrying_step_flow,
         enqueue_in_step_flow,
@@ -326,6 +345,7 @@ async def rt():
             SubjectlessConfirmFlow=subjectless_confirm_flow,
             ReviewFlow=review_flow,
             AttributedFlow=attributed_flow,
+            AnnounceFlow=announce_flow,
             ScheduledDispatch=scheduled_dispatch,
             RetryingStepFlow=retrying_step_flow,
             EnqueueInStepFlow=enqueue_in_step_flow,
@@ -351,6 +371,7 @@ async def rt():
         workflows._items.pop("subjectless_confirm_flow", None)
         workflows._items.pop("review_flow", None)
         workflows._items.pop("attributed_flow", None)
+        workflows._items.pop("announce_flow", None)
         workflows._items.pop("scheduled_dispatch", None)
         workflows._items.pop("retrying_step_flow", None)
         workflows._items.pop("enqueue_in_step_flow", None)
@@ -392,6 +413,14 @@ async def _account_id(engine, email: str) -> str:
         return row.id
     finally:
         await session.close()
+
+
+async def test_launch_commits_installation_settings_before_serving(rt):
+    # This session must see the row committed by launch(), before any settings request.
+    async with get_session(rt.engine) as session:
+        settings = await session.get(InstallationSettings, 1)
+        assert settings is not None
+        assert settings.default_harness == "claude"
 
 
 async def test_attribution_rides_the_run_and_survives_resume(rt):
@@ -706,7 +735,7 @@ async def test_run_agent_step(rt, monkeypatch):
     account_id = await _account_id(rt.engine, "op@example.com")
     assert failed.account_id == account_id
     assert recorded[0].subscription.account_id == account_id
-    assert recorded[0].api_key_provider is None
+    assert recorded[0].api_key_id is None
     assert held == [False]  # the step let its connection go before the agent ran
 
 
@@ -943,31 +972,11 @@ async def test_session_scope_commits_writes(rt):
         await session.close()
 
 
-async def test_launch_commits_the_user_settings_seed(rt):
-    # launch()'s reconcile touches the settings singleton (apply_schedules
-    # reads its timezone), and the row must land committed before the app
-    # serves: two requests racing the first-touch insert wait on its key lock
-    # synchronously on the event loop and deadlock the whole process.
-    from druks.user_settings.models import SettingsProfile
-
-    session = get_session(rt.engine)
-    try:
-        assert (
-            await session.scalar(
-                select(SettingsProfile).where(SettingsProfile.account_id.is_(None))
-            )
-            is not None
-        )
-    finally:
-        await session.close()
-
-
-async def test_apply_schedules_evaluates_cron_in_operator_timezone(rt):
+async def test_apply_schedules_evaluates_cron_in_installation_timezone(rt, monkeypatch):
     # The cron is stored verbatim and evaluated in the operator's timezone, so
     # "daily at midnight" is their midnight and stays honest across DST.
     from dbos import DBOS
     from druks.durable.engine import apply_schedules
-    from druks.user_settings.models import SettingsProfile
 
     def sweep_timezone():
         rows = {s["schedule_name"]: s["cron_timezone"] for s in DBOS.list_schedules()}
@@ -976,12 +985,10 @@ async def test_apply_schedules_evaluates_cron_in_operator_timezone(rt):
     await apply_schedules()
     assert sweep_timezone() == "UTC"  # the settings default
 
-    # Commit the write — a bare test-task session stays idle-in-transaction and
-    # its row lock deadlocks any later test that touches user_settings.
-    from druks.database import session_scope
+    from druks.durable import engine
 
-    async with session_scope(rt.engine):
-        await (await SettingsProfile.get()).update_profile(timezone="Europe/Madrid")
+    settings = engine.load_settings().model_copy(update={"timezone": "Europe/Madrid"})
+    monkeypatch.setattr(engine, "load_settings", lambda: settings)
     await apply_schedules()
     assert sweep_timezone() == "Europe/Madrid"
 
@@ -990,15 +997,15 @@ async def test_user_settings_get_recreates_the_singleton(rt):
     # get() is the first-touch creator; its ON CONFLICT insert lets two
     # processes booting one fresh database both call it safely.
     from druks.database import db_session, session_scope
-    from druks.user_settings.models import SettingsProfile
+    from druks.user_settings.models import InstallationSettings
     from sqlalchemy import delete
 
     async with session_scope(rt.engine):
-        await db_session().execute(delete(SettingsProfile))
+        await db_session().execute(delete(InstallationSettings))
     async with session_scope(rt.engine):
-        assert (await SettingsProfile.get()).timezone == "UTC"
+        assert (await InstallationSettings.get()).default_harness == "claude"
     async with session_scope(rt.engine):
-        assert (await SettingsProfile.get()).account_id is None
+        assert (await InstallationSettings.get()).id == 1
 
 
 async def test_a_run_hydrates_the_subject_row_it_was_started_for(rt):
@@ -1219,3 +1226,39 @@ async def test_subjectless_run_emits_no_events(rt):
         await session.close()
 
     assert events == []
+
+
+async def test_announcements_survive_subscriber_retry_and_workflow_replay(rt):
+    deliveries = []
+
+    @subscribe("test.revision", workflow=rt.AnnounceFlow)
+    async def receive(*, subject: Widget, revision: int) -> None:
+        async with get_session(rt.engine) as session:
+            events = list(await session.scalars(select(Event).filter_by(type="test.revision")))
+        deliveries.append((revision, len(events)))
+        if len(deliveries) == 1:
+            raise RuntimeError("Subscriber unavailable")
+
+    workflow_id = await rt.AnnounceFlow.start(subject=Widget(id=7))
+    marker = f"announced:{workflow_id}"
+    try:
+        await _wait_for(rt.engine, workflow_id, lambda run: SINK.count(marker) == 1)
+        assert deliveries == [(1, 1), (1, 1), (2, 2)]
+
+        await DBOS.resume_workflow_async(workflow_id)
+        await _wait_for(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+        assert SINK.count(marker) == 2
+
+        async with get_session(rt.engine) as session:
+            events = list(
+                await session.scalars(
+                    select(Event).filter_by(type="test.revision").order_by(Event.id)
+                )
+            )
+        assert [event.payload for event in events] == [
+            {"revision": 1, "run": workflow_id, "kind": rt.AnnounceFlow.kind},
+            {"revision": 2, "run": workflow_id, "kind": rt.AnnounceFlow.kind},
+        ]
+        assert deliveries == [(1, 1), (1, 1), (2, 2)]
+    finally:
+        await DBOS.cancel_workflow_async(workflow_id)

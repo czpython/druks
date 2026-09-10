@@ -34,7 +34,7 @@ from druks.durable.engine import init_dbos, launch, shutdown
 from druks.durable.exceptions import AgentCallNotFound
 from druks.events.routes import router as events_router
 from druks.files.routes import router as files_router
-from druks.harnesses.exceptions import CatalogError, ProfileSettingsError
+from druks.harnesses.exceptions import AgentConfigError, CatalogError
 from druks.harnesses.routes import router as providers_router
 from druks.mcp.catalog import load_mcp_catalog
 from druks.mcp.gateway import exceptions as gate_errors
@@ -43,6 +43,7 @@ from druks.mcp.routes import router as mcp_router
 from druks.notifications.routes import external_router as notifications_external_router
 from druks.notifications.routes import router as notifications_router
 from druks.redis import close_client
+from druks.sandbox.routes import router as secrets_router
 from druks.services.exceptions import OauthPageError, ServiceNotConnectedError
 from druks.services.routes import oauth_router
 from druks.services.routes import router as service_identities_router
@@ -219,8 +220,8 @@ async def _catalog_error_handler(request: Request, exc: CatalogError) -> JSONRes
     return JSONResponse(status_code=503, content={"error": "HTTP_503", "detail": detail})
 
 
-@app.exception_handler(ProfileSettingsError)
-async def _profile_settings_handler(request: Request, exc: ProfileSettingsError) -> JSONResponse:
+@app.exception_handler(AgentConfigError)
+async def _profile_settings_handler(request: Request, exc: AgentConfigError) -> JSONResponse:
     return JSONResponse(status_code=422, content={"error": "HTTP_422", "detail": str(exc)})
 
 
@@ -281,7 +282,8 @@ async def _unhandled_exception_handler(
 # boundary test pins the split. The auth and harness-connection routers mount
 # ungated because each of their routes carries its own resolver (/me and the
 # connection flow must answer during none/zero setup; capability management
-# admits only the session identity).
+# admits only the session identity). The secrets router authenticates a box's
+# grant bearer and nothing else.
 _identity_gate = [Depends(current_account)]
 app.include_router(health_router)
 # Before the webhook catch-all ({hook_path:path}): declaration order is match order.
@@ -289,6 +291,7 @@ app.include_router(notifications_external_router)
 app.include_router(webhooks_router)
 app.include_router(auth_router)
 app.include_router(providers_router)
+app.include_router(secrets_router)
 app.include_router(browser_sessions_router)
 app.include_router(settings_router, dependencies=_identity_gate)
 app.include_router(agents_router, dependencies=_identity_gate)
