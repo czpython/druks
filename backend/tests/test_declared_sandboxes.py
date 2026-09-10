@@ -279,8 +279,8 @@ async def test_ephemeral_lease_uses_workflow_template(monkeypatch):
     )
     monkeypatch.setattr(agent_module, "get_template_id", resolve)
 
-    profile = SimpleNamespace(secrets={}, secret_refs=[], secrets_id="")
-    async with agent_module._runner(workflow, None, "run-1", "summarize", profile) as runner:
+    config = SimpleNamespace(secrets={}, secret_refs=[], secrets_id="")
+    async with agent_module._runner(workflow, None, "run-1", "summarize", config) as runner:
         assert runner == "workspace"
 
     resolve.assert_awaited_once_with(sandbox)

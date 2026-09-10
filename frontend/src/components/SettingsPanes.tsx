@@ -488,29 +488,25 @@ function InheritCell({
   )
 }
 
-export function GeneralPane({
+export function PreferencesPane({
   timezone,
   setTimezone,
   timezones,
   clock,
   busy,
-  personal = false,
 }: {
   timezone: string
   setTimezone: (timezone: string) => void
   timezones: string[]
   clock: string
   busy: boolean
-  personal?: boolean
 }) {
-  const timezoneId = personal ? 'personal-timezone' : 'settings-timezone'
+  const timezoneId = 'personal-timezone'
   return (
     <div className="set-pane">
       <div className="set-pane-head">
         <div className="set-pane-sub">
-          {personal
-            ? "Your timezone controls timestamp display. Schedules use the installation timezone."
-            : "The installation timezone controls schedules and operational day boundaries."}
+          Your timezone controls timestamp display. Schedules use the installation timezone.
         </div>
       </div>
       <div className="set-group" data-setting={SETTINGS_FIELDS.timezone.field}>
@@ -552,7 +548,6 @@ export function AgentsPane({
   onOpenApp,
   onAddProvider,
   busy,
-  personal = false,
 }: {
   defaults: Defaults
   onDefaults: (next: Defaults) => void
@@ -565,7 +560,6 @@ export function AgentsPane({
   onOpenApp: (app: string) => void
   onAddProvider: () => void
   busy: boolean
-  personal?: boolean
 }) {
   const fieldId = useId()
   const id = (field: string) => `${fieldId}-${field}`
@@ -594,15 +588,13 @@ export function AgentsPane({
 
   return (
     <div className="set-pane mcp-pane settings-agents">
-      {!personal && (
-        <header className="mcp-pane-head">
-          <p className="mcp-pane-sub">Installation defaults. Personal profiles and agent overrides take priority.</p>
-        </header>
-      )}
+      <header className="mcp-pane-head">
+        <p className="mcp-pane-sub">Shared execution settings for this installation. Agent overrides take priority.</p>
+      </header>
 
       <section className="set-group settings-default-execution">
         <h2>Default execution</h2>
-        <p>{personal ? "These values apply to your runs." : "Accounts use these defaults until their first personal edit."}</p>
+        <p>All accounts use these defaults unless an agent has an override.</p>
         <div className="set-defaults">
           <div className="mcp-field" data-setting={SETTINGS_FIELDS.harness.field}>
             <label className="mcp-label" htmlFor={id('harness')}>
@@ -696,19 +688,17 @@ export function AgentsPane({
               ))}
             </select>
           </div>
-          {!personal && (
-            <div className="mcp-field" data-setting={SETTINGS_FIELDS.unattendedAccount.field}>
-              <label className="mcp-label" htmlFor={id('unattended-account')}>Unattended runs use</label>
-              <TextInput
-                id={id('unattended-account')}
-                readOnly
-                value={accounts.find((account) => account.isDefault)?.username ?? 'Complete account setup'}
-              />
-              <span className="set-field-help">
-                The default account supplies unattended preferences and subscriptions.
-              </span>
-            </div>
-          )}
+          <div className="mcp-field" data-setting={SETTINGS_FIELDS.unattendedAccount.field}>
+            <label className="mcp-label" htmlFor={id('unattended-account')}>Unattended runs use</label>
+            <TextInput
+              id={id('unattended-account')}
+              readOnly
+              value={accounts.find((account) => account.isDefault)?.username ?? 'Complete account setup'}
+            />
+            <span className="set-field-help">
+              The default account supplies subscriptions for unattended runs.
+            </span>
+          </div>
         </div>
         <div className="settings-fast-mode" data-setting={SETTINGS_FIELDS.fastMode.field}>
           <div>
@@ -736,7 +726,7 @@ export function AgentsPane({
 
       <div className="set-group">
         <div className="set-group-label">Resolved agents</div>
-        <p className="set-field-help">These agents use your saved profile and the shared app overrides.</p>
+        <p className="set-field-help">These agents use the installation defaults and shared app overrides.</p>
         <div className="set-table agents-table">
           <div className="set-thead">
             <div>agent</div>

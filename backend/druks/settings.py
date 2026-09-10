@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import asyncssh
-from pydantic import BaseModel, BeforeValidator, Field, model_validator
+from pydantic import AfterValidator, BaseModel, BeforeValidator, Field, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -12,6 +12,8 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 from sqlalchemy_encrypted_field import validate_keys
+
+from druks.core.utils.time import validate_timezone
 
 DEFAULT_DATA_DIR = Path("/var/lib/druks")
 
@@ -177,6 +179,7 @@ class Settings(BaseSettings):
         hide_input_in_errors=True,
     )
 
+    timezone: Annotated[str, AfterValidator(validate_timezone)] = "UTC"
     identity: Identity = Identity()
     urls: Urls = Urls()
     secrets: Secrets

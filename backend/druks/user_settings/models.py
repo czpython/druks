@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any, ClassVar
+from typing import Any
 
-from sqlalchemy import ForeignKey, UniqueConstraint, select
+from sqlalchemy import CheckConstraint, ForeignKey, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,81 +21,39 @@ from .constants import (
 from .datastructures import ResolvedChoice, ResolvedTimeout
 
 
-class SettingsProfile(Base):
-    """Installation defaults or one account's complete personal profile."""
+class InstallationSettings(Base):
+    """Shared execution settings and the notification default for new accounts."""
 
     __tablename__ = "settings"
-    __table_args__ = (UniqueConstraint("account_id", postgresql_nulls_not_distinct=True),)
+    __table_args__ = (CheckConstraint("id = 1", name="settings_singleton"),)
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    account_id: Mapped[str | None] = mapped_column(
-        ForeignKey("accounts.id", ondelete="CASCADE"), default=None
-    )
-    timezone: Mapped[str] = mapped_column(String, default="UTC")
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
     default_harness: Mapped[str] = mapped_column(String, default=DEFAULT_HARNESS)
     default_model: Mapped[str] = mapped_column(String, default=DEFAULT_MODEL)
     default_billing: Mapped[str] = mapped_column(String, default=DEFAULT_BILLING)
     default_effort: Mapped[str] = mapped_column(String, default=DEFAULT_EFFORT)
     fast_mode: Mapped[bool] = mapped_column(default=False)
     default_timeout: Mapped[int] = mapped_column(default=DEFAULT_TIMEOUT)
-    # The designated gate-park notification destination; unset — or the
-    # destination deleted (SET NULL) — turns gate-park notifications off.
     gate_park_destination_id: Mapped[str | None] = mapped_column(
         ForeignKey("notification_destinations.id", ondelete="SET NULL"), default=None
     )
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
-    PROFILE_FIELDS: ClassVar[tuple[str, ...]] = (
-        "timezone",
-        "default_harness",
-        "default_model",
-        "default_billing",
-        "default_effort",
-        "fast_mode",
-        "default_timeout",
-        "gate_park_destination_id",
-    )
-
     @classmethod
-    async def get(cls, account_id: str | None = None) -> "SettingsProfile":
-        """Read an account's profile, or the installation defaults until its first edit."""
+    async def get(cls) -> "InstallationSettings":
+        """Read or create the installation settings."""
         session = db_session()
-        query = select(cls).where(cls.account_id == account_id)
+        query = select(cls).where(cls.id == 1)
         if row := await session.scalar(query):
             return row
-        if account_id:
-            return await cls.get()
         await session.execute(
-            pg_insert(cls)
-            .values(account_id=None)
-            .on_conflict_do_nothing(index_elements=["account_id"])
+            pg_insert(cls).values(id=1).on_conflict_do_nothing(index_elements=["id"])
         )
         return (await session.scalars(query)).one()
 
-    async def copy_for_account(self, account_id: str) -> "SettingsProfile":
-        """Create the first personal profile without replacing a concurrent edit."""
-        values = {field: getattr(self, field) for field in self.PROFILE_FIELDS}
-        session = db_session()
-        await session.execute(
-            pg_insert(SettingsProfile)
-            .values(account_id=account_id, **values)
-            .on_conflict_do_nothing(index_elements=["account_id"])
-        )
-        return (
-            await session.scalars(
-                select(SettingsProfile).where(SettingsProfile.account_id == account_id)
-            )
-        ).one()
-
-    async def update_profile(self, **fields: object) -> None:
+    async def update(self, **fields: object) -> None:
         for field, value in fields.items():
             setattr(self, field, value)
-        self.updated_at = Base.utc_now()
-        await db_session().flush()
-
-    async def set_gate_park_destination(self, destination_id: str | None) -> None:
-        # None is the off-switch, so this is a set-or-clear, not a skip-on-None.
-        self.gate_park_destination_id = destination_id
         self.updated_at = Base.utc_now()
         await db_session().flush()
 
@@ -126,7 +84,7 @@ class SettingsOverride(Base):
         await session.flush()
 
     @classmethod
-    async def agent_harness(cls, name: str, *, settings: SettingsProfile) -> ResolvedChoice:
+    async def agent_harness(cls, name: str, *, settings: InstallationSettings) -> ResolvedChoice:
         override = await cls.read(f"agent_harness:{name}")
         if override:
             return ResolvedChoice(override, "agent")
@@ -137,7 +95,7 @@ class SettingsOverride(Base):
         await cls.write(f"agent_harness:{name}", harness)
 
     @classmethod
-    async def agent_model(cls, name: str, *, settings: SettingsProfile) -> ResolvedChoice:
+    async def agent_model(cls, name: str, *, settings: InstallationSettings) -> ResolvedChoice:
         override = await cls.read(f"agent_model:{name}")
         if override:
             return ResolvedChoice(override, "agent")
@@ -148,7 +106,7 @@ class SettingsOverride(Base):
         await cls.write(f"agent_model:{name}", model)
 
     @classmethod
-    async def agent_billing(cls, name: str, *, settings: SettingsProfile) -> ResolvedChoice:
+    async def agent_billing(cls, name: str, *, settings: InstallationSettings) -> ResolvedChoice:
         override = await cls.read(f"agent_billing:{name}")
         if override:
             return ResolvedChoice(override, "agent")
@@ -159,7 +117,7 @@ class SettingsOverride(Base):
         await cls.write(f"agent_billing:{name}", billing)
 
     @classmethod
-    async def agent_effort(cls, name: str, *, settings: SettingsProfile) -> ResolvedChoice:
+    async def agent_effort(cls, name: str, *, settings: InstallationSettings) -> ResolvedChoice:
         override = await cls.read(f"agent_effort:{name}")
         if override:
             return ResolvedChoice(override, "agent")
@@ -171,7 +129,7 @@ class SettingsOverride(Base):
 
     @classmethod
     async def agent_timeout(
-        cls, name: str, declared: int | None, *, settings: SettingsProfile
+        cls, name: str, declared: int | None, *, settings: InstallationSettings
     ) -> ResolvedTimeout:
         override = await cls.read(f"agent_timeout:{name}")
         if override:

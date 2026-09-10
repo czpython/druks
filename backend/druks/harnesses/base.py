@@ -113,7 +113,7 @@ class Harness(ABC):
         refuses: no raw key enters a box."""
         if is_registered(provider):
             return {provider: get_provider(provider).get_secret(key)}
-        raise exceptions.ProfileSettingsError(
+        raise exceptions.AgentConfigError(
             f"Druks has no proven API-key transport for provider {provider!r}. "
             "Use an Anthropic or OpenAI key."
         )

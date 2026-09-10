@@ -611,28 +611,35 @@ export interface Service {
 
 export type Billing = 'subscription' | 'api_key'
 
-export interface SettingsProfile {
-  accountId: string | null
+export interface PersonalSettings {
   timezone: string
+  gateParkDestinationId: string | null
+}
+
+export interface InstallationSettings {
+  gateParkDestinationId: string | null
+  updatedAt: string
   defaultHarness: string
   defaultModel: string
   defaultBilling: Billing
   defaultEffort: string
   fastMode: boolean
   defaultTimeout: number
-  gateParkDestinationId: string | null
-  updatedAt: string
+}
+
+export interface UpdatePersonalSettingsRequest {
+  timezone?: string
+  gateParkDestinationId?: string | null
 }
 
 export interface UpdateSettingsRequest {
-  timezone?: string
+  gateParkDestinationId?: string | null
   defaultHarness?: string
   defaultModel?: string
   defaultBilling?: Billing
   defaultEffort?: string
   fastMode?: boolean
   defaultTimeout?: number
-  gateParkDestinationId?: string | null
 }
 
 export type BrowserSessionStatus = 'needs_login' | 'ready' | 'stale' | 'anonymous'

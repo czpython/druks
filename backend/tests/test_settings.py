@@ -59,7 +59,8 @@ def test_the_pat_slot_cannot_be_the_identity_header(tmp_path, mode):
 def test_toml_populates_authored_submodels(tmp_path, monkeypatch):
     config_path = tmp_path / "druks.toml"
     config_path.write_text(
-        f"""
+        f'''
+timezone = "Europe/Madrid"
 [identity]
 mode = "header"
 header = "X-Edge-Email"
@@ -76,7 +77,7 @@ service_url = "https://sandbox.example.com"
 service_token = "sandbox-token"
 image = "sandbox:latest"
 timeout = 180
-""".strip()
+'''.strip()
         + "\n"
     )
     monkeypatch.setenv("DRUKS_CONFIG", str(config_path))
@@ -92,6 +93,7 @@ timeout = 180
     assert settings.sandbox.service_url == "https://sandbox.example.com"
     assert settings.sandbox.image == "sandbox:latest"
     assert settings.sandbox.timeout == 180.0
+    assert settings.timezone == "Europe/Madrid"
 
 
 def test_only_an_explicit_issuer_url_changes_the_mint_base(tmp_path):
@@ -164,3 +166,22 @@ def test_ensure_data_dirs_provisions_skills_dir(tmp_path):
     ensure_data_dirs(settings)
     assert settings.skills_dir.is_dir()
     assert settings.files_dir.is_dir()
+
+
+def test_installation_timezone_defaults_to_utc(tmp_path):
+    assert make_settings(tmp_path).timezone == "UTC"
+
+
+@pytest.mark.parametrize("timezone", ["Not/A/Zone", "/etc/passwd", "../UTC"])
+def test_installation_timezone_rejects_invalid_zones(tmp_path, timezone):
+    with pytest.raises(ValidationError, match="Unknown IANA timezone"):
+        make_settings(tmp_path, timezone=timezone)
+
+
+def test_development_example_pins_the_installation_timezone(tmp_path, monkeypatch):
+    example = Path(__file__).resolve().parents[2] / "druks.toml.example"
+    config = tmp_path / "druks.toml"
+    config.write_text(example.read_text())
+    monkeypatch.setenv("DRUKS_CONFIG", str(config))
+    monkeypatch.setenv("TIMEZONE", "Asia/Tokyo")
+    assert Settings(secrets={"secrets_key": _SECRETS_KEY}).timezone == "UTC"

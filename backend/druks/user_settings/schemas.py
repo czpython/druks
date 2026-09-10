@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveInt
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PositiveInt
 from pydantic.fields import FieldInfo
 
 from druks.apps.settings import (
@@ -12,6 +12,7 @@ from druks.apps.settings import (
     field_visibility,
     validate_field_choice_details,
 )
+from druks.core.utils.time import validate_timezone
 from druks.harnesses.datastructures import Billing
 from druks.harnesses.schemas import SortedNames
 from druks.schemas import Schema
@@ -27,35 +28,48 @@ class HarnessResponse(Schema):
     billing_options: SortedNames
 
 
+class PersonalSettingsResponse(Schema):
+    model_config = ConfigDict(from_attributes=True)
+
+    timezone: str
+    gate_park_destination_id: str | None
+
+
 class SettingsResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
-    account_id: str | None
-    timezone: str
+    gate_park_destination_id: str | None
+    updated_at: datetime
     default_harness: str
     default_model: str
     default_billing: str
     default_effort: str
     fast_mode: bool
     default_timeout: int
-    gate_park_destination_id: str | None
-    updated_at: datetime
+
+
+class UpdatePersonalSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timezone: Annotated[str, AfterValidator(validate_timezone)] | None = None
+    # Absent leaves the destination unchanged. Null turns notifications off.
+    gate_park_destination_id: str | None = Field(
+        default=None, validation_alias="gateParkDestinationId"
+    )
 
 
 class UpdateSettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    timezone: str | None = None
+    gate_park_destination_id: str | None = Field(
+        default=None, validation_alias="gateParkDestinationId"
+    )
     default_harness: str | None = Field(default=None, validation_alias="defaultHarness")
     default_model: str | None = Field(default=None, validation_alias="defaultModel")
     default_billing: Billing | None = Field(default=None, validation_alias="defaultBilling")
     default_effort: Effort | None = Field(default=None, validation_alias="defaultEffort")
     fast_mode: bool | None = Field(default=None, validation_alias="fastMode")
     default_timeout: PositiveInt | None = Field(default=None, validation_alias="defaultTimeout")
-    # Tri-state: absent = unchanged, null = clear (off), value = designate.
-    gate_park_destination_id: str | None = Field(
-        default=None, validation_alias="gateParkDestinationId"
-    )
 
 
 Source = Literal["agent", "default"]

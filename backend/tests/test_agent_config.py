@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 from conftest import (
-    PROFILE_PROBE,
-    ProfileOutput,
+    CONFIG_PROBE,
+    ConfigOutput,
     connect_anthropic_subscription,
     connect_provider,
     make_jwt,
@@ -17,10 +17,10 @@ from druks.database import db_session
 from druks.durable.models import AgentCall
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
-from druks.harnesses.exceptions import HarnessNotConnectedError, ProfileSettingsError
+from druks.harnesses.config import check_config, get_config
+from druks.harnesses.exceptions import AgentConfigError, HarnessNotConnectedError
 from druks.harnesses.models import ProviderCatalog
 from druks.harnesses.opencode import OpenCodeHarness
-from druks.harnesses.profiles import check_profile, get_profile
 from druks.harnesses.providers import OpenAiProvider
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.secrets.datastructures import Audience
@@ -28,38 +28,34 @@ from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.testing import seed_call, seed_run
 from druks.user_settings import reads
-from druks.user_settings.models import SettingsOverride, SettingsProfile
+from druks.user_settings.models import InstallationSettings, SettingsOverride
 from druks.workflows import WorkflowError, current_workflow
 from druks_field_notes.workflows import Summarize
 from sqlalchemy.exc import IntegrityError
 
-DECLARED = agents.Agent(
-    id="profile_declared", prompt="probe.md", contract=ProfileOutput, timeout=900
-)
+DECLARED = agents.Agent(id="config_declared", prompt="probe.md", contract=ConfigOutput, timeout=900)
 OVERSIZED = agents.Agent(
-    id="profile_oversized",
+    id="config_oversized",
     prompt="probe.md",
-    contract=ProfileOutput,
+    contract=ConfigOutput,
     timeout=MAX_AGENT_TIMEOUT_SECONDS * 2,
 )
 
 
 async def test_check_judges_the_triple_together(druks_db):
     assert (
-        await check_profile("claude", "anthropic/claude-opus-4-7", "subscription") is ClaudeHarness
+        await check_config("claude", "anthropic/claude-opus-4-7", "subscription") is ClaudeHarness
     )
-    assert await check_profile("claude", "anthropic/claude-opus-4-7", "api_key") is ClaudeHarness
-    assert (
-        await check_profile("opencode", "anthropic/claude-opus-4-7", "api_key") is OpenCodeHarness
-    )
-    with pytest.raises(ProfileSettingsError, match="claude does not run OpenAI models"):
-        await check_profile("claude", "openai/gpt-5.5", "subscription")
-    with pytest.raises(ProfileSettingsError, match="opencode runs on an API key only"):
-        await check_profile("opencode", "anthropic/claude-opus-4-7", "subscription")
-    with pytest.raises(ProfileSettingsError, match="no installed harness is named 'grok'"):
-        await check_profile("grok", "anthropic/claude-opus-4-7", "subscription")
-    with pytest.raises(ProfileSettingsError, match="names no provider"):
-        await check_profile("claude", "claude-opus-4-7", "subscription")
+    assert await check_config("claude", "anthropic/claude-opus-4-7", "api_key") is ClaudeHarness
+    assert await check_config("opencode", "anthropic/claude-opus-4-7", "api_key") is OpenCodeHarness
+    with pytest.raises(AgentConfigError, match="claude does not run OpenAI models"):
+        await check_config("claude", "openai/gpt-5.5", "subscription")
+    with pytest.raises(AgentConfigError, match="opencode runs on an API key only"):
+        await check_config("opencode", "anthropic/claude-opus-4-7", "subscription")
+    with pytest.raises(AgentConfigError, match="no installed harness is named 'grok'"):
+        await check_config("grok", "anthropic/claude-opus-4-7", "subscription")
+    with pytest.raises(AgentConfigError, match="names no provider"):
+        await check_config("claude", "claude-opus-4-7", "subscription")
 
 
 async def _key() -> VaultSecret:
@@ -87,7 +83,7 @@ async def test_call_keeps_its_billing_reference_after_disconnect(druks_db, billi
     call = await seed_call(
         druks_db,
         run,
-        PROFILE_PROBE.id,
+        CONFIG_PROBE.id,
         subscription_id=subscription.id if billing == "subscription" else None,
         api_key_id=key.id if billing == "api_key" else None,
     )
@@ -122,7 +118,7 @@ async def test_call_requires_exactly_one_billing_reference(druks_db, both):
             druks_db.add(
                 AgentCall(
                     run_id=run.id,
-                    agent=PROFILE_PROBE.id,
+                    agent=CONFIG_PROBE.id,
                     model="anthropic/claude-opus-4-7",
                     sandbox_host_id="test-host",
                     subscription_id=subscription.id if both else None,
@@ -136,8 +132,8 @@ async def test_a_subscription_agent_runs_as_its_actor_or_the_default_account(dru
     default_subscription = await connect_anthropic_subscription("a@example.com")
     actor = await connect_anthropic_subscription("b@example.com")
 
-    as_actor = await get_profile(PROFILE_PROBE.id, actor.account_id)
-    unattended = await get_profile(PROFILE_PROBE.id, None)
+    as_actor = await get_config(CONFIG_PROBE.id, actor.account_id)
+    unattended = await get_config(CONFIG_PROBE.id, None)
 
     assert as_actor.subscription.id == actor.id
     assert as_actor.charged_account_id == actor.account_id
@@ -151,7 +147,7 @@ async def test_a_subscription_agent_runs_as_its_actor_or_the_default_account(dru
     assert (as_actor.effort, as_actor.timeout, as_actor.fast_mode) == ("high", 1800, False)
 
 
-async def test_a_codex_subscription_profile_carries_its_login_facts_and_its_ref(druks_db):
+async def test_a_codex_subscription_config_carries_its_login_facts_and_its_ref(druks_db):
     id_token = make_jwt(
         {
             "https://api.openai.com/auth": {
@@ -174,18 +170,18 @@ async def test_a_codex_subscription_profile_carries_its_login_facts_and_its_ref(
         },
         provider_email="a@example.com",
     )
-    await SettingsOverride.set_agent_harness(PROFILE_PROBE.id, "codex")
-    await SettingsOverride.set_agent_model(PROFILE_PROBE.id, "openai/gpt-5.5")
+    await SettingsOverride.set_agent_harness(CONFIG_PROBE.id, "codex")
+    await SettingsOverride.set_agent_model(CONFIG_PROBE.id, "openai/gpt-5.5")
 
-    profile = await get_profile(PROFILE_PROBE.id, subscription.account_id)
+    config = await get_config(CONFIG_PROBE.id, subscription.account_id)
 
-    assert profile.harness_class is CodexHarness
+    assert config.harness_class is CodexHarness
     # The facts the box's login names come from the row and its id token; the
     # tokens stay on the server.
-    assert profile.identity == {"email": "a@example.com", "account_id": "acc-1", "plan": "pro"}
-    [ref] = profile.secret_refs
+    assert config.identity == {"email": "a@example.com", "account_id": "acc-1", "plan": "pro"}
+    [ref] = config.secret_refs
     assert ref.key == ("codex_subscription_token", subscription.id, "", "chatgpt.com")
-    assert profile.secrets_id == subscription.id
+    assert config.secrets_id == subscription.id
 
 
 async def test_a_subscription_agent_refuses_without_the_actors_own_subscription(druks_db):
@@ -195,16 +191,16 @@ async def test_a_subscription_agent_refuses_without_the_actors_own_subscription(
 
     # A missing personal subscription cannot borrow another credential.
     with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
-        await get_profile(PROFILE_PROBE.id, stranger.id)
+        await get_config(CONFIG_PROBE.id, stranger.id)
 
 
 async def test_a_key_agent_runs_on_the_installations_key_for_anyone(druks_db):
     actor = await connect_anthropic_subscription("a@example.com")
     pasted = await _key()
-    await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "api_key")
+    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "api_key")
 
-    as_actor = await get_profile(PROFILE_PROBE.id, actor.account_id)
-    unattended = await get_profile(PROFILE_PROBE.id, None)
+    as_actor = await get_config(CONFIG_PROBE.id, actor.account_id)
+    unattended = await get_config(CONFIG_PROBE.id, None)
 
     # Claude reads the key from a placeholder in the VM, never from its invocation.
     assert (as_actor.secrets, as_actor.subscription) == ({"anthropic": _SHARED_ENTRY}, None)
@@ -218,10 +214,10 @@ async def test_a_key_agent_runs_on_the_installations_key_for_anyone(druks_db):
 
 async def test_a_key_agent_refuses_without_the_key(druks_db):
     actor = await connect_anthropic_subscription("a@example.com")
-    await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "api_key")
+    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "api_key")
 
     with pytest.raises(HarnessNotConnectedError, match="add the Anthropic API key"):
-        await get_profile(PROFILE_PROBE.id, actor.account_id)
+        await get_config(CONFIG_PROBE.id, actor.account_id)
 
 
 async def test_an_added_provider_refuses_until_its_transport_is_proven(druks_db):
@@ -236,67 +232,67 @@ async def test_an_added_provider_refuses_until_its_transport_is_proven(druks_db)
         "sk-openrouter",
         pasted_by=await Account.get_or_create("ops@example.com"),
     )
-    await SettingsOverride.set_agent_harness(PROFILE_PROBE.id, "opencode")
-    await SettingsOverride.set_agent_model(PROFILE_PROBE.id, "openrouter/anthropic/claude-sonnet-4")
-    await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "api_key")
+    await SettingsOverride.set_agent_harness(CONFIG_PROBE.id, "opencode")
+    await SettingsOverride.set_agent_model(CONFIG_PROBE.id, "openrouter/anthropic/claude-sonnet-4")
+    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "api_key")
 
-    with pytest.raises(ProfileSettingsError, match="'openrouter'"):
-        await get_profile(PROFILE_PROBE.id, None)
+    with pytest.raises(AgentConfigError, match="'openrouter'"):
+        await get_config(CONFIG_PROBE.id, None)
 
 
 async def test_an_added_provider_without_a_key_names_it(druks_db):
     await Account.get_or_create("ops@example.com")
     await ProviderCatalog.create("groq", [{"id": "groq/llama-4", "label": "Llama 4"}], label="Groq")
-    await SettingsOverride.set_agent_harness(PROFILE_PROBE.id, "opencode")
-    await SettingsOverride.set_agent_model(PROFILE_PROBE.id, "groq/llama-4")
-    await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "api_key")
+    await SettingsOverride.set_agent_harness(CONFIG_PROBE.id, "opencode")
+    await SettingsOverride.set_agent_model(CONFIG_PROBE.id, "groq/llama-4")
+    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "api_key")
 
     with pytest.raises(HarnessNotConnectedError, match="add the Groq API key in Settings"):
-        await get_profile(PROFILE_PROBE.id, None)
+        await get_config(CONFIG_PROBE.id, None)
 
 
 async def test_an_added_provider_runs_only_on_an_unbound_cli_and_its_own_models(druks_db):
     await Account.get_or_create("ops@example.com")
     await ProviderCatalog.create("groq", [{"id": "groq/llama-4", "label": "Llama 4"}], label="Groq")
 
-    with pytest.raises(ProfileSettingsError, match="claude does not run Groq models"):
-        await check_profile("claude", "groq/llama-4", "api_key")
-    with pytest.raises(ProfileSettingsError, match="Groq lists no model 'groq/llama-9'"):
-        await check_profile("opencode", "groq/llama-9", "api_key")
-    with pytest.raises(ProfileSettingsError, match="names no provider; add one"):
-        await check_profile("opencode", "nobody/model", "api_key")
-    assert await check_profile("opencode", "groq/llama-4", "api_key") is OpenCodeHarness
+    with pytest.raises(AgentConfigError, match="claude does not run Groq models"):
+        await check_config("claude", "groq/llama-4", "api_key")
+    with pytest.raises(AgentConfigError, match="Groq lists no model 'groq/llama-9'"):
+        await check_config("opencode", "groq/llama-9", "api_key")
+    with pytest.raises(AgentConfigError, match="names no provider; add one"):
+        await check_config("opencode", "nobody/model", "api_key")
+    assert await check_config("opencode", "groq/llama-4", "api_key") is OpenCodeHarness
 
 
 async def test_a_key_only_harness_bills_the_key(druks_db):
     await connect_anthropic_subscription("a@example.com")
     await _key()
-    await SettingsOverride.set_agent_harness(PROFILE_PROBE.id, "opencode")
-    await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "api_key")
+    await SettingsOverride.set_agent_harness(CONFIG_PROBE.id, "opencode")
+    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "api_key")
 
-    profile = await get_profile(PROFILE_PROBE.id, None)
+    config = await get_config(CONFIG_PROBE.id, None)
 
-    assert profile.harness_class is OpenCodeHarness
-    assert profile.secrets == {"anthropic": _SHARED_ENTRY}
+    assert config.harness_class is OpenCodeHarness
+    assert config.secrets == {"anthropic": _SHARED_ENTRY}
 
 
 async def test_a_stored_triple_no_harness_runs_refuses(druks_db):
     await connect_anthropic_subscription("a@example.com")
-    await SettingsOverride.set_agent_harness(PROFILE_PROBE.id, "opencode")
+    await SettingsOverride.set_agent_harness(CONFIG_PROBE.id, "opencode")
 
-    with pytest.raises(ProfileSettingsError, match="opencode runs on an API key only"):
-        await get_profile(PROFILE_PROBE.id, None)
+    with pytest.raises(AgentConfigError, match="opencode runs on an API key only"):
+        await get_config(CONFIG_PROBE.id, None)
 
 
 async def test_effort_timeout_and_fast_mode_follow_the_defaults_and_overrides(druks_db):
     await connect_anthropic_subscription("a@example.com")
-    settings = await SettingsProfile.get()
-    await settings.update_profile(default_effort="low", default_timeout=600, fast_mode=True)
+    settings = await InstallationSettings.get()
+    await settings.update(default_effort="low", default_timeout=600, fast_mode=True)
     await SettingsOverride.set_agent_effort(DECLARED.id, "medium")
 
-    probe = await get_profile(PROFILE_PROBE.id, None)
-    declared = await get_profile(DECLARED.id, None)
-    oversized = await get_profile(OVERSIZED.id, None)
+    probe = await get_config(CONFIG_PROBE.id, None)
+    declared = await get_config(DECLARED.id, None)
+    oversized = await get_config(OVERSIZED.id, None)
 
     assert (probe.effort, probe.timeout, probe.fast_mode) == ("low", 600, True)
     assert (declared.effort, declared.timeout) == ("medium", 900)
@@ -304,17 +300,17 @@ async def test_effort_timeout_and_fast_mode_follow_the_defaults_and_overrides(dr
     assert oversized.timeout == MAX_AGENT_TIMEOUT_SECONDS
 
 
-async def test_an_agent_reads_its_own_profile(druks_db):
+async def test_an_agent_reads_its_own_config(druks_db):
     await connect_anthropic_subscription("a@example.com")
     await _key()
 
     token = current_workflow.set(SimpleNamespace(account_id=None))
-    subscribed = await PROFILE_PROBE.get_profile()
-    await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "api_key")
-    keyed = await PROFILE_PROBE.get_profile()
+    subscribed = await CONFIG_PROBE.get_config()
+    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "api_key")
+    keyed = await CONFIG_PROBE.get_config()
     current_workflow.reset(token)
     with pytest.raises(WorkflowError, match="only inside a workflow"):
-        await PROFILE_PROBE.get_profile()
+        await CONFIG_PROBE.get_config()
 
     assert (subscribed.harness, subscribed.model_id) == ("claude", "claude-opus-4-7")
     assert (subscribed.billing, subscribed.secrets) == ("subscription", {})
@@ -323,28 +319,28 @@ async def test_an_agent_reads_its_own_profile(druks_db):
 
 async def test_an_unregistered_agent_is_named(druks_db):
     with pytest.raises(KeyError, match="no agent is registered as 'ghost'"):
-        await get_profile("ghost", None)
+        await get_config("ghost", None)
 
 
 async def test_two_apps_declare_the_same_agent_name(druks_db):
     class Ticketing(App):
         name = "ticketing"
-        file_tickets = agents.Agent(prompt="probe.md", contract=ProfileOutput)
+        file_tickets = agents.Agent(prompt="probe.md", contract=ConfigOutput)
 
     class BugHunter(App):
         name = "bug_hunter"
         file_tickets = agents.Agent(
-            name="File tickets", prompt="probe.md", contract=ProfileOutput, timeout=300
+            name="File tickets", prompt="probe.md", contract=ConfigOutput, timeout=300
         )
 
     try:
         await connect_anthropic_subscription("a@example.com")
         await SettingsOverride.set_agent_effort(BugHunter.file_tickets.id, "low")
         declared = (Ticketing.agents(), BugHunter.agents())
-        ticketing = await get_profile(Ticketing.file_tickets.id, None)
-        bug_hunter = await get_profile(BugHunter.file_tickets.id, None)
+        ticketing = await get_config(Ticketing.file_tickets.id, None)
+        bug_hunter = await get_config(BugHunter.file_tickets.id, None)
         settings = [
-            await reads.get_agent_setting(agent, settings=await SettingsProfile.get())
+            await reads.get_agent_setting(agent, settings=await InstallationSettings.get())
             for agent in (Ticketing.file_tickets, BugHunter.file_tickets)
         ]
     finally:

@@ -10,8 +10,8 @@ without replacing the process.
 
 | Plane | Examples | Stored in |
 | --- | --- | --- |
-| Deployment | identity, ingress, Drukbox, encryption key | `~/druks/druks.toml` |
-| Dashboard | timezone, the GitHub connection, harness and tracker credentials, workflow and agent overrides, MCP servers, skills | Postgres |
+| Deployment | installation timezone, identity, ingress, Drukbox, encryption key | `~/druks/druks.toml` |
+| Dashboard | personal timezone, the GitHub connection, harness and tracker credentials, workflow and agent overrides, MCP servers, skills | Postgres |
 
 The installer creates the deployment `.env` from `druks.toml`. Compose, Druks,
 and Drukbox consume this build artifact. Do not edit `.env`. Edit `druks.toml`,
@@ -64,28 +64,47 @@ recover an installation, preserve `[secrets]`. Use repeatable
 
 ## Personal and installation settings
 
-**Settings → Preferences** edits your personal profile. **Settings → General**
-and **Settings → Agents** edit installation defaults. Each page saves its
-own draft.
+One Druks installation serves one organization. Separate organizations use
+separate installations. **Settings → Agents** owns the shared harness, model,
+billing, effort, fast mode, and timeout defaults. Every account uses these
+defaults. Shared agent overrides take priority. A declared agent timeout also
+takes priority over the installation default.
 
-Your account uses installation defaults until the first personal edit. That edit
-copies the complete profile. Later installation changes do not change your saved
-profile. Shared agent overrides take priority. A declared agent timeout also takes
-priority over the profile default.
+**Settings → Preferences** edits the timezone on your `Account`. The personal
+settings API also edits your account's gate notification destination. Druks
+copies the installation timezone and notification default when it creates an
+account. Later installation changes do not change existing account preferences.
+Each page saves its own draft.
+
+`PATCH /api/settings` accepts `gateParkDestinationId` as the notification default
+for **new accounts only**. Set it to a destination ID, or to `null` to start new
+accounts with gate notifications off. This default has no dashboard control.
+Use `PATCH /api/settings/personal` to change an existing account's destination.
+Clearing or replacing the installation default does not change existing accounts.
+
+Set the installation timezone at the top level of `druks.toml`, before any table:
+
+```toml
+timezone = "Europe/Madrid"
+```
+
+Use an IANA timezone. The default is `UTC`. Restart Druks after a change to
+apply it to all schedules.
 
 The first account becomes the default account, including in header and JWT modes.
-Unattended calls use its profile and subscriptions. The flag grants no extra
+Unattended calls use its subscriptions. The flag grants no extra
 permissions. Calls with an explicit account use that account's subscriptions.
 Missing subscriptions fail the call. API keys belong to the installation.
 
 The installation timezone controls schedules and operational day boundaries.
 Your personal timezone controls timestamp display. Gate notifications use the
-run account's profile. Unattended runs record the default account.
+run account's preferences. Unattended runs record the default account.
 Druks refuses to start a run before account setup.
 
 The API exposes installation settings at `GET/PATCH /api/settings` and your
-profile at `GET/PATCH /api/settings/personal`. The personal route uses the
-authenticated account. Its `accountId` is NULL while it inherits defaults.
+preferences at `GET/PATCH /api/settings/personal`. The personal route uses the
+authenticated account. It returns `timezone` and `gateParkDestinationId`. It
+rejects execution settings. The installation API rejects timezone changes.
 
 ## Core process settings
 
@@ -148,7 +167,7 @@ order:
    The `exp`, `iss`, and `aud` claims must match the configuration.
    Druks maps `identity.jwt_identity_claim` to an account. A validation error
    returns a 401 with the error class, not the token. Druks uses a fixed RS256
-   profile and does not negotiate it.
+   configuration and does not negotiate it.
 4. **No-authentication mode (`none`).** This mode has no authentication or identity edge. Druks
    resolves the only account. Zero accounts is the setup state. The
    first completed provider connection creates the operator account from the
@@ -401,9 +420,10 @@ are sandbox entries. Provider credentials do not belong in this root. OpenCode
 and Pi do not read it.
 The default harness, model, billing, effort, and timeout live in
 **Settings → Agents**. Each agent can override any of them on its app's page.
-**Unattended runs use** names the default account. Its profile selects the
-subscription or installation API key. A call refuses before provisioning a VM if its selected
-credential is missing.
+**Unattended runs use** names the default account. Shared execution settings
+select subscription or API key billing. Subscription billing uses the run
+account's subscription. API key billing uses the installation key. A call refuses
+before provisioning a VM if its selected credential is missing.
 
 ## Sandboxes
 

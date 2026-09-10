@@ -172,7 +172,7 @@ async def test_declaration_drives_run_agent_call(druks_db, tmp_path, monkeypatch
     assert result == DummyOutput(ok=True)
     kwargs = sandbox.run_agent.await_args.kwargs
     assert kwargs["agent"] == "dummy"
-    assert kwargs["profile"].subscription.account_id == current_run.account_id
+    assert kwargs["config"].subscription.account_id == current_run.account_id
     assert kwargs["schema"] == DummyOutput.model_json_schema()
     assert kwargs["prompt"] == "PROMPT:dummy/agent.md:repo=acme/widget"
     assert kwargs["artifact_dir"] == tmp_path / "run-wf-9"
@@ -255,10 +255,10 @@ async def test_running_call_visible_then_finished(
     await SettingsOverride.set_agent_billing(DUMMY_AGENT.id, billing)
     during: dict[str, object] = {}
 
-    async def _run_agent(*, call_id, profile, **_kwargs):
+    async def _run_agent(*, call_id, config, **_kwargs):
         row = await AgentCall.get(call_id)
-        assert row.subscription_id == (profile.subscription.id if profile.subscription else None)
-        assert row.api_key_id == (profile.api_key.id if profile.api_key else None)
+        assert row.subscription_id == (config.subscription.id if config.subscription else None)
+        assert row.api_key_id == (config.api_key.id if config.api_key else None)
         during["status"] = row.status
         during["host"] = row.sandbox_host_id
         return make_agent_result({"ok": True}, agent="dummy")
@@ -816,10 +816,10 @@ async def test_reused_host_retry_presents_a_stable_idempotency_key(monkeypatch, 
 
     monkeypatch.setattr("druks.sandbox.client.Client.provision", fake_provision)
 
-    profile = SimpleNamespace(secrets={}, secret_refs=[], secrets_id="")
+    config = SimpleNamespace(secrets={}, secret_refs=[], secrets_id="")
     with pytest.raises(HarnessSandboxProvisioningError):
-        await current_run._lease_host(profile)
-    host_id = await current_run._lease_host(profile)
+        await current_run._lease_host(config)
+    host_id = await current_run._lease_host(config)
 
     assert host_id == "warm-host"
     assert keys == ["wf-9:workflow", "wf-9:workflow"]
@@ -857,7 +857,7 @@ async def test_api_key_billing_hands_claude_a_placeholder(
     druks_db, tmp_path, monkeypatch, current_run
 ):
     """Under api_key billing the VM is created with the key as a Drukbox entry. The
-    profile the sandbox runs carries no key, and the durable call records none."""
+    config the sandbox runs carries no key, and the durable call records none."""
     import json
 
     from drukbox_sdk import Secret
@@ -892,8 +892,8 @@ async def test_api_key_billing_hands_claude_a_placeholder(
     ]
     # The VM's key names the pasted key, never its value.
     assert keys == [f"wf-9:dummy:anthropic.{pasted.updated_at:%Y%m%dT%H%M%S}"]
-    profile = sandbox.run_agent.await_args.kwargs["profile"]
-    assert (profile.billing, profile.subscription) == ("api_key", None)
+    config = sandbox.run_agent.await_args.kwargs["config"]
+    assert (config.billing, config.subscription) == ("api_key", None)
     [call] = await AgentCall.list_for_run("wf-9")
     assert (call.subscription_id, call.api_key.audience_name) == (None, "anthropic")
     row = {column.key: getattr(call, column.key) for column in AgentCall.__table__.columns}

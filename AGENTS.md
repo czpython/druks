@@ -40,6 +40,9 @@ For app-surface changes, inspect the proof app at
   registration in the frontend build. Keep standalone `dist/` delivery separate.
 - Keep generic agent, harness, workspace, sandbox, event, gate, webhook, and
   settings plumbing in Druks. Keep domain-specific policy in the app.
+- One Druks installation serves one organization. Execution defaults and agent
+  overrides are shared. Accounts own credentials, personal preferences, and run
+  attribution. Do not add personal execution defaults.
 - Grow the author surface by parameter, not by namespace. If the SDK lacks a
   capability, widen the primitive that owns it. Add a keyword argument or a
   method to the class that holds the data. Do not add a namespace, facade,

@@ -234,10 +234,10 @@ app or integration owns the provider payload and domain reaction.
 Configuration has two planes:
 
 - **Deployment:** `druks.toml` configures the deployment and creates the process environment.
-- Postgres settings configure installation defaults, personal profiles,
+- Postgres settings configure installation defaults, personal preferences,
   app and workflow settings, agent overrides, notifications, MCP servers, and skills.
   See [personal and installation settings](configuration.md#personal-and-installation-settings)
-  for profile resolution and timezone rules.
+  for execution defaults and timezone rules.
 
 Druks keeps every secret in the vault, encrypted at rest: pasted keys, MCP
 tokens, OAuth grants, GitHub App keys, and provider subscriptions. It decrypts

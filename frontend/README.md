@@ -41,10 +41,12 @@ navigation button opens a modal drawer. Escape closes the drawer and returns
 focus to the button.
 
 Settings use `/settings/<section>` routes. `/settings/personal` edits the current
-account through `/api/settings/personal`; `/settings/general` and
-`/settings/agents` edit installation defaults through `/api/settings`. The
-preferences provider uses the personal endpoint for timestamp display. Search
-matches section names and app field labels. Preferences, General, and Agents
+account's preferences through `/api/settings/personal`. `/settings/agents` edits
+shared execution defaults through `/api/settings`. The
+preferences provider uses the personal endpoint for timestamp display. Preferences
+contains only timezone and does not depend on execution catalogs. All accounts
+use the shared execution defaults in Agents and the app agent overrides. Search
+matches section names and app field labels. Preferences and Agents
 retain separate drafts across settings pages. Save changes applies only the current page.
 Leaving Settings offers Save, Discard, and Stay. Save applies each dirty page;
 a failed request keeps the operator on that page with its draft. Resource

@@ -26,6 +26,7 @@ def _upgrade(connection) -> None:
 async def test_the_defaults_come_from_the_first_harness_row(druks_db):
     for statement in (
         "ALTER TABLE settings RENAME TO user_settings",
+        "ALTER TABLE user_settings ADD COLUMN timezone varchar NOT NULL DEFAULT 'UTC'",
         "ALTER TABLE user_settings DROP COLUMN default_harness, DROP COLUMN default_billing, "
         "DROP COLUMN default_effort, DROP COLUMN fast_mode, DROP COLUMN default_timeout",
         "CREATE TABLE harnesses (name varchar PRIMARY KEY, fast_mode boolean NOT NULL, "

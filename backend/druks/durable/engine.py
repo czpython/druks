@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from druks.database import create_async_engine_from_url, db_session, get_session, session_scope
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
 from druks.settings import load_settings
-from druks.user_settings.models import SettingsProfile
+from druks.user_settings.models import InstallationSettings
 
 if TYPE_CHECKING:
     from druks.workflows import Workflow
@@ -81,7 +81,7 @@ async def apply_schedules() -> None:
             await DBOS.delete_schedule_async(existing["schedule_name"])
     # Evaluate in the installation timezone so daily cadence follows DST.
     # Personal display preferences must not move a shared schedule.
-    timezone = (await SettingsProfile.get()).timezone
+    timezone = load_settings().timezone
     for cls, fn in _scheduled:
         await DBOS.delete_schedule_async(cls.kind)
         cron = await cls.get_schedule()
@@ -96,6 +96,8 @@ async def launch() -> None:
     # loop and async steps share it.
     DBOS.launch()
     async with session_scope(_step_engine()):
+        # Commit the singleton before concurrent settings requests can create it.
+        await InstallationSettings.get()
         await apply_schedules()
 
 

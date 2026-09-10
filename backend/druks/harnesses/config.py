@@ -8,19 +8,18 @@ from druks.sandbox.models import SecretRef
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
-from druks.user_settings.models import SettingsOverride, SettingsProfile
+from druks.user_settings.models import InstallationSettings, SettingsOverride
 
 from .base import Harness
-from .exceptions import HarnessNotConnectedError, ProfileSettingsError
+from .exceptions import AgentConfigError, HarnessNotConnectedError
 from .models import ProviderCatalog
 from .providers import get_provider, is_registered, provider_label
 from .registry import get_harness
 
 
 @dataclass(frozen=True)
-class Profile:
-    """How an agent runs for one account: harness, model, effort, billing, read from
-    Settings → Agents at call time."""
+class AgentConfig:
+    """Shared execution settings with the account's selected credential."""
 
     harness_class: type[Harness]
     model: str
@@ -47,7 +46,7 @@ class Profile:
 
     @property
     def secrets_id(self) -> str:
-        """What a box created for this profile holds: the pasted key, or the
+        """What a box created for this config holds: the pasted key, or the
         subscriptions it fetches."""
         if self.secrets:
             return f"{self.api_key.audience_name}.{self.api_key.updated_at:%Y%m%dT%H%M%S}"
@@ -58,35 +57,33 @@ class Profile:
         return self.subscription.account_id if self.subscription else None
 
 
-async def check_profile(harness_name: str, model: str, billing: str) -> type[Harness]:
+async def check_config(harness_name: str, model: str, billing: str) -> type[Harness]:
     """The harness that runs the triple; a triple no harness runs raises."""
     harness = get_harness(harness_name)
     if not harness:
-        raise ProfileSettingsError(f"no installed harness is named {harness_name!r}.")
+        raise AgentConfigError(f"no installed harness is named {harness_name!r}.")
     provider_id = model.partition("/")[0]
     if is_registered(provider_id):
         provider = get_provider(provider_id)
         if not harness.has_provider(provider):
-            raise ProfileSettingsError(f"{harness_name} does not run {provider.label} models.")
+            raise AgentConfigError(f"{harness_name} does not run {provider.label} models.")
     else:
         catalog = await ProviderCatalog.get(provider_id)
         if not catalog:
-            raise ProfileSettingsError(
+            raise AgentConfigError(
                 f"model {model!r} names no provider; add one in Settings → Providers."
             )
         if harness.provider:
-            raise ProfileSettingsError(f"{harness_name} does not run {catalog.label} models.")
+            raise AgentConfigError(f"{harness_name} does not run {catalog.label} models.")
         if model not in {entry["id"] for entry in catalog.models}:
-            raise ProfileSettingsError(f"{catalog.label} lists no model {model!r}.")
+            raise AgentConfigError(f"{catalog.label} lists no model {model!r}.")
     if billing not in harness.billing_options:
-        raise ProfileSettingsError(
-            f"{harness_name} runs on an API key only; set billing to api_key."
-        )
+        raise AgentConfigError(f"{harness_name} runs on an API key only; set billing to api_key.")
     return harness
 
 
-async def get_profile(agent_name: str, account_id: str | None) -> Profile:
-    """Resolve an agent's profile for the supplied or default account.
+async def get_config(agent_name: str, account_id: str | None) -> AgentConfig:
+    """Resolve shared execution settings and the supplied or default account's credential.
     A missing credential raises."""
     from druks.apps.registry import agents  # cycle: apps → agents → this module
 
@@ -96,11 +93,11 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
     if not account_id:
         account = await Account.get_default()
         account_id = account.id if account else None
-    settings = await SettingsProfile.get(account_id)
+    settings = await InstallationSettings.get()
     harness_name = (await SettingsOverride.agent_harness(agent_name, settings=settings)).value
     model = (await SettingsOverride.agent_model(agent_name, settings=settings)).value
     billing = (await SettingsOverride.agent_billing(agent_name, settings=settings)).value
-    harness_class = await check_profile(harness_name, model, billing)
+    harness_class = await check_config(harness_name, model, billing)
     provider_id = model.partition("/")[0]
     subscription = None
     provider_key = None
@@ -121,7 +118,7 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
     timeout = (
         await SettingsOverride.agent_timeout(agent_name, agent.timeout, settings=settings)
     ).value
-    return Profile(
+    return AgentConfig(
         harness_class=harness_class,
         model=model,
         subscription=subscription,

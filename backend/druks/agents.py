@@ -16,12 +16,12 @@ from druks.durable.engine import _step_engine, step_session
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import AgentCall, Artifact
 from druks.files.datastructures import File
+from druks.harnesses.config import AgentConfig, get_config
 from druks.harnesses.exceptions import (
     HarnessError,
     HarnessInvalidOutputError,
     Retry,
 )
-from druks.harnesses.profiles import Profile, get_profile
 from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import provisioning_key, sandbox_client
@@ -44,14 +44,14 @@ _REAP_BEFORE_WAIT_SECONDS = 120
 
 @contextlib.asynccontextmanager
 async def _runner(
-    workflow: "Workflow", host_id: str | None, workflow_id: str, step: str, profile: Profile
+    workflow: "Workflow", host_id: str | None, workflow_id: str, step: str, config: AgentConfig
 ) -> AsyncIterator["Workspace"]:
     # The agent always runs in a Workspace. A warm run attaches the run's held VM; the
     # rest get a fresh ephemeral VM. Either way workflow.get_workspace() turns the VM into
     # the runner — fresh per call, so nothing (connection or credential) is held across steps.
     if host_id:
         vm = sandbox_client.attach(host_id=host_id)
-    elif (refs := [*profile.secret_refs, *await workflow.get_secret_refs()]) and (
+    elif (refs := [*config.secret_refs, *await workflow.get_secret_refs()]) and (
         identity := await SandboxIdentity.lookup(workflow_id, step, refs)
     ):
         # A crashed attempt left its box behind. Its identity finds it again.
@@ -63,7 +63,7 @@ async def _runner(
             await set_run_phase("provisioning_vm")
         # A box that fetches gets its own identity, and the key names it. A
         # replay finds the box through the identity, above.
-        identity, entries, key = None, {}, profile.secrets_id
+        identity, entries, key = None, {}, config.secrets_id
         if refs:
             identity, entries = await SandboxIdentity.create(
                 run_id=workflow_id, scoped_to=step, secret_refs=refs
@@ -71,7 +71,7 @@ async def _runner(
             key = identity.id
         vm = sandbox_client.ephemeral(
             idempotency_key=provisioning_key(workflow_id, step, key),
-            secrets={**profile.secrets, **entries},
+            secrets={**config.secrets, **entries},
             template=template,
             identity=identity,
         )
@@ -140,12 +140,12 @@ class Agent:
         object.__setattr__(self, "app", owner.name)
         agents.register(self)
 
-    async def get_profile(self) -> Profile:
+    async def get_config(self) -> AgentConfig:
         """How this agent runs for the current run's actor, read from settings now."""
         workflow = current_workflow.get(None)
         if not workflow:
-            raise WorkflowError(f"agent {self.id!r} reads its profile only inside a workflow")
-        return await get_profile(self.id, workflow.account_id)
+            raise WorkflowError(f"agent {self.id!r} reads its config only inside a workflow")
+        return await get_config(self.id, workflow.account_id)
 
     async def __call__(
         self, *, contract: type[AgentOutput] | None = None, **context: object
@@ -202,9 +202,9 @@ class Agent:
             # recorded wait instead of re-reading the scrape.
             async with step_session():
                 # The scrape belongs to the subscription account.
-                profile = await get_profile(self.id, workflow.account_id)
-                provider_id = profile.model.partition("/")[0]
-                scrape = await UsageScrape.latest_for(provider_id, profile.charged_account_id)
+                config = await get_config(self.id, workflow.account_id)
+                provider_id = config.model.partition("/")[0]
+                scrape = await UsageScrape.latest_for(provider_id, config.charged_account_id)
                 if scrape:
                     now = datetime.now(UTC)
                     reset = scrape.soonest_reset_after(now)
@@ -276,10 +276,10 @@ class Agent:
         workflow = current_workflow.get()
         # Refusing an unservable call here beats provisioning a VM and
         # 401ing mid-run.
-        profile = await get_profile(self.id, workflow.account_id)
-        model = profile.model
-        subscription_id = profile.subscription.id if profile.subscription else None
-        api_key_id = profile.api_key.id if profile.api_key else None
+        config = await get_config(self.id, workflow.account_id)
+        model = config.model
+        subscription_id = config.subscription.id if config.subscription else None
+        api_key_id = config.api_key.id if config.api_key else None
         # An agent call is a durability boundary — its effects don't roll back —
         # so commit here rather than hold the step's connection idle through the
         # minutes of provisioning and the run.
@@ -288,7 +288,7 @@ class Agent:
         artifact_dir = settings.artifacts_dir / f"run-{workflow_id}"
 
         engine = _step_engine()
-        call_id = profile.harness_class.mint_run_id(None)
+        call_id = config.harness_class.mint_run_id(None)
 
         # Registered for provisioning through execution — the subscription's
         # rotation defers around it. A key never rotates.
@@ -299,14 +299,14 @@ class Agent:
         )
         async with gate:
             await set_run_phase("provisioning_vm")
-            host_id = await workflow._lease_host(profile)
+            host_id = await workflow._lease_host(config)
 
             # Record the call RUNNING once it has a host to run on (its id names
             # the on-disk transcript dir) so the live step shows while the agent
             # works, then finish it — or fail it if the run raised after
             # starting. A provisioning failure happens before this and records
             # no call.
-            async with _runner(workflow, host_id, workflow_id, self.id, profile) as runner:
+            async with _runner(workflow, host_id, workflow_id, self.id, config) as runner:
                 context = await runner.prepare_context(context, agent_call_id=call_id)
                 # Templates read the live workflow + the workspace the agent runs in,
                 # alongside whatever the workflow's get_prompt_context composes.
@@ -328,7 +328,7 @@ class Agent:
                 try:
                     result = await runner.run_agent(
                         account_id=workflow.account_id,
-                        profile=profile,
+                        config=config,
                         agent=self.id,
                         prompt=prompt,
                         schema=contract.model_json_schema(),

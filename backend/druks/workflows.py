@@ -58,7 +58,7 @@ from druks.sandbox.datastructures import Sandbox
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
 from druks.signals import publish
-from druks.user_settings.models import SettingsOverride, SettingsProfile
+from druks.user_settings.models import SettingsOverride
 from druks.workspaces import Workspace
 
 # druks.workflows is the author door for workflow authoring: Workflow, Gate,
@@ -86,7 +86,7 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
-    from druks.harnesses.profiles import Profile
+    from druks.harnesses.config import AgentConfig
     from druks.sandbox.host import Host
 
 # A human gate can park for days; a long recv TTL still caps zombie parks.
@@ -373,7 +373,8 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
     async def _create() -> str | None:
         async with step_session():
             run = await Run.get(workflow_id)
-            destination_id = (await SettingsProfile.get(run.account_id)).gate_park_destination_id
+            account = await Account.get_for_run(run.account_id)
+            destination_id = account.gate_park_destination_id
             if destination_id:
                 return await run.create_park_notification(destination_id, subject)
 
@@ -834,18 +835,18 @@ class Workflow:
         return self.workspace_class(**await self.get_workspace_kwargs(host))
 
     async def get_secret_refs(self) -> list[SecretRef]:
-        # The secrets a box of this run fetches beyond its profile's: the
+        # The secrets a box of this run fetches beyond its config's: the
         # workspace's and its MCP servers', read before the box exists.
         subject = await self.subject
         _, mcp = await self.workspace_class.get_mcp_delivery(subject, self.account_id)
         return [*await self.workspace_class.get_secret_refs(subject), *mcp]
 
-    async def _lease_host(self, profile: "Profile") -> str | None:
+    async def _lease_host(self, config: "AgentConfig") -> str | None:
         # The warm VM, provisioned once per segment; state is carried in git, so
         # only the host-id matters across steps — held-across-steps never fights replay.
         if not self.steps_reuse_sandbox:
             return
-        refs = [*profile.secret_refs, *await self.get_secret_refs()]
+        refs = [*config.secret_refs, *await self.get_secret_refs()]
         # A crashed process left its box behind. Its identity finds it again.
         if (
             not self._host
@@ -853,7 +854,7 @@ class Workflow:
             and (identity := await SandboxIdentity.lookup(self._workflow_id, "workflow", refs))
         ):
             self._host = await sandbox_client.reattach(host_id=identity.host_id)
-            self._host_secrets_id = profile.secrets_id
+            self._host_secrets_id = config.secrets_id
         if self._host and self._host.expires_at:
             remaining = (self._host.expires_at - datetime.now(UTC)).total_seconds()
             if remaining < SANDBOX_HOST_ROTATE_BEFORE_SECONDS:
@@ -861,7 +862,7 @@ class Workflow:
                 # host. Safe because each call rebuilds its workspace on whatever
                 # host it lands on (state lives in git), so a bare VM is fine.
                 await self._reap_run()
-        if self._host and self._host_secrets_id != profile.secrets_id:
+        if self._host and self._host_secrets_id != config.secrets_id:
             # Drukbox binds entries at creation.
             await self._reap_run()
         if not self._host:
@@ -872,7 +873,7 @@ class Workflow:
             # The key names the pasted key the VM holds, so a replay finds its VM.
             # A box that fetches gets its own identity, and the key names that
             # instead. A replay finds the box through the identity, above.
-            identity, entries, key = None, {}, profile.secrets_id
+            identity, entries, key = None, {}, config.secrets_id
             if refs:
                 identity, entries = await SandboxIdentity.create(
                     run_id=self._workflow_id, scoped_to="workflow", secret_refs=refs
@@ -880,11 +881,11 @@ class Workflow:
                 key = identity.id
             self._host = await sandbox_client.provision(
                 idempotency_key=provisioning_key(self._workflow_id, "workflow", key),
-                secrets={**profile.secrets, **entries},
+                secrets={**config.secrets, **entries},
                 template=template,
                 identity=identity,
             )
-            self._host_secrets_id = profile.secrets_id
+            self._host_secrets_id = config.secrets_id
         return self._host.id
 
     async def _reap_run(self) -> None:

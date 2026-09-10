@@ -6,7 +6,7 @@ from druks.api import dashboard
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import Artifact, Run
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
-from druks.user_settings.models import SettingsOverride, SettingsProfile
+from druks.user_settings.models import SettingsOverride
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from fastapi.testclient import TestClient
@@ -120,7 +120,10 @@ async def test_schedules_resolve_paused_override_and_operator_timezone(
     monkeypatch.setattr(Summarize, "every", "0 9 * * *")
     await SettingsOverride.set_workflow_setting(Summarize.kind, "schedule", "15 10 * * 1")
     await SettingsOverride.set_workflow_setting(Summarize.kind, "schedule_enabled", False)
-    await (await SettingsProfile.get()).update_profile(timezone="Europe/Madrid")
+    from druks.api import dashboard
+
+    settings = dashboard.load_settings().model_copy(update={"timezone": "Europe/Madrid"})
+    monkeypatch.setattr(dashboard, "load_settings", lambda: settings)
 
     response = client.get("/api/dashboard/schedules")
 

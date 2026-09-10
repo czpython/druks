@@ -9,11 +9,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from conftest import PROFILE_PROBE, connect_provider, installation_key, make_jwt
+from conftest import CONFIG_PROBE, connect_provider, installation_key, make_jwt
 from druks.durable.enums import AgentCallStatus
 from druks.harnesses.base import Harness
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
+from druks.harnesses.config import AgentConfig, get_config
 from druks.harnesses.exceptions import (
     HarnessAuthError,
     HarnessError,
@@ -25,7 +26,6 @@ from druks.harnesses.exceptions import (
     HarnessUsageLimitError,
     Retry,
 )
-from druks.harnesses.profiles import Profile, get_profile
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.sandbox.datastructures import (
     AgentInvocation,
@@ -526,8 +526,8 @@ def test_agent_result_names_the_agent_in_its_failure():
 
 
 @pytest.fixture
-def agent_profile():
-    return Profile(
+def agent_config():
+    return AgentConfig(
         harness_class=ClaudeHarness,
         model="anthropic/claude-opus-4-7",
         subscription=SimpleNamespace(id="subscription-1", account_id="acc"),
@@ -543,7 +543,7 @@ def agent_profile():
 
 
 async def test_run_agent_carries_foreign_failures_as_harness_errors(
-    ctx: SimpleNamespace, agent_profile
+    ctx: SimpleNamespace, agent_config
 ):
     """The result's error is always from the taxonomy: a foreign failure is
     wrapped unclassified, keeps its traceback via the chain, and — unlike an
@@ -560,7 +560,7 @@ async def test_run_agent_carries_foreign_failures_as_harness_errors(
     result = await Host.run_agent(
         sandbox,
         agent="evaluate",
-        profile=agent_profile,
+        config=agent_config,
         prompt="p",
         schema={"type": "object"},
         artifact_dir=ctx.artifact_dir,
@@ -575,7 +575,7 @@ async def test_run_agent_carries_foreign_failures_as_harness_errors(
     assert type(revived) is HarnessError and revived.__cause__ is None
 
 
-async def test_run_agent_carries_a_taxonomy_failure_as_itself(ctx: SimpleNamespace, agent_profile):
+async def test_run_agent_carries_a_taxonomy_failure_as_itself(ctx: SimpleNamespace, agent_config):
     sandbox = SimpleNamespace(id="host-abc", ssh_username="root")
     timeout = HarnessTimeoutError("claude timed out after 60s.")
 
@@ -586,7 +586,7 @@ async def test_run_agent_carries_a_taxonomy_failure_as_itself(ctx: SimpleNamespa
     result = await Host.run_agent(
         sandbox,
         agent="evaluate",
-        profile=agent_profile,
+        config=agent_config,
         prompt="p",
         schema={"type": "object"},
         artifact_dir=ctx.artifact_dir,
@@ -601,8 +601,8 @@ async def test_claude_api_key_stays_on_the_server(
     """Under api_key billing the VM is created with the key as a Drukbox entry and
     holds a placeholder. The key reaches no invocation, VM file, artifact, or result."""
     key = (await installation_key()).secrets["value"]
-    await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "api_key")
-    profile = await get_profile(PROFILE_PROBE.id, None)
+    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "api_key")
+    config = await get_config(CONFIG_PROBE.id, None)
     result_event = {
         "type": "result",
         "subtype": "success",
@@ -623,7 +623,7 @@ async def test_claude_api_key_stays_on_the_server(
     result = await Host.run_agent(
         sandbox,
         agent="evaluate",
-        profile=profile,
+        config=config,
         prompt="p",
         schema={"type": "object"},
         artifact_dir=ctx.artifact_dir,
@@ -640,7 +640,7 @@ async def test_claude_api_key_stays_on_the_server(
     assert not any(type(entry) is HomeFile for entry in bundle.home)
     for artifact in (ctx.artifact_dir / "call-9").iterdir():
         assert key not in artifact.read_text()
-    assert key not in repr(result) and key not in repr(profile)
+    assert key not in repr(result) and key not in repr(config)
 
 
 async def test_claude_subscription_token_stays_on_the_server(
@@ -659,8 +659,8 @@ async def test_claude_subscription_token_stays_on_the_server(
             }
         },
     )
-    await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "subscription")
-    profile = await get_profile(PROFILE_PROBE.id, None)
+    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "subscription")
+    config = await get_config(CONFIG_PROBE.id, None)
     result_event = {
         "type": "result",
         "subtype": "success",
@@ -681,7 +681,7 @@ async def test_claude_subscription_token_stays_on_the_server(
     result = await Host.run_agent(
         sandbox,
         agent="evaluate",
-        profile=profile,
+        config=config,
         prompt="p",
         schema={"type": "object"},
         artifact_dir=ctx.artifact_dir,
@@ -689,8 +689,8 @@ async def test_claude_subscription_token_stays_on_the_server(
     )
 
     assert result.status is AgentCallStatus.SUCCEEDED
-    [secret] = profile.secret_refs
-    assert secret.key == ("anthropic", profile.subscription.id, "", "")
+    [secret] = config.secret_refs
+    assert secret.key == ("anthropic", config.subscription.id, "", "")
     [start] = sandbox.calls
     assert not start.kwargs["extra_env"]
     bundle = start.kwargs["credentials_bundle"]
@@ -715,10 +715,10 @@ async def test_codex_subscription_token_stays_on_the_server(
         "account_id": "acc-1",
     }
     await connect_provider(OpenAiProvider, {"OPENAI_API_KEY": None, "tokens": tokens})
-    await SettingsOverride.set_agent_harness(PROFILE_PROBE.id, "codex")
-    await SettingsOverride.set_agent_model(PROFILE_PROBE.id, "openai/gpt-5.5")
-    await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "subscription")
-    profile = await get_profile(PROFILE_PROBE.id, None)
+    await SettingsOverride.set_agent_harness(CONFIG_PROBE.id, "codex")
+    await SettingsOverride.set_agent_model(CONFIG_PROBE.id, "openai/gpt-5.5")
+    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "subscription")
+    config = await get_config(CONFIG_PROBE.id, None)
     # Codex leaves its result in the box; the fake download pulls nothing, so
     # the file is in place before the run.
     (ctx.artifact_dir / "call-9").mkdir()
@@ -737,7 +737,7 @@ async def test_codex_subscription_token_stays_on_the_server(
     result = await Host.run_agent(
         sandbox,
         agent="evaluate",
-        profile=profile,
+        config=config,
         prompt="p",
         schema={"type": "object"},
         artifact_dir=ctx.artifact_dir,
@@ -746,8 +746,8 @@ async def test_codex_subscription_token_stays_on_the_server(
 
     assert result.status is AgentCallStatus.SUCCEEDED
     assert result.output == {"ok": True}
-    [secret] = profile.secret_refs
-    assert secret.key == ("codex_subscription_token", profile.subscription.id, "", "chatgpt.com")
+    [secret] = config.secret_refs
+    assert secret.key == ("codex_subscription_token", config.subscription.id, "", "chatgpt.com")
     [start] = sandbox.calls
     assert not start.kwargs["extra_env"]
     bundle = start.kwargs["credentials_bundle"]
@@ -758,4 +758,4 @@ async def test_codex_subscription_token_stays_on_the_server(
         assert secret not in start.kwargs["stdin_data"].decode()
         for artifact in (ctx.artifact_dir / "call-9").iterdir():
             assert secret not in artifact.read_text()
-        assert secret not in repr(result) and secret not in repr(profile)
+        assert secret not in repr(result) and secret not in repr(config)
