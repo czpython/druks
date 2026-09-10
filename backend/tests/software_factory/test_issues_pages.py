@@ -1,3 +1,4 @@
+from druks.accounts.models import Account
 from druks.contrib.software_factory.issues.models import Ticket
 
 from software_factory.factories import make_test_work_item
@@ -194,6 +195,18 @@ async def test_ticket_page_follows_the_row_and_comments_refresh_the_region(druks
     repo = columns["blocks"][1]["blocks"][3]
     assert repo["fields"][0]["name"] == "repo_id"
     assert repo["fields"][0]["options"][0]["group"] == "Acme"
+    facts = columns["blocks"][1]["blocks"][-1]
+    assert [fact["label"] for fact in facts["facts"]] == [
+        "Identifier",
+        "Created by",
+        "Created",
+        "Updated",
+    ]
+    assert facts["facts"][0]["value"]["text"] == created["identifier"]
+    account = await Account.get_or_create("op@example.com")
+    assert facts["facts"][1]["value"]["text"] == account.username
+    assert facts["facts"][2]["value"]["value"] == "time"
+    assert facts["facts"][3]["value"]["value"] == "time"
     comments = _comments(page)
     assert comments["title"] == "Comments"
     assert comments["blocks"][0]["title"] == "No comments yet"
@@ -210,6 +223,17 @@ async def test_ticket_page_follows_the_row_and_comments_refresh_the_region(druks
     after = (await druks_client.get(f"{_PAGES}/tickets/{created['identifier']}")).json()
     thread = _comments(after)
     assert thread["blocks"][0]["blocks"][0]["text"] == "looks good"
+
+
+async def test_ticket_page_unattributed_creator_when_none_is_stored(druks_client):
+    repo = await _open_repo(druks_client)
+    ticket = await Ticket.create(repo_id=int(repo["id"]), title="ghost")
+
+    page = (await druks_client.get(f"{_PAGES}/tickets/{ticket.identifier}")).json()
+
+    facts = page["blocks"][0]["blocks"][1]["blocks"][-1]
+    created_by = next(fact for fact in facts["facts"] if fact["label"] == "Created by")
+    assert created_by["value"]["text"] == "Unattributed"
 
 
 async def test_ticket_page_links_the_open_build(druks_client):
