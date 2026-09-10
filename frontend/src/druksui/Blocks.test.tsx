@@ -1,13 +1,31 @@
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
 
-import type { Block, CardBlock, EmptyStateBlock, PageEntry } from '../api/types'
+import { api } from '../api/client'
+import type { Action, Block, CardBlock, EmptyStateBlock, Operation, PageEntry } from '../api/types'
 import { Blocks } from './Blocks'
 import { PagesContext } from './pages'
 
-afterEach(cleanup)
+vi.mock('../api/client', async () => {
+  const real = await vi.importActual<typeof import('../api/client')>('../api/client')
+  return {
+    ApiError: real.ApiError,
+    api: { callOperation: vi.fn(), readPage: vi.fn(), upload: vi.fn(), listApps: vi.fn() },
+  }
+})
+
+const callOperation = vi.mocked(api.callOperation)
+
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+})
+beforeEach(() => {
+  callOperation.mockResolvedValue()
+})
 
 const PAGES: PageEntry[] = [
   {
@@ -28,15 +46,25 @@ const PAGES: PageEntry[] = [
   },
 ]
 
+const OPERATIONS: Operation[] = [
+  { id: 'set_status', method: 'POST', path: '/api/software_factory/tickets/{identifier}/status' },
+]
+
 function renderBlocks(blocks: Block[]) {
-  const { hook } = memoryLocation({ path: '/field_notes' })
-  return render(
-    <Router hook={hook}>
-      <PagesContext.Provider value={{ app: 'field_notes', pages: PAGES, operations: [] }}>
-        <Blocks blocks={blocks} />
-      </PagesContext.Provider>
-    </Router>,
+  const location = memoryLocation({ path: '/field_notes', record: true })
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const rendered = render(
+    <QueryClientProvider client={queryClient}>
+      <Router hook={location.hook} searchHook={location.searchHook}>
+        <PagesContext.Provider
+          value={{ app: 'field_notes', pages: PAGES, operations: OPERATIONS }}
+        >
+          <Blocks blocks={blocks} />
+        </PagesContext.Provider>
+      </Router>
+    </QueryClientProvider>,
   )
+  return { ...rendered, location }
 }
 
 describe('the display core', () => {
@@ -182,6 +210,53 @@ describe('Cards', () => {
     controls: [],
   }
 
+  function ticketCard(title: string, identifier: string): CardBlock {
+    return {
+      block: 'card',
+      title,
+      description: identifier,
+      blocks: [],
+      controls: [],
+      drag: { identifier },
+      link: {
+        block: 'link',
+        label: title,
+        page: 'note',
+        arguments: { note_id: '7' },
+        url: '',
+        subject: null,
+      },
+    }
+  }
+
+  function moveAction(status: string): Action {
+    return {
+      block: 'action',
+      label: `Move to ${status}`,
+      operation: 'set_status',
+      arguments: { status },
+      fields: [],
+      tone: 'default',
+      confirm: '',
+      refresh: 'none',
+      link: null,
+    }
+  }
+
+  function transfer() {
+    const data: Record<string, string> = {}
+    return {
+      setData(type: string, value: string) {
+        data[type] = value
+      },
+      getData(type: string) {
+        return data[type] ?? ''
+      },
+      effectAllowed: 'move',
+      dropEffect: 'move',
+    }
+  }
+
   it('shows one card for each thing, under the title', () => {
     const { container } = renderBlocks([
       { block: 'cards', title: 'Peers', cards: [card('peer-7'), card('peer-9')], empty: null },
@@ -266,5 +341,199 @@ describe('Cards', () => {
     )
     expect(screen.getByText('Ship the board').closest('.dui-card')?.tagName).toBe('DIV')
     expect(screen.getByText('Archive').getAttribute('href')).toBe('/field_notes')
+  })
+
+  it('stacks cards in one column when layout is stack', () => {
+    const { container } = renderBlocks([
+      { block: 'cards', title: 'Todo', layout: 'stack', cards: [card('one')], empty: null },
+    ])
+
+    expect(container.querySelector('ul.dui-cards')?.className).toContain('dui-cards-stack')
+  })
+
+  it('posts the drop action with the card drag merged in', async () => {
+    const { container } = renderBlocks([
+      {
+        block: 'cards',
+        title: 'Todo',
+        layout: 'stack',
+        drop: moveAction('todo'),
+        cards: [ticketCard('Ship', 'BOX-1')],
+        empty: null,
+      },
+      {
+        block: 'cards',
+        title: 'Done',
+        layout: 'stack',
+        drop: moveAction('done'),
+        cards: [],
+        empty: nothingYet,
+      },
+    ])
+    const dt = transfer()
+    const dest = container.querySelectorAll('.dui-cards-drop')[1]!
+    fireEvent.dragStart(container.querySelector('ul.dui-cards li')!, { dataTransfer: dt })
+    fireEvent.dragOver(screen.getByText('No peer yet'), { dataTransfer: dt })
+    fireEvent.drop(dest, { dataTransfer: dt })
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    expect(callOperation).toHaveBeenCalledWith(
+      'POST',
+      '/api/software_factory/tickets/BOX-1/status',
+      { status: 'done' },
+    )
+  })
+
+  it('does not post when the card lands on its own list', () => {
+    const { container } = renderBlocks([
+      {
+        block: 'cards',
+        title: 'Todo',
+        layout: 'stack',
+        drop: moveAction('todo'),
+        cards: [ticketCard('Ship', 'BOX-1')],
+        empty: null,
+      },
+    ])
+    const dt = transfer()
+    fireEvent.dragStart(container.querySelector('ul.dui-cards li')!, { dataTransfer: dt })
+    fireEvent.drop(container.querySelector('.dui-cards-drop')!, { dataTransfer: dt })
+
+    expect(callOperation).not.toHaveBeenCalled()
+  })
+
+  it('does not follow the card link after a drag', () => {
+    const { container, location } = renderBlocks([
+      {
+        block: 'cards',
+        title: 'Todo',
+        layout: 'stack',
+        drop: moveAction('todo'),
+        cards: [ticketCard('Ship', 'BOX-1')],
+        empty: null,
+      },
+    ])
+    const dt = transfer()
+    fireEvent.dragStart(container.querySelector('ul.dui-cards li')!, { dataTransfer: dt })
+    fireEvent.click(screen.getByText('Ship'))
+
+    expect(location.history).toEqual(['/field_notes'])
+  })
+
+  it('dims the card, then previews it in the list under the pointer', () => {
+    const { container } = renderBlocks([
+      {
+        block: 'cards',
+        title: 'Todo',
+        layout: 'stack',
+        drop: moveAction('todo'),
+        cards: [ticketCard('Ship', 'BOX-1')],
+        empty: null,
+      },
+      {
+        block: 'cards',
+        title: 'Done',
+        layout: 'stack',
+        drop: moveAction('done'),
+        cards: [],
+        empty: nothingYet,
+      },
+    ])
+    const dt = transfer()
+    const drops = container.querySelectorAll('.dui-cards-drop')
+    const source = drops[0]!
+    const dest = drops[1]!
+    fireEvent.dragStart(source.querySelector('ul.dui-cards li')!, { dataTransfer: dt })
+
+    expect(source.querySelector('.dui-cards-item-dim')).toBeTruthy()
+    expect(source.className).toContain('dui-cards-drop-live')
+    expect(dest.className).toContain('dui-cards-drop-live')
+    expect(container.querySelector('.dui-card-ghost')).toBeNull()
+    expect(callOperation).not.toHaveBeenCalled()
+
+    fireEvent.dragOver(dest, { dataTransfer: dt })
+
+    expect(source.querySelector('.dui-cards-item-away')).toBeTruthy()
+    expect(dest.querySelector('.dui-card-ghost')?.textContent).toContain('Ship')
+    expect(dest.className).toContain('dui-cards-drop-over')
+    expect(dest.querySelector('[hidden]')).toBeTruthy()
+    expect(callOperation).not.toHaveBeenCalled()
+  })
+
+  it('restores the card when the drag ends without a drop', () => {
+    const { container } = renderBlocks([
+      {
+        block: 'cards',
+        title: 'Todo',
+        layout: 'stack',
+        drop: moveAction('todo'),
+        cards: [ticketCard('Ship', 'BOX-1')],
+        empty: null,
+      },
+      {
+        block: 'cards',
+        title: 'Done',
+        layout: 'stack',
+        drop: moveAction('done'),
+        cards: [],
+        empty: nothingYet,
+      },
+    ])
+    const dt = transfer()
+    const drops = container.querySelectorAll('.dui-cards-drop')
+    const source = drops[0]!
+    const dest = drops[1]!
+    const item = source.querySelector('ul.dui-cards li')!
+    fireEvent.dragStart(item, { dataTransfer: dt })
+    fireEvent.dragOver(dest, { dataTransfer: dt })
+    fireEvent.dragEnd(item, { dataTransfer: dt })
+
+    expect(container.querySelector('.dui-cards-item-dim')).toBeNull()
+    expect(container.querySelector('.dui-cards-item-away')).toBeNull()
+    expect(container.querySelector('.dui-card-ghost')).toBeNull()
+    expect(source.className).not.toContain('dui-cards-drop-live')
+    expect(screen.getByText('No peer yet')).toBeTruthy()
+    expect(callOperation).not.toHaveBeenCalled()
+  })
+
+  it('commits the list that held the placeholder, even if drop lands on a neighbor', async () => {
+    const { container } = renderBlocks([
+      {
+        block: 'cards',
+        title: 'Todo',
+        layout: 'stack',
+        drop: moveAction('todo'),
+        cards: [ticketCard('Ship', 'BOX-1')],
+        empty: null,
+      },
+      {
+        block: 'cards',
+        title: 'Ready for Agent',
+        layout: 'stack',
+        drop: moveAction('ready_for_agent'),
+        cards: [],
+        empty: nothingYet,
+      },
+      {
+        block: 'cards',
+        title: 'In Progress',
+        layout: 'stack',
+        drop: moveAction('in_progress'),
+        cards: [],
+        empty: nothingYet,
+      },
+    ])
+    const dt = transfer()
+    const drops = container.querySelectorAll('.dui-cards-drop')
+    fireEvent.dragStart(drops[0]!.querySelector('ul.dui-cards li')!, { dataTransfer: dt })
+    fireEvent.dragOver(drops[1]!, { dataTransfer: dt })
+    fireEvent.drop(drops[2]!, { dataTransfer: dt })
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    expect(callOperation).toHaveBeenCalledWith(
+      'POST',
+      '/api/software_factory/tickets/BOX-1/status',
+      { status: 'ready_for_agent' },
+    )
   })
 })

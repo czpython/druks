@@ -319,7 +319,8 @@ function Confirm({ action, run }: { action: Action; run: ReturnType<typeof useAc
 // Everything an action does once someone presses it: ask first when it says to,
 // send the one payload, keep a second press out while it runs, and then stay,
 // refresh, or navigate.
-function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
+// eslint-disable-next-line react-refresh/only-export-components -- drop zones run the same action hook
+export function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
   const fieldNames = fields.map((one) => one.name)
   const secretNames = fields.filter((one) => one.field === 'secret').map((one) => one.name)
   const [pending, setPending] = useState(false)
