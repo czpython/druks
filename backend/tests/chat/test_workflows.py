@@ -6,13 +6,14 @@ from druks.contrib.chat.app import Chat
 from druks.contrib.chat.contracts import TurnOutput
 from druks.contrib.chat.enums import Role
 from druks.contrib.chat.models import Conversation
-from druks.contrib.chat.workflows import ChatTurn, Talk
+from druks.contrib.chat.workflows import ChatTurn, ConfirmTool, Talk
 from druks.workflows import current_workflow
 
 
 async def _run_talk(conversation: Conversation) -> None:
     flow = Talk()
     flow.subject = conversation
+    flow.account_id = conversation.account_id
     token = current_workflow.set(flow)
     try:
         await flow.run_multistep()
@@ -46,6 +47,7 @@ async def test_talk_appends_the_assistant_line_and_stops(druks_db, monkeypatch):
 
     monkeypatch.setattr(ChatTurn, "wait", classmethod(wait))
     monkeypatch.setattr(Talk, "record_message", Talk.record_message.__wrapped__)
+    monkeypatch.setattr(Talk, "deferred_writes", mock.AsyncMock(return_value=[]))
 
     await _run_talk(conversation)
 
@@ -77,6 +79,7 @@ async def test_talk_appends_the_operator_line_and_loops(druks_db, monkeypatch):
 
     monkeypatch.setattr(ChatTurn, "wait", classmethod(wait))
     monkeypatch.setattr(Talk, "record_message", Talk.record_message.__wrapped__)
+    monkeypatch.setattr(Talk, "deferred_writes", mock.AsyncMock(return_value=[]))
 
     await _run_talk(conversation)
 
@@ -90,3 +93,74 @@ async def test_talk_appends_the_operator_line_and_loops(druks_db, monkeypatch):
     ]
     assert turns[0]["autonomy"] == conversation.autonomy
     assert turns[1]["messages"][-1] == {"role": Role.USER, "body": "and then?"}
+
+
+async def test_talk_confirms_deferred_writes_before_the_next_line(druks_db, monkeypatch):
+    account = await Account.get_or_create("op@example.com")
+    conversation = await Conversation.create(account_id=account.id, title="")
+    await conversation.add_message(role=Role.USER, body="hello")
+
+    monkeypatch.setattr(Chat, "reply", mock.AsyncMock(return_value=TurnOutput(text="hi")))
+    monkeypatch.setattr(Talk, "record_message", Talk.record_message.__wrapped__)
+    proposed = [
+        {
+            "method": "POST",
+            "path": "/api/gates/run-1/answer",
+            "body": "{}",
+            "content_type": "application/json",
+        }
+    ]
+    monkeypatch.setattr(Talk, "deferred_writes", mock.AsyncMock(return_value=proposed))
+    applied = []
+
+    async def apply(self, writes):
+        applied.extend(writes)
+
+    monkeypatch.setattr(Talk, "apply_deferred_writes", apply)
+    parked = []
+
+    async def confirm_wait(cls, **kwargs):
+        parked.append(kwargs)
+        return ConfirmTool(action="approve")
+
+    async def turn_wait(cls, **kwargs):
+        return ChatTurn(text="", stop=True)
+
+    monkeypatch.setattr(ConfirmTool, "wait", classmethod(confirm_wait))
+    monkeypatch.setattr(ChatTurn, "wait", classmethod(turn_wait))
+
+    await _run_talk(conversation)
+
+    assert parked[0]["input_request"]["controls"] == ["approve", "reject"]
+    assert applied == proposed
+
+
+async def test_talk_skips_deferred_writes_when_the_operator_rejects(druks_db, monkeypatch):
+    account = await Account.get_or_create("op@example.com")
+    conversation = await Conversation.create(account_id=account.id, title="")
+    await conversation.add_message(role=Role.USER, body="hello")
+
+    monkeypatch.setattr(Chat, "reply", mock.AsyncMock(return_value=TurnOutput(text="hi")))
+    monkeypatch.setattr(Talk, "record_message", Talk.record_message.__wrapped__)
+    monkeypatch.setattr(
+        Talk,
+        "deferred_writes",
+        mock.AsyncMock(
+            return_value=[{"method": "POST", "path": "/x", "body": "", "content_type": ""}]
+        ),
+    )
+    apply = mock.AsyncMock()
+    monkeypatch.setattr(Talk, "apply_deferred_writes", apply)
+
+    async def confirm_wait(cls, **kwargs):
+        return ConfirmTool(action="reject")
+
+    async def turn_wait(cls, **kwargs):
+        return ChatTurn(text="", stop=True)
+
+    monkeypatch.setattr(ConfirmTool, "wait", classmethod(confirm_wait))
+    monkeypatch.setattr(ChatTurn, "wait", classmethod(turn_wait))
+
+    await _run_talk(conversation)
+
+    apply.assert_not_awaited()

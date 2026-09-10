@@ -5,7 +5,7 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
-from urllib.parse import urlsplit
+from urllib.parse import urlparse, urlsplit, urlunparse
 
 from druks.accounts.models import Account
 from druks.core.apis.github import get_github_client
@@ -28,9 +28,28 @@ from druks.sandbox.datastructures import AgentResult, McpServer, RequiredMcpServ
 from druks.sandbox.exceptions import ExecFailed
 from druks.sandbox.layout import get_repo_root, get_work_root
 from druks.sandbox.models import SecretRef
+from druks.settings import load_settings
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Host
+
+
+def this_appliance_mcp_url(host: "Host") -> str:
+    """The /mcp hop a sandbox uses to reach this process.
+
+    Docker sibling containers cannot use the host loopback; the engine
+    publishes that address as host.docker.internal:8001. An exe VM is a
+    different machine and uses the dashboard URL (urls.endpoint), never
+    webhook_host.
+    """
+    base = (load_settings().urls.endpoint or "http://127.0.0.1:8001").rstrip("/")
+    parsed = urlparse(base)
+    if host.record.provider == "docker" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+        port = parsed.port
+        if not port:
+            port = 8001 if parsed.scheme == "http" else 443
+        base = urlunparse(parsed._replace(netloc=f"host.docker.internal:{port}")).rstrip("/")
+    return f"{base}/mcp"
 
 
 @dataclass(frozen=True)
