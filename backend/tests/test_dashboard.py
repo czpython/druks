@@ -21,105 +21,11 @@ def client(tmp_path, druks_db):
         yield client
 
 
-def current_work(client):
-    response = client.get("/api/dashboard/work")
-    assert response.status_code == 200
-    assert response.headers["cache-control"] == "no-store"
-    return response.json()
-
-
 def overview(client, app=None):
     response = client.get("/api/dashboard/overview", params={"app": app} if app else {})
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     return response.json()
-
-
-async def test_a_current_run_carries_bounded_labels_and_failure_details(client, druks_db):
-    note = await Note.create(body="decision")
-    run = await seed_run(
-        druks_db,
-        kind=Summarize.kind,
-        subject=note,
-        state="parked",
-        input_gate="review",
-        input_request={"presentation": "in_app", "label": "x" * 300, "questions": ["private"]},
-        failure="f" * 4000,
-    )
-    run.input_requested_at = datetime(2026, 1, 1, tzinfo=UTC)
-    await druks_db.flush()
-
-    body = current_work(client)
-
-    assert body["hasMore"] is False
-    [row] = body["rows"]
-    assert (row["run"], row["app"], row["state"]) == (run.id, "field_notes", "parked")
-    assert row["parkedAt"] == "2026-01-01T00:00:00Z"
-    assert row["presentation"] == "in_app"
-    assert row["requestLabel"] == "x" * 240
-    assert row["failure"] == "f" * 2048
-    assert "private" not in str(row)
-
-
-async def test_newer_success_hides_historical_failure(client, druks_db):
-    note = await Note.create(body="recovered")
-    failed = await seed_run(druks_db, kind=Summarize.kind, subject=note, state="failed")
-    failed.created_at = datetime(2026, 1, 1, tzinfo=UTC)
-    await seed_run(druks_db, kind=Summarize.kind, subject=note, state="finished")
-
-    assert current_work(client)["rows"] == []
-
-
-async def test_subjectless_and_orphaned_runs_each_stay_current(client, druks_db):
-    background = await seed_run(druks_db, kind=Summarize.kind, state="running")
-    orphan = Run(
-        account_id=background.account_id,
-        id=str(uuid7()),
-        kind=Summarize.kind,
-        created_at=datetime.now(UTC) - timedelta(minutes=10),
-    )
-    druks_db.add(orphan)
-    await druks_db.flush()
-
-    rows = {row["run"]: row for row in current_work(client)["rows"]}
-
-    assert rows[background.id]["state"] == "running"
-    assert rows[orphan.id]["state"] == "orphaned"
-    assert rows[orphan.id]["subjectId"] is None
-
-
-async def test_only_installed_workflow_kinds_are_read(client, druks_db):
-    other = await Account.get_or_create("another@example.invalid")
-    note = await Note.create(body="shared run")
-    included = await seed_run(druks_db, kind=Summarize.kind, subject=note)
-    included.account_id = other.id
-    await seed_run(druks_db, kind="uninstalled.sweep")
-    await druks_db.flush()
-
-    assert [row["run"] for row in current_work(client)["rows"]] == [included.id]
-
-
-async def test_changed_time_orders_current_work(client, druks_db):
-    first = await seed_run(druks_db, kind=Summarize.kind, subject=await Note.create(body="first"))
-    second = await seed_run(druks_db, kind=Summarize.kind, subject=await Note.create(body="second"))
-    await druks_db.execute(
-        workflow_status.update()
-        .where(workflow_status.c.workflow_uuid == first.id)
-        .values(updated_at=int((datetime.now(UTC) + timedelta(minutes=1)).timestamp() * 1000))
-    )
-
-    assert [row["run"] for row in current_work(client)["rows"]] == [first.id, second.id]
-
-
-async def test_the_read_is_capped(client, druks_db, monkeypatch):
-    monkeypatch.setattr(dashboard, "PAGE_SIZE", 1)
-    for body in ("one", "two"):
-        await seed_run(druks_db, kind=Summarize.kind, subject=await Note.create(body=body))
-
-    body = current_work(client)
-
-    assert len(body["rows"]) == 1
-    assert body["hasMore"] is True
 
 
 async def test_schedules_resolve_paused_override_and_operator_timezone(
@@ -151,7 +57,6 @@ def test_dashboard_requires_the_existing_identity_gate(tmp_path, druks_db):
     )
     with TestClient(app) as anonymous:
         assert anonymous.get("/api/dashboard/overview").status_code == 401
-        assert anonymous.get("/api/dashboard/work").status_code == 401
         assert anonymous.get("/api/dashboard/schedules").status_code == 401
 
 
@@ -166,6 +71,7 @@ async def test_artifact_title_comes_from_the_latest_call(client, druks_db, has_a
         input_gate="review",
         input_request={"presentation": "in_app", "controls": ["approve"]},
     )
+    run.input_requested_at = datetime(2026, 1, 2, tzinfo=UTC)
     first_call = await seed_call(druks_db, run=run, agent="summarize")
     druks_db.add(
         Artifact(
@@ -185,7 +91,9 @@ async def test_artifact_title_comes_from_the_latest_call(client, druks_db, has_a
         )
     await druks_db.flush()
 
-    [row] = current_work(client)["rows"]
+    response = client.get("/api/dashboard/overview")
+    assert response.status_code == 200
+    [row] = response.json()["needsYou"]["rows"]
     assert row["requestLabel"] is None
     assert row["artifactTitle"] == ("Reply with the confirmed date" if has_artifact else None)
 

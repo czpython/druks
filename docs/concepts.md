@@ -123,25 +123,39 @@ gate as the shared run API. An authenticated operator sees installation-wide
 run facts. `Run.account_id` records attribution and does not restrict this
 read.
 
-For each workflow kind and subject, the newest run counts. A newer successful
-run therefore removes an older failure from Problems. A run without a subject,
-including one whose DBOS record is missing, counts on its own until it is
-cancelled. The read returns the 200 most recently changed current runs with
-labels and artifact titles of at most 240 characters, and failure text of at
-most 2,048 characters. It never carries transcripts or complete review content.
+For each workflow kind and subject, the newest run counts. As a result, a newer
+successful run removes an older failure. A run without a subject counts on its
+own until an operator cancels it. This includes a run whose DBOS record is
+missing. The read groups current runs into three states. For each state, it
+returns an exact total and at most four preview runs.
 
-Needs you lists parked runs that carry a request the operator can act on,
-oldest request first. Other parked work is Waiting. Active work is running and
-queued runs. Problems is failed and orphaned runs. Scheduled work lists
-declared schedules with resolved cadence, pause state, and installation timezone.
-These are configuration facts, not proof that a future run will succeed.
+Labels and artifact titles are at most 240 characters long. Failure text is at
+most 2,048 characters long. The read never carries transcripts or complete
+review content.
 
-Review opens the owning app at the selected run and names the request round
-by its `parkedAt` timestamp. The owner reads the current gate. A different
-round shows a stale-link message, and an answer echoes the round it read, so
-the server rejects a stale one. An external request opens the app-declared
-HTTP or HTTPS address. The Dashboard does not infer access health from
-configuration.
+Needs you is parked runs that carry a request that the operator can answer. The
+oldest request comes first. Failed is runs in the failed or orphaned state.
+Running is runs in the running state. Queued runs and parked runs without an
+operator request are not current work.
+
+The read also carries the time of the last recorded run finish and the time of
+the last recorded failure. If no record exists, the time is null. An optional
+app filter limits every fact to one installed app.
+
+The Dashboard shows one state as its main content. If there are requests, it
+shows the requests. If there are no requests, it shows the failures. If there
+are no requests and no failures, it shows the running work. The other states
+appear in a compact status panel with their totals.
+
+The page has no full list. Declared schedules have their own page below Usage.
+
+Review opens the owning app at the selected run. The link names the request
+round by its `parkedAt` timestamp. The owner reads the current gate. If the
+current round is different, the owner shows a stale-link message. An answer
+echoes the round that it read, so the server rejects a stale answer.
+
+An external request opens the app-declared HTTP or HTTPS address. The Dashboard
+does not infer access health from configuration.
 
 ## Waiting for people and systems
 
