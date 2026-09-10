@@ -242,15 +242,43 @@ Two rules:
 
 ### Announcing domain events
 
-If another component must react to a body action, announce the action:
+Announce a domain fact from the workflow body:
 
 ```python
 await self.announce("pr.opened", pr_number=delivery.pr_number, branch=delivery.branch)
 ```
 
-The platform routes it to subscribers that filter on your workflow and subject.
-The publication is a durable checkpoint. Recovery does not publish it again.
-Announce from the body, not inside a `@step`.
+Druks records the event in one checkpoint. It notifies subscribers in a second
+checkpoint. A subscriber retry cannot insert the completed event again. Recovery
+reuses completed checkpoints. An interrupted operation can run again, so
+subscribers must remain idempotent. Call this method outside a `@step`.
+
+A domain method announces through its subject:
+
+```python
+from druks.db import StoredSubject
+from sqlalchemy.orm import Mapped
+
+
+class Report(StoredSubject):
+    __tablename__ = "night_watch_reports"
+
+    published_url: Mapped[str | None]
+
+    async def publish(self, url: str) -> None:
+        if self.published_url != url:
+            self.published_url = url
+            await self.announce("report.published", url=url)
+```
+
+`Subject` and `StoredSubject` both supply `announce()`. Druks gets the owner from
+the registered app package. The call records the subject identity, its current
+label, and the supplied facts. It then notifies subscribers in the same
+transaction as the domain change. A rollback removes the change and its event.
+The app must prevent duplicate domain changes on webhook redelivery.
+
+Authors supply no app ID, run ID, timestamp, or session. Frontend code owns the
+wording.
 
 ### Schedules and settings
 

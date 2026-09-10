@@ -1,12 +1,15 @@
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from druks.database import db_session
-from druks.models import Base
+from druks.models import Base, StoredSubject
+
+if TYPE_CHECKING:
+    from druks.durable.datastructures import Subject
 
 
 class Event(Base):
@@ -55,3 +58,27 @@ class Event(Base):
             )
         )
         await db_session().flush()
+
+    @classmethod
+    async def announce(
+        cls, subject: "Subject | StoredSubject", topic: str, facts: dict[str, Any]
+    ) -> None:
+        """Record a subject's domain fact and notify subscribers, in the current
+        transaction. A failing subscriber rolls the domain change back with it."""
+        # The apps package, the signals bus, and the durable engine are built on this log.
+        from druks.apps.loader import resolve_workflow_app
+        from druks.durable.exceptions import WorkflowError
+        from druks.signals import publish
+
+        try:
+            app = resolve_workflow_app(type(subject).__module__)
+        except LookupError:
+            raise WorkflowError(
+                f"{type(subject).__module__} declares subject {type(subject).__name__} outside "
+                "every registered app package. Call register_workflow_package() for the "
+                "package before importing it."
+            ) from None
+        await cls.emit(
+            type=topic, subject=subject.identity, label=subject.label, payload=facts, app=app
+        )
+        await publish(topic, subject=subject.identity, **facts)
