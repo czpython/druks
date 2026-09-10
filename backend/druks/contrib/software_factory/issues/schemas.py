@@ -36,26 +36,26 @@ class TicketDetail(BaseModel):
     status: Status
     priority: Priority
     repo_id: int
-    assignee_id: str | None
+    owner_id: str | None
     comments: list[CommentRead]
 
 
 class TicketEdit(BaseModel):
     """A partial edit — what a caller leaves out stays as it was. Status is not
     here: moving a ticket is ``set_status``'s job, the one door that publishes
-    ``ticket.transitioned``. A null ``assignee_id`` is the one null that says
-    something: it unassigns."""
+    ``ticket.transitioned``. A null ``owner_id`` is the one null that says
+    something: it clears the owner."""
 
     title: str | None = None
     description: str | None = None
     priority: Priority | None = None
-    assignee_id: str | None = None
+    owner_id: str | None = None
     repo_id: int | None = None
 
-    @field_validator("assignee_id", mode="before")
+    @field_validator("owner_id", mode="before")
     @classmethod
     def _blank_is_nobody(cls, value: str | None) -> str | None:
-        # An assignee select with nobody picked submits "", and the shell sends
-        # every field the form shows. Blank means unassign, not an account id to
-        # look up — the field still counts as given, so it still unassigns.
+        # An owner select with nobody picked submits "", and the shell sends
+        # every field the form shows. Blank means unowned, not an account id to
+        # look up — the field still counts as given, so it still clears.
         return value or None
