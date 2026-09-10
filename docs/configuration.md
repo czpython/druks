@@ -109,7 +109,8 @@ overrides. The same fields remain in app settings.
 
 The page shows the installation timezone. Account timezone preferences do not
 change schedule timing. A failed save keeps your edits. A read refresh also
-preserves unsaved edits. The `?app=` filter selects one installed app.
+preserves unsaved edits. If you leave the page with unsaved edits, Druks asks
+first. The `?app=` filter selects one installed app.
 
 The API exposes installation settings at `GET/PATCH /api/settings` and your
 preferences at `GET/PATCH /api/settings/personal`. The personal route uses the

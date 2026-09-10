@@ -281,8 +281,9 @@ class Engage(Workflow):
 ```
 
 A scheduled `dispatch()` fires with no arguments, so it must be nullary. Druks
-evaluates cron expressions in the installation timezone. The dashboard can retune or
-disable a declared schedule but cannot invent a new workflow schedule.
+evaluates cron expressions in the installation timezone. An operator can change
+the cadence or pause a declared schedule on the Schedules page or in the app
+settings. Druks cannot add a schedule to a workflow that declares none.
 
 ### Background tasks
 
@@ -311,8 +312,9 @@ annotated. `enqueue()` validates them and stores JSON. A task keeps no run row
 and never reaches the timeline.
 
 It has no subject, gate, or operator settings.
-It cannot make agent calls. `every=` uses a fixed UTC cadence that the code
-owns. An operator can retune the `every=` value of a workflow.
+It cannot make agent calls. `every=` on a task is a fixed UTC cadence that the
+code owns. An operator can change only a workflow schedule, on the Schedules
+page or in the app settings.
 `retries=` sets retries after the first attempt, both here and on `@step`.
 
 A workflow can declare its own operator settings:

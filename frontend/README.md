@@ -69,9 +69,11 @@ existing workflow overrides.
 Schedules at `/schedules` groups declared workflows by app. The `app` query
 parameter filters the list. Operators change cadence and pause state here with
 the same controls as app settings. Each schedule saves through
-`PATCH /api/settings/apps`. Use defaults removes both overrides. A failed save
-keeps the draft. Polling and focus refresh preserve unsaved edits. The page shows
-the installation timezone beside the saved cadence.
+`PATCH /api/settings/apps`. Use defaults removes both overrides.
+
+A failed save keeps the draft. Polling and focus refresh preserve unsaved edits.
+If you leave the page with unsaved edits, the shell asks first, as Settings
+does. The page shows the installation timezone beside the saved cadence.
 
 Normal interface text uses IBM Plex Sans at 15 px. Technical values use
 IBM Plex Mono. Phone inputs use at least 16 px.
