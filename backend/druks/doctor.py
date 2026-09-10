@@ -479,6 +479,20 @@ def check_capability_modules(settings: Settings) -> CheckResult:
     )
 
 
+def check_chat(settings: Settings) -> CheckResult:
+    """Chat ships in this distribution. A missing roster entry is a
+    packaging fault, not an optional install."""
+    if any(app.name == "chat" for app in iter_apps()):
+        return CheckResult(name="chat", ok=True, detail="bundled")
+    return CheckResult(
+        name="chat",
+        ok=False,
+        detail=(
+            "chat is missing from the app roster — it ships with Druks, not as an optional package."
+        ),
+    )
+
+
 async def check_apps(settings: Settings) -> list[CheckResult]:
     """Each installed app's settings and own checks, namespaced under it. A
     raise is contained under the app's name."""
@@ -548,6 +562,7 @@ CHECKS = (
     check_redis,
     check_drukbox,
     check_capability_modules,
+    check_chat,
     check_apps,
     check_declared_sandboxes,
 )

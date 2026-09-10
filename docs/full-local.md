@@ -161,6 +161,9 @@ still required for pull requests. See
 The run appears on the subject page and in Activity. Agent-call pages stream
 transcript and artifact data.
 
+Open **Chat** to start an operator conversation on this appliance. See
+[Chat](chat.md).
+
 If you develop a different app, install that distribution into a
 development Druks environment and invoke its documented trigger or
 `Workflow.start()` path. See [writing an app](writing-an-app.md).

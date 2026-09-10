@@ -70,3 +70,12 @@ Three details matter when an agent uses the MCP endpoint:
   and `RUN_NOT_ACTIVE` are stable match values. App tools use the API shape
   `{"error", "detail"}` for refusals. Shape errors contain
   `VALIDATION_ERROR` detail.
+
+## Chat uses the same catalog inward
+
+Dashboard [Chat](chat.md) is not a replacement for this external MCP connection.
+A Talk sandbox calls the same `/mcp` tools as the signed-in operator. Mint a
+personal access token when Claude Code or Codex should talk *into* Druks from
+your laptop. Chat does not use that token. It mints a call-scoped credential
+that dies with the agent call.
+

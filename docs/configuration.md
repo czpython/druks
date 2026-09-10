@@ -153,6 +153,10 @@ other addresses free, set `DRUKS_WEBHOOK_BIND_HOST` in `[env]` to the public
 address. Caddy then serves only that address. To keep IPv6, list the IPv4
 and the IPv6 addresses.
 
+A Docker sandbox cannot use the host loopback. Druks rewrites a loopback
+`urls.endpoint` to `host.docker.internal` for that hop. An exe VM uses
+`urls.endpoint` as given. See [Chat](chat.md).
+
 `urls.endpoint` and `urls.webhook_host` are different. The first is where an
 operator's browser reaches Druks. The second is the public ingress host for
 webhook senders. They can share a hostname on exe.dev.
