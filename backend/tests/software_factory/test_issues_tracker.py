@@ -1,5 +1,6 @@
 import druks.contrib.software_factory.subscribers  # noqa: F401
 import pytest
+from conftest import connect_service
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import ReviewWork
 from druks.contrib.software_factory.issues.enums import Status
@@ -9,7 +10,6 @@ from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.ticketing.issues import IssuesTracker
 from druks.contrib.software_factory.workflows import Build
 from druks.core.apis.exceptions import UnknownTicketError
-from druks.services.models import ServiceIdentity
 
 from software_factory.factories import make_test_work_item, seed_build_run
 
@@ -30,7 +30,7 @@ def _pin_software_factory_settings(monkeypatch, **values):
 
 
 async def _connect_github() -> None:
-    await ServiceIdentity.connect(
+    await connect_service(
         "github",
         identity={"app_id": "1", "slug": "druks-operator"},
         secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},
