@@ -41,6 +41,7 @@ dependencies = [
     "cryptography>=48.0.1",
     "fastmcp>=4.0.2,<5",
     "sqlalchemy-encrypted-field==1.0.2",
+    "jsonpointer>=3.1.1",
 ]
 
 [project.urls]

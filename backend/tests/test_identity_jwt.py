@@ -45,7 +45,7 @@ def _token(key=_PRIVATE_KEY, **claim_overrides) -> str:
     return pyjwt.encode(claims, key, algorithm="RS256", headers={"kid": KID})
 
 
-def _jwt_client(tmp_path: Path) -> TestClient:
+def _jwt_client(tmp_path: Path, *, identity_claim: str = "/email") -> TestClient:
     app = configure_app_for_test(
         settings=make_settings(
             tmp_path,
@@ -55,6 +55,7 @@ def _jwt_client(tmp_path: Path) -> TestClient:
                 "jwks_url": "https://edge.example.com/jwks.json",
                 "jwt_issuer": ISSUER,
                 "jwt_audience": AUDIENCE,
+                "jwt_identity_claim": identity_claim,
             },
         ),
         authenticated=False,
@@ -74,6 +75,46 @@ async def test_a_valid_assertion_open_enrolls_its_subject(tmp_path, druks_db):
 
 
 @pytest.mark.parametrize(
+    ("pointer", "claims"),
+    [
+        ("/email", {"email": "  op@example.com  "}),
+        ("/traits/email", {"traits": {"email": "op@example.com"}}),
+        ("/people/1/email", {"people": [{}, {"email": "op@example.com"}]}),
+    ],
+)
+async def test_identity_pointer_selects_the_account(tmp_path, druks_db, pointer, claims):
+    token = _token(**{"email": "fallback@example.com", **claims})
+
+    with _jwt_client(tmp_path, identity_claim=pointer) as client:
+        response = client.get("/api/auth/me", headers={HEADER: token})
+
+    assert response.status_code == 200
+    assert response.json()["account"]["username"] == "op@example.com"
+    assert [account.username for account in await Account.list_all()] == ["op@example.com"]
+
+
+@pytest.mark.parametrize(
+    ("pointer", "claims"),
+    [
+        ("/email/0", {"email": "op@example.com"}),
+        ("/people/1/email", {"people": [{"email": "op@example.com"}]}),
+    ],
+)
+async def test_an_unresolvable_pointer_rejects_without_enrolling(
+    tmp_path, druks_db, pointer, claims
+):
+    token = _token(**claims)
+
+    with _jwt_client(tmp_path, identity_claim=pointer) as client:
+        response = client.get("/api/auth/me", headers={HEADER: token})
+
+    assert response.status_code == 401
+    assert "op@example.com" not in response.json()["detail"]
+    assert token.split(".")[1] not in response.json()["detail"]
+    assert not await Account.list_all()
+
+
+@pytest.mark.parametrize(
     "token",
     [
         _token(key=_FOREIGN_KEY),  # signature it can't verify
@@ -83,6 +124,8 @@ async def test_a_valid_assertion_open_enrolls_its_subject(tmp_path, druks_db):
         _token(aud="not-druks"),
         _token(email=None),  # missing identity claim
         _token(email={"nested": "never"}),  # non-string identity claim
+        _token(email=["op@example.com"]),  # array identity claim
+        _token(email="  "),  # blank identity claim
         "not.a.jwt",
     ],
 )

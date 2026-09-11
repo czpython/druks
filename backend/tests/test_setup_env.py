@@ -11,7 +11,7 @@ DROPPED_RENDER_KEYS = {
     "DRUKS_AUTH_JWKS_URL": ("identity.jwks_url", "https://edge.example/jwks"),
     "DRUKS_AUTH_JWT_ISSUER": ("identity.jwt_issuer", "https://edge.example"),
     "DRUKS_AUTH_JWT_AUDIENCE": ("identity.jwt_audience", "druks"),
-    "DRUKS_AUTH_JWT_IDENTITY_CLAIM": ("identity.jwt_identity_claim", "sub"),
+    "DRUKS_AUTH_JWT_IDENTITY_CLAIM": ("identity.jwt_identity_claim", "/sub"),
     "DRUKS_ENDPOINT": ("urls.endpoint", "https://druks.example"),
     "DRUKS_SECRETS_KEY": ("secrets.secrets_key", "secrets-key"),
     "DRUKS_SANDBOX_SERVICE_URL": ("sandbox.service_url", "http://sandbox:8000"),
@@ -46,6 +46,7 @@ def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
 
     values = read_env(env_path)
     config = _read_toml(tmp_path / "druks.toml")
+    assert config["identity"]["jwt_identity_claim"] == "/email"
     assert values["DEFAULT_HOST_PROVIDER"] == "exe"
     assert values["TAILSCALE_ENABLED"] == "true"
     assert values["EXE_API_URL"] == "https://exe.dev"

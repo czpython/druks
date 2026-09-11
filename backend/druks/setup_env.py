@@ -175,7 +175,7 @@ header = ""
 jwks_url = ""
 jwt_issuer = ""
 jwt_audience = ""
-jwt_identity_claim = "email"
+jwt_identity_claim = "/email"
 
 # Public dashboard and webhook ingress addresses.
 [urls]
