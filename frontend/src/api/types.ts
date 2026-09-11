@@ -608,8 +608,18 @@ export interface ServiceField {
 export interface Connection {
   id: string
   provider: string
-  scopes: string[]
-  identity: Record<string, string>
+  scopes: string[] | null
+  identity: Record<string, unknown> & {
+    subject?: string
+    authority?: string
+    source?: string
+    email?: string
+    email_verified?: boolean
+    name?: string
+    username?: string
+    subscription?: string
+  }
+  identityStatus: 'resolved' | 'unavailable' | 'failed' | null
   connectedAt: string
   revokedAt: string | null
   revokedReason: string

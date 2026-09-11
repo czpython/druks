@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api/client'
 import type { Connection, Provider, UsageProviderSummary } from '../api/types'
-import { ConnectionsPane, ProvidersPane } from './SettingsPanes'
+import { ConnectionsPane, McpServersPane, ProvidersPane } from './SettingsPanes'
 
 const provider: Provider = {
   id: 'anthropic',
@@ -138,6 +138,7 @@ describe('Account grant groups', () => {
     provider: 'gmail',
     scopes: ['read'],
     identity: { email: 'mailbox@example.invalid' },
+    identityStatus: null,
     connectedAt: '2026-09-05T08:00:00Z',
     revokedAt: null,
     revokedReason: '',
@@ -172,6 +173,75 @@ describe('Account grant groups', () => {
       </QueryClientProvider>,
     )
   }
+
+  it.each([
+    ['unavailable', null, 'Account identity unavailable', 'Permissions not reported'],
+    ['failed', [], 'Account identity lookup failed', 'No permissions granted'],
+    ['resolved', ['read'], 'provider-user-1', 'read'],
+  ] as const)('shows the %s identity and scope outcome', async (status, scopes, label, permissions) => {
+    vi.spyOn(api, 'listConnections').mockResolvedValue([
+      {
+        ...account,
+        provider: 'jira',
+        identity: status === 'resolved' ? { subject: 'provider-user-1' } : {},
+        identityStatus: status,
+        scopes: scopes === null ? null : [...scopes],
+      },
+    ])
+    renderAccounts()
+    const current = within(screen.getByRole('region', { name: 'Current accounts' }))
+    expect(await current.findByText(label)).toBeTruthy()
+    expect(current.getByText(permissions)).toBeTruthy()
+    expect(current.getByRole('button', { name: 'Disconnect' })).toBeTruthy()
+  })
+
+  it('replaces the displayed identity when MCP consent finishes on the Accounts page', async () => {
+    const connections = vi.spyOn(api, 'listConnections').mockResolvedValue([account])
+    renderAccounts()
+    await screen.findByText('mailbox@example.invalid')
+    connections.mockResolvedValue([
+      { ...account, identity: {}, identityStatus: 'failed', scopes: null },
+    ])
+    const callback = new BroadcastChannel('druks-mcp-connect')
+    try {
+      act(() => callback.postMessage('jira'))
+      await screen.findByText('Account identity lookup failed')
+      expect(screen.queryByText('mailbox@example.invalid')).toBeNull()
+      expect(screen.getByText('Permissions not reported')).toBeTruthy()
+    } finally {
+      callback.close()
+    }
+  })
+
+  it('refreshes cached account facts after consent finishes on the MCP page', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(['connections'], [account])
+    const servers = vi.spyOn(api, 'mcpServers').mockResolvedValue([])
+    vi.spyOn(api, 'services').mockResolvedValue([])
+    vi.spyOn(api, 'listConnections').mockResolvedValue([
+      { ...account, identity: { subject: 'new-user' }, identityStatus: 'resolved' },
+    ])
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <McpServersPane />
+      </QueryClientProvider>,
+    )
+    await screen.findByText('No MCP servers installed.')
+    const callback = new BroadcastChannel('druks-mcp-connect')
+    try {
+      act(() => callback.postMessage('jira'))
+      await waitFor(() => expect(servers).toHaveBeenCalledTimes(2))
+      view.rerender(
+        <QueryClientProvider client={queryClient}>
+          <ConnectionsPane />
+        </QueryClientProvider>,
+      )
+      expect(await screen.findByText('new-user')).toBeTruthy()
+      expect(screen.queryByText('mailbox@example.invalid')).toBeNull()
+    } finally {
+      callback.close()
+    }
+  })
 
   it('keeps live grants and revoked history separate and names the confirmed account', async () => {
     let accounts = [

@@ -47,6 +47,8 @@ class FakeAuthServer:
         self.issuer = _AUTH_BASE
         self.code_challenge_methods = ["S256"]
         self.userinfo_endpoint = f"{_AUTH_BASE}/userinfo"
+        self.userinfo_response = {"sub": "user-1", "email": "op@linear.test"}
+        self.userinfo_status = 200
         self.token_status = 200
         self.token_malformed = False
         self.token_response = {
@@ -81,7 +83,7 @@ class FakeAuthServer:
                 metadata["registration_endpoint"] = f"{_AUTH_BASE}/register"
             return httpx.Response(200, json=metadata)
         if path == "/userinfo":
-            return httpx.Response(200, json={"email": "op@linear.test"})
+            return httpx.Response(self.userinfo_status, json=self.userinfo_response)
         if path == "/register":
             return httpx.Response(201, json={"client_id": "client-123"})
         if path == "/token":
@@ -196,6 +198,8 @@ async def test_begin_connect_builds_consent_url_and_stashes_pkce_state(auth_serv
     assert pending["name"] == _NAME
     assert pending["account_id"] is None
     assert pending["identity_mode"] == IdentityMode.SHARED
+    assert params["nonce"] == pending["nonce"]
+    assert pending["issuer"] == _AUTH_BASE
 
 
 async def test_begin_connect_without_registration_endpoint_fails_loudly(auth_server):
@@ -304,7 +308,14 @@ async def test_complete_connect_exchanges_code_and_stores_the_grant(auth_server,
     assert name == _NAME
     grant = await oauth.get_connection(_NAME, None)
     assert grant.secrets["refresh_token"] == "rt-1"
-    assert grant.identity == {"email": "op@linear.test"}
+    assert grant.identity == {
+        "authority": _AUTH_BASE,
+        "subject": "user-1",
+        "source": "userinfo",
+        "email": "op@linear.test",
+    }
+    assert grant.identity_status == "resolved"
+    assert grant.scopes == ["read"]
     assert grant.secrets["client_id"] == "client-123"
     assert grant.secrets["token_endpoint"] == f"{_AUTH_BASE}/token"
     exchange = auth_server.token_requests[0]
@@ -320,6 +331,78 @@ async def test_complete_connect_exchanges_code_and_stores_the_grant(auth_server,
     refresh = auth_server.token_requests[1]
     assert refresh["grant_type"] == "refresh_token"
     assert refresh["resource"] == _SERVER_URL
+
+
+@pytest.mark.parametrize(
+    ("token_scopes", "scopes"),
+    [
+        ({}, None),
+        ({"scope": ""}, []),
+        ({"scope": ["read"]}, None),
+    ],
+)
+async def test_connect_records_reported_scopes_only(auth_server, druks_db, token_scopes, scopes):
+    auth_server.token_response.pop("scope")
+    auth_server.token_response.update(token_scopes)
+    url = await oauth.begin_connect(
+        _NAME, _SERVER_URL, _ENDPOINT, account_id=None, identity_mode=IdentityMode.SHARED
+    )
+    await oauth.complete_connect(state=dict(parse_qsl(urlparse(url).query))["state"], code="code")
+    grant = await oauth.get_connection(_NAME, None)
+    assert grant.scopes == scopes
+
+
+@pytest.mark.parametrize("status", ["failed", "unavailable"])
+async def test_reconnect_replaces_stale_identity_even_when_lookup_fails(
+    auth_server, druks_db, status
+):
+    account = await Account.get_or_create("owner@example.test")
+    url = await oauth.begin_connect(
+        _NAME, _SERVER_URL, _ENDPOINT, account_id=account.id, identity_mode=IdentityMode.PER_USER
+    )
+    await oauth.complete_connect(state=dict(parse_qsl(urlparse(url).query))["state"], code="first")
+    first = await oauth.get_connection(_NAME, account.id)
+    assert first.identity["subject"] == "user-1"
+    auth_server.token_response["refresh_token"] = "rt-new"
+    auth_server.token_response.pop("scope")
+    if status == "failed":
+        auth_server.userinfo_status = 503
+    else:
+        auth_server.userinfo_endpoint = ""
+    url = await oauth.begin_connect(
+        _NAME, _SERVER_URL, _ENDPOINT, account_id=account.id, identity_mode=IdentityMode.PER_USER
+    )
+    await oauth.complete_connect(state=dict(parse_qsl(urlparse(url).query))["state"], code="second")
+    grant = await oauth.get_connection(_NAME, account.id)
+    assert grant.id == first.id
+    assert grant.account_id == account.id
+    assert grant.identity == {}
+    assert grant.identity_status == status
+    assert grant.scopes is None
+    assert grant.secrets["refresh_token"] == "rt-new"
+    assert (await oauth.get_access_token(_NAME, account.id))[0] == "at-1"
+
+
+async def test_connection_api_exposes_identity_facts_without_tokens(
+    auth_server, druks_db, tmp_path, registry_state
+):
+    _register_oauth_server()
+    settings = make_settings(tmp_path, urls={"endpoint": _ENDPOINT})
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        start = client.post(f"/api/mcp-servers/{_NAME}/connect", json={"identity_mode": "per_user"})
+        state = dict(parse_qsl(urlparse(start.json()["authorizationUrl"]).query))["state"]
+        callback = client.get(
+            "/api/mcp-servers/oauth/callback", params={"state": state, "code": "code"}
+        )
+        assert callback.status_code == 200
+        response = client.get("/api/oauth/connections")
+    assert response.status_code == 200
+    grant = next(item for item in response.json() if item["provider"] == _NAME)
+    assert grant["identityStatus"] == "resolved"
+    assert grant["identity"]["subject"] == "user-1"
+    assert grant["scopes"] == ["read"]
+    for secret in ("access_token", "refresh_token", "client_secret", "at-1", "rt-1", "client-123"):
+        assert secret not in response.text
 
     # The state is single-use.
     with pytest.raises(OauthConnectError, match="expired state"):

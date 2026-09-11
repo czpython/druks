@@ -607,6 +607,35 @@ sandbox was created. A pasted token reaches a running sandbox within five
 minutes. A server enabled after that gets no entry in a running sandbox. The
 API never returns a token.
 
+### OAuth grant identity
+
+At connect and reconnect, Druks records the provider account behind an OAuth
+grant. It tries these sources in order:
+
+1. The ID token in the token response. Druks checks its issuer, audience,
+   time claims, and nonce. The token comes directly from the token endpoint
+   over TLS, so Druks does not check its signature.
+2. The userinfo endpoint, if it is on the identity issuer's origin. Druks
+   does not follow redirects.
+
+Druks stores the issuer, the `sub` claim, the source, and the name and email
+if they are present. It stores `email_verified` only if the provider sends a
+Boolean. `identity_status` is `resolved`, `unavailable` if the provider has
+no source, or `failed`. A failed lookup does not change the connection. The
+log names the check that failed.
+
+The OpenID metadata comes from the OAuth issuer. It can also come from the
+OpenID provider at the origin root, if that provider has the same
+authorization and token endpoints. If the provider supports `openid`, Druks
+requests the MCP resource's scopes with `openid`, `email`, and `profile`, and
+registers its client with the same scopes. An existing grant gets an identity
+at its next reconnect.
+
+Druks stores the `scope` field of the token response as the granted scopes.
+If the field is missing, the provider granted the requested scopes. If the
+field is missing and Druks requested no scopes, the value is `null`. These
+facts do not change account ownership, login, or run attribution.
+
 ## Skills
 
 The dashboard installs skill collections from GitHub repositories.
