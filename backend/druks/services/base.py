@@ -33,7 +33,7 @@ class Connection:
         return self.row.id
 
     @property
-    def scopes(self) -> list[str]:
+    def scopes(self) -> list[str] | None:
         return self.row.scopes
 
     @property
@@ -41,7 +41,7 @@ class Connection:
         return self.row.identity
 
     @property
-    def account_id(self) -> str:
+    def account_id(self) -> str | None:
         return self.row.account_id
 
     @property

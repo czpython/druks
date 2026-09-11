@@ -71,6 +71,10 @@ class OauthConnectError(McpServerError):
         self.reason = reason
 
 
+class IdentityLookupError(McpServerError):
+    """The provider returned no usable identity for the grant."""
+
+
 class UnresolvedGrantAccountError(McpServerError):
     def __init__(self, identity_mode: str | None, account_id: str | None):
         if identity_mode == IdentityMode.PER_USER:

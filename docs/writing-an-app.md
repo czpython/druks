@@ -1137,7 +1137,8 @@ for connection in await NightWatch.acme.list_for_account(account_id):
 subscriber, the platform's argument in `list_summaries`. `await NightWatch.acme.get(connection_id)` returns one connection
 when your own row stored its id. Each connection carries `id`, `scopes`, `identity` — the
 provider's facts for the sign-in — `account_id` — the druks account that
-signed it in — and `connected_at`. The handle serves
+signed it in — and `connected_at`. The `scopes` value is a list, or `None`
+when the provider did not report scopes. The handle serves
 live connections only. A revoked connection drops out of `get` and
 `list_for_account`, but its platform row survives with its owner and
 identity. Your rows never need tombstone copies of either.

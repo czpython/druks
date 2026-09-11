@@ -6,3 +6,9 @@ class SecretKind(StrEnum):
     OAUTH = "oauth"
     APP_KEY = "app_key"
     SUBSCRIPTION = "subscription"
+
+
+class IdentityStatus(StrEnum):
+    RESOLVED = "resolved"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"

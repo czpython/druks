@@ -192,8 +192,9 @@ class OauthClient:
                 self.provider, "the connection is revoked; sign in again to restore it"
             )
         requested = tuple(sorted(scopes))
-        if requested and not set(requested) <= set(connection.scopes):
-            missing = ", ".join(sorted(set(requested) - set(connection.scopes)))
+        granted = set(connection.scopes or [])
+        if requested and not set(requested) <= granted:
+            missing = ", ".join(sorted(set(requested) - granted))
             raise OauthRefreshError(
                 self.provider, f"the connection does not grant scope(s) {missing}"
             )
