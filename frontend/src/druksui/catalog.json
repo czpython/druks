@@ -223,6 +223,7 @@
     },
     {
       "block": "columns",
+      "layout": "sidebar",
       "blocks": [
         {
           "block": "text",
@@ -259,6 +260,18 @@
     {
       "block": "cards",
       "title": "Recent",
+      "layout": "stack",
+      "drop": {
+        "block": "action",
+        "label": "Move here",
+        "operation": "write_note",
+        "arguments": {},
+        "fields": [],
+        "tone": "default",
+        "confirm": "",
+        "refresh": "page",
+        "link": null
+      },
       "cards": [
         {
           "block": "card",
@@ -270,7 +283,18 @@
           ],
           "title": "Note 7",
           "description": "Fan noise on rack 3.",
-          "controls": []
+          "controls": [],
+          "link": {
+            "block": "link",
+            "label": "Note 7",
+            "page": "notes",
+            "arguments": {},
+            "url": "",
+            "subject": null
+          },
+          "drag": {
+            "note_id": "7"
+          }
         }
       ],
       "empty": {
@@ -352,7 +376,8 @@
           "options": [
             {
               "value": "low",
-              "label": "Low"
+              "label": "Low",
+              "group": "Rack"
             }
           ],
           "value": "",

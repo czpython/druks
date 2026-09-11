@@ -1,88 +1,45 @@
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi import status as http_status
-from sqlalchemy import select
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
-from druks.contrib.software_factory.exceptions import MissingPrefix, RepoNotFound
 from druks.contrib.software_factory.issues.enums import Priority, Status
-from druks.contrib.software_factory.issues.models import Ticket
 from druks.contrib.software_factory.issues.schemas import CommentRead, TicketDetail, TicketEdit
-from druks.contrib.software_factory.models import ProjectRepo
+from druks.contrib.software_factory.models import Comment, ProjectRepo, Ticket
 from druks.db import Base, db_session
 
-# The operations own the facts: pages call these doors, and so do the dashboard
-# and the sandbox — the same doors, joined to druks ``/mcp`` as
-# ``software_factory_*``. Reads are not doors — pages read the models directly —
-# with one exception: a caller that cannot open the page still has to read the
-# ticket it is answering.
-#
-# ``status`` is a field on two of these doors, so the HTTP codes come in under
-# their own name.
 router = APIRouter()
 
 
 def required_text(value: str, field: str) -> str:
-    """Trimmed, or a refusal a form can show — whitespace is not content."""
-    text = value.strip()
-    if not text:
-        raise HTTPException(
-            http_status.HTTP_422_UNPROCESSABLE_CONTENT, f"{field} must not be blank"
-        )
-    return text
+    if text := value.strip():
+        return text
+    raise HTTPException(http_status.HTTP_422_UNPROCESSABLE_CONTENT, f"{field} must not be blank")
 
 
 async def require_ticket(identifier: str) -> Ticket:
-    ticket = await Ticket.get_for_identifier(identifier)
-    if not ticket:
-        raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no ticket {identifier!r}")
-    return ticket
+    if ticket := await Ticket.get_for_identifier(identifier):
+        return ticket
+    raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no ticket {identifier!r}")
+
+
+async def require_repo(repo_id: int) -> ProjectRepo:
+    if repo := await ProjectRepo.get(repo_id):
+        return repo
+    raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no repo {repo_id}")
 
 
 async def require_owner(owner_id: str) -> None:
-    """A ticket is owned by a real account or by nobody. The owner FK is
-    RESTRICT, so a bad id would surface as a 500 IntegrityError on write —
-    check it here instead, where the answer is a 404 the form can show."""
-    if not await Account.get(owner_id):
-        raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no account {owner_id!r}")
-
-
-async def ticket_detail(ticket: Ticket) -> TicketDetail:
-    """The ticket and its thread — ``Comment.list_for_ticket`` reads oldest
-    first, the order a conversation happened in."""
-    comments = await ticket.list_comments()
-    # One SELECT for the whole thread's authors rather than one per line:
-    # Account has no batch door of its own, so the read is spelled here.
-    # Never a 5xx on a gone account either — an id the query answers for is
-    # named, and one it does not stays out of the map, so that line reads
-    # unattributed.
-    author_ids = {comment.author_id for comment in comments}
-    authors: dict[str, str] = {}
-    if author_ids:
-        rows = await db_session().scalars(select(Account).where(Account.id.in_(author_ids)))
-        authors = {account.id: account.username for account in rows}
-    return TicketDetail(
-        identifier=ticket.identifier,
-        title=ticket.title,
-        description=ticket.description,
-        status=Status(ticket.status),
-        priority=Priority(ticket.priority),
-        repo_id=ticket.repo_id,
-        owner_id=ticket.owner_id,
-        comments=[
-            CommentRead(
-                id=comment.id,
-                author=authors.get(comment.author_id),
-                body=comment.body,
-                created_at=comment.created_at,
-            )
-            for comment in comments
-        ],
-    )
+    # The FK is RESTRICT, so a bad id would be a 500 on write.
+    if await Account.get(owner_id):
+        return
+    raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no account {owner_id!r}")
 
 
 @router.post(
     "/tickets",
+    response_model=TicketDetail,
+    response_model_by_alias=True,
     status_code=http_status.HTTP_201_CREATED,
     operation_id="create_ticket",
     tags=["agent"],
@@ -97,89 +54,72 @@ async def create_ticket(
     priority: Priority = Body(Priority.NONE, embed=True),
     owner_id: str | None = Body(None, embed=True),
     account: Account = Depends(current_account),
-) -> TicketDetail:
-    """Write a ticket down. It takes the next number in its repo's project's
-    sequence. Creating in Ready for Agent is a transition into the trigger, so a
-    build can open. Creating in Backlog publishes nothing."""
+) -> Ticket:
+    """Create a ticket; creating it in Ready for Agent opens a build."""
     title = required_text(title, "title")
-    # An owner select with nobody picked submits "", and the shell sends
-    # every field the form shows. Blank is nobody, not an account id to look up.
+    # The owner select submits "" for nobody.
     owner_id = owner_id or None
-    if owner_id is not None:
+    if owner_id:
         await require_owner(owner_id)
-    try:
-        ticket = await Ticket.create(
-            repo_id=repo_id,
-            title=title,
-            description=description,
-            status=status,
-            priority=priority,
-            owner_id=owner_id,
-            creator_id=account.id,
-        )
-    except RepoNotFound as error:
-        raise HTTPException(http_status.HTTP_404_NOT_FOUND, str(error)) from error
-    except MissingPrefix as error:
-        raise HTTPException(http_status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
-    return await ticket_detail(ticket)
+    return await Ticket.create(
+        repo=await require_repo(repo_id),
+        title=title,
+        description=description,
+        status=status,
+        priority=priority,
+        owner_id=owner_id,
+        creator_id=account.id,
+    )
 
 
-@router.patch("/tickets/{identifier}", operation_id="update_ticket", tags=["agent"])
-async def update_ticket(identifier: str, edit: TicketEdit) -> TicketDetail:
-    """Edit what a ticket says — title, description, priority, owner, repo.
-    What you leave out stays as it was, and a title cannot be edited away. Status
-    is not here: a title edit is not a state transition, and ``set_status`` is the
-    one door that moves a ticket. Moving the repo does not remint the identifier."""
+@router.patch(
+    "/tickets/{identifier}",
+    response_model=TicketDetail,
+    response_model_by_alias=True,
+    operation_id="update_ticket",
+    tags=["agent"],
+)
+async def update_ticket(identifier: str, edit: TicketEdit) -> Ticket:
+    """Edit a ticket's title, description, priority, owner, or repo."""
     ticket = await require_ticket(identifier)
-    if edit.owner_id is not None:
-        await require_owner(edit.owner_id)
-    if edit.repo_id is not None:
-        repo = await ProjectRepo.get(edit.repo_id)
-        if not repo:
-            raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no repo {edit.repo_id}")
-        if not repo.project.prefix:
-            raise HTTPException(
-                http_status.HTTP_422_UNPROCESSABLE_CONTENT,
-                str(MissingPrefix(repo.project.name)),
-            )
-
+    # The owner select submits "" for nobody.
+    owner_id = edit.owner_id or None
+    if owner_id:
+        await require_owner(owner_id)
+    if edit.repo_id:
+        ticket.repo = await require_repo(edit.repo_id)
     if edit.title is not None:
         ticket.title = required_text(edit.title, "title")
     if edit.description is not None:
         ticket.description = edit.description
-    if edit.title is not None or edit.description is not None:
-        # Ticket carries setters for priority and owner but not for its
-        # content; stamp and flush the way those setters do.
-        ticket.updated_at = Base.utc_now()
-        await db_session().flush()
-    if edit.priority is not None:
-        await ticket.set_priority(edit.priority)
-    # A null owner_id means "unowned", so this field reads the caller's
-    # set of fields rather than the value: omitted keeps whoever holds it.
+    if edit.priority:
+        ticket.priority = edit.priority
+    # A null owner clears it, so only an omitted owner_id keeps it.
     if "owner_id" in edit.model_fields_set:
-        await ticket.set_owner(edit.owner_id)
-    if edit.repo_id is not None and ticket.repo_id != edit.repo_id:
-        ticket.repo_id = edit.repo_id
-        ticket.updated_at = Base.utc_now()
-        await db_session().flush()
-    return await ticket_detail(ticket)
+        ticket.owner_id = owner_id
+    ticket.updated_at = Base.utc_now()
+    await db_session().flush()
+    return ticket
 
 
-@router.post("/tickets/{identifier}/status", operation_id="set_status", tags=["agent"])
-async def set_status(
-    identifier: str,
-    status: Status = Body(..., embed=True),
-) -> TicketDetail:
-    """Move a ticket. The transition publishes ``ticket.transitioned`` —
-    Software Factory's funnel reads that signal, so a move into the trigger
-    status is what opens a build."""
+@router.post(
+    "/tickets/{identifier}/status",
+    response_model=TicketDetail,
+    response_model_by_alias=True,
+    operation_id="set_status",
+    tags=["agent"],
+)
+async def set_status(identifier: str, status: Status = Body(..., embed=True)) -> Ticket:
+    """Move a ticket to a status; Ready for Agent opens a build."""
     ticket = await require_ticket(identifier)
     await ticket.transition(status)
-    return await ticket_detail(ticket)
+    return ticket
 
 
 @router.post(
     "/tickets/{identifier}/comments",
+    response_model=CommentRead,
+    response_model_by_alias=True,
     status_code=http_status.HTTP_201_CREATED,
     operation_id="add_comment",
     tags=["agent"],
@@ -188,24 +128,20 @@ async def add_comment(
     identifier: str,
     body: str = Body(..., embed=True),
     account: Account = Depends(current_account),
-) -> CommentRead:
-    """Say something on a ticket's thread. The author is you — the signed-in
-    account, or the account behind the token — never a field the caller picks.
-    Append-only: a thread is a record, so there is no edit and no delete."""
+) -> Comment:
+    """Append a comment to a ticket as the calling account."""
     body = required_text(body, "body")
     ticket = await require_ticket(identifier)
-    comment = await ticket.add_comment(author_id=account.id, body=body)
-    return CommentRead(
-        id=comment.id,
-        author=account.username,
-        body=comment.body,
-        created_at=comment.created_at,
-    )
+    return await ticket.add_comment(author=account, body=body)
 
 
-@router.get("/tickets/{identifier}", operation_id="get_ticket", tags=["agent"])
-async def get_ticket(identifier: str) -> TicketDetail:
-    """Read one Druks board ticket by identifier (for example BOX-3), including
-    every comment, oldest first. This is not a GitHub issue — GitHub issue tools
-    cannot fetch it."""
-    return await ticket_detail(await require_ticket(identifier))
+@router.get(
+    "/tickets/{identifier}",
+    response_model=TicketDetail,
+    response_model_by_alias=True,
+    operation_id="get_ticket",
+    tags=["agent"],
+)
+async def get_ticket(identifier: str) -> Ticket:
+    """Read a Druks board ticket such as BOX-3 with its comments; it is not a GitHub issue."""
+    return await require_ticket(identifier)

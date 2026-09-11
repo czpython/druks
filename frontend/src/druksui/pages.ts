@@ -1,5 +1,5 @@
 import { createContext } from 'react'
-import type { SubjectTarget } from '../apps/registry'
+import { getAppUI, type SubjectTarget } from '../apps/registry'
 
 import type { Block, Follows, Link, Operation, PageEntry, PageSnapshot } from '../api/types'
 
@@ -35,10 +35,14 @@ export function fillPath(path: string, args: Record<string, string>): string {
   return missing ? '' : filled
 }
 
-/** Empty when the page name or an argument is missing. */
+/** Empty when the page name or an argument is missing. A subject opens the
+ * page its app gives it. */
 export function hrefForLink(link: Link, app: string, pages: PageEntry[]): string {
   if (link.url) return link.url
-  if (link.subject) return `/${app}/${link.subject.subjectType}/${link.subject.subjectId}`
+  if (link.subject) {
+    const subject = { type: link.subject.subjectType, id: link.subject.subjectId }
+    return getAppUI(app)?.subjectPath?.(subject) ?? `/${app}/${subject.type}/${subject.id}`
+  }
   const target = pages.find((entry) => entry.name === link.page)
   return target ? fillPath(target.path, link.arguments) : ''
 }

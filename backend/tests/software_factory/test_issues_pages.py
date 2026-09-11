@@ -1,5 +1,5 @@
 from druks.accounts.models import Account
-from druks.contrib.software_factory.issues.models import Ticket
+from druks.contrib.software_factory.models import ProjectRepo, Ticket
 
 from software_factory.factories import make_test_work_item
 
@@ -17,8 +17,8 @@ _TICKETS = "/api/software_factory/tickets"
 _PROJECTS = "/api/software_factory/projects"
 
 
-async def _open_repo(druks_client, *, project="Acme", prefix="dru", repo="acme/druks"):
-    created = await druks_client.post(_PROJECTS, json={"name": project, "prefix": prefix})
+async def _open_repo(druks_client, *, project="Acme", repo="acme/druks"):
+    created = await druks_client.post(_PROJECTS, json={"name": project})
     assert created.status_code == 201
     added = await druks_client.post(
         f"{_PROJECTS}/{created.json()['id']}/repos",
@@ -105,7 +105,7 @@ async def test_created_ticket_lands_in_backlog_on_the_board(druks_client):
     by_title = {column["title"]: column for column in _columns(board)}
     (card,) = _cards_in(by_title["Backlog"])
     assert card["title"] == "Ship the board"
-    assert card["description"].startswith("DRU-1")
+    assert card["description"].startswith("ACM-1")
     assert card["link"]["arguments"] == {"identifier": ticket["identifier"]}
     assert card["drag"] == {"identifier": ticket["identifier"]}
     assert card["controls"] == []
@@ -145,15 +145,13 @@ async def test_blocked_tickets_stay_on_the_board(druks_client):
     assert [card["title"] for card in _cards_in(by_title["Backlog"])] == ["live"]
 
 
-async def test_ticket_page_follows_the_row_and_comments_refresh_the_region(druks_client):
+async def test_ticket_page_saves_in_place_and_comments_refresh_the_region(druks_client):
     repo = await _open_repo(druks_client)
     created = await _open_ticket(druks_client, repo["id"], title="Follow me")
-    row = await Ticket.get_for_identifier(created["identifier"])
 
     page = (await druks_client.get(f"{_PAGES}/tickets/{created['identifier']}")).json()
 
     assert page["title"] == created["identifier"]
-    assert page["follows"] == {"subjectType": "ticket", "subjectId": str(row.id)}
     assert page["controls"] == []
     columns = page["blocks"][0]
     assert columns["layout"] == "sidebar"
@@ -204,7 +202,7 @@ async def test_ticket_page_follows_the_row_and_comments_refresh_the_region(druks
 
 async def test_ticket_page_unattributed_creator_when_none_is_stored(druks_client):
     repo = await _open_repo(druks_client)
-    ticket = await Ticket.create(repo_id=int(repo["id"]), title="ghost")
+    ticket = await Ticket.create(repo=await ProjectRepo.get(int(repo["id"])), title="ghost")
 
     page = (await druks_client.get(f"{_PAGES}/tickets/{ticket.identifier}")).json()
 
@@ -231,21 +229,21 @@ async def test_ticket_page_links_the_open_build(druks_client):
             "label": "Open build",
             "page": "",
             "arguments": {},
-            "url": f"/software_factory/work-items/{item.id}",
-            "subject": None,
+            "url": "",
+            "subject": {"subjectType": "work_item", "subjectId": str(item.id)},
         }
     ]
 
 
 async def test_new_ticket_groups_repos_by_github_project(druks_client):
-    acme = (await druks_client.post(_PROJECTS, json={"name": "Acme", "prefix": "acm"})).json()
+    acme = (await druks_client.post(_PROJECTS, json={"name": "Acme"})).json()
     one = (
         await druks_client.post(f"{_PROJECTS}/{acme['id']}/repos", json={"fullName": "acme/one"})
     ).json()
     two = (
         await druks_client.post(f"{_PROJECTS}/{acme['id']}/repos", json={"fullName": "acme/two"})
     ).json()
-    beta = await _open_repo(druks_client, project="Beta", prefix="bet", repo="beta/app")
+    beta = await _open_repo(druks_client, project="Beta", repo="beta/app")
 
     board = (await druks_client.get(f"{_PAGES}/board")).json()
     repo_field = next(
@@ -262,7 +260,6 @@ async def test_new_ticket_groups_repos_by_github_project(druks_client):
         str(two["id"]),
         str(beta["id"]),
     ]
-    assert repo_field["value"] == str(one["id"])
 
 
 async def test_unknown_ticket_page_is_an_empty_state(druks_client):
@@ -301,11 +298,11 @@ async def test_board_status_filter_keeps_columns(druks_client):
 
 
 async def test_board_filters_by_repo_owner_and_creator(druks_client):
-    acme = (await druks_client.post(_PROJECTS, json={"name": "Acme", "prefix": "acm"})).json()
+    acme = (await druks_client.post(_PROJECTS, json={"name": "Acme"})).json()
     acme_repo = (
         await druks_client.post(f"{_PROJECTS}/{acme['id']}/repos", json={"fullName": "acme/one"})
     ).json()
-    beta_repo = await _open_repo(druks_client, project="Beta", prefix="bet", repo="beta/app")
+    beta_repo = await _open_repo(druks_client, project="Beta", repo="beta/app")
     me = (await druks_client.get("/api/auth/me")).json()["account"]["id"]
     await _open_ticket(druks_client, acme_repo["id"], title="assigned", owner_id=me)
     await _open_ticket(druks_client, acme_repo["id"], title="open")

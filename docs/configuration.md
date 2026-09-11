@@ -335,24 +335,23 @@ a setting. `druks doctor` reports the tracker as healthy.
 
 The dashboard shows the board and ticket pages only for
 **druks**. Each ticket picks a GitHub repository from a Software Factory
-project. Set that project's ticket prefix (2–6 letters A–Z, or two letters and a
-digit 1–9) on **Software Factory → Projects**. Creating a project fills the
-first three letters of its name; change the field before save if you want
-another. Druks mints identifiers as `{prefix}-{n}` once.
-Changing the ticket's repository does not remint the identifier. A project
-without a prefix cannot mint tickets.
+project. Druks derives each project's ticket prefix from the project name:
+the first two letters and one later letter, the first such prefix that no other
+project uses. Identifiers are `{prefix}-{n}`, minted once. Changing the ticket's
+repository does not remint the identifier.
 
 A ticket that enters Ready for Agent opens a build against the selected
 repository. If a scheduled, running, or parked run already exists for that
 ticket, Software Factory does not start another.
 
 Each local-board build ships this appliance's `/mcp` into the sandbox as the
-`druks` server. The sandbox authenticates with a PAT for the run account. The
-agent reads the ticket with `software_factory_get_ticket` and posts with
+`druks` server. The sandbox holds a token for the run account that is limited
+to the ticket tools. Druks mints it for each agent call and deletes it after.
+The agent reads the ticket with `software_factory_get_ticket` and posts with
 `software_factory_add_comment`. The Druks identifier is not a GitHub issue
-number. Linear and Jira builds do not receive this MCP. Set `urls.endpoint` so
-the VM can reach `/mcp`. `druks doctor` also checks that `/mcp` answers when the
-tracker is **druks**.
+number. Linear and Jira builds do not receive this MCP. Set `urls.endpoint` to
+an address the sandbox can reach; `druks doctor` reports it when the tracker
+is **druks**.
 
 Webhook URLs remain `/_external/linear/events/` and
 `/_external/jira/events/`. The Jira webhook uses a Jira Automation

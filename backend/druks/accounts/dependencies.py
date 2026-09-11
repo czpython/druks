@@ -20,17 +20,29 @@ _BEARER_CHALLENGE = 'Bearer realm="druks"'
 _bearer_scheme = HTTPBearer(auto_error=False, scheme_name="personalAccessToken")
 
 
-async def resolve_pat_account(credentials: HTTPAuthorizationCredentials | None) -> Account:
-    """A present Authorization must authenticate — never a fall-through."""
+async def resolve_pat_account(
+    request: HTTPConnection, credentials: HTTPAuthorizationCredentials | None
+) -> Account:
+    """A present Authorization must authenticate — never a fall-through. A
+    token limited to agent tools passes only their routes."""
     if credentials:
         try:
-            return (await PersonalAccessToken.authenticate(credentials.credentials)).account
+            pat = await PersonalAccessToken.authenticate(credentials.credentials)
         except InvalidPatError as error:
             raise HTTPException(
                 status_code=401,
                 detail=str(error),
                 headers={"WWW-Authenticate": f'{_BEARER_CHALLENGE}, error="invalid_token"'},
             ) from error
+        if pat.tools is None:
+            return pat.account
+        # The MCP surface maps each agent route's endpoint to its tool name at boot.
+        if request.app.state.agent_tools.get(request.scope["endpoint"]) in pat.tools:
+            return pat.account
+        raise HTTPException(
+            status_code=403,
+            detail=f"Token {pat.token_prefix} is limited to these tools: {', '.join(pat.tools)}.",
+        )
     raise HTTPException(
         status_code=401,
         detail="Authorization must be: Bearer <token>.",
@@ -102,7 +114,7 @@ async def current_account(
     """The Bearer PAT when Authorization is present — present-but-empty still
     challenges — else the session identity."""
     if "Authorization" in request.headers:
-        account = await resolve_pat_account(bearer)
+        account = await resolve_pat_account(request, bearer)
     else:
         account = await _resolve_operator(request)
         if not account:
@@ -154,7 +166,7 @@ async def current_account_or_setup(
     """PAT-first identity that reads none/zero setup as None instead of
     refusing — ``/api/auth/me`` only."""
     if "Authorization" in request.headers:
-        account = await resolve_pat_account(bearer)
+        account = await resolve_pat_account(request, bearer)
     else:
         account = await _resolve_operator(request)
     token = current_account_id.set(account.id if account else None)

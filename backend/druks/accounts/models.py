@@ -2,10 +2,10 @@ import base64
 import hashlib
 import hmac
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import ForeignKey, Index, LargeBinary, String, select, text
-from sqlalchemy.dialects.postgresql import CITEXT, insert
+from sqlalchemy.dialects.postgresql import CITEXT, JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from druks.accounts.constants import (
@@ -120,6 +120,9 @@ class PersonalAccessToken(Base, Uuid7Pk):
     expires_at: Mapped[datetime]
     last_used_at: Mapped[datetime | None]
     revoked_at: Mapped[datetime | None]
+    # None: the account's whole API. A list: only these agent tools, by their
+    # MCP names. A sandbox holds such a token and reaches nothing else.
+    tools: Mapped[list[str] | None] = mapped_column(JSONB, default=None)
 
     @property
     def is_expired(self) -> bool:
@@ -148,7 +151,14 @@ class PersonalAccessToken(Base, Uuid7Pk):
         return list(await db_session().scalars(stmt))
 
     @classmethod
-    async def create(cls, *, account_id: str, name: str) -> "tuple[PersonalAccessToken, str]":
+    async def create(
+        cls,
+        *,
+        account_id: str,
+        name: str,
+        tools: list[str] | None = None,
+        lifetime: timedelta = PAT_LIFETIME,
+    ) -> "tuple[PersonalAccessToken, str]":
         """Mint ``account_id`` a token; returns (row, plaintext). The plaintext
         is shown exactly once — only its hash lands in the row."""
         prefix = _new_prefix()
@@ -164,7 +174,8 @@ class PersonalAccessToken(Base, Uuid7Pk):
             token_prefix=prefix,
             token_hash=_hash_token(token),
             created_at=now,
-            expires_at=now + PAT_LIFETIME,
+            expires_at=now + lifetime,
+            tools=tools,
         )
         session = db_session()
         session.add(row)
@@ -196,3 +207,8 @@ class PersonalAccessToken(Base, Uuid7Pk):
         # Keep the first revocation instant — a repeat revoke changes nothing.
         self.revoked_at = self.revoked_at or Base.utc_now()
         await db_session().flush()
+
+    async def delete(self) -> None:
+        session = db_session()
+        await session.delete(self)
+        await session.flush()

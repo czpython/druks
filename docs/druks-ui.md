@@ -130,7 +130,8 @@ async def peers(): ...
 Druks checks these at boot. A break raises with the app name and the exact
 cause.
 
-- Exactly one page declares `/`. That page is the landing page.
+- At most one page declares `/`. That page is the landing page. An app whose
+  home is a React route declares none.
 - `@page` declares a top-level page.
 - `@parent.child` declares a child page.
 - One child level is allowed. A child of a child is a boot error.
@@ -851,7 +852,7 @@ class Link:
 ```
 
 A link sets exactly one destination: `page` for another page of this app,
-`url` for outside, or `subject` for the subject's own platform page — the
+`url` for outside, or `subject` for the app's page for that subject — the
 full story of what druks did about it, which no app page recomposes:
 
 ```python
@@ -1232,7 +1233,6 @@ class Facts:
 class TableColumn:
     label: str
     align: Literal["start", "end"] = "start"
-    width: str = ""
 
 
 class TableRow:
@@ -1252,7 +1252,7 @@ class Table:
 {
   "block": "table",
   "title": "Peers",
-  "columns": [{"label": "Peer", "align": "start", "width": ""}, {"label": "Answers", "align": "end", "width": ""}],
+  "columns": [{"label": "Peer", "align": "start"}, {"label": "Answers", "align": "end"}],
   "rows": [
     {
       "cells": [
@@ -1265,12 +1265,10 @@ class Table:
 }
 ```
 
-Every row must have one cell for each column. With no rows the shell still
-draws the columns and shows `empty_text` in the body. `width` on a column is
-a CSS size that column keeps in every table that names it; empty shares the
-leftover. A cell that overruns its column stays on one line with an ellipsis.
-A wide table scrolls inside its own container, on a narrow screen as
-well: a stacked row would lose the header each cell belongs to.
+Every row must have one cell for each column. With no rows the shell shows
+`empty_text`, and nothing of its own. A wide table scrolls inside its own
+container, on a narrow screen as well: a stacked row would lose the header each
+cell belongs to.
 
 A row's `detail` is the sentence it has no room for — the failure behind a
 status, the reason behind a verdict. The shell keeps it folded and the reader

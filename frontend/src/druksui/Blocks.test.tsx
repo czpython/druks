@@ -402,6 +402,27 @@ describe('Cards', () => {
     expect(callOperation).not.toHaveBeenCalled()
   })
 
+  it('follows the card link on a real click after a drag ends', () => {
+    const { container, location } = renderBlocks([
+      {
+        block: 'cards',
+        title: 'Todo',
+        layout: 'stack',
+        drop: moveAction('todo'),
+        cards: [ticketCard('Ship', 'BOX-1')],
+        empty: null,
+      },
+    ])
+    const item = container.querySelector('ul.dui-cards li')!
+    const dt = transfer()
+    fireEvent.dragStart(item, { dataTransfer: dt })
+    fireEvent.dragEnd(item, { dataTransfer: dt })
+    fireEvent.pointerDown(screen.getByText('Ship'))
+    fireEvent.click(screen.getByText('Ship'))
+
+    expect(location.history).toEqual(['/field_notes', '/field_notes/notes/7'])
+  })
+
   it('does not follow the card link after a drag', () => {
     const { container, location } = renderBlocks([
       {

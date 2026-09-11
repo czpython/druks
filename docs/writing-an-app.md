@@ -10,10 +10,6 @@ Druks supplies durable execution and shared operating services. Read
 [the app boundary](concepts.md#the-app-boundary)
 before you assign ownership of a capability.
 
-The bundled `software_factory` app owns its local issue board and the GitHub PR
-funnel. That board is not a second app, not an author-surface namespace, and
-not a `Service` kind.
-
 ## Scaffold and prove the package
 
 ```bash

@@ -8,13 +8,10 @@ from druks.accounts.models import Account
 from druks.api.exceptions import agent_error_responses
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.exceptions import (
-    InvalidPrefix,
-    PrefixLocked,
-    PrefixTaken,
+    PrefixTakenError,
     TicketNotFound,
     TrackerNotConfigured,
 )
-from druks.contrib.software_factory.issues.models import Comment, Ticket
 from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
 from druks.contrib.software_factory.schemas import (
     AddProjectRepoRequest,
@@ -59,10 +56,8 @@ async def create_project(body: CreateProjectRequest) -> ProjectSummary:
     if not name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "name is required")
     try:
-        project = await Project.create(name=name, prefix=body.prefix)
-    except InvalidPrefix as error:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
-    except PrefixTaken as error:
+        project = await Project.create(name=name)
+    except PrefixTakenError as error:
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
     return ProjectSummary.model_validate(project)
 
@@ -128,7 +123,6 @@ async def get_project(project_id: int) -> ProjectSummary:
 async def update_project(
     project_id: int,
     name: str | None = Body(default=None, embed=True),
-    prefix: str | None = Body(default=None, embed=True),
 ) -> ProjectSummary:
     project = await Project.get(project_id)
     if not project:
@@ -139,13 +133,6 @@ async def update_project(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "name cannot be empty")
         project.name = name
         await db_session().flush()
-    if prefix is not None:
-        try:
-            await project.set_prefix(prefix)
-        except (InvalidPrefix, PrefixLocked) as error:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
-        except PrefixTaken as error:
-            raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
     return ProjectSummary.model_validate(project)
 
 
@@ -159,11 +146,6 @@ async def delete_project(project_id: int) -> None:
     project = await Project.get(project_id)
     if not project:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "project not found")
-    repo_ids = [repo.id for repo in project.repos]
-    if repo_ids:
-        ticket_ids = select(Ticket.id).where(Ticket.repo_id.in_(repo_ids))
-        await session.execute(delete(Comment).where(Comment.ticket_id.in_(ticket_ids)))
-        await session.execute(delete(Ticket).where(Ticket.repo_id.in_(repo_ids)))
     await session.execute(delete(WorkItem).where(WorkItem.project_id == project_id))
     await session.delete(project)
     await session.flush()

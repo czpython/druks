@@ -26,7 +26,6 @@ class ProjectSummary(Schema):
 
     id: int
     name: str
-    prefix: str | None = None
     created_at: datetime
     updated_at: datetime
     repos: list[ProjectRepoSummary] = Field(default_factory=list)
@@ -38,7 +37,6 @@ class ProjectsResponse(Schema):
 
 class CreateProjectRequest(BaseModel):
     name: str
-    prefix: str | None = None
 
 
 class AddProjectRepoRequest(BaseModel):

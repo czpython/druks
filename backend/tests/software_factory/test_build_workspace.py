@@ -7,10 +7,12 @@ from typing import Any
 import pytest
 from conftest import connect_service
 from druks import workspaces as workspace_mod
-from druks.accounts.models import Account
+from druks.accounts.exceptions import InvalidPatError
+from druks.accounts.models import Account, PersonalAccessToken
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.constants import (
     APPLIANCE_MCP_NAME,
+    APPLIANCE_MCP_TOOLS,
     GITHUB_MCP_NAME,
     GITHUB_MCP_URL,
 )
@@ -130,15 +132,45 @@ async def test_issues_tracker_requires_appliance_mcp(druks_db):
         subject=SimpleNamespace(repo="o/main"),
         branch="b",
         skills=("python-house-rules",),
-        appliance_mcp_url="http://host.docker.internal:8001/mcp",
-        appliance_mcp_token="druks_pat_test",
+        appliance_mcp_url="http://druks.test/mcp",
     )
     kwargs = await workspace.with_mcp_servers(None, **workspace.get_agent_run_kwargs())
 
     appliance = next(s for s in kwargs["mcp_servers"] if s.name == APPLIANCE_MCP_NAME)
-    assert appliance.url == "http://host.docker.internal:8001/mcp"
-    assert kwargs["extra_env"][get_bearer_token_env_var(APPLIANCE_MCP_NAME)] == "druks_pat_test"
-    assert "druks_pat_test" not in repr(appliance)
+    assert appliance.url == "http://druks.test/mcp"
+    assert appliance.bearer_token_env_var == get_bearer_token_env_var(APPLIANCE_MCP_NAME)
+    assert "extra_env" not in kwargs
+
+
+async def test_an_issues_agent_call_holds_a_ticket_token_only_while_it_runs(
+    druks_db, monkeypatch: pytest.MonkeyPatch
+):
+    account = await Account.get_or_create("op@example.com")
+    seen: dict[str, Any] = {}
+
+    async def fake_exec(self: Any, argv: list[str], **_kw: Any) -> None:
+        return
+
+    async def base_run_agent(self: Any, **kwargs: Any) -> str:
+        seen["token"] = kwargs["extra_env"][get_bearer_token_env_var(APPLIANCE_MCP_NAME)]
+        pat = await PersonalAccessToken.authenticate(seen["token"])
+        seen["holder"] = (pat.account_id, pat.tools)
+        return "ran"
+
+    monkeypatch.setattr(host_mod.Host, "exec", fake_exec)
+    monkeypatch.setattr(RepoWorkspace, "run_agent", base_run_agent)
+    workspace = BuildWorkspace(
+        host=host_mod.Host(record=SimpleNamespace(id="h1", ssh_username="exedev")),  # type: ignore[arg-type]
+        subject=SimpleNamespace(repo="o/main"),
+        branch="b",
+        skills=(),
+        appliance_mcp_url="http://druks.test/mcp",
+    )
+
+    assert await workspace.run_agent(account_id=account.id) == "ran"
+    assert seen["holder"] == (account.id, list(APPLIANCE_MCP_TOOLS))
+    with pytest.raises(InvalidPatError):
+        await PersonalAccessToken.authenticate(seen["token"])
 
 
 def _pin_tracker(monkeypatch: pytest.MonkeyPatch, tracker: str) -> None:
@@ -165,49 +197,15 @@ def _issues_workspace(monkeypatch: pytest.MonkeyPatch) -> tuple[Build, Any]:
     return workflow, sandbox
 
 
-async def test_get_workspace_kwargs_mints_a_pat_for_the_run_account(druks_db, monkeypatch):
-    account = await Account.get_or_create("op@example.com")
-    await Account.get_or_create("other@example.com")
-    workflow, sandbox = _issues_workspace(monkeypatch)
-    workflow.account_id = account.id
-
-    kwargs = await workflow.get_workspace_kwargs(sandbox)
-
-    assert kwargs["appliance_mcp_url"] == "http://host.docker.internal:8001/mcp"
-    assert kwargs["appliance_mcp_token"].startswith("druks_pat_")
-
-
-async def test_get_workspace_kwargs_uses_the_sole_operator_when_unassigned(druks_db, monkeypatch):
-    await Account.get_or_create("op@example.com")
+async def test_get_workspace_kwargs_names_the_appliance_mcp(druks_db, monkeypatch):
     workflow, sandbox = _issues_workspace(monkeypatch)
 
     kwargs = await workflow.get_workspace_kwargs(sandbox)
 
-    assert kwargs["appliance_mcp_token"].startswith("druks_pat_")
-
-
-async def test_get_workspace_kwargs_keeps_a_public_mcp_endpoint(druks_db, monkeypatch):
-    await Account.get_or_create("op@example.com")
-    workflow, sandbox = _issues_workspace(monkeypatch)
-    monkeypatch.setattr(
-        "druks.contrib.software_factory.workflows.load_settings",
-        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="https://druks.example.com")),
-    )
-
-    kwargs = await workflow.get_workspace_kwargs(sandbox)
-
-    assert kwargs["appliance_mcp_url"] == "https://druks.example.com/mcp"
-
-
-async def test_get_workspace_kwargs_fails_without_an_operator_account(druks_db, monkeypatch):
-    workflow, sandbox = _issues_workspace(monkeypatch)
-
-    with pytest.raises(FatalError, match="/mcp PAT"):
-        await workflow.get_workspace_kwargs(sandbox)
+    assert kwargs["appliance_mcp_url"] == "http://127.0.0.1:8001/mcp"
 
 
 async def test_get_workspace_kwargs_fails_when_endpoint_is_unset(druks_db, monkeypatch):
-    await Account.get_or_create("op@example.com")
     workflow, sandbox = _issues_workspace(monkeypatch)
     monkeypatch.setattr(
         "druks.contrib.software_factory.workflows.load_settings",
@@ -228,7 +226,6 @@ async def test_linear_tracker_does_not_require_appliance_mcp(druks_db, monkeypat
     kwargs = await workflow.get_workspace_kwargs(sandbox)
 
     assert "appliance_mcp_url" not in kwargs
-    assert "appliance_mcp_token" not in kwargs
 
 
 def _review_actor_stub(monkeypatch: pytest.MonkeyPatch, *, review_actor) -> None:

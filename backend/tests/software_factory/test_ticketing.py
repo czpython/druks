@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from conftest import connect_service
-from druks.apps.settings import field_choices, field_visibility, validate_field_choice_details
+from druks.apps.settings import field_choices, field_visibility
 from druks.contrib.software_factory.app import (
     SoftwareFactory,
     check_issues_mcp,
@@ -227,10 +227,6 @@ async def test_tracker_check_accepts_issues_without_a_service(monkeypatch):
 def test_issues_is_a_tracker_choice_and_hides_the_name_knobs():
     fields = SoftwareFactory.Settings.model_fields
     assert field_choices(fields["tracker"]) == ["none", "linear", "jira", "issues"]
-    assert validate_field_choice_details(fields["tracker"])["issues"] == {
-        "label": "druks",
-        "help": "Druks is this appliance — no credentials.",
-    }
     assert SoftwareFactory.Settings(tracker="issues").trigger_status == "Ready for Agent"
     assert field_visibility(fields["linear_trigger_status"]) == ("tracker", "linear")
     assert field_visibility(fields["linear_resting_status"]) == ("tracker", "linear")
@@ -270,23 +266,17 @@ async def test_issues_mcp_check_pends_without_an_endpoint(monkeypatch):
     assert "/mcp" in result.detail
 
 
-async def test_issues_mcp_check_names_an_unreachable_url(monkeypatch):
+async def test_issues_mcp_check_reports_the_endpoint(monkeypatch):
     _pin_software_factory_settings(monkeypatch, tracker="issues")
     monkeypatch.setattr(
         "druks.contrib.software_factory.app.load_settings",
-        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="http://druks.test:8001")),
+        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="http://druks.test:8001/")),
     )
-
-    async def fake_get(self, url):
-        raise httpx.ConnectError("connection refused", request=httpx.Request("GET", url))
-
-    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
     result = await check_issues_mcp()
 
-    assert not result.ok
-    assert not result.pending
-    assert "http://druks.test:8001/mcp" in result.detail
+    assert result.ok
+    assert result.detail == "http://druks.test:8001/mcp"
 
 
 # --- Linear provider --------------------------------------------------------

@@ -1,6 +1,5 @@
 from typing import Literal
 
-import httpx
 from pydantic import Field
 
 from druks.agents import Agent
@@ -62,35 +61,17 @@ async def check_review_identity() -> CheckResult:
 
 
 async def check_issues_mcp() -> CheckResult:
-    """Whether this appliance's /mcp answers, so an issues build can fetch
-    and comment. Linear and Jira do not need it."""
+    """Whether ``urls.endpoint`` names the /mcp an issues build's sandbox reaches."""
     if (await SoftwareFactory.settings()).tracker != "issues":
         return CheckResult(name="issues_mcp", ok=True, detail="not required")
-    endpoint = load_settings().urls.endpoint.rstrip("/")
-    if not endpoint:
-        return CheckResult(
-            name="issues_mcp",
-            ok=False,
-            pending=True,
-            detail="urls.endpoint is unset — the sandbox needs it to reach /mcp.",
-        )
-    url = f"{endpoint}/mcp"
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(url)
-    except httpx.RequestError as error:
-        return CheckResult(
-            name="issues_mcp",
-            ok=False,
-            detail=f"{url} is unreachable: {error}. The issues tracker tools need it.",
-        )
-    if response.status_code >= 500:
-        return CheckResult(
-            name="issues_mcp",
-            ok=False,
-            detail=f"{url} returned {response.status_code}. The issues tracker tools need it.",
-        )
-    return CheckResult(name="issues_mcp", ok=True, detail=url)
+    if endpoint := load_settings().urls.endpoint.rstrip("/"):
+        return CheckResult(name="issues_mcp", ok=True, detail=f"{endpoint}/mcp")
+    return CheckResult(
+        name="issues_mcp",
+        ok=False,
+        pending=True,
+        detail="urls.endpoint is unset. The sandbox needs it to reach /mcp.",
+    )
 
 
 class SoftwareFactory(App):

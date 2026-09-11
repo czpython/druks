@@ -208,8 +208,7 @@ describe('Table', () => {
     ])
 
     expect(screen.getByText('No peers yet.')).toBeTruthy()
-    expect(screen.getByRole('table', { name: 'Peers' })).toBeTruthy()
-    expect(screen.getAllByRole('columnheader').map((one) => one.textContent)).toEqual(['Peer'])
+    expect(screen.queryByRole('table')).toBeNull()
   })
 
   it('renders nothing at all when the app said nothing', () => {

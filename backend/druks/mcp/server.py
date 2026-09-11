@@ -94,18 +94,26 @@ def _validate_agent_tools(api: FastAPI) -> None:
             raise InvalidAgentToolError(where, "a non-empty endpoint docstring is required")
 
 
-def _namespace_agent_operations(spec: dict, app_names: set[str]) -> None:
-    # Derive each app-owned agent operation's id to f"{app}_{operation_id}",
-    # so the tool name the provider reads off the spec is namespaced without the
-    # author repeating the prefix. The loader tags every app route with its
+def _agent_tool_name(operation_id: str, tags: list[str], app_names: set[str]) -> str:
+    # An app-owned agent operation's tool is f"{app}_{operation_id}", so the
+    # author never repeats the prefix. The loader tags every app route with its
     # app's name, so among an agent operation's tags the one naming an
-    # installed app is the owner; platform agent operations carry no such
-    # tag and keep their declared ids. An already-prefixed id passes through, so
-    # stable names like software_factory_start never double — and the namespace is what makes
-    # the merged document's operation ids globally unique. A derived id that would
-    # collide with another route's explicit id is rejected: before this derivation
-    # the clash was visible in the author's code, so the framework must surface it
-    # now that it owns the naming.
+    # installed app is the owner; platform agent operations carry no such tag
+    # and keep their declared ids. An already-prefixed id passes through, so
+    # stable names like software_factory_start never double.
+    app = next((tag for tag in tags if tag in app_names), None)
+    if app and not operation_id.startswith(f"{app}_"):
+        return f"{app}_{operation_id}"
+    return operation_id
+
+
+def _namespace_agent_operations(spec: dict, app_names: set[str]) -> None:
+    # Rename each agent operation to its tool name: the provider reads the tool
+    # name off the spec. The namespace is what makes the merged document's
+    # operation ids globally unique. A derived id that would collide with another
+    # route's explicit id is rejected: before this derivation the clash was
+    # visible in the author's code, so the framework must surface it now that it
+    # owns the naming.
     existing_ids = {
         op.get("operationId")
         for ops in spec.get("paths", {}).values()
@@ -119,9 +127,8 @@ def _namespace_agent_operations(spec: dict, app_names: set[str]) -> None:
             operation_id = operation.get("operationId")
             if not operation_id:
                 continue
-            app = next((tag for tag in operation["tags"] if tag in app_names), None)
-            if app and not operation_id.startswith(f"{app}_"):
-                derived = f"{app}_{operation_id}"
+            derived = _agent_tool_name(operation_id, operation["tags"], app_names)
+            if derived != operation_id:
                 if derived in existing_ids:
                     raise InvalidAgentToolError(
                         path,
@@ -142,6 +149,13 @@ def _install_agent_namespacing(api: FastAPI) -> None:
     # need not repeat that guard — and the derivation is idempotent, so running
     # it on a warm cache leaves the already-prefixed ids untouched.
     app_names = {app.name for app in iter_apps()}
+    # The identity gate holds a tools-limited token to these routes, found by
+    # the endpoint a request matched.
+    api.state.agent_tools = {
+        route.endpoint: _agent_tool_name(route.operation_id, list(route.tags), app_names)
+        for route in iter_route_contexts(api.routes)
+        if isinstance(route.original_route, APIRoute) and "agent" in route.tags
+    }
     generate = api.openapi
 
     def namespaced() -> dict:
