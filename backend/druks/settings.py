@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import asyncssh
+from jsonpointer import JsonPointer, JsonPointerException
 from pydantic import AfterValidator, BaseModel, BeforeValidator, Field, model_validator
 from pydantic_settings import (
     BaseSettings,
@@ -85,7 +86,7 @@ class Identity(BaseModel):
     jwks_url: str = ""
     jwt_issuer: str = ""
     jwt_audience: str = ""
-    jwt_identity_claim: str = "email"
+    jwt_identity_claim: str = "/email"
 
     @model_validator(mode="after")
     def _auth_mode_is_fully_configured(self) -> "Identity":
@@ -108,6 +109,12 @@ class Identity(BaseModel):
             missing = [name for name, value in required.items() if not value.strip()]
             if missing:
                 raise ValueError(f"identity.mode=jwt requires {', '.join(missing)}")
+            try:
+                JsonPointer(self.jwt_identity_claim)
+            except JsonPointerException as error:
+                raise ValueError(
+                    "identity.jwt_identity_claim must be a JSON Pointer, such as /email"
+                ) from error
         return self
 
 

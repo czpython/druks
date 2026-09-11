@@ -29,7 +29,7 @@ def test_jwt_mode_requires_its_verification_targets(tmp_path):
         "jwt_audience": "druks",
     }
     settings = make_settings(tmp_path, identity={"mode": "jwt", **complete})
-    assert settings.identity.jwt_identity_claim == "email"
+    assert settings.identity.jwt_identity_claim == "/email"
     # Each required field, blanked in turn, refuses jwt mode.
     for name in complete:
         with pytest.raises(ValidationError):
@@ -37,6 +37,8 @@ def test_jwt_mode_requires_its_verification_targets(tmp_path):
                 tmp_path,
                 identity={"mode": "jwt", **complete, name: "  "},
             )
+    with pytest.raises(ValidationError, match="jwt_identity_claim must be a JSON Pointer"):
+        make_settings(tmp_path, identity={"mode": "jwt", **complete, "jwt_identity_claim": "email"})
 
 
 @pytest.mark.parametrize("mode", ["header", "jwt"])
@@ -132,7 +134,7 @@ secrets_key = "{_SECRETS_KEY}"
 
     settings = Settings()
 
-    assert settings.identity.jwt_identity_claim == "email"
+    assert settings.identity.jwt_identity_claim == "/email"
 
 
 def test_harness_config_root_expands_the_environment_path(tmp_path, monkeypatch):

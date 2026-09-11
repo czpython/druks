@@ -144,7 +144,7 @@ caches, and the sandbox provisioning gate.
 | `identity.jwks_url` | `jwt` mode: where the edge publishes its signing keys |
 | `identity.jwt_issuer` | `jwt` mode: required `iss` claim value |
 | `identity.jwt_audience` | `jwt` mode: required `aud` claim value |
-| `identity.jwt_identity_claim` | `jwt` mode: the claim mapped to the account (default `email`) |
+| `identity.jwt_identity_claim` | `jwt` mode: the JSON Pointer to the account identity in the verified payload (default `/email`) |
 
 The `urls.webhook_host` listener binds every interface. A second TLS
 terminator on the same box, for example `tailscale serve` on the tailnet
@@ -176,8 +176,9 @@ order:
    rotation.
 
    The `exp`, `iss`, and `aud` claims must match the configuration.
-   Druks maps `identity.jwt_identity_claim` to an account. A validation error
-   returns a 401 with the error class, not the token. Druks uses a fixed RS256
+   Druks resolves `identity.jwt_identity_claim` in the verified payload and maps
+   the selected value to an account. A validation error
+   returns a 401 without token material. Druks uses a fixed RS256
    configuration and does not negotiate it.
 4. **No-authentication mode (`none`).** This mode has no authentication or identity edge. Druks
    resolves the only account. Zero accounts is the setup state. The
@@ -186,6 +187,27 @@ order:
 
    More than one account is configuration
    drift. Druks refuses requests and startup in this state.
+
+In JWT mode, `identity.jwt_identity_claim` uses
+[JSON Pointer (RFC 6901)](https://www.rfc-editor.org/rfc/rfc6901.html).
+Set it in the deployment's `druks.toml`:
+
+```toml
+[identity]
+jwt_identity_claim = "/traits/email"
+```
+
+`/email` selects a top-level claim. `/traits/email` selects a nested claim.
+`/people/0/email` selects a claim from the first object in an array. Dots are
+literal key characters. Within a key, encode `/` as `~1` and `~` as `~0`.
+For example, `/https:~1~1id.example~1email` selects the key
+`https://id.example/email`. Druks refuses invalid pointer syntax at startup
+in JWT mode. Bare claim names and dot paths are not accepted.
+
+The selected value must be a nonblank string. Druks removes its outer
+whitespace. A missing path, invalid traversal, or another result shape
+returns a 401 without creating an account. The extraction has no
+provider-specific behavior.
 
 A subscription is always one person's. An API key is the installation's:
 one per provider, owned by no account, and visible to every account in
