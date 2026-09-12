@@ -14,9 +14,9 @@ from druks.contrib.software_factory.contracts import (
     ReviewReport,
     TriageOutput,
 )
-from druks.contrib.software_factory.issues.enums import Status as IssuesStatus
+from druks.contrib.software_factory.enums import Status
 from druks.contrib.software_factory.ticketing.base import Tracker
-from druks.contrib.software_factory.ticketing.issues import IssuesTracker
+from druks.contrib.software_factory.ticketing.druks import DruksTracker
 from druks.contrib.software_factory.ticketing.jira import Jira
 from druks.contrib.software_factory.ticketing.linear import Linear
 from druks.core import services
@@ -32,8 +32,8 @@ async def check_tracker_identity() -> CheckResult:
     settings = await SoftwareFactory.settings()
     if settings.tracker == "none":
         return CheckResult(name="tracker", ok=True, detail="trackerless by choice")
-    if settings.tracker == "issues":
-        return CheckResult(name="tracker", ok=True, detail="local issues board")
+    if settings.tracker == "druks":
+        return CheckResult(name="tracker", ok=True, detail="this appliance")
     service = {"linear": services.Linear, "jira": services.Jira}[settings.tracker]
     if await service.is_connected():
         return CheckResult(name="tracker", ok=True, detail=f"{settings.tracker} connected")
@@ -71,18 +71,10 @@ class SoftwareFactory(App):
     )
 
     class Settings(AppSettings):
-        tracker: Literal["none", "linear", "jira", "issues"] = Field(
+        tracker: Literal["none", "linear", "jira", "druks"] = Field(
             default="linear",
             title="Tracker",
             description="Which ticket tracker this installation uses.",
-            json_schema_extra={
-                "choice_details": {
-                    "issues": {
-                        "label": "druks",
-                        "help": "Druks is this appliance — no credentials.",
-                    },
-                },
-            },
         )
         # The tracker status names that drive build's funnel. They're operator
         # knobs — the names an operator's Linear/Jira workflow actually uses — so
@@ -123,24 +115,23 @@ class SoftwareFactory(App):
                 return self.linear_trigger_status
             if self.tracker == "jira":
                 return self.jira_trigger_status
-            if self.tracker == "issues":
-                return IssuesStatus.READY_FOR_AGENT.label
+            if self.tracker == "druks":
+                return Status.READY_FOR_AGENT.label
             return ""
 
     checks = [check_tracker_identity, check_review_identity]
 
     @classmethod
     async def get_tracker(cls, source: str | None = None) -> Tracker | None:
-        """The selected tracker. Linear and Jira need a connected service identity.
-        The local issues board does not. None when the installation runs
-        trackerless or the identity is missing. Pass a ``source`` to get it only
-        when that source is the selected one — a work item syncs only to the
-        tracker that owns it."""
+        """The selected tracker, or None when this installation runs without one.
+        Linear and Jira need a connected service identity. The board on this
+        appliance needs none. Pass a ``source`` to get the tracker only when that
+        source is the selected one. A work item syncs to the tracker that owns it."""
         settings = await cls.settings()
         if source and source != settings.tracker:
             return
-        if settings.tracker == "issues":
-            return IssuesTracker()
+        if settings.tracker == "druks":
+            return DruksTracker()
         try:
             if settings.tracker == "linear":
                 row = await services.Linear.get()

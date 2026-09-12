@@ -1,4 +1,4 @@
-from druks.contrib.software_factory.issues.enums import Status
+from druks.contrib.software_factory.enums import Status
 from druks.contrib.software_factory.models import Ticket
 from druks.contrib.software_factory.ticketing.base import Tracker
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
@@ -14,8 +14,8 @@ _BOARD = {
 }
 
 
-class IssuesTracker(Tracker):
-    """Status writes the issues row. No credentials: the board is this appliance."""
+class DruksTracker(Tracker):
+    """The board on this appliance. It writes the ticket row and needs no credentials."""
 
     known_exceptions = (UnknownTicketError,)
 
@@ -23,7 +23,7 @@ class IssuesTracker(Tracker):
         if ticket := await Ticket.get_for_identifier(key):
             await ticket.transition(_BOARD[status])
             return
-        raise UnknownTicketError(key, "issues")
+        raise UnknownTicketError(key, "druks")
 
     async def aclose(self) -> None:
         return

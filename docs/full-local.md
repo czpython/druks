@@ -154,8 +154,8 @@ the reference app. Register a project in its dashboard. Use its configured
 ticket or GitHub trigger.
 
 To run without Linear or Jira, select **druks** in
-**Software Factory → Settings** and use the local board. GitHub remains
-required for pull requests. See
+**Software Factory → Settings** and use the board on this appliance. GitHub is
+still required for pull requests. See
 [ticketing integrations](configuration.md#ticketing-integrations).
 
 The run appears on the subject page and in the Events

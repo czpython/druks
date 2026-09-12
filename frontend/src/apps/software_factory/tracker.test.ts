@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { AppsSettingsResponse } from '../../api/types'
 import { SOFTWARE_FACTORY } from './api'
-import { isDruksIssuesTracker, softwareFactoryNavigation } from './tracker'
+import { isDruksTracker, softwareFactoryNavigation } from './tracker'
 
 function settingsWithTracker(tracker: string): AppsSettingsResponse {
   return {
@@ -16,19 +16,19 @@ function settingsWithTracker(tracker: string): AppsSettingsResponse {
   } as unknown as AppsSettingsResponse
 }
 
-describe('isDruksIssuesTracker', () => {
-  it('is true only when Software Factory tracker is issues', () => {
-    expect(isDruksIssuesTracker()).toBe(false)
-    expect(isDruksIssuesTracker({ allowedEfforts: [], apps: [] })).toBe(false)
-    expect(isDruksIssuesTracker(settingsWithTracker('linear'))).toBe(false)
-    expect(isDruksIssuesTracker(settingsWithTracker('jira'))).toBe(false)
-    expect(isDruksIssuesTracker(settingsWithTracker('none'))).toBe(false)
-    expect(isDruksIssuesTracker(settingsWithTracker('issues'))).toBe(true)
+describe('isDruksTracker', () => {
+  it('is true only when the Software Factory tracker is druks', () => {
+    expect(isDruksTracker()).toBe(false)
+    expect(isDruksTracker({ allowedEfforts: [], apps: [] })).toBe(false)
+    expect(isDruksTracker(settingsWithTracker('linear'))).toBe(false)
+    expect(isDruksTracker(settingsWithTracker('jira'))).toBe(false)
+    expect(isDruksTracker(settingsWithTracker('none'))).toBe(false)
+    expect(isDruksTracker(settingsWithTracker('druks'))).toBe(true)
   })
 })
 
 describe('softwareFactoryNavigation', () => {
-  it('omits board until the tracker is druks', () => {
+  it('omits the board until the tracker is druks', () => {
     expect(softwareFactoryNavigation()).toEqual([
       [`/${SOFTWARE_FACTORY}`, 'Overview'],
       [`/${SOFTWARE_FACTORY}/history`, 'history'],
@@ -42,7 +42,7 @@ describe('softwareFactoryNavigation', () => {
   })
 
   it('inserts board after Overview when the tracker is druks', () => {
-    expect(softwareFactoryNavigation(settingsWithTracker('issues'))).toEqual([
+    expect(softwareFactoryNavigation(settingsWithTracker('druks'))).toEqual([
       [`/${SOFTWARE_FACTORY}`, 'Overview'],
       [`/${SOFTWARE_FACTORY}/board`, 'board'],
       [`/${SOFTWARE_FACTORY}/history`, 'history'],

@@ -28,3 +28,19 @@ class TrackerNotConfigured(AgentApiError):
             "No ticket tracker is configured. Select one in the Software Factory settings. "
             "Linear and Jira also need their identity in Settings → Connections → Services."
         )
+
+
+class RepoNotFound(AgentApiError):
+    status_code = 404
+    code = "REPO_NOT_FOUND"
+
+    def __init__(self, repo_id: int) -> None:
+        super().__init__(f"No project repo {repo_id}. Read the projects for the repos they hold.")
+
+
+class OwnerNotFound(AgentApiError):
+    status_code = 404
+    code = "OWNER_NOT_FOUND"
+
+    def __init__(self, account_id: str) -> None:
+        super().__init__(f"No account {account_id}.")

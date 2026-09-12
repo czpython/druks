@@ -4,7 +4,7 @@ from typing import Literal
 from druks import ui
 from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
-from druks.contrib.software_factory.issues.enums import Priority, Status
+from druks.contrib.software_factory.enums import Priority, Status
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket, WorkItem
 from druks.db import Base
 
@@ -17,10 +17,10 @@ PRIORITY_LABELS: dict[Priority, str] = {
 }
 
 UNOWNED = "Unowned"
-# A gone account or druks' own system actor: the row reads, without a name.
+# An account that is gone, or Druks itself. The row still reads.
 UNATTRIBUTED = "Unattributed"
 FILTER_ANY = "Any"
-# The owner filter's value for unowned; "" already means any.
+# The owner filter's value for unowned. Empty already means any.
 UNOWNED_FILTER = "none"
 
 
@@ -251,7 +251,7 @@ async def ticket(identifier: str):
         )
         for comment in found.comments
     ] or [ui.EmptyState("No comments yet", description="Say something about this ticket.")]
-    build = await WorkItem.get_for_ticket_key(source="issues", ticket_key=found.identifier)
+    build = await WorkItem.get_for_ticket_key(source="druks", ticket_key=found.identifier)
     controls = [ui.Link("Open build", subject=build)] if build else []
 
     return ui.Page(

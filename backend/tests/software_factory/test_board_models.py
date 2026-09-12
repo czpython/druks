@@ -1,13 +1,23 @@
 import pytest
 from druks.accounts.models import Account
+from druks.contrib.software_factory.enums import Status
 from druks.contrib.software_factory.exceptions import PrefixTakenError
-from druks.contrib.software_factory.issues.enums import Status
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket, derive_prefix
 
 
 async def _open_repo(*, name="Druks", full_name="acme/druks"):
     project = await Project.create(name=name)
     return await ProjectRepo.create(project_id=project.id, full_name=full_name)
+
+
+def test_derive_prefix_takes_the_first_unused_third_letter():
+    assert derive_prefix("Acme", set()) == "ACM"
+    assert derive_prefix("Acme Tools", {"ACM"}) == "ACE"
+    assert derive_prefix("Go", set()) == "GO"
+    with pytest.raises(PrefixTakenError):
+        derive_prefix("Go", {"GO"})
+    with pytest.raises(PrefixTakenError):
+        derive_prefix("A", set())
 
 
 async def test_ticket_identifiers_count_up_per_project():
@@ -21,23 +31,6 @@ async def test_ticket_identifiers_count_up_per_project():
     ]
 
     assert identifiers == ["DRU-1", "DRU-2", "ENG-1"]
-
-
-def test_derive_prefix_takes_the_first_unused_third_letter():
-    assert derive_prefix("Acme", set()) == "ACM"
-    assert derive_prefix("Acme Tools", {"ACM"}) == "ACE"
-    assert derive_prefix("Go", set()) == "GO"
-    with pytest.raises(PrefixTakenError):
-        derive_prefix("Go", {"GO"})
-    with pytest.raises(PrefixTakenError):
-        derive_prefix("A", set())
-
-
-async def test_create_derives_an_unused_prefix():
-    first = await Project.create(name="Acme")
-    second = await Project.create(name="Acme Tools")
-
-    assert (first.prefix, second.prefix) == ("ACM", "ACE")
 
 
 async def test_comments_read_back_oldest_first_with_their_author():

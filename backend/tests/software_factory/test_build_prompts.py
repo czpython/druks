@@ -36,7 +36,6 @@ def _build(*, review_code: bool = True) -> SimpleNamespace:
         pr_number=7,
         ticket_ref="ACME-1",
         source="github",
-        tracker_label="GitHub",
         issue_number=None,
         task_owner_name=None,
         task_owner_email=None,

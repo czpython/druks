@@ -328,31 +328,29 @@ and webhook secret. The Jira identity uses a base URL, email, API token, and
 webhook secret. Druks validates the credentials before it stores them. Those
 trackers show status-name knobs for the trigger status and the resting status.
 
-Select **druks** to use Software Factory's local issue board on this appliance.
-The stored value is `issues`. That choice needs no credentials. Linear and Jira
-status-name knobs stay hidden. The trigger status is Ready for Agent. It is not
-a setting. `druks doctor` reports the tracker as healthy.
+Select **druks** to use the ticket board on this appliance. That choice needs no
+credentials. The Linear and Jira status names stay hidden. The trigger status is
+Ready for Agent, and it is not a setting.
 
-The dashboard shows the board and ticket pages only for
-**druks**. Each ticket picks a GitHub repository from a Software Factory
-project. Druks derives each project's ticket prefix from the project name:
-the first two letters and one later letter, the first such prefix that no other
-project uses. Identifiers are `{prefix}-{n}`, minted once. Changing the ticket's
-repository does not remint the identifier.
+The dashboard shows the board and the ticket pages only for **druks**. Each
+ticket selects a GitHub repository from a Software Factory project. Druks derives
+each project's ticket prefix from the project name. It takes the first two
+letters and one later letter, and it uses the first prefix that no other project
+holds. An identifier is `{prefix}-{n}`. Druks mints it once, and a move to
+another repository keeps it.
 
 A ticket that enters Ready for Agent opens a build against the selected
 repository. If a scheduled, running, or parked run already exists for that
 ticket, Software Factory does not start another.
 
-An agent reads and answers a board ticket through this appliance's own `/mcp`.
-A build whose tracker is **druks** requires that server, so there is nothing to
-paste, connect, or declare. Druks mints the token of the account the run belongs
-to, limited to the five ticket tools, so a comment the agent writes carries that
-person's name. The token appears in that person's API tokens, and Druks mints
-another once they retire it. The server's address comes from `urls.endpoint`, so
-set it to an address the sandboxes reach. The agent reads the ticket with
-`software_factory_get_ticket` and posts with `software_factory_add_comment`. A
-Druks identifier is not a GitHub issue number.
+An agent reads and answers a board ticket through this appliance's own `/mcp`. A
+build whose tracker is **druks** asks for that server. You paste nothing and
+connect nothing. Druks mints the token of the account the run belongs to, and it
+allows only the five ticket tools. A comment the agent writes then carries that
+person's name. The token appears in that person's API tokens. Druks mints another
+once they retire it. The server's address comes from `urls.endpoint`. Set it to
+an address the sandboxes reach. The agent reads a ticket with
+`software_factory_get_ticket` and posts with `software_factory_add_comment`.
 
 Webhook URLs remain `/_external/linear/events/` and
 `/_external/jira/events/`. The Jira webhook uses a Jira Automation

@@ -5,8 +5,8 @@ import pytest
 from conftest import connect_service
 from druks.apps.settings import field_choices, field_visibility
 from druks.contrib.software_factory.app import SoftwareFactory, check_tracker_identity
+from druks.contrib.software_factory.ticketing.druks import DruksTracker
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
-from druks.contrib.software_factory.ticketing.issues import IssuesTracker
 from druks.contrib.software_factory.ticketing.jira import Jira
 from druks.contrib.software_factory.ticketing.linear import Linear
 from druks.core import services
@@ -209,32 +209,32 @@ async def test_tracker_check_pends_a_selected_unconnected_tracker(druks_db, monk
     assert "jira" in result.detail
 
 
-async def test_tracker_check_accepts_issues_without_a_service(monkeypatch):
-    _pin_software_factory_settings(monkeypatch, tracker="issues")
+async def test_tracker_check_accepts_the_board_without_a_service(monkeypatch):
+    _pin_software_factory_settings(monkeypatch, tracker="druks")
 
     result = await check_tracker_identity()
 
     assert result.ok
-    assert result.detail == "local issues board"
+    assert result.detail == "this appliance"
     assert not result.pending
 
 
-def test_issues_is_a_tracker_choice_and_hides_the_name_knobs():
+def test_druks_is_a_tracker_choice_and_hides_the_name_knobs():
     fields = SoftwareFactory.Settings.model_fields
-    assert field_choices(fields["tracker"]) == ["none", "linear", "jira", "issues"]
-    assert SoftwareFactory.Settings(tracker="issues").trigger_status == "Ready for Agent"
+    assert field_choices(fields["tracker"]) == ["none", "linear", "jira", "druks"]
+    assert SoftwareFactory.Settings(tracker="druks").trigger_status == "Ready for Agent"
     assert field_visibility(fields["linear_trigger_status"]) == ("tracker", "linear")
     assert field_visibility(fields["linear_resting_status"]) == ("tracker", "linear")
     assert field_visibility(fields["jira_trigger_status"]) == ("tracker", "jira")
     assert field_visibility(fields["jira_resting_status"]) == ("tracker", "jira")
 
 
-async def test_tracker_builds_issues_without_credentials(druks_db, monkeypatch):
-    _pin_software_factory_settings(monkeypatch, tracker="issues")
+async def test_tracker_builds_the_board_without_credentials(druks_db, monkeypatch):
+    _pin_software_factory_settings(monkeypatch, tracker="druks")
 
-    tracker = await SoftwareFactory.get_tracker("issues")
+    tracker = await SoftwareFactory.get_tracker("druks")
 
-    assert isinstance(tracker, IssuesTracker)
+    assert isinstance(tracker, DruksTracker)
     assert await SoftwareFactory.get_tracker("linear") is None
 
 

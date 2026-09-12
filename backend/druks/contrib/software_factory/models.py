@@ -8,8 +8,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from druks.accounts.models import Account
+from druks.contrib.software_factory.enums import Priority, Status
 from druks.contrib.software_factory.exceptions import PrefixTakenError
-from druks.contrib.software_factory.issues.enums import Priority, Status
 from druks.contrib.software_factory.policy import RepoPolicy
 from druks.contrib.software_factory.schemas import ProjectRepoSummary, WorkItemSummary
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
@@ -252,7 +252,7 @@ class WorkItem(StoredSubject):
     )
     project: Mapped[Project] = relationship(lazy="joined")
     # Which tracker the ticket lives in: ``linear`` / ``github`` /
-    # ``jira`` / ``issues``. Combined with ``ticket_key`` to uniquely identify
+    # ``jira`` / ``druks``. Combined with ``ticket_key`` to uniquely identify
     # a ticket.
     source: Mapped[str] = mapped_column(default="github")
     title: Mapped[str] = mapped_column(default="")
@@ -462,10 +462,10 @@ class WorkItem(StoredSubject):
 
 
 class Comment(Base):
-    __tablename__ = "issues_comments"
+    __tablename__ = "ticket_comments"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    ticket_id: Mapped[int] = mapped_column(ForeignKey("issues_tickets.id", ondelete="CASCADE"))
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id", ondelete="CASCADE"))
     author_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     author: Mapped[Account] = relationship(lazy="joined")
     body: Mapped[str]
@@ -473,13 +473,13 @@ class Comment(Base):
 
 
 class Ticket(Base):
-    __tablename__ = "issues_tickets"
+    __tablename__ = "tickets"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     identifier: Mapped[str] = mapped_column(unique=True)
     title: Mapped[str]
     description: Mapped[str] = mapped_column(default="")
-    # String columns behind closed StrEnums: a new status needs no ALTER TYPE.
+    # String columns, never PG enums. A new status then needs no ALTER TYPE.
     status: Mapped[str] = mapped_column(default=Status.BACKLOG)
     priority: Mapped[str] = mapped_column(default=Priority.NONE)
     repo_id: Mapped[int] = mapped_column(ForeignKey("project_repos.id", ondelete="CASCADE"))
@@ -502,7 +502,7 @@ class Ticket(Base):
         owner_id: str | None = None,
         creator_id: str | None = None,
     ) -> "Ticket":
-        # comments=[]: loaded-empty, so a read right after flush does not lazy-load.
+        # comments=[] loads the collection empty. A read after flush needs no query.
         ticket = cls(
             identifier=await Project.mint_identifier(repo.project_id),
             repo=repo,
@@ -563,13 +563,17 @@ class Ticket(Base):
         statement = statement.order_by(cls.updated_at.desc(), cls.id.desc())
         return list(await db_session().scalars(statement))
 
+    async def save(self) -> None:
+        """Persist an edit to the row, stamping when it happened."""
+        self.updated_at = Base.utc_now()
+        await db_session().flush()
+
     async def transition(self, status: Status) -> None:
-        """Write the status and tell the funnel. Already there is a no-op, so a
-        repeat never dispatches a second build."""
+        """Write the status and tell the funnel. A repeat is a no-op, so it never
+        opens a second build."""
         if self.status != status:
             self.status = status
-            self.updated_at = Base.utc_now()
-            await db_session().flush()
+            await self.save()
             await self._emit_transitioned(status)
 
     async def _emit_transitioned(self, status: Status) -> None:
@@ -577,7 +581,7 @@ class Ticket(Base):
         await publish(
             "ticket.transitioned",
             payload={
-                "source": "issues",
+                "source": "druks",
                 "identifier": self.identifier,
                 # The display label, the way Linear and Jira publish state names.
                 "status": status.label,

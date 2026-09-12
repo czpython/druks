@@ -141,7 +141,7 @@ async def _required_servers(monkeypatch: pytest.MonkeyPatch, tracker: str):
 
 
 async def test_a_board_build_requires_the_appliance_mcp(druks_db, monkeypatch):
-    servers = await _required_servers(monkeypatch, "issues")
+    servers = await _required_servers(monkeypatch, "druks")
 
     assert [server.name for server in servers] == [GITHUB_MCP_NAME, "druks"]
     board = servers[-1]

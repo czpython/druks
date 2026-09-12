@@ -1,8 +1,17 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import AliasPath, BaseModel, ConfigDict, Field, computed_field
+from pydantic import (
+    AliasPath,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    computed_field,
+)
 
+from druks.contrib.software_factory.enums import Priority, Status
 from druks.schemas import Schema
 from druks.workflows import SubjectSummary
 
@@ -35,10 +44,6 @@ class ProjectsResponse(Schema):
     projects: list[ProjectSummary]
 
 
-class CreateProjectRequest(BaseModel):
-    name: str
-
-
 class AddProjectRepoRequest(BaseModel):
     full_name: str = Field(alias="fullName")
     purpose: str | None = None
@@ -63,7 +68,7 @@ class WorkItemSummary(SubjectSummary):
     # The work item's domain header — what only Software Factory knows. Status (where it is
     # in its lifecycle) and the timeline come from the platform's subject read-side,
     # which composes this with them; ``id`` is the platform subject key (str).
-    source: Literal["linear", "github", "jira", "issues"]
+    source: Literal["linear", "github", "jira", "druks"]
     repo: str
     # Druks Project name (e.g. "Acme"), not the repo. Required —
     # every WorkItem is born into a project, intake refuses tickets
@@ -120,3 +125,44 @@ class ReviewSummary(SubjectSummary):
     repo: str
     pr_number: int
     pull_request_url: str
+
+
+# A title or a comment body as the person typed it, minus the padding.
+NonBlank = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+# The owner select submits "" for nobody.
+OwnerId = Annotated[str | None, BeforeValidator(lambda value: value or None)]
+
+
+class CommentRead(Schema):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    author: str = Field(validation_alias=AliasPath("author", "username"))
+    body: str
+    created_at: datetime
+
+
+class TicketDetail(Schema):
+    """The ticket and its thread, oldest comment first."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    identifier: str
+    title: str
+    description: str
+    status: Status
+    priority: Priority
+    repo_id: int
+    owner_id: str | None
+    comments: list[CommentRead]
+
+
+class TicketEdit(BaseModel):
+    """A partial edit. An omitted field keeps its value, an empty owner clears it,
+    and ``set_status`` moves a ticket."""
+
+    title: NonBlank | None = None
+    description: str | None = None
+    priority: Priority | None = None
+    owner_id: OwnerId = None
+    repo_id: int | None = None

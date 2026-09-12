@@ -15,7 +15,6 @@ from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.core.apis.github import get_github_client
 from druks.core.services import Github
-from druks.durable.enums import RunState
 from druks.mcp.inbound import get_druks_mcp_server
 from druks.sandbox.datastructures import RequiredMcpServer
 from druks.sandbox.layout import get_related_root, get_work_root
@@ -32,7 +31,7 @@ from .datastructures import PullRequest
 from .github import get_review_actor
 from .journal import BuildJournal
 from .policy import PlanGate, RepoPolicy
-from .prompt_context import TRACKER_LABELS, BuildPromptContext
+from .prompt_context import BuildPromptContext
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Host
@@ -58,7 +57,7 @@ class BuildWorkspace(RepoWorkspace):
             secret_id=(await actor.service.get()).id,
             resource=cls.get_repo(subject),
         )
-        if (await SoftwareFactory.settings()).tracker == "issues":
+        if (await SoftwareFactory.settings()).tracker == "druks":
             return (github, get_druks_mcp_server(allowed_tools=TICKET_TOOLS))
         return (github,)
 
@@ -144,15 +143,11 @@ class Build(Workflow):
                 return
             await item.update(title=ticket["title"], ticket_url=ticket["url"])
             status = await item.get_status(workflow=cls)
-            if status.is_parked:
+            if status.is_active:
+                reviewing = status.gate == ReviewWork.name
                 await item.set_ticket_status(
-                    TicketStatus.IN_REVIEW
-                    if status.gate == ReviewWork.name
-                    else TicketStatus.IN_PROGRESS
+                    TicketStatus.IN_REVIEW if reviewing else TicketStatus.IN_PROGRESS
                 )
-                return
-            if status.state in (RunState.SCHEDULED, RunState.RUNNING):
-                await item.set_ticket_status(TicketStatus.IN_PROGRESS)
                 return
         else:
             repo = await ProjectRepo.lookup(
@@ -226,7 +221,6 @@ class Build(Workflow):
             pr_number=self.pr_number,
             ticket_ref=work_item.ticket_key,
             source=work_item.source,
-            tracker_label=TRACKER_LABELS[work_item.source],
             issue_number=self.input.issue_number,
             task_owner_name=self.input.task_owner_name,
             task_owner_email=self.input.task_owner_email,
