@@ -295,7 +295,8 @@ To register the GitHub App manually, use this webhook URL:
 Webhook URL:
 `https://<webhook-host>/_external/github/events/`
 
-Subscribe to issue comment, pull request, pull request review, and push events.
+Subscribe to issue comment, pull request, pull request review, pull request
+review comment, and push events.
 
 | Repository permission | Access |
 | --- | --- |

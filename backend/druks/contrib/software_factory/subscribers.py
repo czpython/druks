@@ -1,3 +1,5 @@
+import re
+
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import ReviewWork
 from druks.contrib.software_factory.github import get_review_actor
@@ -56,16 +58,15 @@ async def policy_push_reprofiles_the_repo(*, repo: str, paths: list, **_: object
 @subscribe("pr.review_submitted")
 async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict) -> None:
     item = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number, branch=payload["branch"])
-    if not item:
-        return
-    status = await item.get_status(workflow=Build)
-    if status.is_parked and status.gate == ReviewWork.name:
-        await ReviewWork.answer(
-            item,
-            action=payload["action"],
-            reviewer=payload["reviewer"],
-            body=payload["body"],
-        )
+    if item:
+        status = await item.get_status(workflow=Build)
+        if status.is_parked and status.gate == ReviewWork.name:
+            await ReviewWork.answer(
+                item,
+                action=payload["action"],
+                reviewer=payload["reviewer"],
+                body=payload["body"],
+            )
 
 
 @subscribe("pr.closed")
@@ -86,7 +87,9 @@ async def mention_asks_for_a_review(*, repo: str, pr_number: int, payload: dict)
     """Addressing the review actor asks it to review that pull request, and only someone
     who writes to the repo may ask — a review is the account's to spend."""
     handle = await (await get_review_actor()).client.get_mention_handle()
-    is_mentioned = handle and f"@{handle}".casefold() in payload["body"].casefold()
+    # Only the full handle counts. An email address or a longer handle is not a mention.
+    mention = rf"(?<!\w)@{re.escape(handle)}(?![\w-])"
+    is_mentioned = handle and re.search(mention, payload["body"], re.IGNORECASE)
     if is_mentioned and await ProjectRepo.get_for_repo(repo):
         await PullRequestReview.dispatch(
             repo=repo, pr_number=pr_number, requested_by=payload["author"]

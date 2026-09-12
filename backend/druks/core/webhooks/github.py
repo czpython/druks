@@ -17,8 +17,8 @@ _WRITERS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 
 
 class GitHubEvents(Webhook):
-    """Verifies the GitHub HMAC, then emits ``pr.review_submitted`` /
-    ``pr.closed`` — normalized facts, no WorkItem knowledge."""
+    """Verifies the GitHub HMAC, then publishes each event as a normalized fact.
+    It knows nothing about work items."""
 
     provider = "github"
     category = "events"
@@ -55,42 +55,47 @@ class GitHubEvents(Webhook):
 
     async def on_pull_request_review_submitted(self) -> Response:
         sender = self.data["sender"]
-        if sender["type"] != "User":
-            return _accepted()
         review, pull_request = self.data["review"], self.data["pull_request"]
         action = _REVIEW_ACTION.get(review["state"].upper())
-        if not action:
-            return _accepted()
-        await publish(
-            "pr.review_submitted",
-            repo=_repo_name(self.data),
-            pr_number=pull_request["number"],
-            payload={
-                "branch": pull_request["head"]["ref"],
-                "action": action,
-                "reviewer": sender["login"],
-                "body": review["body"] or "",  # body is nullable on an approve
-            },
-        )
+        if sender["type"] == "User" and action:
+            await publish(
+                "pr.review_submitted",
+                repo=_repo_name(self.data),
+                pr_number=pull_request["number"],
+                payload={
+                    "branch": pull_request["head"]["ref"],
+                    "action": action,
+                    "reviewer": sender["login"],
+                    "body": review["body"] or "",  # body is nullable on an approve
+                },
+            )
         return _accepted()
 
     async def on_issue_comment_created(self) -> Response:
-        # GitHub files pull-request comments under issues; only those carry
-        # ``pull_request``. A non-User sender is an app talking to itself.
-        issue, sender = self.data["issue"], self.data["sender"]
-        if sender["type"] != "User" or "pull_request" not in issue:
-            return _accepted()
-        await publish(
-            "pr.commented",
-            repo=_repo_name(self.data),
-            pr_number=issue["number"],
-            payload={
-                "author": sender["login"],
-                "author_can_write": self.data["comment"]["author_association"] in _WRITERS,
-                "body": self.data["comment"]["body"],
-            },
-        )
+        # GitHub files pull-request comments under issues; only those carry ``pull_request``.
+        issue = self.data["issue"]
+        if "pull_request" in issue:
+            await self._publish_comment(issue["number"])
         return _accepted()
+
+    async def on_pull_request_review_comment_created(self) -> Response:
+        await self._publish_comment(self.data["pull_request"]["number"])
+        return _accepted()
+
+    async def _publish_comment(self, pr_number: int) -> None:
+        # A non-User sender is an app talking to itself.
+        sender, comment = self.data["sender"], self.data["comment"]
+        if sender["type"] == "User":
+            await publish(
+                "pr.commented",
+                repo=_repo_name(self.data),
+                pr_number=pr_number,
+                payload={
+                    "author": sender["login"],
+                    "author_can_write": comment["author_association"] in _WRITERS,
+                    "body": comment["body"],
+                },
+            )
 
     async def on_pull_request_closed(self) -> Response:
         pull_request = self.data["pull_request"]

@@ -32,7 +32,13 @@ class Github(Service):
         "name": "druks",
         "description": "Druks operator — receives webhooks, writes branches, PRs, and comments.",
         "public": False,
-        "default_events": ["issue_comment", "pull_request", "pull_request_review", "push"],
+        "default_events": [
+            "issue_comment",
+            "pull_request",
+            "pull_request_review",
+            "pull_request_review_comment",
+            "push",
+        ],
         "default_permissions": {
             "metadata": "read",
             "contents": "write",
