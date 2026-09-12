@@ -2,9 +2,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { api } from '../../../api/client'
-import type { AppsSettingsResponse } from '../../../api/types'
-import { SOFTWARE_FACTORY } from '../api'
 import { projectsApi } from './api'
 import { ProjectsPage } from './ProjectsPage'
 import type { Project, ProjectsResponse } from './types'
@@ -17,25 +14,18 @@ vi.mock('./api', () => ({
     repoBoard: vi.fn(),
     delete: vi.fn(),
     create: vi.fn(),
-    update: vi.fn(),
   },
-}))
-
-vi.mock('../../../api/client', () => ({
-  api: { getAppSettings: vi.fn() },
 }))
 
 const listMock = vi.mocked(projectsApi.list)
 const repoBoardMock = vi.mocked(projectsApi.repoBoard)
 const deleteMock = vi.mocked(projectsApi.delete)
 const createMock = vi.mocked(projectsApi.create)
-const updateMock = vi.mocked(projectsApi.update)
 
 function project(overrides: Partial<Project> = {}): Project {
   return {
     id: 7,
     name: 'Target',
-    prefix: null,
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     repos: [],
@@ -43,27 +33,12 @@ function project(overrides: Partial<Project> = {}): Project {
   }
 }
 
-function settingsWithTracker(tracker: string): AppsSettingsResponse {
-  return {
-    allowedEfforts: [],
-    apps: [
-      {
-        name: SOFTWARE_FACTORY,
-        settings: [{ name: 'tracker', value: tracker }],
-      },
-    ],
-  } as unknown as AppsSettingsResponse
-}
-
-function renderPage(projects: Project[], tracker = 'issues') {
+function renderPage(projects: Project[]) {
   listMock.mockResolvedValue({ projects } satisfies ProjectsResponse)
   repoBoardMock.mockResolvedValue({ rows: [] })
-  const settings = settingsWithTracker(tracker)
-  vi.mocked(api.getAppSettings).mockResolvedValue(settings)
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  queryClient.setQueryData(['appSettings'], settings)
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectsPage />
@@ -116,7 +91,6 @@ describe('ProjectsPage create row', () => {
     fireEvent.change(await screen.findByPlaceholderText(/new project name/), {
       target: { value: 'Acme' },
     })
-    expect((screen.getByPlaceholderText(/prefix/) as HTMLInputElement).value).toBe('ACM')
     const create = screen.getByText('+ create').closest('button')!
     await waitFor(() => expect(create.disabled).toBe(false))
     fireEvent.click(create)
@@ -124,84 +98,7 @@ describe('ProjectsPage create row', () => {
     // react-query hands the mutationFn a context argument too; the payload is
     // the first one.
     await waitFor(() => expect(createMock).toHaveBeenCalled())
-    expect(createMock.mock.calls[0]![0]).toEqual({ name: 'Acme', prefix: 'ACM' })
-  })
-
-  it('does not overwrite a prefix the operator edited', async () => {
-    renderPage([project()])
-
-    fireEvent.change(await screen.findByPlaceholderText(/new project name/), {
-      target: { value: 'Acme' },
-    })
-    fireEvent.change(screen.getByPlaceholderText(/prefix/), {
-      target: { value: 'box' },
-    })
-    fireEvent.change(screen.getByPlaceholderText(/new project name/), {
-      target: { value: 'Acme Tools' },
-    })
-    expect((screen.getByPlaceholderText(/prefix/) as HTMLInputElement).value).toBe('box')
-  })
-
-  it('sends the prefix when one is typed', async () => {
-    createMock.mockResolvedValue(project({ name: 'Acme', prefix: 'ACM' }))
-    renderPage([project()])
-
-    fireEvent.change(await screen.findByPlaceholderText(/new project name/), {
-      target: { value: 'Acme' },
-    })
-    fireEvent.change(screen.getByPlaceholderText(/prefix/), {
-      target: { value: 'acm' },
-    })
-    fireEvent.click(screen.getByText('+ create').closest('button')!)
-
-    await waitFor(() => expect(createMock).toHaveBeenCalled())
-    expect(createMock.mock.calls[0]![0]).toEqual({ name: 'Acme', prefix: 'acm' })
-  })
-})
-
-describe('ProjectsPage prefix note', () => {
-  it('notes that a project without a prefix cannot be selected on the board', async () => {
-    renderPage([project({ name: 'Bare' })])
-
-    expect(
-      await screen.findByText(/cannot be selected on the board/),
-    ).toBeTruthy()
-  })
-
-  it('does not note the board when the project has a prefix', async () => {
-    renderPage([project({ name: 'Acme', prefix: 'ACM' })])
-
-    expect(await screen.findByText('Acme')).toBeTruthy()
-    expect(screen.queryByText(/cannot be selected on the board/)).toBeNull()
-  })
-
-  it('hides the prefix field and note when the tracker is not druks', async () => {
-    renderPage([project({ name: 'Bare' })], 'linear')
-
-    expect(await screen.findByText('Bare')).toBeTruthy()
-    expect(screen.queryByPlaceholderText(/prefix/)).toBeNull()
-    expect(screen.queryByText(/cannot be selected on the board/)).toBeNull()
-    expect(screen.queryByText('prefix')).toBeNull()
-  })
-
-  it('keeps the prefix editor open and names a taken prefix', async () => {
-    updateMock.mockRejectedValue(
-      new Error("project prefix 'BOX' is already in use. Pick a different one."),
-    )
-    renderPage([
-      project({ id: 2, name: 'Acme', prefix: null }),
-      project({ id: 1, name: 'BOX', prefix: 'BOX' }),
-    ])
-
-    fireEvent.click(await screen.findByText('prefix'))
-    const input = screen.getByPlaceholderText('DRU')
-    fireEvent.change(input, { target: { value: 'BOX' } })
-    fireEvent.blur(input)
-
-    await waitFor(() => expect(updateMock).toHaveBeenCalledWith(2, { prefix: 'BOX' }))
-    const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain('already in use')
-    expect(screen.getByPlaceholderText('DRU')).toBeTruthy()
+    expect(createMock.mock.calls[0]![0]).toEqual({ name: 'Acme' })
   })
 })
 

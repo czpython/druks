@@ -11,8 +11,7 @@ from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.server import mcp_app
 from druks.contrib.software_factory.app import SoftwareFactory
-from druks.contrib.software_factory.issues.models import Ticket
-from druks.contrib.software_factory.models import Project, ProjectRepo
+from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket
 from druks.core.apis.exceptions import UnknownTicketError
 from druks.durable.models import Artifact, Run
 from druks.mcp.exceptions import InvalidAgentToolError
@@ -172,13 +171,13 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
 
     assert list(tools)[:7] == _TOOL_NAMES
     assert list(tools)[7:] == [
+        "software_factory_start",
+        "software_factory_review",
         "software_factory_create_ticket",
         "software_factory_get_ticket",
         "software_factory_update_ticket",
         "software_factory_set_status",
         "software_factory_add_comment",
-        "software_factory_start",
-        "software_factory_review",
     ]
 
     expected_annotations = {
@@ -228,11 +227,9 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
 
 
 async def test_issues_ticket_tools_read_and_comment_as_the_pat_account(app, account, pat_token):
-    project = await Project.create(name="Acme", prefix="WID")
+    project = await Project.create(name="Acme")
     repo = await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
-    ticket = await Ticket.create(
-        repo_id=repo.id, title="Add an endpoint", description="do the thing"
-    )
+    ticket = await Ticket.create(repo=repo, title="Add an endpoint", description="do the thing")
 
     async with live(app), _client(app, pat_token) as client:
         names = {tool.name for tool in await client.list_tools()}
@@ -257,6 +254,27 @@ async def test_issues_ticket_tools_read_and_comment_as_the_pat_account(app, acco
     assert commented["body"] == "first plan"
     assert [line["body"] for line in reread["comments"]] == ["first plan"]
     assert reread["comments"][0]["author"] == account.username
+
+
+async def test_a_ticket_token_reaches_only_its_tools(app, account):
+    project = await Project.create(name="Acme")
+    repo = await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
+    ticket = await Ticket.create(repo=repo, title="Add an endpoint")
+    _, token = await PersonalAccessToken.create(
+        account_id=account.id,
+        name="issues sandbox",
+        allowed_tools=["software_factory_get_ticket"],
+    )
+
+    async with live(app), _client(app, token) as client:
+        fetched = await client.call_tool(
+            "software_factory_get_ticket", {"identifier": ticket.identifier}
+        )
+        refused = await client.call_tool("get_usage", {}, raise_on_error=False)
+
+    assert fetched.structured_content["title"] == "Add an endpoint"
+    assert refused.is_error
+    assert "limited to these tools" in refused.content[0].text
 
 
 @pytest.mark.parametrize(

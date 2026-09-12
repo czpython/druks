@@ -33,7 +33,8 @@ export function Form({
   const fieldState = useFieldState(fields)
   const live = submit === 'change'
   const run = useAction(action, fields, live ? undefined : fieldState.clear)
-  const declared = Object.fromEntries(fields.map(startingValue))
+  // An edit since the last send: a blur with none sends nothing.
+  const edited = useRef(false)
   const immediate = new Set(
     fields
       .filter((field) => !['text', 'text_area', 'number', 'secret'].includes(field.field))
@@ -41,7 +42,7 @@ export function Form({
   )
 
   function commit(values: Payload) {
-    if (JSON.stringify(values) === JSON.stringify(declared)) return
+    edited.current = false
     void run.call(values)
   }
 
@@ -62,11 +63,17 @@ export function Form({
         errors={run.fieldErrors}
         resets={fieldState.resets}
         onChange={(name, value) => {
-          const next = { ...fieldState.values, [name]: value }
           fieldState.change(name, value)
-          if (live && immediate.has(name)) commit(next)
+          edited.current = true
+          if (live && immediate.has(name)) commit({ ...fieldState.values, [name]: value })
         }}
-        onBlur={live ? () => commit(fieldState.values) : undefined}
+        onBlur={
+          live
+            ? () => {
+                if (edited.current) commit(fieldState.values)
+              }
+            : undefined
+        }
       />
       {run.problem && (
         <div className="dui-form-error" role="alert">

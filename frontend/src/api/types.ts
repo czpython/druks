@@ -304,7 +304,6 @@ export interface Fact {
 export interface TableColumn {
   label: string
   align: 'start' | 'end'
-  width?: string
 }
 
 export interface TableRow {

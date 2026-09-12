@@ -23,6 +23,7 @@ from druks.mcp.constants import TOKEN_ENV_PREFIX
 from druks.mcp.enums import IdentityMode, TokenSource
 from druks.mcp.exceptions import MissingGrantError, MissingTokenError
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
+from druks.mcp.inbound import get_druks_account_token
 from druks.sandbox import repo as checkout
 from druks.sandbox.datastructures import AgentResult, McpServer, RequiredMcpServer
 from druks.sandbox.exceptions import ExecFailed
@@ -178,10 +179,16 @@ class Workspace:
         for server in required:
             variable = get_bearer_token_env_var(server.name)
             wire.append(McpServer(name=server.name, url=server.url, bearer_token_env_var=variable))
+            if server.secret_id:
+                secret_id = server.secret_id
+            else:
+                account = await Account.get_for_run(account_id)
+                row = await get_druks_account_token(account.id, server.allowed_tools)
+                secret_id = row.id
             refs.append(
                 SecretRef(
                     name=variable.lower(),
-                    secret_id=server.secret_id,
+                    secret_id=secret_id,
                     resource=server.resource,
                     host=urlsplit(server.url).hostname,
                 )

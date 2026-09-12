@@ -5,7 +5,7 @@ import secrets
 from datetime import datetime
 
 from sqlalchemy import ForeignKey, Index, LargeBinary, String, select, text
-from sqlalchemy.dialects.postgresql import CITEXT, insert
+from sqlalchemy.dialects.postgresql import CITEXT, JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from druks.accounts.constants import (
@@ -120,6 +120,8 @@ class PersonalAccessToken(Base, Uuid7Pk):
     expires_at: Mapped[datetime]
     last_used_at: Mapped[datetime | None]
     revoked_at: Mapped[datetime | None]
+    # None is the account's whole API; a list only those agent tools, by MCP name.
+    allowed_tools: Mapped[list[str] | None] = mapped_column(JSONB, default=None)
 
     @property
     def is_expired(self) -> bool:
@@ -148,7 +150,13 @@ class PersonalAccessToken(Base, Uuid7Pk):
         return list(await db_session().scalars(stmt))
 
     @classmethod
-    async def create(cls, *, account_id: str, name: str) -> "tuple[PersonalAccessToken, str]":
+    async def create(
+        cls,
+        *,
+        account_id: str,
+        name: str,
+        allowed_tools: list[str] | None = None,
+    ) -> "tuple[PersonalAccessToken, str]":
         """Mint ``account_id`` a token; returns (row, plaintext). The plaintext
         is shown exactly once — only its hash lands in the row."""
         prefix = _new_prefix()
@@ -165,6 +173,7 @@ class PersonalAccessToken(Base, Uuid7Pk):
             token_hash=_hash_token(token),
             created_at=now,
             expires_at=now + PAT_LIFETIME,
+            allowed_tools=allowed_tools,
         )
         session = db_session()
         session.add(row)

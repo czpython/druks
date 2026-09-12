@@ -61,7 +61,7 @@ class McpServer(Base, Uuid7Pk):
         rows = {server.name: server for server in await cls.list_all()}
         tokens: dict[str, VaultSecret] = {}
         secret_headers: dict[str, dict[str, VaultSecret]] = {}
-        for secret in await VaultSecret.list_tokens():
+        for secret in await VaultSecret.list_installation_tokens():
             if secret.header == BEARER_HEADER:
                 tokens[secret.audience_name] = secret
             else:

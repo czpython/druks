@@ -4,21 +4,19 @@ import { api } from '../../api/client'
 import type { AppsSettingsResponse } from '../../api/types'
 import { SOFTWARE_FACTORY } from './api'
 
-/** The Settings value whose label is "druks" — this appliance's own board. */
-export const DRUKS_ISSUES_TRACKER = 'issues'
-
-export function isDruksIssuesTracker(settings?: AppsSettingsResponse): boolean {
+/** Whether Software Factory tracks tickets on this appliance's own board. */
+export function isDruksTracker(settings?: AppsSettingsResponse): boolean {
   const field = settings?.apps
     .find((app) => app.name === SOFTWARE_FACTORY)
     ?.settings.find((setting) => setting.name === 'tracker')
-  return field?.value === DRUKS_ISSUES_TRACKER
+  return field?.value === 'druks'
 }
 
 export function softwareFactoryNavigation(settings?: AppsSettingsResponse): [string, string][] {
   const overview: [string, string] = [`/${SOFTWARE_FACTORY}`, 'Overview']
   const history: [string, string] = [`/${SOFTWARE_FACTORY}/history`, 'history']
   const projects: [string, string] = [`/${SOFTWARE_FACTORY}/projects`, 'projects']
-  if (isDruksIssuesTracker(settings)) {
+  if (isDruksTracker(settings)) {
     return [
       overview,
       [`/${SOFTWARE_FACTORY}/board`, 'board'],
@@ -29,12 +27,12 @@ export function softwareFactoryNavigation(settings?: AppsSettingsResponse): [str
   return [overview, history, projects]
 }
 
-export function useDruksIssuesTracker(): boolean | undefined {
+export function useDruksTracker(): boolean | undefined {
   const settings = useQuery({
     queryKey: ['appSettings'],
     queryFn: api.getAppSettings,
     staleTime: 60_000,
   })
   if (settings.isPending) return undefined
-  return isDruksIssuesTracker(settings.data)
+  return isDruksTracker(settings.data)
 }

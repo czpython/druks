@@ -1,4 +1,5 @@
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Response, status
 from sqlalchemy import delete, func, select, update
@@ -7,24 +8,28 @@ from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
 from druks.api.exceptions import agent_error_responses
 from druks.contrib.software_factory.app import SoftwareFactory
+from druks.contrib.software_factory.enums import Priority, Status
 from druks.contrib.software_factory.exceptions import (
-    InvalidPrefix,
-    PrefixLocked,
-    PrefixTaken,
+    OwnerNotFound,
+    PrefixTakenError,
+    RepoNotFound,
     TicketNotFound,
     TrackerNotConfigured,
 )
-from druks.contrib.software_factory.issues.models import Comment, Ticket
-from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
+from druks.contrib.software_factory.models import Comment, Project, ProjectRepo, Ticket, WorkItem
 from druks.contrib.software_factory.schemas import (
     AddProjectRepoRequest,
-    CreateProjectRequest,
+    CommentRead,
     DashboardItem,
     GitHubReposResponse,
     GitHubRepoSummary,
+    NonBlank,
+    OwnerId,
     ProjectRepoSummary,
     ProjectsResponse,
     ProjectSummary,
+    TicketDetail,
+    TicketEdit,
     WorkItemsHistoryResponse,
 )
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
@@ -36,8 +41,6 @@ from druks.services.exceptions import ServiceNotConnectedError
 
 logger = logging.getLogger(__name__)
 
-
-# /api/software_factory/projects                                          Project / ProjectRepo
 
 projects_router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -54,15 +57,13 @@ async def list_projects() -> ProjectsResponse:
     response_model_by_alias=True,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_project(body: CreateProjectRequest) -> ProjectSummary:
-    name = body.name.strip()
+async def create_project(name: Annotated[str, Body(embed=True)]) -> ProjectSummary:
+    name = name.strip()
     if not name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "name is required")
     try:
-        project = await Project.create(name=name, prefix=body.prefix)
-    except InvalidPrefix as error:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
-    except PrefixTaken as error:
+        project = await Project.create(name=name)
+    except PrefixTakenError as error:
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
     return ProjectSummary.model_validate(project)
 
@@ -128,7 +129,6 @@ async def get_project(project_id: int) -> ProjectSummary:
 async def update_project(
     project_id: int,
     name: str | None = Body(default=None, embed=True),
-    prefix: str | None = Body(default=None, embed=True),
 ) -> ProjectSummary:
     project = await Project.get(project_id)
     if not project:
@@ -139,13 +139,6 @@ async def update_project(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "name cannot be empty")
         project.name = name
         await db_session().flush()
-    if prefix is not None:
-        try:
-            await project.set_prefix(prefix)
-        except (InvalidPrefix, PrefixLocked) as error:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
-        except PrefixTaken as error:
-            raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
     return ProjectSummary.model_validate(project)
 
 
@@ -159,11 +152,6 @@ async def delete_project(project_id: int) -> None:
     project = await Project.get(project_id)
     if not project:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "project not found")
-    repo_ids = [repo.id for repo in project.repos]
-    if repo_ids:
-        ticket_ids = select(Ticket.id).where(Ticket.repo_id.in_(repo_ids))
-        await session.execute(delete(Comment).where(Comment.ticket_id.in_(ticket_ids)))
-        await session.execute(delete(Ticket).where(Ticket.repo_id.in_(repo_ids)))
     await session.execute(delete(WorkItem).where(WorkItem.project_id == project_id))
     await session.delete(project)
     await session.flush()
@@ -257,8 +245,6 @@ async def delete_project_repo(project_id: int, repo_id: int) -> None:
     await session.delete(row)
     await session.flush()
 
-
-# /api/software_factory/work-items                                                WorkItem CRUD
 
 work_items_router = APIRouter(prefix="/work-items", tags=["work-items"])
 
@@ -361,3 +347,133 @@ async def request_review(
         status.HTTP_404_NOT_FOUND,
         f"{repo} is not a registered project repo. Add it to a project first.",
     )
+
+
+tickets_router = APIRouter(prefix="/tickets", tags=["tickets"])
+
+
+async def require_ticket(identifier: str) -> Ticket:
+    if ticket := await Ticket.get_for_identifier(identifier):
+        return ticket
+    raise TicketNotFound(identifier, "druks")
+
+
+async def require_repo(repo_id: int) -> ProjectRepo:
+    if repo := await ProjectRepo.get(repo_id):
+        return repo
+    raise RepoNotFound(repo_id)
+
+
+async def require_owner(account_id: str | None) -> str | None:
+    """The id as given, once it names a real account. The column is RESTRICT, so an
+    unknown id would surface as a write failure rather than an answer."""
+    if account_id and not await Account.get(account_id):
+        raise OwnerNotFound(account_id)
+    return account_id
+
+
+@tickets_router.post(
+    "",
+    response_model=TicketDetail,
+    response_model_by_alias=True,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="create_ticket",
+    tags=["agent"],
+    responses=agent_error_responses(RepoNotFound(7), OwnerNotFound("ops@example.com")),
+)
+async def create_ticket(
+    title: Annotated[NonBlank, Body(embed=True, max_length=200)],
+    repo_id: Annotated[
+        int, Body(embed=True, description="the GitHub repo this ticket's PR will target")
+    ],
+    description: Annotated[str, Body(embed=True)] = "",
+    status: Annotated[Status, Body(embed=True)] = Status.BACKLOG,
+    priority: Annotated[Priority, Body(embed=True)] = Priority.NONE,
+    owner_id: Annotated[OwnerId, Body(embed=True)] = None,
+    account: Account = Depends(current_account),
+) -> Ticket:
+    """Create a ticket. Creating it in Ready for Agent opens a build."""
+    return await Ticket.create(
+        repo=await require_repo(repo_id),
+        title=title,
+        description=description,
+        status=status,
+        priority=priority,
+        owner_id=await require_owner(owner_id),
+        creator_id=account.id,
+    )
+
+
+@tickets_router.get(
+    "/{identifier}",
+    response_model=TicketDetail,
+    response_model_by_alias=True,
+    operation_id="get_ticket",
+    tags=["agent"],
+    responses=agent_error_responses(TicketNotFound("ACM-1", "druks")),
+)
+async def get_ticket(identifier: str) -> Ticket:
+    """Read a board ticket such as ACM-1 with its comments."""
+    return await require_ticket(identifier)
+
+
+@tickets_router.patch(
+    "/{identifier}",
+    response_model=TicketDetail,
+    response_model_by_alias=True,
+    operation_id="update_ticket",
+    tags=["agent"],
+    responses=agent_error_responses(
+        TicketNotFound("ACM-1", "druks"), RepoNotFound(7), OwnerNotFound("ops@example.com")
+    ),
+)
+async def update_ticket(identifier: str, edit: TicketEdit) -> Ticket:
+    """Edit a ticket's title, description, priority, owner, or repo."""
+    ticket = await require_ticket(identifier)
+    if edit.repo_id:
+        ticket.repo = await require_repo(edit.repo_id)
+    if edit.title:
+        ticket.title = edit.title
+    # An empty description is one the operator cleared.
+    if edit.description is not None:
+        ticket.description = edit.description
+    if edit.priority:
+        ticket.priority = edit.priority
+    if "owner_id" in edit.model_fields_set:
+        ticket.owner_id = await require_owner(edit.owner_id)
+    await ticket.save()
+    return ticket
+
+
+@tickets_router.post(
+    "/{identifier}/status",
+    response_model=TicketDetail,
+    response_model_by_alias=True,
+    operation_id="set_status",
+    tags=["agent"],
+    responses=agent_error_responses(TicketNotFound("ACM-1", "druks")),
+)
+async def set_status(identifier: str, status: Annotated[Status, Body(embed=True)]) -> Ticket:
+    """Move a ticket. Ready for Agent opens a build."""
+    ticket = await require_ticket(identifier)
+    await ticket.transition(status)
+    return ticket
+
+
+@tickets_router.post(
+    "/{identifier}/comments",
+    response_model=CommentRead,
+    response_model_by_alias=True,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="add_comment",
+    tags=["agent"],
+    responses=agent_error_responses(TicketNotFound("ACM-1", "druks")),
+)
+async def add_comment(
+    identifier: str,
+    body: Annotated[NonBlank, Body(embed=True)],
+    account: Account = Depends(current_account),
+) -> Comment:
+    """Append a comment to a ticket as the calling account."""
+    ticket = await require_ticket(identifier)
+    return await ticket.add_comment(author=account, body=body)

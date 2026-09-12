@@ -106,6 +106,20 @@ async def test_a_bearer_pat_authenticates_gated_routes(tmp_path, druks_db):
         assert client.get("/api/settings", headers=_bearer(token)).status_code == 200
 
 
+async def test_a_tools_limited_token_is_refused_outside_its_tools(tmp_path, druks_db):
+    with _client(tmp_path) as client:
+        account = await Account.get_or_create("agent@example.com")
+        _, token = await PersonalAccessToken.create(
+            account_id=account.id,
+            name="sandbox",
+            allowed_tools=["software_factory_get_ticket"],
+        )
+        for path in ("/api/auth/me", "/api/settings"):
+            response = client.get(path, headers=_bearer(token))
+            assert response.status_code == 403
+            assert "limited to these tools" in response.json()["detail"]
+
+
 def test_an_unknown_token_never_falls_through_to_the_assertion(tmp_path, druks_db):
     with _client(tmp_path) as client:
         assert client.get("/api/auth/me", headers=OPERATOR).status_code == 200

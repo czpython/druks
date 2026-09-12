@@ -4,15 +4,6 @@ from druks.contrib.software_factory.journal import BuildJournal
 from druks.contrib.software_factory.models import ProjectRepo
 from druks.skills.models import Skill
 
-# How the prompt names the ticket's home. ``issues`` must not render as
-# "Issues" — that reads as GitHub Issues and the agent fetches the wrong tool.
-TRACKER_LABELS = {
-    "linear": "Linear",
-    "jira": "Jira",
-    "github": "GitHub",
-    "issues": "the Druks board",
-}
-
 
 @dataclass(frozen=True)
 class BuildPromptContext:
@@ -29,8 +20,7 @@ class BuildPromptContext:
     branch: str | None
     pr_number: int | None
     ticket_ref: str | None
-    source: str | None
-    tracker_label: str
+    source: str
     issue_number: int | None
     task_owner_name: str | None
     task_owner_email: str | None
