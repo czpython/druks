@@ -47,7 +47,7 @@ everything the original plan got right.
 
 The PR description is the plan document reviewers review the diff against — your revision made it stale. Before emitting your final JSON, write the revised plan to a file and publish it to PR #{{ build.pr_number }}'s description with `gh api -X PATCH repos/{{ build.repo }}/pulls/{{ build.pr_number }} -F body=@<file>` (the checkout is authenticated):
 
-- `**Linear ticket:** [<ticket ref>](<url>)` when the ticket has a URL.
+- `**Ticket:** [<ticket ref>](<url>)` when the ticket has a URL.
 - `## Plan` — your revised plan markdown.
 - `## Acceptance Criteria` — `- <id>: <description>` bullets, an indented `- Verification: <how>` when you specified one.
 - End with: `<!-- Plan authored by Druks. Reviews, evaluations, and the full audit trail live in the Druks dashboard, not here. -->`
