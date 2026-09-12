@@ -1,43 +1,23 @@
 from datetime import timedelta
 
 from druks import ui
+from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
 from druks.contrib.software_factory.issues.enums import Priority, Status
 from druks.contrib.software_factory.issues.models import Comment, Ticket
 from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
 from druks.db import Base
 
-# The board's columns, worked-on left to right. Cancelled and blocked are off
-# it: ``Ticket.list_board`` leaves those rows out.
+# The board's columns, worked-on left to right. Blocked sits next to In
+# Progress so stuck work stays visible beside work in flight.
 BOARD_STATUSES = (
     Status.BACKLOG,
-    Status.TODO,
     Status.READY_FOR_AGENT,
     Status.IN_PROGRESS,
-    Status.IN_REVIEW,
-    Status.DONE,
-)
-# The issues page's sections, left to right through the workflow, then parked
-# and cancelled at the bottom. Ready for Agent stays: it is still a live status.
-LIST_STATUSES = (
-    Status.BACKLOG,
-    Status.TODO,
-    Status.READY_FOR_AGENT,
-    Status.IN_PROGRESS,
-    Status.IN_REVIEW,
-    Status.DONE,
     Status.BLOCKED,
-    Status.CANCELLED,
+    Status.IN_REVIEW,
+    Status.DONE,
 )
-
-ISSUE_COLUMNS = [
-    ui.TableColumn("Identifier", width="8rem"),
-    ui.TableColumn("Title"),
-    ui.TableColumn("Priority", width="8rem"),
-    ui.TableColumn("Assignee", width="14rem"),
-    ui.TableColumn("Repo", width="12rem"),
-    ui.TableColumn("Updated", align="end", width="9rem"),
-]
 
 # The words the screens spell a priority with. The stored value stays
 # snake_case; only these strings change when the board wants different words.
@@ -49,14 +29,14 @@ PRIORITY_LABELS: dict[Priority, str] = {
     Priority.LOW: "Low",
 }
 
-UNASSIGNED = "Unassigned"
+UNOWNED = "Unowned"
 # An account that has since gone, or druks' own system actor: the row still
 # reads, it just carries no name.
 UNATTRIBUTED = "Unattributed"
-# Empty value on a page filter: any ticket. Assignee uses ``none`` for
-# unassigned because this empty value already means "no filter".
+# Empty value on a page filter: any ticket. Owner uses ``none`` for
+# unowned because this empty value already means "no filter".
 FILTER_ANY = "Any"
-UNASSIGNED_FILTER = "none"
+UNOWNED_FILTER = "none"
 UPDATED_WINDOWS = ("today", "week", "month")
 
 
@@ -68,10 +48,10 @@ def _repo_options(repos: list[ProjectRepo]) -> list[ui.Option]:
     ]
 
 
-def _assignee_options(accounts: list[Account]) -> list[ui.Option]:
-    """Who work can be handed to, plus nobody. Unassigned carries the empty
-    value the doors read back as "no assignee"."""
-    return [ui.Option(UNASSIGNED, value="")] + [
+def _owner_options(accounts: list[Account]) -> list[ui.Option]:
+    """Who work can be handed to, plus nobody. Unowned carries the empty
+    value the doors read back as "no owner"."""
+    return [ui.Option(UNOWNED, value="")] + [
         ui.Option(account.username, value=account.id) for account in accounts
     ]
 
@@ -84,15 +64,21 @@ def _status_options() -> list[ui.Option]:
     return [ui.Option(status.label, value=status.value) for status in Status]
 
 
-def _assignee_name(assignee_id: str | None, account_names: dict[str, str]) -> str:
-    if not assignee_id:
-        return UNASSIGNED
-    return account_names.get(assignee_id, UNATTRIBUTED)
+def _owner_name(owner_id: str | None, account_names: dict[str, str]) -> str:
+    if not owner_id:
+        return UNOWNED
+    return account_names.get(owner_id, UNATTRIBUTED)
+
+
+def _creator_name(creator_id: str | None, account_names: dict[str, str]) -> str:
+    if not creator_id:
+        return UNATTRIBUTED
+    return account_names.get(creator_id, UNATTRIBUTED)
 
 
 def _create_actions(repos: list[ProjectRepo], accounts: list[Account]) -> list[ui.Action]:
-    """Creation is a control on the board and the issues page, not a destination:
-    a page that lists nothing is not where a ticket gets written."""
+    """Creation is a control on the board, not a destination: a page that lists
+    nothing is not where a ticket gets written."""
     repo_choices = _repo_options(repos)
     return [
         ui.Action(
@@ -116,7 +102,7 @@ def _create_actions(repos: list[ProjectRepo], accounts: list[Account]) -> list[u
                     name="status",
                     label="Status",
                     options=_status_options(),
-                    value=Status.TODO.value,
+                    value=Status.BACKLOG.value,
                 ),
                 ui.SelectField(
                     name="priority",
@@ -125,9 +111,10 @@ def _create_actions(repos: list[ProjectRepo], accounts: list[Account]) -> list[u
                     value=Priority.NONE.value,
                 ),
                 ui.SelectField(
-                    name="assignee_id",
-                    label="Assignee",
-                    options=_assignee_options(accounts),
+                    name="owner_id",
+                    label="Owner",
+                    options=_owner_options(accounts),
+                    value=current_account_id.get() or "",
                 ),
             ],
         ),
@@ -164,28 +151,13 @@ def _ticket_card(ticket: Ticket, account_names: dict[str, str]) -> ui.Card:
     priority = Priority(ticket.priority)
     if priority is not Priority.NONE:
         description.append(PRIORITY_LABELS[priority])
-    if ticket.assignee_id:
-        description.append(_assignee_name(ticket.assignee_id, account_names))
+    if ticket.owner_id:
+        description.append(_owner_name(ticket.owner_id, account_names))
     return ui.Card(
         title=ticket.title,
         description=" · ".join(description),
         link=_ticket_link(ticket, ticket.title),
-    )
-
-
-def _ticket_row(ticket: Ticket, account_names: dict[str, str]) -> ui.TableRow:
-    return ui.TableRow(
-        [
-            ui.TextValue(
-                ticket.identifier,
-                link=_ticket_link(ticket, ticket.identifier),
-            ),
-            ui.TextValue(ticket.title, link=_ticket_link(ticket, ticket.title)),
-            ui.TextValue(PRIORITY_LABELS[Priority(ticket.priority)]),
-            ui.TextValue(_assignee_name(ticket.assignee_id, account_names)),
-            ui.TextValue(ticket.repo.full_name),
-            ui.TimeValue(ticket.updated_at),
-        ]
+        drag={"identifier": ticket.identifier},
     )
 
 
@@ -226,7 +198,7 @@ def _ticket_filters(
     status: str,
     priority: str,
     updated: str,
-    assignee: str,
+    owner: str,
     creator: str,
     project: str,
     repo: str,
@@ -260,14 +232,14 @@ def _ticket_filters(
             value=updated,
         ),
         ui.SelectField(
-            name="assignee",
-            label="Assignee",
+            name="owner",
+            label="Owner",
             options=[
                 ui.Option(FILTER_ANY, value=""),
-                ui.Option(UNASSIGNED, value=UNASSIGNED_FILTER),
+                ui.Option(UNOWNED, value=UNOWNED_FILTER),
                 *[ui.Option(account.username, value=account.id) for account in accounts],
             ],
-            value=assignee,
+            value=owner,
         ),
         _filter_select(
             "creator",
@@ -287,11 +259,10 @@ def _ticket_filters(
 
 async def _ticket_collection(
     *,
-    exclude_cancelled: bool,
     status: str = "",
     priority: str = "",
     updated: str = "",
-    assignee: str = "",
+    owner: str = "",
     creator: str = "",
     project: str = "",
     repo: str = "",
@@ -313,10 +284,9 @@ async def _ticket_collection(
     repos = await ProjectRepo.list_for_tickets()
     accounts = await Account.list_all()
     tickets = await Ticket.list_matching(
-        exclude_cancelled=exclude_cancelled and not status,
         status=status,
         priority=priority,
-        assignee=assignee,
+        owner=owner,
         creator=creator,
         project_id=_optional_int(project),
         repo_id=_optional_int(repo),
@@ -330,7 +300,7 @@ async def _ticket_collection(
             status=status,
             priority=priority,
             updated=updated,
-            assignee=assignee,
+            owner=owner,
             creator=creator,
             project=project,
             repo=repo,
@@ -346,25 +316,21 @@ async def board(
     status: str = "",
     priority: str = "",
     updated: str = "",
-    assignee: str = "",
+    owner: str = "",
     creator: str = "",
     project: str = "",
     repo: str = "",
 ):
     tickets, repos, accounts, filters = await _ticket_collection(
-        exclude_cancelled=True,
         status=status,
         priority=priority,
         updated=updated,
-        assignee=assignee,
+        owner=owner,
         creator=creator,
         project=project,
         repo=repo,
     )
     account_names = {account.id: account.username for account in accounts}
-    columns = BOARD_STATUSES
-    if status in {Status.CANCELLED, Status.BLOCKED}:
-        columns = BOARD_STATUSES + (Status(status),)
     return ui.Page(
         "Board",
         # Built from the repos and accounts alone, so an empty install still
@@ -378,6 +344,13 @@ async def board(
                         title=item.label,
                         blocks=[
                             ui.Cards(
+                                layout="stack",
+                                drop=ui.Action(
+                                    label=f"Move to {item.label}",
+                                    operation="set_status",
+                                    arguments={"status": item.value},
+                                    refresh="page",
+                                ),
                                 cards=[
                                     _ticket_card(ticket, account_names)
                                     for ticket in tickets
@@ -390,7 +363,7 @@ async def board(
                             )
                         ],
                     )
-                    for item in columns
+                    for item in BOARD_STATUSES
                 ]
             )
         ],
@@ -522,10 +495,10 @@ async def ticket(identifier: str):
                             _live_form(
                                 found,
                                 ui.SelectField(
-                                    name="assignee_id",
-                                    label="Assignee",
-                                    options=_assignee_options(accounts),
-                                    value=found.assignee_id or "",
+                                    name="owner_id",
+                                    label="Owner",
+                                    options=_owner_options(accounts),
+                                    value=found.owner_id or "",
                                 ),
                                 operation="update_ticket",
                                 layout="row",
@@ -546,6 +519,12 @@ async def ticket(identifier: str):
                             ui.Facts(
                                 [
                                     ui.Fact("Identifier", value=ui.TextValue(found.identifier)),
+                                    ui.Fact(
+                                        "Created by",
+                                        value=ui.TextValue(
+                                            _creator_name(found.creator_id, account_names)
+                                        ),
+                                    ),
                                     ui.Fact("Created", value=ui.TimeValue(found.created_at)),
                                     ui.Fact("Updated", value=ui.TimeValue(found.updated_at)),
                                 ]
@@ -557,44 +536,4 @@ async def ticket(identifier: str):
                 layout="sidebar",
             )
         ],
-    )
-
-
-@ui.page("/issues")
-async def issues(
-    status: str = "",
-    priority: str = "",
-    updated: str = "",
-    assignee: str = "",
-    creator: str = "",
-    project: str = "",
-    repo: str = "",
-):
-    tickets, repos, accounts, filters = await _ticket_collection(
-        exclude_cancelled=False,
-        status=status,
-        priority=priority,
-        updated=updated,
-        assignee=assignee,
-        creator=creator,
-        project=project,
-        repo=repo,
-    )
-    account_names = {account.id: account.username for account in accounts}
-    sections = []
-    for item in LIST_STATUSES:
-        rows = [ticket for ticket in tickets if ticket.status == item]
-        sections.append(
-            ui.Table(
-                title=f"{item.label} ({len(rows)})",
-                columns=ISSUE_COLUMNS,
-                rows=[_ticket_row(row, account_names) for row in rows],
-                empty_text=f"No ticket is in {item.label}.",
-            )
-        )
-    return ui.Page(
-        "Issues",
-        controls=_create_actions(repos, accounts),
-        filters=filters,
-        blocks=[ui.Stack(sections, gap="large")],
     )

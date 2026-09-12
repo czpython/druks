@@ -28,7 +28,7 @@ describe('isDruksIssuesTracker', () => {
 })
 
 describe('softwareFactoryNavigation', () => {
-  it('omits board and issues until the tracker is druks', () => {
+  it('omits board until the tracker is druks', () => {
     expect(softwareFactoryNavigation()).toEqual([
       [`/${SOFTWARE_FACTORY}`, 'Overview'],
       [`/${SOFTWARE_FACTORY}/history`, 'history'],
@@ -41,11 +41,10 @@ describe('softwareFactoryNavigation', () => {
     ])
   })
 
-  it('inserts board and issues after Overview when the tracker is druks', () => {
+  it('inserts board after Overview when the tracker is druks', () => {
     expect(softwareFactoryNavigation(settingsWithTracker('issues'))).toEqual([
       [`/${SOFTWARE_FACTORY}`, 'Overview'],
       [`/${SOFTWARE_FACTORY}/board`, 'board'],
-      [`/${SOFTWARE_FACTORY}/issues`, 'issues'],
       [`/${SOFTWARE_FACTORY}/history`, 'history'],
       [`/${SOFTWARE_FACTORY}/projects`, 'projects'],
     ])

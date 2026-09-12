@@ -2167,7 +2167,9 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 .dui-table-block > .dui-block-title { margin: 0 0 10px; padding: 0 2px; }
 .dui-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 14px; line-height: 20px; font-variant-numeric: tabular-nums; }
 .dui-table thead th { text-align: left; font-size: 12px; line-height: 16px; color: var(--text-dim); padding: 14px 16px; border-bottom: 1px solid var(--border); background: color-mix(in oklch, var(--surface-2) 45%, var(--surface)); font-weight: 500; white-space: nowrap; }
-.dui-table :is(td, tbody th) { text-align: left; font-weight: 400; vertical-align: middle; padding: 16px; border-bottom: 1px solid var(--border-soft); transition: background-color 160ms ease; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Table links are a 32px hit target. Cells use that line-height so linked and
+   unlinked labels share one baseline. */
+.dui-table :is(td, tbody th) { text-align: left; font-weight: 400; vertical-align: middle; padding: 16px; border-bottom: 1px solid var(--border-soft); transition: background-color 160ms ease; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 32px; }
 .dui-table tbody tr:last-child > * { border-bottom: none; }
 .dui-table tbody tr:hover > * { background: var(--surface-2); }
 .dui-table [data-align='end'] { text-align: right; }
@@ -2201,8 +2203,24 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 
 .dui-chart-data { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-.dui-cards { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 16px 0; }
+.dui-cards { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 16px 0; position: relative; }
+.dui-cards-stack { display: flex; flex-direction: column; }
+/* A board column stretches to the tallest neighbor. The drop target has to
+   fill that height, or an empty column only accepts a drop on its empty copy.
+   min-width: 0 keeps columns from growing with empty copy, which would shove
+   the next column under the pointer when the ghost replaces it. */
+.dui-column > .dui-section { flex: 1; min-width: 0; }
+.dui-cards-drop { min-height: 48px; flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.dui-cards-drop .dui-cards-block { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.dui-cards-drop .dui-cards,
+.dui-cards-drop .dui-empty { flex: 1; }
+.dui-cards-drop-live { outline: 1px dashed var(--border-loud); outline-offset: 4px; border-radius: var(--dui-radius-surface); }
+.dui-cards-drop-over { outline-color: var(--accent); background: color-mix(in oklch, var(--accent) 8%, transparent); }
+.dui-cards [draggable='true'] { cursor: grab; }
 .dui-cards .dui-card { margin: 0; }
+.dui-cards-item-dim { opacity: 0.4; }
+.dui-cards-item-away { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.dui-card-ghost { opacity: 0.4; pointer-events: none; }
 .dui-gallery-grid { list-style: none; margin: 12px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
 .dui-gallery-item { display: block; }
 .dui-gallery .dui-image { margin: 0; }
@@ -2367,7 +2385,7 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 .dui-action-danger:hover:not(:disabled) { border-color: color-mix(in oklch, var(--outcome-failed) 64%, var(--border)); background: color-mix(in oklch, var(--outcome-failed) 15%, var(--surface)); color: var(--outcome-failed); }
 .dui-action-broken { color: var(--text-faint); text-decoration: line-through; cursor: help; }
 .dui-table :is(.dui-action, .dui-link) {
-  min-height: 32px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;
+  min-height: 32px; line-height: 32px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;
 }
 
 .dui-value { display: inline-flex; flex-direction: column; gap: 2px; }

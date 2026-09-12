@@ -39,12 +39,12 @@ async def require_ticket(identifier: str) -> Ticket:
     return ticket
 
 
-async def require_assignee(assignee_id: str) -> None:
-    """A ticket is assigned to a real account or to nobody. The assignee FK is
+async def require_owner(owner_id: str) -> None:
+    """A ticket is owned by a real account or by nobody. The owner FK is
     RESTRICT, so a bad id would surface as a 500 IntegrityError on write —
     check it here instead, where the answer is a 404 the form can show."""
-    if not await Account.get(assignee_id):
-        raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no account {assignee_id!r}")
+    if not await Account.get(owner_id):
+        raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no account {owner_id!r}")
 
 
 async def ticket_detail(ticket: Ticket) -> TicketDetail:
@@ -68,7 +68,7 @@ async def ticket_detail(ticket: Ticket) -> TicketDetail:
         status=Status(ticket.status),
         priority=Priority(ticket.priority),
         repo_id=ticket.repo_id,
-        assignee_id=ticket.assignee_id,
+        owner_id=ticket.owner_id,
         comments=[
             CommentRead(
                 id=comment.id,
@@ -93,20 +93,20 @@ async def create_ticket(
         ..., embed=True, description="the GitHub repo this ticket's PR will target"
     ),
     description: str = Body("", embed=True),
-    status: Status = Body(Status.TODO, embed=True),
+    status: Status = Body(Status.BACKLOG, embed=True),
     priority: Priority = Body(Priority.NONE, embed=True),
-    assignee_id: str | None = Body(None, embed=True),
+    owner_id: str | None = Body(None, embed=True),
     account: Account = Depends(current_account),
 ) -> TicketDetail:
     """Write a ticket down. It takes the next number in its repo's project's
     sequence. Creating in Ready for Agent is a transition into the trigger, so a
-    build can open. Creating in Todo publishes nothing."""
+    build can open. Creating in Backlog publishes nothing."""
     title = required_text(title, "title")
-    # An assignee select with nobody picked submits "", and the shell sends
+    # An owner select with nobody picked submits "", and the shell sends
     # every field the form shows. Blank is nobody, not an account id to look up.
-    assignee_id = assignee_id or None
-    if assignee_id is not None:
-        await require_assignee(assignee_id)
+    owner_id = owner_id or None
+    if owner_id is not None:
+        await require_owner(owner_id)
     try:
         ticket = await Ticket.create(
             repo_id=repo_id,
@@ -114,7 +114,7 @@ async def create_ticket(
             description=description,
             status=status,
             priority=priority,
-            assignee_id=assignee_id,
+            owner_id=owner_id,
             creator_id=account.id,
         )
     except RepoNotFound as error:
@@ -126,13 +126,13 @@ async def create_ticket(
 
 @router.patch("/tickets/{identifier}", operation_id="update_ticket", tags=["agent"])
 async def update_ticket(identifier: str, edit: TicketEdit) -> TicketDetail:
-    """Edit what a ticket says — title, description, priority, assignee, repo.
+    """Edit what a ticket says — title, description, priority, owner, repo.
     What you leave out stays as it was, and a title cannot be edited away. Status
     is not here: a title edit is not a state transition, and ``set_status`` is the
     one door that moves a ticket. Moving the repo does not remint the identifier."""
     ticket = await require_ticket(identifier)
-    if edit.assignee_id is not None:
-        await require_assignee(edit.assignee_id)
+    if edit.owner_id is not None:
+        await require_owner(edit.owner_id)
     if edit.repo_id is not None:
         repo = await ProjectRepo.get(edit.repo_id)
         if not repo:
@@ -148,16 +148,16 @@ async def update_ticket(identifier: str, edit: TicketEdit) -> TicketDetail:
     if edit.description is not None:
         ticket.description = edit.description
     if edit.title is not None or edit.description is not None:
-        # Ticket carries setters for priority and assignee but not for its
+        # Ticket carries setters for priority and owner but not for its
         # content; stamp and flush the way those setters do.
         ticket.updated_at = Base.utc_now()
         await db_session().flush()
     if edit.priority is not None:
         await ticket.set_priority(edit.priority)
-    # A null assignee_id means "unassign", so this field reads the caller's
+    # A null owner_id means "unowned", so this field reads the caller's
     # set of fields rather than the value: omitted keeps whoever holds it.
-    if "assignee_id" in edit.model_fields_set:
-        await ticket.assign(edit.assignee_id)
+    if "owner_id" in edit.model_fields_set:
+        await ticket.set_owner(edit.owner_id)
     if edit.repo_id is not None and ticket.repo_id != edit.repo_id:
         ticket.repo_id = edit.repo_id
         ticket.updated_at = Base.utc_now()

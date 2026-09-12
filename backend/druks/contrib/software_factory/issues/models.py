@@ -24,14 +24,14 @@ class Ticket(StoredSubject):
     # Status and priority are String columns driven by this app's closed
     # StrEnums, not native PG enum types: the workflow stays in code and a label
     # change never needs an ALTER TYPE.
-    status: Mapped[str] = mapped_column(default=Status.TODO)
+    status: Mapped[str] = mapped_column(default=Status.BACKLOG)
     priority: Mapped[str] = mapped_column(default=Priority.NONE)
     # Required: a ticket names the repo its PR will land in, and the identifier
     # is minted from that repo's project.
     repo_id: Mapped[int] = mapped_column(ForeignKey("project_repos.id"))
     repo: Mapped[ProjectRepo] = relationship(lazy="joined")
     # Optional: a ticket exists before anyone picks it up.
-    assignee_id: Mapped[str | None] = mapped_column(
+    owner_id: Mapped[str | None] = mapped_column(
         ForeignKey("accounts.id", ondelete="RESTRICT"), default=None
     )
     # Who opened it. Optional on the row so a ticket minted outside the HTTP
@@ -49,9 +49,9 @@ class Ticket(StoredSubject):
         repo_id: int,
         title: str,
         description: str = "",
-        status: Status = Status.TODO,
+        status: Status = Status.BACKLOG,
         priority: Priority = Priority.NONE,
-        assignee_id: str | None = None,
+        owner_id: str | None = None,
         creator_id: str | None = None,
     ) -> "Ticket":
         session = db_session()
@@ -65,13 +65,13 @@ class Ticket(StoredSubject):
             description=description,
             status=status,
             priority=priority,
-            assignee_id=assignee_id,
+            owner_id=owner_id,
             creator_id=creator_id,
         )
         session.add(ticket)
         await session.flush()
         # Creating already in Ready for Agent is arriving at the trigger, the
-        # same as a later move into it. Todo and the rest stay quiet: drafting
+        # same as a later move into it. Backlog and the rest stay quiet: drafting
         # is not a funnel event.
         if status == Status.READY_FOR_AGENT:
             await ticket._emit_transitioned(status)
@@ -94,28 +94,23 @@ class Ticket(StoredSubject):
     async def list_matching(
         cls,
         *,
-        exclude_cancelled: bool = False,
         status: str = "",
         priority: str = "",
-        assignee: str = "",
+        owner: str = "",
         creator: str = "",
         project_id: int | None = None,
         repo_id: int | None = None,
         updated_since: datetime | None = None,
     ) -> list["Ticket"]:
         statement = select(cls)
-        if exclude_cancelled:
-            statement = statement.where(
-                cls.status.notin_((Status.CANCELLED, Status.BLOCKED))
-            )
         if status:
             statement = statement.where(cls.status == status)
         if priority:
             statement = statement.where(cls.priority == priority)
-        if assignee == "none":
-            statement = statement.where(cls.assignee_id.is_(None))
-        elif assignee:
-            statement = statement.where(cls.assignee_id == assignee)
+        if owner == "none":
+            statement = statement.where(cls.owner_id.is_(None))
+        elif owner:
+            statement = statement.where(cls.owner_id == owner)
         if creator:
             statement = statement.where(cls.creator_id == creator)
         if repo_id:
@@ -131,9 +126,8 @@ class Ticket(StoredSubject):
 
     @classmethod
     async def list_board(cls) -> list["Ticket"]:
-        """Everything on the board — cancelled and blocked tickets are off it.
-        The page groups these by status; the model just says which rows are live."""
-        return await cls.list_matching(exclude_cancelled=True)
+        """Every ticket. The page groups these by status."""
+        return await cls.list_matching()
 
     @classmethod
     async def list_for_status(cls, status: Status) -> list["Ticket"]:
@@ -163,7 +157,7 @@ class Ticket(StoredSubject):
 
     async def _emit_transitioned(self, status: Status) -> None:
         repo = await ProjectRepo.get(self.repo_id)
-        assignee = await Account.get(self.assignee_id) if self.assignee_id else None
+        owner = await Account.get(self.owner_id) if self.owner_id else None
         await publish(
             "ticket.transitioned",
             payload={
@@ -178,8 +172,8 @@ class Ticket(StoredSubject):
                 # find the PR target the operator picked.
                 "project_name": repo.full_name.rsplit("/", 1)[-1],
                 "labels": [],
-                "assignee_email": assignee.username if assignee else None,
-                "assignee_name": assignee.username if assignee else None,
+                "assignee_email": owner.username if owner else None,
+                "assignee_name": owner.username if owner else None,
                 "completed": status.completed,
                 "terminal": status.terminal,
             },
@@ -190,8 +184,8 @@ class Ticket(StoredSubject):
         self.updated_at = Base.utc_now()
         await db_session().flush()
 
-    async def assign(self, assignee_id: str | None) -> None:
-        self.assignee_id = assignee_id
+    async def set_owner(self, owner_id: str | None) -> None:
+        self.owner_id = owner_id
         self.updated_at = Base.utc_now()
         await db_session().flush()
 

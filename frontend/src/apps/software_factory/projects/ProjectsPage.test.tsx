@@ -116,6 +116,7 @@ describe('ProjectsPage create row', () => {
     fireEvent.change(await screen.findByPlaceholderText(/new project name/), {
       target: { value: 'Acme' },
     })
+    expect((screen.getByPlaceholderText(/prefix/) as HTMLInputElement).value).toBe('ACM')
     const create = screen.getByText('+ create').closest('button')!
     await waitFor(() => expect(create.disabled).toBe(false))
     fireEvent.click(create)
@@ -123,7 +124,22 @@ describe('ProjectsPage create row', () => {
     // react-query hands the mutationFn a context argument too; the payload is
     // the first one.
     await waitFor(() => expect(createMock).toHaveBeenCalled())
-    expect(createMock.mock.calls[0]![0]).toEqual({ name: 'Acme' })
+    expect(createMock.mock.calls[0]![0]).toEqual({ name: 'Acme', prefix: 'ACM' })
+  })
+
+  it('does not overwrite a prefix the operator edited', async () => {
+    renderPage([project()])
+
+    fireEvent.change(await screen.findByPlaceholderText(/new project name/), {
+      target: { value: 'Acme' },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/prefix/), {
+      target: { value: 'box' },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/new project name/), {
+      target: { value: 'Acme Tools' },
+    })
+    expect((screen.getByPlaceholderText(/prefix/) as HTMLInputElement).value).toBe('box')
   })
 
   it('sends the prefix when one is typed', async () => {
@@ -144,19 +160,19 @@ describe('ProjectsPage create row', () => {
 })
 
 describe('ProjectsPage prefix note', () => {
-  it('notes that a project without a prefix cannot be selected in Issues', async () => {
+  it('notes that a project without a prefix cannot be selected on the board', async () => {
     renderPage([project({ name: 'Bare' })])
 
     expect(
-      await screen.findByText(/cannot be selected in Issues/),
+      await screen.findByText(/cannot be selected on the board/),
     ).toBeTruthy()
   })
 
-  it('does not note Issues when the project has a prefix', async () => {
+  it('does not note the board when the project has a prefix', async () => {
     renderPage([project({ name: 'Acme', prefix: 'ACM' })])
 
     expect(await screen.findByText('Acme')).toBeTruthy()
-    expect(screen.queryByText(/cannot be selected in Issues/)).toBeNull()
+    expect(screen.queryByText(/cannot be selected on the board/)).toBeNull()
   })
 
   it('hides the prefix field and note when the tracker is not druks', async () => {
@@ -164,7 +180,7 @@ describe('ProjectsPage prefix note', () => {
 
     expect(await screen.findByText('Bare')).toBeTruthy()
     expect(screen.queryByPlaceholderText(/prefix/)).toBeNull()
-    expect(screen.queryByText(/cannot be selected in Issues/)).toBeNull()
+    expect(screen.queryByText(/cannot be selected on the board/)).toBeNull()
     expect(screen.queryByText('prefix')).toBeNull()
   })
 
