@@ -1,4 +1,4 @@
-.dashboard .page-shell-body { width: min(100%, 1040px); margin-inline: auto; padding-block: 12px 40px; }
+.dashboard .page-shell-body { padding-block: 12px 40px; }
 .dashboard-head { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
 .dashboard h1 { margin: 0 0 10px; font-size: 32px; font-weight: 500; letter-spacing: -.02em; }
 .dashboard-head p { margin: 0; color: var(--text-mid); font-size: 17px; }

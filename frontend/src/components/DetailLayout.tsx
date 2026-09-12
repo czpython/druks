@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 
 /**
  * DetailLayout — the rail + main grid every detail page sits inside.
@@ -16,8 +16,7 @@ interface DetailLayoutProps {
 }
 
 export function DetailLayout({ rail, main, railWidth = 384 }: DetailLayoutProps) {
-  const style =
-    railWidth !== 384 ? { gridTemplateColumns: `${railWidth}px 1fr` } : undefined
+  const style = { '--detail-rail-width': `${railWidth}px` } as CSSProperties
   return (
     <div className="detail-body" style={style}>
       <aside className="detail-rail">{rail}</aside>
