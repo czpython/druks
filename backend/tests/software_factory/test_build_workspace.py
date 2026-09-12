@@ -7,14 +7,11 @@ from typing import Any
 import pytest
 from conftest import connect_service
 from druks import workspaces as workspace_mod
-from druks.accounts.exceptions import InvalidPatError
-from druks.accounts.models import Account, PersonalAccessToken
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.constants import (
-    APPLIANCE_MCP_NAME,
-    APPLIANCE_MCP_TOOLS,
     GITHUB_MCP_NAME,
     GITHUB_MCP_URL,
+    TICKET_TOOLS,
 )
 from druks.contrib.software_factory.services import GithubReviewer
 from druks.contrib.software_factory.workflows import Build, BuildWorkspace, ReviewWorkspace
@@ -22,7 +19,6 @@ from druks.core.services import Github
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox import host as host_mod
 from druks.sandbox.layout import get_related_root, get_repo_root
-from druks.workflows import FatalError
 from druks.workspaces import RepoWorkspace
 
 
@@ -118,61 +114,6 @@ async def test_get_workspace_kwargs_carries_the_build_fields():
     }
 
 
-async def test_issues_tracker_requires_appliance_mcp(druks_db):
-    await connect_service(
-        "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
-    )
-    await connect_service(
-        "github_reviewer",
-        identity={"app_id": "2", "slug": "druks-reviewer"},
-        secrets={"private_key": "reviewer-pem"},
-    )
-    workspace = BuildWorkspace(
-        host=_FakeSandbox(),  # type: ignore[arg-type]
-        subject=SimpleNamespace(repo="o/main"),
-        branch="b",
-        skills=("python-house-rules",),
-        appliance_mcp_url="http://druks.test/mcp",
-    )
-    kwargs = await workspace.with_mcp_servers(None, **workspace.get_agent_run_kwargs())
-
-    appliance = next(s for s in kwargs["mcp_servers"] if s.name == APPLIANCE_MCP_NAME)
-    assert appliance.url == "http://druks.test/mcp"
-    assert appliance.bearer_token_env_var == get_bearer_token_env_var(APPLIANCE_MCP_NAME)
-    assert "extra_env" not in kwargs
-
-
-async def test_an_issues_agent_call_holds_a_ticket_token_only_while_it_runs(
-    druks_db, monkeypatch: pytest.MonkeyPatch
-):
-    account = await Account.get_or_create("op@example.com")
-    seen: dict[str, Any] = {}
-
-    async def fake_exec(self: Any, argv: list[str], **_kw: Any) -> None:
-        return
-
-    async def base_run_agent(self: Any, **kwargs: Any) -> str:
-        seen["token"] = kwargs["extra_env"][get_bearer_token_env_var(APPLIANCE_MCP_NAME)]
-        pat = await PersonalAccessToken.authenticate(seen["token"])
-        seen["holder"] = (pat.account_id, pat.tools)
-        return "ran"
-
-    monkeypatch.setattr(host_mod.Host, "exec", fake_exec)
-    monkeypatch.setattr(RepoWorkspace, "run_agent", base_run_agent)
-    workspace = BuildWorkspace(
-        host=host_mod.Host(record=SimpleNamespace(id="h1", ssh_username="exedev")),  # type: ignore[arg-type]
-        subject=SimpleNamespace(repo="o/main"),
-        branch="b",
-        skills=(),
-        appliance_mcp_url="http://druks.test/mcp",
-    )
-
-    assert await workspace.run_agent(account_id=account.id) == "ran"
-    assert seen["holder"] == (account.id, list(APPLIANCE_MCP_TOOLS))
-    with pytest.raises(InvalidPatError):
-        await PersonalAccessToken.authenticate(seen["token"])
-
-
 def _pin_tracker(monkeypatch: pytest.MonkeyPatch, tracker: str) -> None:
     settings = SoftwareFactory.Settings(tracker=tracker)
 
@@ -182,50 +123,39 @@ def _pin_tracker(monkeypatch: pytest.MonkeyPatch, tracker: str) -> None:
     monkeypatch.setattr(SoftwareFactory, "settings", classmethod(_settings))
 
 
-def _issues_workspace(monkeypatch: pytest.MonkeyPatch) -> tuple[Build, Any]:
-    _pin_tracker(monkeypatch, "issues")
-    monkeypatch.setattr(
-        "druks.contrib.software_factory.workflows.load_settings",
-        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="http://127.0.0.1:8001")),
+async def _required_servers(monkeypatch: pytest.MonkeyPatch, tracker: str):
+    await connect_service(
+        "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
     )
-    sandbox = host_mod.Host(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
-    workflow = Build()
-    workflow.input = Build._run_input_model()
-    workflow.subject = SimpleNamespace(repo="o/app")
-    workflow._profile = {"recommended_skills": ["python-house-rules"]}
-    workflow.account_id = None
-    return workflow, sandbox
-
-
-async def test_get_workspace_kwargs_names_the_appliance_mcp(druks_db, monkeypatch):
-    workflow, sandbox = _issues_workspace(monkeypatch)
-
-    kwargs = await workflow.get_workspace_kwargs(sandbox)
-
-    assert kwargs["appliance_mcp_url"] == "http://127.0.0.1:8001/mcp"
-
-
-async def test_get_workspace_kwargs_fails_when_endpoint_is_unset(druks_db, monkeypatch):
-    workflow, sandbox = _issues_workspace(monkeypatch)
+    await connect_service(
+        "github_reviewer",
+        identity={"app_id": "2", "slug": "druks-reviewer"},
+        secrets={"private_key": "reviewer-pem"},
+    )
     monkeypatch.setattr(
-        "druks.contrib.software_factory.workflows.load_settings",
-        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="")),
+        "druks.mcp.inbound.load_settings",
+        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="https://druks.test")),
+    )
+    _pin_tracker(monkeypatch, tracker)
+    return await BuildWorkspace.get_required_mcp_servers(SimpleNamespace(repo="o/main"))
+
+
+async def test_a_board_build_requires_the_appliance_mcp(druks_db, monkeypatch):
+    servers = await _required_servers(monkeypatch, "issues")
+
+    assert [server.name for server in servers] == [GITHUB_MCP_NAME, "druks"]
+    board = servers[-1]
+    assert (board.url, board.secret_id, board.allowed_tools) == (
+        "https://druks.test/mcp",
+        "",
+        TICKET_TOOLS,
     )
 
-    with pytest.raises(FatalError, match="/mcp"):
-        await workflow.get_workspace_kwargs(sandbox)
 
+async def test_a_linear_build_requires_github_alone(druks_db, monkeypatch):
+    servers = await _required_servers(monkeypatch, "linear")
 
-async def test_linear_tracker_does_not_require_appliance_mcp(druks_db, monkeypatch):
-    sandbox = host_mod.Host(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
-    workflow = Build()
-    workflow.input = Build._run_input_model()
-    workflow.subject = SimpleNamespace(repo="o/app")
-    workflow._profile = {"recommended_skills": ["python-house-rules"]}
-
-    kwargs = await workflow.get_workspace_kwargs(sandbox)
-
-    assert "appliance_mcp_url" not in kwargs
+    assert [server.name for server in servers] == [GITHUB_MCP_NAME]
 
 
 def _review_actor_stub(monkeypatch: pytest.MonkeyPatch, *, review_actor) -> None:

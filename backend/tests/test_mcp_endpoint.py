@@ -261,7 +261,9 @@ async def test_a_ticket_token_reaches_only_its_tools(app, account):
     repo = await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
     ticket = await Ticket.create(repo=repo, title="Add an endpoint")
     _, token = await PersonalAccessToken.create(
-        account_id=account.id, name="issues sandbox", tools=["software_factory_get_ticket"]
+        account_id=account.id,
+        name="issues sandbox",
+        allowed_tools=["software_factory_get_ticket"],
     )
 
     async with live(app), _client(app, token) as client:

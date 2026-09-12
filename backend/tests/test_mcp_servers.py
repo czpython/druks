@@ -1,20 +1,24 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from conftest import connect_service
+from druks.accounts.models import Account, PersonalAccessToken
 from druks.apps.registry import mcp_servers
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
 from druks.mcp.catalog import load_mcp_catalog
-from druks.mcp.constants import BEARER_HEADER
+from druks.mcp.constants import BEARER_HEADER, DRUKS_SERVER_NAME
 from druks.mcp.exceptions import (
     InvalidCatalogError,
     InvalidServerNameError,
+    MissingEndpointError,
     MissingTokenError,
 )
 from druks.mcp.helpers import get_bearer_token_env_var
+from druks.mcp.inbound import get_druks_mcp_server
 from druks.mcp.models import McpServer
 from druks.sandbox.datastructures import RequiredMcpServer
 from druks.sandbox.models import SecretRef
@@ -603,3 +607,83 @@ async def test_catalog_enabled_false_ships_the_entry_dark(tmp_path, registry_sta
     enabled_names = {s["name"] for s in await McpServer.list_enabled()}
     assert "dark_test" not in enabled_names
     assert "lit_test" in enabled_names
+
+
+# --- druks' own server: each account's token, on first use -----------------
+
+
+def _requiring_druks(monkeypatch, allowed_tools=()) -> type[Workspace]:
+    monkeypatch.setattr(
+        "druks.mcp.inbound.load_settings",
+        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="https://druks.test/")),
+    )
+    return _requiring(get_druks_mcp_server(allowed_tools=allowed_tools))
+
+
+async def _druks_row(account_id: str) -> VaultSecret:
+    return await VaultSecret.lookup(
+        SecretKind.STATIC, Audience.mcp(DRUKS_SERVER_NAME), account_id, BEARER_HEADER
+    )
+
+
+def test_druks_needs_an_address_a_box_reaches(monkeypatch):
+    monkeypatch.setattr(
+        "druks.mcp.inbound.load_settings",
+        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="")),
+    )
+
+    with pytest.raises(MissingEndpointError):
+        get_druks_mcp_server(allowed_tools=())
+
+
+async def test_delivery_mints_the_run_account_its_own_token(druks_db, monkeypatch):
+    allowed_tools = ("software_factory_get_ticket",)
+    workspace = _requiring_druks(monkeypatch, allowed_tools)
+    account = await Account.get_or_create("op@example.com")
+
+    wire, refs = await workspace.get_mcp_delivery(None, account.id)
+
+    row = await _druks_row(account.id)
+    minted = await PersonalAccessToken.authenticate(row.secrets["value"])
+    assert (minted.account_id, minted.allowed_tools) == (account.id, list(allowed_tools))
+    server = next(one for one in wire if one.name == DRUKS_SERVER_NAME)
+    assert server.url == "https://druks.test/mcp"
+    assert server.bearer_token_env_var == "MCP_DRUKS_TOKEN"
+    assert {ref.name: ref.secret_id for ref in refs}["mcp_druks_token"] == row.id
+    # An account's own row never stands in for the installation's.
+    assert not await _bearer_row(DRUKS_SERVER_NAME)
+
+
+async def test_a_later_run_reuses_the_token_and_a_retired_one_is_replaced(druks_db, monkeypatch):
+    workspace = _requiring_druks(monkeypatch)
+    account = await Account.get_or_create("op@example.com")
+    await workspace.get_mcp_delivery(None, account.id)
+    first = (await _druks_row(account.id)).secrets["value"]
+    # No tools: the token carries the account's whole API.
+    assert (await PersonalAccessToken.authenticate(first)).allowed_tools is None
+
+    await workspace.get_mcp_delivery(None, account.id)
+
+    assert (await _druks_row(account.id)).secrets["value"] == first
+    assert len(await PersonalAccessToken.list_for_account(account.id)) == 1
+
+    await (await PersonalAccessToken.authenticate(first)).revoke()
+    await workspace.get_mcp_delivery(None, account.id)
+
+    assert (await _druks_row(account.id)).secrets["value"] != first
+    assert len(await PersonalAccessToken.list_for_account(account.id)) == 2
+
+
+async def test_two_accounts_hold_their_own_tokens(druks_db, monkeypatch):
+    workspace = _requiring_druks(monkeypatch)
+    first = await Account.get_or_create("first@example.com")
+    second = await Account.get_or_create("second@example.com")
+
+    await workspace.get_mcp_delivery(None, first.id)
+    await workspace.get_mcp_delivery(None, second.id)
+
+    rows = [await _druks_row(first.id), await _druks_row(second.id)]
+    holders = [
+        (await PersonalAccessToken.authenticate(row.secrets["value"])).account_id for row in rows
+    ]
+    assert holders == [first.id, second.id]

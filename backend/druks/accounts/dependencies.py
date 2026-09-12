@@ -34,14 +34,17 @@ async def resolve_pat_account(
                 detail=str(error),
                 headers={"WWW-Authenticate": f'{_BEARER_CHALLENGE}, error="invalid_token"'},
             ) from error
-        if pat.tools is None:
+        if pat.allowed_tools is None:
             return pat.account
         # The MCP surface maps each agent route's endpoint to its tool name at boot.
-        if request.app.state.agent_tools.get(request.scope["endpoint"]) in pat.tools:
+        if request.app.state.agent_tools.get(request.scope["endpoint"]) in pat.allowed_tools:
             return pat.account
         raise HTTPException(
             status_code=403,
-            detail=f"Token {pat.token_prefix} is limited to these tools: {', '.join(pat.tools)}.",
+            detail=(
+                f"Token {pat.token_prefix} is limited to these tools: "
+                f"{', '.join(pat.allowed_tools)}."
+            ),
         )
     raise HTTPException(
         status_code=401,

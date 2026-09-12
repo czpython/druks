@@ -22,7 +22,6 @@ from druks.contrib.software_factory.ticketing.linear import Linear
 from druks.core import services
 from druks.doctor import CheckResult
 from druks.services import ServiceNotConnectedError
-from druks.settings import load_settings
 
 from .services import GithubReviewer
 
@@ -57,20 +56,6 @@ async def check_review_identity() -> CheckResult:
         )
     return CheckResult(
         name="review_identity", ok=True, detail="unset — reviews publish as operator comments"
-    )
-
-
-async def check_issues_mcp() -> CheckResult:
-    """Whether ``urls.endpoint`` names the /mcp an issues build's sandbox reaches."""
-    if (await SoftwareFactory.settings()).tracker != "issues":
-        return CheckResult(name="issues_mcp", ok=True, detail="not required")
-    if endpoint := load_settings().urls.endpoint.rstrip("/"):
-        return CheckResult(name="issues_mcp", ok=True, detail=f"{endpoint}/mcp")
-    return CheckResult(
-        name="issues_mcp",
-        ok=False,
-        pending=True,
-        detail="urls.endpoint is unset. The sandbox needs it to reach /mcp.",
     )
 
 
@@ -142,7 +127,7 @@ class SoftwareFactory(App):
                 return IssuesStatus.READY_FOR_AGENT.label
             return ""
 
-    checks = [check_tracker_identity, check_review_identity, check_issues_mcp]
+    checks = [check_tracker_identity, check_review_identity]
 
     @classmethod
     async def get_tracker(cls, source: str | None = None) -> Tracker | None:

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from druks.accounts.models import Account, PersonalAccessToken
+from druks.accounts.models import Account
 from druks.contrib.software_factory.contracts import ImplementationOutput, ReviewWork
 from druks.contrib.software_factory.enums import (
     EvaluationVerdict,
@@ -16,8 +16,8 @@ from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.core.apis.github import get_github_client
 from druks.core.services import Github
 from druks.durable.enums import RunState
-from druks.mcp.helpers import get_bearer_token_env_var
-from druks.sandbox.datastructures import McpServer, RequiredMcpServer
+from druks.mcp.inbound import get_druks_mcp_server
+from druks.sandbox.datastructures import RequiredMcpServer
 from druks.sandbox.layout import get_related_root, get_work_root
 from druks.sandbox.models import SecretRef
 from druks.services.exceptions import ServiceNotConnectedError
@@ -27,13 +27,7 @@ from druks.workflows import FatalError, Workflow, step
 from druks.workspaces import RepoWorkspace
 
 from .app import SoftwareFactory
-from .constants import (
-    APPLIANCE_MCP_NAME,
-    APPLIANCE_MCP_TOKEN_LIFETIME,
-    APPLIANCE_MCP_TOOLS,
-    GITHUB_MCP_NAME,
-    GITHUB_MCP_URL,
-)
+from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, TICKET_TOOLS
 from .datastructures import PullRequest
 from .github import get_review_actor
 from .journal import BuildJournal
@@ -46,22 +40,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def appliance_mcp_url() -> str:
-    """The appliance /mcp at ``urls.endpoint``, an address the sandbox reaches."""
-    if endpoint := load_settings().urls.endpoint.rstrip("/"):
-        return f"{endpoint}/mcp"
-    raise FatalError(
-        "urls.endpoint is unset. Set it to an address the sandbox reaches, so the "
-        "issues tracker tools can call /mcp."
-    )
-
-
 @dataclass(frozen=True, kw_only=True)
 class BuildWorkspace(RepoWorkspace):
     skills: tuple[str, ...]
-    # The appliance /mcp, set only when the tracker is issues. Its token is
-    # minted per agent call in run_agent, so it never rides a vault row.
-    appliance_mcp_url: str = ""
 
     @property
     def workspace_root(self) -> str:
@@ -71,52 +52,20 @@ class BuildWorkspace(RepoWorkspace):
     async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
         # GitHub MCP acts as the review actor; the clone acts as the operator.
         actor = await get_review_actor()
-        return (
-            RequiredMcpServer(
-                name=GITHUB_MCP_NAME,
-                url=GITHUB_MCP_URL,
-                secret_id=(await actor.service.get()).id,
-                resource=cls.get_repo(subject),
-            ),
+        github = RequiredMcpServer(
+            name=GITHUB_MCP_NAME,
+            url=GITHUB_MCP_URL,
+            secret_id=(await actor.service.get()).id,
+            resource=cls.get_repo(subject),
         )
-
-    async def with_mcp_servers(self, account_id: str | None, **kwargs: Any) -> dict[str, Any]:
-        kwargs = await super().with_mcp_servers(account_id, **kwargs)
-        if self.appliance_mcp_url:
-            servers = [
-                server
-                for server in kwargs.get("mcp_servers") or ()
-                if server.name != APPLIANCE_MCP_NAME
-            ]
-            servers.append(
-                McpServer(
-                    name=APPLIANCE_MCP_NAME,
-                    url=self.appliance_mcp_url,
-                    bearer_token_env_var=get_bearer_token_env_var(APPLIANCE_MCP_NAME),
-                )
-            )
-            kwargs["mcp_servers"] = tuple(servers)
-        return kwargs
+        if (await SoftwareFactory.settings()).tracker == "issues":
+            return (github, get_druks_mcp_server(allowed_tools=TICKET_TOOLS))
+        return (github,)
 
     async def run_agent(self, *, account_id: str | None, **kwargs: Any):
         # Agents clone related repos on demand; Claude's --add-dir target must exist first.
         related_root = get_related_root(self.host.ssh_username)
         await self.host.exec(["mkdir", "-p", related_root], timeout=10.0)
-        if self.appliance_mcp_url:
-            # One token per agent call, limited to the ticket tools, deleted when
-            # the call ends. The lifetime is the backstop for a call that dies.
-            account = await Account.get_for_run(account_id)
-            pat, token = await PersonalAccessToken.create(
-                account_id=account.id,
-                name="issues sandbox",
-                tools=list(APPLIANCE_MCP_TOOLS),
-                lifetime=APPLIANCE_MCP_TOKEN_LIFETIME,
-            )
-            kwargs["extra_env"] = {get_bearer_token_env_var(APPLIANCE_MCP_NAME): token}
-            try:
-                return await super().run_agent(account_id=account_id, **kwargs)
-            finally:
-                await pat.delete()
         return await super().run_agent(account_id=account_id, **kwargs)
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
@@ -263,8 +212,6 @@ class Build(Workflow):
             "branch": self.branch,
             "skills": tuple(self._profile.get("recommended_skills", [])),
         }
-        if (await SoftwareFactory.settings()).tracker == "issues":
-            kwargs["appliance_mcp_url"] = appliance_mcp_url()
         return kwargs
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:

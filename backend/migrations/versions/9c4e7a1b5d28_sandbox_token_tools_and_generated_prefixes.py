@@ -30,7 +30,7 @@ def _derive_prefix(name: str, taken: set[str]) -> str:
 def upgrade() -> None:
     op.add_column(
         "personal_access_tokens",
-        sa.Column("tools", postgresql.JSONB(), nullable=True),
+        sa.Column("allowed_tools", postgresql.JSONB(), nullable=True),
     )
 
     bind = op.get_bind()

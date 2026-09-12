@@ -137,7 +137,7 @@ caches, and the sandbox provisioning gate.
 
 | TOML key | Purpose |
 | --- | --- |
-| `urls.endpoint` | Browser-visible dashboard base URL for MCP OAuth callbacks and sandbox access to this appliance's `/mcp` |
+| `urls.endpoint` | Browser-visible dashboard base URL. MCP OAuth callbacks and this appliance's own `/mcp` address come from it |
 | `urls.webhook_host` | Public webhook hostname used by `druks doctor` for its ingress probe |
 | `identity.mode` | `none` (default, no authentication, single operator), `header` (edge-asserted identity), or `jwt` (validated edge-signed assertion) |
 | `identity.header` | The trusted identity header. The shipped Caddy edge also uses it. Header and JWT modes have no default and require it |
@@ -344,14 +344,15 @@ A ticket that enters Ready for Agent opens a build against the selected
 repository. If a scheduled, running, or parked run already exists for that
 ticket, Software Factory does not start another.
 
-Each local-board build ships this appliance's `/mcp` into the sandbox as the
-`druks` server. The sandbox holds a token for the run account that is limited
-to the ticket tools. Druks mints it for each agent call and deletes it after.
-The agent reads the ticket with `software_factory_get_ticket` and posts with
-`software_factory_add_comment`. The Druks identifier is not a GitHub issue
-number. Linear and Jira builds do not receive this MCP. Set `urls.endpoint` to
-an address the sandbox can reach; `druks doctor` reports it when the tracker
-is **druks**.
+An agent reads and answers a board ticket through this appliance's own `/mcp`.
+A build whose tracker is **druks** requires that server, so there is nothing to
+paste, connect, or declare. Druks mints the token of the account the run belongs
+to, limited to the five ticket tools, so a comment the agent writes carries that
+person's name. The token appears in that person's API tokens, and Druks mints
+another once they retire it. The server's address comes from `urls.endpoint`, so
+set it to an address the sandboxes reach. The agent reads the ticket with
+`software_factory_get_ticket` and posts with `software_factory_add_comment`. A
+Druks identifier is not a GitHub issue number.
 
 Webhook URLs remain `/_external/linear/events/` and
 `/_external/jira/events/`. The Jira webhook uses a Jira Automation
