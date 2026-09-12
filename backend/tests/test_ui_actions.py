@@ -9,9 +9,12 @@ from druks.ui import (
     Form,
     Link,
     MultiUploadField,
+    Option,
     Page,
     SecretField,
     Section,
+    SelectField,
+    TextAreaField,
     TextField,
 )
 from druks.ui.fields import PageField
@@ -73,7 +76,32 @@ def test_a_form_carries_its_fields_and_the_action_that_sends_them():
         }
     ]
     assert block["action"]["operation"] == "write_note"
+    assert block["submit"] == "button"
+    assert block["layout"] == "stack"
     assert "presentation" not in block
+
+
+def test_a_markdown_text_area_stays_source_on_the_wire():
+    (block,) = wire(
+        Form(
+            action=Action(label="Save", operation="write_note"),
+            fields=[TextAreaField(name="body", label="Note", markdown=True, rows=8)],
+        )
+    )
+
+    assert block["fields"] == [
+        {
+            "field": "text_area",
+            "name": "body",
+            "label": "Note",
+            "value": "",
+            "placeholder": "",
+            "helpText": "",
+            "isRequired": False,
+            "rows": 8,
+            "markdown": True,
+        }
+    ]
 
 
 def test_an_action_can_collect_fields_before_it_runs():
@@ -129,6 +157,30 @@ def test_multi_upload_fields_round_trip_through_the_page(owner: str):
             "helpText": "Pictures of the shop.",
             "isRequired": True,
         }
+    ]
+
+
+def test_a_select_option_carries_its_group():
+    (block,) = wire(
+        Form(
+            fields=[
+                SelectField(
+                    name="repo_id",
+                    label="Repo",
+                    options=[
+                        Option("acme/app", value="12", group="Acme"),
+                        Option("beta/api", value="14", group="Beta"),
+                    ],
+                    is_required=True,
+                )
+            ],
+            action=Action(label="Save", operation="write_note"),
+        )
+    )
+
+    assert block["fields"][0]["options"] == [
+        {"value": "12", "label": "acme/app", "group": "Acme"},
+        {"value": "14", "label": "beta/api", "group": "Beta"},
     ]
 
 
@@ -210,6 +262,15 @@ def test_a_form_keeps_all_fields_on_the_form():
                 fields=[TextField(name="tag", label="Tag")],
             ),
             fields=[TextField(name="body", label="Body")],
+        )
+
+
+def test_a_form_that_submits_on_change_cannot_also_confirm():
+    with pytest.raises(ValueError, match="submits on change"):
+        Form(
+            action=Action(label="Save", operation="write_note", confirm="Sure?"),
+            fields=[TextField(name="body", label="Note")],
+            submit="change",
         )
 
 

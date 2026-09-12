@@ -4,23 +4,18 @@ from sqlalchemy import select
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
+from druks.contrib.software_factory.exceptions import MissingPrefix, RepoNotFound
 from druks.contrib.software_factory.issues.enums import Priority, Status
-from druks.contrib.software_factory.issues.exceptions import InvalidPrefix
-from druks.contrib.software_factory.issues.models import IssuesProject, Ticket
-from druks.contrib.software_factory.issues.schemas import (
-    CommentRead,
-    ProjectRead,
-    TicketDetail,
-    TicketEdit,
-)
+from druks.contrib.software_factory.issues.models import Ticket
+from druks.contrib.software_factory.issues.schemas import CommentRead, TicketDetail, TicketEdit
+from druks.contrib.software_factory.models import ProjectRepo
 from druks.db import Base, db_session
 
 # The operations own the facts: pages call these doors, and so do the dashboard
 # and the sandbox — the same doors, joined to druks ``/mcp`` as
-# ``software_factory_*``. ``/projects`` is GitHub's project API, so the board's
-# namespace door is ``/ticket-projects``. Reads are not doors — pages read the
-# models directly — with one exception: a caller that cannot open the page still
-# has to read the ticket it is answering.
+# ``software_factory_*``. Reads are not doors — pages read the models directly —
+# with one exception: a caller that cannot open the page still has to read the
+# ticket it is answering.
 #
 # ``status`` is a field on two of these doors, so the HTTP codes come in under
 # their own name.
@@ -72,7 +67,7 @@ async def ticket_detail(ticket: Ticket) -> TicketDetail:
         description=ticket.description,
         status=Status(ticket.status),
         priority=Priority(ticket.priority),
-        project_id=ticket.project_id,
+        repo_id=ticket.repo_id,
         assignee_id=ticket.assignee_id,
         comments=[
             CommentRead(
@@ -87,33 +82,6 @@ async def ticket_detail(ticket: Ticket) -> TicketDetail:
 
 
 @router.post(
-    "/ticket-projects",
-    status_code=http_status.HTTP_201_CREATED,
-    operation_id="create_ticket_project",
-    tags=["agent"],
-)
-async def create_ticket_project(
-    name: str = Body(..., embed=True, max_length=140),
-    prefix: str = Body(
-        ...,
-        embed=True,
-        description="2-6 letters, A-Z — the first half of every identifier this project mints",
-    ),
-) -> ProjectRead:
-    """Open a namespace: a project names its tickets ``{prefix}-1``,
-    ``{prefix}-2``, and so on. The prefix is fixed once a number has been
-    handed out, so pick the one the team already says out loud."""
-    name = required_text(name, "name")
-    try:
-        # The model's own @validates uppercases and shapes the prefix; a
-        # namespace nobody could spell is the caller's mistake, not a 500.
-        project = await IssuesProject.create(name=name, prefix=prefix)
-    except InvalidPrefix as error:
-        raise HTTPException(http_status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
-    return ProjectRead.model_validate(project)
-
-
-@router.post(
     "/tickets",
     status_code=http_status.HTTP_201_CREATED,
     operation_id="create_ticket",
@@ -121,45 +89,59 @@ async def create_ticket_project(
 )
 async def create_ticket(
     title: str = Body(..., embed=True, max_length=200),
-    project_id: int = Body(..., embed=True, description="the namespace to mint from"),
+    repo_id: int = Body(
+        ..., embed=True, description="the GitHub repo this ticket's PR will target"
+    ),
     description: str = Body("", embed=True),
     status: Status = Body(Status.TODO, embed=True),
     priority: Priority = Body(Priority.NONE, embed=True),
     assignee_id: str | None = Body(None, embed=True),
+    account: Account = Depends(current_account),
 ) -> TicketDetail:
-    """Write a ticket down. It lands in Todo and takes the next number in its
-    project's sequence. Creating is quiet: moving a ticket into Ready for Agent
-    is what opens a build, so a new ticket publishes nothing."""
+    """Write a ticket down. It takes the next number in its repo's project's
+    sequence. Creating in Ready for Agent is a transition into the trigger, so a
+    build can open. Creating in Todo publishes nothing."""
     title = required_text(title, "title")
-    if not await IssuesProject.get(project_id):
-        raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no project {project_id}")
     # An assignee select with nobody picked submits "", and the shell sends
     # every field the form shows. Blank is nobody, not an account id to look up.
     assignee_id = assignee_id or None
     if assignee_id is not None:
         await require_assignee(assignee_id)
-    ticket = await Ticket.create(
-        project_id=project_id,
-        title=title,
-        description=description,
-        status=status,
-        priority=priority,
-        assignee_id=assignee_id,
-    )
+    try:
+        ticket = await Ticket.create(
+            repo_id=repo_id,
+            title=title,
+            description=description,
+            status=status,
+            priority=priority,
+            assignee_id=assignee_id,
+            creator_id=account.id,
+        )
+    except RepoNotFound as error:
+        raise HTTPException(http_status.HTTP_404_NOT_FOUND, str(error)) from error
+    except MissingPrefix as error:
+        raise HTTPException(http_status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
     return await ticket_detail(ticket)
 
 
 @router.patch("/tickets/{identifier}", operation_id="update_ticket", tags=["agent"])
 async def update_ticket(identifier: str, edit: TicketEdit) -> TicketDetail:
-    """Edit what a ticket says — title, description, priority, assignee, project.
+    """Edit what a ticket says — title, description, priority, assignee, repo.
     What you leave out stays as it was, and a title cannot be edited away. Status
     is not here: a title edit is not a state transition, and ``set_status`` is the
-    one door that moves a ticket."""
+    one door that moves a ticket. Moving the repo does not remint the identifier."""
     ticket = await require_ticket(identifier)
     if edit.assignee_id is not None:
         await require_assignee(edit.assignee_id)
-    if edit.project_id is not None and not await IssuesProject.get(edit.project_id):
-        raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no project {edit.project_id}")
+    if edit.repo_id is not None:
+        repo = await ProjectRepo.get(edit.repo_id)
+        if not repo:
+            raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no repo {edit.repo_id}")
+        if not repo.project.prefix:
+            raise HTTPException(
+                http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+                str(MissingPrefix(repo.project.name)),
+            )
 
     if edit.title is not None:
         ticket.title = required_text(edit.title, "title")
@@ -176,8 +158,8 @@ async def update_ticket(identifier: str, edit: TicketEdit) -> TicketDetail:
     # set of fields rather than the value: omitted keeps whoever holds it.
     if "assignee_id" in edit.model_fields_set:
         await ticket.assign(edit.assignee_id)
-    if edit.project_id is not None and ticket.project_id != edit.project_id:
-        ticket.project_id = edit.project_id
+    if edit.repo_id is not None and ticket.repo_id != edit.repo_id:
+        ticket.repo_id = edit.repo_id
         ticket.updated_at = Base.utc_now()
         await db_session().flush()
     return await ticket_detail(ticket)
@@ -223,6 +205,7 @@ async def add_comment(
 
 @router.get("/tickets/{identifier}", operation_id="get_ticket", tags=["agent"])
 async def get_ticket(identifier: str) -> TicketDetail:
-    """Read one ticket: what it asks for, and everything said about it so far,
-    oldest comment first."""
+    """Read one Druks board ticket by identifier (for example BOX-3), including
+    every comment, oldest first. This is not a GitHub issue — GitHub issue tools
+    cannot fetch it."""
     return await ticket_detail(await require_ticket(identifier))

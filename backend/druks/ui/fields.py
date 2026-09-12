@@ -8,6 +8,8 @@ from druks.schemas import Schema
 class Option(Schema):
     value: str
     label: str
+    # Empty: a flat choice. Set: the shell nests this option in an ``<optgroup>``.
+    group: str = ""
 
     def __init__(self, label: str, **data):
         super().__init__(label=label, **data)
@@ -37,6 +39,8 @@ class TextAreaField(PageField):
     value: str = ""
     placeholder: str = ""
     rows: int = 4
+    # The value is markdown source. The shell renders it as formatted text.
+    markdown: bool = False
 
 
 class NumberField(PageField):

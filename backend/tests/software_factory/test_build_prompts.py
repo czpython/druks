@@ -7,7 +7,7 @@ from druks.contrib import software_factory
 from druks.contrib.software_factory.journal import BuildJournal
 from druks.contrib.software_factory.models import Project, ProjectRepo
 from druks.contrib.software_factory.policy import RepoPolicy
-from druks.contrib.software_factory.prompt_context import BuildPromptContext
+from druks.contrib.software_factory.prompt_context import TRACKER_LABELS, BuildPromptContext
 from druks.prompts import render_prompt
 from druks.workflows import FatalError
 
@@ -26,16 +26,18 @@ _CALL_KWARGS = {
 }
 
 
-def _build(*, review_code: bool = True) -> SimpleNamespace:
+def _build(**overrides) -> SimpleNamespace:
     """A stand-in BuildPromptContext exposing the fields the templates read —
     identity facts faked, the journal real and empty."""
-    return SimpleNamespace(
+    source = overrides.get("source", "github")
+    fields = dict(
         repo="acme/widget",
         work_item_url="https://druks.test/work-items/1",
         branch="agent/eng-1",
         pr_number=7,
         ticket_ref="ACME-1",
-        source="github",
+        source=source,
+        tracker_label=TRACKER_LABELS[source],
         issue_number=None,
         task_owner_name=None,
         task_owner_email=None,
@@ -46,10 +48,14 @@ def _build(*, review_code: bool = True) -> SimpleNamespace:
                 description="Apply the Python house rules.",
             )
         ],
-        review_code=review_code,
+        review_code=True,
         review_mode="approve",
         journal=BuildJournal(),
     )
+    fields.update(overrides)
+    if "tracker_label" not in overrides:
+        fields["tracker_label"] = TRACKER_LABELS[fields["source"]]
+    return SimpleNamespace(**fields)
 
 
 def _workspace() -> SimpleNamespace:
@@ -71,11 +77,11 @@ async def test_build_operation_prompt_renders(template):
 
 
 async def _generate_plan_prompt(
-    *, answered_questions=None, operator_note="", reviewer_notes=""
+    *, answered_questions=None, operator_note="", reviewer_notes="", **build
 ) -> str:
     return await render_prompt(
         "software_factory/build/generate_plan.md",
-        build=_build(),
+        build=_build(**build),
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
         answered_questions=answered_questions or [],
@@ -114,6 +120,25 @@ async def test_generate_plan_prompt_keeps_first_draft_ambiguity_instructions():
     prompt = await _generate_plan_prompt()
 
     assert "Before deep code reading" in prompt
+
+
+async def test_issues_ticket_fetch_names_the_druks_tool():
+    prompt = await _generate_plan_prompt(source="issues", ticket_ref="BOX-3")
+
+    assert "`software_factory_get_ticket` on the `druks` MCP with identifier `BOX-3`" in prompt
+    assert "BOX-3` is not a GitHub issue number" in prompt
+    assert "Ticket:** BOX-3 on the Druks board" in prompt
+    assert "`software_factory_add_comment` on the `druks` MCP (identifier `BOX-3`)" in prompt
+    assert "from Issues using your available tools" not in prompt
+    assert "from the Druks board using your tracker tools" not in prompt
+
+
+async def test_linear_ticket_fetch_names_linear():
+    prompt = await _generate_plan_prompt(source="linear", ticket_ref="ACME-1")
+
+    assert "fetch `ACME-1` from Linear using your tracker tools" in prompt
+    assert "software_factory_get_ticket" not in prompt
+    assert "Ticket:** ACME-1 on Linear" in prompt
 
 
 async def test_verification_profile_renders_ci_provenance_per_command():

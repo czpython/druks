@@ -1,11 +1,12 @@
 from datetime import UTC, datetime
 
 from conftest import connect_service
+from druks.contrib.software_factory.contracts import ReviewWork
 from druks.contrib.software_factory.workflows import Build
 from druks.signals import publish
 from druks.testing import seed_run
 
-from software_factory.factories import make_test_work_item
+from software_factory.factories import make_test_work_item, seed_build_run
 
 
 async def _connect_github() -> None:
@@ -122,6 +123,22 @@ async def test_dispatch_merged_noop_still_precedes_the_identity_guard(
         assert await Build.dispatch(ticket=_ticket(item)) is None
 
     assert any("already merged" in record.getMessage() for record in caplog.records)
+
+
+async def test_dispatch_syncs_a_parked_build_instead_of_restarting(druks_db, monkeypatch) -> None:
+    await _connect_github()
+    item = await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-12")
+    await seed_build_run(druks_db, work_item_id=item.id, state="parked", input_gate=ReviewWork.name)
+    started = []
+
+    async def fake_start(cls, **kwargs):
+        started.append(kwargs)
+        return "should-not-run"
+
+    monkeypatch.setattr(Build, "start", classmethod(fake_start))
+
+    assert await Build.dispatch(ticket=_ticket(item)) is None
+    assert started == []
 
 
 async def test_dispatch_unroutable_noop_still_precedes_the_identity_guard(

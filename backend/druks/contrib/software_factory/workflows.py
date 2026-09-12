@@ -13,8 +13,10 @@ from druks.contrib.software_factory.enums import (
     ReviewDecision,
 )
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
+from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.core.apis.github import get_github_client
 from druks.core.services import Github
+from druks.durable.enums import RunState
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox.datastructures import McpServer, RequiredMcpServer
 from druks.sandbox.layout import get_related_root, get_work_root
@@ -31,7 +33,7 @@ from .datastructures import PullRequest
 from .github import get_review_actor
 from .journal import BuildJournal
 from .policy import PlanGate, RepoPolicy
-from .prompt_context import BuildPromptContext
+from .prompt_context import TRACKER_LABELS, BuildPromptContext
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Host
@@ -177,7 +179,8 @@ class Build(Workflow):
     @classmethod
     async def dispatch(cls, *, ticket: dict) -> str | None:
         # The tracker funnel's entry: a ticket at the trigger status opens a build.
-        # Resolve-or-refresh the item, then start (start() dedups a live run).
+        # A live run already holds the queue slot — start() would return it
+        # without announcing, so mirror the ticket onto that run instead.
         item = await WorkItem.get_for_ticket_key(
             source=ticket["source"], ticket_key=ticket["identifier"]
         )
@@ -188,6 +191,17 @@ class Build(Workflow):
                 )
                 return
             await item.update(title=ticket["title"], ticket_url=ticket["url"])
+            status = await item.get_status(workflow=cls)
+            if status.is_parked:
+                await item.set_ticket_status(
+                    TicketStatus.IN_REVIEW
+                    if status.gate == ReviewWork.name
+                    else TicketStatus.IN_PROGRESS
+                )
+                return
+            if status.state in (RunState.SCHEDULED, RunState.RUNNING):
+                await item.set_ticket_status(TicketStatus.IN_PROGRESS)
+                return
         else:
             repo = await ProjectRepo.lookup(
                 project_name=ticket["project_name"], labels=ticket["labels"]
@@ -279,6 +293,7 @@ class Build(Workflow):
             pr_number=self.pr_number,
             ticket_ref=work_item.ticket_key,
             source=work_item.source,
+            tracker_label=TRACKER_LABELS[work_item.source],
             issue_number=self.input.issue_number,
             task_owner_name=self.input.task_owner_name,
             task_owner_email=self.input.task_owner_email,

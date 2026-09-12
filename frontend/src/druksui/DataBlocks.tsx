@@ -1,4 +1,4 @@
-import { useContext, useState } from 'react'
+import { useContext, useId, useState } from 'react'
 import { Link as RouteLink } from 'wouter'
 
 import type {
@@ -13,7 +13,7 @@ import type {
 } from '../api/types'
 import { RelTime } from '../components/RelTime'
 import { Image, Status } from './RunBlocks'
-import { fillPath, PagesContext } from './pages'
+import { hrefForLink, PagesContext } from './pages'
 
 // The plot's own coordinates; CSS gives it its real size.
 const PLOT_WIDTH = 300
@@ -76,26 +76,14 @@ function TextDatum({
     which shows the value's own text. */
 export function LinkControl({ link, label = link.label }: { link: Link; label?: string }) {
   const { app, pages } = useContext(PagesContext)
+  const href = hrefForLink(link, app, pages)
   if (link.url) {
     return (
-      <a className="dui-link" href={link.url} target="_blank" rel="noreferrer">
+      <a className="dui-link" href={href} target="_blank" rel="noreferrer">
         {label}
       </a>
     )
   }
-  if (link.subject) {
-    // The subject's own platform page — the full story of what druks did.
-    return (
-      <RouteLink
-        href={`/${app}/${link.subject.subjectType}/${link.subject.subjectId}`}
-        className="dui-link"
-      >
-        {label}
-      </RouteLink>
-    )
-  }
-  const target = pages.find((entry) => entry.name === link.page)
-  const href = target ? fillPath(target.path, link.arguments) : ''
   if (href) {
     return (
       <RouteLink href={href} className="dui-link">
@@ -310,24 +298,27 @@ export function Table({
   rows: TableRow[]
   emptyText: string
 }) {
-  if (rows.length === 0) {
-    // Nothing to show and nothing to say about it: a heading over an empty box
-    // is worse than no block at all.
-    if (!emptyText) return null
-    return (
-      <div className="dui-table-block">
-        {title && <h3 className="dui-block-title">{title}</h3>}
-        <div className="dui-table-empty dim">{emptyText}</div>
-      </div>
-    )
-  }
+  const headingId = useId()
+  if (rows.length === 0 && !emptyText) return null
   return (
     <div className="dui-table-block">
+      {title && (
+        <h3 id={headingId} className="dui-block-title">
+          {title}
+        </h3>
+      )}
       <div className="dui-table-scroll">
-        <table className="dui-table">
-          {/* The title names the table itself, so a reader moving between
-              tables hears which one it is. */}
-          {title && <caption className="dui-block-title dui-table-caption">{title}</caption>}
+        <table className="dui-table" aria-labelledby={title ? headingId : undefined}>
+          <colgroup>
+            {columns.map((column) => (
+              <col
+                key={column.label}
+                style={
+                  column.width ? { width: column.width, minWidth: column.width } : undefined
+                }
+              />
+            ))}
+          </colgroup>
           <thead>
             <tr>
               {columns.map((column) => (
@@ -338,9 +329,15 @@ export function Table({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, index) => (
-              <Row key={index} row={row} columns={columns} />
-            ))}
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={columns.length} className="dui-table-empty">
+                  {emptyText}
+                </td>
+              </tr>
+            ) : (
+              rows.map((row, index) => <Row key={index} row={row} columns={columns} />)
+            )}
           </tbody>
         </table>
       </div>

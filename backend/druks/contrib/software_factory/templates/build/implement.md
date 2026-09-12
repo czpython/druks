@@ -54,7 +54,7 @@ When the implementation is complete you MUST commit and push it to the PR branch
 {% else %}
 No PR exists yet — your delivery provisions it. The repo is checked out on the default branch, so create the work branch first and implement on it (`git checkout -b <branch>`), named:
 
-- Linear/Jira ticket: `agent/<ticket ref>` (e.g. `agent/ACME-270`).
+- Linear, Jira, or Druks board ticket: `agent/<ticket ref>` (e.g. `agent/ACME-270`).
 - GitHub issue: `agent/issue-<issue number>-<slug>` — slug is the issue title lowercased, non-alphanumeric runs replaced with `-`, trimmed to 40 characters.
 
 When the implementation is complete, run from the repo root (pushing with `git push -u origin <branch>`; if the remote rejects the name as taken, rename with a `-2`/`-3`/… suffix and push again — never adopt an existing branch or PR):
@@ -83,7 +83,7 @@ Then, on every implementation revision, regenerate the PR body above from the cu
 {% else %}
 After a successful push, open the draft PR against the default branch with the body above (`gh pr create --draft`; `gh` is authenticated):
 
-- Title: `<ticket ref> - <ticket title>` for a Linear/Jira ticket (just the ref when the title is empty); the GitHub issue title verbatim for an issue.
+- Title: `<ticket ref> - <ticket title>` for a Linear, Jira, or Druks board ticket (just the ref when the title is empty); the GitHub issue title verbatim when the source is GitHub.
 {% endif %}
 
 Authentication is already configured (a git credential helper supplies the token), so the push needs no further setup. After a successful push, report the resulting commit SHA in `head_sha` and `commit_sha`, and set `base_sha` to the commit you started from (the `git rev-parse HEAD` before your first commit). Report the branch you delivered on in `branch` and its PR number in `pr_number`. If the push is rejected because the remote branch moved, fetch and retry once (`git fetch origin <branch> && git rebase origin/<branch>`, resolve trivially, push again); if it still fails, return `status="needs_clarification"` explaining the conflict. `workspace_path` should be the repo root you worked in.

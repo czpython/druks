@@ -11,6 +11,7 @@ class Status(StrEnum):
     IN_PROGRESS = "in_progress"
     IN_REVIEW = "in_review"
     DONE = "done"
+    BLOCKED = "blocked"
     CANCELLED = "cancelled"
 
     @property
@@ -42,6 +43,7 @@ STATUS_LABELS: dict[Status, str] = {
     Status.IN_PROGRESS: "In Progress",
     Status.IN_REVIEW: "In Review",
     Status.DONE: "Done",
+    Status.BLOCKED: "Blocked",
     Status.CANCELLED: "Cancelled",
 }
 

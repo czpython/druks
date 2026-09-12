@@ -78,7 +78,9 @@ To use it:
 4. Open **Software Factory → Projects**.
 5. Create a project and add the repository.
 6. Profile the repository. Then use the configured ticket or GitHub trigger to
-   start work.
+   start work. For a tracker that needs no credentials, select **druks** in
+   **Software Factory → Settings**. See
+   [ticketing integrations](configuration.md#ticketing-integrations).
 7. Watch the work item, event feed, agent calls, and each parked gate in the
    dashboard.
 
