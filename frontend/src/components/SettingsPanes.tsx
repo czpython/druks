@@ -1086,7 +1086,14 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
 
 function connectionIdentity(connection: Connection): string | null {
   const identity = connection.identity
-  return identity.email ?? identity.username ?? identity.subscription ?? identity.name ?? null
+  return (
+    identity.email ??
+    identity.username ??
+    identity.subscription ??
+    identity.name ??
+    identity.subject ??
+    null
+  )
 }
 
 const revokeReasonCopy: Record<string, string> = {
@@ -1134,7 +1141,7 @@ function ServiceAccess({ service }: { service: Service }) {
       .finally(() => setBusy(false))
   }
   const missingScopes = (connection: Connection) =>
-    service.requiredScopes.filter((scope) => !connection.scopes.includes(scope))
+    service.requiredScopes.filter((scope) => !connection.scopes?.includes(scope))
   const live = service.connections.filter((connection) => !connection.revokedAt)
   const revoked = service.connections.filter((connection) => connection.revokedAt)
 
@@ -1163,7 +1170,9 @@ function ServiceAccess({ service }: { service: Service }) {
             {connectionIdentity(connection) ??
               new Date(connection.connectedAt).toLocaleDateString()}
           </span>
-          <span className="svc-fact-val">{connection.scopes.join(', ')}</span>
+          <span className="svc-fact-val">
+            {connection.scopes?.join(', ') ?? 'Permissions not reported'}
+          </span>
           <span className="svc-actions">
             {missingScopes(connection).length > 0 && (
               <button
@@ -1213,6 +1222,11 @@ function ServiceAccess({ service }: { service: Service }) {
 
 export function ConnectionsPane({ revokedOnly = false }: { revokedOnly?: boolean }) {
   const queryClient = useQueryClient()
+  useEffect(() => {
+    const channel = new BroadcastChannel('druks-mcp-connect')
+    channel.onmessage = () => void queryClient.invalidateQueries({ queryKey: ['connections'] })
+    return () => channel.close()
+  }, [queryClient])
   const query = useQuery({
     queryKey: ['connections'],
     queryFn: () => api.listConnections(),
@@ -1306,7 +1320,10 @@ export function ConnectionsPane({ revokedOnly = false }: { revokedOnly?: boolean
               <tr key={connection.id}>
                 <th scope="row">
                   <span className="connection-name">
-                    {connectionIdentity(connection) ?? 'Account identity unavailable'}
+                    {connectionIdentity(connection) ??
+                      (connection.identityStatus === 'failed'
+                        ? 'Account identity lookup failed'
+                        : 'Account identity unavailable')}
                   </span>
                   {revokedOnly && (
                     <span className="connection-context">{revokedCopy(connection)}</span>
@@ -1327,9 +1344,9 @@ export function ConnectionsPane({ revokedOnly = false }: { revokedOnly?: boolean
                       </dd>
                       <dt>Permissions</dt>
                       <dd>
-                        {connection.scopes.length > 0
-                          ? connection.scopes.join(', ')
-                          : 'No scopes recorded'}
+                        {connection.scopes === null
+                          ? 'Permissions not reported'
+                          : connection.scopes.join(', ') || 'No permissions granted'}
                       </dd>
                     </dl>
                   </details>
@@ -2278,13 +2295,19 @@ export function McpServersPane() {
   const fieldId = useId()
   const servers = serversQuery.data ?? []
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['mcpServers'] })
+  const refresh = () =>
+    queryClient.invalidateQueries({
+      predicate: (query) => ['mcpServers', 'connections'].includes(String(query.queryKey[0])),
+    })
 
   // The OAuth callback page broadcasts here right before closing its tab, so
   // the row flips to connected without a reload.
   useEffect(() => {
     const channel = new BroadcastChannel('druks-mcp-connect')
-    channel.onmessage = () => void queryClient.invalidateQueries({ queryKey: ['mcpServers'] })
+    channel.onmessage = () =>
+      void queryClient.invalidateQueries({
+        predicate: (query) => ['mcpServers', 'connections'].includes(String(query.queryKey[0])),
+      })
     return () => channel.close()
   }, [queryClient])
 

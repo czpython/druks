@@ -42,6 +42,8 @@ dependencies = [
     "fastmcp>=4.0.2,<5",
     "sqlalchemy-encrypted-field==1.0.2",
     "jsonpointer>=3.1.1",
+    "authlib>=1.7.2",
+    "joserfc>=1.7.4",
 ]
 
 [project.urls]

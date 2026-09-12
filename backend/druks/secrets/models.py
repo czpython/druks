@@ -9,7 +9,7 @@ from sqlalchemy_encrypted_field import EncryptedJsonField
 from druks.core.models import Uuid7Pk
 from druks.database import db_session, get_session
 from druks.models import Base
-from druks.secrets.enums import SecretKind
+from druks.secrets.enums import IdentityStatus, SecretKind
 from druks.secrets.exceptions import SecretRevokedError
 
 if TYPE_CHECKING:
@@ -48,8 +48,9 @@ class VaultSecret(Base, Uuid7Pk):
     secrets = EncryptedJsonField()
     # Non-secret facts: the App slug, the subscription's email.
     identity: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    identity_status: Mapped[str | None]
     # What the provider granted, for an OAuth connection.
-    scopes: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    scopes: Mapped[list[str] | None] = mapped_column(JSONB(none_as_null=True))
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
     expires_at: Mapped[datetime | None]
@@ -179,8 +180,9 @@ class VaultSecret(Base, Uuid7Pk):
         *,
         account_id: str | None,
         refresh_token: str,
-        scopes: list[str],
+        scopes: list[str] | None,
         identity: dict[str, Any] | None = None,
+        identity_status: IdentityStatus | None = None,
         secrets: dict[str, Any] | None = None,
     ) -> "VaultSecret":
         """A new OAuth connection at an audience: the consent's refresh token,
@@ -193,6 +195,7 @@ class VaultSecret(Base, Uuid7Pk):
             secrets={**(secrets or {}), "refresh_token": refresh_token},
             scopes=scopes,
             identity=identity or {},
+            identity_status=identity_status,
         )
         db_session().add(row)
         await db_session().flush()
@@ -202,8 +205,9 @@ class VaultSecret(Base, Uuid7Pk):
         self,
         *,
         refresh_token: str,
-        scopes: list[str],
+        scopes: list[str] | None,
         identity: dict[str, Any] | None = None,
+        identity_status: IdentityStatus | None = None,
         secrets: dict[str, Any] | None = None,
     ) -> None:
         """A revoked connection, or a live one, takes a fresh consent. The
@@ -213,8 +217,9 @@ class VaultSecret(Base, Uuid7Pk):
         }
         self.secrets = {**kept, "refresh_token": refresh_token}
         self.scopes = scopes
-        if identity:
+        if identity is not None:
             self.identity = identity
+        self.identity_status = identity_status
         self.updated_at = Base.utc_now()
         self.revoked_at = None
         self.revoked_reason = ""
