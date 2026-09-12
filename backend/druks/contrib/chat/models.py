@@ -16,12 +16,10 @@ _TITLE_CHARS = 80
 class Conversation(StoredSubject):
     __tablename__ = "chat_conversations"
 
-    # id: the integer subject key inherited from StoredSubject; the class name
-    # derives subject_type "conversation".
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     title: Mapped[str]
-    # Autonomy is a String column driven by this app's closed StrEnum, not a
-    # native PG enum: the modes stay in code and a rename never needs ALTER TYPE.
+    # A String column driven by this app's closed StrEnum, not a native PG enum:
+    # the modes stay in code and a rename never needs ALTER TYPE.
     autonomy: Mapped[str] = mapped_column(default=Autonomy.PROPOSE)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
@@ -37,6 +35,17 @@ class Conversation(StoredSubject):
         conversation = cls(account_id=account_id, title=title, autonomy=autonomy)
         session.add(conversation)
         await session.flush()
+        return conversation
+
+    @classmethod
+    async def start(cls, *, account_id: str, body: str, title: str = "") -> "Conversation":
+        """A thread and the operator's first line. An empty title takes that
+        line, so a list of threads reads as the questions that opened them."""
+        first_line = next((" ".join(raw.split()) for raw in body.splitlines() if raw.strip()), "")
+        conversation = await cls.create(
+            account_id=account_id, title=title or first_line[:_TITLE_CHARS]
+        )
+        await conversation.add_message(role=Role.USER, body=body)
         return conversation
 
     @classmethod
@@ -72,25 +81,6 @@ class Conversation(StoredSubject):
         self.autonomy = autonomy
         await db_session().flush()
 
-    async def name_from_first_line(self) -> None:
-        """Fill an empty title from the first user line. A title the operator
-        already set, or a prior call, is left alone."""
-        if self.title:
-            return
-        first = next(
-            (message for message in await self.list_messages() if message.role == Role.USER),
-            None,
-        )
-        if not first:
-            return
-        line = next(
-            (" ".join(raw.split()) for raw in first.body.splitlines() if raw.strip()),
-            "",
-        )
-        if line:
-            self.title = line[:_TITLE_CHARS]
-            await db_session().flush()
-
     async def list_messages(self) -> list["Message"]:
         return await Message.list_for_conversation(self.id)
 
@@ -115,9 +105,8 @@ class Conversation(StoredSubject):
 class Message(Base):
     __tablename__ = "chat_messages"
 
-    # A row, not an event and not a StoredSubject: events stay facts about what
-    # happened, while a message is the thread the conversation reads back in
-    # order. Issues' ``Comment`` is the same shape.
+    # A row, not an event: events stay facts about what happened, while a
+    # message is the thread the conversation reads back in order.
     id: Mapped[int] = mapped_column(primary_key=True)
     conversation_id: Mapped[int] = mapped_column(ForeignKey("chat_conversations.id"))
     role: Mapped[str]

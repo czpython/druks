@@ -1,10 +1,11 @@
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from druks.accounts.context import current_account_id
+from druks.accounts.dependencies import current_session_account
 from druks.apps.registry import mcp_servers
 from druks.core.templates import render_page
 from druks.mcp import oauth, registry
@@ -206,7 +207,11 @@ async def connect_mcp_server(
     return ConnectMcpServerResponse(authorization_url=authorization_url)
 
 
-@router.get("/oauth/callback", response_class=HTMLResponse)
+@router.get(
+    "/oauth/callback",
+    response_class=HTMLResponse,
+    dependencies=[Depends(current_session_account)],
+)
 async def oauth_callback(state: str = "", code: str = "", error: str = "") -> HTMLResponse:
     # The operator's browser lands here from the consent screen — a human-facing
     # page, not a JSON API. Failures surface as loud HTTP errors (the app's

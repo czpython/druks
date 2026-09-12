@@ -20,7 +20,7 @@ async def test_create_conversation_posts_body_and_starts_talk(druks_client, monk
 
     assert created.status_code == 201
     conversation = await Conversation.get(created.json()["id"])
-    assert conversation.title == ""
+    assert conversation.title == "hello"
     account = await Account.get_or_create("op@example.com")
     assert conversation.account_id == account.id
     assert started == [conversation.id]

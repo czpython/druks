@@ -243,29 +243,12 @@ async def test_park_with_hold_clips_the_lease_and_keeps_the_host(monkeypatch):
     flow = _warm_workflow()
     await flow._lease_host(_NONE)
 
-    await sdk._park(flow, "review", None, 60.0, hold_sandbox=True)
+    await sdk._park(flow, "review", None, 60.0, hold_sandbox=timedelta(minutes=15))
 
     assert [host_id for host_id, _ in fake.expiry_sets] == ["host-1"]
     assert fake.released == []
     assert flow._host is not None
     assert flow._host.id == "host-1"
-
-
-@pytest.mark.asyncio
-async def test_hold_true_clips_to_one_more_worst_case_call(monkeypatch):
-    """``True`` holds the VM for as long as its lease could still cover one more
-    worst-case call — past that the next call would rotate anyway."""
-    fake = _FakeSandboxClient(lease=timedelta(hours=2))
-    monkeypatch.setattr(sdk, "sandbox_client", fake)
-    flow = _warm_workflow()
-    await flow._lease_host(_NONE)
-
-    await flow._hold_host(True)
-
-    ((_, expires_at),) = fake.expiry_sets
-    clip = datetime.now(UTC) + timedelta(seconds=SANDBOX_HOST_ROTATE_BEFORE_SECONDS)
-    assert clip - timedelta(seconds=5) <= expires_at <= clip
-    assert expires_at <= flow._host.expires_at
 
 
 @pytest.mark.asyncio
@@ -283,8 +266,8 @@ async def test_hold_never_outlasts_the_lease_drukbox_granted(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_hold_timedelta_clips_to_the_requested_span(monkeypatch):
-    """A timedelta hold ends at ``now + hold`` when the lease outlasts it."""
+async def test_hold_clips_to_the_requested_span(monkeypatch):
+    """A hold ends at ``now + hold`` when the lease outlasts it."""
     fake = _FakeSandboxClient(lease=timedelta(hours=2))
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
@@ -307,7 +290,7 @@ async def test_hold_without_a_warm_host_touches_nothing(monkeypatch):
     flow = _warm_workflow(reuse=False)
     await flow._lease_host(_NONE)
 
-    await sdk._park(flow, "review", None, 60.0, hold_sandbox=True)
+    await sdk._park(flow, "review", None, 60.0, hold_sandbox=timedelta(minutes=15))
 
     assert fake.expiry_sets == []
     assert fake.released == []
@@ -323,7 +306,7 @@ async def test_resume_after_a_hold_reuses_the_held_host(monkeypatch):
     _park_without_dbos(monkeypatch)
     flow = _warm_workflow()
     await flow._lease_host(_NONE)
-    await sdk._park(flow, "review", None, 60.0, hold_sandbox=True)
+    await sdk._park(flow, "review", None, 60.0, hold_sandbox=timedelta(minutes=15))
 
     assert await flow._lease_host(_NONE) == "host-1"
     assert fake.provisions == ["wf-1:workflow"]

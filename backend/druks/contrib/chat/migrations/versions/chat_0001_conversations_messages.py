@@ -20,7 +20,6 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "chat_conversations",
-        # Integer subject key (StoredSubject.id) — serial, matching create_all.
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("account_id", sa.String(), nullable=False),
         sa.Column("title", sa.String(), nullable=False),

@@ -7,11 +7,13 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlparse, urlsplit, urlunparse
 
-from druks.accounts.models import Account
+from druks.accounts.enums import OperatorWrites
+from druks.accounts.models import Account, OperatorToken
 from druks.core.apis.github import get_github_client
 from druks.core.models import uuid7_str
 from druks.core.services import Github
 from druks.database import db_session
+from druks.durable.exceptions import FatalError
 from druks.files.constants import MAX_FILE_BYTES
 from druks.files.datastructures import File
 from druks.files.exceptions import FileUnavailableError
@@ -19,9 +21,13 @@ from druks.files.models import FileRecord
 from druks.files.storage import get_file_storage
 from druks.mcp import models as mcp_models
 from druks.mcp import oauth
-from druks.mcp.constants import TOKEN_ENV_PREFIX
+from druks.mcp.constants import THIS_APPLIANCE, TOKEN_ENV_PREFIX
 from druks.mcp.enums import IdentityMode, TokenSource
-from druks.mcp.exceptions import MissingGrantError, MissingTokenError
+from druks.mcp.exceptions import (
+    MissingGrantError,
+    MissingTokenError,
+    ReservedServerNameError,
+)
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
 from druks.sandbox import repo as checkout
 from druks.sandbox.datastructures import AgentResult, McpServer, RequiredMcpServer
@@ -37,19 +43,17 @@ if TYPE_CHECKING:
 def this_appliance_mcp_url(host: "Host") -> str:
     """The /mcp hop a sandbox uses to reach this process.
 
-    Docker sibling containers cannot use the host loopback; the engine
-    publishes that address as host.docker.internal:8001. An exe VM is a
-    different machine and uses the dashboard URL (urls.endpoint), never
-    webhook_host.
+    A docker sibling container cannot use the host loopback; the engine
+    publishes that address as host.docker.internal. An exe VM is a different
+    machine and uses the dashboard URL (urls.endpoint), never webhook_host.
     """
-    base = (load_settings().urls.endpoint or "http://127.0.0.1:8001").rstrip("/")
-    parsed = urlparse(base)
-    if host.record.provider == "docker" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
-        port = parsed.port
-        if not port:
-            port = 8001 if parsed.scheme == "http" else 443
-        base = urlunparse(parsed._replace(netloc=f"host.docker.internal:{port}")).rstrip("/")
-    return f"{base}/mcp"
+    if endpoint := load_settings().urls.endpoint.rstrip("/"):
+        parsed = urlparse(endpoint)
+        if host.record.provider == "docker" and parsed.hostname in {"127.0.0.1", "localhost"}:
+            netloc = parsed.netloc.replace(parsed.hostname, "host.docker.internal")
+            endpoint = urlunparse(parsed._replace(netloc=netloc))
+        return f"{endpoint}/mcp"
+    raise FatalError("urls.endpoint is unset, so a sandbox cannot reach this appliance. Set it.")
 
 
 @dataclass(frozen=True)
@@ -58,6 +62,11 @@ class Workspace:
     host: "Host"
     # What the run is about; None for a workflow about nothing.
     subject: Any = None
+    # The run the box serves. The platform fills it.
+    run_id: str = ""
+    # How far this box may go when it operates this appliance as the run's
+    # operator. None keeps this appliance's own /mcp out of the box entirely.
+    operator_writes: OperatorWrites | None = None
 
     @property
     def host_id(self) -> str:
@@ -166,12 +175,39 @@ class Workspace:
         # with_mcp_servers is the run's last DB read; commit so the step's
         # connection isn't held idle through the minutes the agent runs.
         await db_session().commit()
-        return await self.host.run_agent(**run_kwargs)
+        try:
+            return await self.host.run_agent(**run_kwargs)
+        finally:
+            if self.operator_writes:
+                await OperatorToken.revoke(kwargs["call_id"])
 
     async def with_mcp_servers(self, account_id: str | None, **kwargs: Any) -> dict[str, Any]:
         # The harness names each server's url, variables, and plain headers.
-        # Every credential is a box entry, so nothing rides ``extra_env``.
+        # Every registry credential is a box entry, so nothing rides
+        # ``extra_env`` — except this appliance's own inward bearer, which is
+        # minted per agent call and dies with it. No box entry could carry it:
+        # Drukbox binds entries when it creates the box.
         wire, _ = await self.get_mcp_delivery(self.subject, account_id)
+        if self.operator_writes:
+            if THIS_APPLIANCE in {server.name for server in wire}:
+                raise ReservedServerNameError(THIS_APPLIANCE)
+            variable = get_bearer_token_env_var(THIS_APPLIANCE)
+            wire += (
+                McpServer(
+                    name=THIS_APPLIANCE,
+                    url=this_appliance_mcp_url(self.host),
+                    bearer_token_env_var=variable,
+                ),
+            )
+            kwargs["extra_env"] = {
+                **kwargs.get("extra_env", {}),
+                variable: await OperatorToken.mint(
+                    account_id=account_id,
+                    agent_call_id=kwargs["call_id"],
+                    run_id=self.run_id,
+                    writes=self.operator_writes,
+                ),
+            }
         if wire:
             kwargs["mcp_servers"] = wire
         return kwargs

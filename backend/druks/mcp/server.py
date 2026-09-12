@@ -4,6 +4,7 @@
 # tagged app route joins the surface the same way.
 import inspect
 from collections.abc import Generator, Sequence
+from typing import Any
 
 import httpx2
 from fastapi import FastAPI
@@ -19,10 +20,12 @@ from fastmcp.utilities.openapi import HTTPRoute
 from fastmcp.utilities.versions import VersionSpec
 from mcp.types import ToolAnnotations
 
+from druks.accounts.enums import OperatorWrites
 from druks.accounts.exceptions import InvalidPatError
 from druks.accounts.models import OperatorToken, PersonalAccessToken
 from druks.apps.loader import iter_apps
 from druks.database import db_session
+from druks.mcp import proposals
 from druks.mcp.exceptions import InvalidAgentToolError
 
 _INSTRUCTIONS = """\
@@ -65,7 +68,11 @@ class PatTokenVerifier(TokenVerifier):
                 token=token,
                 client_id=pat.token_prefix,
                 scopes=[],
-                claims={"account_id": pat.account_id, "pat_id": pat.id, "writes": "allow"},
+                claims={
+                    "account_id": pat.account_id,
+                    "pat_id": pat.id,
+                    "writes": OperatorWrites.ALLOW,
+                },
             )
             await db_session().commit()
             return access
@@ -92,23 +99,27 @@ class CallerPat(httpx2.Auth):
         yield request
 
 
-def _writes_claim() -> str:
+def _caller_claims() -> dict[str, Any]:
+    # The verified credential behind this request; empty outside a request.
     token = get_access_token()
-    if token:
-        return token.claims.get("writes", "allow")
-    return "allow"
+    return token.claims if token else {}
 
 
 def _is_read_tool(tool: Tool) -> bool:
     return bool(tool.annotations and tool.annotations.read_only_hint)
 
 
+def _denies_writes() -> bool:
+    return _caller_claims().get("writes") == OperatorWrites.DENY
+
+
 class OperatorWritesFilter(Transform):
-    """Propose (writes=deny) lists only GET-derived tools. Confirm and full
-    keep the live catalog; mutating calls are intercepted on the HTTP hop."""
+    """A credential whose writes are denied sees only the GET-derived tools, so
+    it never offers an action it cannot take. Every other credential sees the
+    live catalog."""
 
     async def list_tools(self, tools: Sequence[Tool]) -> Sequence[Tool]:
-        if _writes_claim() == "deny":
+        if _denies_writes():
             return [tool for tool in tools if _is_read_tool(tool)]
         return tools
 
@@ -116,60 +127,39 @@ class OperatorWritesFilter(Transform):
         self, name: str, call_next: GetToolNext, *, version: VersionSpec | None = None
     ) -> Tool | None:
         tool = await call_next(name, version=version)
-        if tool and _writes_claim() == "deny" and not _is_read_tool(tool):
+        if tool and _denies_writes() and not _is_read_tool(tool):
             return
         return tool
 
 
-def _bearer_credential(header: str | None) -> str:
-    if header:
-        scheme, _, credential = header.partition(" ")
-        if scheme.lower() == "bearer" and credential:
-            return credential
-    return ""
-
-
 class OperatorWritesTransport(httpx2.AsyncBaseTransport):
-    """Mutating OpenAPI hops: deny 403s, defer stashes, allow passes through."""
+    """A deferred credential's write becomes a proposal on the internal hop:
+    recorded against its run, never performed. Refusing a denied write is the
+    bearer door's job, so it holds on every route and not only on a tool."""
 
     def __init__(self, inner: httpx2.AsyncBaseTransport):
         self._inner = inner
 
     async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
-        if request.method.upper() != "GET":
-            operator = await OperatorToken.lookup(
-                _bearer_credential(request.headers.get("authorization"))
+        claims = _caller_claims()
+        if request.method != "GET" and claims.get("writes") == OperatorWrites.DEFER:
+            await proposals.stash(
+                claims["run_id"],
+                {
+                    "method": request.method,
+                    "path": request.url.path,
+                    "body": request.content.decode() if request.content else "",
+                    "content_type": request.headers.get("content-type") or "application/json",
+                },
             )
-            if operator and operator.writes == "deny":
-                return httpx2.Response(
-                    403,
-                    json={
-                        "code": "AUTONOMY_READ_ONLY",
-                        "message": (
-                            "This conversation's autonomy is propose; mutating tools do not run."
-                        ),
-                        "retryable": False,
-                    },
-                    request=request,
-                )
-            if operator and operator.writes == "defer":
-                await OperatorToken.defer_write(
-                    operator.run_id,
-                    {
-                        "method": request.method,
-                        "path": request.url.path,
-                        "body": request.content.decode() if request.content else "",
-                        "content_type": request.headers.get("content-type") or "application/json",
-                    },
-                )
-                return httpx2.Response(
-                    200,
-                    json={
-                        "result": "deferred",
-                        "message": "Proposed. The operator must confirm before this runs.",
-                    },
-                    request=request,
-                )
+            return httpx2.Response(
+                200,
+                json={
+                    "result": "deferred",
+                    "message": "This write is recorded, not performed. Its operator answers it.",
+                },
+                request=request,
+            )
         return await self._inner.handle_async_request(request)
 
 
@@ -258,9 +248,9 @@ def _annotate(route: HTTPRoute, component: object) -> None:
             destructive_hint=not is_read and route.extensions.get("x-destructive", True),
             idempotent_hint=route.extensions.get("x-idempotent", False),
         )
-        # Confirm (writes=defer) intercepts mutating hops with a deferred stub,
-        # not the route's 201 model. Advertising that model as outputSchema
-        # makes MCP reject the stub (`identifier` required on create_ticket).
+        # A deferred write answers with the proposal stub, not the route's own
+        # model. Advertising that model as outputSchema makes MCP reject the
+        # stub, whose required fields (an `identifier`) it does not carry.
         if not is_read:
             component.output_schema = None
 

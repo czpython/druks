@@ -11,8 +11,6 @@ PAT_TOKEN_TAG = "druks_pat"
 OPERATOR_TOKEN_TAG = "druks_call"
 OPERATOR_TOKEN_PREFIX = "operator_token:"
 OPERATOR_TOKEN_CALL_PREFIX = "operator_token_call:"
-OPERATOR_DEFERRED_PREFIX = "operator_deferred:"
-OPERATOR_WRITES = frozenset({"deny", "defer", "allow"})
 PAT_NAME_LENGTH = 80
 PAT_PREFIX_LENGTH = 12
 # No separator characters, so the serialized token splits unambiguously on "_".

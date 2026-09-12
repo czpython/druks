@@ -28,7 +28,8 @@ def test_chat_turn_accepts_the_in_app_send_and_stop_payload():
 
 async def _run_talk(conversation: Conversation, monkeypatch) -> None:
     monkeypatch.setattr(Talk, "record_message", Talk.record_message.__wrapped__)
-    monkeypatch.setattr(Talk, "name_thread", Talk.name_thread.__wrapped__)
+    monkeypatch.setattr(Talk, "settle_proposals", Talk.settle_proposals.__wrapped__)
+
     flow = Talk()
     flow.subject = conversation
     flow.account_id = conversation.account_id
@@ -37,6 +38,10 @@ async def _run_talk(conversation: Conversation, monkeypatch) -> None:
         await flow.run_multistep()
     finally:
         current_workflow.reset(token)
+
+
+def _no_proposals(monkeypatch) -> None:
+    monkeypatch.setattr(Talk, "take_proposals", mock.AsyncMock(return_value=[]))
 
 
 async def test_dispatch_starts_talk_for_the_conversation(monkeypatch):
@@ -52,8 +57,7 @@ async def test_dispatch_starts_talk_for_the_conversation(monkeypatch):
 
 async def test_talk_appends_the_assistant_line_and_stops(druks_db, monkeypatch):
     account = await Account.get_or_create("op@example.com")
-    conversation = await Conversation.create(account_id=account.id, title="")
-    await conversation.add_message(role=Role.USER, body="hello")
+    conversation = await Conversation.start(account_id=account.id, body="hello")
 
     reply = mock.AsyncMock(return_value=TurnOutput(text="hi"))
     monkeypatch.setattr(Chat, "reply", staticmethod(reply))
@@ -64,7 +68,7 @@ async def test_talk_appends_the_assistant_line_and_stops(druks_db, monkeypatch):
         return ChatTurn(action="stop")
 
     monkeypatch.setattr(ChatTurn, "wait", classmethod(wait))
-    monkeypatch.setattr(Talk, "deferred_writes", mock.AsyncMock(return_value=[]))
+    _no_proposals(monkeypatch)
 
     await _run_talk(conversation, monkeypatch)
 
@@ -74,13 +78,11 @@ async def test_talk_appends_the_assistant_line_and_stops(druks_db, monkeypatch):
     messages = await conversation.list_messages()
     assert [message.body for message in messages] == ["hello", "hi"]
     assert [message.role for message in messages] == [Role.USER, Role.ASSISTANT]
-    assert conversation.title == "hello"
 
 
 async def test_talk_appends_the_operator_line_and_loops(druks_db, monkeypatch):
     account = await Account.get_or_create("op@example.com")
-    conversation = await Conversation.create(account_id=account.id, title="")
-    await conversation.add_message(role=Role.USER, body="hello")
+    conversation = await Conversation.start(account_id=account.id, body="hello")
 
     outputs = iter([TurnOutput(text="hi"), TurnOutput(text="ok")])
     turns: list[dict] = []
@@ -98,7 +100,7 @@ async def test_talk_appends_the_operator_line_and_loops(druks_db, monkeypatch):
         return next(answers)
 
     monkeypatch.setattr(ChatTurn, "wait", classmethod(wait))
-    monkeypatch.setattr(Talk, "deferred_writes", mock.AsyncMock(return_value=[]))
+    _no_proposals(monkeypatch)
 
     await _run_talk(conversation, monkeypatch)
 
@@ -112,15 +114,13 @@ async def test_talk_appends_the_operator_line_and_loops(druks_db, monkeypatch):
     ]
     assert turns[0]["autonomy"] == conversation.autonomy
     assert turns[1]["messages"][-1] == {"role": Role.USER, "body": "and then?"}
-    assert conversation.title == "hello"
 
 
 async def test_stop_does_not_write_a_message(druks_db, monkeypatch):
     account = await Account.get_or_create("op@example.com")
-    conversation = await Conversation.create(account_id=account.id, title="")
-    await conversation.add_message(role=Role.USER, body="hello")
+    conversation = await Conversation.start(account_id=account.id, body="hello")
     monkeypatch.setattr(Chat, "reply", mock.AsyncMock(return_value=TurnOutput(text="hi")))
-    monkeypatch.setattr(Talk, "deferred_writes", mock.AsyncMock(return_value=[]))
+    _no_proposals(monkeypatch)
 
     async def wait(cls, **kwargs):
         return ChatTurn(action="stop", note="goodnight")
@@ -130,23 +130,6 @@ async def test_stop_does_not_write_a_message(druks_db, monkeypatch):
     await _run_talk(conversation, monkeypatch)
 
     assert [message.body for message in await conversation.list_messages()] == ["hello", "hi"]
-
-
-async def test_talk_names_an_untitled_thread_once(druks_db, monkeypatch):
-    account = await Account.get_or_create("op@example.com")
-    conversation = await Conversation.create(account_id=account.id, title="Pump")
-    await conversation.add_message(role=Role.USER, body="hello")
-    monkeypatch.setattr(Chat, "reply", mock.AsyncMock(return_value=TurnOutput(text="hi")))
-    monkeypatch.setattr(Talk, "deferred_writes", mock.AsyncMock(return_value=[]))
-
-    async def wait(cls, **kwargs):
-        return ChatTurn(action="stop")
-
-    monkeypatch.setattr(ChatTurn, "wait", classmethod(wait))
-
-    await _run_talk(conversation, monkeypatch)
-
-    assert conversation.title == "Pump"
 
 
 async def test_talk_prompts_with_bounded_history(druks_db, monkeypatch):
@@ -166,7 +149,7 @@ async def test_talk_prompts_with_bounded_history(druks_db, monkeypatch):
         return ChatTurn(action="stop")
 
     monkeypatch.setattr(ChatTurn, "wait", classmethod(wait))
-    monkeypatch.setattr(Talk, "deferred_writes", mock.AsyncMock(return_value=[]))
+    _no_proposals(monkeypatch)
 
     await _run_talk(conversation, monkeypatch)
 
@@ -175,70 +158,79 @@ async def test_talk_prompts_with_bounded_history(druks_db, monkeypatch):
     ]
 
 
-async def test_talk_confirms_deferred_writes_before_the_next_line(druks_db, monkeypatch):
-    account = await Account.get_or_create("op@example.com")
-    conversation = await Conversation.create(account_id=account.id, title="")
-    await conversation.add_message(role=Role.USER, body="hello")
+def _proposal(path: str = "/api/gates/run-1/answer") -> dict[str, str]:
+    return {"method": "POST", "path": path, "body": "{}", "content_type": "application/json"}
 
-    monkeypatch.setattr(Chat, "reply", mock.AsyncMock(return_value=TurnOutput(text="hi")))
-    proposed = [
-        {
-            "method": "POST",
-            "path": "/api/gates/run-1/answer",
-            "body": "{}",
-            "content_type": "application/json",
-        }
-    ]
-    monkeypatch.setattr(Talk, "deferred_writes", mock.AsyncMock(return_value=proposed))
-    applied = []
 
-    async def apply(self, writes):
-        applied.extend(writes)
-
-    monkeypatch.setattr(Talk, "apply_deferred_writes", apply)
-    parked = []
-
+async def _answer_confirm(monkeypatch, action: str, parked: list[dict] | None = None):
     async def confirm_wait(cls, **kwargs):
-        parked.append(kwargs)
-        return ConfirmTool(action="approve")
+        if parked is not None:
+            parked.append(kwargs)
+        return ConfirmTool(action=action)
 
     async def turn_wait(cls, **kwargs):
         return ChatTurn(action="stop")
 
     monkeypatch.setattr(ConfirmTool, "wait", classmethod(confirm_wait))
     monkeypatch.setattr(ChatTurn, "wait", classmethod(turn_wait))
+
+
+async def test_an_approved_proposal_runs_and_says_so_on_the_thread(druks_db, monkeypatch):
+    account = await Account.get_or_create("op@example.com")
+    conversation = await Conversation.start(account_id=account.id, body="hello")
+    monkeypatch.setattr(Chat, "reply", mock.AsyncMock(return_value=TurnOutput(text="hi")))
+    proposed = [_proposal()]
+    monkeypatch.setattr(Talk, "take_proposals", mock.AsyncMock(return_value=proposed))
+    applied = mock.AsyncMock(return_value=[])
+    monkeypatch.setattr(Talk, "apply_proposals", applied)
+    parked: list[dict] = []
+    await _answer_confirm(monkeypatch, "approve", parked)
 
     await _run_talk(conversation, monkeypatch)
 
     assert parked[0]["input_request"]["controls"] == ["approve", "reject"]
-    assert applied == proposed
+    assert parked[0]["hold_sandbox"] == timedelta(minutes=15)
+    applied.assert_awaited_once_with(proposed)
+    last = (await conversation.list_messages())[-1]
+    assert last.role == Role.SYSTEM
+    assert last.body == "1 of 1 approved actions ran."
+    assert [message.role for message in await conversation.list_messages()] == [
+        Role.USER,
+        Role.ASSISTANT,
+        Role.SYSTEM,
+    ]
 
 
-async def test_talk_skips_deferred_writes_when_the_operator_rejects(druks_db, monkeypatch):
+async def test_a_rejected_proposal_never_runs(druks_db, monkeypatch):
     account = await Account.get_or_create("op@example.com")
-    conversation = await Conversation.create(account_id=account.id, title="")
-    await conversation.add_message(role=Role.USER, body="hello")
-
+    conversation = await Conversation.start(account_id=account.id, body="hello")
     monkeypatch.setattr(Chat, "reply", mock.AsyncMock(return_value=TurnOutput(text="hi")))
-    monkeypatch.setattr(
-        Talk,
-        "deferred_writes",
-        mock.AsyncMock(
-            return_value=[{"method": "POST", "path": "/x", "body": "", "content_type": ""}]
-        ),
-    )
-    apply = mock.AsyncMock()
-    monkeypatch.setattr(Talk, "apply_deferred_writes", apply)
-
-    async def confirm_wait(cls, **kwargs):
-        return ConfirmTool(action="reject")
-
-    async def turn_wait(cls, **kwargs):
-        return ChatTurn(action="stop")
-
-    monkeypatch.setattr(ConfirmTool, "wait", classmethod(confirm_wait))
-    monkeypatch.setattr(ChatTurn, "wait", classmethod(turn_wait))
+    monkeypatch.setattr(Talk, "take_proposals", mock.AsyncMock(return_value=[_proposal()]))
+    applied = mock.AsyncMock()
+    monkeypatch.setattr(Talk, "apply_proposals", applied)
+    await _answer_confirm(monkeypatch, "reject")
 
     await _run_talk(conversation, monkeypatch)
 
-    apply.assert_not_awaited()
+    applied.assert_not_awaited()
+    assert (await conversation.list_messages())[-1].body == "1 proposed actions did not run."
+
+
+async def test_a_proposal_that_fails_is_reported_and_the_thread_carries_on(druks_db, monkeypatch):
+    """A refused write is the operator's to see. It is not the run's failure."""
+    account = await Account.get_or_create("op@example.com")
+    conversation = await Conversation.start(account_id=account.id, body="hello")
+    monkeypatch.setattr(Chat, "reply", mock.AsyncMock(return_value=TurnOutput(text="hi")))
+    monkeypatch.setattr(Talk, "take_proposals", mock.AsyncMock(return_value=[_proposal()]))
+    monkeypatch.setattr(
+        Talk,
+        "apply_proposals",
+        mock.AsyncMock(return_value=["POST /api/gates/run-1/answer: 409 already answered"]),
+    )
+    await _answer_confirm(monkeypatch, "approve")
+
+    await _run_talk(conversation, monkeypatch)
+
+    last = (await conversation.list_messages())[-1]
+    assert last.body.startswith("0 of 1 approved actions ran.")
+    assert "409 already answered" in last.body

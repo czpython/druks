@@ -551,6 +551,33 @@ the host at a gate and at workflow exit, unless `Gate.wait` passes
 `hold_sandbox`. It rotates the host near lease expiry,
 and when the next agent call needs other secret entries.
 
+### Operate this appliance from a sandbox
+
+A workspace can let its sandbox call this appliance's own `/mcp` as the operator
+who started the run. Set `operator_writes` on the workspace the workflow builds:
+
+```python
+from druks.workspaces import OperatorWrites
+
+
+class Talk(Workflow):
+    async def get_workspace_kwargs(self, host):
+        return {
+            **await super().get_workspace_kwargs(host),
+            "operator_writes": OperatorWrites.DENY,
+        }
+```
+
+`DENY` gives the box the read tools only. `DEFER` records each write as a
+proposal instead of performing it; `Workflow.take_proposals()` reads them, and
+`Workflow.apply_proposals(writes)` performs the ones the operator approved and
+returns a line for each one that failed. `ALLOW` performs writes at once.
+
+Druks mints the credential for one agent call, delivers it in the harness
+environment, and drops it when the call ends. The mode holds at every door, so
+it covers the whole API and not only the MCP tools. Leave `operator_writes`
+unset and the box never reaches this appliance.
+
 ### Borrow a browser session
 
 Declare required logins on the app class. The attribute name and app name form
@@ -652,11 +679,10 @@ reply = await ApproveReport.wait(
 )
 ```
 
-Default `False` reaps. `True` holds for as long as the remaining
-lease could still cover one more worst-case agent call. A `timedelta` holds
-for at most that span. A hold never extends the lease Drukbox already granted.
-The park itself still lasts up to 14 days. The clipped lease is what ends the
-hold if nobody answers.
+No `hold_sandbox` reaps the VM. A `timedelta` holds it for at most that span.
+A hold never extends the lease Drukbox already granted. The park itself still
+lasts up to 14 days. The clipped lease is what ends the hold if nobody
+answers.
 
 `review()` calls the park path without `hold_sandbox`, so it still reaps.
 
@@ -1624,7 +1650,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.agents` | `Agent`, `AgentOutput` |
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox` |
-| `druks.workspaces` | `Workspace`, `RepoWorkspace` |
+| `druks.workspaces` | `Workspace`, `RepoWorkspace`, `OperatorWrites` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
 | `druks.schemas` | `Schema` |
 | `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `MultiUploadField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `Quote`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |

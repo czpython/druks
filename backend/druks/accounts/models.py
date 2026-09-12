@@ -5,19 +5,15 @@ import json
 import secrets
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
-import httpx2
 from sqlalchemy import ForeignKey, Index, LargeBinary, String, select, text
 from sqlalchemy.dialects.postgresql import CITEXT, insert
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from druks.accounts.constants import (
-    OPERATOR_DEFERRED_PREFIX,
     OPERATOR_TOKEN_CALL_PREFIX,
     OPERATOR_TOKEN_PREFIX,
     OPERATOR_TOKEN_TAG,
-    OPERATOR_WRITES,
     PAT_LAST_USED_RESOLUTION,
     PAT_LIFETIME,
     PAT_NAME_LENGTH,
@@ -26,8 +22,9 @@ from druks.accounts.constants import (
     PAT_SECRET_BYTES,
     PAT_TOKEN_TAG,
 )
+from druks.accounts.enums import OperatorWrites
 from druks.accounts.exceptions import AuthConfigurationError, InvalidPatError
-from druks.core.models import Uuid7Pk, uuid7_str
+from druks.core.models import Uuid7Pk
 from druks.database import db_session
 from druks.models import Base
 from druks.redis import get_client
@@ -213,24 +210,16 @@ def _hash_operator_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-_operator_api = None
-
-
 @dataclass(frozen=True)
 class OperatorToken:
-    """A call-scoped bearer with PAT authority. Redis holds it for the agent
-    call; Settings never does. ``writes`` is deny (read tools only), defer
-    (stash mutating calls), or allow (execute as ``account_id``)."""
+    """A call-scoped bearer with PAT authority, minted for one agent call so a
+    box can operate this appliance as the run's operator. Redis holds it and
+    ``revoke`` drops it when the call ends; Settings never holds it."""
 
     account_id: str
     agent_call_id: str
     run_id: str
     writes: str
-
-    @classmethod
-    def bind_api(cls, api: Any) -> None:
-        global _operator_api
-        _operator_api = api
 
     @classmethod
     async def mint(
@@ -239,12 +228,8 @@ class OperatorToken:
         account_id: str,
         agent_call_id: str,
         run_id: str,
-        writes: str,
+        writes: OperatorWrites,
     ) -> str:
-        if writes not in OPERATOR_WRITES:
-            raise ValueError(
-                f"operator token writes must be one of {sorted(OPERATOR_WRITES)}, not {writes!r}"
-            )
         token = f"{OPERATOR_TOKEN_TAG}_{secrets.token_urlsafe(32)}"
         payload = json.dumps(
             {
@@ -256,6 +241,7 @@ class OperatorToken:
         )
         digest = _hash_operator_token(token)
         redis = get_client()
+        # The TTL is only a backstop for a call that never reaches its revoke.
         await redis.set(f"{OPERATOR_TOKEN_PREFIX}{digest}", payload, ex=MAX_AGENT_TIMEOUT_SECONDS)
         await redis.set(
             f"{OPERATOR_TOKEN_CALL_PREFIX}{agent_call_id}", digest, ex=MAX_AGENT_TIMEOUT_SECONDS
@@ -264,19 +250,13 @@ class OperatorToken:
 
     @classmethod
     async def lookup(cls, credential: str) -> "OperatorToken | None":
-        if not credential.startswith(f"{OPERATOR_TOKEN_TAG}_"):
-            return
-        raw = await get_client().get(f"{OPERATOR_TOKEN_PREFIX}{_hash_operator_token(credential)}")
-        if raw:
-            return cls(**json.loads(raw))
+        """The live token behind a credential. None for a credential of any
+        other kind, so the caller can try the next door."""
+        if credential.startswith(f"{OPERATOR_TOKEN_TAG}_"):
+            digest = _hash_operator_token(credential)
+            raw = await get_client().get(f"{OPERATOR_TOKEN_PREFIX}{digest}")
+            return cls(**json.loads(raw)) if raw else None
         return
-
-    @classmethod
-    async def authenticate(cls, credential: str) -> "OperatorToken":
-        found = await cls.lookup(credential)
-        if found:
-            return found
-        raise InvalidPatError("Not a recognized operator token.")
 
     @classmethod
     async def revoke(cls, agent_call_id: str) -> None:
@@ -285,49 +265,3 @@ class OperatorToken:
         digest = await redis.get(call_key)
         if digest:
             await redis.delete(f"{OPERATOR_TOKEN_PREFIX}{digest.decode()}", call_key)
-
-    @classmethod
-    async def defer_write(cls, run_id: str, write: dict[str, str]) -> None:
-        redis = get_client()
-        key = f"{OPERATOR_DEFERRED_PREFIX}{run_id}"
-        await redis.rpush(key, json.dumps(write))
-        await redis.expire(key, MAX_AGENT_TIMEOUT_SECONDS)
-
-    @classmethod
-    async def take_deferred(cls, run_id: str) -> list[dict[str, str]]:
-        redis = get_client()
-        key = f"{OPERATOR_DEFERRED_PREFIX}{run_id}"
-        items = await redis.lrange(key, 0, -1)
-        await redis.delete(key)
-        return [json.loads(item) for item in items]
-
-    @classmethod
-    async def play_deferred(cls, account_id: str, writes: list[dict[str, str]]) -> None:
-        if not _operator_api:
-            raise RuntimeError("operator token replay needs the API bound at MCP boot")
-        call_id = uuid7_str()
-        token = await cls.mint(
-            account_id=account_id, agent_call_id=call_id, run_id=call_id, writes="allow"
-        )
-        try:
-            async with httpx2.AsyncClient(
-                transport=httpx2.ASGITransport(app=_operator_api, raise_app_exceptions=False),
-                base_url="http://druks",
-            ) as client:
-                for write in writes:
-                    response = await client.request(
-                        write["method"],
-                        write["path"],
-                        content=write["body"] or None,
-                        headers={
-                            "Authorization": f"Bearer {token}",
-                            "Content-Type": write["content_type"],
-                        },
-                    )
-                    if response.status_code >= 400:
-                        raise RuntimeError(
-                            f"deferred {write['method']} {write['path']} failed: "
-                            f"{response.status_code} {response.text}"
-                        )
-        finally:
-            await cls.revoke(call_id)

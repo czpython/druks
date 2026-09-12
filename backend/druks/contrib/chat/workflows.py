@@ -1,30 +1,38 @@
-from dataclasses import dataclass
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
-from druks.accounts.models import OperatorToken
 from druks.contrib.chat.app import Chat
-from druks.contrib.chat.enums import Role
+from druks.contrib.chat.enums import Autonomy, Role
 from druks.contrib.chat.models import Conversation
-from druks.mcp.constants import THIS_APPLIANCE
-from druks.mcp.helpers import get_bearer_token_env_var
-from druks.sandbox.datastructures import McpServer
-from druks.workflows import FatalError, Gate, Workflow, step
-from druks.workspaces import Workspace, this_appliance_mcp_url
+from druks.workflows import Gate, Workflow, step
+from druks.workspaces import OperatorWrites
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Host
 
+# The operator is reading the last line, so the next one usually comes soon.
+_IDLE_HOLD = timedelta(minutes=15)
 _WRITES = {
-    "propose": "deny",
-    "confirm": "defer",
-    "full": "allow",
+    Autonomy.PROPOSE: OperatorWrites.DENY,
+    Autonomy.CONFIRM: OperatorWrites.DEFER,
+    Autonomy.FULL: OperatorWrites.ALLOW,
+}
+_TURN = {
+    "presentation": "in_app",
+    "label": "Message",
+    "controls": ["send", "stop"],
+    "questions": [],
+}
+_CONFIRM = {
+    "presentation": "in_app",
+    "label": "The agent proposed an action",
+    "controls": ["approve", "reject"],
+    "questions": [],
 }
 
 
 class ChatTurn(Gate):
-    """The operator's next line, or a stop. Not ``review()`` — those controls
-    would offer approve/request_changes on a chat turn."""
+    """The operator's next line, or a stop."""
 
     name = "chat_turn"
     action: Literal["send", "stop"]
@@ -32,52 +40,11 @@ class ChatTurn(Gate):
 
 
 class ConfirmTool(Gate):
-    """The operator approves or skips the mutating MCP call the agent proposed.
-    Parks after the agent step and before the next ChatTurn — a run holds one
-    gate at a time."""
+    """The operator's answer on the actions the agent proposed. A run holds one
+    gate at a time, so it parks before the next line."""
 
     name = "confirm_tool"
     action: Literal["approve", "reject"]
-
-
-@dataclass(frozen=True, kw_only=True)
-class TalkWorkspace(Workspace):
-    account_id: str
-    run_id: str
-    writes: str
-
-    async def with_mcp_servers(self, account_id: str | None, **kwargs: Any) -> dict[str, Any]:
-        # Call-scoped: minted here, not a vault row. The box cannot hold it —
-        # it dies with the agent call.
-        kwargs = await super().with_mcp_servers(account_id, **kwargs)
-        token = await OperatorToken.mint(
-            account_id=self.account_id,
-            agent_call_id=kwargs["call_id"],
-            run_id=self.run_id,
-            writes=self.writes,
-        )
-        variable = get_bearer_token_env_var(THIS_APPLIANCE)
-        servers = [
-            server for server in kwargs.get("mcp_servers") or () if server.name != THIS_APPLIANCE
-        ]
-        servers.append(
-            McpServer(
-                name=THIS_APPLIANCE,
-                url=this_appliance_mcp_url(self.host),
-                bearer_token_env_var=variable,
-            )
-        )
-        kwargs["mcp_servers"] = tuple(servers)
-        env = dict(kwargs.get("extra_env") or {})
-        env[variable] = token
-        kwargs["extra_env"] = env
-        return kwargs
-
-    async def run_agent(self, *, account_id: str | None, **kwargs: Any):
-        try:
-            return await super().run_agent(account_id=account_id, **kwargs)
-        finally:
-            await OperatorToken.revoke(kwargs["call_id"])
 
 
 class Talk(Workflow):
@@ -85,8 +52,6 @@ class Talk(Workflow):
 
     subject = Conversation
     steps_reuse_sandbox = True
-    sandbox_hold = timedelta(minutes=15)
-    workspace_class = TalkWorkspace
 
     async def run_multistep(self) -> None:
         while True:
@@ -97,42 +62,21 @@ class Talk(Workflow):
                 messages=[{"role": message.role, "body": message.body} for message in messages],
             )
             await self.record_message(Role.ASSISTANT, result.text)
-            await self.name_thread()
-            deferred = await self.deferred_writes()
-            if deferred:
-                decision = await ConfirmTool.wait(
-                    input_request={
-                        "presentation": "in_app",
-                        "label": "Confirm the proposed action",
-                        "controls": ["approve", "reject"],
-                        "questions": [],
-                    },
-                    hold_sandbox=self.sandbox_hold,
-                )
-                if decision.action == "approve":
-                    await self.apply_deferred_writes(deferred)
-            reply = await ChatTurn.wait(
-                input_request={
-                    "presentation": "in_app",
-                    "label": "Message",
-                    "controls": ["send", "stop"],
-                    "questions": [],
-                },
-                hold_sandbox=self.sandbox_hold,
-            )
+            proposed = await self.take_proposals()
+            if proposed:
+                decision = await ConfirmTool.wait(input_request=_CONFIRM, hold_sandbox=_IDLE_HOLD)
+                outcome = await self.settle_proposals(decision.action, proposed)
+                await self.record_message(Role.SYSTEM, outcome)
+            reply = await ChatTurn.wait(input_request=_TURN, hold_sandbox=_IDLE_HOLD)
             if reply.action == "stop":
                 return
             await self.record_message(Role.USER, reply.note)
 
     async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
         conversation = await self.subject
-        if not self.account_id:
-            raise FatalError("Talk runs as the operator who started the conversation.")
         return {
             **await super().get_workspace_kwargs(host),
-            "account_id": self.account_id,
-            "run_id": self.workflow_id,
-            "writes": _WRITES[conversation.autonomy],
+            "operator_writes": _WRITES[conversation.autonomy],
         }
 
     @step
@@ -141,22 +85,19 @@ class Talk(Workflow):
         await conversation.add_message(role=role, body=body)
 
     @step
-    async def name_thread(self) -> None:
-        conversation = await self.subject
-        await conversation.name_from_first_line()
-
-    @step
-    async def deferred_writes(self) -> list[dict[str, str]]:
-        return await OperatorToken.take_deferred(self.workflow_id)
-
-    @step
-    async def apply_deferred_writes(self, writes: list[dict[str, str]]) -> None:
-        if not self.account_id:
-            raise FatalError("Talk runs as the operator who started the conversation.")
-        await OperatorToken.play_deferred(self.account_id, writes)
+    async def settle_proposals(self, action: str, proposed: list[dict[str, str]]) -> str:
+        """Run what the operator approved and say what happened. A proposal that
+        failed is the operator's to read, and the conversation carries on either
+        way. Touches no row: applying a proposal calls this appliance back, and
+        that call shares this task's database session."""
+        if action == "approve":
+            failures = await self.apply_proposals(proposed)
+            ran = f"{len(proposed) - len(failures)} of {len(proposed)} approved actions ran."
+            if failures:
+                return f"{ran} Failed: " + "; ".join(failures)
+            return ran
+        return f"{len(proposed)} proposed actions did not run."
 
     @classmethod
     async def dispatch(cls, *, conversation: Conversation) -> str:
-        # One Talk per conversation: start() already dedups live runs on the
-        # subject, so a later line answers ChatTurn instead of starting again.
         return await cls.start(subject=conversation)

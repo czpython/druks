@@ -105,6 +105,14 @@ describe('InAppReview', () => {
     expect(screen.getByText('Send')).toBeTruthy()
     expect(screen.getByText('Stop')).toBeTruthy()
   })
+
+  it('labels approve and reject', () => {
+    stubFetch()
+    renderReview({ presentation: 'in_app', controls: ['approve', 'reject'], questions: [] })
+
+    expect(screen.getByText('Approve')).toBeTruthy()
+    expect(screen.getByText('Reject')).toBeTruthy()
+  })
 })
 
 describe('the lent run controls', () => {

@@ -77,47 +77,35 @@ async def test_get_for_account_misses_another_operators_thread():
     assert await Conversation.get_for_account(mine.id, None) is None
 
 
-async def test_name_from_first_line_fills_an_empty_title():
+async def test_start_titles_the_thread_from_its_first_line():
     account = await Account.get_or_create("op@example.com")
-    conversation = await Conversation.create(account_id=account.id, title="")
-    await conversation.add_message(role=Role.USER, body="  Pump the tires  \nmore detail")
-    await conversation.add_message(role=Role.ASSISTANT, body="ok")
 
-    await conversation.name_from_first_line()
+    conversation = await Conversation.start(
+        account_id=account.id, body="  Pump the tires  \nmore detail"
+    )
 
     assert conversation.title == "Pump the tires"
+    assert [message.body for message in await conversation.list_messages()] == [
+        "  Pump the tires  \nmore detail"
+    ]
 
 
-async def test_name_from_first_line_leaves_an_operator_title():
+async def test_start_keeps_a_title_the_operator_typed():
     account = await Account.get_or_create("op@example.com")
-    conversation = await Conversation.create(account_id=account.id, title="Pump")
-    await conversation.add_message(role=Role.USER, body="something else")
 
-    await conversation.name_from_first_line()
+    conversation = await Conversation.start(
+        account_id=account.id, body="something else", title="Pump"
+    )
 
     assert conversation.title == "Pump"
 
 
-async def test_name_from_first_line_caps_a_long_first_line():
+async def test_start_caps_a_long_first_line():
     account = await Account.get_or_create("op@example.com")
-    conversation = await Conversation.create(account_id=account.id, title="")
-    await conversation.add_message(role=Role.USER, body="x" * 100)
 
-    await conversation.name_from_first_line()
+    conversation = await Conversation.start(account_id=account.id, body="x" * 100)
 
     assert conversation.title == "x" * 80
-
-
-async def test_name_from_first_line_is_idempotent():
-    account = await Account.get_or_create("op@example.com")
-    conversation = await Conversation.create(account_id=account.id, title="")
-    await conversation.add_message(role=Role.USER, body="first")
-    await conversation.name_from_first_line()
-    await conversation.add_message(role=Role.USER, body="later")
-
-    await conversation.name_from_first_line()
-
-    assert conversation.title == "first"
 
 
 async def test_prompt_history_keeps_the_newest_lines():
