@@ -11,7 +11,7 @@ from druks.contrib.software_factory.exceptions import (
 )
 from druks.contrib.software_factory.issues.enums import Status
 from druks.contrib.software_factory.issues.models import Comment, Ticket
-from druks.contrib.software_factory.models import Project, ProjectRepo
+from druks.contrib.software_factory.models import Project, ProjectRepo, prefix_candidates
 from sqlalchemy.exc import IntegrityError
 
 
@@ -46,7 +46,7 @@ async def test_unknown_repo_refuses_a_ticket():
 
 
 async def test_a_project_without_a_prefix_refuses_a_ticket():
-    project = await Project.create(name="bare")
+    project = await Project.create(name="A")
     repo = await ProjectRepo.create(project_id=project.id, full_name="acme/bare")
     with pytest.raises(MissingPrefix):
         await Ticket.create(repo_id=repo.id, title="orphan")
@@ -73,11 +73,46 @@ async def test_set_prefix_refuses_a_prefix_another_project_holds():
         await acme.set_prefix("box")
 
 
-async def test_prefix_must_be_two_to_six_letters():
+async def test_prefix_must_be_two_to_six_letters_or_two_letters_and_a_digit():
     with pytest.raises(InvalidPrefix):
         await Project.create(name="short", prefix="A")
     with pytest.raises(InvalidPrefix):
-        await Project.create(name="digits", prefix="DR1")
+        await Project.create(name="zero", prefix="DR0")
+    with pytest.raises(InvalidPrefix):
+        await Project.create(name="long", prefix="ABCDEFG")
+    project = await Project.create(name="digits", prefix="DR1")
+    assert project.prefix == "DR1"
+
+
+def test_prefix_candidates_walk_letters_then_digits():
+    assert prefix_candidates("Acme") == [
+        "ACM",
+        "ACE",
+        "AC1",
+        "AC2",
+        "AC3",
+        "AC4",
+        "AC5",
+        "AC6",
+        "AC7",
+        "AC8",
+        "AC9",
+    ]
+    assert prefix_candidates("Go") == [f"GO{digit}" for digit in range(1, 10)]
+    assert prefix_candidates("A") == []
+    assert prefix_candidates("Acme Tools")[0] == "ACM"
+    assert prefix_candidates("Acme Tools")[1] == "ACE"
+
+
+async def test_create_walks_derived_prefixes_on_clash():
+    first = await Project.create(name="Acme")
+    assert first.prefix == "ACM"
+    second = await Project.create(name="Acme Tools")
+    assert second.prefix == "ACE"
+    third = await Project.create(name="Go")
+    assert third.prefix == "GO1"
+    fourth = await Project.create(name="Go 2")
+    assert fourth.prefix == "GO2"
 
 
 async def test_prefix_cannot_change_after_a_ticket_is_minted():
@@ -108,16 +143,16 @@ async def test_comments_are_rows_and_empty_is_a_list():
     assert all(isinstance(comment, Comment) for comment in listed)
 
 
-async def test_list_board_omits_cancelled():
+async def test_list_board_includes_blocked():
     repo = await _open_repo(name="Board", prefix="brd", full_name="acme/board")
     live = await Ticket.create(repo_id=repo.id, title="live")
-    gone = await Ticket.create(repo_id=repo.id, title="gone")
-    await gone.set_status(Status.CANCELLED)
+    stuck = await Ticket.create(repo_id=repo.id, title="stuck")
+    await stuck.set_status(Status.BLOCKED)
 
     board = await Ticket.list_board()
     identifiers = {ticket.identifier for ticket in board}
     assert live.identifier in identifiers
-    assert gone.identifier not in identifiers
+    assert stuck.identifier in identifiers
     found = await Ticket.get_for_identifier(live.identifier)
     assert found is not None
     assert found.id == live.id
@@ -125,19 +160,19 @@ async def test_list_board_omits_cancelled():
     assert found.get_summary().title == "live"
 
 
-async def test_list_matching_filters_by_assignee_creator_and_repo():
+async def test_list_matching_filters_by_owner_creator_and_repo():
     account = await Account.get_or_create("op@example.com")
     dru = await _open_repo(name="Filter", prefix="flt", full_name="acme/filter")
     other = await _open_repo(name="Other", prefix="oth", full_name="acme/other")
-    await Ticket.create(repo_id=dru.id, title="mine", assignee_id=account.id, creator_id=account.id)
+    await Ticket.create(repo_id=dru.id, title="mine", owner_id=account.id, creator_id=account.id)
     await Ticket.create(repo_id=dru.id, title="open")
     await Ticket.create(repo_id=other.id, title="elsewhere")
 
-    assert {ticket.title for ticket in await Ticket.list_matching(assignee="none")} == {
+    assert {ticket.title for ticket in await Ticket.list_matching(owner="none")} == {
         "open",
         "elsewhere",
     }
-    assert {ticket.title for ticket in await Ticket.list_matching(assignee=account.id)} == {"mine"}
+    assert {ticket.title for ticket in await Ticket.list_matching(owner=account.id)} == {"mine"}
     assert {ticket.title for ticket in await Ticket.list_matching(creator=account.id)} == {"mine"}
     assert {ticket.title for ticket in await Ticket.list_matching(repo_id=other.id)} == {
         "elsewhere"

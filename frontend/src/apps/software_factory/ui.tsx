@@ -27,7 +27,6 @@ registerAppUI({
   routes: [
     { path: `/${SOFTWARE_FACTORY}`, render: () => <WorkItemsPage /> },
     { path: `/${SOFTWARE_FACTORY}/board`, render: () => <DruksIssuesPage page="board" /> },
-    { path: `/${SOFTWARE_FACTORY}/issues`, render: () => <DruksIssuesPage page="issues" /> },
     {
       path: `/${SOFTWARE_FACTORY}/tickets/:identifier`,
       render: () => <DruksIssuesPage page="ticket" />,

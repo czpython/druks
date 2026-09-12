@@ -46,13 +46,13 @@ def test_get_and_comment_are_agent_operations():
     assert add_comment["operationId"] in {"add_comment", "software_factory_add_comment"}
 
 
-async def test_create_as_todo_does_not_publish(druks_client, monkeypatch):
+async def test_create_as_backlog_does_not_publish(druks_client, monkeypatch):
     events = _published(monkeypatch)
     repo = await _open_repo(druks_client)
     ticket = await _open_ticket(druks_client, repo["id"], title="quiet")
 
     assert ticket["identifier"] == "DRU-1"
-    assert ticket["status"] == "todo"
+    assert ticket["status"] == "backlog"
     assert ticket["comments"] == []
     assert events == []
 
@@ -122,25 +122,26 @@ async def test_set_status_publishes_one_transition_with_display_labels(druks_cli
     assert len(events) == 1
 
 
-async def test_set_status_marks_done_completed_and_cancelled_terminal(druks_client, monkeypatch):
+async def test_set_status_marks_done_completed_and_terminal(druks_client, monkeypatch):
     events = _published(monkeypatch)
     repo = await _open_repo(druks_client)
     ticket = await _open_ticket(druks_client, repo["id"])
+    stuck = await _open_ticket(druks_client, repo["id"])
 
     done = await druks_client.post(
         f"{_TICKETS}/{ticket['identifier']}/status",
         json={"status": "done"},
     )
-    cancelled = await druks_client.post(
-        f"{_TICKETS}/{ticket['identifier']}/status",
-        json={"status": "cancelled"},
+    blocked = await druks_client.post(
+        f"{_TICKETS}/{stuck['identifier']}/status",
+        json={"status": "blocked"},
     )
 
     assert done.status_code == 200
-    assert cancelled.status_code == 200
-    assert [payload["status"] for _, payload in events] == ["Done", "Cancelled"]
+    assert blocked.status_code == 200
+    assert [payload["status"] for _, payload in events] == ["Done", "Blocked"]
     assert [payload["completed"] for _, payload in events] == [True, False]
-    assert [payload["terminal"] for _, payload in events] == [True, True]
+    assert [payload["terminal"] for _, payload in events] == [True, False]
 
 
 async def test_update_ticket_never_publishes_and_cannot_set_status(druks_client, monkeypatch):
@@ -157,35 +158,35 @@ async def test_update_ticket_never_publishes_and_cannot_set_status(druks_client,
     body = edited.json()
     assert body["title"] == "new"
     assert body["priority"] == "high"
-    assert body["status"] == "todo"
+    assert body["status"] == "backlog"
     assert events == []
 
 
-async def test_blank_assignee_is_nobody(druks_client):
+async def test_blank_owner_is_nobody(druks_client):
     repo = await _open_repo(druks_client)
     created = await druks_client.post(
         _TICKETS,
-        json={"title": "unheld", "repo_id": int(repo["id"]), "assignee_id": ""},
+        json={"title": "unheld", "repo_id": int(repo["id"]), "owner_id": ""},
     )
 
     assert created.status_code == 201
-    assert created.json()["assignee_id"] is None
+    assert created.json()["owner_id"] is None
 
     ticket = created.json()
     assigned = await Account.get_or_create("dev@example.com")
     held = await druks_client.patch(
         f"{_TICKETS}/{ticket['identifier']}",
-        json={"assignee_id": assigned.id},
+        json={"owner_id": assigned.id},
     )
     assert held.status_code == 200
-    assert held.json()["assignee_id"] == assigned.id
+    assert held.json()["owner_id"] == assigned.id
 
     cleared = await druks_client.patch(
         f"{_TICKETS}/{ticket['identifier']}",
-        json={"assignee_id": ""},
+        json={"owner_id": ""},
     )
     assert cleared.status_code == 200
-    assert cleared.json()["assignee_id"] is None
+    assert cleared.json()["owner_id"] is None
 
 
 async def test_update_can_move_a_ticket_to_another_repo(druks_client):
@@ -246,7 +247,7 @@ async def test_blank_title_and_body_are_refused(druks_client):
     assert commented.status_code == 422
 
 
-async def test_unknown_ticket_and_unknown_assignee_are_404(druks_client):
+async def test_unknown_ticket_and_unknown_owner_are_404(druks_client):
     missing = await druks_client.get(f"{_TICKETS}/DRU-99")
     assert missing.status_code == 404
 
@@ -256,7 +257,7 @@ async def test_unknown_ticket_and_unknown_assignee_are_404(druks_client):
         json={
             "title": "handed to nobody real",
             "repo_id": int(repo["id"]),
-            "assignee_id": "not-an-account",
+            "owner_id": "not-an-account",
         },
     )
     assert assigned.status_code == 404
@@ -264,7 +265,7 @@ async def test_unknown_ticket_and_unknown_assignee_are_404(druks_client):
     ticket = await _open_ticket(druks_client, repo["id"])
     updated = await druks_client.patch(
         f"{_TICKETS}/{ticket['identifier']}",
-        json={"assignee_id": "not-an-account"},
+        json={"owner_id": "not-an-account"},
     )
     assert updated.status_code == 404
 

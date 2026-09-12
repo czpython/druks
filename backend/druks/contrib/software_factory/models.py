@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 # A project's prefix is the identifier namespace — Linear's team key. Short
 # enough to read at a glance, long enough to stay distinct. Null until set:
 # a GitHub project can exist before anyone mints a ticket against it.
-PREFIX_PATTERN = "^[A-Z]{2,6}$"
+# Two to six letters, or the clash walk's two letters plus a digit 1-9.
+PREFIX_PATTERN = r"^([A-Z]{2,6}|[A-Z]{2}[1-9])$"
 PREFIX_RE = re.compile(PREFIX_PATTERN)
 PREFIX_UNIQUE = "projects_prefix_key"
 
@@ -40,11 +41,40 @@ def _raise_prefix_taken(error: IntegrityError, prefix: str | None) -> None:
 
 
 def normalize_prefix(prefix: str) -> str:
-    """The stored form of an operator's prefix: uppercase, and 2-6 letters."""
+    """The stored form of an operator's prefix: uppercase, 2-6 letters, or two
+    letters and a digit 1-9."""
     normalized = prefix.strip().upper()
     if not PREFIX_RE.match(normalized):
         raise InvalidPrefix(prefix)
     return normalized
+
+
+def prefix_candidates(name: str) -> list[str]:
+    """Prefixes derived from a project name, first suggestion then clash walk.
+
+    Letters only, uppercase. First is positions 1, 2, 3. A clash retries 1, 2
+    and the next remaining letter (1+2+4, 1+2+5, …). After those, letters 1+2
+    plus a digit 1-9. A name with fewer than two letters has no candidates.
+    """
+    letters = "".join(ch for ch in name.upper() if ch.isascii() and ch.isalpha())
+    if len(letters) < 2:
+        return []
+    stem = letters[:2]
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(candidate: str) -> None:
+        if candidate not in seen:
+            seen.add(candidate)
+            out.append(candidate)
+
+    if len(letters) >= 3:
+        add(letters[:3])
+        for extra in letters[3:]:
+            add(stem + extra)
+    for digit in "123456789":
+        add(f"{stem}{digit}")
+    return out
 
 
 # WorkItem.update() sentinel: a field left at _KEEP is untouched, while passing
@@ -90,9 +120,19 @@ class Project(Base):
     @classmethod
     async def create(cls, *, name: str, prefix: str | None = None) -> "Project":
         session = db_session()
+        submitted = None if prefix is None or not str(prefix).strip() else normalize_prefix(prefix)
+        candidates = prefix_candidates(name)
+        suggested = candidates[0] if candidates else None
+        if submitted is None or submitted == suggested:
+            taken = set(await session.scalars(select(cls.prefix).where(cls.prefix.is_not(None))))
+            chosen = next((item for item in candidates if item not in taken), None)
+            if chosen is None and (submitted is not None or candidates):
+                raise PrefixTaken(candidates[-1] if candidates else submitted or "")
+        else:
+            chosen = submitted
         # Seed the collection as loaded-empty: a fresh project has no repos, and
         # the summary read right after flush must not trigger a lazy load.
-        project = cls(name=name, prefix=prefix, repos=[])
+        project = cls(name=name, prefix=chosen, repos=[])
         session.add(project)
         try:
             await session.flush()
