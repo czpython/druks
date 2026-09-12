@@ -1,10 +1,17 @@
 import json
+from types import SimpleNamespace
 
 import httpx
 import pytest
 from conftest import connect_service
-from druks.contrib.software_factory.app import SoftwareFactory, check_tracker_identity
+from druks.apps.settings import field_choices, field_visibility, validate_field_choice_details
+from druks.contrib.software_factory.app import (
+    SoftwareFactory,
+    check_issues_mcp,
+    check_tracker_identity,
+)
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
+from druks.contrib.software_factory.ticketing.issues import IssuesTracker
 from druks.contrib.software_factory.ticketing.jira import Jira
 from druks.contrib.software_factory.ticketing.linear import Linear
 from druks.core import services
@@ -205,6 +212,81 @@ async def test_tracker_check_pends_a_selected_unconnected_tracker(druks_db, monk
     assert not result.ok
     assert result.pending
     assert "jira" in result.detail
+
+
+async def test_tracker_check_accepts_issues_without_a_service(monkeypatch):
+    _pin_software_factory_settings(monkeypatch, tracker="issues")
+
+    result = await check_tracker_identity()
+
+    assert result.ok
+    assert result.detail == "local issues board"
+    assert not result.pending
+
+
+def test_issues_is_a_tracker_choice_and_hides_the_name_knobs():
+    fields = SoftwareFactory.Settings.model_fields
+    assert field_choices(fields["tracker"]) == ["none", "linear", "jira", "issues"]
+    assert validate_field_choice_details(fields["tracker"])["issues"] == {
+        "label": "druks",
+        "help": "Druks is this appliance — no credentials.",
+    }
+    assert SoftwareFactory.Settings(tracker="issues").trigger_status == "Ready for Agent"
+    assert field_visibility(fields["linear_trigger_status"]) == ("tracker", "linear")
+    assert field_visibility(fields["linear_resting_status"]) == ("tracker", "linear")
+    assert field_visibility(fields["jira_trigger_status"]) == ("tracker", "jira")
+    assert field_visibility(fields["jira_resting_status"]) == ("tracker", "jira")
+
+
+async def test_tracker_builds_issues_without_credentials(druks_db, monkeypatch):
+    _pin_software_factory_settings(monkeypatch, tracker="issues")
+
+    tracker = await SoftwareFactory.get_tracker("issues")
+
+    assert isinstance(tracker, IssuesTracker)
+    assert await SoftwareFactory.get_tracker("linear") is None
+
+
+async def test_issues_mcp_check_skips_when_tracker_is_not_issues(monkeypatch):
+    _pin_software_factory_settings(monkeypatch, tracker="linear")
+
+    result = await check_issues_mcp()
+
+    assert result.ok
+    assert result.detail == "not required"
+
+
+async def test_issues_mcp_check_pends_without_an_endpoint(monkeypatch):
+    _pin_software_factory_settings(monkeypatch, tracker="issues")
+    monkeypatch.setattr(
+        "druks.contrib.software_factory.app.load_settings",
+        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="")),
+    )
+
+    result = await check_issues_mcp()
+
+    assert not result.ok
+    assert result.pending
+    assert "/mcp" in result.detail
+
+
+async def test_issues_mcp_check_names_an_unreachable_url(monkeypatch):
+    _pin_software_factory_settings(monkeypatch, tracker="issues")
+    monkeypatch.setattr(
+        "druks.contrib.software_factory.app.load_settings",
+        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="http://druks.test:8001")),
+    )
+
+    async def fake_get(self, url):
+        raise httpx.ConnectError("connection refused", request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    result = await check_issues_mcp()
+
+    assert not result.ok
+    assert not result.pending
+    assert "http://druks.test:8001/mcp" in result.detail
 
 
 # --- Linear provider --------------------------------------------------------
