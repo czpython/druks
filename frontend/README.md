@@ -28,6 +28,14 @@ runs lint, tests, and build for PRs into `main` and `codex/` stack branches.
 - Dashboard, Events, Usage, and Schedules
 - Shared routing and fallback behavior.
 
+`src/components/Page.tsx` owns page width, outer spacing, and scrolling. Use
+`<Page inset>` for a page with outer spacing. Use the shared `--page-gutter`
+for full-width list headers and rows. Do not cap or center a page body in
+page-specific CSS. Individual controls, forms, and prose can limit their width.
+
+`DetailLayout` owns the detail rail and main pane. Its `railWidth` prop sets
+the desktop rail width. The shared CSS stacks the panes on narrow screens.
+
 Bundled app UI lives under `src/apps/<name>/`. Its module calls
 `registerAppUI()` with routes and an optional home path. The backend app class
 declares the subnav tabs. The roster supplies these tabs to the frontend.

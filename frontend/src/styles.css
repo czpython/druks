@@ -145,7 +145,7 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 
 .detail-body {
   display: grid;
-  grid-template-columns: 384px 1fr;
+  grid-template-columns: var(--detail-rail-width) minmax(0, 1fr);
   flex: 1;
   min-height: 0;
 }
@@ -1653,8 +1653,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .wic-call-label { font-size: 12px; color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wic-call-ledger { display: flex; gap: 10px; white-space: nowrap; }
 
-.pj-col { padding: 24px 20px 80px; }
-
 .pj-head {
   display: flex; align-items: baseline; gap: 12px;
   padding-bottom: 16px; border-bottom: 1px solid var(--border); margin-bottom: 24px;
@@ -1772,6 +1770,12 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .pj-addform-foot { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 
 .pj-empty-create { display: grid; gap: 8px; width: 100%; max-width: 440px; text-align: left; }
+
+@media (max-width: 940px) {
+  .pj-repo { grid-template-columns: minmax(0, 1fr) auto 24px; gap: 12px; }
+  .pj-repo-name { grid-column: 1 / -1; }
+  .pj-addform-fields { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+}
 
 :root {
   --ins-scheduled: var(--text-faint);

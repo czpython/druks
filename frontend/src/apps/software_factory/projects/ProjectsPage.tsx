@@ -49,64 +49,62 @@ export function ProjectsPage() {
 
   if (isLoading) {
     return (
-      <Page className="page-projects">
+      <Page inset className="page-projects">
         <EmptyState glyph="…" msg="loading projects" />
       </Page>
     )
   }
   if (isError || !data) {
     return (
-      <Page className="page-projects">
+      <Page inset className="page-projects">
         <EmptyState glyph="!" msg="could not load projects" />
       </Page>
     )
   }
 
   return (
-    <Page className="page-projects">
-      <div className="pj-col">
-        {deleteError && (
-          <div className="pj-toast pj-toast-error mono" role="alert">
-            {deleteError}
-          </div>
-        )}
-        <div className="pj-head">
-          <span className="pj-head-title">Projects</span>
-          <span className="pj-head-count mono">({data.projects.length})</span>
+    <Page inset className="page-projects">
+      {deleteError && (
+        <div className="pj-toast pj-toast-error mono" role="alert">
+          {deleteError}
         </div>
-
-        {data.projects.length === 0 ? (
-          <EmptyState
-            glyph="⊞"
-            msg="No projects yet"
-            sub="A project groups the GitHub repositories a build operates on. Each work item targets one of those repos for its changes, while the rest give agents cross-repo context. Name your first one to get started."
-            action={
-              <div className="pj-empty-create">
-                <CreateRow
-                  value={draft}
-                  onChange={setDraft}
-                  onCreate={onCreate}
-                  pending={createMutation.isPending}
-                />
-                <Field error={createMutation.error && String(createMutation.error)} />
-              </div>
-            }
-          />
-        ) : (
-          <div className="pj-list">
-            <CreateRow
-              value={draft}
-              onChange={setDraft}
-              onCreate={onCreate}
-              pending={createMutation.isPending}
-            />
-            <Field error={createMutation.error && String(createMutation.error)} />
-            {data.projects.map((p) => (
-              <ProjectCard key={p.id} project={p} onDeleteError={setDeleteError} />
-            ))}
-          </div>
-        )}
+      )}
+      <div className="pj-head">
+        <span className="pj-head-title">Projects</span>
+        <span className="pj-head-count mono">({data.projects.length})</span>
       </div>
+
+      {data.projects.length === 0 ? (
+        <EmptyState
+          glyph="⊞"
+          msg="No projects yet"
+          sub="A project groups the GitHub repositories a build operates on. Each work item targets one of those repos for its changes, while the rest give agents cross-repo context. Name your first one to get started."
+          action={
+            <div className="pj-empty-create">
+              <CreateRow
+                value={draft}
+                onChange={setDraft}
+                onCreate={onCreate}
+                pending={createMutation.isPending}
+              />
+              <Field error={createMutation.error && String(createMutation.error)} />
+            </div>
+          }
+        />
+      ) : (
+        <div className="pj-list">
+          <CreateRow
+            value={draft}
+            onChange={setDraft}
+            onCreate={onCreate}
+            pending={createMutation.isPending}
+          />
+          <Field error={createMutation.error && String(createMutation.error)} />
+          {data.projects.map((p) => (
+            <ProjectCard key={p.id} project={p} onDeleteError={setDeleteError} />
+          ))}
+        </div>
+      )}
     </Page>
   )
 }
