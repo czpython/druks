@@ -26,6 +26,7 @@ def _ready(identifier, title, repo):
             "url": f"/software_factory/tickets/{identifier}",
             "project_name": repo,
             "labels": [],
+            "assignee_id": None,
             "assignee_email": None,
             "assignee_name": None,
         },

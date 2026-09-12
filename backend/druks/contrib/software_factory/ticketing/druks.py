@@ -25,5 +25,9 @@ class DruksTracker(Tracker):
             return
         raise UnknownTicketError(key, "druks")
 
+    async def get_account_id(self, user_id: str) -> str | None:
+        # A board ticket's assignee is a Druks account.
+        return user_id
+
     async def aclose(self) -> None:
         return

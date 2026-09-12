@@ -5,6 +5,7 @@ import druks.contrib.software_factory.subscribers as subs
 import pytest
 from conftest import connect_service
 from druks.contrib.software_factory import webhooks as webhook_module
+from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
 from druks.contrib.software_factory.webhooks import JiraEvents
 from druks.contrib.software_factory.workflows import Build
 from druks.testing import make_settings, seed_run
@@ -48,6 +49,7 @@ def _jira_payload(*, key="IT-12", status="Open", project="acme-app", labels=None
         "url": None,
         "project_name": project,
         "labels": labels or [],
+        "assignee_id": None,
         "assignee_email": "dev@acme.co",
         "assignee_name": "Dev",
         "completed": False,
@@ -133,7 +135,7 @@ async def test_done_category_marks_the_transition_terminal(tmp_path, druks_db, m
     await _provider(tmp_path, payload=payload).on_issue_event()
 
     assert [event for event, _ in events] == ["ticket.transitioned"]
-    assert events[0][1]["terminal"] is True
+    assert events[0][1]["terminal"]
 
 
 async def test_open_category_is_not_terminal(tmp_path, druks_db, monkeypatch):
@@ -151,10 +153,7 @@ async def test_open_category_is_not_terminal(tmp_path, druks_db, monkeypatch):
     await provider.on_issue_event()
 
     assert [event for event, _ in events] == ["ticket.transitioned"]
-    assert events[0][1]["terminal"] is False
-
-
-# --- subscriber: build routing ---------------------------------------------
+    assert not events[0][1]["terminal"]
 
 
 def _pin_settings(monkeypatch, **over):
@@ -220,9 +219,7 @@ async def test_trigger_status_redispatches_a_closed_item(druks_db, monkeypatch):
 
 
 async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, druks_db, monkeypatch):
-    """No work item yet: the label names the repo, the registry routes it."""
-    from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
-
+    """A new ticket has no work item. Its label names the repo, and the registry routes it."""
     project = await Project.create(name="octo/alfred")
     await ProjectRepo.create(project_id=project.id, full_name="octo/alfred")
     await druks_db.flush()
@@ -244,7 +241,7 @@ async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, druks_db, m
 
 
 async def test_trigger_status_ignores_an_unroutable_ticket(tmp_path, druks_db, monkeypatch):
-    """No signal matches a registered repo → no build."""
+    """A ticket that matches no registered repo starts no build."""
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
     start = AsyncMock()
     monkeypatch.setattr(subs.Build, "start", start)

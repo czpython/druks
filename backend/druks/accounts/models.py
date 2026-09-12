@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import logging
 import secrets
 from datetime import datetime
 
@@ -21,8 +22,11 @@ from druks.accounts.exceptions import AuthConfigurationError, InvalidPatError
 from druks.core.models import Uuid7Pk
 from druks.database import db_session
 from druks.models import Base
+from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
 from druks.user_settings.models import InstallationSettings
+
+logger = logging.getLogger(__name__)
 
 
 class Account(Base, Uuid7Pk):
@@ -33,9 +37,9 @@ class Account(Base, Uuid7Pk):
         ),
     )
 
-    # citext: the column compares and enforces uniqueness case-insensitively,
-    # so a lookup or a duplicate check needs no normalization — the username is
-    # stored as the provider gave it and matched regardless of case.
+    # The citext column compares and enforces uniqueness without regard to case.
+    # A lookup or a duplicate check needs no normalization. The username stays
+    # as the provider gave it.
     username: Mapped[str] = mapped_column(CITEXT, unique=True)
     is_default: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     timezone: Mapped[str] = mapped_column(String, default="UTC")
@@ -64,6 +68,22 @@ class Account(Base, Uuid7Pk):
     @classmethod
     async def get_for_username(cls, username: str) -> "Account | None":
         return await db_session().scalar(select(cls).where(cls.username == username))
+
+    @classmethod
+    async def lookup(cls, authority: str, subject: str) -> "Account | None":
+        """The one account with a live grant for this provider user. A shared
+        grant has no account, and two owning accounts match none."""
+        owners = select(VaultSecret.account_id).where(
+            VaultSecret.revoked_at.is_(None),
+            VaultSecret.identity["authority"].astext == authority,
+            VaultSecret.identity["subject"].astext == subject,
+        )
+        accounts = list(await db_session().scalars(select(cls).where(cls.id.in_(owners))))
+        if len(accounts) == 1:
+            return accounts[0]
+        if accounts:
+            logger.warning("A provider user at %s has grants under multiple accounts.", authority)
+        return
 
     @classmethod
     async def get_or_create(cls, username: str) -> "Account":
@@ -114,13 +134,14 @@ class PersonalAccessToken(Base, Uuid7Pk):
     account: Mapped[Account] = relationship(lazy="joined", innerjoin=True)
     name: Mapped[str] = mapped_column(String(PAT_NAME_LENGTH))
     token_prefix: Mapped[str] = mapped_column(String(PAT_PREFIX_LENGTH), unique=True, index=True)
-    # SHA-256 of the full serialized token; the plaintext is never stored.
+    # The SHA-256 digest of the full serialized token. Druks never stores the plaintext.
     token_hash: Mapped[bytes] = mapped_column(LargeBinary, unique=True)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     expires_at: Mapped[datetime]
     last_used_at: Mapped[datetime | None]
     revoked_at: Mapped[datetime | None]
-    # None is the account's whole API; a list only those agent tools, by MCP name.
+    # None allows the whole API of the account. A list allows only the agent tools
+    # that it names by MCP name.
     allowed_tools: Mapped[list[str] | None] = mapped_column(JSONB, default=None)
 
     @property
@@ -129,7 +150,8 @@ class PersonalAccessToken(Base, Uuid7Pk):
 
     @property
     def status(self) -> str:
-        # One tri-state on the wire; revoked outranks expired outranks active.
+        # The wire carries one of three states. Revoked outranks expired, and expired
+        # outranks active.
         if self.revoked_at:
             return "revoked"
         if self.is_expired:
@@ -157,8 +179,8 @@ class PersonalAccessToken(Base, Uuid7Pk):
         name: str,
         allowed_tools: list[str] | None = None,
     ) -> "tuple[PersonalAccessToken, str]":
-        """Mint ``account_id`` a token; returns (row, plaintext). The plaintext
-        is shown exactly once — only its hash lands in the row."""
+        """Mint a token for ``account_id`` and return (row, plaintext). The row
+        keeps only the hash, so the plaintext shows once."""
         prefix = _new_prefix()
         while await cls.get_for_prefix(prefix):
             prefix = _new_prefix()
@@ -182,9 +204,8 @@ class PersonalAccessToken(Base, Uuid7Pk):
 
     @classmethod
     async def authenticate(cls, credential: str) -> "PersonalAccessToken":
-        """Resolve a presented bearer credential to its live row — the one
-        authentication door for both HTTP and MCP — or raise InvalidPatError.
-        Stamps last_used_at, at most hourly."""
+        """Resolve a bearer credential to its live row, or raise InvalidPatError.
+        HTTP and MCP both authenticate here. last_used_at updates at most hourly."""
         prefix, _, _ = credential.removeprefix(f"{PAT_TOKEN_TAG}_").partition("_")
         row = await cls.get_for_prefix(prefix)
         if not row:
@@ -202,6 +223,6 @@ class PersonalAccessToken(Base, Uuid7Pk):
         return row
 
     async def revoke(self) -> None:
-        # Keep the first revocation instant — a repeat revoke changes nothing.
+        # A repeat revoke keeps the first revocation time.
         self.revoked_at = self.revoked_at or Base.utc_now()
         await db_session().flush()
