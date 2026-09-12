@@ -1,3 +1,16 @@
+from druks.api.exceptions import AgentApiError
+
+
+class CredentialReadOnly(AgentApiError):
+    # A credential whose writes are denied, presented on a write request. The
+    # door refuses it, so the mode holds on every route, not only MCP tools.
+    status_code = 403
+    code = "CREDENTIAL_READ_ONLY"
+
+    def __init__(self) -> None:
+        super().__init__("This credential may only read.")
+
+
 class InvalidPatError(Exception):
     """A presented bearer credential that resolves to no live personal access
     token — unknown, mismatched, revoked, or expired."""

@@ -3,23 +3,29 @@
 # operation's single declaration — schema, docstring, operation_id — and a
 # tagged app route joins the surface the same way.
 import inspect
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
+from typing import Any
 
 import httpx2
 from fastapi import FastAPI
 from fastapi.routing import APIRoute, iter_route_contexts
 from fastmcp import FastMCP
 from fastmcp.server.auth import AccessToken, TokenVerifier
-from fastmcp.server.dependencies import get_http_request
+from fastmcp.server.dependencies import get_access_token, get_http_request
 from fastmcp.server.http import StarletteWithLifespan
 from fastmcp.server.providers.openapi import MCPType, OpenAPIProvider, OpenAPITool, RouteMap
+from fastmcp.server.transforms import GetToolNext, Transform
+from fastmcp.tools.base import Tool
 from fastmcp.utilities.openapi import HTTPRoute
+from fastmcp.utilities.versions import VersionSpec
 from mcp.types import ToolAnnotations
 
+from druks.accounts.enums import OperatorWrites
 from druks.accounts.exceptions import InvalidPatError
-from druks.accounts.models import PersonalAccessToken
+from druks.accounts.models import OperatorToken, PersonalAccessToken
 from druks.apps.loader import iter_apps
 from druks.database import db_session
+from druks.mcp import proposals
 from druks.mcp.exceptions import InvalidAgentToolError
 
 _INSTRUCTIONS = """\
@@ -41,14 +47,32 @@ surface.
 class PatTokenVerifier(TokenVerifier):
     async def verify_token(self, token: str) -> AccessToken | None:
         # Auth middleware runs outside the request session boundary, so this
-        # owns one — authenticate stamps last_used_at.
+        # owns one — authenticate stamps last_used_at on a PAT; a call token
+        # is Redis-only and needs no commit.
         try:
+            operator = await OperatorToken.lookup(token)
+            if operator:
+                return AccessToken(
+                    token=token,
+                    client_id=operator.agent_call_id,
+                    scopes=[],
+                    claims={
+                        "account_id": operator.account_id,
+                        "agent_call_id": operator.agent_call_id,
+                        "run_id": operator.run_id,
+                        "writes": operator.writes,
+                    },
+                )
             pat = await PersonalAccessToken.authenticate(token)
             access = AccessToken(
                 token=token,
                 client_id=pat.token_prefix,
                 scopes=[],
-                claims={"account_id": pat.account_id, "pat_id": pat.id},
+                claims={
+                    "account_id": pat.account_id,
+                    "pat_id": pat.id,
+                    "writes": OperatorWrites.ALLOW,
+                },
             )
             await db_session().commit()
             return access
@@ -73,6 +97,70 @@ class CallerPat(httpx2.Auth):
         if bearer:
             request.headers["Authorization"] = bearer
         yield request
+
+
+def _caller_claims() -> dict[str, Any]:
+    # The verified credential behind this request; empty outside a request.
+    token = get_access_token()
+    return token.claims if token else {}
+
+
+def _is_read_tool(tool: Tool) -> bool:
+    return bool(tool.annotations and tool.annotations.read_only_hint)
+
+
+def _denies_writes() -> bool:
+    return _caller_claims().get("writes") == OperatorWrites.DENY
+
+
+class OperatorWritesFilter(Transform):
+    """A credential whose writes are denied sees only the GET-derived tools, so
+    it never offers an action it cannot take. Every other credential sees the
+    live catalog."""
+
+    async def list_tools(self, tools: Sequence[Tool]) -> Sequence[Tool]:
+        if _denies_writes():
+            return [tool for tool in tools if _is_read_tool(tool)]
+        return tools
+
+    async def get_tool(
+        self, name: str, call_next: GetToolNext, *, version: VersionSpec | None = None
+    ) -> Tool | None:
+        tool = await call_next(name, version=version)
+        if tool and _denies_writes() and not _is_read_tool(tool):
+            return
+        return tool
+
+
+class OperatorWritesTransport(httpx2.AsyncBaseTransport):
+    """A deferred credential's write becomes a proposal on the internal hop:
+    recorded against its run, never performed. Refusing a denied write is the
+    bearer door's job, so it holds on every route and not only on a tool."""
+
+    def __init__(self, inner: httpx2.AsyncBaseTransport):
+        self._inner = inner
+
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+        claims = _caller_claims()
+        if request.method != "GET" and claims.get("writes") == OperatorWrites.DEFER:
+            await proposals.stash(
+                claims["run_id"],
+                {
+                    "method": request.method,
+                    "path": request.url.path,
+                    "body": request.content.decode() if request.content else "",
+                    "content_type": request.headers.get("content-type") or "application/json",
+                },
+            )
+            return httpx2.Response(
+                200,
+                json={
+                    "result": "deferred",
+                    "message": "This write is recorded, not performed. Its operator answers it.",
+                },
+                request=request,
+            )
+        return await self._inner.handle_async_request(request)
 
 
 def _validate_agent_tools(api: FastAPI) -> None:
@@ -160,6 +248,11 @@ def _annotate(route: HTTPRoute, component: object) -> None:
             destructive_hint=not is_read and route.extensions.get("x-destructive", True),
             idempotent_hint=route.extensions.get("x-idempotent", False),
         )
+        # A deferred write answers with the proposal stub, not the route's own
+        # model. Advertising that model as outputSchema makes MCP reject the
+        # stub, whose required fields (an `identifier`) it does not carry.
+        if not is_read:
+            component.output_schema = None
 
 
 def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
@@ -169,7 +262,9 @@ def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
     # raise_app_exceptions=False makes an app crash reach the tool as the
     # app's sanitized 500, so no masking is needed and the taxonomy travels.
     client = httpx2.AsyncClient(
-        transport=httpx2.ASGITransport(app=api, raise_app_exceptions=False),
+        transport=OperatorWritesTransport(
+            httpx2.ASGITransport(app=api, raise_app_exceptions=False)
+        ),
         base_url="http://druks",
         auth=CallerPat(),
     )
@@ -185,6 +280,7 @@ def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
     server = FastMCP(
         name="druks",
         providers=[provider],
+        transforms=[OperatorWritesFilter()],
         instructions=_INSTRUCTIONS,
         auth=PatTokenVerifier(),
     )

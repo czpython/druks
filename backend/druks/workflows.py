@@ -2,7 +2,7 @@ import inspect
 from collections.abc import Awaitable, Callable
 from contextlib import nullcontext, suppress
 from contextvars import ContextVar
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import (
     TYPE_CHECKING,
@@ -49,6 +49,7 @@ from druks.durable.schemas import (
 )
 from druks.events.models import Event
 from druks.harnesses.exceptions import HarnessError
+from druks.mcp import proposals
 from druks.models import StoredSubject, snake_name
 from druks.notifications.outbox import notifications_queue, send_notification
 from druks.sandbox.client import provisioning_key, sandbox_client
@@ -290,13 +291,19 @@ class Gate(BaseModel):
 
     @classmethod
     async def wait(
-        cls, *, input_request: dict[str, Any] | None = None, ttl_seconds: float = GATE_TTL_SECONDS
+        cls,
+        *,
+        input_request: dict[str, Any] | None = None,
+        ttl_seconds: float = GATE_TTL_SECONDS,
+        hold_sandbox: timedelta | None = None,
     ) -> Self:
         # Suspend the running workflow until its gate is answered. A gate is a
         # run-level state — the read surfaces "needs you" straight off the parked run.
         # ``input_request`` is the plain-dict ask (at least a ``label`` and
         # ``presentation``), stored on the run beside ``input_gate`` and cleared on
         # resume — so an app declares the ask here, beside on_wait, not at read time.
+        # ``hold_sandbox`` keeps the warm VM across the park for at most that
+        # long, instead of reaping it (see ``_hold_host``).
         workflow = current_workflow.get()
         if not workflow._subject and cls.on_wait.__func__ is Gate.on_wait.__func__:
             # No subject means no feed surface; if on_wait wasn't overridden
@@ -311,7 +318,9 @@ class Gate(BaseModel):
                 await cls.on_wait(workflow)
 
         await DBOS.run_step_async(StepOptions(name=f"{cls.name}._on_wait"), _on_wait)
-        payload = await _park(workflow, cls.name, input_request, ttl_seconds)
+        payload = await _park(
+            workflow, cls.name, input_request, ttl_seconds, hold_sandbox=hold_sandbox
+        )
         reply = cls.model_validate(payload)
         workflow.journal.add(reply)
         return reply
@@ -333,10 +342,15 @@ async def _park(
     gate: str,
     input_request: dict[str, Any] | None,
     ttl_seconds: float,
+    hold_sandbox: timedelta | None = None,
 ) -> dict[str, Any]:
     # Shared park core: a park lasts days, so reap the warm VM, then suspend on the
-    # gate's channel until Run.resume answers it.
-    await workflow._reap_run()
+    # gate's channel until Run.resume answers it. A caller that expects a quick
+    # answer can hold the VM instead — the clipped lease is what ends the hold.
+    if hold_sandbox:
+        await workflow._hold_host(hold_sandbox)
+    else:
+        await workflow._reap_run()
     await _emit_run_event(
         workflow.workflow_id,
         RunState.PARKED,
@@ -833,7 +847,17 @@ class Workflow:
 
     async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
         # Extend via super() to add the fields workspace_class needs beyond these.
-        return {"host": host, "subject": await self.subject}
+        return {"host": host, "subject": await self.subject, "run_id": self._workflow_id}
+
+    async def take_proposals(self) -> list[dict[str, str]]:
+        """The writes this run's agent asked for while its credential deferred
+        them, cleared as they are read so one answer settles one set."""
+        return await proposals.take(self._workflow_id)
+
+    async def apply_proposals(self, writes: list[dict[str, str]]) -> list[str]:
+        """Perform proposals as the run's operator. Returns one line per write
+        that failed, so a caller can report it — one refusal stops nothing."""
+        return await proposals.play(self.account_id, writes)
 
     async def get_workspace(self, host: "Host") -> Workspace:
         # Built per agent call, so nothing is held across steps.
@@ -898,6 +922,18 @@ class Workflow:
             return
         host, self._host = self._host, None
         await sandbox_client.release(host_id=host.id)
+
+    async def _hold_host(self, hold: timedelta) -> None:
+        # Keep the warm VM across a park instead of reaping it, by clipping its lease
+        # down: drukbox reaps at the new expiry, so a hold nobody ever answers still
+        # frees the VM with no druks-side sweep. Never extends: the lease drukbox
+        # already granted is the ceiling. A run with no warm host has nothing to hold.
+        if not self._host:
+            return
+        expires_at = datetime.now(UTC) + hold
+        if self._host.expires_at:
+            expires_at = min(self._host.expires_at, expires_at)
+        await sandbox_client.set_expiry(host_id=self._host.id, expires_at=expires_at)
 
     @property
     def workflow_id(self) -> str:

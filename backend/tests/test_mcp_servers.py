@@ -8,11 +8,12 @@ from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
 from druks.mcp.catalog import load_mcp_catalog
-from druks.mcp.constants import BEARER_HEADER
+from druks.mcp.constants import BEARER_HEADER, THIS_APPLIANCE
 from druks.mcp.exceptions import (
     InvalidCatalogError,
     InvalidServerNameError,
     MissingTokenError,
+    ReservedServerNameError,
 )
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.models import McpServer
@@ -113,6 +114,13 @@ async def test_create_rejects_names_that_break_env_or_config(druks_db):
     for bad in ("linear-app", "1linear", "Linear", "linear.app", "linear app"):
         with pytest.raises(InvalidServerNameError, match="Invalid MCP server name"):
             await McpServer.create(name=bad, url=_LINEAR_URL, token=_TOKEN)
+
+
+async def test_create_refuses_the_name_this_appliance_delivers_under(druks_db):
+    """This appliance's own /mcp owns that config key. A row claiming it would
+    collide in the VM's config, so the operator hears about it at creation."""
+    with pytest.raises(ReservedServerNameError, match="reserved"):
+        await McpServer.create(name=THIS_APPLIANCE, url=_LINEAR_URL, token=_TOKEN)
 
 
 async def test_valid_name_derives_shell_safe_env_var(druks_db):

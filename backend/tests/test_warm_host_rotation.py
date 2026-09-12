@@ -37,6 +37,7 @@ class _FakeSandboxClient:
         self.secrets: list[dict[str, Secret]] = []
         self.released: list[str] = []
         self.reattached: list[str] = []
+        self.expiry_sets: list[tuple[str, datetime]] = []
 
     async def provision(
         self,
@@ -60,6 +61,9 @@ class _FakeSandboxClient:
         self.reattached.append(host_id)
         return _FakeSandbox(id=host_id, expires_at=datetime.now(UTC) + self.lease)
 
+    async def set_expiry(self, *, host_id: str, expires_at: datetime) -> None:
+        self.expiry_sets.append((host_id, expires_at))
+
 
 def _warm_workflow(*, reuse: bool = True) -> Workflow:
     # __new__ skips __init__/__init_subclass__ so the host logic can be exercised
@@ -71,6 +75,19 @@ def _warm_workflow(*, reuse: bool = True) -> Workflow:
     flow._workflow_id = "wf-1"
     flow.account_id = None
     return flow
+
+
+def _park_without_dbos(monkeypatch) -> None:
+    # The park's durable surroundings — the run event it emits and the channel it
+    # suspends on — say nothing about the hold, so the gate answers immediately.
+    async def _emit(*args, **kwargs) -> None:
+        return
+
+    async def _answer(gate, timeout_seconds=None) -> dict[str, str]:
+        return {"action": "approve"}
+
+    monkeypatch.setattr(sdk, "_emit_run_event", _emit)
+    monkeypatch.setattr(sdk.DBOS, "recv_async", _answer)
 
 
 @pytest.mark.asyncio
@@ -198,3 +215,117 @@ async def test_a_replay_finds_the_warm_box_through_its_identity(
 
     assert client.reattached == ["host-crashed"]
     assert client.provisions == []
+
+
+@pytest.mark.asyncio
+async def test_park_without_hold_releases_the_warm_host(monkeypatch):
+    """A park with no hold is today's park: the VM goes, nothing is clipped."""
+    fake = _FakeSandboxClient(lease=timedelta(hours=2))
+    monkeypatch.setattr(sdk, "sandbox_client", fake)
+    _park_without_dbos(monkeypatch)
+    flow = _warm_workflow()
+    await flow._lease_host(_NONE)
+
+    await sdk._park(flow, "review", None, 60.0)
+
+    assert fake.released == ["host-1"]
+    assert fake.expiry_sets == []
+    assert flow._host is None
+
+
+@pytest.mark.asyncio
+async def test_park_with_hold_clips_the_lease_and_keeps_the_host(monkeypatch):
+    """A held park clips the lease instead of deleting the VM, and the run keeps
+    the handle so a same-worker resume reattaches warm."""
+    fake = _FakeSandboxClient(lease=timedelta(hours=2))
+    monkeypatch.setattr(sdk, "sandbox_client", fake)
+    _park_without_dbos(monkeypatch)
+    flow = _warm_workflow()
+    await flow._lease_host(_NONE)
+
+    await sdk._park(flow, "review", None, 60.0, hold_sandbox=timedelta(minutes=15))
+
+    assert [host_id for host_id, _ in fake.expiry_sets] == ["host-1"]
+    assert fake.released == []
+    assert flow._host is not None
+    assert flow._host.id == "host-1"
+
+
+@pytest.mark.asyncio
+async def test_hold_never_outlasts_the_lease_drukbox_granted(monkeypatch):
+    """The clip is a floor, never an extension: a lease shorter than the hold
+    stands as it is."""
+    fake = _FakeSandboxClient(lease=timedelta(minutes=20))
+    monkeypatch.setattr(sdk, "sandbox_client", fake)
+    flow = _warm_workflow()
+    await flow._lease_host(_NONE)
+
+    await flow._hold_host(timedelta(hours=1))
+
+    assert fake.expiry_sets == [("host-1", flow._host.expires_at)]
+
+
+@pytest.mark.asyncio
+async def test_hold_clips_to_the_requested_span(monkeypatch):
+    """A hold ends at ``now + hold`` when the lease outlasts it."""
+    fake = _FakeSandboxClient(lease=timedelta(hours=2))
+    monkeypatch.setattr(sdk, "sandbox_client", fake)
+    flow = _warm_workflow()
+    await flow._lease_host(_NONE)
+
+    await flow._hold_host(timedelta(minutes=30))
+
+    ((_, expires_at),) = fake.expiry_sets
+    clip = datetime.now(UTC) + timedelta(minutes=30)
+    assert clip - timedelta(seconds=5) <= expires_at <= clip
+
+
+@pytest.mark.asyncio
+async def test_hold_without_a_warm_host_touches_nothing(monkeypatch):
+    """Without steps_reuse_sandbox there is no warm host to hold, so a held park
+    neither clips nor deletes."""
+    fake = _FakeSandboxClient(lease=timedelta(hours=2))
+    monkeypatch.setattr(sdk, "sandbox_client", fake)
+    _park_without_dbos(monkeypatch)
+    flow = _warm_workflow(reuse=False)
+    await flow._lease_host(_NONE)
+
+    await sdk._park(flow, "review", None, 60.0, hold_sandbox=timedelta(minutes=15))
+
+    assert fake.expiry_sets == []
+    assert fake.released == []
+    assert fake.provisions == []
+
+
+@pytest.mark.asyncio
+async def test_resume_after_a_hold_reuses_the_held_host(monkeypatch):
+    """The worker that survived the recv still holds the handle, so the first
+    call after the resume lands on the same VM."""
+    fake = _FakeSandboxClient(lease=timedelta(hours=2))
+    monkeypatch.setattr(sdk, "sandbox_client", fake)
+    _park_without_dbos(monkeypatch)
+    flow = _warm_workflow()
+    await flow._lease_host(_NONE)
+    await sdk._park(flow, "review", None, 60.0, hold_sandbox=timedelta(minutes=15))
+
+    assert await flow._lease_host(_NONE) == "host-1"
+    assert fake.provisions == ["wf-1:workflow"]
+
+
+@pytest.mark.asyncio
+async def test_resume_on_a_restarted_worker_re_leases_under_the_run_key(monkeypatch):
+    """A worker that died over the park has no handle: the resume goes back
+    through the run's idempotency key exactly once — warm if the clipped lease
+    still stands, cold if drukbox already reaped it."""
+    fake = _FakeSandboxClient(lease=timedelta(hours=2))
+    monkeypatch.setattr(sdk, "sandbox_client", fake)
+    _park_without_dbos(monkeypatch)
+    flow = _warm_workflow()
+    await flow._lease_host(_NONE)
+    await sdk._park(flow, "review", None, 60.0, hold_sandbox=timedelta(minutes=30))
+    flow._host = None
+
+    await flow._lease_host(_NONE)
+
+    assert fake.provisions == ["wf-1:workflow", "wf-1:workflow"]
+    assert fake.released == []

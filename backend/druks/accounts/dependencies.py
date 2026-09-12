@@ -5,13 +5,15 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.requests import HTTPConnection
 
 from druks.accounts.context import current_account_id
+from druks.accounts.enums import OperatorWrites
 from druks.accounts.exceptions import (
     AuthConfigurationError,
+    CredentialReadOnly,
     InvalidAssertionError,
     InvalidPatError,
 )
 from druks.accounts.jwt import verify_assertion
-from druks.accounts.models import Account, PersonalAccessToken
+from druks.accounts.models import Account, OperatorToken, PersonalAccessToken
 
 _BEARER_CHALLENGE = 'Bearer realm="druks"'
 # auto_error=False: absence and malformed both come back None — presence is
@@ -20,11 +22,13 @@ _BEARER_CHALLENGE = 'Bearer realm="druks"'
 _bearer_scheme = HTTPBearer(auto_error=False, scheme_name="personalAccessToken")
 
 
-async def resolve_pat_account(credentials: HTTPAuthorizationCredentials | None) -> Account:
+async def resolve_pat_account(
+    credentials: HTTPAuthorizationCredentials | None, *, method: str
+) -> Account:
     """A present Authorization must authenticate — never a fall-through."""
     if credentials:
         try:
-            return (await PersonalAccessToken.authenticate(credentials.credentials)).account
+            return await resolve_bearer_account(credentials.credentials, method=method)
         except InvalidPatError as error:
             raise HTTPException(
                 status_code=401,
@@ -36,6 +40,19 @@ async def resolve_pat_account(credentials: HTTPAuthorizationCredentials | None) 
         detail="Authorization must be: Bearer <token>.",
         headers={"WWW-Authenticate": _BEARER_CHALLENGE},
     )
+
+
+async def resolve_bearer_account(credential: str, *, method: str) -> Account:
+    """The one bearer door: a live call-scoped operator token, else a PAT. An
+    operator token that may not write authenticates a read request only — the
+    box holds the token and this appliance's URL, so the mode has to hold here
+    and not only on the MCP tool surface."""
+    operator = await OperatorToken.lookup(credential)
+    if operator:
+        if method == "GET" or operator.writes == OperatorWrites.ALLOW:
+            return await Account.get_for_run(operator.account_id)
+        raise CredentialReadOnly()
+    return (await PersonalAccessToken.authenticate(credential)).account
 
 
 async def resolve_single_operator() -> Account | None:
@@ -102,7 +119,7 @@ async def current_account(
     """The Bearer PAT when Authorization is present — present-but-empty still
     challenges — else the session identity."""
     if "Authorization" in request.headers:
-        account = await resolve_pat_account(bearer)
+        account = await resolve_pat_account(bearer, method=request.method)
     else:
         account = await _resolve_operator(request)
         if not account:
@@ -154,7 +171,7 @@ async def current_account_or_setup(
     """PAT-first identity that reads none/zero setup as None instead of
     refusing — ``/api/auth/me`` only."""
     if "Authorization" in request.headers:
-        account = await resolve_pat_account(bearer)
+        account = await resolve_pat_account(bearer, method=request.method)
     else:
         account = await _resolve_operator(request)
     token = current_account_id.set(account.id if account else None)

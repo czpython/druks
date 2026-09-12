@@ -8,9 +8,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from druks.apps.registry import mcp_servers
 from druks.core.models import Uuid7Pk
 from druks.database import db_session
-from druks.mcp.constants import BEARER_HEADER, NAME_PATTERN
+from druks.mcp.constants import BEARER_HEADER, NAME_PATTERN, THIS_APPLIANCE
 from druks.mcp.enums import TokenSource
-from druks.mcp.exceptions import InvalidServerNameError
+from druks.mcp.exceptions import InvalidServerNameError, ReservedServerNameError
 from druks.mcp.helpers import get_grant_account
 from druks.models import Base
 from druks.secrets.datastructures import Audience
@@ -150,6 +150,8 @@ class McpServer(Base, Uuid7Pk):
         secret_headers: dict[str, str] | None = None,
         is_enabled: bool = True,
     ) -> "McpServer":
+        if name == THIS_APPLIANCE:
+            raise ReservedServerNameError(name)
         if not NAME_PATTERN.match(name):
             raise InvalidServerNameError(name)
         session = db_session()

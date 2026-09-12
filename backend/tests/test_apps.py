@@ -24,7 +24,7 @@ def _subjects(cls) -> list[type[Subject]]:
 
 def test_iter_apps_discovers_the_bundled_apps():
     """The bundled apps resolve from the ``druks.apps`` entry points."""
-    assert {app.name for app in iter_apps()} >= {"core", "software_factory", "usage"}
+    assert {app.name for app in iter_apps()} >= {"core", "software_factory", "chat", "usage"}
 
 
 def test_platform_apps_are_builtin():

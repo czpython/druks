@@ -24,6 +24,16 @@ class InvalidServerNameError(McpServerError):
         self.name = name
 
 
+class ReservedServerNameError(McpServerError):
+    # This appliance delivers its own /mcp under one fixed name. A row that
+    # claims it would collide on the config key the harness reads.
+    def __init__(self, name: str):
+        super().__init__(
+            f"MCP server name {name!r} is reserved for this appliance; choose another name."
+        )
+        self.name = name
+
+
 class MissingTokenError(McpServerError):
     # An enabled server carries no token, so it can't authenticate in the VM.
     # Raised loudly at delivery rather than shipping a header the harness can't

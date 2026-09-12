@@ -2,9 +2,10 @@ import json
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
+from druks.accounts.dependencies import current_session_account
 from druks.core.apis.github import GITHUB
 from druks.core.services import Github
 from druks.core.templates import render_page
@@ -42,7 +43,11 @@ async def create_github_app(request: Request) -> HTMLResponse:
     return render_page("github_manifest.html", manifest_json=json.dumps(manifest))
 
 
-@router.get("/manifest/callback", response_class=HTMLResponse)
+@router.get(
+    "/manifest/callback",
+    response_class=HTMLResponse,
+    dependencies=[Depends(current_session_account)],
+)
 async def github_manifest_callback(request: Request, code: str = "") -> HTMLResponse:
     if not code:
         raise HTTPException(status_code=400, detail="Missing code in the GitHub redirect.")

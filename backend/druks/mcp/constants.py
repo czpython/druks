@@ -4,6 +4,14 @@ import re
 # the var name ever lands in emitted config, never the value.
 TOKEN_ENV_PREFIX = "MCP_"
 TOKEN_ENV_SUFFIX = "_TOKEN"
+# The name a workspace uses when it injects this appliance's /mcp into a
+# sandbox — one config key, one bearer env var. Reserved: a registry row may
+# not claim it, or the emitted config would carry two servers under one key.
+THIS_APPLIANCE = "druks"
+
+# A write a deferred credential proposed instead of performing, listed under
+# the run that proposed it until its operator answers.
+PROPOSAL_PREFIX = "operator_proposal:"
 
 # A server name is one identifier reused as the MCP config key (a bare TOML path
 # segment for codex, a JSON object key for claude) and the stem of the bearer env
