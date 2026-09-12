@@ -4,7 +4,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, status
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
-from druks.contrib.chat.enums import Autonomy, Role
+from druks.contrib.chat.enums import Autonomy
 from druks.contrib.chat.models import Conversation
 from druks.contrib.chat.workflows import Talk
 
@@ -17,8 +17,7 @@ async def create_conversation(
     account: Account = Depends(current_account),
     title: Annotated[str, Body(embed=True)] = "",
 ) -> dict[str, int]:
-    conversation = await Conversation.create(account_id=account.id, title=title)
-    await conversation.add_message(role=Role.USER, body=body)
+    conversation = await Conversation.start(account_id=account.id, body=body, title=title)
     await Talk.dispatch(conversation=conversation)
     return {"id": conversation.id}
 

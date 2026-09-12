@@ -15,7 +15,7 @@ async def list():
                 title="Threads",
                 cards=[
                     ui.Card(
-                        title=thread.title or thread.label,
+                        title=thread.title or thread.key,
                         controls=[
                             ui.Link(
                                 "Open",
@@ -85,7 +85,7 @@ async def thread(conversation_id: int):
                 speaker = "System"
             cards.append(ui.Card(title=speaker, blocks=[ui.Quote(message.body)]))
         return ui.Page(
-            conversation.title or conversation.label,
+            conversation.title or conversation.key,
             controls=[
                 ui.Link(
                     "Settings",

@@ -4,6 +4,7 @@ from druks.accounts.models import Account
 from druks.contrib.chat.enums import Role
 from druks.contrib.chat.models import Conversation
 from druks.contrib.chat.workflows import ChatTurn, Talk
+from druks.db import db_session
 from druks.testing import seed_run
 
 
@@ -22,8 +23,8 @@ async def test_the_roster_names_chat_pages(druks_client):
 
 
 async def test_the_list_page_shows_this_accounts_threads(druks_client):
-    owner = await Account.get_or_create("op@example.com")
-    other = await Account.get_or_create("dev@example.com")
+    owner = await Account.get_or_create(db_session(), "op@example.com")
+    other = await Account.get_or_create(db_session(), "dev@example.com")
     mine = await Conversation.create(account_id=owner.id, title="Pump")
     await Conversation.create(account_id=other.id, title="theirs")
 
@@ -64,7 +65,7 @@ async def test_the_new_page_collects_an_optional_title_and_a_required_message(dr
 
 
 async def test_the_thread_shows_messages_and_follows_the_conversation(druks_client):
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(db_session(), "op@example.com")
     conversation = await Conversation.create(account_id=account.id, title="Pump")
     await conversation.add_message(role=Role.USER, body="hello")
 
@@ -88,7 +89,7 @@ async def test_the_thread_shows_messages_and_follows_the_conversation(druks_clie
 
 
 async def test_a_parked_turn_puts_gate_controls_on_the_thread(druks_client, druks_db):
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(db_session(), "op@example.com")
     conversation = await Conversation.create(account_id=account.id, title="")
     run = await seed_run(
         druks_db,
@@ -113,7 +114,7 @@ async def test_a_parked_turn_puts_gate_controls_on_the_thread(druks_client, druk
 
 
 async def test_a_running_turn_shows_status_not_a_gate(druks_client, druks_db):
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(db_session(), "op@example.com")
     conversation = await Conversation.create(account_id=account.id, title="")
     await seed_run(druks_db, kind=Talk.kind, subject=conversation, state="running")
 
@@ -125,7 +126,7 @@ async def test_a_running_turn_shows_status_not_a_gate(druks_client, druks_db):
 
 
 async def test_another_operators_thread_is_an_empty_state(druks_client):
-    other = await Account.get_or_create("dev@example.com")
+    other = await Account.get_or_create(db_session(), "dev@example.com")
     conversation = await Conversation.create(account_id=other.id, title="secret")
     await conversation.add_message(role=Role.USER, body="nope")
 
@@ -142,7 +143,7 @@ async def test_another_operators_thread_is_an_empty_state(druks_client):
 
 
 async def test_settings_offers_the_autonomy_modes(druks_client):
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(db_session(), "op@example.com")
     conversation = await Conversation.create(account_id=account.id, title="Pump")
 
     page = (

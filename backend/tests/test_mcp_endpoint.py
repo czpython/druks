@@ -8,12 +8,14 @@ import httpx
 import httpx2
 import pytest
 from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed_note_run
+from druks.accounts.enums import OperatorWrites
 from druks.accounts.models import Account, OperatorToken, PersonalAccessToken
 from druks.api.server import mcp_app
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket
 from druks.core.apis.exceptions import UnknownTicketError
 from druks.durable.models import Artifact, Run
+from druks.mcp import proposals
 from druks.mcp.exceptions import InvalidAgentToolError
 from druks.mcp.server import create_mcp_app
 from druks.testing import asgi_client, configure_app_for_test, make_settings
@@ -664,7 +666,7 @@ async def test_mcp_server_registry_routes_stay_untouched(tmp_path, druks_db, mon
     assert "druks" not in {server["name"] for server in listed.json()}
 
 
-async def _operator_token(account, *, writes: str, run_id: str = "run-op"):
+async def _operator_token(account, *, writes: OperatorWrites, run_id: str = "run-op"):
     return await OperatorToken.mint(
         account_id=account.id,
         agent_call_id=f"call-{writes}",
@@ -684,7 +686,7 @@ async def test_propose_cannot_hit_answer_gate(app, account, druks_db, resume_spy
     )
     run.input_requested_at = datetime.now(UTC)
     await druks_db.flush()
-    token = await _operator_token(account, writes="deny")
+    token = await _operator_token(account, writes=OperatorWrites.DENY)
 
     async with live(app), _client(app, token) as client:
         tools = {tool.name for tool in await client.list_tools()}
@@ -715,7 +717,7 @@ async def test_confirm_defers_answer_gate_until_play(app, account, druks_db, res
     )
     run.input_requested_at = datetime.now(UTC)
     await druks_db.flush()
-    token = await _operator_token(account, writes="defer", run_id="run-confirm")
+    token = await _operator_token(account, writes=OperatorWrites.DEFER, run_id="run-confirm")
 
     async with live(app), _client(app, token) as client:
         tools = {tool.name for tool in await client.list_tools()}
@@ -728,9 +730,9 @@ async def test_confirm_defers_answer_gate_until_play(app, account, druks_db, res
         )
 
     assert resume_spy == []
-    writes = await OperatorToken.take_deferred("run-confirm")
+    writes = await proposals.take("run-confirm")
     assert writes[0]["method"] == "POST"
-    await OperatorToken.play_deferred(account.id, writes)
+    await proposals.play(account.id, writes)
     assert resume_spy == [{"id": run.id, "action": "approve", "answers": {}, "note": ""}]
 
 
@@ -743,7 +745,7 @@ async def test_mutating_agent_tools_omit_output_schema(app, pat_token):
 
 
 async def test_confirm_defers_a_create_shaped_write(account):
-    token = await _operator_token(account, writes="defer", run_id="run-confirm-create")
+    token = await _operator_token(account, writes=OperatorWrites.DEFER, run_id="run-confirm-create")
     api = _create_shaped_app()
 
     async with live(api), _client(api, token) as client:
@@ -752,7 +754,7 @@ async def test_confirm_defers_a_create_shaped_write(account):
     if result.is_error:
         raise AssertionError(result.content[0].text)
     assert result.structured_content["result"] == "deferred"
-    writes = await OperatorToken.take_deferred("run-confirm-create")
+    writes = await proposals.take("run-confirm-create")
     assert writes[0]["method"] == "POST"
     assert writes[0]["path"] == "/api/software_factory/tickets"
 
@@ -768,7 +770,7 @@ async def test_full_answer_gate_runs_as_the_token_account(app, account, druks_db
     )
     run.input_requested_at = datetime.now(UTC)
     await druks_db.flush()
-    token = await _operator_token(account, writes="allow")
+    token = await _operator_token(account, writes=OperatorWrites.ALLOW)
 
     async with live(app), _client(app, token) as client:
         gate = (await client.call_tool("get_gate", {"run": run.id})).structured_content
@@ -784,8 +786,8 @@ async def test_full_answer_gate_runs_as_the_token_account(app, account, druks_db
 
 
 async def test_operator_token_cannot_act_as_another_account(app, druks_db):
-    mine = await Account.get_or_create("op@example.com")
-    theirs = await Account.get_or_create("peer@example.com")
+    mine = await Account.get_or_create(druks_db, "op@example.com")
+    theirs = await Account.get_or_create(druks_db, "peer@example.com")
     druks_db.add(
         UsageScrape(
             provider="openai",
@@ -795,7 +797,7 @@ async def test_operator_token_cannot_act_as_another_account(app, druks_db):
         )
     )
     await druks_db.flush()
-    token = await _operator_token(mine, writes="allow")
+    token = await _operator_token(mine, writes=OperatorWrites.ALLOW)
 
     async with live(app), _client(app, token) as client:
         usage = (await client.call_tool("get_usage", {})).structured_content
@@ -803,8 +805,71 @@ async def test_operator_token_cannot_act_as_another_account(app, druks_db):
     assert codex["fiveHourPercentLeft"] is None
 
 
+async def test_a_denied_credential_cannot_write_over_plain_rest(app, account, druks_db, resume_spy):
+    """The box holds this credential and this appliance's URL, so the mode has
+    to hold at the door. Hiding the MCP tool is not a boundary."""
+    item = await make_test_note()
+    run = await seed_note_run(
+        druks_db,
+        note=item,
+        state="parked",
+        input_gate="review",
+        input_request=dict(_IN_APP_ASK),
+    )
+    run.input_requested_at = datetime.now(UTC)
+    await druks_db.flush()
+    token = await _operator_token(account, writes=OperatorWrites.DENY)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://druks.test"
+    ) as wire:
+        headers = {"Authorization": f"Bearer {token}"}
+        refused = await wire.post(
+            f"/api/gates/{run.id}/answer",
+            json={"parkedAt": run.input_requested_at.isoformat(), "control": "approve"},
+            headers=headers,
+        )
+        read = await wire.get(f"/api/gates/{run.id}", headers=headers)
+
+    assert refused.status_code == 403
+    assert refused.json()["detail"] == "This operator token may only read."
+    assert resume_spy == []
+    assert read.status_code == 200
+
+
+async def test_a_deferred_credential_stashes_nothing_outside_the_mcp_hop(
+    app, account, druks_db, resume_spy
+):
+    """Only the MCP transport records a proposal. A direct write is refused at
+    the door, so nothing is stashed behind the operator's back."""
+    item = await make_test_note()
+    run = await seed_note_run(
+        druks_db,
+        note=item,
+        state="parked",
+        input_gate="review",
+        input_request=dict(_IN_APP_ASK),
+    )
+    run.input_requested_at = datetime.now(UTC)
+    await druks_db.flush()
+    token = await _operator_token(account, writes=OperatorWrites.DEFER, run_id="run-direct")
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://druks.test"
+    ) as wire:
+        refused = await wire.post(
+            f"/api/gates/{run.id}/answer",
+            json={"parkedAt": run.input_requested_at.isoformat(), "control": "approve"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert refused.status_code == 403
+    assert resume_spy == []
+    assert await proposals.take("run-direct") == []
+
+
 async def test_operator_token_is_gone_after_the_call(app, account):
-    token = await _operator_token(account, writes="allow", run_id="run-gone")
+    token = await _operator_token(account, writes=OperatorWrites.ALLOW, run_id="run-gone")
     assert (await OperatorToken.lookup(token)).account_id == account.id
     await OperatorToken.revoke("call-allow")
     assert await OperatorToken.lookup(token) is None

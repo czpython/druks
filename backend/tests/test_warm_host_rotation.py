@@ -7,7 +7,7 @@ import pytest
 from drukbox_sdk import Secret
 from druks.db import db_session
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
-from druks.workflows import Workflow
+from druks.workflows import OperatorReply, Workflow
 
 
 def _config(secrets: dict[str, Secret], secrets_id: str = "") -> SimpleNamespace:
@@ -226,9 +226,9 @@ async def test_park_without_hold_releases_the_warm_host(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     _park_without_dbos(monkeypatch)
     flow = _warm_workflow()
-    await flow._lease_host(_NONE)
+    await flow._lease_host(db_session(), _NONE)
 
-    await sdk._park(flow, "review", None, 60.0)
+    await sdk._park(flow, OperatorReply, None, 60.0)
 
     assert fake.released == ["host-1"]
     assert fake.expiry_sets == []
@@ -243,31 +243,14 @@ async def test_park_with_hold_clips_the_lease_and_keeps_the_host(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     _park_without_dbos(monkeypatch)
     flow = _warm_workflow()
-    await flow._lease_host(_NONE)
+    await flow._lease_host(db_session(), _NONE)
 
-    await sdk._park(flow, "review", None, 60.0, hold_sandbox=True)
+    await sdk._park(flow, OperatorReply, None, 60.0, hold_sandbox=timedelta(minutes=15))
 
     assert [host_id for host_id, _ in fake.expiry_sets] == ["host-1"]
     assert fake.released == []
     assert flow._host is not None
     assert flow._host.id == "host-1"
-
-
-@pytest.mark.asyncio
-async def test_hold_true_clips_to_one_more_worst_case_call(monkeypatch):
-    """``True`` holds the VM for as long as its lease could still cover one more
-    worst-case call — past that the next call would rotate anyway."""
-    fake = _FakeSandboxClient(lease=timedelta(hours=2))
-    monkeypatch.setattr(sdk, "sandbox_client", fake)
-    flow = _warm_workflow()
-    await flow._lease_host(_NONE)
-
-    await flow._hold_host(True)
-
-    ((_, expires_at),) = fake.expiry_sets
-    clip = datetime.now(UTC) + timedelta(seconds=SANDBOX_HOST_ROTATE_BEFORE_SECONDS)
-    assert clip - timedelta(seconds=5) <= expires_at <= clip
-    assert expires_at <= flow._host.expires_at
 
 
 @pytest.mark.asyncio
@@ -277,7 +260,7 @@ async def test_hold_never_outlasts_the_lease_drukbox_granted(monkeypatch):
     fake = _FakeSandboxClient(lease=timedelta(minutes=20))
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
-    await flow._lease_host(_NONE)
+    await flow._lease_host(db_session(), _NONE)
 
     await flow._hold_host(timedelta(hours=1))
 
@@ -285,12 +268,12 @@ async def test_hold_never_outlasts_the_lease_drukbox_granted(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_hold_timedelta_clips_to_the_requested_span(monkeypatch):
-    """A timedelta hold ends at ``now + hold`` when the lease outlasts it."""
+async def test_hold_clips_to_the_requested_span(monkeypatch):
+    """A hold ends at ``now + hold`` when the lease outlasts it."""
     fake = _FakeSandboxClient(lease=timedelta(hours=2))
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
-    await flow._lease_host(_NONE)
+    await flow._lease_host(db_session(), _NONE)
 
     await flow._hold_host(timedelta(minutes=30))
 
@@ -307,9 +290,9 @@ async def test_hold_without_a_warm_host_touches_nothing(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     _park_without_dbos(monkeypatch)
     flow = _warm_workflow(reuse=False)
-    await flow._lease_host(_NONE)
+    await flow._lease_host(db_session(), _NONE)
 
-    await sdk._park(flow, "review", None, 60.0, hold_sandbox=True)
+    await sdk._park(flow, OperatorReply, None, 60.0, hold_sandbox=timedelta(minutes=15))
 
     assert fake.expiry_sets == []
     assert fake.released == []
@@ -324,10 +307,10 @@ async def test_resume_after_a_hold_reuses_the_held_host(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     _park_without_dbos(monkeypatch)
     flow = _warm_workflow()
-    await flow._lease_host(_NONE)
-    await sdk._park(flow, "review", None, 60.0, hold_sandbox=True)
+    await flow._lease_host(db_session(), _NONE)
+    await sdk._park(flow, OperatorReply, None, 60.0, hold_sandbox=timedelta(minutes=15))
 
-    assert await flow._lease_host(_NONE) == "host-1"
+    assert await flow._lease_host(db_session(), _NONE) == "host-1"
     assert fake.provisions == ["wf-1:workflow"]
 
 
@@ -340,11 +323,11 @@ async def test_resume_on_a_restarted_worker_re_leases_under_the_run_key(monkeypa
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     _park_without_dbos(monkeypatch)
     flow = _warm_workflow()
-    await flow._lease_host(_NONE)
-    await sdk._park(flow, "review", None, 60.0, hold_sandbox=timedelta(minutes=30))
+    await flow._lease_host(db_session(), _NONE)
+    await sdk._park(flow, OperatorReply, None, 60.0, hold_sandbox=timedelta(minutes=30))
     flow._host = None
 
-    await flow._lease_host(_NONE)
+    await flow._lease_host(db_session(), _NONE)
 
     assert fake.provisions == ["wf-1:workflow", "wf-1:workflow"]
     assert fake.released == []

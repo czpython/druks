@@ -172,8 +172,9 @@ A `Gate` defines a typed reply and a durable receive topic. When a workflow
 waits at a gate, Druks:
 
 1. Releases each warm sandbox that the workflow holds, unless the wait passes
-   `hold_sandbox`. A hold clips the Drukbox lease. It is shorter than the
-   remaining lease. The park itself still lasts up to 14 days.
+   `hold_sandbox`. A hold clips the Drukbox lease to that span. The clipped
+   lease is never longer than the remaining one. The park itself still lasts up
+   to 14 days.
 2. Records `parked` and the request for the operator.
 3. Sends an optional notification.
 4. Suspends the workflow until a reply arrives or the 14-day timeout expires.

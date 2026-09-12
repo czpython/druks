@@ -2,6 +2,7 @@ from druks.accounts.models import Account
 from druks.contrib.chat.enums import Autonomy, Role
 from druks.contrib.chat.models import Conversation
 from druks.contrib.chat.workflows import Talk
+from druks.db import db_session
 
 
 async def test_create_conversation_posts_body_and_starts_talk(druks_client, monkeypatch):
@@ -20,8 +21,8 @@ async def test_create_conversation_posts_body_and_starts_talk(druks_client, monk
 
     assert created.status_code == 201
     conversation = await Conversation.get(created.json()["id"])
-    assert conversation.title == ""
-    account = await Account.get_or_create("op@example.com")
+    assert conversation.title == "hello"
+    account = await Account.get_or_create(db_session(), "op@example.com")
     assert conversation.account_id == account.id
     assert started == [conversation.id]
     messages = await conversation.list_messages()
@@ -46,7 +47,7 @@ async def test_create_conversation_stores_an_optional_title(druks_client, monkey
 
 
 async def test_set_autonomy_updates_this_accounts_thread(druks_client):
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(db_session(), "op@example.com")
     conversation_id = (await Conversation.create(account_id=account.id, title="mine")).id
 
     response = await druks_client.post(
@@ -60,7 +61,7 @@ async def test_set_autonomy_updates_this_accounts_thread(druks_client):
 
 
 async def test_set_autonomy_misses_another_operators_thread(druks_client):
-    other = await Account.get_or_create("dev@example.com")
+    other = await Account.get_or_create(db_session(), "dev@example.com")
     conversation = await Conversation.create(account_id=other.id, title="theirs")
 
     response = await druks_client.post(

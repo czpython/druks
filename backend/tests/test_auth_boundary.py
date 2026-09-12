@@ -40,6 +40,9 @@ SESSION_ONLY_API_ROUTES = {
     ("PATCH", "/api/settings/apps"),
     ("POST", "/api/services/{slug}"),
     ("GET", "/api/oauth/{slug}/connect"),
+    ("GET", "/api/oauth/callback"),
+    ("GET", "/api/core/github/manifest/callback"),
+    ("GET", "/api/mcp-servers/oauth/callback"),
     ("GET", "/api/oauth/connections"),
     ("DELETE", "/api/oauth/connections/{connection_id}"),
 }
@@ -50,6 +53,9 @@ DUAL_GATED_API_PATHS = {
     "/api/settings/apps",
     "/api/services/{slug}",
     "/api/oauth/{slug}/connect",
+    "/api/oauth/callback",
+    "/api/core/github/manifest/callback",
+    "/api/mcp-servers/oauth/callback",
     "/api/oauth/connections",
     "/api/oauth/connections/{connection_id}",
 }

@@ -1,11 +1,12 @@
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.context import current_account_id
+from druks.accounts.dependencies import current_session_account
 from druks.api.dependencies import SessionDep
 from druks.apps.registry import mcp_servers
 from druks.core.templates import render_page
@@ -221,7 +222,11 @@ async def connect_mcp_server(
     return ConnectMcpServerResponse(authorization_url=authorization_url)
 
 
-@router.get("/oauth/callback", response_class=HTMLResponse)
+@router.get(
+    "/oauth/callback",
+    response_class=HTMLResponse,
+    dependencies=[Depends(current_session_account)],
+)
 async def oauth_callback(
     session: SessionDep, state: str = "", code: str = "", error: str = ""
 ) -> HTMLResponse:

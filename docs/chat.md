@@ -13,8 +13,8 @@ operator. Other accounts cannot read it.
 
 1. Open **Chat → Conversations**.
 2. Choose **New**.
-3. Enter the first message. A title is optional. An empty title is filled from
-   the first user line after the first assistant reply.
+3. Enter the first message. A title is optional. An empty title takes the
+   first line of that message.
 4. Choose **Start**.
 
 That start creates the thread and one Talk run. Later lines answer the parked
@@ -27,11 +27,14 @@ Each conversation has a mode. A change applies on the next agent call.
 
 | Mode | Tools |
 | --- | --- |
-| **propose** (default) | Read tools only. Mutating tools do not run. The agent proposes the action in the thread. You commit it in the real dashboard. |
-| **confirm** | The live catalog is visible. Mutating tools stash the call. After the turn, a confirm gate asks you to approve or reject before the next user line. |
-| **full** | Tools run immediately as your account. |
+| **propose** (default) | Read tools only. A write is refused, and the agent sees no mutating tool. The agent describes the action in the thread. You do it in the dashboard. |
+| **confirm** | The live catalog is visible. A write through an MCP tool is recorded, not performed. After the turn, a gate asks you to approve or reject. The thread then says what ran. |
+| **full** | Writes run at once as your account. |
 
-Set the mode on the conversation. The next Talk call reads the live row.
+Set the mode on the conversation. The next Talk call reads the live row. The
+mode holds at the door, so it covers every route and not only the MCP tools.
+Only a write that comes through an MCP tool can be recorded for confirm; a
+write by any other route is refused.
 
 Chat uses the same `/mcp` catalog as an external agent. It is not a second
 catalog and it does not replace [Connect your agent](connect-your-agent.md).
@@ -52,8 +55,7 @@ and still works.
 lease lapses. `review()` and any park without `hold_sandbox` still delete the
 host at once.
 
-`druks doctor` reports that Chat is bundled. It also probes `/mcp` when sandbox
-execution is on. Set `urls.endpoint` so a sandbox can reach this appliance.
-A Docker sandbox rewrites a loopback dashboard URL to
-`host.docker.internal`. See
+Set `urls.endpoint` so a sandbox can reach this appliance. Without it a turn
+fails and names the setting. A Docker sandbox rewrites a loopback dashboard URL
+to `host.docker.internal`. See
 [public URLs](configuration.md#public-urls-and-access-control).

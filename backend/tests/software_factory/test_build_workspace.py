@@ -98,6 +98,7 @@ async def test_get_workspace_kwargs_carries_the_build_fields():
     assert kwargs == {
         "host": host,
         "subject": workflow.__dict__["subject"],
+        "run_id": "",
         "branch": None,
         "skills": ("python-house-rules",),
     }

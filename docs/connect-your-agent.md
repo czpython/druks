@@ -78,4 +78,3 @@ A Talk sandbox calls the same `/mcp` tools as the signed-in operator. Mint a
 personal access token when Claude Code or Codex should talk *into* Druks from
 your laptop. Chat does not use that token. It mints a call-scoped credential
 that dies with the agent call.
-

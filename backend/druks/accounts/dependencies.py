@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import HTTPConnection
 
 from druks.accounts.context import current_account_id
+from druks.accounts.enums import OperatorWrites
 from druks.accounts.exceptions import (
     AuthConfigurationError,
     InvalidAssertionError,
@@ -26,12 +27,17 @@ async def resolve_pat_account(
     session: AsyncSession, request: HTTPConnection, credentials: HTTPAuthorizationCredentials | None
 ) -> Account:
     """A present Authorization must authenticate — never a fall-through. A
-    token limited to agent tools passes only their routes."""
+    token limited to agent tools passes only their routes, and an operator
+    token that may not write passes only reads."""
     if credentials:
         try:
             operator = await OperatorToken.lookup(credentials.credentials)
             if operator:
-                return await Account.get_for_run(session, operator.account_id)
+                # The box holds this token and this appliance's URL, so its
+                # write mode has to hold here, not only on the MCP tools.
+                if request.scope["method"] == "GET" or operator.writes == OperatorWrites.ALLOW:
+                    return await Account.get_for_run(session, operator.account_id)
+                raise HTTPException(status_code=403, detail="This operator token may only read.")
             pat = await PersonalAccessToken.authenticate(session, credentials.credentials)
         except InvalidPatError as error:
             raise HTTPException(

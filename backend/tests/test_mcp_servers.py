@@ -17,6 +17,7 @@ from druks.mcp.exceptions import (
     InvalidServerNameError,
     MissingEndpointError,
     MissingTokenError,
+    ReservedServerNameError,
 )
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.inbound import get_druks_mcp_server
@@ -120,6 +121,13 @@ async def test_create_rejects_names_that_break_env_or_config(druks_db):
     for bad in ("linear-app", "1linear", "Linear", "linear.app", "linear app"):
         with pytest.raises(InvalidServerNameError, match="Invalid MCP server name"):
             await McpServer.create(druks_db, name=bad, url=_LINEAR_URL, token=_TOKEN)
+
+
+async def test_create_refuses_the_name_this_appliance_delivers_under(druks_db):
+    """This appliance's own /mcp owns that config key. A row claiming it would
+    collide in the VM's config, so the operator hears about it at creation."""
+    with pytest.raises(ReservedServerNameError, match="reserved"):
+        await McpServer.create(druks_db, name=DRUKS_SERVER_NAME, url=_LINEAR_URL, token=_TOKEN)
 
 
 async def test_valid_name_derives_shell_safe_env_var(druks_db):
