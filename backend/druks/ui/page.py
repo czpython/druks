@@ -164,11 +164,12 @@ def list_pages_for_app(app_name: str, package: str) -> list[PageRoute]:
         return []
 
     landing = [page_route for page_route in declared if page_route.route == "/"]
-    if len(landing) != 1:
+    if len(landing) > 1:
         named = sorted(page_route.name for page_route in landing)
         raise PageRouteError(
             f"app {app_name!r} declares {len(landing)} pages at '/' ({named}). Declare "
-            "exactly one: it is the page the app opens on."
+            "at most one: it is the page the app opens on. An app whose shell home is "
+            "a React route may declare none."
         )
 
     by_name: dict[str, PageRoute] = {}

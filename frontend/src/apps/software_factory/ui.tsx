@@ -1,3 +1,4 @@
+import { AppPage } from '../../druksui/AppPage'
 import { registerAppUI, targetQuery } from '../registry'
 import { SOFTWARE_FACTORY } from './api'
 import { parseLeadingId } from './slug'
@@ -13,6 +14,8 @@ registerAppUI({
   home: `/${SOFTWARE_FACTORY}`,
   navigation: [
     [`/${SOFTWARE_FACTORY}`, 'Overview'],
+    [`/${SOFTWARE_FACTORY}/board`, 'board'],
+    [`/${SOFTWARE_FACTORY}/list`, 'list'],
     [`/${SOFTWARE_FACTORY}/history`, 'history'],
     [`/${SOFTWARE_FACTORY}/projects`, 'projects'],
   ],
@@ -28,6 +31,12 @@ registerAppUI({
       : undefined,
   routes: [
     { path: `/${SOFTWARE_FACTORY}`, render: () => <WorkItemsPage /> },
+    { path: `/${SOFTWARE_FACTORY}/board`, render: () => <AppPage app={SOFTWARE_FACTORY} page="board" /> },
+    { path: `/${SOFTWARE_FACTORY}/list`, render: () => <AppPage app={SOFTWARE_FACTORY} page="list" /> },
+    {
+      path: `/${SOFTWARE_FACTORY}/tickets/:identifier`,
+      render: () => <AppPage app={SOFTWARE_FACTORY} page="ticket" />,
+    },
     { path: `/${SOFTWARE_FACTORY}/history`, render: () => <HistoryPage /> },
     { path: `/${SOFTWARE_FACTORY}/projects`, render: () => <ProjectsPage /> },
     {
