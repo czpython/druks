@@ -27,7 +27,7 @@ The contract uses eight terms. Each one has one meaning.
 | `Page` | One screen. A page function returns it. |
 | `Block` | One piece of a page. Blocks nest. |
 | `Value` | One rendered datum inside a block. |
-| `Field` | One named input that the shell collects before an action runs. |
+| `Field` | One named input. An action collects it before it runs. A page filter collects it in the URL query. |
 | `Action` | A control that calls one of the app's operations. |
 | `Link` | A control that navigates. |
 | `operation` | The `operation_id` of an app route. |
@@ -137,9 +137,10 @@ cause.
 - A child declaration can live in another module.
 - A child inherits every parameter of its parent route.
 - An extra child parameter must come from the relative child path.
-- A page function takes one parameter for each parameter of its route, and no
-  others. Each one must be callable by name, so a positional-only or variadic
-  parameter is a boot error.
+- A page function takes one required parameter for each parameter of its route.
+  Extra parameters must have defaults. FastAPI binds them from the query string
+  as filters. Each parameter must be callable by name, so a positional-only or
+  variadic parameter is a boot error.
 - A catch-all is the last segment of its route. A catch-all anywhere else would
   swallow every route under it, so it is a boot error.
 - A static child is a tab. The parent is the first tab.
@@ -173,6 +174,31 @@ in. Route matching sorts the table, so that order survives only here.
 placeholder from the `Link` `arguments` and percent-encodes the value.
 `arguments` values are strings; FastAPI coerces each one to the type the page
 declares. A `Link` missing an argument reads as broken.
+
+A page function can take extra parameters with defaults. Those are query
+filters. The shell keeps their values in the URL and sends them on every page
+read. `run` and `parkedAt` stay the shell's: they name a parked decision, not a
+filter.
+
+```python
+@ui.page("/peers")
+async def peers(status: str = ""):
+    return ui.Page(
+        "Peers",
+        filters=[
+            ui.SelectField(
+                name="status",
+                label="Status",
+                options=[
+                    ui.Option("Any", value=""),
+                    ui.Option("Live", value="live"),
+                ],
+                value=status,
+            )
+        ],
+        blocks=[...],
+    )
+```
 
 The parent of a page is its `parent` entry when it has one. Otherwise it is the
 declared page whose `path` is the longest proper prefix of this page's `path`,
@@ -683,6 +709,7 @@ class Card:
     description: str = ""
     blocks: list[Block] = []
     controls: list[Action | Link] = []
+    link: Link | None = None
 ```
 
 ```json
@@ -691,9 +718,15 @@ class Card:
   "title": "peer-7",
   "description": "Last answered 4 minutes ago.",
   "blocks": [{"block": "text", "text": "Healthy."}],
-  "controls": [{"block": "link", "label": "Open", "page": "peer", "arguments": {"peer_id": "7"}, "url": ""}]
+  "controls": [],
+  "link": {"block": "link", "label": "peer-7", "page": "peer", "arguments": {"peer_id": "7"}, "url": ""}
 }
 ```
+
+`link` is the card's destination. With no `controls`, the shell makes the whole
+panel the control. With `controls`, the title carries the link so a button is
+not nested inside an anchor. A linked card should not hold other links in
+`blocks`.
 
 ### Cards
 
@@ -719,7 +752,14 @@ One card for each of a set of things.
 ```python
 ui.Cards(
     title="Peers",
-    cards=[ui.Card(title=peer.name, blocks=[...], controls=[...]) for peer in peers],
+    cards=[
+        ui.Card(
+            title=peer.name,
+            blocks=[...],
+            link=ui.Link(peer.name, page="peer", arguments={"peer_id": str(peer.id)}),
+        )
+        for peer in peers
+    ],
     empty=ui.EmptyState("No peer yet", controls=[ui.Link("Add one", page="new_peer")]),
 )
 ```
@@ -849,6 +889,8 @@ class Form:
     description: str = ""
     fields: list[Field] = []
     action: Action
+    submit: Literal["button", "change"] = "button"
+    layout: Literal["stack", "prose", "row"] = "stack"
 ```
 
 ```python
@@ -891,9 +933,15 @@ Druks refuses the form when the page function builds it.
     "confirm": "",
     "refresh": "page",
     "link": null
-  }
+  },
+  "submit": "button",
+  "layout": "stack"
 }
 ```
+
+`submit="change"` sends the form when a select changes or a text field blurs.
+The shell draws no button. `layout="prose"` is a title and body. `layout="row"`
+is a labelled property. A form cannot both submit on change and set `confirm`.
 
 ### Timeline
 
@@ -1167,6 +1215,7 @@ class Facts:
 class TableColumn:
     label: str
     align: Literal["start", "end"] = "start"
+    width: str = ""
 
 
 class TableRow:
@@ -1186,7 +1235,7 @@ class Table:
 {
   "block": "table",
   "title": "Peers",
-  "columns": [{"label": "Peer", "align": "start"}, {"label": "Answers", "align": "end"}],
+  "columns": [{"label": "Peer", "align": "start", "width": ""}, {"label": "Answers", "align": "end", "width": ""}],
   "rows": [
     {
       "cells": [
@@ -1199,10 +1248,12 @@ class Table:
 }
 ```
 
-Every row must have one cell for each column. With no rows the shell shows
-`empty_text`, and nothing of its own. A wide table scrolls inside its own
-container, on a narrow screen as well: a stacked row would lose the header each
-cell belongs to.
+Every row must have one cell for each column. With no rows the shell still
+draws the columns and shows `empty_text` in the body. `width` on a column is
+a CSS size that column keeps in every table that names it; empty shares the
+leftover. A cell that overruns its column stays on one line with an ellipsis.
+A wide table scrolls inside its own container, on a narrow screen as
+well: a stacked row would lose the header each cell belongs to.
 
 A row's `detail` is the sentence it has no room for — the failure behind a
 status, the reason behind a verdict. The shell keeps it folded and the reader
@@ -1244,15 +1295,16 @@ class Stack:
 ```python
 class Columns:
     block: Literal["columns"] = "columns"
+    layout: Literal["even", "sidebar"] = "even"
     blocks: list[Block] = []
 ```
 
 ```json
-{"block": "columns", "blocks": []}
+{"block": "columns", "layout": "even", "blocks": []}
 ```
 
-Each child block is one column. The columns share the width. On a narrow
-screen they stack.
+Each child block is one column. `even` shares the width. `sidebar` keeps the
+last column a rail. On a narrow screen they stack.
 
 `Stack` and `Columns` hold every V1 block, including each other. They have no
 special cases.
@@ -1372,11 +1424,17 @@ class TextAreaField:
     help_text: str = ""
     is_required: bool = False
     rows: int = 4
+    markdown: bool = False
 ```
 
 ```json
-{"field": "text_area", "name": "body", "label": "Note", "value": "", "placeholder": "", "helpText": "", "isRequired": false, "rows": 4}
+{"field": "text_area", "name": "body", "label": "Note", "value": "", "placeholder": "", "helpText": "", "isRequired": false, "rows": 4, "markdown": false}
 ```
+
+`markdown=True` keeps the value as markdown source. The shell renders formatted
+text in place. A selection toolbar applies marks, headings, lists, and links.
+Submit still sends markdown. There is no HTML roundtrip. Read-only `Markdown`
+blocks still use the GFM renderer.
 
 ### NumberField
 
@@ -1403,6 +1461,7 @@ class NumberField:
 class Option:
     value: str
     label: str
+    group: str = ""
 
 
 class SelectField:
@@ -1415,17 +1474,38 @@ class SelectField:
     is_required: bool = False
 ```
 
+```python
+ui.SelectField(
+    name="repo_id",
+    label="Repo",
+    options=[
+        ui.Option("acme/app", value="12", group="Acme"),
+        ui.Option("acme/docs", value="13", group="Acme"),
+        ui.Option("beta/api", value="14", group="Beta"),
+    ],
+    value="12",
+    is_required=True,
+)
+```
+
 ```json
 {
   "field": "select",
   "name": "severity",
   "label": "Severity",
-  "options": [{"value": "low", "label": "Low"}, {"value": "high", "label": "High"}],
+  "options": [{"value": "low", "label": "Low", "group": ""}, {"value": "high", "label": "High", "group": ""}],
   "value": "low",
   "helpText": "",
   "isRequired": true
 }
 ```
+
+A non-empty `group` nests the option in an `<optgroup>` of that name.
+Consecutive options that share a group share one group. An empty `group` is a
+flat choice. Radio and multi-select ignore `group`. A required select whose
+`value` is not among the options starts on the first option. The browser already
+paints that choice; submitting the empty declared value would send a blank to
+the operation.
 
 ### MultiSelectField
 
@@ -1445,7 +1525,7 @@ class MultiSelectField:
   "field": "multi_select",
   "name": "tags",
   "label": "Tags",
-  "options": [{"value": "rack", "label": "Rack"}],
+  "options": [{"value": "rack", "label": "Rack", "group": ""}],
   "value": ["rack"],
   "helpText": "",
   "isRequired": false
@@ -1470,7 +1550,7 @@ class RadioField:
   "field": "radio",
   "name": "decision",
   "label": "Decision",
-  "options": [{"value": "approve", "label": "Approve"}],
+  "options": [{"value": "approve", "label": "Approve", "group": ""}],
   "value": "",
   "helpText": "",
   "isRequired": true
@@ -1628,6 +1708,7 @@ class Page:
     title: str
     description: str = ""
     controls: list[Action | Link] = []
+    filters: list[Field] = []
     blocks: list[Block] = []
     follows: Follows | None = None
 ```
@@ -1637,6 +1718,7 @@ class Page:
   "title": "peer-7",
   "description": "One peer and its last sweep.",
   "controls": [],
+  "filters": [],
   "blocks": [{"block": "text", "text": "Healthy."}],
   "follows": {"subjectType": "peers", "subjectId": "7"}
 }
@@ -1645,10 +1727,15 @@ class Page:
 A page's controls belong to that page. The shell chooses where to show them. An
 action in `blocks` stays with the body content.
 
+`filters` are fields the shell renders in the page chrome. Changing one updates
+the URL query and rereads the page. Empty `value` means any. They are not
+actions: they do not call an operation.
+
 `Page`, `Section`, `Card` and `EmptyState` all take `controls` the same way: a
 list of `Action` and `Link`, in the order the app wants them read. An `Action`
 calls one of the app's operations; a `Link` navigates. Both are things an
-operator presses, so they share the row.
+operator presses, so they share the row. A `Card` can also take `link`. That is
+the card's destination, not a control on the row.
 
 ```python
 return ui.Page(

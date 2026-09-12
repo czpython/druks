@@ -331,7 +331,8 @@
           "placeholder": "",
           "helpText": "",
           "isRequired": false,
-          "rows": 4
+          "rows": 4,
+          "markdown": false
         },
         {
           "field": "number",

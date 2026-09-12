@@ -53,8 +53,9 @@ name must match `App.name`. The same name scopes:
 - Provider credentials and prerequisites that are specific to the domain
 - Optional static frontend assets in the app package.
 
-The bundled `software_factory` app owns projects, work items, ticket intake,
-GitHub branches, pull requests, coding-agent policy, and dashboard pages. These
+The bundled `software_factory` app owns projects, work items, ticket intake
+(Linear, Jira, or the local board), GitHub branches, pull requests,
+coding-agent policy, and dashboard pages. These
 features are examples, not platform guarantees.
 
 ## Durability and recovery

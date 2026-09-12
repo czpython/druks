@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { useFlashNote } from '../../../lib/useFlashNote'
+import { useDruksIssuesTracker } from '../tracker'
 import { projectsApi } from './api'
 import { repoProfiling, useRepoRuns, type RepoProfiling } from './profiling'
 import type { Project, ProjectRepo } from './types'
@@ -21,6 +22,7 @@ function splitRepo(full: string): { org: string; short: string } {
 
 export function ProjectsPage() {
   const queryClient = useQueryClient()
+  const isDruksIssues = useDruksIssuesTracker() === true
   const runs = useRepoRuns()
   const anyProfiling = [...runs.values()].some((status) => status.state === 'running')
   const { data, isLoading, isError } = useQuery({
@@ -31,20 +33,25 @@ export function ProjectsPage() {
     refetchInterval: anyProfiling ? 3_000 : 30_000,
   })
 
-  const [draft, setDraft] = useState('')
+  const [draftName, setDraftName] = useState('')
+  const [draftPrefix, setDraftPrefix] = useState('')
   // A project delete can still fail (a race, a server error); surface it here at
   // page level as a transient error toast so it's never a silent no-op.
   const [deleteError, setDeleteError] = useFlashNote<string>()
   const createMutation = useMutation({
     mutationFn: projectsApi.create,
     onSuccess: () => {
-      setDraft('')
+      setDraftName('')
+      setDraftPrefix('')
       void queryClient.invalidateQueries({ queryKey: ['projects'] })
     },
   })
   const onCreate = () => {
-    const name = draft.trim()
-    if (name) createMutation.mutate({ name })
+    const name = draftName.trim()
+    if (name) {
+      const prefix = isDruksIssues ? draftPrefix.trim() : ''
+      createMutation.mutate(prefix ? { name, prefix } : { name })
+    }
   }
 
   if (isLoading) {
@@ -82,8 +89,11 @@ export function ProjectsPage() {
           action={
             <div className="pj-empty-create">
               <CreateRow
-                value={draft}
-                onChange={setDraft}
+                name={draftName}
+                prefix={draftPrefix}
+                showPrefix={isDruksIssues}
+                onNameChange={setDraftName}
+                onPrefixChange={setDraftPrefix}
                 onCreate={onCreate}
                 pending={createMutation.isPending}
               />
@@ -94,14 +104,22 @@ export function ProjectsPage() {
       ) : (
         <div className="pj-list">
           <CreateRow
-            value={draft}
-            onChange={setDraft}
+            name={draftName}
+            prefix={draftPrefix}
+            showPrefix={isDruksIssues}
+            onNameChange={setDraftName}
+            onPrefixChange={setDraftPrefix}
             onCreate={onCreate}
             pending={createMutation.isPending}
           />
           <Field error={createMutation.error && String(createMutation.error)} />
           {data.projects.map((p) => (
-            <ProjectCard key={p.id} project={p} onDeleteError={setDeleteError} />
+            <ProjectCard
+              key={p.id}
+              project={p}
+              showPrefix={isDruksIssues}
+              onDeleteError={setDeleteError}
+            />
           ))}
         </div>
       )}
@@ -110,27 +128,44 @@ export function ProjectsPage() {
 }
 
 function CreateRow({
-  value,
-  onChange,
+  name,
+  prefix,
+  showPrefix,
+  onNameChange,
+  onPrefixChange,
   onCreate,
   pending,
 }: {
-  value: string
-  onChange: (v: string) => void
+  name: string
+  prefix: string
+  showPrefix: boolean
+  onNameChange: (v: string) => void
+  onPrefixChange: (v: string) => void
   onCreate: () => void
   pending: boolean
 }) {
-  const enabled = value.trim().length > 0 && !pending
+  const enabled = name.trim().length > 0 && !pending
   return (
     <div className="pj-create">
       <TextInput
         placeholder="new project name (e.g. 'Acme')"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={name}
+        onChange={(e) => onNameChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && enabled) onCreate()
         }}
       />
+      {showPrefix && (
+        <input
+          className="set-select pj-create-prefix"
+          placeholder="prefix (DRU)"
+          value={prefix}
+          onChange={(e) => onPrefixChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && enabled) onCreate()
+          }}
+        />
+      )}
       <Button variant="primary" disabled={!enabled} onClick={onCreate}>
         + create
       </Button>
@@ -140,9 +175,11 @@ function CreateRow({
 
 function ProjectCard({
   project,
+  showPrefix,
   onDeleteError,
 }: {
   project: Project
+  showPrefix: boolean
   onDeleteError: (message: string) => void
 }) {
   const queryClient = useQueryClient()
@@ -152,11 +189,20 @@ function ProjectCard({
   const [adding, setAdding] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [name, setName] = useState(project.name)
+  const [editingPrefix, setEditingPrefix] = useState(false)
+  const [prefix, setPrefix] = useState(project.prefix ?? '')
 
   const rename = useMutation({
     mutationFn: (next: string) => projectsApi.update(project.id, { name: next }),
     onSuccess: () => {
       setEditingName(false)
+      invalidate()
+    },
+  })
+  const savePrefix = useMutation({
+    mutationFn: (next: string) => projectsApi.update(project.id, { prefix: next }),
+    onSuccess: () => {
+      setEditingPrefix(false)
       invalidate()
     },
   })
@@ -215,6 +261,40 @@ function ProjectCard({
             </span>
           )}
           <span className="pj-repocount mono">{repoCount}</span>
+          {showPrefix &&
+            (editingPrefix ? (
+              <input
+                className="pj-prefix-input mono"
+                value={prefix}
+                autoFocus
+                placeholder="DRU"
+                onChange={(e) => setPrefix(e.target.value)}
+                onBlur={() => {
+                  const next = prefix.trim().toUpperCase()
+                  if (next !== (project.prefix ?? '')) savePrefix.mutate(next)
+                  else {
+                    setPrefix(project.prefix ?? '')
+                    setEditingPrefix(false)
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                  if (e.key === 'Escape') {
+                    setPrefix(project.prefix ?? '')
+                    setEditingPrefix(false)
+                    savePrefix.reset()
+                  }
+                }}
+              />
+            ) : (
+              <span
+                className={`pj-prefix mono ${project.prefix ? '' : 'pj-prefix-empty'}`}
+                onClick={() => setEditingPrefix(true)}
+                title="click to set ticket prefix"
+              >
+                {project.prefix ?? 'prefix'}
+              </span>
+            ))}
         </div>
         <button
           type="button"
@@ -232,6 +312,20 @@ function ProjectCard({
         >
           delete
         </button>
+        {savePrefix.error ? (
+          <p className="pj-prefix-note" role="alert">
+            {savePrefix.error instanceof Error
+              ? savePrefix.error.message
+              : String(savePrefix.error)}
+          </p>
+        ) : (
+          showPrefix &&
+          !project.prefix && (
+            <p className="pj-prefix-note">
+              Without a prefix, this project's repos cannot be selected in Issues.
+            </p>
+          )
+        )}
       </header>
 
       {!collapsed && (

@@ -187,13 +187,16 @@ class Action(PageBlock):
 
 class Form(PageBlock):
     """Inputs and the action that submits them. The shell sends the action's
-    arguments and the field values as one object."""
+    arguments and the field values as one object. ``submit="change"`` sends
+    on blur for text and on change for a select, with no button."""
 
     block: Literal["form"] = "form"
     title: str = ""
     description: str = ""
     fields: list[FormField] = Field(default_factory=list)
     action: Action
+    submit: Literal["button", "change"] = "button"
+    layout: Literal["stack", "prose", "row"] = "stack"
 
     def iter_actions(self) -> "Iterable[Action]":
         yield self.action
@@ -206,6 +209,11 @@ class Form(PageBlock):
         if self.action.fields:
             raise ValueError(
                 f"form {self.title!r} has fields on its action. Put all form fields on the form."
+            )
+        if self.submit == "change" and self.action.confirm:
+            raise ValueError(
+                f"form {self.title!r} submits on change and also asks to confirm. "
+                "A confirm is a press; give the form a button, or drop confirm."
             )
         _check_field_names(
             owner=f"form {self.title!r}",
@@ -524,6 +532,9 @@ class Facts(PageBlock):
 class TableColumn(Schema):
     label: str
     align: Literal["start", "end"] = "start"
+    # Empty: the shell shares leftover width. Set: that column keeps this size
+    # in every table that names it, so stacked groups line up.
+    width: str = ""
 
     def __init__(self, label, **data):
         super().__init__(label=label, **data)
@@ -539,7 +550,8 @@ class TableRow(Schema):
 
 class Table(PageBlock):
     """Rows of values under named columns. Every row carries one cell for each
-    column; with no rows the shell shows ``empty_text``."""
+    column; with no rows the shell still draws the columns and shows
+    ``empty_text`` in the body."""
 
     block: Literal["table"] = "table"
     title: str = ""
@@ -578,20 +590,25 @@ class Stack(BlockParent):
 
 
 class Columns(BlockParent):
-    """Blocks across the page. Each child is one column; they share the width
-    and stack on a narrow screen."""
+    """Blocks across the page. ``even`` shares the width. ``sidebar`` keeps
+    the last column a rail. They stack on a narrow screen."""
 
     block: Literal["columns"] = "columns"
+    layout: Literal["even", "sidebar"] = "even"
 
     def __init__(self, blocks=(), **data):
         super().__init__(blocks=blocks, **data)
 
 
 class Card(BlockParent):
+    """A titled panel. ``link`` is its destination. The shell makes the whole
+    panel the control when ``controls`` is empty."""
+
     block: Literal["card"] = "card"
     title: str = ""
     description: str = ""
     controls: list[Action | Link] = Field(default_factory=list)
+    link: Link | None = None
 
     def iter_actions(self) -> "Iterable[Action]":
         yield from super().iter_actions()
@@ -602,6 +619,8 @@ class Card(BlockParent):
         super().check_placement(followed=followed, regions=regions, region=region)
         for control in self.controls:
             control.check_placement(followed=followed, regions=regions, region=region)
+        if self.link:
+            self.link.check_placement(followed=followed, regions=regions, region=region)
 
 
 class Cards(PageBlock):

@@ -96,6 +96,14 @@ export default defineConfig({
           ) {
             return 'markdown-vendor'
           }
+          if (
+            id.includes('node_modules/@tiptap') ||
+            id.includes('node_modules/prosemirror-') ||
+            id.includes('node_modules/marked') ||
+            id.includes('node_modules/@floating-ui')
+          ) {
+            return 'tiptap-vendor'
+          }
           if (id.includes('node_modules/@tanstack/react-query')) {
             return 'query-vendor'
           }

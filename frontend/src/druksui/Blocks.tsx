@@ -1,12 +1,13 @@
 import { useContext } from 'react'
+import { Link as RouteLink } from 'wouter'
 
-import type { Action, Block, Link } from '../api/types'
+import type { Action, Block, CardBlock, Link } from '../api/types'
 import { Markdown } from '../components/Markdown'
 import { GateControls } from './GateControls'
 import { Chart, Facts, ImageGallery, LinkControl, List, Metrics, Table } from './DataBlocks'
 import { ActionButton, Form } from './Form'
 import { Files, Image, Progress, Timeline } from './RunBlocks'
-import { PagesContext, RegionContext } from './pages'
+import { hrefForLink, PagesContext, RegionContext } from './pages'
 
 export function Blocks({ blocks }: { blocks: Block[] }) {
   return (
@@ -42,6 +43,8 @@ function BlockContent({ block }: { block: Block }) {
           description={block.description}
           fields={block.fields}
           action={block.action}
+          submit={block.submit ?? 'button'}
+          layout={block.layout ?? 'stack'}
         />
       )
     case 'gate_controls':
@@ -102,7 +105,7 @@ function BlockContent({ block }: { block: Block }) {
     case 'columns':
       if (!block.blocks.length) return null
       return (
-        <div className="dui-columns">
+        <div className={`dui-columns${block.layout === 'sidebar' ? ' dui-columns-sidebar' : ''}`}>
           {block.blocks.map((column, index) => (
             <div key={index} className="dui-column">
               <BlockContent block={column} />
@@ -126,14 +129,7 @@ function BlockContent({ block }: { block: Block }) {
         </div>
       )
     case 'card':
-      return (
-        <div className="dui-card">
-          {block.title && <div className="dui-card-title">{block.title}</div>}
-          {block.description && <div className="dui-card-desc dim">{block.description}</div>}
-          <Blocks blocks={block.blocks} />
-          <Controls controls={block.controls} />
-        </div>
-      )
+      return <CardPanel block={block} />
     case 'cards': {
       const inside = block.cards.length ? (
         <ul className="dui-cards">
@@ -182,6 +178,43 @@ function BlockContent({ block }: { block: Block }) {
         </div>
       )
   }
+}
+
+function CardPanel({ block }: { block: CardBlock }) {
+  const { app, pages } = useContext(PagesContext)
+  const wrapHref = block.link && !block.controls.length ? hrefForLink(block.link, app, pages) : ''
+  const title = block.title && (
+    block.link && !wrapHref ? (
+      <div className="dui-card-title">
+        <LinkControl link={block.link} label={block.title} />
+      </div>
+    ) : (
+      <div className="dui-card-title">{block.title}</div>
+    )
+  )
+  const inner = (
+    <>
+      {title}
+      {block.description && <div className="dui-card-desc dim">{block.description}</div>}
+      <Blocks blocks={block.blocks} />
+      <Controls controls={block.controls} />
+    </>
+  )
+  if (wrapHref && block.link) {
+    if (block.link.url) {
+      return (
+        <a className="dui-card" href={wrapHref} target="_blank" rel="noreferrer">
+          {inner}
+        </a>
+      )
+    }
+    return (
+      <RouteLink href={wrapHref} className="dui-card">
+        {inner}
+      </RouteLink>
+    )
+  }
+  return <div className="dui-card">{inner}</div>
 }
 
 export function Controls({ controls }: { controls: (Action | Link)[] }) {

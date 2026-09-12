@@ -232,7 +232,8 @@ export const api = {
   listApps: () => getJSON<App[]>('/api/apps'),
   // ``path`` is the location under the app's own root: "" for the landing
   // page, "/notes/7" for a detail page.
-  readPage: (app: string, path: string) => getJSON<PageSnapshot>(`/api/${app}/pages${path}`),
+  readPage: (app: string, path: string, search?: string) =>
+    getJSON<PageSnapshot>(`/api/${app}/pages${path}${search ? `?${search}` : ''}`),
   // A parked run's gate. The answer echoes ``parkedAt`` unchanged, so it names
   // the exact question it answers; a run that re-parked rejects the stale one.
   getGate: (run: string) => getJSON<Gate>(`/api/gates/${run}`),

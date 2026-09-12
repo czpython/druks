@@ -29,6 +29,7 @@ export interface ProjectRepo extends SubjectSummary {
 export interface Project {
   id: number
   name: string
+  prefix: string | null
   createdAt: string
   updatedAt: string
   repos: ProjectRepo[]
@@ -40,10 +41,12 @@ export interface ProjectsResponse {
 
 export interface CreateProjectRequest {
   name: string
+  prefix?: string | null
 }
 
 export interface UpdateProjectRequest {
   name?: string | null
+  prefix?: string | null
 }
 
 export interface AddProjectRepoRequest {

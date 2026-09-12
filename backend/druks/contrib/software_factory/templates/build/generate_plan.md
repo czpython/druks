@@ -108,7 +108,9 @@ understood and what is blocked, and leave `acceptance_criteria` empty.
 
 {% endif %}
 {% if build.journal.plan_revision == 0 %}
-On this ticket's first plan only, post ONE comment on the source ticket with your tracker tools:
+{% if build.source == "issues" %}On this ticket's first plan only, post ONE comment with `software_factory_add_comment` on the `druks` MCP (identifier `{{ build.ticket_ref }}`):
+{% else %}On this ticket's first plan only, post ONE comment on the source ticket with your tracker tools:
+{% endif %}
 two or three sentences stating what druks understood the work to be.
 {% if build.work_item_url %}Add this link on its own line: {{ build.work_item_url }}
 {% endif %}Never edit the ticket description and never post the plan itself.

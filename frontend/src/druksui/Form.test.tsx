@@ -52,7 +52,7 @@ function renderBlocks(blocks: Block[]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const rendered = render(
     <QueryClientProvider client={queryClient}>
-      <Router hook={location.hook}>
+      <Router hook={location.hook} searchHook={location.searchHook}>
         <PagesContext.Provider
           value={{ app: 'field_notes', pages: PAGES, operations: OPERATIONS }}
         >
@@ -95,11 +95,11 @@ function notePage(fields: Field[]): PageSnapshot {
 
 function renderPage() {
   listApps.mockResolvedValue(ROSTER)
-  const { hook } = memoryLocation({ path: '/field_notes/notes/new' })
+  const memory = memoryLocation({ path: '/field_notes/notes/new' })
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <Router hook={hook}>
+      <Router hook={memory.hook} searchHook={memory.searchHook}>
         <AppPage app="field_notes" page="new_note" />
       </Router>
     </QueryClientProvider>,
@@ -121,13 +121,18 @@ function action(overrides: Partial<Action> = {}): Action {
   }
 }
 
-function form(fields: Field[], sends = action()): Block {
+function form(
+  fields: Field[],
+  sends = action(),
+  extras: { submit?: 'button' | 'change'; layout?: 'stack' | 'prose' | 'row' } = {},
+): Extract<Block, { block: 'form' }> {
   return {
     block: 'form',
     title: 'New note',
     description: 'What did you see?',
     fields,
     action: sends,
+    ...extras,
   }
 }
 
@@ -383,6 +388,149 @@ describe('submitting a form', () => {
     })
   })
 
+  it('sends a live form when a text field blurs, with no Save button', async () => {
+    renderBlocks([
+      form([BODY], action({ refresh: 'none' }), { submit: 'change', layout: 'prose' }),
+    ])
+
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
+    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'Fan noise.' } })
+    fireEvent.blur(screen.getByLabelText(/Note/))
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+      body: 'Fan noise.',
+    })
+  })
+
+  it('does not send a live form that nobody changed', () => {
+    renderBlocks([
+      form([BODY], action({ refresh: 'none' }), { submit: 'change', layout: 'prose' }),
+    ])
+
+    fireEvent.blur(screen.getByLabelText(/Note/))
+    expect(callOperation).not.toHaveBeenCalled()
+  })
+
+  it('sends a live select as soon as it changes', async () => {
+    renderBlocks([
+      form(
+        [
+          {
+            field: 'select',
+            name: 'severity',
+            label: 'Severity',
+            options: [
+              { value: 'low', label: 'Low' },
+              { value: 'high', label: 'High' },
+            ],
+            value: 'low',
+            helpText: '',
+            isRequired: false,
+          },
+        ],
+        action({ refresh: 'none' }),
+        { submit: 'change', layout: 'row' },
+      ),
+    ])
+
+    fireEvent.change(screen.getByLabelText(/Severity/), { target: { value: 'high' } })
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+      severity: 'high',
+    })
+  })
+
+  it('nests grouped select options in optgroups', () => {
+    renderBlocks([
+      form(
+        [
+          {
+            field: 'select',
+            name: 'repo_id',
+            label: 'Repo',
+            options: [
+              { value: '12', label: 'acme/app', group: 'Acme' },
+              { value: '13', label: 'acme/docs', group: 'Acme' },
+              { value: '14', label: 'beta/api', group: 'Beta' },
+            ],
+            value: '',
+            helpText: '',
+            isRequired: true,
+          },
+        ],
+        action({ refresh: 'none' }),
+      ),
+    ])
+
+    const acme = screen.getByRole('group', { name: 'Acme' })
+    expect(acme.querySelector('[value="12"]')?.textContent).toBe('acme/app')
+    expect(acme.querySelector('[value="13"]')?.textContent).toBe('acme/docs')
+    expect(screen.getByRole('group', { name: 'Beta' }).querySelector('[value="14"]')?.textContent).toBe(
+      'beta/api',
+    )
+  })
+
+  it('submits a required select’s first option when the page left the value empty', async () => {
+    renderBlocks([
+      form(
+        [
+          {
+            field: 'select',
+            name: 'repo_id',
+            label: 'Repo',
+            options: [
+              { value: '12', label: 'chaosk/boxes-n-such', group: 'BOX' },
+              { value: '13', label: 'acme/app', group: 'Acme' },
+            ],
+            value: '',
+            helpText: '',
+            isRequired: true,
+          },
+        ],
+        action({ refresh: 'none' }),
+      ),
+    ])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+      repo_id: '12',
+    })
+  })
+
+  it('renders a markdown text area as formatted text and submits markdown source', async () => {
+    renderBlocks([
+      form(
+        [
+          {
+            field: 'text_area',
+            name: 'body',
+            label: 'Description',
+            value: '**bold gist**',
+            placeholder: '',
+            helpText: '',
+            isRequired: false,
+            rows: 8,
+            markdown: true,
+          },
+        ],
+        action({ refresh: 'none' }),
+      ),
+    ])
+
+    const box = await screen.findByRole('textbox', { name: 'Description' })
+    expect(box.getAttribute('contenteditable')).toBe('true')
+    expect(screen.queryByRole('tab', { name: 'Preview' })).toBeNull()
+    await waitFor(() => expect(screen.getByText('bold gist').tagName).toBe('STRONG'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    const body = (callOperation.mock.calls[0]?.[2] as { body: string }).body
+    expect(body.trim()).toBe('**bold gist**')
+  })
+
   it('fills the path from the payload and sends what is left as the body', async () => {
     renderBlocks([
       form(
@@ -538,7 +686,7 @@ describe('what an action does next', () => {
     })
     const outside: Block = { block: 'text', text: 'Original outside text' }
     const { queryClient } = renderBlocks([outside, region])
-    const key = ['page', 'field_notes', '/notes/new']
+    const key = ['page', 'field_notes', '/notes/new', '']
     const previous: PageSnapshot = {
       title: 'Original page', description: '', controls: [], blocks: [outside, region], follows: null,
     }
@@ -640,7 +788,7 @@ describe('what an action does next', () => {
 
     rerender(
       <QueryClientProvider client={queryClient}>
-        <Router hook={location.hook}>
+        <Router hook={location.hook} searchHook={location.searchHook}>
           <PagesContext.Provider
             value={{ app: 'field_notes', pages: PAGES, operations: OPERATIONS }}
           >
@@ -661,7 +809,7 @@ describe('what an action does next', () => {
 
     rerender(
       <QueryClientProvider client={queryClient}>
-        <Router hook={location.hook}>
+        <Router hook={location.hook} searchHook={location.searchHook}>
           <PagesContext.Provider
             value={{ app: 'field_notes', pages: PAGES, operations: OPERATIONS }}
           >
@@ -682,7 +830,7 @@ describe('what an action does next', () => {
 
     rerender(
       <QueryClientProvider client={queryClient}>
-        <Router hook={location.hook}>
+        <Router hook={location.hook} searchHook={location.searchHook}>
           <PagesContext.Provider
             value={{ app: 'field_notes', pages: PAGES, operations: OPERATIONS }}
           >

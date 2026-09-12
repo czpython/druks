@@ -304,6 +304,7 @@ export interface Fact {
 export interface TableColumn {
   label: string
   align: 'start' | 'end'
+  width?: string
 }
 
 export interface TableRow {
@@ -317,6 +318,7 @@ export interface CardBlock {
   description: string
   blocks: Block[]
   controls: (Action | Link)[]
+  link?: Link | null
 }
 
 export interface EmptyStateBlock {
@@ -344,6 +346,7 @@ export interface FileSummary {
 export interface Option {
   value: string
   label: string
+  group?: string
 }
 
 interface FieldBase {
@@ -353,10 +356,17 @@ interface FieldBase {
   isRequired: boolean
 }
 
-// One named input that the shell collects before an action runs.
+// One named input. An action collects it before it runs. A page filter
+// collects it in the URL query.
 export type Field =
   | (FieldBase & { field: 'text'; value: string; placeholder: string })
-  | (FieldBase & { field: 'text_area'; value: string; placeholder: string; rows: number })
+  | (FieldBase & {
+      field: 'text_area'
+      value: string
+      placeholder: string
+      rows: number
+      markdown?: boolean
+    })
   | (FieldBase & {
       field: 'number'
       value: number | null
@@ -437,7 +447,7 @@ export type Block =
     }
   | { block: 'list'; title: string; items: Value[] }
   | { block: 'stack'; gap: 'small' | 'medium' | 'large'; blocks: Block[] }
-  | { block: 'columns'; blocks: Block[] }
+  | { block: 'columns'; layout?: 'even' | 'sidebar'; blocks: Block[] }
   | Action
   | {
       block: 'form'
@@ -445,6 +455,8 @@ export type Block =
       description: string
       fields: Field[]
       action: Action
+      submit?: 'button' | 'change'
+      layout?: 'stack' | 'prose' | 'row'
     }
   | CardBlock
   | { block: 'cards'; title: string; cards: CardBlock[]; empty: EmptyStateBlock | null }
@@ -471,6 +483,7 @@ export interface PageSnapshot {
   title: string
   description: string
   controls: (Action | Link)[]
+  filters?: Field[]
   blocks: Block[]
   follows: Follows | null
 }

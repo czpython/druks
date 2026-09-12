@@ -1,7 +1,7 @@
 import { createContext } from 'react'
 import type { SubjectTarget } from '../apps/registry'
 
-import type { Block, Follows, Operation, PageEntry, PageSnapshot } from '../api/types'
+import type { Block, Follows, Link, Operation, PageEntry, PageSnapshot } from '../api/types'
 
 // Which app's pages a block tree belongs to. A Link carries a page name, and
 // only this table turns that name into a URL — so the renderer reads it here
@@ -33,6 +33,14 @@ export function fillPath(path: string, args: Record<string, string>): string {
     return encodeURIComponent(value)
   })
   return missing ? '' : filled
+}
+
+/** Empty when the page name or an argument is missing. */
+export function hrefForLink(link: Link, app: string, pages: PageEntry[]): string {
+  if (link.url) return link.url
+  if (link.subject) return `/${app}/${link.subject.subjectType}/${link.subject.subjectId}`
+  const target = pages.find((entry) => entry.name === link.page)
+  return target ? fillPath(target.path, link.arguments) : ''
 }
 
 /** The tab strip a page belongs to: its family root first, then the root's
@@ -70,6 +78,30 @@ export function parentOf(pages: PageEntry[], current: PageEntry): PageEntry | un
  * depth, so the parameters already in the URL come along. */
 export function hrefUnder(location: string, ancestor: PageEntry): string {
   return location.split('/').slice(0, ancestor.path.split('/').length).join('/')
+}
+
+const DECISION_QUERY = new Set(['run', 'parkedAt'])
+
+/** Query string a page read carries: filters, not the decision the shell parked. */
+export function pageFilterSearch(search: string): string {
+  const query = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search)
+  for (const name of DECISION_QUERY) query.delete(name)
+  const names: string[] = []
+  query.forEach((_value, key) => names.push(key))
+  const next = new URLSearchParams()
+  for (const key of names.sort()) {
+    const value = query.get(key)
+    if (value) next.set(key, value)
+  }
+  return next.toString()
+}
+
+export function pageQueryKey(
+  app: string,
+  path: string,
+  search: string,
+): ['page', string, string, string] {
+  return ['page', app, path, search]
 }
 
 /** Every subject this snapshot watches: the page's own, and each named

@@ -1,10 +1,14 @@
+from datetime import timedelta
+
 from druks import ui
 from druks.accounts.models import Account
 from druks.contrib.software_factory.issues.enums import Priority, Status
-from druks.contrib.software_factory.issues.models import Comment, IssuesProject, Ticket
+from druks.contrib.software_factory.issues.models import Comment, Ticket
+from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
+from druks.db import Base
 
-# The board's columns, worked-on left to right. Cancelled is not a column: a
-# cancelled ticket is off the board, which is what ``Ticket.list_board`` reads.
+# The board's columns, worked-on left to right. Cancelled and blocked are off
+# it: ``Ticket.list_board`` leaves those rows out.
 BOARD_STATUSES = (
     Status.BACKLOG,
     Status.TODO,
@@ -13,16 +17,27 @@ BOARD_STATUSES = (
     Status.IN_REVIEW,
     Status.DONE,
 )
-# The list's sections, worked-on first, with the finished ones at the bottom.
+# The issues page's sections, left to right through the workflow, then parked
+# and cancelled at the bottom. Ready for Agent stays: it is still a live status.
 LIST_STATUSES = (
+    Status.BACKLOG,
+    Status.TODO,
+    Status.READY_FOR_AGENT,
     Status.IN_PROGRESS,
     Status.IN_REVIEW,
-    Status.READY_FOR_AGENT,
-    Status.TODO,
-    Status.BACKLOG,
     Status.DONE,
+    Status.BLOCKED,
     Status.CANCELLED,
 )
+
+ISSUE_COLUMNS = [
+    ui.TableColumn("Identifier", width="8rem"),
+    ui.TableColumn("Title"),
+    ui.TableColumn("Priority", width="8rem"),
+    ui.TableColumn("Assignee", width="14rem"),
+    ui.TableColumn("Repo", width="12rem"),
+    ui.TableColumn("Updated", align="end", width="9rem"),
+]
 
 # The words the screens spell a priority with. The stored value stays
 # snake_case; only these strings change when the board wants different words.
@@ -33,27 +48,24 @@ PRIORITY_LABELS: dict[Priority, str] = {
     Priority.MEDIUM: "Medium",
     Priority.LOW: "Low",
 }
-# How a status reads as a chip. Presentation only — the workflow is the enum.
-STATUS_TONES: dict[Status, str] = {
-    Status.BACKLOG: "neutral",
-    Status.TODO: "neutral",
-    Status.READY_FOR_AGENT: "warning",
-    Status.IN_PROGRESS: "active",
-    Status.IN_REVIEW: "active",
-    Status.DONE: "success",
-    Status.CANCELLED: "danger",
-}
 
 UNASSIGNED = "Unassigned"
 # An account that has since gone, or druks' own system actor: the row still
 # reads, it just carries no name.
 UNATTRIBUTED = "Unattributed"
+# Empty value on a page filter: any ticket. Assignee uses ``none`` for
+# unassigned because this empty value already means "no filter".
+FILTER_ANY = "Any"
+UNASSIGNED_FILTER = "none"
+UPDATED_WINDOWS = ("today", "week", "month")
 
 
-def _project_options(projects: list[IssuesProject]) -> list[ui.Option]:
-    """Every namespace a ticket can be minted into. No blank entry: a ticket
-    without a project could not be named."""
-    return [ui.Option(project.name, value=str(project.id)) for project in projects]
+def _repo_options(repos: list[ProjectRepo]) -> list[ui.Option]:
+    """Every registered repo whose project can mint an identifier. Grouped by
+    GitHub project so the operator picks a repo, not a second project table."""
+    return [
+        ui.Option(repo.full_name, value=str(repo.id), group=repo.project.name) for repo in repos
+    ]
 
 
 def _assignee_options(accounts: list[Account]) -> list[ui.Option]:
@@ -78,9 +90,10 @@ def _assignee_name(assignee_id: str | None, account_names: dict[str, str]) -> st
     return account_names.get(assignee_id, UNATTRIBUTED)
 
 
-def _create_actions(projects: list[IssuesProject], accounts: list[Account]) -> list[ui.Action]:
-    """Creation is a control on the board and the list, not a destination: a
-    page that lists nothing is not where a ticket gets written."""
+def _create_actions(repos: list[ProjectRepo], accounts: list[Account]) -> list[ui.Action]:
+    """Creation is a control on the board and the issues page, not a destination:
+    a page that lists nothing is not where a ticket gets written."""
+    repo_choices = _repo_options(repos)
     return [
         ui.Action(
             label="New ticket",
@@ -89,13 +102,16 @@ def _create_actions(projects: list[IssuesProject], accounts: list[Account]) -> l
             fields=[
                 ui.TextField(name="title", label="Title", is_required=True),
                 ui.SelectField(
-                    name="project_id",
-                    label="Project",
-                    options=_project_options(projects),
+                    name="repo_id",
+                    label="Repo",
+                    options=repo_choices,
+                    # An empty value still paints the first option in the browser.
+                    # The door takes an int, so the field has to start on a real id.
+                    value=repo_choices[0].value if repo_choices else "",
                     is_required=True,
-                    help_text="The namespace the identifier is minted from.",
+                    help_text="The GitHub repo this ticket's pull request will target.",
                 ),
-                ui.TextAreaField(name="description", label="Description"),
+                ui.TextAreaField(name="description", label="Description", markdown=True, rows=3),
                 ui.SelectField(
                     name="status",
                     label="Status",
@@ -115,20 +131,32 @@ def _create_actions(projects: list[IssuesProject], accounts: list[Account]) -> l
                 ),
             ],
         ),
-        ui.Action(
-            label="New project",
-            operation="create_ticket_project",
-            fields=[
-                ui.TextField(name="name", label="Name", is_required=True),
-                ui.TextField(
-                    name="prefix",
-                    label="Prefix",
-                    is_required=True,
-                    help_text="2-6 letters, A-Z — the first half of every identifier it mints.",
-                ),
-            ],
-        ),
     ]
+
+
+def _ticket_link(ticket: Ticket, label: str) -> ui.Link:
+    return ui.Link(label, page="ticket", arguments={"identifier": ticket.identifier})
+
+
+def _live_form(
+    ticket: Ticket,
+    field: ui.Field,
+    *,
+    operation: str,
+    layout: str,
+    refresh: str,
+) -> ui.Form:
+    return ui.Form(
+        fields=[field],
+        action=ui.Action(
+            label=f"Save {field.label.lower()}",
+            operation=operation,
+            arguments={"identifier": ticket.identifier},
+            refresh=refresh,
+        ),
+        submit="change",
+        layout=layout,
+    )
 
 
 def _ticket_card(ticket: Ticket, account_names: dict[str, str]) -> ui.Card:
@@ -141,31 +169,21 @@ def _ticket_card(ticket: Ticket, account_names: dict[str, str]) -> ui.Card:
     return ui.Card(
         title=ticket.title,
         description=" · ".join(description),
-        controls=[
-            ui.Link("Open", page="ticket", arguments={"identifier": ticket.identifier}),
-        ],
+        link=_ticket_link(ticket, ticket.title),
     )
 
 
-def _ticket_row(
-    ticket: Ticket,
-    project_names: dict[int, str],
-    account_names: dict[str, str],
-) -> ui.TableRow:
+def _ticket_row(ticket: Ticket, account_names: dict[str, str]) -> ui.TableRow:
     return ui.TableRow(
         [
             ui.TextValue(
                 ticket.identifier,
-                link=ui.Link(
-                    ticket.identifier,
-                    page="ticket",
-                    arguments={"identifier": ticket.identifier},
-                ),
+                link=_ticket_link(ticket, ticket.identifier),
             ),
-            ui.TextValue(ticket.title),
+            ui.TextValue(ticket.title, link=_ticket_link(ticket, ticket.title)),
             ui.TextValue(PRIORITY_LABELS[Priority(ticket.priority)]),
             ui.TextValue(_assignee_name(ticket.assignee_id, account_names)),
-            ui.TextValue(project_names.get(ticket.project_id, "")),
+            ui.TextValue(ticket.repo.full_name),
             ui.TimeValue(ticket.updated_at),
         ]
     )
@@ -182,38 +200,197 @@ def _comment_blocks(comments: list[Comment], account_names: dict[str, str]) -> l
     ]
 
 
-@ui.page("/board")
-async def board():
-    tickets = await Ticket.list_board()
-    projects = await IssuesProject.list()
+def _optional_int(raw: str) -> int | None:
+    return int(raw) if raw else None
+
+
+def _choice(raw: str, allowed: set[str], name: str) -> str:
+    if not raw:
+        return ""
+    if raw not in allowed:
+        raise ValueError(f"{name} filter {raw!r} is not one of {sorted(allowed)}")
+    return raw
+
+
+def _filter_select(name: str, label: str, options: list[ui.Option], value: str) -> ui.SelectField:
+    return ui.SelectField(
+        name=name,
+        label=label,
+        options=[ui.Option(FILTER_ANY, value=""), *options],
+        value=value,
+    )
+
+
+def _ticket_filters(
+    *,
+    status: str,
+    priority: str,
+    updated: str,
+    assignee: str,
+    creator: str,
+    project: str,
+    repo: str,
+    projects: list[Project],
+    repos: list[ProjectRepo],
+    accounts: list[Account],
+) -> list[ui.SelectField]:
+    repo_choices = [item for item in repos if not project or str(item.project_id) == project]
+    return [
+        _filter_select(
+            "status",
+            "Status",
+            [ui.Option(item.label, value=item.value) for item in Status],
+            status,
+        ),
+        _filter_select(
+            "priority",
+            "Priority",
+            [ui.Option(label, value=item.value) for item, label in PRIORITY_LABELS.items()],
+            priority,
+        ),
+        ui.SelectField(
+            name="updated",
+            label="Updated",
+            options=[
+                ui.Option(FILTER_ANY, value=""),
+                ui.Option("Today", value="today"),
+                ui.Option("Past week", value="week"),
+                ui.Option("Past month", value="month"),
+            ],
+            value=updated,
+        ),
+        ui.SelectField(
+            name="assignee",
+            label="Assignee",
+            options=[
+                ui.Option(FILTER_ANY, value=""),
+                ui.Option(UNASSIGNED, value=UNASSIGNED_FILTER),
+                *[ui.Option(account.username, value=account.id) for account in accounts],
+            ],
+            value=assignee,
+        ),
+        _filter_select(
+            "creator",
+            "Creator",
+            [ui.Option(account.username, value=account.id) for account in accounts],
+            creator,
+        ),
+        _filter_select(
+            "project",
+            "Project",
+            [ui.Option(item.name, value=str(item.id)) for item in projects],
+            project,
+        ),
+        _filter_select("repo", "Repo", _repo_options(repo_choices), repo),
+    ]
+
+
+async def _ticket_collection(
+    *,
+    exclude_cancelled: bool,
+    status: str = "",
+    priority: str = "",
+    updated: str = "",
+    assignee: str = "",
+    creator: str = "",
+    project: str = "",
+    repo: str = "",
+):
+    status = _choice(status, {item.value for item in Status}, "status")
+    priority = _choice(priority, {item.value for item in Priority}, "priority")
+    if updated and updated not in UPDATED_WINDOWS:
+        raise ValueError(f"updated filter {updated!r} is not today, week, or month")
+    updated_since = None
+    if updated:
+        now = Base.utc_now()
+        if updated == "today":
+            updated_since = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif updated == "week":
+            updated_since = now - timedelta(days=7)
+        else:
+            updated_since = now - timedelta(days=30)
+    projects = await Project.list()
+    repos = await ProjectRepo.list_for_tickets()
     accounts = await Account.list_all()
+    tickets = await Ticket.list_matching(
+        exclude_cancelled=exclude_cancelled and not status,
+        status=status,
+        priority=priority,
+        assignee=assignee,
+        creator=creator,
+        project_id=_optional_int(project),
+        repo_id=_optional_int(repo),
+        updated_since=updated_since,
+    )
+    return (
+        tickets,
+        repos,
+        accounts,
+        _ticket_filters(
+            status=status,
+            priority=priority,
+            updated=updated,
+            assignee=assignee,
+            creator=creator,
+            project=project,
+            repo=repo,
+            projects=projects,
+            repos=repos,
+            accounts=accounts,
+        ),
+    )
+
+
+@ui.page("/board")
+async def board(
+    status: str = "",
+    priority: str = "",
+    updated: str = "",
+    assignee: str = "",
+    creator: str = "",
+    project: str = "",
+    repo: str = "",
+):
+    tickets, repos, accounts, filters = await _ticket_collection(
+        exclude_cancelled=True,
+        status=status,
+        priority=priority,
+        updated=updated,
+        assignee=assignee,
+        creator=creator,
+        project=project,
+        repo=repo,
+    )
     account_names = {account.id: account.username for account in accounts}
+    columns = BOARD_STATUSES
+    if status in {Status.CANCELLED, Status.BLOCKED}:
+        columns = BOARD_STATUSES + (Status(status),)
     return ui.Page(
         "Board",
-        description="What this install is working on, a column to a status.",
-        # Built from the projects and accounts alone, so an empty install still
-        # offers both: the board is where a first ticket gets written.
-        controls=_create_actions(projects, accounts),
+        # Built from the repos and accounts alone, so an empty install still
+        # offers create: the board is where a first ticket gets written.
+        controls=_create_actions(repos, accounts),
+        filters=filters,
         blocks=[
             ui.Columns(
                 [
                     ui.Section(
-                        title=status.label,
+                        title=item.label,
                         blocks=[
                             ui.Cards(
                                 cards=[
                                     _ticket_card(ticket, account_names)
                                     for ticket in tickets
-                                    if ticket.status == status
+                                    if ticket.status == item
                                 ],
                                 empty=ui.EmptyState(
                                     "Nothing here",
-                                    description=f"No ticket is in {status.label}.",
+                                    description=f"No ticket is in {item.label}.",
                                 ),
                             )
                         ],
                     )
-                    for status in BOARD_STATUSES
+                    for item in columns
                 ]
             )
         ],
@@ -235,146 +412,189 @@ async def ticket(identifier: str):
             ],
         )
 
-    projects = await IssuesProject.list()
+    repos = await ProjectRepo.list_for_tickets()
     accounts = await Account.list_all()
-    project_names = {project.id: project.name for project in projects}
     account_names = {account.id: account.username for account in accounts}
-    status = Status(found.status)
     comments = await found.list_comments()
     thread = _comment_blocks(comments, account_names) or [
         ui.EmptyState("No comments yet", description="Say something about this ticket.")
     ]
+    build = await WorkItem.get_for_ticket_key(source="issues", ticket_key=found.identifier)
 
     return ui.Page(
-        found.title,
-        description=found.identifier,
+        found.identifier,
         # The whole page follows the ticket, so a status write from anywhere —
         # Software Factory included — redraws it without a navigation.
         follows=found,
-        controls=[
-            ui.Action(
-                label="Move",
-                operation="set_status",
-                arguments={"identifier": found.identifier},
-                fields=[
-                    ui.SelectField(
-                        name="status",
-                        label="Status",
-                        options=_status_options(),
-                        value=status.value,
-                        is_required=True,
-                    )
-                ],
-            )
-        ],
+        controls=(
+            [ui.Link("Open build", url=f"/software_factory/work-items/{build.id}")] if build else []
+        ),
         blocks=[
-            ui.Markdown(found.description or "_No description._"),
-            ui.Facts(
+            ui.Columns(
                 [
-                    ui.Fact(
-                        "Status", value=ui.StatusValue(status.label, tone=STATUS_TONES[status])
+                    ui.Stack(
+                        [
+                            ui.Form(
+                                fields=[
+                                    ui.TextField(
+                                        name="title",
+                                        label="Title",
+                                        value=found.title,
+                                        is_required=True,
+                                        placeholder="Title",
+                                    ),
+                                    ui.TextAreaField(
+                                        name="description",
+                                        label="Description",
+                                        value=found.description,
+                                        placeholder="Add a description…",
+                                        rows=12,
+                                        markdown=True,
+                                    ),
+                                ],
+                                action=ui.Action(
+                                    label="Save",
+                                    operation="update_ticket",
+                                    arguments={"identifier": found.identifier},
+                                    refresh="none",
+                                ),
+                                submit="change",
+                                layout="prose",
+                            ),
+                            ui.Section(
+                                title="Comments",
+                                # Named, so the comment below replaces this section alone and
+                                # the thread grows in place.
+                                name="comments",
+                                blocks=[
+                                    *thread,
+                                    ui.Form(
+                                        title="Add a comment",
+                                        fields=[
+                                            ui.TextAreaField(
+                                                name="body",
+                                                label="Comment",
+                                                is_required=True,
+                                                markdown=True,
+                                                rows=3,
+                                            )
+                                        ],
+                                        action=ui.Action(
+                                            label="Comment",
+                                            operation="add_comment",
+                                            arguments={"identifier": found.identifier},
+                                            tone="primary",
+                                            refresh="region",
+                                        ),
+                                    ),
+                                ],
+                            ),
+                        ],
+                        gap="large",
                     ),
-                    ui.Fact(
-                        "Priority",
-                        value=ui.TextValue(PRIORITY_LABELS[Priority(found.priority)]),
+                    ui.Stack(
+                        [
+                            _live_form(
+                                found,
+                                ui.SelectField(
+                                    name="status",
+                                    label="Status",
+                                    options=_status_options(),
+                                    value=found.status,
+                                    is_required=True,
+                                ),
+                                operation="set_status",
+                                layout="row",
+                                refresh="page",
+                            ),
+                            _live_form(
+                                found,
+                                ui.SelectField(
+                                    name="priority",
+                                    label="Priority",
+                                    options=_priority_options(),
+                                    value=found.priority,
+                                ),
+                                operation="update_ticket",
+                                layout="row",
+                                refresh="page",
+                            ),
+                            _live_form(
+                                found,
+                                ui.SelectField(
+                                    name="assignee_id",
+                                    label="Assignee",
+                                    options=_assignee_options(accounts),
+                                    value=found.assignee_id or "",
+                                ),
+                                operation="update_ticket",
+                                layout="row",
+                                refresh="page",
+                            ),
+                            _live_form(
+                                found,
+                                ui.SelectField(
+                                    name="repo_id",
+                                    label="Repo",
+                                    options=_repo_options(repos),
+                                    value=str(found.repo_id),
+                                ),
+                                operation="update_ticket",
+                                layout="row",
+                                refresh="page",
+                            ),
+                            ui.Facts(
+                                [
+                                    ui.Fact("Identifier", value=ui.TextValue(found.identifier)),
+                                    ui.Fact("Created", value=ui.TimeValue(found.created_at)),
+                                    ui.Fact("Updated", value=ui.TimeValue(found.updated_at)),
+                                ]
+                            ),
+                        ],
+                        gap="small",
                     ),
-                    ui.Fact(
-                        "Assignee",
-                        value=ui.TextValue(_assignee_name(found.assignee_id, account_names)),
-                    ),
-                    ui.Fact(
-                        "Project",
-                        value=ui.TextValue(project_names.get(found.project_id, "")),
-                    ),
-                    ui.Fact("Identifier", value=ui.TextValue(found.identifier)),
                 ],
-                title="Details",
-            ),
-            ui.Form(
-                title="Edit",
-                fields=[
-                    ui.TextField(name="title", label="Title", value=found.title, is_required=True),
-                    ui.TextAreaField(
-                        name="description", label="Description", value=found.description
-                    ),
-                    ui.SelectField(
-                        name="priority",
-                        label="Priority",
-                        options=_priority_options(),
-                        value=found.priority,
-                    ),
-                    ui.SelectField(
-                        name="assignee_id",
-                        label="Assignee",
-                        options=_assignee_options(accounts),
-                        value=found.assignee_id or "",
-                    ),
-                    ui.SelectField(
-                        name="project_id",
-                        label="Project",
-                        options=_project_options(projects),
-                        value=str(found.project_id),
-                    ),
-                ],
-                action=ui.Action(
-                    label="Save",
-                    operation="update_ticket",
-                    arguments={"identifier": found.identifier},
-                ),
-            ),
-            ui.Section(
-                title="Comments",
-                # Named, so the comment below replaces this section alone and
-                # the thread grows in place.
-                name="comments",
-                blocks=[
-                    *thread,
-                    ui.Form(
-                        title="Add a comment",
-                        fields=[ui.TextAreaField(name="body", label="Comment", is_required=True)],
-                        action=ui.Action(
-                            label="Comment",
-                            operation="add_comment",
-                            arguments={"identifier": found.identifier},
-                            tone="primary",
-                            refresh="region",
-                        ),
-                    ),
-                ],
-            ),
+                layout="sidebar",
+            )
         ],
     )
 
 
-# Declared last: the name is the page's name, and binding it shadows the
-# builtin for the rest of the module.
-@ui.page("/list")
-async def list():
-    projects = await IssuesProject.list()
-    accounts = await Account.list_all()
-    project_names = {project.id: project.name for project in projects}
+@ui.page("/issues")
+async def issues(
+    status: str = "",
+    priority: str = "",
+    updated: str = "",
+    assignee: str = "",
+    creator: str = "",
+    project: str = "",
+    repo: str = "",
+):
+    tickets, repos, accounts, filters = await _ticket_collection(
+        exclude_cancelled=False,
+        status=status,
+        priority=priority,
+        updated=updated,
+        assignee=assignee,
+        creator=creator,
+        project=project,
+        repo=repo,
+    )
     account_names = {account.id: account.username for account in accounts}
     sections = []
-    for status in LIST_STATUSES:
-        rows = await Ticket.list_for_status(status)
+    for item in LIST_STATUSES:
+        rows = [ticket for ticket in tickets if ticket.status == item]
         sections.append(
             ui.Table(
-                title=status.label,
-                columns=[
-                    ui.TableColumn("Identifier"),
-                    ui.TableColumn("Title"),
-                    ui.TableColumn("Priority"),
-                    ui.TableColumn("Assignee"),
-                    ui.TableColumn("Project"),
-                    ui.TableColumn("Updated", align="end"),
-                ],
-                rows=[_ticket_row(row, project_names, account_names) for row in rows],
-                empty_text=f"No ticket is in {status.label}.",
+                title=f"{item.label} ({len(rows)})",
+                columns=ISSUE_COLUMNS,
+                rows=[_ticket_row(row, account_names) for row in rows],
+                empty_text=f"No ticket is in {item.label}.",
             )
         )
     return ui.Page(
-        "List",
-        description="Every ticket, worked-on first and cancelled last.",
-        controls=_create_actions(projects, accounts),
-        blocks=[ui.Stack(sections)],
+        "Issues",
+        controls=_create_actions(repos, accounts),
+        filters=filters,
+        blocks=[ui.Stack(sections, gap="large")],
     )

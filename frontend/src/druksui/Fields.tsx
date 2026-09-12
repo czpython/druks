@@ -1,6 +1,38 @@
-import { useId, useRef } from 'react'
+import { useId, useRef, type ReactNode } from 'react'
 
-import type { Field } from '../api/types'
+import type { Field, Option } from '../api/types'
+import { MarkdownEditor } from './MarkdownEditor'
+
+function groupedOptions(options: Option[]): { group: string; options: Option[] }[] {
+  const groups: { group: string; options: Option[] }[] = []
+  for (const option of options) {
+    const group = option.group ?? ''
+    const last = groups.at(-1)
+    if (last && last.group === group) last.options.push(option)
+    else groups.push({ group, options: [option] })
+  }
+  return groups
+}
+
+function selectOptions(options: Option[]): ReactNode {
+  return groupedOptions(options).map((entry) =>
+    entry.group ? (
+      <optgroup key={entry.group} label={entry.group}>
+        {entry.options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </optgroup>
+    ) : (
+      entry.options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))
+    ),
+  )
+}
 
 /** Every input in a form, with the value the operator has given it so far and
  * whatever the server said about it. */
@@ -10,12 +42,14 @@ export function Fields({
   errors,
   resets,
   onChange,
+  onBlur,
 }: {
   fields: Field[]
   values: Record<string, unknown>
   errors: Record<string, string>
   resets: number
   onChange: (name: string, value: unknown) => void
+  onBlur?: () => void
 }) {
   // A page can hold two forms that both take a "body", so the id a label points
   // at belongs to this form, not to the field name alone.
@@ -52,6 +86,9 @@ export function Fields({
               id={id}
               value={values[field.name]}
               onChange={onChange}
+              onBlur={
+                ['text', 'text_area', 'number', 'secret'].includes(field.field) ? onBlur : undefined
+              }
               describedBy={describedBy}
               isInvalid={Boolean(errors[field.name])}
               resets={resets}
@@ -78,6 +115,7 @@ function Input({
   id,
   value,
   onChange,
+  onBlur,
   describedBy,
   isInvalid,
   resets,
@@ -86,6 +124,7 @@ function Input({
   id: string
   value: unknown
   onChange: (name: string, value: unknown) => void
+  onBlur?: () => void
   describedBy?: string
   isInvalid: boolean
   resets: number
@@ -115,9 +154,24 @@ function Input({
           placeholder={field.placeholder}
           value={String(value ?? '')}
           onChange={(event) => onChange(field.name, event.target.value)}
+          onBlur={onBlur}
         />
       )
     case 'text_area':
+      if (field.markdown) {
+        return (
+          <MarkdownEditor
+            key={resets}
+            field={field}
+            id={id}
+            value={String(value ?? '')}
+            onChange={onChange}
+            onBlur={onBlur}
+            describedBy={describedBy}
+            isInvalid={isInvalid}
+          />
+        )
+      }
       return (
         <textarea
           {...shared}
@@ -126,6 +180,7 @@ function Input({
           placeholder={field.placeholder}
           value={String(value ?? '')}
           onChange={(event) => onChange(field.name, event.target.value)}
+          onBlur={onBlur}
         />
       )
     case 'number':
@@ -141,6 +196,7 @@ function Input({
           onChange={(event) =>
             onChange(field.name, event.target.value === '' ? null : Number(event.target.value))
           }
+          onBlur={onBlur}
         />
       )
     case 'select':
@@ -151,12 +207,8 @@ function Input({
           value={String(value ?? '')}
           onChange={(event) => onChange(field.name, event.target.value)}
         >
-          <option value="">—</option>
-          {field.options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
+          {field.options.length === 0 ? <option value="">—</option> : null}
+          {selectOptions(field.options)}
         </select>
       )
     case 'multi_select':
@@ -226,6 +278,7 @@ function Input({
           data-lpignore="true"
           value={String(value ?? '')}
           onChange={(event) => onChange(field.name, event.target.value)}
+          onBlur={onBlur}
         />
       )
     case 'upload':
