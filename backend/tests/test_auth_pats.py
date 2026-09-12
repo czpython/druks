@@ -110,7 +110,9 @@ async def test_a_tools_limited_token_is_refused_outside_its_tools(tmp_path, druk
     with _client(tmp_path) as client:
         account = await Account.get_or_create("agent@example.com")
         _, token = await PersonalAccessToken.create(
-            account_id=account.id, name="sandbox", tools=["software_factory_get_ticket"]
+            account_id=account.id,
+            name="sandbox",
+            allowed_tools=["software_factory_get_ticket"],
         )
         for path in ("/api/auth/me", "/api/settings"):
             response = client.get(path, headers=_bearer(token))

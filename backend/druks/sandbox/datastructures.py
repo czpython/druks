@@ -154,15 +154,17 @@ class McpServer:
 
 @dataclass(frozen=True)
 class RequiredMcpServer:
-    """An MCP server a workspace requires for its runs. ``secret_id`` names
-    the vault row the box's entry issues from, and ``resource`` what the token
-    is for: Software Factory's review identity and the repo. It owns its
-    name: a same-named registry entry is not delivered."""
+    """An MCP server a workspace requires for its runs. ``secret_id`` names the
+    vault row the box's entry issues from and ``resource`` what its token is for;
+    no ``secret_id`` names this appliance, whose token Druks mints for the run's
+    account, limited to ``allowed_tools``. It owns its name: a same-named
+    registry entry is not delivered."""
 
     name: str
     url: str
-    secret_id: str
+    secret_id: str = ""
     resource: str = ""
+    allowed_tools: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

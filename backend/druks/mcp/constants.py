@@ -11,6 +11,9 @@ TOKEN_ENV_SUFFIX = "_TOKEN"
 # two names never collapse to one env var.
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
+# Druks' own MCP server, as a box names it.
+DRUKS_SERVER_NAME = "druks"
+
 # The header a server's bearer fills, and its prefix. A secret header keeps
 # its own name and no prefix.
 BEARER_HEADER = "Authorization"

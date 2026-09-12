@@ -33,6 +33,15 @@ class MissingTokenError(McpServerError):
         self.name = name
 
 
+class MissingEndpointError(McpServerError):
+    def __init__(self, name: str):
+        super().__init__(
+            f"MCP server {name!r} is this appliance; set urls.endpoint to an address "
+            "its sandboxes reach."
+        )
+        self.name = name
+
+
 class InvalidCatalogError(McpServerError):
     # The catalog declares a deployment's default servers; a file that can't be
     # read or an entry that would emit a broken config stops boot by name —

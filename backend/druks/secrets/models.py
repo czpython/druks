@@ -99,6 +99,14 @@ class VaultSecret(Base, Uuid7Pk):
         return await cls._list(SecretKind.STATIC, where)
 
     @classmethod
+    async def list_installation_tokens(cls) -> list["VaultSecret"]:
+        """The MCP bearers and secret headers the installation holds. An account's
+        own token is theirs, and never stands in for one of these."""
+        return await cls._list(
+            SecretKind.STATIC, cls.audience.startswith("mcp:"), cls.account_id.is_(None)
+        )
+
+    @classmethod
     async def list_subscriptions(
         cls, audience: str | None = None, *, account_id: str | None = None
     ) -> list["VaultSecret"]:
