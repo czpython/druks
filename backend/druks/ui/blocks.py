@@ -532,9 +532,6 @@ class Facts(PageBlock):
 class TableColumn(Schema):
     label: str
     align: Literal["start", "end"] = "start"
-    # Empty: the shell shares leftover width. Set: that column keeps this size
-    # in every table that names it, so stacked groups line up.
-    width: str = ""
 
     def __init__(self, label, **data):
         super().__init__(label=label, **data)
@@ -550,8 +547,7 @@ class TableRow(Schema):
 
 class Table(PageBlock):
     """Rows of values under named columns. Every row carries one cell for each
-    column; with no rows the shell still draws the columns and shows
-    ``empty_text`` in the body."""
+    column; with no rows the shell shows ``empty_text``."""
 
     block: Literal["table"] = "table"
     title: str = ""

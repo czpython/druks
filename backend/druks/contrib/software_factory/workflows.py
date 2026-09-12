@@ -1,11 +1,10 @@
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, Field
 
-from druks.accounts.models import Account, PersonalAccessToken
+from druks.accounts.models import Account
 from druks.contrib.software_factory.contracts import ImplementationOutput, ReviewWork
 from druks.contrib.software_factory.enums import (
     EvaluationVerdict,
@@ -16,9 +15,8 @@ from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.core.apis.github import get_github_client
 from druks.core.services import Github
-from druks.durable.enums import RunState
-from druks.mcp.helpers import get_bearer_token_env_var
-from druks.sandbox.datastructures import McpServer, RequiredMcpServer
+from druks.mcp.inbound import get_druks_mcp_server
+from druks.sandbox.datastructures import RequiredMcpServer
 from druks.sandbox.layout import get_related_root, get_work_root
 from druks.sandbox.models import SecretRef
 from druks.services.exceptions import ServiceNotConnectedError
@@ -28,47 +26,22 @@ from druks.workflows import FatalError, Workflow, step
 from druks.workspaces import RepoWorkspace
 
 from .app import SoftwareFactory
-from .constants import APPLIANCE_MCP_NAME, GITHUB_MCP_NAME, GITHUB_MCP_URL
+from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, TICKET_TOOLS
 from .datastructures import PullRequest
 from .github import get_review_actor
 from .journal import BuildJournal
 from .policy import PlanGate, RepoPolicy
-from .prompt_context import TRACKER_LABELS, BuildPromptContext
+from .prompt_context import BuildPromptContext
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Host
 
 logger = logging.getLogger(__name__)
 
-_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
-
-
-def appliance_mcp_url() -> str:
-    """The appliance /mcp as a sandbox reaches this process. Loopback is this
-    host, not the VM, so it becomes the Docker host gateway."""
-    endpoint = load_settings().urls.endpoint.rstrip("/")
-    if not endpoint:
-        raise FatalError(
-            "urls.endpoint is unset; the issues tracker tools need /mcp reachable from the sandbox."
-        )
-    parts = urlsplit(endpoint)
-    host = parts.hostname or ""
-    if host in _LOOPBACK_HOSTS:
-        port = f":{parts.port}" if parts.port else ""
-        endpoint = urlunsplit(
-            (parts.scheme, f"host.docker.internal{port}", parts.path, "", "")
-        ).rstrip("/")
-    return f"{endpoint}/mcp"
-
 
 @dataclass(frozen=True, kw_only=True)
 class BuildWorkspace(RepoWorkspace):
     skills: tuple[str, ...]
-    # Appliance /mcp, set only when the tracker is issues. Empty otherwise —
-    # Linear and Jira do not take this server. The PAT is minted after the box
-    # exists, so it rides extra_env instead of a vault secret_id.
-    appliance_mcp_url: str = ""
-    appliance_mcp_token: str = ""
 
     @property
     def workspace_root(self) -> str:
@@ -78,37 +51,15 @@ class BuildWorkspace(RepoWorkspace):
     async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
         # GitHub MCP acts as the review actor; the clone acts as the operator.
         actor = await get_review_actor()
-        return (
-            RequiredMcpServer(
-                name=GITHUB_MCP_NAME,
-                url=GITHUB_MCP_URL,
-                secret_id=(await actor.service.get()).id,
-                resource=cls.get_repo(subject),
-            ),
+        github = RequiredMcpServer(
+            name=GITHUB_MCP_NAME,
+            url=GITHUB_MCP_URL,
+            secret_id=(await actor.service.get()).id,
+            resource=cls.get_repo(subject),
         )
-
-    async def with_mcp_servers(self, account_id: str | None, **kwargs: Any) -> dict[str, Any]:
-        kwargs = await super().with_mcp_servers(account_id, **kwargs)
-        if not self.appliance_mcp_url:
-            return kwargs
-        variable = get_bearer_token_env_var(APPLIANCE_MCP_NAME)
-        servers = [
-            server
-            for server in kwargs.get("mcp_servers") or ()
-            if server.name != APPLIANCE_MCP_NAME
-        ]
-        servers.append(
-            McpServer(
-                name=APPLIANCE_MCP_NAME,
-                url=self.appliance_mcp_url,
-                bearer_token_env_var=variable,
-            )
-        )
-        kwargs["mcp_servers"] = tuple(servers)
-        env = dict(kwargs.get("extra_env") or {})
-        env[variable] = self.appliance_mcp_token
-        kwargs["extra_env"] = env
-        return kwargs
+        if (await SoftwareFactory.settings()).tracker == "druks":
+            return (github, get_druks_mcp_server(allowed_tools=TICKET_TOOLS))
+        return (github,)
 
     async def run_agent(self, *, account_id: str | None, **kwargs: Any):
         # Agents clone related repos on demand; Claude's --add-dir target must exist first.
@@ -192,15 +143,11 @@ class Build(Workflow):
                 return
             await item.update(title=ticket["title"], ticket_url=ticket["url"])
             status = await item.get_status(workflow=cls)
-            if status.is_parked:
+            if status.is_active:
+                reviewing = status.gate == ReviewWork.name
                 await item.set_ticket_status(
-                    TicketStatus.IN_REVIEW
-                    if status.gate == ReviewWork.name
-                    else TicketStatus.IN_PROGRESS
+                    TicketStatus.IN_REVIEW if reviewing else TicketStatus.IN_PROGRESS
                 )
-                return
-            if status.state in (RunState.SCHEDULED, RunState.RUNNING):
-                await item.set_ticket_status(TicketStatus.IN_PROGRESS)
                 return
         else:
             repo = await ProjectRepo.lookup(
@@ -260,25 +207,6 @@ class Build(Workflow):
             "branch": self.branch,
             "skills": tuple(self._profile.get("recommended_skills", [])),
         }
-        if (await SoftwareFactory.settings()).tracker == "issues":
-            kwargs["appliance_mcp_url"] = appliance_mcp_url()
-            account_id = self.account_id
-            if account_id:
-                account = await Account.get(account_id)
-                if not account:
-                    raise FatalError(
-                        f"issues tracker tools need account {account_id} to mint the /mcp PAT."
-                    )
-            else:
-                account = await Account.get_default()
-                if not account:
-                    raise FatalError(
-                        "issues tracker tools need a run account or a default "
-                        "account to mint the /mcp PAT."
-                    )
-            _, kwargs["appliance_mcp_token"] = await PersonalAccessToken.create(
-                account_id=account.id, name="issues sandbox"
-            )
         return kwargs
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
@@ -293,7 +221,6 @@ class Build(Workflow):
             pr_number=self.pr_number,
             ticket_ref=work_item.ticket_key,
             source=work_item.source,
-            tracker_label=TRACKER_LABELS[work_item.source],
             issue_number=self.input.issue_number,
             task_owner_name=self.input.task_owner_name,
             task_owner_email=self.input.task_owner_email,

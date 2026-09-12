@@ -293,6 +293,8 @@ function CardsStatic({
 function CardItem({ card }: { card: CardBlock }) {
   const zone = useContext(CardsZoneContext)
   const drag = useCardsDrag()
+  // Set by a drag, so a click the browser fires after it does not navigate. A
+  // real click clears it with its own pointerdown.
   const skipClick = useRef(false)
   const payload = card.drag ?? {}
   const movable = Boolean(zone && Object.keys(payload).length)
@@ -320,6 +322,13 @@ function CardItem({ card }: { card: CardBlock }) {
           : undefined
       }
       onDragEnd={() => setCardsDrag(null)}
+      onPointerDown={
+        movable
+          ? () => {
+              skipClick.current = false
+            }
+          : undefined
+      }
       onClickCapture={
         movable
           ? (event) => {

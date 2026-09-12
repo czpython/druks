@@ -2,7 +2,7 @@ import { registerAppUI, targetQuery } from '../registry'
 import { SOFTWARE_FACTORY } from './api'
 import { parseLeadingId } from './slug'
 import { AgentCallPage } from './AgentCallPage'
-import { DruksIssuesPage } from './DruksIssuesPage'
+import { BoardPage } from './BoardPage'
 import { HistoryPage } from './HistoryPage'
 import { NotFound } from './NotFound'
 import { ProjectsPage } from './projects/ProjectsPage'
@@ -26,10 +26,10 @@ registerAppUI({
       : undefined,
   routes: [
     { path: `/${SOFTWARE_FACTORY}`, render: () => <WorkItemsPage /> },
-    { path: `/${SOFTWARE_FACTORY}/board`, render: () => <DruksIssuesPage page="board" /> },
+    { path: `/${SOFTWARE_FACTORY}/board`, render: () => <BoardPage page="board" /> },
     {
       path: `/${SOFTWARE_FACTORY}/tickets/:identifier`,
-      render: () => <DruksIssuesPage page="ticket" />,
+      render: () => <BoardPage page="ticket" />,
     },
     { path: `/${SOFTWARE_FACTORY}/history`, render: () => <HistoryPage /> },
     { path: `/${SOFTWARE_FACTORY}/projects`, render: () => <ProjectsPage /> },

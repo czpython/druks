@@ -87,8 +87,8 @@ def test_a_table_cell_can_reach_another_page():
     )
 
     assert block["columns"] == [
-        {"label": "Peer", "align": "start", "width": ""},
-        {"label": "Answers", "align": "end", "width": ""},
+        {"label": "Peer", "align": "start"},
+        {"label": "Answers", "align": "end"},
     ]
     assert block["rows"][0]["cells"][0]["link"]["page"] == "peer"
     assert block["emptyText"] == "No peers yet."

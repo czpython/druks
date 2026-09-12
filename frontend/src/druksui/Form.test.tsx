@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
@@ -410,6 +410,23 @@ describe('submitting a form', () => {
 
     fireEvent.blur(screen.getByLabelText(/Note/))
     expect(callOperation).not.toHaveBeenCalled()
+  })
+
+  it('sends an edit back to the value the page started with', async () => {
+    renderBlocks([
+      form([BODY], action({ refresh: 'none' }), { submit: 'change', layout: 'prose' }),
+    ])
+    const note = screen.getByLabelText(/Note/)
+
+    fireEvent.change(note, { target: { value: 'Fan noise.' } })
+    fireEvent.blur(note)
+    await waitFor(() => expect(callOperation).toHaveBeenCalledTimes(1))
+    await act(() => new Promise((settle) => setTimeout(settle, 0)))
+    fireEvent.change(note, { target: { value: '' } })
+    fireEvent.blur(note)
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalledTimes(2))
+    expect(callOperation).toHaveBeenLastCalledWith('POST', '/api/field_notes/notes', { body: '' })
   })
 
   it('sends a live select as soon as it changes', async () => {
