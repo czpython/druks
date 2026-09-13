@@ -69,19 +69,20 @@ git push
 
 Stage only the paths your implementation changed; explicit staging is what keeps stray artifacts (caches, downloaded toolchains, editor files) out of the PR. The commit subject must describe what THIS commit's diff actually contains — not work that landed in earlier commits — and must not include the ticket or issue prefix.
 
-The PR body — the plan document reviewers review the diff against — carries exactly these sections, in order, whether you are opening the PR or refreshing it on a later revision:
+The PR body carries the plan block — the plan document reviewers review the diff against. The block is exactly these lines, in order:
 
+- `<!-- Plan authored by Druks. Reviews, evaluations, and the full audit trail live in the Druks dashboard, not here. -->`
 - `**Ticket:** [<ticket ref>](<url>)` when the ticket has a URL.
 - `## Plan` — the approved plan markdown (the **Current plan** section above), verbatim. Copy only that section: it stops at the end of `## Current plan` and does NOT include the prompt's rendered `## Acceptance criteria`.
 - `## Acceptance Criteria` — `- <id>: <description>` bullets, an indented `- Verification: <how>` when one is specified. This bullet section is the one place the acceptance criteria appear; do not also fold them into `## Plan`.
-- End with: `<!-- Plan authored by Druks. Reviews, evaluations, and the full audit trail live in the Druks dashboard, not here. -->`
+- `<!-- End of the Druks plan. -->`
 
 {% if build.pr_number %}
 After a successful push, dismiss the PR's existing reviews (`gh` is authenticated) — but only a review whose requests your new commits actually addressed. A review asking for changes your diff did not touch still describes the code as it stands: leave it standing and name it in known_risks instead. A dismissal failure must never block your delivery — note it in known_risks and move on.
 
-Then, on every implementation revision, regenerate the PR body above from the current plan and acceptance criteria and republish it so a later plan revision can never leave the body stale — write it to a file and run `gh api -X PATCH repos/{{ build.repo }}/pulls/{{ build.pr_number }} -F body=@<file>`. Like the review dismissal, a body-republish failure must never block your delivery — record it in known_risks and move on, because the successful push is the deliverable.
+Then, on every implementation revision, republish the plan block so a later plan revision can never leave it stale. In the current PR body, replace only the text between the two plan block comments with the block regenerated from the current plan and acceptance criteria. Keep everything outside those comments as it is: a person may have filled it in. Like the review dismissal, a body-republish failure must never block your delivery — record it in known_risks and move on, because the successful push is the deliverable.
 {% else %}
-After a successful push, open the draft PR against the default branch with the body above (`gh pr create --draft`; `gh` is authenticated):
+After a successful push, open the draft PR against the default branch (`gh` is authenticated). When the repo has a GitHub pull request template, the body is that template filled in from the plan and your diff, with the plan block where the template asks for a description, or at the end when it has no such section. Tick a template checkbox only when your work proves it; leave unticked any box a person must confirm, such as a contributor agreement. Without a template, the body is the plan block alone.
 
 - Title: `<ticket ref> - <ticket title>` for a Linear, Jira, or Druks board ticket (just the ref when the title is empty); the GitHub issue title verbatim when the source is GitHub.
 {% endif %}

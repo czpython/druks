@@ -42,12 +42,3 @@ everything the original plan got right.
 {% endif %}
 {% endif %}
 {% endif %}The human reviewer's feedback contradicts the current acceptance criteria. Revise the plan and acceptance criteria to incorporate the feedback while preserving the original issue intent. The rejecting review is rendered above under **Rejecting review**; the current acceptance criteria are in the **Acceptance criteria** section above. Return the full revised plan markdown, the complete updated acceptance criteria list, and concise implementation instructions describing what changed so the implementer knows what to redo.
-
-# Update the PR description
-
-The PR description is the plan document reviewers review the diff against — your revision made it stale. Before emitting your final JSON, write the revised plan to a file and publish it to PR #{{ build.pr_number }}'s description with `gh api -X PATCH repos/{{ build.repo }}/pulls/{{ build.pr_number }} -F body=@<file>` (the checkout is authenticated):
-
-- `**Ticket:** [<ticket ref>](<url>)` when the ticket has a URL.
-- `## Plan` — your revised plan markdown.
-- `## Acceptance Criteria` — `- <id>: <description>` bullets, an indented `- Verification: <how>` when you specified one.
-- End with: `<!-- Plan authored by Druks. Reviews, evaluations, and the full audit trail live in the Druks dashboard, not here. -->`
