@@ -38,9 +38,9 @@ class RepoNotFound(AgentApiError):
         super().__init__(f"No project repo {repo_id}. Read the projects for the repos they hold.")
 
 
-class OwnerNotFound(AgentApiError):
+class AssigneeNotFound(AgentApiError):
     status_code = 404
-    code = "OWNER_NOT_FOUND"
+    code = "ASSIGNEE_NOT_FOUND"
 
     def __init__(self, account_id: str) -> None:
         super().__init__(f"No account {account_id}.")

@@ -16,12 +16,12 @@ PRIORITY_LABELS: dict[Priority, str] = {
     Priority.LOW: "Low",
 }
 
-UNOWNED = "Unowned"
+UNASSIGNED = "Unassigned"
 # An account that is gone, or Druks itself. The row still reads.
 UNATTRIBUTED = "Unattributed"
 FILTER_ANY = "Any"
-# The owner filter's value for unowned. Empty already means any.
-UNOWNED_FILTER = "none"
+# The assignee filter's value for unassigned. Empty already means any.
+UNASSIGNED_FILTER = "none"
 
 
 def _repo_options(repos: list[ProjectRepo]) -> list[ui.Option]:
@@ -30,8 +30,8 @@ def _repo_options(repos: list[ProjectRepo]) -> list[ui.Option]:
     ]
 
 
-def _owner_options(accounts: list[Account]) -> list[ui.Option]:
-    return [ui.Option(UNOWNED, value="")] + [
+def _assignee_options(accounts: list[Account]) -> list[ui.Option]:
+    return [ui.Option(UNASSIGNED, value="")] + [
         ui.Option(account.username, value=account.id) for account in accounts
     ]
 
@@ -82,9 +82,9 @@ def _create_actions(repos: list[ProjectRepo], accounts: list[Account]) -> list[u
                     value=Priority.NONE.value,
                 ),
                 ui.SelectField(
-                    name="owner_id",
-                    label="Owner",
-                    options=_owner_options(accounts),
+                    name="assignee_id",
+                    label="Assignee",
+                    options=_assignee_options(accounts),
                     value=current_account_id.get() or "",
                 ),
             ],
@@ -111,8 +111,8 @@ def _ticket_card(ticket: Ticket, account_names: dict[str, str]) -> ui.Card:
     priority = Priority(ticket.priority)
     if priority is not Priority.NONE:
         description.append(PRIORITY_LABELS[priority])
-    if ticket.owner_id:
-        description.append(account_names.get(ticket.owner_id, UNATTRIBUTED))
+    if ticket.assignee_id:
+        description.append(account_names.get(ticket.assignee_id, UNATTRIBUTED))
     return ui.Card(
         title=ticket.title,
         description=" · ".join(description),
@@ -126,7 +126,7 @@ async def board(
     status: Status | None = None,
     priority: Priority | None = None,
     updated: Literal["today", "week", "month"] | None = None,
-    owner: str = "",
+    assignee: str = "",
     creator: str = "",
     project: int | None = None,
     repo: int | None = None,
@@ -145,7 +145,7 @@ async def board(
     tickets = await Ticket.list_matching(
         status=status,
         priority=priority,
-        owner=owner,
+        assignee=assignee,
         creator=creator,
         project_id=project,
         repo_id=repo,
@@ -169,14 +169,14 @@ async def board(
                 updated or "",
             ),
             ui.SelectField(
-                name="owner",
-                label="Owner",
+                name="assignee",
+                label="Assignee",
                 options=[
                     ui.Option(FILTER_ANY, value=""),
-                    ui.Option(UNOWNED, value=UNOWNED_FILTER),
+                    ui.Option(UNASSIGNED, value=UNASSIGNED_FILTER),
                     *[ui.Option(account.username, value=account.id) for account in accounts],
                 ],
-                value=owner,
+                value=assignee,
             ),
             _filter_select(
                 "creator",
@@ -345,10 +345,10 @@ async def ticket(identifier: str):
                             _live_form(
                                 found,
                                 ui.SelectField(
-                                    name="owner_id",
-                                    label="Owner",
-                                    options=_owner_options(accounts),
-                                    value=found.owner_id or "",
+                                    name="assignee_id",
+                                    label="Assignee",
+                                    options=_assignee_options(accounts),
+                                    value=found.assignee_id or "",
                                 ),
                                 operation="update_ticket",
                             ),

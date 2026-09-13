@@ -25,12 +25,12 @@ def _provider(tmp_path, *, payload, headers=None):
     return events
 
 
-def _issue(*, key="IT-12", status="Open", status_category="new", project="acme-app", labels=()):
+def _issue(*, key="IT-12", status="Open", project="acme-app", labels=()):
     return {
         "issue": {
             "key": key,
             "fields": {
-                "status": {"name": status, "statusCategory": {"key": status_category}},
+                "status": {"name": status},
                 "project": {"name": project},
                 "summary": "Add an endpoint",
                 "labels": list(labels),
@@ -52,7 +52,6 @@ def _jira_payload(*, key="IT-12", status="Open", project="acme-app", labels=None
         "assignee_id": None,
         "assignee_email": "dev@acme.co",
         "assignee_name": "Dev",
-        "completed": False,
     }
 
 
@@ -120,40 +119,6 @@ async def test_emits_normalized_ticket_transition(tmp_path, druks_db, monkeypatc
     assert payload["status"] == "Ready"
     assert payload["assignee_email"] == "dev@acme.co"
     assert payload["url"] == "https://jira.test/browse/IT-9"
-
-
-async def test_done_category_marks_the_transition_terminal(tmp_path, druks_db, monkeypatch):
-    """The "done" statusCategory is Jira's terminal marker."""
-    events = []
-
-    async def _emit(event_type, **kwargs):
-        events.append((event_type, kwargs["payload"]))
-
-    await _connect_jira()
-    monkeypatch.setattr(webhook_module, "publish", _emit)
-    payload = _issue(key="IT-9", status="Done", status_category="done")
-    await _provider(tmp_path, payload=payload).on_issue_event()
-
-    assert [event for event, _ in events] == ["ticket.transitioned"]
-    assert events[0][1]["terminal"]
-
-
-async def test_open_category_is_not_terminal(tmp_path, druks_db, monkeypatch):
-    """An in-flight status (any non-"done" category) transitions but isn't terminal."""
-    events = []
-
-    async def _emit(event_type, **kwargs):
-        events.append((event_type, kwargs["payload"]))
-
-    await _connect_jira()
-    monkeypatch.setattr(webhook_module, "publish", _emit)
-    provider = _provider(
-        tmp_path, payload=_issue(status="In Progress", status_category="indeterminate")
-    )
-    await provider.on_issue_event()
-
-    assert [event for event, _ in events] == ["ticket.transitioned"]
-    assert not events[0][1]["terminal"]
 
 
 def _pin_settings(monkeypatch, **over):

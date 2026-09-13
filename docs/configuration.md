@@ -390,7 +390,7 @@ ID must match the [provider account](#oauth-grant-identity) of an MCP connection
 that the assignee made with **Connect your account**. A connection for everyone
 has no account, so it does not match. If no account or more than one account
 matches, the build uses the default account. A **druks** ticket build uses the
-account of the ticket owner.
+account of the ticket assignee.
 
 ## Harnesses
 

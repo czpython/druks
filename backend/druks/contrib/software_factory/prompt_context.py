@@ -21,9 +21,8 @@ class BuildPromptContext:
     pr_number: int | None
     ticket_ref: str | None
     source: str
-    issue_number: int | None
-    task_owner_name: str | None
-    task_owner_email: str | None
+    assignee_name: str | None
+    assignee_email: str | None
     related_repos: list[ProjectRepo]
     skills: list[Skill]
     review_code: bool

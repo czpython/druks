@@ -70,7 +70,7 @@ async def test_tracker_webhook_starts_under_the_connected_account(
             "issue": {
                 "key": item.ticket_key,
                 "fields": {
-                    "status": {"name": settings.trigger_status, "statusCategory": {"key": "new"}},
+                    "status": {"name": settings.trigger_status},
                     "summary": item.title,
                     "project": {"name": "company/app"},
                     "labels": [],
@@ -137,18 +137,20 @@ async def test_unconnected_assignee_uses_the_default_account(druks_db, started):
 
 
 async def test_builtin_ticket_uses_its_account_id(druks_db, monkeypatch, started):
-    owner = await Account.get_or_create("github-boss")
+    assignee = await Account.get_or_create("github-boss")
     project = await Project.create(name="Company")
-    repo = await ProjectRepo.create(project_id=project.id, full_name="company/app")
+    project_repo = await ProjectRepo.create(project_id=project.id, full_name="company/app")
     settings = SoftwareFactory.Settings(tracker="druks")
 
     async def get_settings(cls):
         return settings
 
     monkeypatch.setattr(SoftwareFactory, "settings", classmethod(get_settings))
-    ticket = await Ticket.create(title="A change", repo=repo, owner_id=owner.id)
+    ticket = await Ticket.create(
+        title="A change", project_repo=project_repo, assignee_id=assignee.id
+    )
 
     await ticket.transition(Status.READY_FOR_AGENT)
 
     assert len(started) == 1
-    assert started[0]["account_id"] == owner.id
+    assert started[0]["account_id"] == assignee.id

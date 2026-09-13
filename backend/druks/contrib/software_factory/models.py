@@ -154,7 +154,7 @@ class ProjectRepo(StoredSubject):
     async def list_summaries(cls, account_id: str | None) -> list["ProjectRepoSummary"]:
         # A repo is registered, not transient, so the board shows all of them by name.
         stmt = select(cls).order_by(cls.full_name)
-        return [repo.get_summary() for repo in await db_session().scalars(stmt)]
+        return [project_repo.get_summary() for project_repo in await db_session().scalars(stmt)]
 
     async def siblings(self) -> list["ProjectRepo"]:
         # A fresh query, not ``self.project.repos``: the loaded collection goes
@@ -191,15 +191,15 @@ class ProjectRepo(StoredSubject):
         cls, full_name: str, *, raise_on_missing: bool = False
     ) -> "ProjectRepo | None":
         stmt = select(cls).where(func.lower(cls.full_name) == full_name.lower()).limit(1)
-        repo = (await db_session().scalars(stmt)).first()
-        if raise_on_missing and not repo:
+        project_repo = (await db_session().scalars(stmt)).first()
+        if raise_on_missing and not project_repo:
             # A rename or a GitHub transfer can leave a run with an old repo name.
             # Fail with that reason, not with an unclear NoneType error.
             raise FatalError(
                 f"{full_name!r} is not a registered project repo. If the repo was "
                 "renamed or transferred, register it again under its current name."
             )
-        return repo
+        return project_repo
 
     @classmethod
     async def lookup(
@@ -457,8 +457,8 @@ class Ticket(Base):
     status: Mapped[str] = mapped_column(default=Status.BACKLOG)
     priority: Mapped[str] = mapped_column(default=Priority.NONE)
     repo_id: Mapped[int] = mapped_column(ForeignKey("project_repos.id", ondelete="CASCADE"))
-    repo: Mapped[ProjectRepo] = relationship(lazy="joined")
-    owner_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
+    project_repo: Mapped[ProjectRepo] = relationship(lazy="joined")
+    assignee_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     creator_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -468,23 +468,23 @@ class Ticket(Base):
     async def create(
         cls,
         *,
-        repo: ProjectRepo,
+        project_repo: ProjectRepo,
         title: str,
         description: str = "",
         status: Status = Status.BACKLOG,
         priority: Priority = Priority.NONE,
-        owner_id: str | None = None,
+        assignee_id: str | None = None,
         creator_id: str | None = None,
     ) -> "Ticket":
         # comments=[] loads the collection empty. A read after flush needs no query.
         ticket = cls(
-            identifier=await Project.mint_identifier(repo.project_id),
-            repo=repo,
+            identifier=await Project.mint_identifier(project_repo.project_id),
+            project_repo=project_repo,
             title=title,
             description=description,
             status=status,
             priority=priority,
-            owner_id=owner_id,
+            assignee_id=assignee_id,
             creator_id=creator_id,
             comments=[],
         )
@@ -509,7 +509,7 @@ class Ticket(Base):
         *,
         status: Status | None = None,
         priority: Priority | None = None,
-        owner: str = "",
+        assignee: str = "",
         creator: str = "",
         project_id: int | None = None,
         repo_id: int | None = None,
@@ -520,10 +520,10 @@ class Ticket(Base):
             statement = statement.where(cls.status == status)
         if priority:
             statement = statement.where(cls.priority == priority)
-        if owner == "none":
-            statement = statement.where(cls.owner_id.is_(None))
-        elif owner:
-            statement = statement.where(cls.owner_id == owner)
+        if assignee == "none":
+            statement = statement.where(cls.assignee_id.is_(None))
+        elif assignee:
+            statement = statement.where(cls.assignee_id == assignee)
         if creator:
             statement = statement.where(cls.creator_id == creator)
         if repo_id:
@@ -550,7 +550,7 @@ class Ticket(Base):
             await self._emit_transitioned(status)
 
     async def _emit_transitioned(self, status: Status) -> None:
-        owner = await Account.get(self.owner_id) if self.owner_id else None
+        assignee = await Account.get(self.assignee_id) if self.assignee_id else None
         await publish(
             "ticket.transitioned",
             payload={
@@ -560,11 +560,11 @@ class Ticket(Base):
                 "status": status.label,
                 "title": self.title,
                 "url": f"/software_factory/tickets/{self.identifier}",
-                "project_name": self.repo.full_name,
+                "project_name": self.project_repo.full_name,
                 "labels": [],
-                "assignee_id": self.owner_id,
-                "assignee_email": owner.username if owner else None,
-                "assignee_name": owner.username if owner else None,
+                "assignee_id": self.assignee_id,
+                "assignee_email": assignee.username if assignee else None,
+                "assignee_name": assignee.username if assignee else None,
             },
         )
 

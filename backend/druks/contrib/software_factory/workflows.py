@@ -150,17 +150,17 @@ class Build(Workflow):
                 )
                 return
         else:
-            repo = await ProjectRepo.lookup(
+            project_repo = await ProjectRepo.lookup(
                 project_name=ticket["project_name"], labels=ticket["labels"]
             )
-            if repo:
+            if project_repo:
                 item = await WorkItem.create(
-                    project_id=repo.project_id,
+                    project_id=project_repo.project_id,
                     source=ticket["source"],
                     title=ticket["title"] or ticket["identifier"],
                     ticket_key=ticket["identifier"],
                     ticket_url=ticket["url"],
-                    repo=repo.full_name,
+                    repo=project_repo.full_name,
                 )
             else:
                 logger.info(
@@ -181,15 +181,14 @@ class Build(Workflow):
         return await cls.start(
             subject=item,
             account_id=account_id,
-            task_owner_email=ticket["assignee_email"],
-            task_owner_name=ticket["assignee_name"],
+            assignee_email=ticket["assignee_email"],
+            assignee_name=ticket["assignee_name"],
         )
 
     async def run_multistep(
         self,
-        issue_number: int | None = None,
-        task_owner_email: str | None = None,
-        task_owner_name: str | None = None,
+        assignee_email: str | None = None,
+        assignee_name: str | None = None,
     ) -> None:
         # Steps read the policy, the profile, and the settings, so replay reuses them.
         resolved = await self._load_policy_and_profile()
@@ -212,7 +211,7 @@ class Build(Workflow):
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         work_item = await self.subject
-        target_repo = await ProjectRepo.get_for_repo(work_item.repo, raise_on_missing=True)
+        project_repo = await ProjectRepo.get_for_repo(work_item.repo, raise_on_missing=True)
         endpoint = load_settings().urls.endpoint.rstrip("/")
         work_item_url = f"{endpoint}/software_factory/work-items/{work_item.id}" if endpoint else ""
         prompt_context = BuildPromptContext(
@@ -222,10 +221,9 @@ class Build(Workflow):
             pr_number=self.pr_number,
             ticket_ref=work_item.ticket_key,
             source=work_item.source,
-            issue_number=self.input.issue_number,
-            task_owner_name=self.input.task_owner_name,
-            task_owner_email=self.input.task_owner_email,
-            related_repos=await target_repo.siblings(),
+            assignee_name=self.input.assignee_name,
+            assignee_email=self.input.assignee_email,
+            related_repos=await project_repo.siblings(),
             skills=await Skill.list_delivered(self._profile.get("recommended_skills", [])),
             review_code=self._settings.review_code,
             review_mode=(await get_review_actor()).mode,
@@ -243,10 +241,10 @@ class Build(Workflow):
     async def _load_policy_and_profile(self) -> dict[str, Any]:
         repo = (await self.subject).repo
         policy = await RepoPolicy.resolve(repo)
-        target = await ProjectRepo.get_for_repo(repo, raise_on_missing=True)
+        project_repo = await ProjectRepo.get_for_repo(repo, raise_on_missing=True)
         return {
             "policy": policy.model_dump(mode="json"),
-            "profile": target.effective_profile,
+            "profile": project_repo.effective_profile,
         }
 
     @step
@@ -297,17 +295,12 @@ class Build(Workflow):
         while True:
             await self.implement()
             evaluation = await SoftwareFactory.evaluate_implementation()
-            if evaluation.verdict == EvaluationVerdict.PASS:
-                if await self._work_gate():
-                    return
-                continue
             if evaluation.verdict == EvaluationVerdict.FAIL and (
                 self.journal.implementation_revision < self._settings.max_implementation_revisions
             ):
                 continue
             if await self._work_gate():
                 return
-            continue
 
     async def _work_gate(self) -> bool:
         """Park for work approval. Return True when the work is done, or False when it
@@ -428,13 +421,13 @@ class Profile(Workflow):
     workspace_class = ProfileWorkspace
 
     @classmethod
-    async def dispatch(cls, repo: ProjectRepo, *, refresh_only: bool = False) -> str:
+    async def dispatch(cls, project_repo: ProjectRepo, *, refresh_only: bool = False) -> str:
         # The profiler clones with the operator App token. The lookup raises a clear
         # error before the run starts a VM.
         await Github.get()
         return await cls.start(
-            subject=repo,
-            repo_id=repo.id,
+            subject=project_repo,
+            repo_id=project_repo.id,
             refresh_only=refresh_only,
         )
 
@@ -525,9 +518,11 @@ class PullRequestReview(Workflow):
         await SoftwareFactory.review_pull_request()
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
-        target = await ProjectRepo.get_for_repo((await self.subject).repo, raise_on_missing=True)
+        project_repo = await ProjectRepo.get_for_repo(
+            (await self.subject).repo, raise_on_missing=True
+        )
         return {
-            "siblings": await target.siblings(),
+            "siblings": await project_repo.siblings(),
             "review_mode": (await get_review_actor()).mode,
             **await super().get_prompt_context(**context),
         }

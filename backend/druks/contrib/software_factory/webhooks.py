@@ -65,9 +65,6 @@ class LinearEvents(Webhook):
                 "assignee_id": assignee.get("id"),
                 "assignee_email": assignee.get("email"),
                 "assignee_name": assignee.get("name"),
-                "completed": state["type"] == "completed",
-                # Teams rename statuses, so the fixed Linear state type marks a terminal status.
-                "terminal": state["type"] in ("completed", "canceled"),
             },
         )
         return _accepted()
@@ -144,9 +141,6 @@ class JiraEvents(Webhook):
                 "assignee_id": assignee.get("accountId"),
                 "assignee_email": assignee.get("emailAddress"),
                 "assignee_name": assignee.get("displayName"),
-                "completed": False,
-                # The "done" status category marks a terminal status, whatever its name.
-                "terminal": issue_status["statusCategory"]["key"] == "done",
             },
         )
         return _accepted()
