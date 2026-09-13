@@ -26,6 +26,8 @@ function subscription(overrides: Partial<ProviderSubscription> = {}): ProviderSu
     expiresAt: null,
     updatedAt: '2026-09-01T00:00:00Z',
     connected: true,
+    revokedAt: null,
+    revokedReason: '',
     ...overrides,
   }
 }
@@ -223,6 +225,26 @@ describe('ProviderConnect', () => {
     expect(screen.getByRole('button', { name: 'Disconnect Anthropic subscription' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Remove Anthropic API key' })).toBeTruthy()
     expect(screen.queryByText('op@example.com')).toBeNull()
+  })
+
+  it('a provider revocation keeps its facts and starts reconnect', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      authorizeUrl: 'https://example.com/authorize',
+      connectionId: 'reconnect-1',
+    })))
+    vi.stubGlobal('fetch', fetchMock)
+    const revokedAt = '2026-09-12T03:30:00Z'
+    const { view } = renderCard(provider(), {
+      subscription: subscription({ connected: false, revokedAt, revokedReason: 'invalid_grant' }),
+    })
+
+    expect(screen.getByText('Disconnected')).toBeTruthy()
+    expect(screen.getByText('claude-seat@corp.com')).toBeTruthy()
+    expect(screen.getByText('invalid_grant')).toBeTruthy()
+    expect(view.container.querySelector('time')?.dateTime).toBe(revokedAt)
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }))
+    await flush()
+    expect(fetchMock).toHaveBeenCalledWith('/api/providers/anthropic/connection/start', expect.anything())
   })
 
   it('an expired subscription keeps its identity and asks for a Reconnect', () => {

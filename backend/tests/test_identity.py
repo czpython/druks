@@ -5,18 +5,16 @@ from pathlib import Path
 import httpx
 import pytest
 from conftest import IDENTITY_HEADER, connect_provider, header_client
-from druks import database
 from druks.accounts.dependencies import resolve_single_operator
 from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.models import Account, PersonalAccessToken
-from druks.harnesses import providers as pbase
+from druks.harnesses import providers
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 
 
 def _client(tmp_path: Path, **settings_overrides) -> TestClient:
@@ -37,14 +35,10 @@ def _grant(email: str = "me@example.com") -> dict:
 
 
 def _mock_exchange(monkeypatch, grant: dict):
-    async def fake_post(self, url, *, json=None, data=None, **_kwargs):
-        return httpx.Response(200, text=_dumps(grant), request=httpx.Request("POST", url))
+    async def fake_post(self, url, **_kwargs):
+        return httpx.Response(200, text=json.dumps(grant), request=httpx.Request("POST", url))
 
-    monkeypatch.setattr(pbase.httpx.AsyncClient, "post", fake_post)
-
-
-def _dumps(value: dict) -> str:
-    return json.dumps(value)
+    monkeypatch.setattr(providers.httpx.AsyncClient, "post", fake_post)
 
 
 def _connect(
@@ -68,10 +62,6 @@ def _connect(
     )
 
 
-async def _all_accounts() -> list[Account]:
-    return list(await database.db_session().scalars(select(Account)))
-
-
 def _mock_exchange_codex(monkeypatch, *, email: str):
     claims = {
         "https://api.openai.com/auth": {"chatgpt_account_id": "acc-1"},
@@ -80,15 +70,10 @@ def _mock_exchange_codex(monkeypatch, *, email: str):
     }
     header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
     payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
-    grant = {"access_token": f"{header}.{payload}.sig", "refresh_token": "RT", "id_token": "ID"}
-
-    async def fake_post(self, url, *, json=None, data=None, **_kwargs):
-        return httpx.Response(200, text=_dumps(grant), request=httpx.Request("POST", url))
-
-    monkeypatch.setattr(pbase.httpx.AsyncClient, "post", fake_post)
-
-
-# --- header mode -----------------------------------------------------------
+    _mock_exchange(
+        monkeypatch,
+        {"access_token": f"{header}.{payload}.sig", "refresh_token": "RT", "id_token": "ID"},
+    )
 
 
 async def test_header_mode_requires_exactly_one_nonblank_assertion(tmp_path, druks_db):
@@ -101,8 +86,7 @@ async def test_header_mode_requires_exactly_one_nonblank_assertion(tmp_path, dru
             headers=[(IDENTITY_HEADER, "a@example.com"), (IDENTITY_HEADER, "b@example.com")],
         )
         assert two.status_code == 401
-    # Rejection never enrolls anyone.
-    assert {account.username for account in await _all_accounts()} == set()
+    assert not await Account.list_all()
 
 
 async def test_an_asserted_email_open_enrolls_once_across_case_variants(tmp_path, druks_db):
@@ -121,9 +105,8 @@ async def test_an_asserted_email_open_enrolls_once_across_case_variants(tmp_path
 
 async def test_get_or_create_losing_the_insert_race_still_converges(druks_db, monkeypatch):
     existing = await Account.get_or_create("race@example.com")
-    # Simulate losing the read-then-insert race: the pre-read misses, the
-    # INSERT hits ON CONFLICT DO NOTHING, the canonical lookup converges.
 
+    # The pre-read misses, so the insert hits ON CONFLICT DO NOTHING.
     async def _miss(cls, username):
         return None
 
@@ -142,7 +125,6 @@ async def test_a_valid_pat_wins_over_a_conflicting_header(tmp_path, druks_db):
         )
         assert response.status_code == 200
         assert response.json()["account"]["username"] == "agent@example.com"
-    # The losing assertion never enrolled.
     assert not await Account.get_for_username("op@example.com")
 
 
@@ -153,16 +135,12 @@ async def test_onboarding_clears_once_the_account_has_a_connection(tmp_path, dru
     assert body["onboardingRequired"] is False
 
 
-# --- none mode -------------------------------------------------------------
-
-
 async def test_none_mode_ignores_a_present_identity_header(tmp_path, druks_db):
     await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "x"}})
     with _client(tmp_path) as client:
         body = client.get("/api/auth/me", headers={IDENTITY_HEADER: "intruder@example.com"}).json()
     assert body["authMode"] == "none"
     assert body["account"]["username"] == "op@example.com"
-    # Never open-enrolls in none mode.
     assert not await Account.get_for_username("intruder@example.com")
 
 
@@ -183,17 +161,32 @@ async def test_none_one_resolves_the_operator(tmp_path, druks_db):
         assert client.get("/api/settings").status_code == 200
 
 
+@pytest.mark.parametrize(
+    ("reason", "onboarding_required"), [("invalid_grant", False), ("user", True)]
+)
+async def test_onboarding_after_the_only_subscription_is_revoked(
+    tmp_path, druks_db, reason, onboarding_required
+):
+    subscription = await connect_provider(
+        AnthropicProvider, {"claudeAiOauth": {"accessToken": "x"}}
+    )
+    await subscription.revoke(reason)
+
+    with _client(tmp_path) as client:
+        response = client.get("/api/auth/me")
+
+    assert response.status_code == 200
+    assert response.json()["onboardingRequired"] is onboarding_required
+
+
 async def test_none_multi_refuses_requests_and_startup(tmp_path, druks_db):
     await Account.get_or_create("one@example.com")
     await Account.get_or_create("two@example.com")
     with _client(tmp_path) as client:
         assert client.get("/api/settings").status_code == 503
-    # The startup validator runs the same check and refuses boot.
+    # Startup runs the same check.
     with pytest.raises(AuthConfigurationError):
         await resolve_single_operator()
-
-
-# --- connection flow -------------------------------------------------------
 
 
 async def test_none_zero_setup_flow_creates_the_operator(tmp_path, monkeypatch, druks_db):
@@ -202,7 +195,6 @@ async def test_none_zero_setup_flow_creates_the_operator(tmp_path, monkeypatch, 
         assert response.status_code == 200
         assert response.json()["username"] == "me@example.com"
         assert "set-cookie" not in response.headers
-        # The created operator now resolves and is past onboarding.
         body = client.get("/api/auth/me").json()
         assert body["account"]["username"] == "me@example.com"
         assert body["onboardingRequired"] is False
@@ -225,7 +217,6 @@ async def test_a_pasted_key_is_the_providers_and_names_its_paster(tmp_path, druk
     assert response.json()["keyTail"] == "alue"
     assert response.json()["updatedBy"]["username"] == "operator@example.com"
     assert "api-key-value" not in response.text
-    # The key is the installation's; the paster holds no subscription of their own.
     account = await Account.get_for_username("operator@example.com")
     assert not await VaultSecret.lookup(
         SecretKind.SUBSCRIPTION, Audience.provider("anthropic"), account.id
@@ -236,8 +227,6 @@ async def test_a_pasted_key_is_the_providers_and_names_its_paster(tmp_path, druk
 
 
 async def test_a_key_alone_finishes_onboarding(tmp_path, druks_db):
-    # A key-only operator (one whose key row the migration moved out of the
-    # subscriptions) must reach Settings, not the subscription-only door.
     with header_client(tmp_path) as client:
         headers = {IDENTITY_HEADER: "operator@example.com"}
         assert client.get("/api/auth/me", headers=headers).json()["onboardingRequired"] is True
@@ -299,7 +288,7 @@ async def test_concurrent_setup_completions_with_one_email_converge(
     tmp_path, monkeypatch, druks_db
 ):
     with _client(tmp_path) as client:
-        # Both flows start while zero accounts exist — both unbound.
+        # No account exists yet, so both flows start unbound.
         first = client.post("/api/providers/anthropic/connection/start")
         second = client.post("/api/providers/openai/connection/start")
         _mock_exchange(monkeypatch, _grant("me@example.com"))
@@ -324,10 +313,8 @@ async def test_concurrent_setup_completions_with_one_email_converge(
 
 async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, monkeypatch, druks_db):
     with _client(tmp_path) as client:
-        # Both flows start while zero accounts exist; the first completion
-        # creates the operator, so the second — a different provider email —
-        # must attach to that operator instead of minting a rival account and
-        # bricking none mode.
+        # The first completion creates the operator. The second, with another
+        # provider email, attaches to it instead of creating a second account.
         first = client.post("/api/providers/anthropic/connection/start")
         second = client.post("/api/providers/openai/connection/start")
         _mock_exchange(monkeypatch, _grant("a@example.com"))
@@ -348,7 +335,6 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
     codex_connection = await VaultSecret.lookup(
         SecretKind.SUBSCRIPTION, Audience.provider("openai"), operator.id
     )
-    # The capability keeps its own provider identity; it never rekeys the account.
     assert codex_connection.identity["email"] == "b@example.com"
 
 
@@ -356,8 +342,6 @@ async def test_a_connect_survives_a_failed_catalog_refresh(tmp_path, monkeypatch
     async def _refresh_boom(cls):
         raise RuntimeError("picker flush failed")
 
-    # The subscription commits before the refresh runs; a refresh failure past
-    # that point must not turn the durable connect into a client-visible error.
     monkeypatch.setattr(AnthropicProvider, "refresh_catalog", classmethod(_refresh_boom))
     with _client(tmp_path) as client:
         response = _connect(client, monkeypatch, email="me@example.com")
@@ -384,7 +368,7 @@ async def test_a_bound_connect_cannot_complete_under_another_operator(
         )
         assert response.status_code == 422
         assert "different operator" in response.json()["detail"]
-    assert not any(row.provider == "anthropic" for row in await VaultSecret.list_subscriptions())
+    assert not await VaultSecret.list_subscriptions()
 
 
 async def test_first_account_remains_default_after_other_connections(
@@ -406,7 +390,6 @@ async def test_first_account_remains_default_after_other_connections(
             email="other-seat@corp.com",
             headers={IDENTITY_HEADER: "second@example.com"},
         )
-    # The first operator keeps the default flag.
     assert (await Account.get_default()).id == first.id
 
 
@@ -441,9 +424,6 @@ async def test_connection_flow_rejects_a_bearer(tmp_path, druks_db):
         assert response.status_code == 401
 
 
-# --- the old browser-session surface is gone -------------------------------
-
-
 def test_the_session_era_routes_are_gone(tmp_path, druks_db):
     with _client(tmp_path) as client:
         gone = [
@@ -455,5 +435,4 @@ def test_the_session_era_routes_are_gone(tmp_path, druks_db):
         for response in gone:
             assert response.status_code == 404
             assert "set-cookie" not in response.headers
-        # The identity read never mints a cookie either.
         assert "set-cookie" not in client.get("/api/auth/me").headers

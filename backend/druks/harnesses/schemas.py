@@ -6,7 +6,6 @@ from pydantic import BeforeValidator, ConfigDict
 from druks.accounts.schemas import AccountResponse
 from druks.schemas import Schema
 
-# A set of names on the wire, in a stable order.
 SortedNames = Annotated[list[str], BeforeValidator(sorted)]
 
 
@@ -25,11 +24,13 @@ class ProviderResponse(Schema):
 
 class ProviderSubscriptionResponse(Schema):
     provider: str
-    # The email the provider reported at connect — display, never authority.
+    # Display only. Druks never authorizes by it.
     provider_email: str
     expires_at: datetime | None
     updated_at: datetime
-    # False once the token has expired.
+    revoked_at: datetime | None
+    revoked_reason: str
+    # False once the token expires or the subscription is revoked.
     connected: bool
 
     @classmethod
@@ -39,6 +40,8 @@ class ProviderSubscriptionResponse(Schema):
             provider_email=row.identity["email"],
             expires_at=row.expires_at,
             updated_at=row.updated_at,
+            revoked_at=row.revoked_at,
+            revoked_reason=row.revoked_reason,
             connected=row.is_live and (not row.expires_at or row.expires_at > datetime.now(UTC)),
         )
 

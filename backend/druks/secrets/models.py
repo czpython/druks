@@ -17,14 +17,11 @@ if TYPE_CHECKING:
 
 
 class VaultSecret(Base, Uuid7Pk):
-    """One secret Druks keeps, and the kind that turns it into a token: a
-    pasted value, an OAuth connection, a GitHub App key, or a subscription."""
+    """A pasted value, an OAuth connection, a GitHub App key, or a subscription."""
 
     __tablename__ = "vault"
     __table_args__ = (
-        # One row per audience, account, and header for a pasted value, an App
-        # key, or a subscription. An OAuth connection is the exception: an
-        # account can hold many at one audience, one per mailbox or workspace.
+        # An account can hold many OAuth connections at one audience.
         Index(
             "ix_vault_one_per_audience",
             "kind",
@@ -38,7 +35,7 @@ class VaultSecret(Base, Uuid7Pk):
     )
 
     kind: Mapped[str]
-    # The account whose secret this is. Empty for the appliance's own.
+    # Empty for the appliance's own.
     account_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     account: Mapped["Account | None"] = relationship(lazy="joined")
     # What the secret authenticates at: a provider, a service, or an MCP server.
@@ -60,13 +57,13 @@ class VaultSecret(Base, Uuid7Pk):
 
     @classmethod
     async def get(cls, secret_id: str) -> "VaultSecret | None":
-        # Any state: a revoked row keeps its facts, and a caller reads is_live.
+        # Revoked rows too. The caller reads is_live.
         return await db_session().get(cls, secret_id)
 
     @classmethod
     async def reload(cls, secret_id: str) -> "VaultSecret | None":
-        """One live row read past the identity map: what a refresher reads
-        after it wins the lock, so it never presents a token a peer advanced."""
+        """The live row, read past the identity map, so a refresher never
+        presents a token that a peer already rotated."""
         return await db_session().scalar(
             select(cls)
             .where(cls.id == secret_id, cls.revoked_at.is_(None))
@@ -101,27 +98,37 @@ class VaultSecret(Base, Uuid7Pk):
 
     @classmethod
     async def list_installation_tokens(cls) -> list["VaultSecret"]:
-        """The MCP bearers and secret headers the installation holds. An account's
-        own token is theirs, and never stands in for one of these."""
+        """The MCP bearers and secret headers the installation holds."""
         return await cls._list(
             SecretKind.STATIC, cls.audience.startswith("mcp:"), cls.account_id.is_(None)
         )
 
     @classmethod
     async def list_subscriptions(
-        cls, audience: str | None = None, *, account_id: str | None = None
+        cls,
+        audience: str | None = None,
+        *,
+        account_id: str | None = None,
+        include_revoked: bool = False,
     ) -> list["VaultSecret"]:
-        """The provider subscriptions: at one provider, of one account, or all."""
+        """The provider subscriptions: at one provider, of one account, or all.
+        ``include_revoked`` adds provider revocations, never a Disconnect."""
         clauses = []
         if audience:
             clauses.append(cls.audience == audience)
         if account_id:
             clauses.append(cls.account_id == account_id)
-        return await cls._list(SecretKind.SUBSCRIPTION, *clauses)
+        if include_revoked:
+            clauses.append(cls.revoked_reason != "user")
+        return await cls._list(SecretKind.SUBSCRIPTION, *clauses, include_revoked=include_revoked)
 
     @classmethod
-    async def _list(cls, kind: SecretKind, *clauses: ColumnElement[bool]) -> list["VaultSecret"]:
-        query = select(cls).where(cls.kind == kind, cls.revoked_at.is_(None), *clauses)
+    async def _list(
+        cls, kind: SecretKind, *clauses: ColumnElement[bool], include_revoked: bool = False
+    ) -> list["VaultSecret"]:
+        query = select(cls).where(cls.kind == kind, *clauses)
+        if not include_revoked:
+            query = query.where(cls.revoked_at.is_(None))
         return list(await db_session().scalars(query.order_by(cls.audience, cls.id)))
 
     @classmethod
@@ -137,8 +144,8 @@ class VaultSecret(Base, Uuid7Pk):
         scopes: list[str] | None = None,
         expires_at: datetime | None = None,
     ) -> "VaultSecret":
-        """Store the one row a kind keeps per audience, account, and header. A
-        second store replaces the first, and a revoked row comes back to life."""
+        """Store the one row per audience, account, and header. A second store
+        replaces the first and revives a revoked row."""
         row = await db_session().scalar(
             select(cls).where(
                 cls.kind == kind,
@@ -185,9 +192,8 @@ class VaultSecret(Base, Uuid7Pk):
         identity_status: IdentityStatus | None = None,
         secrets: dict[str, Any] | None = None,
     ) -> "VaultSecret":
-        """A new OAuth connection at an audience: the consent's refresh token,
-        and the client it refreshes through when the audience registered one.
-        An account can hold many connections at one audience."""
+        """A new OAuth connection. ``secrets`` holds the client it refreshes
+        through, when the consent registered one."""
         row = cls(
             kind=SecretKind.OAUTH,
             audience=audience,
@@ -210,8 +216,8 @@ class VaultSecret(Base, Uuid7Pk):
         identity_status: IdentityStatus | None = None,
         secrets: dict[str, Any] | None = None,
     ) -> None:
-        """A revoked connection, or a live one, takes a fresh consent. The
-        client it refreshes through stays unless the consent registered a new one."""
+        """A fresh consent on a live or revoked connection. The stored client
+        stays unless the consent registered a new one."""
         kept = secrets or {
             key: value for key, value in self.secrets.items() if key != "refresh_token"
         }
@@ -239,8 +245,7 @@ class VaultSecret(Base, Uuid7Pk):
     async def list_account_connections(
         cls, audience: str, account_id: str | None
     ) -> list["VaultSecret"]:
-        """One account's live OAuth connections at an audience. None is the
-        appliance's own."""
+        """One account's live OAuth connections at an audience. None is the appliance's own."""
         return list(
             await db_session().scalars(
                 select(cls)
@@ -258,7 +263,6 @@ class VaultSecret(Base, Uuid7Pk):
     async def get_for_identity(
         cls, audience: str, account_id: str | None, key: str, value: Any
     ) -> "VaultSecret | None":
-        # A live match wins; among revoked matches, the latest consent wins.
         return (
             await db_session().scalars(
                 select(cls)
@@ -275,8 +279,7 @@ class VaultSecret(Base, Uuid7Pk):
 
     @classmethod
     async def list_owned_by(cls, account_id: str | None) -> list["VaultSecret"]:
-        # The audit read: every connection this account ever authorized,
-        # revoked rows included.
+        # The audit read, revoked rows included.
         return list(
             await db_session().scalars(
                 select(cls)
@@ -286,9 +289,7 @@ class VaultSecret(Base, Uuid7Pk):
         )
 
     async def _load_refresh_token(self) -> str:
-        # Under the refresh lock: another process may have rotated and
-        # committed, and this transaction may already hold the row.
-        # populate_existing re-reads it past the identity map.
+        # Another process may have rotated and committed since this session read the row.
         fresh = (
             await db_session().scalars(
                 select(VaultSecret)
@@ -297,16 +298,15 @@ class VaultSecret(Base, Uuid7Pk):
             )
         ).one()
         if fresh.revoked_at:
-            # The services package imports the vault; the error is the one path back.
+            # The services package imports the vault.
             from druks.services.exceptions import OauthRefreshError
 
             raise OauthRefreshError(self.audience_name, "the connection was revoked mid-refresh")
         return fresh.secrets["refresh_token"]
 
     async def _save_refresh_token(self, rotated: str) -> None:
-        # The provider invalidated the old token the moment it rotated, so
-        # the write commits on its own session, never the enclosing
-        # transaction. A step that rolls back later must not brick the connection.
+        # The provider already invalidated the old token. A later rollback of the
+        # enclosing transaction must not lose the new one, so this commits on its own.
         async with get_session(db_session().bind) as session:
             fresh = await session.get(VaultSecret, self.id)
             stored = 0
@@ -318,16 +318,14 @@ class VaultSecret(Base, Uuid7Pk):
                 )
                 stored = result.rowcount
             await session.commit()
-        if not stored:
-            # A revoke landed mid-refresh. Nothing secret outlives the
-            # consent at rest, so the rotated token is not stored.
-            from druks.services.exceptions import OauthRefreshError
+        if stored:
+            # Expire, never assign: the enclosing commit must not rewrite secrets
+            # over a revoke that lands between the two commits.
+            db_session().expire(self, ["secrets"])
+            return
+        from druks.services.exceptions import OauthRefreshError
 
-            raise OauthRefreshError(self.audience_name, "the connection was revoked mid-refresh")
-        # The next read loads the rotated value. The enclosing transaction
-        # never writes this column at commit, so a revoke that lands between
-        # the two commits keeps its cleared secrets.
-        db_session().expire(self, ["secrets"])
+        raise OauthRefreshError(self.audience_name, "the connection was revoked mid-refresh")
 
     @property
     def audience_name(self) -> str:
@@ -339,8 +337,8 @@ class VaultSecret(Base, Uuid7Pk):
         return not self.revoked_at
 
     async def update_secrets(self, secrets: dict[str, Any], *, expires_at: datetime | None) -> None:
-        """A rotation's write: the whole mapping and its expiry, on the live
-        row only, so a revoke that landed first keeps its cleared secrets."""
+        """A rotation's write, on the live row only, so an earlier revoke keeps
+        its cleared secrets."""
         await db_session().execute(
             update(type(self))
             .where(type(self).id == self.id, type(self).revoked_at.is_(None))
@@ -349,28 +347,23 @@ class VaultSecret(Base, Uuid7Pk):
         await db_session().refresh(self)
 
     async def revoke(self, reason: str = "") -> None:
-        # A second revoke keeps the first stamp.
         self.revoked_at = self.revoked_at or Base.utc_now()
         self.revoked_reason = self.revoked_reason or reason
         self.secrets = {}
         await db_session().flush()
 
     async def issue_token(self, resource: str, *, host_id: str = "") -> tuple[str, datetime | None]:
-        """The token a box fetches from this secret, and its expiry. A pasted
-        value is itself and never expires. ``host_id`` names the box that asks,
-        so a rotation skips its refresh request."""
+        """The token a box fetches, and its expiry. A rotation skips the refresh
+        request for ``host_id``, the box that asks."""
         if not self.is_live:
             raise SecretRevokedError(self.audience)
         if self.kind == SecretKind.STATIC:
             return self.secrets["value"], None
         if self.kind == SecretKind.APP_KEY:
-            # The service declares how its App key turns into a token.
             from druks.apps.registry import services
 
             return await services.get(self.audience_name).issue_token(resource)
         if self.kind == SecretKind.OAUTH:
-            # An MCP connection refreshes through the client it registered; a
-            # service connection through the service's own client.
             from druks.apps.registry import services
 
             if self.audience.startswith("mcp:"):
@@ -379,7 +372,6 @@ class VaultSecret(Base, Uuid7Pk):
                 return await oauth.get_access_token(self.audience_name, self.account_id)
             client = await services.get(self.audience_name).get_oauth_client()
             return await client.get_access_token(connection=self)
-        # The provider rotates the subscription and answers its access token.
         from druks.harnesses.providers import get_provider
 
         token = await get_provider(self.audience_name).issue_token(self.id, except_host_id=host_id)

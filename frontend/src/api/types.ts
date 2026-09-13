@@ -562,7 +562,9 @@ export interface ProviderSubscription {
   providerEmail: string
   expiresAt: string | null
   updatedAt: string
-  // False once the token has expired.
+  revokedAt: string | null
+  revokedReason: string
+  // False once the token expires or the subscription is revoked.
   connected: boolean
 }
 

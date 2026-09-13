@@ -43,6 +43,7 @@ import { appLabel } from '../apps/registry'
 import { money, relTimeFromIso, secondsUntil } from '../lib/format'
 import { useUsageToday } from '../lib/useUsage'
 import { useTicker } from '../lib/useTicker'
+import { useFormatters } from '../lib/preferences'
 import { Bar } from './UsagePanel'
 import { harnessColors } from '../lib/harnessColors'
 import { SETTINGS_FIELDS, isFieldVisible, type Catalog, type CatalogChoice, type Defaults } from './settings'
@@ -1581,6 +1582,9 @@ export function ProvidersPane({
       <div className="hrs-list">
         {configured.map((provider) => {
           const subscription = subscriptions.find((row) => row.provider === provider.id) ?? null
+          const unavailableLabel = subscription?.revokedAt
+            ? 'Subscription disconnected'
+            : 'Subscription expired'
           const apiKey = keys.find((row) => row.provider === provider.id) ?? null
           const usage = usageQuery.data?.providers.find((row) => row.id === provider.id)
           const weekly = usage?.weeks.find((week) => week.model === null)
@@ -1616,7 +1620,7 @@ export function ProvidersPane({
                       label={
                         subscription.connected
                           ? 'Subscription connected'
-                          : 'Subscription expired'
+                          : unavailableLabel
                       }
                     />
                   )}
@@ -1731,6 +1735,7 @@ export function ProviderConnect({
   usage?: UsageProviderSummary | null
   keySpendToday?: number | null
 }) {
+  const { absTime } = useFormatters()
   const queryClient = useQueryClient()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1793,10 +1798,9 @@ export function ProviderConnect({
     }, refreshKeys, 'API key saved.')
   }
 
+  const unavailableLabel = subscription?.revokedAt ? 'Disconnected' : 'Expired'
   const connected = Boolean(subscription?.connected)
-  // An expired subscription is still a subscription: keep its identity and Disconnect
-  // visible and ask for a Reconnect, not a first-time sign-in.
-  const expired = Boolean(subscription) && !connected
+  const disconnected = Boolean(subscription) && !connected
   const showKeyForm = acceptsApiKey && (keyFormOpen || replacing)
   return (
     <div className="hr-connect">
@@ -1805,12 +1809,12 @@ export function ProviderConnect({
           <div className="provider-method-head">
             <h4 className="hr-block-title">Subscription</h4>
             {subscription && (
-              <ServiceStatus connected={connected} label={expired ? 'Expired' : undefined} />
+              <ServiceStatus connected={connected} label={disconnected ? unavailableLabel : undefined} />
             )}
             <div className="hr-conn-actions">
               {subscription ? (
                 <>
-                  {expired && !flow.challenge && (
+                  {disconnected && !flow.challenge && (
                     <button
                       className="set-btn primary"
                       onClick={() => void flow.start()}
@@ -1819,14 +1823,16 @@ export function ProviderConnect({
                       Reconnect
                     </button>
                   )}
-                  <button
-                    className="set-btn danger"
-                    aria-label={`Disconnect ${provider.label} subscription`}
-                    onClick={disconnect}
-                    disabled={busy || flow.busy}
-                  >
-                    Disconnect
-                  </button>
+                  {!subscription.revokedAt && (
+                    <button
+                      className="set-btn danger"
+                      aria-label={`Disconnect ${provider.label} subscription`}
+                      onClick={disconnect}
+                      disabled={busy || flow.busy}
+                    >
+                      Disconnect
+                    </button>
+                  )}
                 </>
               ) : (
                 !flow.challenge && (
@@ -1847,6 +1853,15 @@ export function ProviderConnect({
                 {usage?.planTier ? `${usage.planTier} · ` : ''}
                 {subscription.providerEmail}
               </p>
+              {subscription.revokedAt && (
+                <p className="provider-stale">
+                  Disconnected on{' '}
+                  <time dateTime={subscription.revokedAt}>
+                    {absTime(subscription.revokedAt)}
+                  </time>
+                  {' · '}Reason: <code>{subscription.revokedReason}</code>
+                </p>
+              )}
               {usage?.fiveHour && !usage.unlimited && (
                 <div className="provider-quotas">
                   <QuotaRow label="5-hour" metric={usage.fiveHour} />

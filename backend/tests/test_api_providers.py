@@ -17,14 +17,9 @@ def _build_client(tmp_path: Path) -> TestClient:
     return TestClient(configure_app_for_test(settings=make_settings(tmp_path)))
 
 
-def _providers(client: TestClient) -> dict[str, dict]:
-    return {p["id"]: p for p in client.get("/api/providers").json()}
-
-
 def test_list_carries_billing_options_and_no_connection(tmp_path: Path):
-    # One card per vendor; each takes a subscription and an API key.
     with _build_client(tmp_path) as client:
-        providers = _providers(client)
+        providers = {provider["id"]: provider for provider in client.get("/api/providers").json()}
     assert list(providers) == ["anthropic", "openai"]
     assert providers["anthropic"]["billingOptions"] == ["api_key", "subscription"]
     assert providers["openai"]["billingOptions"] == ["api_key", "subscription"]
@@ -32,8 +27,6 @@ def test_list_carries_billing_options_and_no_connection(tmp_path: Path):
 
 
 async def test_list_shows_only_the_requesting_accounts_login(tmp_path: Path, druks_db):
-    # The list resolves the edge identity itself; another account's subscription
-    # never shows on this card.
     await connect_provider(
         AnthropicProvider,
         {"claudeAiOauth": {"accessToken": "x"}},
@@ -61,7 +54,6 @@ async def test_keys_list_the_installations_keys_for_every_account(tmp_path: Path
 
 
 async def test_logins_report_the_provider_identity(tmp_path: Path, druks_db):
-    # The provider identity is display, never authority.
     await VaultSecret.store(
         SecretKind.SUBSCRIPTION,
         Audience.provider("anthropic"),
@@ -78,6 +70,8 @@ async def test_logins_report_the_provider_identity(tmp_path: Path, druks_db):
         "providerEmail": "seat@corp.com",
         "expiresAt": None,
         "connected": True,
+        "revokedAt": None,
+        "revokedReason": "",
     }
 
 
@@ -95,6 +89,31 @@ async def test_logins_read_an_expired_token_as_not_connected(tmp_path: Path, dru
     assert subscription["connected"] is False
 
 
+async def test_revoked_subscription_keeps_its_facts_for_its_owner(tmp_path: Path, druks_db):
+    mine = await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "x"}})
+    await mine.revoke("invalid_grant")
+    other = await connect_provider(
+        AnthropicProvider,
+        {"claudeAiOauth": {"accessToken": "y"}},
+        provider_email="someone-else@example.com",
+    )
+    await other.revoke("invalid_grant")
+    assert not await VaultSecret.list_subscriptions()
+
+    with _build_client(tmp_path) as client:
+        [subscription] = client.get("/api/providers/subscriptions").json()
+
+    assert subscription == {
+        "provider": "anthropic",
+        "providerEmail": mine.identity["email"],
+        "expiresAt": None,
+        "updatedAt": mine.updated_at.isoformat().replace("+00:00", "Z"),
+        "connected": False,
+        "revokedAt": mine.revoked_at.isoformat().replace("+00:00", "Z"),
+        "revokedReason": "invalid_grant",
+    }
+
+
 async def test_disconnect_removes_only_the_requesting_accounts_login(tmp_path: Path, druks_db):
     mine = await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "x"}})
     other = await connect_provider(
@@ -104,10 +123,9 @@ async def test_disconnect_removes_only_the_requesting_accounts_login(tmp_path: P
     )
     mine_id, other_id = mine.id, other.id
     with _build_client(tmp_path) as client:
-        response = client.delete("/api/providers/anthropic/connection")
-    assert response.status_code == 204
-    # The request deleted in its own task-scoped session; read past this
-    # task's identity map for what actually persisted.
+        assert client.delete("/api/providers/anthropic/connection").status_code == 204
+        assert client.get("/api/providers/subscriptions").json() == []
+    # The request revoked in its own session. reload reads past this identity map.
     assert not await VaultSecret.reload(mine_id)
     assert await VaultSecret.reload(other_id)
 
@@ -153,7 +171,6 @@ async def test_a_key_for_a_directory_provider_adds_it(tmp_path: Path, druks_db, 
         assert (catalog["provider"], catalog["label"]) == ("groq", "Groq")
         assert client.post("/api/providers/nobody/key", json={"key": "x"}).status_code == 404
 
-        # Removing the key removes the provider with it.
         assert client.delete("/api/providers/groq/key").status_code == 204
         assert client.get("/api/providers/catalogs").json() == []
     assert await VaultSecret.list_keys() == []

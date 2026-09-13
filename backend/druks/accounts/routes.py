@@ -20,13 +20,12 @@ async def get_identity(
     return IdentityResponse(
         auth_mode=request.app.state.settings.identity.mode,
         account=AccountResponse.model_validate(account) if account else None,
-        # An account needs onboarding while it holds no subscription and the
-        # installation holds no key; none/zero is onboarding before the account
-        # exists.
+        # none/zero has no account before onboarding. A provider revocation still
+        # counts, so the operator can reach Reconnect.
         onboarding_required=not (
             account
             and (
-                await VaultSecret.list_subscriptions(account_id=account.id)
+                await VaultSecret.list_subscriptions(account_id=account.id, include_revoked=True)
                 or await VaultSecret.list_keys()
             )
         ),
@@ -57,8 +56,7 @@ async def create_pat(
 ) -> dict[str, str]:
     name = name.strip()
     if name and len(name) <= PAT_NAME_LENGTH:
-        # The plaintext, handed back exactly once — only its hash is stored,
-        # and the new row surfaces through the list.
+        # The only time the plaintext leaves Druks. Druks stores its hash.
         _, token = await PersonalAccessToken.create(account_id=account.id, name=name)
         return {"token": token}
     raise HTTPException(
@@ -77,5 +75,5 @@ async def revoke_pat(
     if pat and pat.account_id == account.id:
         await pat.revoke()
         return pat
-    # One shape for missing and foreign — existence stays account-scoped.
+    # A foreign token gets the same 404 as a missing one.
     raise HTTPException(status_code=404, detail="No such token.")

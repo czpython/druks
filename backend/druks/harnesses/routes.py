@@ -46,7 +46,7 @@ async def list_subscriptions(
 ) -> list[ProviderSubscriptionResponse]:
     return [
         ProviderSubscriptionResponse.from_secret(row)
-        for row in await VaultSecret.list_subscriptions(account_id=account.id)
+        for row in await VaultSecret.list_subscriptions(account_id=account.id, include_revoked=True)
     ]
 
 
@@ -81,7 +81,7 @@ async def list_catalogs() -> list[ProviderCatalog]:
     dependencies=[Depends(current_session_account)],
 )
 async def list_directory() -> list[dict]:
-    """The providers an operator can add by key: the directory minus the registered ones."""
+    """The providers an operator can add by key."""
     providers = await directory.list_providers()
     return [provider for provider in providers if not is_registered(provider["provider"])]
 
@@ -98,8 +98,7 @@ async def start_connection(
     provider_id: str, account: Account | None = Depends(current_session_or_setup)
 ) -> dict[str, str]:
     provider = _resolve_provider(provider_id)
-    # A resolved operator binds the flow; none/zero starts the unbound setup
-    # flow whose completion creates the operator.
+    # In none/zero the flow starts unbound, and its completion creates the operator.
     url, flow_id = await provider.connect_start(account_id=account.id if account else None)
     return {"authorizeUrl": url, "connectionId": flow_id}
 
@@ -120,22 +119,17 @@ async def complete_connection(
         completed = await provider.connect_complete(flow_id=flow_id, pasted=code)
     except ConnectError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if completed.account_id:
-        # A bound flow must complete under the operator that started it —
-        # never rebound by email fallback.
-        if not account or account.id != completed.account_id:
-            raise HTTPException(
-                status_code=422,
-                detail="This connect was started under a different operator — start it again.",
-            )
+    if account and account.id == completed.account_id:
         resolved = account
+    elif completed.account_id:
+        # A bound flow never rebinds to another operator.
+        raise HTTPException(
+            status_code=422,
+            detail="This connect was started under a different operator — start it again.",
+        )
     else:
-        # The unbound setup flow attaches to the operator this request resolved
-        # — a flow started before the account existed still lands on it. Only a
-        # still-account-less request creates the operator from the
-        # provider-verified email; get_or_create is atomic, so concurrent
-        # completions of the same email converge, and a true different-email
-        # race surfaces as the none-mode multi-operator refusal.
+        # An unbound flow attaches to this request's account when one exists.
+        # get_or_create is atomic, so concurrent completions of one email converge.
         resolved = account or await Account.get_or_create(completed.provider_email)
     await VaultSecret.store(
         SecretKind.SUBSCRIPTION,
@@ -145,16 +139,12 @@ async def complete_connection(
         identity={"email": completed.provider_email},
         expires_at=completed.expires_at,
     )
-    # Materialize the reply, then land the subscription before any provider I/O —
-    # an await while flushed rows still hold their locks can stall every other
-    # writer on this event loop, and nothing past the point of durability may
-    # depend on another database read.
+    # Build the reply, then commit before provider I/O. Flushed rows hold their locks
+    # across an await, and after the commit the reply would need another read.
     response = AccountResponse.model_validate(resolved)
     await db_session().commit()
     try:
-        # A fresh picker right after connect; fetch failures are tagged inside.
-        # The single-use flow is already spent, so trouble here — including a
-        # database that vanished under the refresh — only logs.
+        # The flow is already spent, so a failed refresh only logs.
         await provider.refresh_catalog()
     except Exception:
         logging.getLogger(__name__).exception("Catalog refresh after connect failed")
@@ -173,19 +163,16 @@ async def create_key(
     account: Account = Depends(current_session_account),
     key: str = Body(..., embed=True),
 ) -> ProviderKeyResponse:
-    """The installation's key at a provider. A provider from the directory
-    becomes one of the installation's when its key lands."""
+    """The installation's key at a provider. A key for a directory provider also adds it."""
     if not (key := key.strip()):
         raise HTTPException(status_code=422, detail="The API key is empty. Paste a key.")
     if is_registered(provider_id):
         provider = get_provider(provider_id)
-        if "api_key" not in provider.billing_options:
-            raise HTTPException(
-                status_code=422, detail=f"{provider.label} does not accept API keys."
-            )
-        stored = await VaultSecret.paste(Audience.provider(provider.id), key, pasted_by=account)
-        await provider.refresh_catalog()
-        return await _key_response(stored)
+        if "api_key" in provider.billing_options:
+            stored = await VaultSecret.paste(Audience.provider(provider.id), key, pasted_by=account)
+            await provider.refresh_catalog()
+            return await _key_response(stored)
+        raise HTTPException(status_code=422, detail=f"{provider.label} does not accept API keys.")
     try:
         await directory.add_provider(provider_id)
     except KeyError as error:
@@ -199,24 +186,21 @@ async def create_key(
     "/{provider_id}/key", status_code=204, dependencies=[Depends(current_session_account)]
 )
 async def remove_key(provider_id: str) -> None:
-    """A provider the operator added from the directory is gone with its key."""
-    stored = await VaultSecret.lookup(SecretKind.STATIC, Audience.provider(provider_id))
-    if stored:
+    """Removing a directory provider's key also removes the provider."""
+    if stored := await VaultSecret.lookup(SecretKind.STATIC, Audience.provider(provider_id)):
         await stored.revoke("user")
     if is_registered(provider_id):
         return
-    catalog = await ProviderCatalog.get(provider_id)
-    if not catalog:
-        raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}")
-    await catalog.delete()
+    if catalog := await ProviderCatalog.get(provider_id):
+        await catalog.delete()
+        return
+    raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}")
 
 
 @router.delete("/{provider_id}/connection", status_code=204)
 async def disconnect(provider_id: str, account: Account = Depends(current_session_account)) -> None:
     provider = _resolve_provider(provider_id)
-    subscription = await VaultSecret.lookup(
+    if subscription := await VaultSecret.lookup(
         SecretKind.SUBSCRIPTION, Audience.provider(provider.id), account.id
-    )
-    if subscription:
-        # Only the requesting account's own subscription — never another's.
+    ):
         await subscription.revoke("user")
