@@ -1,12 +1,15 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Literal
 
 from druks import ui
 from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
+from druks.contrib.software_factory.contracts import ReviewWork
+from druks.contrib.software_factory.datastructures import PullRequest
 from druks.contrib.software_factory.enums import Priority, Status
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket, WorkItem
 from druks.db import Base
+from druks.workflows import OperatorReply, SubjectStatus
 
 PRIORITY_LABELS: dict[Priority, str] = {
     Priority.NONE: "No priority",
@@ -22,6 +25,125 @@ UNATTRIBUTED = "Unattributed"
 FILTER_ANY = "Any"
 # The assignee filter's value for unassigned. Empty already means any.
 UNASSIGNED_FILTER = "none"
+
+# A gate Software Factory has no words for reads as waiting on you.
+PARKED_LINES = {OperatorReply.name: "Review the plan", ReviewWork.name: "Review implementation"}
+IN_FLIGHT_STATES = ("scheduled", "running")
+STATE_TONES = {"scheduled": "active", "running": "active", "parked": "warning", "failed": "danger"}
+OVERVIEW_COLUMNS = [ui.TableColumn("Work"), ui.TableColumn("Status"), ui.TableColumn("Updated")]
+
+
+def _kind_label(kind: str) -> str:
+    return kind.rpartition(".")[2].replace("_", " ").capitalize()
+
+
+def _status_line(status: SubjectStatus) -> str:
+    if status.state == "parked":
+        return PARKED_LINES.get(status.gate, "Waiting on you")
+    if status.state in IN_FLIGHT_STATES:
+        return f"{_kind_label(status.agent or status.kind)}…"
+    if status.state == "failed" and status.reason == "gate_timeout":
+        # An unanswered gate is not a crash. The run is over, so a new trigger starts again.
+        return f"{_kind_label(status.kind)} timed out — re-trigger to retry"
+    if status.state == "finished":
+        # Only a build stays on the overview once it finishes: until GitHub decides its PR.
+        return "Merge or close the PR"
+    return status.state or "Not started"
+
+
+def _overview_row(
+    title: str,
+    *,
+    description: str,
+    subject: WorkItem | PullRequest,
+    status: SubjectStatus,
+    updated_at: datetime,
+) -> ui.TableRow:
+    return ui.TableRow(
+        [
+            ui.TextValue(title, description=description, link=ui.Link(title, subject=subject)),
+            ui.StatusValue(_status_line(status), tone=STATE_TONES.get(status.state, "neutral")),
+            ui.TimeValue(updated_at),
+        ],
+        detail=status.failure or "",
+    )
+
+
+@ui.page("/")
+async def overview(query: str = ""):
+    needle = query.lower()
+    # A work item sorts by its last update and a review by its start. Each entry joins
+    # a lane by its run state.
+    entries: list[tuple[datetime, SubjectStatus, ui.TableRow]] = []
+
+    work_items = await WorkItem.list_unresolved()
+    build_statuses = await WorkItem.get_statuses([str(item.id) for item in work_items])
+    for item in work_items:
+        status = build_statuses[str(item.id)]
+        references = [item.ticket_key, item.repo]
+        if item.pr_number:
+            references.append(f"#{item.pr_number}")
+        description = " · ".join(references)
+        if needle in f"{item.title} {description}".lower():
+            row = _overview_row(
+                item.title,
+                description=description,
+                subject=item,
+                status=status,
+                updated_at=item.updated_at,
+            )
+            entries.append((item.updated_at, status, row))
+
+    pull_requests = await PullRequest.list_open()
+    review_statuses = await PullRequest.get_statuses([request.id for request in pull_requests])
+    for pull_request in pull_requests:
+        status = review_statuses[pull_request.id]
+        description = "Pull request review"
+        if needle in f"{pull_request.label} {description}".lower():
+            row = _overview_row(
+                pull_request.label,
+                description=description,
+                subject=pull_request,
+                status=status,
+                updated_at=status.triggered_at,
+            )
+            entries.append((status.triggered_at, status, row))
+
+    entries.sort(key=lambda entry: entry[0], reverse=True)
+    in_flight = [row for _, status, row in entries if status.state in IN_FLIGHT_STATES]
+    needs_you = [row for _, status, row in entries if status.state not in IN_FLIGHT_STATES]
+    unmatched = f'No work matches "{query}".' if query else ""
+    return ui.Page(
+        "Overview",
+        filters=[
+            ui.TextField(
+                name="query", label="Filter", value=query, placeholder="Ticket, title, or repo"
+            )
+        ],
+        # The page follows builds and its lanes follow reviews, so a change to either
+        # reads the lanes again.
+        follows=WorkItem,
+        blocks=[
+            ui.Section(
+                name="lanes",
+                follows=PullRequest,
+                blocks=[
+                    ui.Table(
+                        title="Needs you",
+                        columns=OVERVIEW_COLUMNS,
+                        rows=needs_you,
+                        empty_text=unmatched or "Nothing needs you. Handed-off work is in History.",
+                    ),
+                    ui.Table(
+                        title="In flight",
+                        columns=OVERVIEW_COLUMNS,
+                        rows=in_flight,
+                        empty_text=unmatched or "Nothing is running.",
+                    ),
+                ],
+            )
+        ],
+    )
 
 
 def _repo_options(repos: list[ProjectRepo]) -> list[ui.Option]:

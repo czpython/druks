@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any, Literal, TypeVar
 
 from githubkit import AppAuthStrategy, AppInstallationAuthStrategy, GitHub
-from githubkit.exception import GraphQLFailed, RequestFailed
+from githubkit.exception import GitHubException, GraphQLFailed, RequestFailed
 
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.utils.time import ensure_utc
@@ -465,6 +465,37 @@ class GitHubClient:
             raise
 
         return True
+
+    @_retry_on_401
+    async def react_to_comment(
+        self,
+        repo: str,
+        comment_id: int,
+        *,
+        is_review_comment: bool,
+        content: str,
+        fail_silently: bool = False,
+    ) -> None:
+        owner, name = repo.split("/", 1)
+        try:
+            reactions = (await self._for_repo(repo)).rest.reactions
+            # GitHub files a line comment under the pull request and a conversation
+            # comment under the issue, and each has its own reactions endpoint.
+            if is_review_comment:
+                await reactions.async_create_for_pull_request_review_comment(
+                    owner, name, comment_id, content=content
+                )
+            else:
+                await reactions.async_create_for_issue_comment(
+                    owner, name, comment_id, content=content
+                )
+        except (GitHubAppNotInstalledError, GitHubException):
+            if fail_silently:
+                logger.warning(
+                    "Could not react to comment %s on %s.", comment_id, repo, exc_info=True
+                )
+                return
+            raise
 
     @_retry_on_401
     async def request_pull_request_reviewers(

@@ -260,12 +260,16 @@ class WorkItem(StoredSubject):
 
     @classmethod
     async def list_summaries(cls, account_id: str | None) -> list[WorkItemSummary]:
+        return [item.get_summary() for item in await cls.list_unresolved()]
+
+    @classmethod
+    async def list_unresolved(cls) -> list["WorkItem"]:
         # The run state colors a row but never decides whether the row shows. The 500
         # most recent rows cover the board.
         stmt = (
             select(cls).where(cls.resolution.is_(None)).order_by(cls.updated_at.desc()).limit(500)
         )
-        return [item.get_summary() for item in await db_session().scalars(stmt)]
+        return list(await db_session().scalars(stmt))
 
     @classmethod
     async def create(
