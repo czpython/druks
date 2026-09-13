@@ -11,7 +11,7 @@
 - **Repo:** {{ build.repo }} · branch `{{ build.branch or '(none)' }}` · PR #{{ build.pr_number or '?' }}
 {% endif %}
 {% if build.ticket_ref %}
-- **Ticket:** {{ build.ticket_ref }} on `{{ build.source }}`
+- **Ticket:** {{ build.ticket_ref }} on `{{ build.source }}`{% if build.ticket_url %} · {{ build.ticket_url }}{% endif %}
 {% endif %}
 - **Plan revision:** {{ build.journal.plan_revision }}
 - **Implementation revision:** {{ build.journal.implementation_revision }}{% if build.journal.implementation_revision == 0 %} (first attempt){% endif %}

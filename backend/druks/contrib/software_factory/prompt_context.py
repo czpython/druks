@@ -20,6 +20,7 @@ class BuildPromptContext:
     branch: str | None
     pr_number: int | None
     ticket_ref: str | None
+    ticket_url: str | None
     source: str
     assignee_name: str | None
     assignee_email: str | None

@@ -35,6 +35,7 @@ def _build(*, review_code: bool = True) -> SimpleNamespace:
         branch="agent/eng-1",
         pr_number=7,
         ticket_ref="ACME-1",
+        ticket_url="https://github.com/acme/widget/issues/1",
         source="github",
         assignee_name=None,
         assignee_email=None,

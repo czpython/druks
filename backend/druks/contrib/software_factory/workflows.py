@@ -214,12 +214,17 @@ class Build(Workflow):
         project_repo = await ProjectRepo.get_for_repo(work_item.repo, raise_on_missing=True)
         endpoint = load_settings().urls.endpoint.rstrip("/")
         work_item_url = f"{endpoint}/software_factory/work-items/{work_item.id}" if endpoint else ""
+        ticket_url = work_item.ticket_url
+        if work_item.source == "druks":
+            # The board links a ticket relative to the dashboard. A PR body needs an absolute URL.
+            ticket_url = f"{endpoint}{ticket_url}" if endpoint else None
         prompt_context = BuildPromptContext(
             repo=work_item.repo,
             work_item_url=work_item_url,
             branch=self.branch,
             pr_number=self.pr_number,
             ticket_ref=work_item.ticket_key,
+            ticket_url=ticket_url,
             source=work_item.source,
             assignee_name=self.input.assignee_name,
             assignee_email=self.input.assignee_email,
