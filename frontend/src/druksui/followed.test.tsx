@@ -180,6 +180,30 @@ describe('a followed region', () => {
     expect(screen.getByText('outside')).toBeTruthy()
   })
 
+  it('keeps a newer read when an older read of another subject lands late', async () => {
+    const NOTE_9 = { subjectType: 'note', subjectId: '9' }
+    const page = (text: string) => snapshot([region('board', text, NOTE_9)], NOTE_7)
+    renderPage(page('first'))
+    await waitFor(() => expect(screen.getByText('first')).toBeTruthy())
+    let landLate: (late: PageSnapshot) => void = () => {}
+    readPage.mockReturnValueOnce(new Promise((resolve) => (landLate = resolve)))
+    readPage.mockResolvedValueOnce(page('newest'))
+    const streams = Object.fromEntries(sse.mock.calls.map(([path, options]) => [path, options]))
+
+    await act(async () => {
+      streams['/api/field_notes/note/9/stream']?.handlers.snapshot?.({})
+      streams['/api/field_notes/note/7/stream']?.handlers.snapshot?.({})
+    })
+    await waitFor(() => expect(screen.getByText('newest')).toBeTruthy())
+    await act(async () => {
+      landLate(page('older'))
+      await new Promise((settle) => setTimeout(settle, 0))
+    })
+
+    expect(screen.getByText('newest')).toBeTruthy()
+    expect(screen.queryByText('older')).toBeNull()
+  })
+
   it('leaves the page as it was when a read fails', async () => {
     renderPage(snapshot([region('decision', 'waiting')]))
     await waitFor(() => expect(screen.getByText('waiting')).toBeTruthy())

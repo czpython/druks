@@ -109,7 +109,7 @@ function SubjectDetail({
   )
 
   return (
-    <Page scroll="internal" className="ins page-subject" header={crumb}>
+    <Page scroll="internal" inset className="ins page-subject" header={crumb}>
       <Facts className="subject-facts">
         <Fact k={label}>{data.summary.label}</Fact>
         {summaryEntries(data.summary).map(([key, value]) => (

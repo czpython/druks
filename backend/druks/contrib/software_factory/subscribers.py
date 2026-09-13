@@ -87,13 +87,22 @@ async def pr_close_settles_the_item(*, repo: str, pr_number: int, payload: dict)
 async def mention_asks_for_a_review(*, repo: str, pr_number: int, payload: dict) -> None:
     """Addressing the review actor asks it to review that pull request, and only someone
     who writes to the repo may ask — a review is the account's to spend."""
-    handle = await (await get_review_actor()).client.get_mention_handle()
+    actor = await get_review_actor()
+    handle = await actor.client.get_mention_handle()
     # Only the full handle counts. An email address or a longer handle is not a mention.
     mention = rf"(?<!\w)@{re.escape(handle)}(?![\w-])"
     is_mentioned = handle and re.search(mention, payload["body"], re.IGNORECASE)
     if is_mentioned and await ProjectRepo.get_for_repo(repo):
         await PullRequestReview.dispatch(
             repo=repo, pr_number=pr_number, requested_by=payload["author"]
+        )
+        # The reaction tells the requester on GitHub that the reviewer saw the ask.
+        await actor.client.react_to_comment(
+            repo,
+            payload["comment_id"],
+            is_review_comment=payload["is_review_comment"],
+            content="eyes",
+            fail_silently=True,
         )
 
 

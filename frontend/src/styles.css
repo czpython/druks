@@ -497,9 +497,6 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 .row-pr-cell .row-pr-num { color: var(--text-mid); text-decoration: none; }
 .row-pr-cell .row-pr-num:hover { color: var(--bucket-run); text-decoration: underline; }
 
-.row-id .row-ticket-link { color: inherit; text-decoration: none; }
-.row-id .row-ticket-link:hover { color: var(--bucket-run); text-decoration: underline; }
-
 .repo-pr {
   font-size: 11.5px;
   white-space: nowrap;
@@ -525,13 +522,6 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 @media (max-width: 1100px) {
 }
 
-.row-work-item {
-
-  grid-template-columns:
-    16px minmax(0, 104px) minmax(0, 540px) 1fr 120px 64px minmax(0, 160px) 70px;
-}
-.row-work-item { gap: 14px; padding: 0 20px; }
-.row-work-item:hover { background: var(--surface-2); }
 .wi-updated { text-align: right; white-space: nowrap; font-size: 11px; }
 
 .wi-group-head {

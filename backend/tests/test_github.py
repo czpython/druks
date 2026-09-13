@@ -654,3 +654,42 @@ async def test_create_repo_from_template_reads_a_taken_name_as_already_created(
     )
 
     assert full_name == "clawhaven/acme-coffee"
+
+
+@pytest.mark.parametrize(
+    "is_review_comment,endpoint",
+    [
+        (False, "async_create_for_issue_comment"),
+        (True, "async_create_for_pull_request_review_comment"),
+    ],
+)
+async def test_a_reaction_goes_to_the_endpoint_of_its_comment(is_review_comment, endpoint) -> None:
+    reactions = SimpleNamespace(
+        async_create_for_issue_comment=AsyncMock(),
+        async_create_for_pull_request_review_comment=AsyncMock(),
+    )
+    client = _TestGitHubClient(SimpleNamespace(rest=SimpleNamespace(reactions=reactions)))
+
+    await client.react_to_comment(
+        "ClawHaven/example", 99, is_review_comment=is_review_comment, content="eyes"
+    )
+
+    getattr(reactions, endpoint).assert_awaited_once_with(
+        "ClawHaven", "example", 99, content="eyes"
+    )
+
+
+async def test_a_reaction_that_fails_silently_raises_nothing() -> None:
+    reactions = SimpleNamespace(
+        async_create_for_issue_comment=AsyncMock(side_effect=_make_request_failed(403))
+    )
+    client = _TestGitHubClient(SimpleNamespace(rest=SimpleNamespace(reactions=reactions)))
+
+    await client.react_to_comment(
+        "ClawHaven/example", 99, is_review_comment=False, content="eyes", fail_silently=True
+    )
+
+    with pytest.raises(RequestFailed):
+        await client.react_to_comment(
+            "ClawHaven/example", 99, is_review_comment=False, content="eyes"
+        )

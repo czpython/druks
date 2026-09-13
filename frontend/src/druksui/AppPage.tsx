@@ -56,10 +56,13 @@ export function AppPage({ app, page }: { app: string; page: string }) {
   })
 
   // Every read gets a number, per subject: a read that lands after a newer read
-  // of the same subject is stale, while another subject's read is not.
+  // of the same subject is stale, while another subject's read is not. A page
+  // that follows a subject is taken whole on every read, so one number covers
+  // every read of it: an older read would put back rows a newer one replaced.
   const latest = useRef(new Map<string, number>())
+  const isFollowedWhole = !!snapshot.data?.follows
   async function reread(subject: Follows) {
-    const watched = `${subject.subjectType}/${subject.subjectId}`
+    const watched = isFollowedWhole ? '' : `${subject.subjectType}/${subject.subjectId}`
     const mine = (latest.current.get(watched) ?? 0) + 1
     latest.current.set(watched, mine)
     // The stream repeats nothing, so a read that fails would leave the page
@@ -73,7 +76,7 @@ export function AppPage({ app, page }: { app: string; page: string }) {
       if (mine !== latest.current.get(watched)) return
       if (fresh) {
         queryClient.setQueryData(key, (previous?: PageSnapshot) =>
-          previous ? mergeRegions(previous, fresh, subject) : fresh,
+          previous && !isFollowedWhole ? mergeRegions(previous, fresh, subject) : fresh,
         )
         // A snapshot can open, change, or close a gate on a run this page
         // already shows, so the gates read themselves again.
@@ -148,6 +151,7 @@ export function AppPage({ app, page }: { app: string; page: string }) {
             description={snapshot.data.description}
             controls={snapshot.data.controls}
             filters={snapshot.data.filters ?? []}
+            isFiltering={snapshot.isPlaceholderData}
           />
           {target && !gateRuns(snapshot.data.blocks).includes(target.run) && (
             <p role="alert">This input request is unavailable. Return to the Dashboard to open the current request.</p>
@@ -172,6 +176,7 @@ function PageChrome({
   description,
   controls,
   filters,
+  isFiltering = false,
 }: {
   app: string
   page: string
@@ -183,6 +188,7 @@ function PageChrome({
   description?: string
   controls?: (Action | Link)[]
   filters?: Field[]
+  isFiltering?: boolean
 }) {
   return (
     <>
@@ -218,17 +224,23 @@ function PageChrome({
           ))}
         </nav>
       )}
-      {filters?.length ? <PageFilters fields={filters} /> : null}
+      {filters?.length ? <PageFilters fields={filters} isFiltering={isFiltering} /> : null}
     </>
   )
 }
 
-function PageFilters({ fields }: { fields: Field[] }) {
+function PageFilters({ fields, isFiltering }: { fields: Field[]; isFiltering: boolean }) {
   const { path: rawPath, search, base } = useRawLocation()
   const location = rawPath.slice(base.length)
   const [, navigate] = useLocation()
+  const current = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search)
   const values = Object.fromEntries(
-    fields.map((field) => [field.name, 'value' in field ? (field.value ?? '') : '']),
+    fields.map((field) => {
+      // While the filtered read is on its way, the snapshot still holds the old text.
+      // The URL already holds the new text, so a typed filter loses no keystroke.
+      if (isFiltering && field.field === 'text') return [field.name, current.get(field.name) ?? '']
+      return [field.name, 'value' in field ? (field.value ?? '') : '']
+    }),
   )
   return (
     <div className="dui-filters" aria-label="Filters">

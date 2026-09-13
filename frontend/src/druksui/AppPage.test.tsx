@@ -300,6 +300,31 @@ describe('the parent link', () => {
 
     await waitFor(() => expect(readPage).toHaveBeenCalledWith('field_notes', '', 'status=todo'))
   })
+
+  it('keeps typed filter text while the filtered read is on its way', async () => {
+    const snapshot: PageSnapshot = {
+      ...NOTES,
+      filters: [
+        {
+          field: 'text',
+          name: 'query',
+          label: 'Filter',
+          helpText: '',
+          isRequired: false,
+          placeholder: '',
+          value: '',
+        },
+      ],
+    }
+    renderAt('/field_notes', 'notes', snapshot)
+    await waitFor(() => expect(screen.getByLabelText('Filter')).toBeTruthy())
+    readPage.mockReturnValue(new Promise(() => {}))
+
+    fireEvent.change(screen.getByLabelText('Filter'), { target: { value: 'fan' } })
+
+    await waitFor(() => expect(readPage).toHaveBeenCalledWith('field_notes', '', 'query=fan'))
+    expect((screen.getByLabelText('Filter') as HTMLInputElement).value).toBe('fan')
+  })
 })
 
 describe('a page snapshot the renderer cannot walk', () => {

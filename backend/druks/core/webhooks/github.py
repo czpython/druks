@@ -75,14 +75,14 @@ class GitHubEvents(Webhook):
         # GitHub files pull-request comments under issues; only those carry ``pull_request``.
         issue = self.data["issue"]
         if "pull_request" in issue:
-            await self._publish_comment(issue["number"])
+            await self._publish_comment(issue["number"], is_review_comment=False)
         return _accepted()
 
     async def on_pull_request_review_comment_created(self) -> Response:
-        await self._publish_comment(self.data["pull_request"]["number"])
+        await self._publish_comment(self.data["pull_request"]["number"], is_review_comment=True)
         return _accepted()
 
-    async def _publish_comment(self, pr_number: int) -> None:
+    async def _publish_comment(self, pr_number: int, *, is_review_comment: bool) -> None:
         # A non-User sender is an app talking to itself.
         sender, comment = self.data["sender"], self.data["comment"]
         if sender["type"] == "User":
@@ -94,6 +94,8 @@ class GitHubEvents(Webhook):
                     "author": sender["login"],
                     "author_can_write": comment["author_association"] in _WRITERS,
                     "body": comment["body"],
+                    "comment_id": comment["id"],
+                    "is_review_comment": is_review_comment,
                 },
             )
 

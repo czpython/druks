@@ -53,6 +53,21 @@ describe('eventLine', () => {
     expect(line.path).toBe('/software_factory/work-items/42')
   })
 
+  it('links a review to the page of its pull request', () => {
+    const line = eventLine(
+      event({
+        kind: 'workflow.running',
+        workflow: 'software_factory.pull_request_review',
+        app: 'software_factory',
+        subjectType: 'pull_request',
+        subjectId: 'acme/widget#7',
+        subjectLabel: 'acme/widget#7',
+      }),
+    )
+
+    expect(line.path).toBe('/software_factory/pull_request/acme%2Fwidget%237')
+  })
+
   it("leaves a row about a subject with no page of its own unclickable", () => {
     const line = eventLine(
       event({
