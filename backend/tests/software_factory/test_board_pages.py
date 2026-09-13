@@ -64,8 +64,8 @@ async def test_an_empty_board_shows_its_columns_and_what_creates_a_ticket(druks_
     ]
     assert repos["options"][0]["value"] == str(one["id"])
     me = (await druks_client.get("/api/auth/me")).json()["account"]["id"]
-    owner = next(field for field in create["fields"] if field["name"] == "owner_id")
-    assert owner["value"] == me
+    assignee = next(field for field in create["fields"] if field["name"] == "assignee_id")
+    assert assignee["value"] == me
 
 
 async def test_a_new_ticket_shows_on_the_board_as_a_card_that_opens_and_drags(druks_client):
@@ -99,7 +99,7 @@ async def test_a_filter_narrows_the_cards_and_keeps_the_columns(druks_client):
         "status",
         "priority",
         "updated",
-        "owner",
+        "assignee",
         "creator",
         "project",
         "repo",
@@ -141,7 +141,7 @@ async def test_the_ticket_page_saves_in_place_and_opens_its_build(druks_client):
     assert [form["fields"][0]["name"] for form in sidebar[:-1]] == [
         "status",
         "priority",
-        "owner_id",
+        "assignee_id",
         "repo_id",
     ]
     assert all(form["submit"] == "change" for form in sidebar[:-1])
@@ -174,7 +174,7 @@ async def test_a_ticket_nobody_wrote_is_an_empty_state(druks_client):
 
 async def test_an_unattributed_ticket_still_reads(druks_client):
     repo = await _open_repo(druks_client)
-    ticket = await Ticket.create(repo=await ProjectRepo.get(int(repo["id"])), title="ghost")
+    ticket = await Ticket.create(project_repo=await ProjectRepo.get(int(repo["id"])), title="ghost")
 
     page = (await druks_client.get(f"{_PAGES}/tickets/{ticket.identifier}")).json()
 

@@ -19,7 +19,7 @@ def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
     """Register an async subscriber for the named signal.
 
     ``filters`` are equality matches against the published kwargs; ``__``
-    descends into dicts (``payload__terminal=True``); a ``Gate`` class stands for
+    descends into dicts (``payload__source="jira"``); a ``Gate`` class stands for
     its ``name``. ``workflow=Build`` narrows to that workflow and to the subject
     that workflow declares, handing the body that subject; ``subject=WorkItem``
     on its own narrows to any workflow about one. A non-matching publication

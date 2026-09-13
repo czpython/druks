@@ -24,7 +24,7 @@ class LinearEvents(Webhook):
         except ServiceNotConnectedError as error:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
-                "Linear is not connected — connect it in Settings → Connections → Services.",
+                "Linear is not connected. Connect it in Settings → Connections → Services.",
             ) from error
         verify_hmac_sha256(
             self.raw_body,
@@ -49,7 +49,7 @@ class LinearEvents(Webhook):
     async def on_state_transition(self) -> Response:
         issue = self.data["data"]
         state = issue["state"]
-        # An issue outside any project has none; assignee is null when unassigned.
+        # An issue outside a project has no project. An unassigned issue has no assignee.
         project = issue.get("project") or {}
         assignee = issue.get("assignee") or {}
         await publish(
@@ -62,12 +62,9 @@ class LinearEvents(Webhook):
                 "url": issue["url"],
                 "project_name": project.get("name"),
                 "labels": [],
+                "assignee_id": assignee.get("id"),
                 "assignee_email": assignee.get("email"),
                 "assignee_name": assignee.get("name"),
-                "completed": state["type"] == "completed",
-                # State types are Linear's fixed vocabulary — terminal-ness can't
-                # be read off status names, which every team customizes.
-                "terminal": state["type"] in ("completed", "canceled"),
             },
         )
         return _accepted()
@@ -100,7 +97,7 @@ class JiraEvents(Webhook):
         except ServiceNotConnectedError as error:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
-                "Jira is not connected — connect it in Settings → Connections → Services.",
+                "Jira is not connected. Connect it in Settings → Connections → Services.",
             ) from error
         provided = self.request.headers.get("x-druks-webhook-token") or ""
         if not hmac.compare_digest(provided, webhook_secret):
@@ -111,15 +108,14 @@ class JiraEvents(Webhook):
         return "issue_event"
 
     def delivery_key(self) -> str:
-        # No delivery id from Automation: a retry resends the same body, so its
-        # digest is the dedup key; a new transition changes the body.
+        # Automation sends no delivery id. A retry sends the same body, so its digest is
+        # the dedup key. A new transition changes the body.
         return hashlib.sha256(self.raw_body).hexdigest()[:16]
 
     async def on_issue_event(self) -> Response:
-        # The body is authored by the operator's Automation rule, not by Jira,
-        # so druks names the one accepted shape: Automation's "Issue data"
-        # payload, the REST issue JSON under ``issue``. Anything else 400s,
-        # which Automation surfaces in the rule's audit log.
+        # The Automation rule of the operator writes this body, not Jira. Druks accepts
+        # one shape: the "Issue data" payload, with the REST issue JSON under ``issue``.
+        # Any other body gets a 400, which the audit log of the rule shows.
         issue = self.data.get("issue")
         if not isinstance(issue, dict):
             raise HTTPException(
@@ -130,7 +126,7 @@ class JiraEvents(Webhook):
         issue_status = fields["status"]
         key = issue["key"]
         base_url = (await services.Jira.get()).identity["base_url"]
-        # Unassigned issues carry a null assignee; privacy settings can hide the email.
+        # An unassigned issue has a null assignee. Privacy settings can hide the email.
         assignee = fields["assignee"] or {}
         await publish(
             "ticket.transitioned",
@@ -142,12 +138,9 @@ class JiraEvents(Webhook):
                 "url": f"{base_url.rstrip('/')}/browse/{key}",
                 "project_name": fields["project"]["name"],
                 "labels": fields["labels"],
+                "assignee_id": assignee.get("accountId"),
                 "assignee_email": assignee.get("emailAddress"),
                 "assignee_name": assignee.get("displayName"),
-                "completed": False,
-                # The "done" status category is Jira's terminal marker — it covers
-                # Done/Closed/Won't Do however the workflow names its statuses.
-                "terminal": issue_status["statusCategory"]["key"] == "done",
             },
         )
-        return JSONResponse({"accepted": True})
+        return _accepted()

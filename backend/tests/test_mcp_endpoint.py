@@ -229,7 +229,9 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
 async def test_issues_ticket_tools_read_and_comment_as_the_pat_account(app, account, pat_token):
     project = await Project.create(name="Acme")
     repo = await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
-    ticket = await Ticket.create(repo=repo, title="Add an endpoint", description="do the thing")
+    ticket = await Ticket.create(
+        project_repo=repo, title="Add an endpoint", description="do the thing"
+    )
 
     async with live(app), _client(app, pat_token) as client:
         names = {tool.name for tool in await client.list_tools()}
@@ -259,7 +261,7 @@ async def test_issues_ticket_tools_read_and_comment_as_the_pat_account(app, acco
 async def test_a_ticket_token_reaches_only_its_tools(app, account):
     project = await Project.create(name="Acme")
     repo = await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
-    ticket = await Ticket.create(repo=repo, title="Add an endpoint")
+    ticket = await Ticket.create(project_repo=repo, title="Add an endpoint")
     _, token = await PersonalAccessToken.create(
         account_id=account.id,
         name="issues sandbox",

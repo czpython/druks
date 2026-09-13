@@ -71,7 +71,7 @@ Stage only the paths your implementation changed; explicit staging is what keeps
 
 The PR body — the plan document reviewers review the diff against — carries exactly these sections, in order, whether you are opening the PR or refreshing it on a later revision:
 
-- `**Linear ticket:** [<ticket ref>](<url>)` when the ticket has a URL.
+- `**Ticket:** [<ticket ref>](<url>)` when the ticket has a URL.
 - `## Plan` — the approved plan markdown (the **Current plan** section above), verbatim. Copy only that section: it stops at the end of `## Current plan` and does NOT include the prompt's rendered `## Acceptance criteria`.
 - `## Acceptance Criteria` — `- <id>: <description>` bullets, an indented `- Verification: <how>` when one is specified. This bullet section is the one place the acceptance criteria appear; do not also fold them into `## Plan`.
 - End with: `<!-- Plan authored by Druks. Reviews, evaluations, and the full audit trail live in the Druks dashboard, not here. -->`

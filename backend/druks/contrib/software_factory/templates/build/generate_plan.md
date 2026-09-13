@@ -142,8 +142,8 @@ you can write is "the ticket says so", the approach is not ruled out; leave it o
 
 ASSIGNEE RESOLUTION — the `assignee_github_login` schema field. Resolve the ticket
 assignee's GitHub login via the github MCP from their name
-`{{ build.task_owner_name or "(unknown)" }}` or email
-`{{ build.task_owner_email or "(unknown)" }}` (user search; pick the
+`{{ build.assignee_name or "(unknown)" }}` or email
+`{{ build.assignee_email or "(unknown)" }}` (user search; pick the
 candidate whose profile clearly matches). Report the login string, or `null` when
 nothing resolves convincingly — never guess. Druks uses it to request their
 review at the parks that await a human; do not request reviewers yourself.

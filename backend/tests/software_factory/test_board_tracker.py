@@ -16,7 +16,7 @@ from software_factory.factories import make_test_work_item, seed_build_run
 async def _open_ticket(*, project="Acme", full_name="acme/widget", title="one"):
     row = await Project.create(name=project)
     repo = await ProjectRepo.create(project_id=row.id, full_name=full_name)
-    return await Ticket.create(repo=repo, title=title)
+    return await Ticket.create(project_repo=repo, title=title)
 
 
 def _pin_tracker(monkeypatch, tracker="druks"):

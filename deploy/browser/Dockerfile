@@ -8,7 +8,7 @@
 #
 # Published by .github/workflows/publish-sandbox-image.yml as
 # ghcr.io/czpython/druks/browser.
-FROM ghcr.io/czpython/drukbox/sandbox:latest@sha256:1b9e843541d57278655be9aef328b8648152a507b65cfb3e7b53c87087b29544
+FROM ghcr.io/czpython/drukbox/sandbox:latest@sha256:72c6ab246c53481051d8d4ec9ed34e9aff47f539f989f625cf20ba82e9b3f311
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 

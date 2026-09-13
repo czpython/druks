@@ -384,6 +384,14 @@ Druks accepts the REST issue JSON under `issue`. Put the shared token in the
 Jira identity as optional when that tracker is not selected. It reports pending
 setup if the selected tracker is Linear or Jira and that identity is missing.
 
+Software Factory starts a Linear or Jira build under the Druks account of the
+ticket assignee. It finds that account from the assignee ID in the webhook. The
+ID must match the [provider account](#oauth-grant-identity) of an MCP connection
+that the assignee made with **Connect your account**. A connection for everyone
+has no account, so it does not match. If no account or more than one account
+matches, the build uses the default account. A **druks** ticket build uses the
+account of the ticket assignee.
+
 ## Harnesses
 
 Druks registers two subscription providers, `anthropic` and `openai`. Each
@@ -634,7 +642,9 @@ at its next reconnect.
 Druks stores the `scope` field of the token response as the granted scopes.
 If the field is missing, the provider granted the requested scopes. If the
 field is missing and Druks requested no scopes, the value is `null`. These
-facts do not change account ownership, login, or run attribution.
+facts do not change account ownership or login. Software Factory uses them to
+select the account for a Linear or Jira build. See
+[ticketing integrations](#ticketing-integrations).
 
 ## Skills
 
