@@ -5,6 +5,7 @@ import druks.contrib.software_factory.subscribers as subs
 import pytest
 from conftest import connect_service
 from druks.contrib.software_factory import webhooks as webhook_module
+from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
 from druks.contrib.software_factory.webhooks import JiraEvents
 from druks.contrib.software_factory.workflows import Build
 from druks.testing import make_settings, seed_run
@@ -24,12 +25,12 @@ def _provider(tmp_path, *, payload, headers=None):
     return events
 
 
-def _issue(*, key="IT-12", status="Open", status_category="new", project="acme-app", labels=()):
+def _issue(*, key="IT-12", status="Open", project="acme-app", labels=()):
     return {
         "issue": {
             "key": key,
             "fields": {
-                "status": {"name": status, "statusCategory": {"key": status_category}},
+                "status": {"name": status},
                 "project": {"name": project},
                 "summary": "Add an endpoint",
                 "labels": list(labels),
@@ -48,9 +49,9 @@ def _jira_payload(*, key="IT-12", status="Open", project="acme-app", labels=None
         "url": None,
         "project_name": project,
         "labels": labels or [],
+        "assignee_id": None,
         "assignee_email": "dev@acme.co",
         "assignee_name": "Dev",
-        "completed": False,
     }
 
 
@@ -120,43 +121,6 @@ async def test_emits_normalized_ticket_transition(tmp_path, druks_db, monkeypatc
     assert payload["url"] == "https://jira.test/browse/IT-9"
 
 
-async def test_done_category_marks_the_transition_terminal(tmp_path, druks_db, monkeypatch):
-    """The "done" statusCategory is Jira's terminal marker."""
-    events = []
-
-    async def _emit(event_type, **kwargs):
-        events.append((event_type, kwargs["payload"]))
-
-    await _connect_jira()
-    monkeypatch.setattr(webhook_module, "publish", _emit)
-    payload = _issue(key="IT-9", status="Done", status_category="done")
-    await _provider(tmp_path, payload=payload).on_issue_event()
-
-    assert [event for event, _ in events] == ["ticket.transitioned"]
-    assert events[0][1]["terminal"] is True
-
-
-async def test_open_category_is_not_terminal(tmp_path, druks_db, monkeypatch):
-    """An in-flight status (any non-"done" category) transitions but isn't terminal."""
-    events = []
-
-    async def _emit(event_type, **kwargs):
-        events.append((event_type, kwargs["payload"]))
-
-    await _connect_jira()
-    monkeypatch.setattr(webhook_module, "publish", _emit)
-    provider = _provider(
-        tmp_path, payload=_issue(status="In Progress", status_category="indeterminate")
-    )
-    await provider.on_issue_event()
-
-    assert [event for event, _ in events] == ["ticket.transitioned"]
-    assert events[0][1]["terminal"] is False
-
-
-# --- subscriber: build routing ---------------------------------------------
-
-
 def _pin_settings(monkeypatch, **over):
     settings = subs.SoftwareFactory.Settings(**{"tracker": "jira", **over})
 
@@ -220,9 +184,7 @@ async def test_trigger_status_redispatches_a_closed_item(druks_db, monkeypatch):
 
 
 async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, druks_db, monkeypatch):
-    """No work item yet: the label names the repo, the registry routes it."""
-    from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
-
+    """A new ticket has no work item. Its label names the repo, and the registry routes it."""
     project = await Project.create(name="octo/alfred")
     await ProjectRepo.create(project_id=project.id, full_name="octo/alfred")
     await druks_db.flush()
@@ -244,7 +206,7 @@ async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, druks_db, m
 
 
 async def test_trigger_status_ignores_an_unroutable_ticket(tmp_path, druks_db, monkeypatch):
-    """No signal matches a registered repo → no build."""
+    """A ticket that matches no registered repo starts no build."""
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
     start = AsyncMock()
     monkeypatch.setattr(subs.Build, "start", start)

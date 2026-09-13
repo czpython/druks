@@ -8,7 +8,7 @@
 ## Workflow context
 
 {% if build.repo %}
-- **Repo:** {{ build.repo }} · branch `{{ build.branch or '(none)' }}` · PR #{{ build.pr_number or '?' }}{% if build.issue_number %} · issue #{{ build.issue_number }}{% endif %}
+- **Repo:** {{ build.repo }} · branch `{{ build.branch or '(none)' }}` · PR #{{ build.pr_number or '?' }}
 {% endif %}
 {% if build.ticket_ref %}
 - **Ticket:** {{ build.ticket_ref }} on `{{ build.source }}`

@@ -22,18 +22,18 @@ def _provider(tmp_path, *, payload, headers=None):
     return events
 
 
-def _transition(*, identifier="ACME-7", state_name="Done", state_type="completed"):
+def _transition():
     return {
         "action": "update",
         "type": "Issue",
         "updatedFrom": {"stateId": "old-state"},
         "data": {
-            "identifier": identifier,
+            "identifier": "ACME-7",
             "title": "Add an endpoint",
-            "url": f"https://linear.app/acme/issue/{identifier}",
-            "state": {"name": state_name, "type": state_type},
+            "url": "https://linear.app/acme/issue/ACME-7",
+            "state": {"name": "Done"},
             "project": {"name": "acme-app"},
-            "assignee": {"email": "dev@acme.co", "name": "Dev"},
+            "assignee": {"id": "user-7", "email": "dev@acme.co", "name": "Dev"},
         },
     }
 
@@ -86,24 +86,25 @@ async def test_rejects_when_not_connected(tmp_path, druks_db):
     assert "not connected" in error.value.detail
 
 
-async def test_terminal_state_types_mark_the_transition_terminal(tmp_path, monkeypatch):
-    """Completed and canceled states mark the normalized transition terminal."""
-    for state_type, name in (("completed", "Done"), ("canceled", "Cancelled")):
-        events = _capture(monkeypatch)
-        provider = _provider(tmp_path, payload=_transition(state_name=name, state_type=state_type))
-        await provider.on_state_transition()
-
-        assert [event for event, _ in events] == ["ticket.transitioned"]
-        assert events[0][1]["terminal"] is True
-
-
-async def test_open_state_types_are_not_terminal(tmp_path, monkeypatch):
-    """An in-flight state (started here) transitions but isn't terminal."""
+async def test_emits_normalized_ticket_transition(tmp_path, monkeypatch):
     events = _capture(monkeypatch)
-    provider = _provider(
-        tmp_path, payload=_transition(state_name="In Progress", state_type="started")
-    )
-    await provider.on_state_transition()
 
-    assert [event for event, _ in events] == ["ticket.transitioned"]
-    assert events[0][1]["terminal"] is False
+    await _provider(tmp_path, payload=_transition()).on_state_transition()
+
+    assert events == [
+        (
+            "ticket.transitioned",
+            {
+                "source": "linear",
+                "identifier": "ACME-7",
+                "status": "Done",
+                "title": "Add an endpoint",
+                "url": "https://linear.app/acme/issue/ACME-7",
+                "project_name": "acme-app",
+                "labels": [],
+                "assignee_id": "user-7",
+                "assignee_email": "dev@acme.co",
+                "assignee_name": "Dev",
+            },
+        )
+    ]

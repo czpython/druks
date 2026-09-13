@@ -10,7 +10,7 @@ from druks.api.exceptions import agent_error_responses
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.enums import Priority, Status
 from druks.contrib.software_factory.exceptions import (
-    OwnerNotFound,
+    AssigneeNotFound,
     PrefixTakenError,
     RepoNotFound,
     TicketNotFound,
@@ -19,12 +19,12 @@ from druks.contrib.software_factory.exceptions import (
 from druks.contrib.software_factory.models import Comment, Project, ProjectRepo, Ticket, WorkItem
 from druks.contrib.software_factory.schemas import (
     AddProjectRepoRequest,
+    AssigneeId,
     CommentRead,
     DashboardItem,
     GitHubReposResponse,
     GitHubRepoSummary,
     NonBlank,
-    OwnerId,
     ProjectRepoSummary,
     ProjectsResponse,
     ProjectSummary,
@@ -359,16 +359,16 @@ async def require_ticket(identifier: str) -> Ticket:
 
 
 async def require_repo(repo_id: int) -> ProjectRepo:
-    if repo := await ProjectRepo.get(repo_id):
-        return repo
+    if project_repo := await ProjectRepo.get(repo_id):
+        return project_repo
     raise RepoNotFound(repo_id)
 
 
-async def require_owner(account_id: str | None) -> str | None:
+async def require_assignee(account_id: str | None) -> str | None:
     """The id as given, once it names a real account. The column is RESTRICT, so an
     unknown id would surface as a write failure rather than an answer."""
     if account_id and not await Account.get(account_id):
-        raise OwnerNotFound(account_id)
+        raise AssigneeNotFound(account_id)
     return account_id
 
 
@@ -379,7 +379,7 @@ async def require_owner(account_id: str | None) -> str | None:
     status_code=status.HTTP_201_CREATED,
     operation_id="create_ticket",
     tags=["agent"],
-    responses=agent_error_responses(RepoNotFound(7), OwnerNotFound("ops@example.com")),
+    responses=agent_error_responses(RepoNotFound(7), AssigneeNotFound("ops@example.com")),
 )
 async def create_ticket(
     title: Annotated[NonBlank, Body(embed=True, max_length=200)],
@@ -389,17 +389,17 @@ async def create_ticket(
     description: Annotated[str, Body(embed=True)] = "",
     status: Annotated[Status, Body(embed=True)] = Status.BACKLOG,
     priority: Annotated[Priority, Body(embed=True)] = Priority.NONE,
-    owner_id: Annotated[OwnerId, Body(embed=True)] = None,
+    assignee_id: Annotated[AssigneeId, Body(embed=True)] = None,
     account: Account = Depends(current_account),
 ) -> Ticket:
     """Create a ticket. Creating it in Ready for Agent opens a build."""
     return await Ticket.create(
-        repo=await require_repo(repo_id),
+        project_repo=await require_repo(repo_id),
         title=title,
         description=description,
         status=status,
         priority=priority,
-        owner_id=await require_owner(owner_id),
+        assignee_id=await require_assignee(assignee_id),
         creator_id=account.id,
     )
 
@@ -424,14 +424,14 @@ async def get_ticket(identifier: str) -> Ticket:
     operation_id="update_ticket",
     tags=["agent"],
     responses=agent_error_responses(
-        TicketNotFound("ACM-1", "druks"), RepoNotFound(7), OwnerNotFound("ops@example.com")
+        TicketNotFound("ACM-1", "druks"), RepoNotFound(7), AssigneeNotFound("ops@example.com")
     ),
 )
 async def update_ticket(identifier: str, edit: TicketEdit) -> Ticket:
-    """Edit a ticket's title, description, priority, owner, or repo."""
+    """Edit a ticket's title, description, priority, assignee, or repo."""
     ticket = await require_ticket(identifier)
     if edit.repo_id:
-        ticket.repo = await require_repo(edit.repo_id)
+        ticket.project_repo = await require_repo(edit.repo_id)
     if edit.title:
         ticket.title = edit.title
     # An empty description is one the operator cleared.
@@ -439,8 +439,8 @@ async def update_ticket(identifier: str, edit: TicketEdit) -> Ticket:
         ticket.description = edit.description
     if edit.priority:
         ticket.priority = edit.priority
-    if "owner_id" in edit.model_fields_set:
-        ticket.owner_id = await require_owner(edit.owner_id)
+    if "assignee_id" in edit.model_fields_set:
+        ticket.assignee_id = await require_assignee(edit.assignee_id)
     await ticket.save()
     return ticket
 
