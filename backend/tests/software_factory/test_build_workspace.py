@@ -13,10 +13,10 @@ from druks.contrib.software_factory.constants import (
     GITHUB_MCP_URL,
     TICKET_TOOLS,
 )
-from druks.contrib.software_factory.services import GithubReviewer
 from druks.contrib.software_factory.workflows import Build, BuildWorkspace, ReviewWorkspace
 from druks.core.services import Github
 from druks.mcp.helpers import get_bearer_token_env_var
+from druks.mcp.models import McpServer
 from druks.sandbox import host as host_mod
 from druks.sandbox.layout import get_related_root, get_repo_root
 from druks.workspaces import RepoWorkspace
@@ -158,33 +158,39 @@ async def test_a_linear_build_requires_github_alone(druks_db, monkeypatch):
     assert [server.name for server in servers] == [GITHUB_MCP_NAME]
 
 
-def _review_actor_stub(monkeypatch: pytest.MonkeyPatch, *, review_actor) -> None:
-    async def _review_actor():
-        return review_actor()
-
-    monkeypatch.setattr("druks.contrib.software_factory.workflows.get_review_actor", _review_actor)
-
-
 def test_the_build_clones_as_the_operator():
     assert BuildWorkspace.github is Github
 
 
-@pytest.mark.asyncio
-async def test_the_review_workspace_names_the_review_actors_identity(
-    monkeypatch: pytest.MonkeyPatch, druks_db
+@pytest.mark.parametrize("has_reviewer", [False, True], ids=["operator", "reviewer"])
+@pytest.mark.parametrize("has_catalog_github", [False, True], ids=["no-catalog", "catalog"])
+async def test_review_mcp_and_gh_use_the_review_actor(
+    druks_db, has_reviewer: bool, has_catalog_github: bool
 ):
+    """The required server and gh share the actor, even with a catalog name conflict."""
     row = await connect_service(
-        "github_reviewer",
-        identity={"app_id": "2", "slug": "reviewer"},
+        "github",
+        identity={"app_id": "1", "slug": "operator"},
         secrets={"private_key": "pem"},
     )
-    _review_actor_stub(
-        monkeypatch,
-        review_actor=lambda: SimpleNamespace(service=GithubReviewer, client=None, mode="approve"),
-    )
 
-    [secret] = await ReviewWorkspace.get_secret_refs(SimpleNamespace(repo="o/app"))
+    if has_reviewer:
+        row = await connect_service(
+            "github_reviewer",
+            identity={"app_id": "2", "slug": "reviewer"},
+            secrets={"private_key": "reviewer-pem"},
+        )
+    if has_catalog_github:
+        await McpServer.create(name=GITHUB_MCP_NAME, url="https://catalog.test/mcp")
 
+    subject = SimpleNamespace(repo="o/app")
+    [server], [ref] = await ReviewWorkspace.get_mcp_delivery(subject, None)
+    [secret] = await ReviewWorkspace.get_secret_refs(subject)
+
+    assert server.name == GITHUB_MCP_NAME
+    assert server.url == GITHUB_MCP_URL
+    assert server.bearer_token_env_var == get_bearer_token_env_var(GITHUB_MCP_NAME)
+    assert ref.key == ("mcp_github_token", row.id, "o/app", "api.githubcopilot.com")
     assert secret.key == ("github", row.id, "o/app", "")
 
 

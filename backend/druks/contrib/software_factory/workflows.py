@@ -470,6 +470,18 @@ class ReviewWorkspace(RepoWorkspace):
     # A checkout of the default branch, with room beside it for siblings. The reviewer
     # checks out the PR itself. The add_dirs grant needs the directory to exist.
     @classmethod
+    async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
+        actor = await get_review_actor()
+        return (
+            RequiredMcpServer(
+                name=GITHUB_MCP_NAME,
+                url=GITHUB_MCP_URL,
+                secret_id=(await actor.service.get()).id,
+                resource=cls.get_repo(subject),
+            ),
+        )
+
+    @classmethod
     async def get_secret_refs(cls, subject: Any) -> list[SecretRef]:
         # The review is authored under the review actor's identity.
         actor = await get_review_actor()
