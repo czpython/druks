@@ -1862,6 +1862,14 @@ export function ProviderConnect({
                   {' · '}Reason: <code>{subscription.revokedReason}</code>
                 </p>
               )}
+              {subscription.lastRefreshedAt && (
+                <p className="provider-account">
+                  Last refreshed{' '}
+                  <time dateTime={subscription.lastRefreshedAt}>
+                    {absTime(subscription.lastRefreshedAt)}
+                  </time>
+                </p>
+              )}
               {usage?.fiveHour && !usage.unlimited && (
                 <div className="provider-quotas">
                   <QuotaRow label="5-hour" metric={usage.fiveHour} />

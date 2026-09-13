@@ -35,9 +35,9 @@ def _jwt(exp: int) -> str:
 
 def _claude_payload(*, access="A0", refresh="R0", expires_at=None, extra=None) -> dict:
     block = {"accessToken": access, "scopes": ["user:profile"], "subscriptionType": "max"}
-    if refresh is not None:
+    if refresh:
         block["refreshToken"] = refresh
-    if expires_at is not None:
+    if expires_at:
         block["expiresAt"] = int(expires_at.timestamp() * 1000)
     if extra:
         block.update(extra)
@@ -53,7 +53,7 @@ async def _seed_claude(*, provider_email="op@example.com", **kwargs) -> VaultSec
 def _codex_payload(*, access=None, refresh="R0", account_id="acc-1", id_token="id-0") -> dict:
     access = access or _jwt(int((_NOW + timedelta(days=9)).timestamp()))
     tokens = {"access_token": access, "id_token": id_token, "account_id": account_id}
-    if refresh is not None:
+    if refresh:
         tokens["refresh_token"] = refresh
     return {"auth_mode": "chatgpt", "OPENAI_API_KEY": None, "tokens": tokens}
 
@@ -65,7 +65,7 @@ async def _seed_codex(*, provider_email="op@example.com", **kwargs) -> VaultSecr
 
 
 async def _payload(provider_id: str) -> dict:
-    # Rotation commits in its own session; refresh past this session's identity map.
+    # Read past this session's identity map.
     row = await VaultSecret.lookup(
         SecretKind.SUBSCRIPTION, Audience.provider(provider_id), (await Account.get_default()).id
     )
@@ -168,18 +168,48 @@ async def test_claude_stale_refreshes_and_persists(monkeypatch, druks_db):
     assert block["expiresAt"] == int((_NOW + timedelta(seconds=28800)).timestamp() * 1000)
 
 
-async def test_claude_invalid_grant_drops_row(monkeypatch, druks_db):
+async def test_claude_invalid_grant_revokes_the_subscription(monkeypatch, druks_db):
     connection = await _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
     account_id = connection.account_id
     _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
     result = await AnthropicProvider.rotate_token(connection.id, now=_NOW)
     assert result.action == "failed"
     assert result.error == "invalid_grant"
-    # A revoked lineage self-disconnects and commits inside the rotation — the
-    # deletion never rides (or rolls back with) the tick's later commit.
+    # The revocation commits inside the rotation, never with the tick's later commit.
     assert not await VaultSecret.list_subscriptions()
     with pytest.raises(HarnessNotConnectedError):
         await AnthropicProvider.get_subscription(account_id)
+
+
+async def test_the_refresh_time_survives_revocation_until_a_reconnect(monkeypatch, druks_db):
+    connection = await _seed_claude(expires_at=_NOW - timedelta(minutes=1))
+    connection_id = connection.id
+    _mock_post(monkeypatch, _resp(200, {"access_token": "new", "expires_in": 3600}))
+    await AnthropicProvider.rotate_token(connection_id, now=_NOW)
+    db_session().expunge_all()
+    refreshed_at = (await VaultSecret.get(connection_id)).last_refreshed_at
+    assert refreshed_at
+
+    _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
+    await AnthropicProvider.rotate_token(connection_id, now=_NOW + timedelta(hours=2))
+    db_session().expunge_all()
+    assert (await VaultSecret.get(connection_id)).last_refreshed_at == refreshed_at
+
+    assert not (await _seed_claude(access="fresh")).last_refreshed_at
+
+
+async def test_a_refresh_that_a_revoke_overtakes_records_no_time(monkeypatch, druks_db):
+    connection = await _seed_claude(expires_at=_NOW - timedelta(minutes=1))
+    connection_id = connection.id
+
+    async def revoke_then_grant(self, url, **_kwargs):
+        await connection.revoke("user")
+        return _resp(200, {"access_token": "new", "expires_in": 3600})
+
+    monkeypatch.setattr(pbase.httpx.AsyncClient, "post", revoke_then_grant)
+    await AnthropicProvider.rotate_token(connection_id, now=_NOW)
+    db_session().expunge_all()
+    assert not (await VaultSecret.get(connection_id)).last_refreshed_at
 
 
 async def test_claude_network_error_keeps_row(monkeypatch, druks_db):
@@ -206,13 +236,12 @@ async def test_claude_bad_response_keeps_row(monkeypatch, druks_db):
     assert (await _payload("anthropic"))["claudeAiOauth"]["accessToken"] == "old"
 
 
-async def test_rotation_of_a_deleted_row_is_a_no_op(monkeypatch, druks_db):
+async def test_rotation_of_a_revoked_subscription_is_a_no_op(monkeypatch, druks_db):
     connection = await _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
     connection_id = connection.id
     _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
     await AnthropicProvider.rotate_token(connection_id, now=_NOW)
-    # Row is gone; rotating the stale id must short-circuit before any
-    # identity POST.
+    # A revoked subscription stops before any grant request.
     calls = _mock_post(monkeypatch, _resp(200, {"access_token": "x"}))
     result = await AnthropicProvider.rotate_token(connection_id, now=_NOW)
     assert result.action == "failed"
@@ -293,7 +322,7 @@ async def test_rotation_touches_only_the_addressed_row(monkeypatch, druks_db):
     )
 
 
-async def test_invalid_grant_drops_only_the_addressed_row(monkeypatch, druks_db):
+async def test_invalid_grant_revokes_only_the_addressed_subscription(monkeypatch, druks_db):
     kept = await _seed_claude(access="d", expires_at=_NOW - timedelta(minutes=1))
     other = await _seed_claude(
         access="o", expires_at=_NOW - timedelta(minutes=1), provider_email="b@example.com"
@@ -312,8 +341,8 @@ async def test_rotation_stands_down_while_the_lock_is_held(monkeypatch, druks_db
     calls = _mock_post(
         monkeypatch, _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 100})
     )
-    # A second identity on a lineage another refresher is mid-flight on trips the
-    # provider's reuse detection — a held lock means no provider call at all.
+    # A second refresh of one lineage trips the provider's reuse detection, so a
+    # held lock means no grant request.
     await druks.redis.get_client().set(f"druks:harness:refresh:{connection.id}", "1", ex=60)
     result = await AnthropicProvider.rotate_token(connection.id, now=_NOW)
     assert result.action == "locked"
@@ -334,8 +363,8 @@ async def test_rotation_lock_is_released_after_refresh(monkeypatch, druks_db):
 async def test_two_fetches_inside_the_margin_rotate_once_and_read_the_same_token(
     monkeypatch, druks_db
 ):
-    # Two boxes fetch at once inside the margin: the lock elects one identity, and
-    # the second fetch reloads and answers with the token the first one stored.
+    # Two boxes fetch at once inside the margin. The second fetch returns the
+    # token that the first one stored.
     connection = await _seed_claude(
         access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30)
     )
@@ -353,8 +382,7 @@ async def test_two_fetches_inside_the_margin_rotate_once_and_read_the_same_token
 
 
 async def test_a_failed_refresh_keeps_a_live_token_to_serve(monkeypatch, druks_db):
-    # The issuer answers a box with the stored token while it is valid. A refresh
-    # that fails inside the margin changes nothing the box can see.
+    # A refresh that fails inside the margin still returns the stored, valid token.
     soon = _NOW + timedelta(minutes=30)
     connection = await _seed_claude(access="old", refresh="R0", expires_at=soon)
     _mock_post(monkeypatch, httpx.ConnectError("boom"))
@@ -383,8 +411,7 @@ async def test_disconnect_removes_only_the_addressed_login(druks_db):
     await mine.revoke("user")
 
     assert await VaultSecret.reload(other.id)
-    # The fallback account (the first) has no anthropic subscription left; another
-    # account's subscription never leaks into execution.
+    # Another account's subscription never stands in.
     with pytest.raises(HarnessNotConnectedError):
         await AnthropicProvider.get_subscription(mine.account_id)
 
@@ -416,8 +443,7 @@ async def test_connect_scopes_rows_by_provider_and_account(druks_db):
 
 async def test_reconnect_updates_the_existing_credential_in_place(druks_db):
     row = await _seed_claude(access="old", provider_email="a@example.com")
-    # Same email, different case — citext matches it to the existing account,
-    # so the reconnect updates that one connection rather than making a second.
+    # citext matches the email in another case, so the reconnect updates the same row.
     again = await _seed_claude(access="new", provider_email="A@Example.com")
     assert again.id == row.id
     assert dict(again.secrets)["claudeAiOauth"]["accessToken"] == "new"
@@ -449,7 +475,7 @@ async def test_claude_fetch_usage_http_error(monkeypatch, druks_db):
 
 
 async def test_fetch_usage_without_a_token_skips_http(monkeypatch, druks_db):
-    # The connection exists but its payload carries no access token — never fetch.
+    # The payload has no access token, so nothing is fetched.
     connection = await connect_provider(AnthropicProvider, {"claudeAiOauth": {}})
     calls = _mock_get(monkeypatch, _resp(200, {}))
     parsed = await AnthropicProvider.fetch_usage(connection, now=_NOW)
@@ -485,9 +511,8 @@ async def test_codex_fetch_usage_success(monkeypatch, druks_db):
 
 
 async def test_codex_usage_forces_a_refresh_on_401_then_retries(monkeypatch, druks_db):
-    # The stored access token's JWT ``exp`` is days out, so the refresh loop
-    # never touches it — but the provider 401s it server-side. fetch_usage must
-    # trust the 401, refresh, and retry once.
+    # The JWT exp is days away, but the provider rejects the token with 401.
+    # fetch_usage refreshes and retries once.
     connection = await _seed_codex(account_id="acc-7")
     fresh = _jwt(int((_NOW + timedelta(days=9)).timestamp()))
     _mock_post(monkeypatch, _resp(200, {"access_token": fresh, "refresh_token": "R1"}))
@@ -513,9 +538,8 @@ async def test_codex_usage_forces_a_refresh_on_401_then_retries(monkeypatch, dru
 
 
 async def test_codex_usage_reports_auth_required_when_the_refresh_is_revoked(monkeypatch, druks_db):
-    # The subscription changed: both the access token and its refresh lineage
-    # are revoked. The forced refresh gets invalid_grant, so we surface
-    # auth_required rather than looping on the dead token.
+    # The forced refresh gets invalid_grant, so fetch_usage reports auth_required
+    # instead of a loop on the dead token.
     connection = await _seed_codex(account_id="acc-7")
     _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
     _mock_get(monkeypatch, _resp(401, {"detail": {"code": "token_expired"}}))
@@ -533,8 +557,7 @@ async def test_lookup_reads_only_the_accounts_own_subscription(druks_db):
 
 
 async def test_lookup_never_falls_through_to_another_account_or_the_key(druks_db):
-    # Another account's subscription and the installation's key both exist;
-    # neither stands in, and the miss names the fix.
+    # Neither another account's subscription nor the installation's key stands in.
     await _seed_claude(provider_email="a@example.com")
     unsubscribed = await Account.get_or_create("b@example.com")
     await VaultSecret.paste(Audience.provider("anthropic"), "sk-shared", pasted_by=unsubscribed)

@@ -119,7 +119,7 @@ async def test_get_fills_the_cache_only_after_the_rotation_is_saved(token_endpoi
     def _unsavable(self, rotated: str) -> None:
         raise RuntimeError("rotation write failed")
 
-    monkeypatch.setattr(VaultSecret, "_save_refresh_token", _unsavable)
+    monkeypatch.setattr(VaultSecret, "update_refresh_token", _unsavable)
     with pytest.raises(RuntimeError, match="rotation write failed"):
         await _client().get_access_token(connection=connection)
 
@@ -240,8 +240,7 @@ async def test_connect_roundtrip_exchanges_with_basic_auth(token_endpoint):
     assert params["audience"] == "api"
     assert params["code_challenge_method"] == "S256"
 
-    # Completion needs only the state: the begun flow's provider and client
-    # identity ride the stash.
+    # Completion needs only the state. The stash holds the flow's provider and client.
     tokens, pending = await complete_connect(state=params["state"], code="code-1")
 
     assert tokens["refresh_token"] == "rt-1"

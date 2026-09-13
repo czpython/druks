@@ -36,8 +36,7 @@ async def _post_token(
     client_secret: str,
     basic_auth: bool,
 ) -> httpx.Response:
-    # RFC 6749 client authentication: HTTP Basic keeps the credentials out of
-    # the form body; a public or body-authenticating client sends them in it.
+    # RFC 6749: HTTP Basic keeps the client credentials out of the form body.
     if basic_auth:
         return await http.post(token_endpoint, data=data, auth=(client_id, client_secret))
     data["client_id"] = client_id
@@ -47,9 +46,9 @@ async def _post_token(
 
 
 class OauthClient:
-    """One provider's OAuth 2.0 authorization-code + PKCE flow, with
-    rotation-safe refresh — for a provider with fixed endpoints and a
-    pre-registered client::
+    """One provider's OAuth 2.0 authorization-code flow with PKCE, and a refresh
+    that is safe when the provider rotates refresh tokens. Use it for a provider
+    with fixed endpoints and a pre-registered client::
 
         client = OauthClient(
             provider="acme",
@@ -59,29 +58,23 @@ class OauthClient:
             basic_auth=True,
         )
 
-    ``begin_connect`` returns the consent URL to open; the module-level
-    ``complete_connect`` consumes the callback's single-use state and
-    exchanges the code; ``get_access_token`` serves delivery from the Redis
-    token cache, electing one refresher per connection. The caller stores an
-    grant in the vault from the completed exchange and hands it back to
-    ``get_access_token``. A ``Service`` with declared OAuth endpoints hands back a
-    configured client via ``get_oauth_client()`` — construct directly only
-    when no service holds the client credentials.
+    ``begin_connect`` returns the consent URL. ``complete_connect`` consumes the
+    callback's single-use state and exchanges the code. The caller stores the
+    grant in the vault and passes it to ``get_access_token``. A ``Service`` with
+    declared OAuth endpoints returns a configured client from
+    ``get_oauth_client()``. Construct a client directly only when no service
+    holds the client credentials.
 
-    The Redis token cache and refresh lock key on the connection id, so all
-    clients constructed for one provider share them, and across a rolling
-    deploy old and new processes elect the same single refresher. Connect
-    state is keyed by the state value alone: the begun flow's provider,
-    endpoints, and client identity ride the stash, pinned at begin time so a
-    configuration change mid-consent cannot mismatch the PKCE verifier.
+    The token cache and the refresh lock key on the connection id. All clients
+    for one provider share them, also across a rolling deploy. The consent stash
+    pins the endpoints and the client at begin time, so a configuration change
+    during a consent cannot break its exchange.
 
-    ``basic_auth`` picks HTTP Basic on the token endpoint, for both the code
-    exchange and refresh; without it the client credentials travel in the form
-    body. ``extra_token_params`` land in both bodies (RFC 8707's ``resource``
-    audience binding); ``extra_authorize_params`` land in every consent query
-    (Google grants a refresh token only with ``access_type=offline`` and
-    ``prompt=consent``). Scopes are per authorization, not per client — each
-    ``begin_connect`` asks for its own, and the grant keeps what was approved.
+    ``basic_auth`` sends the client credentials with HTTP Basic, else in the form
+    body. ``extra_token_params`` go into the code exchange and the refresh, for
+    example RFC 8707's ``resource``. ``extra_authorize_params`` go into every
+    consent query, for example Google's ``access_type=offline`` and
+    ``prompt=consent``. Each ``begin_connect`` asks for its own scopes.
     """
 
     def __init__(
@@ -117,13 +110,10 @@ class OauthClient:
         context: dict[str, Any] | None = None,
         extra_authorize_params: dict[str, str] | None = None,
     ) -> str:
-        """Stash the pending exchange in Redis under a fresh single-use state
-        and return the consent URL to open. ``scopes`` render into the consent
-        query — this authorization's ask, within whatever ceiling the provider
-        registration allows. ``context`` rides the stash and comes back from
-        ``complete_connect``; ``extra_authorize_params`` land in the consent
-        query, over the client's declared ones on a shared key. Nothing durable
-        is written here — an abandoned consent simply expires."""
+        """Stash the pending exchange in Redis under a new single-use state, and
+        return the consent URL. ``context`` comes back from ``complete_connect``.
+        ``extra_authorize_params`` override the client's declared ones on the same
+        key. Nothing durable is written, so an abandoned consent expires."""
         state = secrets.token_urlsafe(32)
         code_verifier = secrets.token_urlsafe(64)
         code_challenge = (
@@ -168,25 +158,17 @@ class OauthClient:
         scopes: tuple[str, ...] = (),
         cached: bool = True,
     ) -> tuple[str, datetime | None]:
-        """The token for one grant and its expiry: the cached access token
-        while it lives, else one refreshed through the stored refresh token.
-        The expiry is the cache lifetime, the provider's ``expires_in`` less
-        the skew, or one hour when it gives none, and None for a cached token
-        without a lifetime. The provider may rotate the refresh token on use — two
-        concurrent refreshes trip its reuse detection and can revoke the
-        whole connection — so Redis elects one refresher per (connection,
-        scope set) (SET NX; the TTL is a crash backstop a live refresh cannot
-        outlive). Losers poll for the winner's cache fill, for about one
-        token-endpoint round trip, then fail loudly. The engine reads the
-        connection fresh under the lock and commits a rotated token before
-        the cache fills.
+        """The access token for one grant, and its expiry. A cached token serves
+        while it lives. Else Redis elects one refresher per connection and scope
+        set, because two concurrent refreshes can trip the provider's reuse
+        detection and revoke the grant. Other callers wait for its result, then
+        raise. The expiry is the provider's ``expires_in`` less the skew, one hour
+        when it gives none, or None for a cached token without a lifetime.
 
-        ``scopes`` asks the provider for a token narrower than the grant
-        (RFC 6749 §6) — a server-side ceiling for a token handed to
-        untrusted compute; it must be a subset of the connection's granted
-        scopes. ``cached=False`` skips the cache read for a full-lifetime
-        token, still electing one refresher and filling the cache for later
-        callers."""
+        ``scopes`` asks for a token narrower than the grant (RFC 6749 section 6),
+        for a token that goes to untrusted compute. They must be a subset of the
+        granted scopes. ``cached=False`` skips the cache read, but still elects
+        one refresher and fills the cache."""
         if connection.revoked_at:
             raise OauthRefreshError(
                 self.provider, "the connection is revoked; sign in again to restore it"
@@ -199,8 +181,7 @@ class OauthClient:
                 self.provider, f"the connection does not grant scope(s) {missing}"
             )
         redis = get_client()
-        # A down-scoped token must never serve a full-scope caller, or the
-        # reverse — the cache and the refresher election key on the scope set.
+        # A down-scoped token must never serve a full-scope caller, or the reverse.
         suffix = ""
         if requested:
             suffix = ":" + hashlib.sha256(" ".join(requested).encode()).hexdigest()[:16]
@@ -222,7 +203,7 @@ class OauthClient:
         try:
             data = {
                 "grant_type": "refresh_token",
-                "refresh_token": await connection._load_refresh_token(),
+                "refresh_token": await connection.get_refresh_token(),
                 **self.extra_token_params,
             }
             if requested:
@@ -255,10 +236,9 @@ class OauthClient:
                     self.provider, "the token endpoint returned no access token"
                 )
             if tokens.get("refresh_token"):
-                await connection._save_refresh_token(tokens["refresh_token"])
+                await connection.update_refresh_token(tokens["refresh_token"])
             if requested and tokens.get("scope") and set(tokens["scope"].split()) != set(requested):
-                # A provider that ignores the narrowing hands back a token the
-                # sandbox must never hold — fail rather than cache it.
+                # The provider ignored the narrowing. The sandbox must never hold this token.
                 raise OauthRefreshError(
                     self.provider,
                     f"asked for scope(s) {' '.join(requested)}; "
@@ -277,31 +257,25 @@ class OauthClient:
             await redis.delete(lock_key)
 
     async def evict_access_token(self, connection_id: str) -> None:
-        # Down-scoped variants ride the same prefix; one sweep drops them all.
+        # Down-scoped tokens share the prefix, so one scan removes them all.
         redis = get_client()
         async for key in redis.scan_iter(match=f"{self.provider}:access_token:{connection_id}*"):
             await redis.delete(key)
 
     async def disconnect(self, connection: VaultSecret, *, reason: str) -> None:
-        """Revoke the grant and evict its cached access token. The row and
-        its facts survive; the secrets die with the consent."""
+        """Revoke the grant and evict its cached access token."""
         await connection.revoke(reason)
         await self.evict_access_token(connection.id)
 
 
 def _expiry(seconds: int) -> datetime | None:
-    # Redis answers -1 for a key without a lifetime and -2 for a gone key.
-    if seconds <= 0:
-        return None
-    return datetime.now(UTC) + timedelta(seconds=seconds)
+    # Redis returns -1 for a key without a lifetime and -2 for a missing key.
+    return datetime.now(UTC) + timedelta(seconds=seconds) if seconds > 0 else None
 
 
 async def complete_connect(*, state: str, code: str) -> tuple[dict, dict]:
-    """Consume the pending state (single-use, GETDEL) and exchange the code
-    for tokens; a callback route knows only ``state`` and ``code``, so the
-    flow's provider and client identity ride the stash. Returns ``(tokens,
-    pending)`` — the caller stores the grant, because only it knows the
-    grant's account."""
+    """Consume the single-use state and exchange the code. Returns ``(tokens,
+    pending)``. The caller stores the grant, because only it knows the account."""
     raw = await get_client().getdel(f"oauth:connect:{state}")
     if not raw:
         raise OauthExchangeError(
@@ -354,8 +328,8 @@ async def complete_connect(*, state: str, code: str) -> tuple[dict, dict]:
 
 
 async def fetch_identity(endpoint: str, access_token: str) -> dict:
-    """The provider's facts for a fresh token. Any failure returns {} —
-    a missing label must not fail the consent."""
+    """The provider's facts for a fresh token, or {} on any failure, so a missing
+    label never fails the consent."""
     async with _http() as http:
         try:
             response = await http.get(endpoint, headers={"Authorization": f"Bearer {access_token}"})

@@ -51,6 +51,7 @@ function renderProviders(snapshot: UsageProviderSummary = usage) {
             revokedReason: '',
             expiresAt: null,
             updatedAt: '2026-09-05T08:00:00Z',
+            lastRefreshedAt: null,
           },
         ]}
         keys={[]}

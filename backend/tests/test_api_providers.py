@@ -69,6 +69,7 @@ async def test_logins_report_the_provider_identity(tmp_path: Path, druks_db):
         "provider": "anthropic",
         "providerEmail": "seat@corp.com",
         "expiresAt": None,
+        "lastRefreshedAt": None,
         "connected": True,
         "revokedAt": None,
         "revokedReason": "",
@@ -91,6 +92,7 @@ async def test_logins_read_an_expired_token_as_not_connected(tmp_path: Path, dru
 
 async def test_revoked_subscription_keeps_its_facts_for_its_owner(tmp_path: Path, druks_db):
     mine = await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "x"}})
+    await mine.update_secrets(dict(mine.secrets), expires_at=None)
     await mine.revoke("invalid_grant")
     other = await connect_provider(
         AnthropicProvider,
@@ -108,6 +110,7 @@ async def test_revoked_subscription_keeps_its_facts_for_its_owner(tmp_path: Path
         "providerEmail": mine.identity["email"],
         "expiresAt": None,
         "updatedAt": mine.updated_at.isoformat().replace("+00:00", "Z"),
+        "lastRefreshedAt": mine.last_refreshed_at.isoformat().replace("+00:00", "Z"),
         "connected": False,
         "revokedAt": mine.revoked_at.isoformat().replace("+00:00", "Z"),
         "revokedReason": "invalid_grant",

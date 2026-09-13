@@ -451,8 +451,9 @@ When an agent runs, OpenCode selects the endpoint.
 Before you save a key, check the provider documentation and domain.
 
 Provider rows show access state and weekly quota when available. Open
-**Manage** for credential controls, the 5-hour quota when available, and the
-model catalog timestamp. The weekly quota stays in the provider row.
+**Manage** for credential controls, the last subscription token refresh, the
+5-hour quota when available, and the model catalog timestamp. The weekly quota
+stays in the provider row.
 Anthropic and OpenAI fetch separate model lists.
 Added providers use the cached Models.dev directory.
 

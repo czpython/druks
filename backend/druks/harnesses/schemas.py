@@ -28,6 +28,7 @@ class ProviderSubscriptionResponse(Schema):
     provider_email: str
     expires_at: datetime | None
     updated_at: datetime
+    last_refreshed_at: datetime | None
     revoked_at: datetime | None
     revoked_reason: str
     # False once the token expires or the subscription is revoked.
@@ -40,6 +41,7 @@ class ProviderSubscriptionResponse(Schema):
             provider_email=row.identity["email"],
             expires_at=row.expires_at,
             updated_at=row.updated_at,
+            last_refreshed_at=row.last_refreshed_at,
             revoked_at=row.revoked_at,
             revoked_reason=row.revoked_reason,
             connected=row.is_live and (not row.expires_at or row.expires_at > datetime.now(UTC)),

@@ -51,6 +51,8 @@ class VaultSecret(Base, Uuid7Pk):
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
     expires_at: Mapped[datetime | None]
+    # Only a subscription rotation sets it.
+    last_refreshed_at: Mapped[datetime | None]
     # Revoking is a state, never a deletion: the facts stay, the secrets go.
     revoked_at: Mapped[datetime | None]
     revoked_reason: Mapped[str] = mapped_column(default="")
@@ -161,6 +163,7 @@ class VaultSecret(Base, Uuid7Pk):
         row.identity = identity or {}
         row.scopes = scopes or []
         row.expires_at = expires_at
+        row.last_refreshed_at = None
         row.revoked_at = None
         row.revoked_reason = ""
         row.updated_at = Base.utc_now()
@@ -288,35 +291,26 @@ class VaultSecret(Base, Uuid7Pk):
             )
         )
 
-    async def _load_refresh_token(self) -> str:
-        # Another process may have rotated and committed since this session read the row.
-        fresh = (
-            await db_session().scalars(
-                select(VaultSecret)
-                .where(VaultSecret.id == self.id)
-                .execution_options(populate_existing=True)
-            )
-        ).one()
-        if fresh.revoked_at:
-            # The services package imports the vault.
-            from druks.services.exceptions import OauthRefreshError
+    async def get_refresh_token(self) -> str:
+        if fresh := await VaultSecret.reload(self.id):
+            return fresh.secrets["refresh_token"]
+        # The services package imports the vault.
+        from druks.services.exceptions import OauthRefreshError
 
-            raise OauthRefreshError(self.audience_name, "the connection was revoked mid-refresh")
-        return fresh.secrets["refresh_token"]
+        raise OauthRefreshError(self.audience_name, "the connection was revoked mid-refresh")
 
-    async def _save_refresh_token(self, rotated: str) -> None:
+    async def update_refresh_token(self, rotated: str) -> None:
         # The provider already invalidated the old token. A later rollback of the
         # enclosing transaction must not lose the new one, so this commits on its own.
         async with get_session(db_session().bind) as session:
             fresh = await session.get(VaultSecret, self.id)
-            stored = 0
-            if fresh and not fresh.revoked_at:
-                result = await session.execute(
+            stored = (
+                await session.execute(
                     update(VaultSecret)
                     .where(VaultSecret.id == self.id, VaultSecret.revoked_at.is_(None))
                     .values(secrets={**dict(fresh.secrets), "refresh_token": rotated})
                 )
-                stored = result.rowcount
+            ).rowcount
             await session.commit()
         if stored:
             # Expire, never assign: the enclosing commit must not rewrite secrets
@@ -342,7 +336,7 @@ class VaultSecret(Base, Uuid7Pk):
         await db_session().execute(
             update(type(self))
             .where(type(self).id == self.id, type(self).revoked_at.is_(None))
-            .values(secrets=secrets, expires_at=expires_at)
+            .values(secrets=secrets, expires_at=expires_at, last_refreshed_at=Base.utc_now())
         )
         await db_session().refresh(self)
 

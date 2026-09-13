@@ -25,6 +25,7 @@ function subscription(overrides: Partial<ProviderSubscription> = {}): ProviderSu
     providerEmail: 'claude-seat@corp.com',
     expiresAt: null,
     updatedAt: '2026-09-01T00:00:00Z',
+    lastRefreshedAt: null,
     connected: true,
     revokedAt: null,
     revokedReason: '',
@@ -119,7 +120,10 @@ describe('ProviderConnect', () => {
 
   it('a healthy subscription has no expired state or reconnect action', () => {
     renderCard(provider(), {
-      subscription: subscription({ expiresAt: '2099-01-01T00:00:00Z' }),
+      subscription: subscription({
+        expiresAt: '2099-01-01T00:00:00Z',
+        lastRefreshedAt: '2026-09-13T09:12:00Z',
+      }),
       usage: {
         id: 'anthropic',
         label: 'Anthropic',
@@ -140,6 +144,7 @@ describe('ProviderConnect', () => {
 
     expect(screen.getByText('Connected')).toBeTruthy()
     expect(screen.getByText('Claude Max · claude-seat@corp.com')).toBeTruthy()
+    expect(screen.getByText(/Last refreshed/)).toBeTruthy()
     expect(screen.getByLabelText('82% remaining')).toBeTruthy()
     expect(screen.queryByLabelText('41% remaining')).toBeNull()
     expect(screen.getByText('5-hour')).toBeTruthy()
@@ -234,14 +239,24 @@ describe('ProviderConnect', () => {
     })))
     vi.stubGlobal('fetch', fetchMock)
     const revokedAt = '2026-09-12T03:30:00Z'
+    const lastRefreshedAt = '2026-09-11T17:00:00Z'
     const { view } = renderCard(provider(), {
-      subscription: subscription({ connected: false, revokedAt, revokedReason: 'invalid_grant' }),
+      subscription: subscription({
+        connected: false,
+        lastRefreshedAt,
+        revokedAt,
+        revokedReason: 'invalid_grant',
+      }),
     })
 
     expect(screen.getByText('Disconnected')).toBeTruthy()
     expect(screen.getByText('claude-seat@corp.com')).toBeTruthy()
     expect(screen.getByText('invalid_grant')).toBeTruthy()
-    expect(view.container.querySelector('time')?.dateTime).toBe(revokedAt)
+    expect(screen.getByText(/Last refreshed/)).toBeTruthy()
+    expect(Array.from(view.container.querySelectorAll('time'), (time) => time.dateTime)).toEqual([
+      revokedAt,
+      lastRefreshedAt,
+    ])
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }))
     await flush()
     expect(fetchMock).toHaveBeenCalledWith('/api/providers/anthropic/connection/start', expect.anything())
@@ -258,6 +273,7 @@ describe('ProviderConnect', () => {
     expect(screen.getByText('Expired')).toBeTruthy()
     expect(screen.getByText('claude-seat@corp.com')).toBeTruthy()
     expect(screen.queryByText(/Token expired/)).toBeNull()
+    expect(screen.queryByText(/Last refreshed/)).toBeNull()
     expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Disconnect Anthropic subscription' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Sign in/ })).toBeNull()
