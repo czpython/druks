@@ -31,8 +31,8 @@ def derive_prefix(name: str, taken: set[str]) -> str:
     raise PrefixTakenError(name)
 
 
-# WorkItem.update() sentinel: a field left at _KEEP is untouched, while passing
-# None clears the (nullable) column — the two an intent flag has to tell apart.
+# The WorkItem.update() sentinel. A field left at _KEEP stays unchanged, and None
+# clears a nullable column.
 _KEEP: Any = object()
 
 
@@ -59,7 +59,7 @@ class Project(Base):
     async def create(cls, *, name: str) -> "Project":
         session = db_session()
         taken = set(await session.scalars(select(cls.prefix)))
-        # repos=[]: loaded-empty, so the summary read right after flush does not lazy-load.
+        # repos=[] loads the collection empty. A summary read after flush needs no query.
         project = cls(name=name, prefix=derive_prefix(name, taken), repos=[])
         session.add(project)
         await session.flush()
@@ -71,11 +71,7 @@ class Project(Base):
 
     @classmethod
     async def get_for_repo(cls, full_name: str) -> "Project | None":
-        """Lookup the Project that owns ``full_name`` (e.g. ``clawhaven/acme-app``).
-
-        Returns None when the repo isn't bound to any project yet — the
-        caller decides whether to auto-create one or fail.
-        """
+        """The project that owns ``full_name``, for example ``clawhaven/acme-app``."""
         stmt = (
             select(cls)
             .join(ProjectRepo, ProjectRepo.project_id == cls.id)
@@ -111,8 +107,7 @@ class ProjectRepo(StoredSubject):
         ForeignKey("projects.id", ondelete="CASCADE"),
     )
     full_name: Mapped[str] = mapped_column(unique=True)
-    # Optional free-form role for the dashboard: "design", "infra",
-    # "app". None when the operator hasn't labelled it.
+    # A free-form role for the dashboard, for example "design", "infra", or "app".
     purpose: Mapped[str | None]
     profile: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -144,8 +139,8 @@ class ProjectRepo(StoredSubject):
 
     @classmethod
     async def get_in_project(cls, *, project_id: int, repo_id: int) -> "ProjectRepo | None":
-        # Scoped lookup for the nested /projects/{project_id}/repos/{repo_id} routes:
-        # a repo reached through the wrong project's URL is a miss, not a hit to reject.
+        # For the nested /projects/{project_id}/repos/{repo_id} routes. A repo under the
+        # wrong project is a miss, not a hit to reject.
         stmt = select(cls).where(cls.id == repo_id, cls.project_id == project_id).limit(1)
         return (await db_session().scalars(stmt)).first()
 
@@ -157,9 +152,9 @@ class ProjectRepo(StoredSubject):
 
     @classmethod
     async def list_summaries(cls, account_id: str | None) -> list["ProjectRepoSummary"]:
-        # A repo is registered, not transient, so the board is all of them by name.
+        # A repo is registered, not transient, so the board shows all of them by name.
         stmt = select(cls).order_by(cls.full_name)
-        return [repo.get_summary() for repo in await db_session().scalars(stmt)]
+        return [project_repo.get_summary() for project_repo in await db_session().scalars(stmt)]
 
     async def siblings(self) -> list["ProjectRepo"]:
         # A fresh query, not ``self.project.repos``: the loaded collection goes
@@ -172,7 +167,7 @@ class ProjectRepo(StoredSubject):
 
     @property
     def effective_profile(self) -> dict[str, Any]:
-        # {} until the repo profiler has run — an unprofiled repo is a normal state.
+        # The profile is {} until the repo profiler runs. That is a normal state.
         return self.profile.get("effective") or {}
 
     async def set_profile(self, *, baseline: dict[str, Any], effective: dict[str, Any]) -> None:
@@ -181,19 +176,13 @@ class ProjectRepo(StoredSubject):
 
     @classmethod
     async def get_for_name(cls, name: str) -> "ProjectRepo | None":
-        """Match a ticket signal against the repo name.
-
-        Convention: a tracker project name (Linear) or a label names the
-        target repo's bare name (e.g. ``acme-app`` maps to
-        ``clawhaven/acme-app``). The match is case-insensitive on the
-        slug after the last ``/``. A full ``owner/name`` matches exactly.
-        """
-        target = (name or "").strip().lower()
+        """Match a ticket signal to a repo. A bare name matches the slug after the last
+        ``/`` without regard to case. A full ``owner/name`` matches exactly."""
+        target = name.strip().lower()
         if not target:
             return
         if "/" in target:
             return await cls.get_for_repo(target)
-        # SQLite-friendly bare-name suffix match.
         stmt = select(cls).where(func.lower(cls.full_name).like(f"%/{target}")).limit(1)
         return (await db_session().scalars(stmt)).first()
 
@@ -202,16 +191,15 @@ class ProjectRepo(StoredSubject):
         cls, full_name: str, *, raise_on_missing: bool = False
     ) -> "ProjectRepo | None":
         stmt = select(cls).where(func.lower(cls.full_name) == full_name.lower()).limit(1)
-        repo = (await db_session().scalars(stmt)).first()
-        if raise_on_missing and not repo:
-            # A run's stored repo name can outlive its registration — a rename or
-            # a GitHub transfer leaves the old full_name behind, and this matches
-            # the literal string. Fail with the reason, not an opaque NoneType.
+        project_repo = (await db_session().scalars(stmt)).first()
+        if raise_on_missing and not project_repo:
+            # A rename or a GitHub transfer can leave a run with an old repo name.
+            # Fail with that reason, not with an unclear NoneType error.
             raise FatalError(
-                f"{full_name!r} is not a registered project repo — it may have been "
-                "renamed or transferred; re-register it under its current name"
+                f"{full_name!r} is not a registered project repo. If the repo was "
+                "renamed or transferred, register it again under its current name."
             )
-        return repo
+        return project_repo
 
     @classmethod
     async def lookup(
@@ -220,13 +208,8 @@ class ProjectRepo(StoredSubject):
         project_name: str | None,
         labels: list[str],
     ) -> "ProjectRepo | None":
-        """Look up the PR-target repo from a ticket's routing signals.
-
-        Precedence: tracker project name (the original Linear convention),
-        then labels — first bare-name match wins. One Jira project can span
-        many repos, so a per-ticket label carries the routing
-        the project name can't.
-        """
+        """The PR target repo for the routing signals of a ticket: the project name
+        first, then each label. A label routes a ticket when one project spans many repos."""
         for name in (project_name, *labels):
             if name:
                 row = await cls.get_for_name(name)
@@ -239,9 +222,8 @@ class WorkItem(StoredSubject):
     __tablename__ = "work_items"
     __table_args__ = (
         Index("work_items_repo_idx", "repo", "pr_number"),
-        # One WorkItem per (source, ticket_key) — one row per ticket in the remote
-        # tracker. ``source`` is part of the key so Linear "ABC-1" and Jira "ABC-1"
-        # don't collide once we support multiple providers.
+        # One WorkItem per ticket in the remote tracker. ``source`` is part of the key,
+        # so Linear "ABC-1" and Jira "ABC-1" do not collide.
         Index("work_items_ticket_unique", "source", "ticket_key", unique=True),
         Index("work_items_project_idx", "project_id"),
         Index("work_items_resolved_idx", "resolved_at"),
@@ -251,26 +233,21 @@ class WorkItem(StoredSubject):
         ForeignKey("projects.id"),
     )
     project: Mapped[Project] = relationship(lazy="joined")
-    # Which tracker the ticket lives in: ``linear`` / ``github`` /
-    # ``jira`` / ``druks``. Combined with ``ticket_key`` to uniquely identify
-    # a ticket.
+    # The tracker of the ticket: ``linear``, ``github``, ``jira``, or ``druks``.
     source: Mapped[str] = mapped_column(default="github")
     title: Mapped[str] = mapped_column(default="")
-    # Human-readable issue key in the source: ``ACME-270`` / ``#42`` /
-    # ``JIRA-123``. Every item is born from a ticket, so every item has one;
-    # Linear's GraphQL accepts the identifier wherever it accepts the UUID.
+    # The issue key in the source, for example ``ACME-270``, ``#42``, or ``JIRA-123``.
+    # The Linear GraphQL API accepts this key wherever it accepts the UUID.
     ticket_key: Mapped[str]
     ticket_url: Mapped[str | None]
-    # The PR-target repo. Still on WorkItem (not derived from project)
-    # because a Project can hold N repos but every WorkItem PRs into one.
+    # The PR target repo. A project can hold many repos, but a work item targets one.
     repo: Mapped[str]
     pr_number: Mapped[int | None]
     branch: Mapped[str | None]
-    # PR outcomes use GitHub's "merged" or "closed" verdict; operator cancellation
-    # uses druks's "closed" verdict. Unset while the work is still druks's.
+    # GitHub sets "merged" or "closed" for a PR outcome. An operator cancel sets
+    # "closed". The value is None while the work is open.
     resolution: Mapped[str | None] = mapped_column(default=None)
-    # PR outcomes use GitHub's verdict time; operator cancellation uses druks's
-    # cancellation reaction time.
+    # The time of the GitHub verdict, or of the cancel reaction.
     resolved_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -283,8 +260,8 @@ class WorkItem(StoredSubject):
 
     @classmethod
     async def list_summaries(cls, account_id: str | None) -> list[WorkItemSummary]:
-        # Where a run stands colours the row; it never decides whether the row is
-        # here. The 500 most-recent cover it; paginate if a board outgrows it.
+        # The run state colors a row but never decides whether the row shows. The 500
+        # most recent rows cover the board.
         stmt = (
             select(cls).where(cls.resolution.is_(None)).order_by(cls.updated_at.desc()).limit(500)
         )
@@ -322,8 +299,8 @@ class WorkItem(StoredSubject):
     async def get_for_pr(
         cls, *, repo: str, pr_number: int | None, branch: str | None = None
     ) -> "WorkItem | None":
-        """The item a pull request belongs to. Its number identifies it; the head
-        branch is the fallback for an event that lands before druks mirrored one."""
+        """The item of a pull request, found by its number. The head branch is the
+        fallback for an event that arrives before Druks stores the number."""
         if pr_number:
             stmt = (
                 select(cls)
@@ -355,7 +332,7 @@ class WorkItem(StoredSubject):
         await db_session().flush()
 
     async def resolve(self, *, merged: bool, at: datetime) -> None:
-        # cycle: the app imports this module at file scope.
+        # Import cycle: the app imports this module through ticketing/druks.py.
         import druks.contrib.software_factory.app as software_factory_app
 
         self.resolution = "merged" if merged else "closed"
@@ -365,8 +342,8 @@ class WorkItem(StoredSubject):
         await db_session().flush()
 
     async def ship(self) -> None:
-        # A build parked on the operator's review is stranded by their merge; a running
-        # one converges on its own, its merge step finding the PR already closed.
+        # A merge strands a build that is parked on review, so cancel it. A running build
+        # finishes by itself, because its merge step finds the PR closed.
         from druks.contrib.software_factory.workflows import Build
 
         build = await self.get_status(workflow=Build)
@@ -375,9 +352,8 @@ class WorkItem(StoredSubject):
         await self.set_ticket_status(TicketStatus.DONE)
 
     async def close_external(self) -> None:
-        # The attempt was abandoned, not the ticket, so the ticket returns to the
-        # provider's resting pool. Branch cleanup is best-effort: a fetch failure
-        # must not strand it there.
+        # The attempt stopped, not the ticket, so the ticket goes back to its resting
+        # status. Branch cleanup is best effort, and a failure must not block that move.
         from druks.contrib.software_factory.workflows import Build
 
         await Build.cancel(self, failure="pr closed without merge")
@@ -396,8 +372,6 @@ class WorkItem(StoredSubject):
         source: str,
         ticket_key: str,
     ) -> "WorkItem | None":
-        """The item a ticket names in its tracker — (source, ticket_key) is the
-        row's identity."""
         stmt = select(cls).where(cls.source == source, cls.ticket_key == ticket_key).limit(1)
         return (await db_session().scalars(stmt)).first()
 
@@ -417,12 +391,12 @@ class WorkItem(StoredSubject):
         return list(await db_session().scalars(stmt))
 
     async def set_ticket_status(self, status: TicketStatus) -> None:
-        # Lazy: the Software Factory app imports this module, so it can't be imported at top.
+        # Import cycle: the app imports this module through ticketing/druks.py.
         import druks.contrib.software_factory.app as software_factory_app
 
         tracker = await software_factory_app.SoftwareFactory.get_tracker(self.source)
-        # No tracker means nothing to sync: a github item, a source the operator
-        # has switched away from, or credentials not set yet.
+        # A github item, a source that is no longer selected, or missing credentials
+        # has no tracker, so nothing syncs.
         if not tracker:
             return
 
@@ -483,8 +457,8 @@ class Ticket(Base):
     status: Mapped[str] = mapped_column(default=Status.BACKLOG)
     priority: Mapped[str] = mapped_column(default=Priority.NONE)
     repo_id: Mapped[int] = mapped_column(ForeignKey("project_repos.id", ondelete="CASCADE"))
-    repo: Mapped[ProjectRepo] = relationship(lazy="joined")
-    owner_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
+    project_repo: Mapped[ProjectRepo] = relationship(lazy="joined")
+    assignee_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     creator_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -494,23 +468,23 @@ class Ticket(Base):
     async def create(
         cls,
         *,
-        repo: ProjectRepo,
+        project_repo: ProjectRepo,
         title: str,
         description: str = "",
         status: Status = Status.BACKLOG,
         priority: Priority = Priority.NONE,
-        owner_id: str | None = None,
+        assignee_id: str | None = None,
         creator_id: str | None = None,
     ) -> "Ticket":
         # comments=[] loads the collection empty. A read after flush needs no query.
         ticket = cls(
-            identifier=await Project.mint_identifier(repo.project_id),
-            repo=repo,
+            identifier=await Project.mint_identifier(project_repo.project_id),
+            project_repo=project_repo,
             title=title,
             description=description,
             status=status,
             priority=priority,
-            owner_id=owner_id,
+            assignee_id=assignee_id,
             creator_id=creator_id,
             comments=[],
         )
@@ -535,7 +509,7 @@ class Ticket(Base):
         *,
         status: Status | None = None,
         priority: Priority | None = None,
-        owner: str = "",
+        assignee: str = "",
         creator: str = "",
         project_id: int | None = None,
         repo_id: int | None = None,
@@ -546,10 +520,10 @@ class Ticket(Base):
             statement = statement.where(cls.status == status)
         if priority:
             statement = statement.where(cls.priority == priority)
-        if owner == "none":
-            statement = statement.where(cls.owner_id.is_(None))
-        elif owner:
-            statement = statement.where(cls.owner_id == owner)
+        if assignee == "none":
+            statement = statement.where(cls.assignee_id.is_(None))
+        elif assignee:
+            statement = statement.where(cls.assignee_id == assignee)
         if creator:
             statement = statement.where(cls.creator_id == creator)
         if repo_id:
@@ -564,7 +538,6 @@ class Ticket(Base):
         return list(await db_session().scalars(statement))
 
     async def save(self) -> None:
-        """Persist an edit to the row, stamping when it happened."""
         self.updated_at = Base.utc_now()
         await db_session().flush()
 
@@ -577,7 +550,7 @@ class Ticket(Base):
             await self._emit_transitioned(status)
 
     async def _emit_transitioned(self, status: Status) -> None:
-        owner = await Account.get(self.owner_id) if self.owner_id else None
+        assignee = await Account.get(self.assignee_id) if self.assignee_id else None
         await publish(
             "ticket.transitioned",
             payload={
@@ -587,10 +560,11 @@ class Ticket(Base):
                 "status": status.label,
                 "title": self.title,
                 "url": f"/software_factory/tickets/{self.identifier}",
-                "project_name": self.repo.full_name,
+                "project_name": self.project_repo.full_name,
                 "labels": [],
-                "assignee_email": owner.username if owner else None,
-                "assignee_name": owner.username if owner else None,
+                "assignee_id": self.assignee_id,
+                "assignee_email": assignee.username if assignee else None,
+                "assignee_name": assignee.username if assignee else None,
             },
         )
 

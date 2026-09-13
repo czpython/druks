@@ -11,8 +11,9 @@ from .enums import TicketStatus
 
 class Linear(Tracker):
     known_exceptions = (LinearAPIError, UnknownTicketError, httpx.HTTPError)
+    authority = "https://mcp.linear.app"
 
-    # TRIGGER and BACKLOG are operator-named; the rest are fixed.
+    # The operator names TRIGGER and BACKLOG. The other names are fixed.
     _STATIC_STATUS_NAMES: dict[TicketStatus, str] = {
         TicketStatus.IN_PROGRESS: "In Progress",
         TicketStatus.IN_REVIEW: "In Review",
