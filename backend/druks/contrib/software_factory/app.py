@@ -1,9 +1,10 @@
-from typing import Literal
+import logging
+from typing import Annotated, Literal
 
 from pydantic import Field
 
 from druks.agents import Agent
-from druks.apps import App, AppSettings
+from druks.apps import App, AppSettings, Choices
 from druks.contrib.software_factory.contracts import (
     ContractRevisionOutput,
     EvaluationOutput,
@@ -14,9 +15,9 @@ from druks.contrib.software_factory.contracts import (
     ReviewReport,
     TriageOutput,
 )
-from druks.contrib.software_factory.enums import Status
 from druks.contrib.software_factory.ticketing.base import Tracker
 from druks.contrib.software_factory.ticketing.druks import DruksTracker
+from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.ticketing.jira import Jira
 from druks.contrib.software_factory.ticketing.linear import Linear
 from druks.core import services
@@ -25,10 +26,12 @@ from druks.services import ServiceNotConnectedError
 
 from .services import GithubReviewer
 
+logger = logging.getLogger(__name__)
+
 
 async def check_tracker_identity() -> CheckResult:
-    """Whether the selected tracker's identity is connected. Trackerless is a
-    choice, not a fault; a selected-but-unconnected tracker is pending setup."""
+    """Whether the selected tracker is connected. No tracker is a choice, and a
+    selected tracker that is not connected is pending setup."""
     settings = await SoftwareFactory.settings()
     if settings.tracker == "none":
         return CheckResult(name="tracker", ok=True, detail="trackerless by choice")
@@ -46,6 +49,19 @@ async def check_tracker_identity() -> CheckResult:
     )
 
 
+async def list_tracker_status_choices() -> list[tuple[str, str]]:
+    """The statuses of the selected tracker. Empty when no connected tracker lists them."""
+    tracker = await SoftwareFactory.get_tracker()
+    if not tracker:
+        return []
+    async with tracker:
+        try:
+            return await tracker.list_status_choices()
+        except tracker.known_exceptions:
+            logger.warning("Could not list the tracker statuses.", exc_info=True)
+            return []
+
+
 async def check_review_identity() -> CheckResult:
     """Connected or not, both healthy: no reviewer is comment mode by design."""
     if await GithubReviewer.is_connected():
@@ -61,8 +77,7 @@ async def check_review_identity() -> CheckResult:
 
 class SoftwareFactory(App):
     name = "software_factory"
-    # These tables (projects, work_items, ...) are already unprefixed in core's
-    # migration history, so they must stay that way.
+    # The core migration history created these tables without a prefix.
     prefix_tables = False
     icon = "factory"
     description = (
@@ -76,85 +91,88 @@ class SoftwareFactory(App):
             title="Tracker",
             description="Which ticket tracker this installation uses.",
         )
-        # The tracker status names that drive build's funnel. They're operator
-        # knobs — the names an operator's Linear/Jira workflow actually uses — so
-        # they live here, not on core Settings.
-        linear_trigger_status: str = Field(
+        trigger_status: Annotated[str, Choices(list_tracker_status_choices)] = Field(
             default="Ready for Agent",
-            title="Linear trigger status",
-            description="A Linear ticket entering this status opens a build.",
-            json_schema_extra={"section": "Linear", "visible_when": {"tracker": "linear"}},
+            title="Trigger status",
+            description="A ticket entering this status opens a build.",
+            json_schema_extra={
+                "section": "Statuses",
+                "visible_when": {"tracker": ["linear", "jira"]},
+            },
         )
-        linear_resting_status: str = Field(
+        in_progress_status: Annotated[str, Choices(list_tracker_status_choices)] = Field(
+            default="In Progress",
+            title="In progress status",
+            description="The status of a ticket while a build works on it.",
+            json_schema_extra={
+                "section": "Statuses",
+                "visible_when": {"tracker": ["linear", "jira"]},
+            },
+        )
+        in_review_status: Annotated[str, Choices(list_tracker_status_choices)] = Field(
+            default="In Review",
+            title="In review status",
+            description="The status of a ticket while its build waits for review. "
+            "Empty leaves the ticket where it is.",
+            json_schema_extra={
+                "section": "Statuses",
+                "visible_when": {"tracker": ["linear", "jira"]},
+            },
+        )
+        done_status: Annotated[str, Choices(list_tracker_status_choices)] = Field(
+            default="Done",
+            title="Done status",
+            description="The status of a ticket after its pull request merges.",
+            json_schema_extra={
+                "section": "Statuses",
+                "visible_when": {"tracker": ["linear", "jira"]},
+            },
+        )
+        resting_status: Annotated[str, Choices(list_tracker_status_choices)] = Field(
             default="Backlog",
-            title="Linear resting status",
-            description=(
-                "Status druks returns a ticket to when it stops working on it; empty leaves it put."
-            ),
-            json_schema_extra={"section": "Linear", "visible_when": {"tracker": "linear"}},
+            title="Resting status",
+            description="The status of a ticket after druks stops work on it. "
+            "Empty leaves the ticket where it is.",
+            json_schema_extra={
+                "section": "Statuses",
+                "visible_when": {"tracker": ["linear", "jira"]},
+            },
         )
-        jira_trigger_status: str = Field(
-            default="Ready for Agent",
-            title="Jira trigger status",
-            description="A Jira ticket entering this status opens a build.",
-            json_schema_extra={"section": "Jira", "visible_when": {"tracker": "jira"}},
-        )
-        jira_resting_status: str = Field(
-            default="Open",
-            title="Jira resting status",
-            description=(
-                "Status druks returns a ticket to when it stops working on it; empty leaves it put."
-            ),
-            json_schema_extra={"section": "Jira", "visible_when": {"tracker": "jira"}},
-        )
-
-        @property
-        def trigger_status(self) -> str:
-            """The status that opens a build, on the tracker this installation uses."""
-            if self.tracker == "linear":
-                return self.linear_trigger_status
-            if self.tracker == "jira":
-                return self.jira_trigger_status
-            if self.tracker == "druks":
-                return Status.READY_FOR_AGENT.label
-            return ""
 
     checks = [check_tracker_identity, check_review_identity]
 
     @classmethod
     async def get_tracker(cls, source: str | None = None) -> Tracker | None:
-        """The selected tracker, or None when this installation runs without one.
-        Linear and Jira need a connected service identity. The board on this
-        appliance needs none. Pass a ``source`` to get the tracker only when that
-        source is the selected one. A work item syncs to the tracker that owns it."""
+        """The selected tracker, or None without one. A ``source`` returns the tracker
+        only when that source is the selected tracker."""
         settings = await cls.settings()
         if source and source != settings.tracker:
             return
         if settings.tracker == "druks":
             return DruksTracker()
+        status_names = {
+            TicketStatus.TRIGGER: settings.trigger_status,
+            TicketStatus.IN_PROGRESS: settings.in_progress_status,
+            TicketStatus.IN_REVIEW: settings.in_review_status,
+            TicketStatus.DONE: settings.done_status,
+            TicketStatus.BACKLOG: settings.resting_status,
+        }
         try:
             if settings.tracker == "linear":
                 row = await services.Linear.get()
-                return Linear(
-                    api_key=row.secrets["api_key"],
-                    backlog_status=settings.linear_resting_status,
-                    trigger_status=settings.trigger_status,
-                )
+                return Linear(api_key=row.secrets["api_key"], status_names=status_names)
             if settings.tracker == "jira":
                 row = await services.Jira.get()
                 return Jira(
                     base_url=row.identity["base_url"],
                     email=row.identity["email"],
                     api_token=row.secrets["api_token"],
-                    backlog_status=settings.jira_resting_status,
-                    trigger_status=settings.trigger_status,
+                    status_names=status_names,
                 )
         except ServiceNotConnectedError:
             return
 
-    # The app's agents — any of its workflows run them. The app name and the
-    # attribute name form each agent's id (``software_factory.implement``), its
-    # durable settings and timeline key.
+    # Any workflow of the app can run these agents. An agent id is ``software_factory.<name>``.
     generate_plan = Agent(
         description="ticket → implementation plan",
         prompt="software_factory/build/generate_plan.md",

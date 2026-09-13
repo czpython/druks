@@ -108,6 +108,25 @@ export const defaultsOf = (settings: InstallationSettings): Defaults => ({
   defaultTimeout: settings.defaultTimeout,
 })
 
+/** A field with live choices renders as a select that keeps its stored and edited values. */
+export function withLiveChoices(
+  field: WorkflowSettingField,
+  choices: [string, string][] | undefined,
+  edit: unknown,
+): WorkflowSettingField {
+  if (!choices?.length) return field
+  const pairs = [...choices]
+  for (const value of [field.value ?? '', edit ?? field.value ?? ''].map(String)) {
+    if (!pairs.some(([choice]) => choice === value)) pairs.push([value, value])
+  }
+  return {
+    ...field,
+    type: 'enum',
+    choices: pairs.map(([value]) => value),
+    choiceDetails: Object.fromEntries(pairs.map(([value, label]) => [value, { label, help: field.help }])),
+  }
+}
+
 export function isFieldVisible(
   field: WorkflowSettingField,
   fields: WorkflowSettingField[],
@@ -118,7 +137,7 @@ export function isFieldVisible(
   if (!controller) return true
   const edit = changes?.[controller.name]
   const current = edit !== undefined ? edit : controller.value
-  return String(current) === String(field.visibleWhenValue)
+  return field.visibleWhenValues.some((value) => String(value) === String(current))
 }
 
 export interface UnsavedForm {

@@ -9,6 +9,7 @@ import type {
   App,
   FeedResponse,
   FileSummary,
+  AppSettingChoices,
   AppsSettingsResponse,
   Harness,
   Identity,
@@ -320,6 +321,8 @@ export const api = {
       undefined,
     ),
   getAppSettings: () => getJSON<AppsSettingsResponse>('/api/settings/apps'),
+  getAppSettingChoices: (name: string) =>
+    getJSON<AppSettingChoices>(`/api/settings/apps/${encodeURIComponent(name)}/choices`),
   updateAppSettings: (body: UpdateAppsSettingsRequest) =>
     patchJSON<AppsSettingsResponse>('/api/settings/apps', body),
   usage: () => getJSON<UsageResponse>('/api/usage'),

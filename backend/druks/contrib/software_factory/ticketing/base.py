@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Self
 
 from druks.accounts.models import Account
 
@@ -6,8 +7,7 @@ from .enums import TicketStatus
 
 
 class Tracker(ABC):
-    # Transport and API errors a caller should expect and handle, so consumers
-    # can `except tracker.known_exceptions` without importing provider types.
+    # The errors a caller handles, so it can catch them without importing provider types.
     known_exceptions = ()
     # The MCP grant issuer whose subjects are this tracker's user ids.
     authority: str
@@ -17,11 +17,15 @@ class Tracker(ABC):
         if account := await Account.lookup(self.authority, user_id):
             return account.id
 
-    async def __aenter__(self) -> "Tracker":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *exc) -> None:
         await self.aclose()
+
+    async def list_status_choices(self) -> list[tuple[str, str]]:
+        """The status names an operator can pick, as ``(name, label)`` pairs."""
+        return []
 
     @abstractmethod
     async def set_status(self, key: str, status: TicketStatus) -> None: ...

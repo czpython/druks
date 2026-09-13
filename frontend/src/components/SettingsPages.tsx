@@ -92,6 +92,12 @@ export function SettingsPages({
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: api.getSettings })
   const personalQuery = useQuery({ queryKey: ['personalSettings'], queryFn: api.getPersonalSettings })
   const appsQuery = useQuery({ queryKey: ['appSettings'], queryFn: api.getAppSettings })
+  // Live choices can call an outside service, so only the settings page of an app loads them.
+  const choicesQuery = useQuery({
+    queryKey: ['appSettingChoices', appName],
+    queryFn: () => api.getAppSettingChoices(appName!),
+    enabled: Boolean(appName),
+  })
   const harnessesQuery = useQuery({ queryKey: ['harnesses'], queryFn: api.harnesses })
   const agentsQuery = useQuery({ queryKey: ['agents'], queryFn: api.agents })
   const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
@@ -337,6 +343,8 @@ export function SettingsPages({
           }
           await api.updateAppSettings(submitted)
           await queryClient.invalidateQueries({ queryKey: ['appSettings'] })
+          // A choices source can read other saved settings. Save does not wait for the new choices.
+          void queryClient.invalidateQueries({ queryKey: ['appSettingChoices'] })
           await queryClient.invalidateQueries({ queryKey: ['agents'] })
         }
         discard(page)
@@ -394,7 +402,7 @@ export function SettingsPages({
       const visible = isFieldVisible(field, fields, changes)
       const controller = fields.find((candidate) => candidate.name === field.visibleWhenField)
       return {
-        label: visible ? field.label : `${field.label} · set ${controller!.label} to ${field.visibleWhenValue}`,
+        label: visible ? field.label : `${field.label} · set ${controller!.label} to ${field.visibleWhenValues.join(' or ')}`,
         owner: appLabel(entry.name), kind: 'Field',
         terms: `${field.name} ${field.help} ${field.section}`,
         path: `/apps/${entry.name}/settings?field=${encodeURIComponent(`${scope}.${visible ? field.name : field.visibleWhenField}`)}`,
@@ -710,6 +718,7 @@ export function SettingsPages({
                   <div key={entry.name} className="app-settings-layout">
                     <AppPane
                       app={entry}
+                      liveChoices={choicesQuery.data ?? {}}
                       section={paneSection}
                       edits={appEdits[entry.name] ?? {}}
                       fieldErrors={appProblems[entry.name] ?? {}}

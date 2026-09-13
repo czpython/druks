@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 
-def test_get_settings_returns_shared_defaults(tmp_path: Path):
+def test_get_settings_leaves_out_the_timezone(tmp_path: Path):
     with settings_client(tmp_path) as client:
         response = client.get("/api/settings")
 
@@ -22,7 +22,9 @@ def test_get_settings_returns_shared_defaults(tmp_path: Path):
 
 def test_get_harnesses_lists_the_registry(tmp_path: Path):
     with settings_client(tmp_path) as client:
-        harnesses = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}
+        harnesses = {
+            harness["name"]: harness for harness in client.get("/api/settings/harnesses").json()
+        }
     assert list(harnesses) == ["claude", "codex", "opencode", "pi"]
     assert harnesses["claude"] == {
         "name": "claude",
@@ -64,12 +66,12 @@ def test_patch_settings_judges_the_default_triple_together(tmp_path: Path):
         )
         outside = client.patch("/api/settings", json={"defaultModel": "openai/gpt-5.5"})
         assert outside.status_code == 200  # opencode runs any key vendor
-        codex = client.patch("/api/settings", json={"defaultHarness": "claude"})
-        assert codex.status_code == 422
-        assert "does not run OpenAI" in codex.json()["detail"]
+        claude = client.patch("/api/settings", json={"defaultHarness": "claude"})
+        assert claude.status_code == 422
+        assert "does not run OpenAI" in claude.json()["detail"]
 
 
-async def test_accounts_report_the_default_without_a_fallback_setting(tmp_path: Path, druks_db):
+async def test_accounts_report_the_default_without_a_fallback_setting(tmp_path: Path):
     account = await Account.get_or_create("ops@example.com")
     with settings_client(tmp_path) as client:
         assert {"id": account.id, "username": "ops@example.com", "isDefault": True} in client.get(
@@ -96,7 +98,7 @@ def test_patch_settings_updates_the_defaults_every_agent_inherits(tmp_path: Path
         )
         assert patch.status_code == 200
         assert patch.json()["defaultModel"] == "openai/gpt-5.5"
-        agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
+        agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
     assert agents["software_factory.implement"]["harness"] == "codex"
     assert agents["software_factory.implement"]["harnessSource"] == "default"
     assert agents["software_factory.implement"]["model"] == "openai/gpt-5.5"
@@ -141,7 +143,7 @@ def test_agents_lists_every_apps_agents_as_they_resolve(tmp_path: Path):
     apps = {app["name"]: app for app in body["apps"]}
     assert "software_factory" in apps
     assert "field_notes" in apps
-    agents = {a["name"]: a for a in apps["software_factory"]["agents"]}
+    agents = {agent["name"]: agent for agent in apps["software_factory"]["agents"]}
     assert agents["software_factory.implement"]["harness"] == "codex"
     assert agents["software_factory.implement"]["harnessSource"] == "agent"
     assert agents["software_factory.implement"]["model"] == "openai/gpt-5.5"
@@ -179,7 +181,7 @@ def test_apps_judge_an_agents_triple_as_it_resolves(tmp_path: Path):
         )
         assert response.status_code == 422
         assert "does not run OpenAI" in response.json()["detail"]
-        agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
+        agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
         assert agents["software_factory.implement"]["harnessSource"] == "default"
         assert agents["software_factory.implement"]["source"] == "default"
         response = client.patch(
@@ -190,7 +192,7 @@ def test_apps_judge_an_agents_triple_as_it_resolves(tmp_path: Path):
             },
         )
         assert response.status_code == 200
-        agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
+        agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
         assert (
             agents["software_factory.implement"]["harness"],
             agents["software_factory.implement"]["billing"],
@@ -202,38 +204,24 @@ def test_apps_judge_an_agents_triple_as_it_resolves(tmp_path: Path):
 
 def _software_factory_app(client: TestClient) -> dict:
     body = client.get("/api/settings/apps").json()
-    return next(m for m in body["apps"] if m["name"] == "software_factory")
+    return next(app for app in body["apps"] if app["name"] == "software_factory")
 
 
 def _software_factory_settings_fields(client: TestClient) -> dict:
     return {field["name"]: field for field in _software_factory_app(client)["settings"]}
 
 
-def _field_notes_app(client: TestClient) -> dict:
-    body = client.get("/api/settings/apps").json()
-    return next(m for m in body["apps"] if m["name"] == "field_notes")
-
-
 def _field_notes_settings_fields(client: TestClient) -> dict:
-    return {field["name"]: field for field in _field_notes_app(client)["settings"]}
-
-
-def test_apps_surface_build_agents(tmp_path: Path):
-    """The build pipeline's agents all tune under the SoftwareFactory app."""
-    with settings_client(tmp_path) as client:
-        body = client.get("/api/settings/apps").json()
-    apps = {m["name"]: m for m in body["apps"]}
-
-    build_agents = {a["name"]: a for a in apps["software_factory"]["agents"]}
-    assert "software_factory.generate_plan" in build_agents
-    assert "planning" not in build_agents
+    body = client.get("/api/settings/apps").json()
+    field_notes = next(app for app in body["apps"] if app["name"] == "field_notes")
+    return {field["name"]: field for field in field_notes["settings"]}
 
 
 def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
     with settings_client(tmp_path) as client:
-        build = _software_factory_app(client)
+        software_factory = _software_factory_app(client)
 
-    agents = {a["name"]: a for a in build["agents"]}
+    agents = {agent["name"]: agent for agent in software_factory["agents"]}
     assert agents["software_factory.generate_plan"] == {
         "name": "software_factory.generate_plan",
         "label": "generate_plan",
@@ -251,7 +239,7 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
     }
     assert agents["software_factory.implement"]["model"] == "anthropic/claude-opus-4-7"
     assert agents["software_factory.evaluate_implementation"]["effortSource"] == "default"
-    fields = {f["name"]: f for f in build["workflows"][0]["fields"]}
+    fields = {field["name"]: field for field in software_factory["workflows"][0]["fields"]}
     assert fields["max_implementation_revisions"]["value"] == 5
     assert fields["plan_gate"] == {
         "name": "plan_gate",
@@ -286,7 +274,7 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
         "choices": ["human", "machine", "machine_then_human", "adaptive"],
         "section": "",
         "visibleWhenField": "",
-        "visibleWhenValue": None,
+        "visibleWhenValues": [],
         "secretSet": None,
         "multiline": False,
         "overridden": False,
@@ -324,23 +312,22 @@ async def test_app_secret_round_trip_encrypts_at_rest(tmp_path: Path):
 
     assert written.status_code == 200
     assert read.status_code == 200
-    assert stored.value is None
-    assert stored.value_is_null is True
+    assert stored.value_is_null
     assert stored.secret_value
     assert secret.encode() not in stored.secret_value
     assert secret not in written.text
     assert secret not in read.text
     assert token not in written.text
     assert token not in read.text
-    assert resolved and resolved.get_secret_value() == secret
+    assert resolved.get_secret_value() == secret
     field_notes = next(app for app in read.json()["apps"] if app["name"] == "field_notes")
     fields = {field["name"]: field for field in field_notes["settings"]}
     assert fields["sync_signing_key"]["type"] == "secret"
     assert fields["sync_signing_key"]["value"] is None
     assert fields["sync_signing_key"]["default"] is None
-    assert fields["sync_signing_key"]["secretSet"] is True
-    assert fields["sync_signing_key"]["overridden"] is True
-    assert fields["sync_token"]["secretSet"] is True
+    assert fields["sync_signing_key"]["secretSet"]
+    assert fields["sync_signing_key"]["overridden"]
+    assert fields["sync_token"]["secretSet"]
 
 
 async def test_app_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
@@ -350,7 +337,7 @@ async def test_app_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
     await db_session().flush()
 
     with settings_client(tmp_path) as client:
-        initial = _field_notes_app(client)
+        initial_field = _field_notes_settings_fields(client)["sync_signing_key"]
         resolved_initial = (await FieldNotes.settings()).sync_signing_key
         saved = client.patch(
             "/api/settings/apps",
@@ -366,26 +353,35 @@ async def test_app_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
             )
         ).one()
 
-    initial_field = next(
-        setting for setting in initial["settings"] if setting["name"] == "sync_signing_key"
-    )
     assert initial_field["secretSet"] is False
     assert not resolved_initial
     assert saved.status_code == 200
-    assert stored.value is None
-    assert stored.value_is_null is True
+    assert stored.value_is_null
     assert stored.secret_value
     assert secret.encode() not in stored.secret_value
 
 
+def test_live_choices_load_only_through_the_app_choices_read(tmp_path: Path):
+    with settings_client(tmp_path) as client:
+        notebook = _field_notes_settings_fields(client)["notebook"]
+        choices = client.get("/api/settings/apps/field_notes/choices")
+        unknown = client.get("/api/settings/apps/ghost/choices")
+
+    assert (notebook["type"], notebook["choices"]) == ("str", None)
+    assert choices.json() == {
+        "notebook": [["", ""], ["field", "Field notebook"], ["lab", "Lab notebook"]]
+    }
+    assert unknown.status_code == 404
+
+
 async def test_app_non_secret_setting_stays_in_value(tmp_path: Path):
     status = "Agent Queue"
-    key = "app:software_factory:linear_trigger_status"
+    key = "app:software_factory:trigger_status"
 
     with settings_client(tmp_path) as client:
         written = client.patch(
             "/api/settings/apps",
-            json={"appSettings": {"software_factory": {"linear_trigger_status": status}}},
+            json={"appSettings": {"software_factory": {"trigger_status": status}}},
         )
         stored = (
             await db_session().execute(
@@ -393,19 +389,14 @@ async def test_app_non_secret_setting_stays_in_value(tmp_path: Path):
                 {"key": key},
             )
         ).one()
-        software_factory = _software_factory_app(client)
+        field = _software_factory_settings_fields(client)["trigger_status"]
 
-    field = next(
-        setting
-        for setting in software_factory["settings"]
-        if setting["name"] == "linear_trigger_status"
-    )
     assert written.status_code == 200
     assert stored.value == status
     assert stored.secret_value == b""
-    assert (await SoftwareFactory.settings()).linear_trigger_status == status
+    assert (await SoftwareFactory.settings()).trigger_status == status
     assert field["value"] == status
-    assert field["overridden"] is True
+    assert field["overridden"]
 
 
 def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
@@ -431,7 +422,7 @@ def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
             "field_notes": {"sync_token": "Required when visibility is public."}
         }
         assert not reconciled
-        assert _field_notes_settings_fields(client)["visibility"]["overridden"] is False
+        assert not _field_notes_settings_fields(client)["visibility"]["overridden"]
         agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
         assert agents["software_factory.generate_plan"]["model"] == "anthropic/claude-opus-4-7"
 
@@ -474,7 +465,7 @@ async def test_clearing_a_secret_deletes_its_override_and_stays_coherent(tmp_pat
 
     assert configured.status_code == 200
     assert cleared.status_code == 200
-    assert stored is None
+    assert not stored
     assert not (await FieldNotes.settings()).sync_token
     assert fields["sync_token"]["secretSet"] is False
     assert fields["sync_signing_key"]["secretSet"] is False
@@ -490,7 +481,7 @@ def test_apps_override_agent_model_persists(tmp_path: Path):
             },
         )
         assert patch.status_code == 200
-        agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
+        agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
 
     assert agents["software_factory.implement"]["model"] == "openai/gpt-5.5"
     assert agents["software_factory.implement"]["source"] == "agent"
@@ -498,7 +489,7 @@ def test_apps_override_agent_model_persists(tmp_path: Path):
 
 def test_apps_default_effort_and_per_agent_effort_override(tmp_path: Path):
     with settings_client(tmp_path) as client:
-        agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
+        agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
         assert agents["software_factory.generate_plan"]["effort"] == "high"
         assert agents["software_factory.generate_plan"]["effortSource"] == "default"
 
@@ -506,7 +497,7 @@ def test_apps_default_effort_and_per_agent_effort_override(tmp_path: Path):
         client.patch(
             "/api/settings/apps", json={"agentEfforts": {"software_factory.generate_plan": "high"}}
         )
-        agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
+        agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
         assert agents["software_factory.generate_plan"]["effort"] == "high"
         assert agents["software_factory.generate_plan"]["effortSource"] == "agent"
         assert agents["software_factory.revise_contract"]["effort"] == "low"
@@ -525,7 +516,7 @@ def test_apps_reject_unknown_effort(tmp_path: Path):
 
 def test_apps_default_timeout_and_per_agent_timeout_override(tmp_path: Path):
     with settings_client(tmp_path) as client:
-        agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
+        agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
         assert agents["software_factory.implement"]["timeout"] == 1800
         assert agents["software_factory.implement"]["timeoutSource"] == "default"
 
@@ -533,7 +524,7 @@ def test_apps_default_timeout_and_per_agent_timeout_override(tmp_path: Path):
         client.patch(
             "/api/settings/apps", json={"agentTimeouts": {"software_factory.implement": 3600}}
         )
-        agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
+        agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
         assert agents["software_factory.implement"]["timeout"] == 3600
         assert agents["software_factory.implement"]["timeoutSource"] == "agent"
         assert agents["software_factory.review_plan"]["timeout"] == 1200
@@ -550,21 +541,23 @@ def test_apps_reject_non_positive_timeout(tmp_path: Path):
 
 
 def test_build_review_code_is_a_workflow_setting(tmp_path: Path):
-    """Gating the code reviewer is a build-workflow boolean, not an agent flag."""
     with settings_client(tmp_path) as client:
         workflow = _software_factory_app(client)["workflows"][0]
-        fields = {f["name"]: f for f in workflow["fields"]}
-        assert fields["review_code"]["value"] is True
-        assert fields["review_code"]["overridden"] is False
+        fields = {field["name"]: field for field in workflow["fields"]}
+        assert fields["review_code"]["value"]
+        assert not fields["review_code"]["overridden"]
 
         patch = client.patch(
             "/api/settings/apps",
             json={"workflowSettings": {workflow["kind"]: {"review_code": False}}},
         )
         assert patch.status_code == 200
-        fields = {f["name"]: f for f in _software_factory_app(client)["workflows"][0]["fields"]}
-        assert fields["review_code"]["value"] is False
-        assert fields["review_code"]["overridden"] is True
+        fields = {
+            field["name"]: field
+            for field in _software_factory_app(client)["workflows"][0]["fields"]
+        }
+        assert not fields["review_code"]["value"]
+        assert fields["review_code"]["overridden"]
 
 
 def test_apps_clearing_an_override_reverts_to_the_operator_default(tmp_path: Path):
@@ -573,14 +566,14 @@ def test_apps_clearing_an_override_reverts_to_the_operator_default(tmp_path: Pat
             "/api/settings/apps",
             json={"agentModels": {"software_factory.generate_plan": "anthropic/claude-opus-4-7"}},
         )
-        agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
+        agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
         assert agents["software_factory.generate_plan"]["model"] == "anthropic/claude-opus-4-7"
         assert agents["software_factory.generate_plan"]["source"] == "agent"
 
         client.patch(
             "/api/settings/apps", json={"agentModels": {"software_factory.generate_plan": None}}
         )
-        agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
+        agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
         assert agents["software_factory.generate_plan"]["model"] == "anthropic/claude-opus-4-7"
         assert agents["software_factory.generate_plan"]["source"] == "default"
 
@@ -605,10 +598,13 @@ def test_apps_override_workflow_setting_persists(tmp_path: Path):
             },
         )
         assert patch.status_code == 200
-        fields = {f["name"]: f for f in _software_factory_app(client)["workflows"][0]["fields"]}
+        fields = {
+            field["name"]: field
+            for field in _software_factory_app(client)["workflows"][0]["fields"]
+        }
 
     assert fields["max_implementation_revisions"]["value"] == 8
-    assert fields["max_implementation_revisions"]["overridden"] is True
+    assert fields["max_implementation_revisions"]["overridden"]
 
 
 def test_apps_plan_gate_override_persists(tmp_path: Path):
@@ -620,13 +616,16 @@ def test_apps_plan_gate_override_persists(tmp_path: Path):
             },
         )
         assert patch.status_code == 200
-        fields = {f["name"]: f for f in _software_factory_app(client)["workflows"][0]["fields"]}
+        fields = {
+            field["name"]: field
+            for field in _software_factory_app(client)["workflows"][0]["fields"]
+        }
 
     assert fields["plan_gate"]["value"] == "machine_then_human"
-    assert fields["plan_gate"]["overridden"] is True
+    assert fields["plan_gate"]["overridden"]
 
 
-def test_apps_reject_removed_auto_dispatch_setting(tmp_path: Path):
+def test_apps_reject_an_unknown_workflow_setting(tmp_path: Path):
     with settings_client(tmp_path) as client:
         response = client.patch(
             "/api/settings/apps",

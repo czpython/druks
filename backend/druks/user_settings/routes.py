@@ -116,11 +116,21 @@ async def update_personal_settings(
 @router.get("/apps", response_model=AppsSettingsResponse, response_model_by_alias=True)
 async def get_app_settings() -> AppsSettingsResponse:
     settings = await InstallationSettings.get()
-    projected = [await reads.get_app_settings(m, settings=settings) for m in iter_apps()]
+    projected = [await reads.get_app_settings(app, settings=settings) for app in iter_apps()]
     return AppsSettingsResponse(
         allowed_efforts=list(ALLOWED_EFFORTS),
         apps=[out for out in projected if out.agents or out.workflows or out.settings],
     )
+
+
+@router.get("/apps/{name}/choices")
+async def get_app_setting_choices(name: str) -> dict[str, list[tuple[str, str]]]:
+    """The live choices of an app's settings. The settings page asks when it opens the app."""
+    try:
+        model = get_app(name).settings_model
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown app {name!r}") from exc
+    return await reads.list_live_choices(model) if model else {}
 
 
 @router.patch(
@@ -168,9 +178,8 @@ async def update_app_settings(body: AppsSettingsUpdate) -> AppsSettingsResponse:
                 await app.override_setting(field, value)
             changed_apps.append(app)
     except ValueError as exc:
-        # Domain rejections (unknown field, bad cron, failed constraint) → 422.
-        # override_setting has already redacted any submitted value out of the
-        # message, so this is safe to surface even for a rejected secret.
+        # A domain rejection answers 422. override_setting already redacted the submitted
+        # value, so a rejected secret stays out of the message.
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     settings_problems = {}

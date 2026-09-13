@@ -2,9 +2,10 @@
 # into the wire shapes. Schemas stay pure projections.
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from druks.apps.settings import field_kind
+from druks.apps.settings import field_choice_source, field_kind
 from druks.database import db_session
 
 from .models import InstallationSettings, SettingsOverride
@@ -46,6 +47,20 @@ async def get_agent_setting(
     )
 
 
+async def list_live_choices(model: type[BaseModel]) -> dict[str, list[tuple[str, str]]]:
+    """The live choices of each field that has any, keyed by field name, after an empty
+    choice. Fields that share a source share one call."""
+    sources = {
+        name: source
+        for name, field in model.model_fields.items()
+        if (source := field_choice_source(field))
+    }
+    results = {source: await source() for source in set(sources.values())}
+    return {
+        name: [("", ""), *results[source]] for name, source in sources.items() if results[source]
+    }
+
+
 async def get_settings_field(
     name: str, field: FieldInfo, *, value: Any, override_key: str
 ) -> SettingsFieldResponse:
@@ -81,7 +96,7 @@ async def get_workflow_settings(workflow: "type[Workflow]") -> WorkflowSettingsR
                 choices=None,
                 section="",
                 visible_when_field="",
-                visible_when_value=None,
+                visible_when_values=[],
                 secret_set=None,
                 overridden=await SettingsOverride.read(f"workflow:{kind}:schedule") is not None,
             ),
@@ -95,7 +110,7 @@ async def get_workflow_settings(workflow: "type[Workflow]") -> WorkflowSettingsR
                 choices=None,
                 section="",
                 visible_when_field="",
-                visible_when_value=None,
+                visible_when_values=[],
                 secret_set=None,
                 overridden=await SettingsOverride.read(f"workflow:{kind}:schedule_enabled")
                 is not None,

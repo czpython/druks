@@ -7,6 +7,7 @@ import { api } from '../api/client'
 import { SETTINGS_FIELDS } from './settings'
 import type {
   AgentSetting,
+  AppSettingChoices,
   PersonalSettings,
   AppsSettingsResponse,
   UpdateAppsSettingsRequest,
@@ -165,37 +166,22 @@ const appSettings: AppsSettingsResponse = {
           choices: ['none', 'linear', 'jira'], choiceDetails: {},
           section: '',
           visibleWhenField: '',
-          visibleWhenValue: null,
+          visibleWhenValues: [],
           secretSet: null,
           multiline: false,
           overridden: false,
         },
         {
-          name: 'linear_trigger_status',
-          label: 'Linear trigger status',
-          help: '',
+          name: 'trigger_status',
+          label: 'Trigger status',
+          help: 'A ticket entering this status opens a build.',
           type: 'str',
           value: 'Ready for Agent',
           default: 'Ready for Agent',
           choices: null, choiceDetails: {},
-          section: 'Linear',
+          section: 'Statuses',
           visibleWhenField: 'tracker',
-          visibleWhenValue: 'linear',
-          secretSet: null,
-          multiline: false,
-          overridden: false,
-        },
-        {
-          name: 'jira_trigger_status',
-          label: 'Jira trigger status',
-          help: '',
-          type: 'str',
-          value: 'Ready for Agent',
-          default: 'Ready for Agent',
-          choices: null, choiceDetails: {},
-          section: 'Jira',
-          visibleWhenField: 'tracker',
-          visibleWhenValue: 'jira',
+          visibleWhenValues: ['linear', 'jira'],
           secretSet: null,
           multiline: false,
           overridden: false,
@@ -220,7 +206,7 @@ const appSettings: AppsSettingsResponse = {
           choices: null, choiceDetails: {},
           section: '',
           visibleWhenField: '',
-          visibleWhenValue: null,
+          visibleWhenValues: [],
           secretSet: false,
           multiline: false,
           overridden: false,
@@ -235,7 +221,7 @@ const appSettings: AppsSettingsResponse = {
           choices: null, choiceDetails: {},
           section: '',
           visibleWhenField: '',
-          visibleWhenValue: null,
+          visibleWhenValues: [],
           secretSet: true,
           multiline: true,
           overridden: true,
@@ -260,7 +246,7 @@ const appSettings: AppsSettingsResponse = {
           choices: null, choiceDetails: {},
           section: '',
           visibleWhenField: '',
-          visibleWhenValue: null,
+          visibleWhenValues: [],
           secretSet: null,
           multiline: false,
           overridden: false,
@@ -510,23 +496,23 @@ describe('SettingsPages app fields', () => {
 
   it('reveals the chosen section immediately and prunes edits hidden before save', async () => {
     stubFetch(false)
+    const choices = vi.spyOn(api, 'getAppSettingChoices').mockResolvedValue({})
     renderSettings('/apps/software_factory/settings')
 
     const options = (await screen.findByText('Software Factory options')).closest('.set-group')
     expect(options?.textContent?.indexOf('Tracker')).toBeLessThan(
-      options?.textContent?.indexOf('Linear') ?? -1,
+      options?.textContent?.indexOf('Statuses') ?? -1,
     )
-    const statusField = screen.getByText('Linear trigger status').closest('.set-field')
+    const statusField = screen.getByText('Trigger status').closest('.set-field')
     fireEvent.change(statusField?.querySelector('input') as HTMLInputElement, {
       target: { value: 'Agent Queue' },
     })
-    const trackerField = screen.getByText('Tracker').closest('.set-field')
-    fireEvent.change(trackerField?.querySelector('select') as HTMLSelectElement, {
-      target: { value: 'jira' },
-    })
+    const trackerSelect = screen.getByText('Tracker').closest('.set-field')?.querySelector('select')
+    fireEvent.change(trackerSelect as HTMLSelectElement, { target: { value: 'jira' } })
+    expect(screen.getByText('Trigger status')).toBeTruthy()
+    fireEvent.change(trackerSelect as HTMLSelectElement, { target: { value: 'none' } })
 
-    expect(screen.queryByText('Linear trigger status')).toBeNull()
-    expect(screen.getByText('Jira trigger status')).toBeTruthy()
+    expect(screen.queryByText('Trigger status')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
 
     await waitFor(() =>
@@ -540,7 +526,8 @@ describe('SettingsPages app fields', () => {
         ([input, init]) => String(input) === '/api/settings/apps' && init?.method === 'PATCH',
       )
     const body = JSON.parse(String(patchCall?.[1]?.body))
-    expect(body.appSettings.software_factory).toEqual({ tracker: 'jira' })
+    expect(body.appSettings.software_factory).toEqual({ tracker: 'none' })
+    await waitFor(() => expect(choices).toHaveBeenCalledTimes(2))
   })
 
   it('renders a multiline secret as a textarea and PATCHes the paste with newlines intact', async () => {
@@ -574,17 +561,68 @@ describe('SettingsPages app fields', () => {
     expect(body.appSettings.review).toEqual({ private_key: pem })
   })
 
+  it('shows live choices as a select that keeps the stored value', async () => {
+    stubFetch()
+    const choices = vi
+      .spyOn(api, 'getAppSettingChoices')
+      .mockResolvedValue({ trigger_status: [['Agent Queue', 'Agent Queue (unstarted)']] })
+    renderSettings('/apps/software_factory/settings')
+
+    const statusField = (await screen.findByText('Trigger status')).closest('.set-field')
+    const select = await waitFor(() => {
+      const found = statusField?.querySelector('select')
+      expect(found).toBeTruthy()
+      return found as HTMLSelectElement
+    })
+    expect(Array.from(select.options, (option) => [option.value, option.text])).toEqual([
+      ['Agent Queue', 'Agent Queue (unstarted)'],
+      ['Ready for Agent', 'Ready for Agent'],
+    ])
+    expect(select.value).toBe('Ready for Agent')
+    expect(statusField?.textContent).toContain('A ticket entering this status opens a build.')
+    expect(choices).toHaveBeenCalledWith('software_factory')
+  })
+
+  it('keeps an edit made before live choices load as the selected choice', async () => {
+    stubFetch()
+    let answer: (choices: AppSettingChoices) => void = () => {}
+    vi.spyOn(api, 'getAppSettingChoices').mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve
+      }),
+    )
+    renderSettings('/apps/software_factory/settings')
+
+    fireEvent.change(await screen.findByLabelText('Trigger status'), {
+      target: { value: 'Agent Queue' },
+    })
+    answer({ trigger_status: [['', ''], ['Todo', 'Todo (unstarted)']] })
+
+    const select = await waitFor(() => {
+      const found = screen.getByText('Trigger status').closest('.set-field')?.querySelector('select')
+      expect(found).toBeTruthy()
+      return found as HTMLSelectElement
+    })
+    expect(Array.from(select.options, (option) => option.value)).toEqual([
+      '',
+      'Todo',
+      'Ready for Agent',
+      'Agent Queue',
+    ])
+    expect(select.value).toBe('Agent Queue')
+  })
+
   it('renders a 422 message for a field hidden by the tracker selection', async () => {
-    stubFetch(true, { software_factory: { linear_trigger_status: 'Not a Linear status name.' } })
+    stubFetch(true, { software_factory: { trigger_status: 'Not a tracker status name.' } })
     renderSettings('/apps/software_factory/settings')
 
     const trackerField = (await screen.findByText('Tracker')).closest('.set-field')
     fireEvent.change(trackerField?.querySelector('select') as HTMLSelectElement, {
-      target: { value: 'jira' },
+      target: { value: 'none' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
 
-    expect(await screen.findByText('Linear trigger status: Not a Linear status name.')).toBeTruthy()
+    expect(await screen.findByText('Trigger status: Not a tracker status name.')).toBeTruthy()
   })
 })
 
@@ -1068,7 +1106,7 @@ describe('canonical app settings', () => {
             choices: null, choiceDetails: {},
             section: '',
             visibleWhenField: '',
-            visibleWhenValue: null,
+            visibleWhenValues: [],
             secretSet: null,
             multiline: false,
             overridden: false,
@@ -1123,14 +1161,14 @@ describe('canonical app settings', () => {
     stubFetch(false)
     renderSettings('/apps/software_factory/settings')
     await screen.findByLabelText('Tracker')
-    fireEvent.change(screen.getByLabelText('Linear trigger status'), {
+    fireEvent.change(screen.getByLabelText('Trigger status'), {
       target: { value: 'Agent Queue' },
     })
     fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
     fireEvent.click(await screen.findByText('high'))
     fireEvent.click(await screen.findByText('low'))
     fireEvent.click(screen.getByRole('link', { name: 'Options' }))
-    expect((screen.getByLabelText('Linear trigger status') as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText('Trigger status') as HTMLInputElement).value).toBe(
       'Agent Queue',
     )
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
@@ -1146,12 +1184,12 @@ describe('canonical app settings', () => {
       )
     expect(JSON.parse(String(patch?.[1]?.body))).toEqual({
       agentEfforts: { 'software_factory.coder': 'low' },
-      appSettings: { software_factory: { linear_trigger_status: 'Agent Queue' } },
+      appSettings: { software_factory: { trigger_status: 'Agent Queue' } },
       workflowSettings: {},
     })
     expect(patched).toEqual([])
     expect(screen.getByRole('status').textContent).toBe('Saved')
-    expect((screen.getByLabelText('Linear trigger status') as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText('Trigger status') as HTMLInputElement).value).toBe(
       'Agent Queue',
     )
     fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
@@ -1214,7 +1252,7 @@ describe('canonical app settings', () => {
     await screen.findByText('coder')
     expect(window.location.pathname).toBe('/apps/software_factory/settings/agents')
     fireEvent.click(screen.getByRole('link', { name: 'Options' }))
-    fireEvent.change(screen.getByLabelText('Linear trigger status'), {
+    fireEvent.change(screen.getByLabelText('Trigger status'), {
       target: { value: 'Agent Queue' },
     })
     fireEvent.click(screen.getByRole('link', { name: 'Shared agents' }))
@@ -1391,7 +1429,7 @@ describe('settings resource read failures', () => {
     stubFetch(false)
     vi.spyOn(api, 'providerCatalogs').mockRejectedValue(new Error('Offline'))
     renderSettings('/apps/software_factory/settings')
-    fireEvent.change(await screen.findByLabelText('Linear trigger status'), {
+    fireEvent.change(await screen.findByLabelText('Trigger status'), {
       target: { value: 'Draft Queue' },
     })
     fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
@@ -1401,7 +1439,7 @@ describe('settings resource read failures', () => {
     )
     expect(screen.queryByText('coder')).toBeNull()
     fireEvent.click(screen.getByRole('link', { name: 'Options' }))
-    expect((screen.getByLabelText('Linear trigger status') as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText('Trigger status') as HTMLInputElement).value).toBe(
       'Draft Queue',
     )
   })

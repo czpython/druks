@@ -132,7 +132,7 @@ def _pin_settings(monkeypatch, **over):
 
 async def test_trigger_status_dispatches_build_with_the_webhook_payload(tmp_path, monkeypatch):
     """The build funnel receives the normalized ticket payload without a refetch."""
-    _pin_settings(monkeypatch, jira_trigger_status="Ready")
+    _pin_settings(monkeypatch, trigger_status="Ready")
     build = AsyncMock()
     monkeypatch.setattr(subs.Build, "dispatch", build)
     payload = _jira_payload(status="Ready")
@@ -151,7 +151,7 @@ async def test_trigger_status_does_not_redispatch_a_merged_item(druks_db, monkey
     )
     item.resolution = "merged"
     await druks_db.flush()
-    _pin_settings(monkeypatch, jira_trigger_status="Ready")
+    _pin_settings(monkeypatch, trigger_status="Ready")
     start = AsyncMock()
     monkeypatch.setattr(subs.Build, "start", start)
 
@@ -174,7 +174,7 @@ async def test_trigger_status_redispatches_a_closed_item(druks_db, monkeypatch):
     )
     item.resolution = "closed"
     await druks_db.flush()
-    _pin_settings(monkeypatch, jira_trigger_status="Ready")
+    _pin_settings(monkeypatch, trigger_status="Ready")
     start = AsyncMock()
     monkeypatch.setattr(subs.Build, "start", start)
 
@@ -188,7 +188,7 @@ async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, druks_db, m
     project = await Project.create(name="octo/alfred")
     await ProjectRepo.create(project_id=project.id, full_name="octo/alfred")
     await druks_db.flush()
-    _pin_settings(monkeypatch, jira_trigger_status="Ready")
+    _pin_settings(monkeypatch, trigger_status="Ready")
     await seed_run(druks_db, kind=Build.kind, run_id="run-new")
 
     async def fake_start(cls, **kwargs):
@@ -207,7 +207,7 @@ async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, druks_db, m
 
 async def test_trigger_status_ignores_an_unroutable_ticket(tmp_path, druks_db, monkeypatch):
     """A ticket that matches no registered repo starts no build."""
-    _pin_settings(monkeypatch, jira_trigger_status="Ready")
+    _pin_settings(monkeypatch, trigger_status="Ready")
     start = AsyncMock()
     monkeypatch.setattr(subs.Build, "start", start)
 
@@ -219,7 +219,7 @@ async def test_trigger_status_ignores_an_unroutable_ticket(tmp_path, druks_db, m
 
 
 async def test_refinement_candidate_status_no_longer_dispatches(tmp_path, monkeypatch):
-    _pin_settings(monkeypatch, jira_trigger_status="Ready")
+    _pin_settings(monkeypatch, trigger_status="Ready")
     build = AsyncMock()
     monkeypatch.setattr(subs.Build, "dispatch", build)
 
@@ -229,10 +229,22 @@ async def test_refinement_candidate_status_no_longer_dispatches(tmp_path, monkey
 
 
 async def test_nonchosen_tracker_status_does_not_dispatch(monkeypatch):
-    _pin_settings(monkeypatch, tracker="linear", jira_trigger_status="Ready")
+    _pin_settings(monkeypatch, tracker="linear", trigger_status="Ready")
     build = AsyncMock()
     monkeypatch.setattr(subs.Build, "dispatch", build)
 
     await subs.ticket_transition_drives_the_funnel(payload=_jira_payload(status="Ready"))
 
     build.assert_not_called()
+
+
+async def test_the_board_triggers_on_ready_for_agent_whatever_the_status_setting(monkeypatch):
+    _pin_settings(monkeypatch, tracker="druks", trigger_status="Ready")
+    build = AsyncMock()
+    monkeypatch.setattr(subs.Build, "dispatch", build)
+    payload = {**_jira_payload(status="Ready for Agent"), "source": "druks"}
+
+    await subs.ticket_transition_drives_the_funnel(payload=payload)
+    await subs.ticket_transition_drives_the_funnel(payload={**payload, "status": "Ready"})
+
+    build.assert_awaited_once_with(ticket=payload)

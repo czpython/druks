@@ -34,7 +34,7 @@ class JiraClient:
         path: str,
         *,
         json: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ):
         response = await self._client.request(method, f"{self.base_url}{path}", json=json)
         if not response.is_success:
             raise JiraAPIError(
@@ -49,24 +49,33 @@ class JiraClient:
         # Jira moves status only via transitions: find the one whose target is
         # the requested status, then execute it.
         try:
-            data = await self._request("GET", f"/rest/api/3/issue/{key}/transitions")
+            data = await self._request(
+                "GET", f"/rest/api/3/issue/{key}/transitions?expand=transitions.fields"
+            )
         except JiraAPIError as error:
             # The transitions lookup 404s only when the issue itself is unknown.
             if error.status_code == 404:
                 raise UnknownTicketError(key, "Jira") from error
             raise
-        transition_id = next(
+        transition = next(
             (
-                transition["id"]
+                transition
                 for transition in data["transitions"]
                 if transition["to"]["name"] == status_name
             ),
             None,
         )
-        if not transition_id:
+        if not transition:
             raise JiraAPIError(f"{key} has no transition to status {status_name!r}")
-        await self._request(
-            "POST",
-            f"/rest/api/3/issue/{key}/transitions",
-            json={"transition": {"id": transition_id}},
-        )
+        body: dict[str, Any] = {"transition": {"id": transition["id"]}}
+        resolution = transition.get("fields", {}).get("resolution", {})
+        if resolution.get("required"):
+            # A workflow can require a resolution on this transition. Druks prefers "Done".
+            allowed = resolution["allowedValues"]
+            chosen = next((value for value in allowed if value["name"] == "Done"), allowed[0])
+            body["fields"] = {"resolution": {"id": chosen["id"]}}
+        await self._request("POST", f"/rest/api/3/issue/{key}/transitions", json=body)
+
+    async def list_statuses(self):
+        """The statuses of every active workflow. Browse projects is enough to read them."""
+        return await self._request("GET", "/rest/api/3/status")

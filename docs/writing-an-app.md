@@ -1225,11 +1225,11 @@ class NightWatch(App):
     class Settings(AppSettings):
         provider: Literal["none", "acme"] = "none"
         service_token: Secret = Field(
-            json_schema_extra={"section": "Acme", "visible_when": {"provider": "acme"}},
+            json_schema_extra={"section": "Acme", "visible_when": {"provider": ["acme"]}},
         )
         webhook_secret: Secret = Field(
             title="Webhook secret",
-            json_schema_extra={"section": "Acme", "visible_when": {"provider": "acme"}},
+            json_schema_extra={"section": "Acme", "visible_when": {"provider": ["acme"]}},
         )
 
         def clean(self) -> dict[str, str]:
@@ -1261,6 +1261,23 @@ review: Literal["human", "automatic"] = Field(
 )
 ```
 
+A `str` field can take its choices from a live source, such as a connected
+service. Declare it as `Annotated[str, Choices(source)]`, with `Choices` from
+`druks.apps`. The source is an async function that returns `(stored value, label)`
+pairs. Druks calls each source once when someone opens the settings page of the
+app, and shows those fields as a select. The select starts with an empty choice
+and keeps a stored value that the source no longer lists. When the source returns
+no pairs, the field stays a text box:
+
+```python
+async def list_board_choices() -> list[tuple[str, str]]:
+    return [("ops", "Operations board"), ("dev", "Development board")]
+
+
+class Settings(AppSettings):
+    board: Annotated[str, Choices(list_board_choices)] = Field(default="ops", title="Board")
+```
+
 An unset field is an empty, false `SecretStr`. Thus,
 `if self.service_token:` reads its state without a guard for
 `.get_secret_value()`. A multiline secret, such as a PEM private key, can use
@@ -1268,9 +1285,10 @@ An unset field is an empty, false `SecretStr`. Thus,
 keeps newlines. Storage, redaction, and write-only behavior do not change.
 
 `section` is a plain heading that Druks renders in first-declaration order, with
-unsectioned fields first. `visible_when` takes one same-model `{field: value}`
-equality condition. Its controller must be non-secret and unconditional, and a
-`Literal` controller requires one of its declared members.
+unsectioned fields first. `visible_when` takes one same-model `{field: [values]}`
+condition. The field shows when its controller holds one of the values. The
+controller must be non-secret and unconditional, and a `Literal` controller
+requires declared members.
 
 Hidden fields keep their stored values. Read the resolved model with
 `await NightWatch.settings()`. The settings form runs `clean()` against the
@@ -1591,7 +1609,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | Namespace | Public names |
 | --- | --- |
 | `druks.accounts` | `current_account_id` |
-| `druks.apps` | `App`, `AppSettings`, `Secret` |
+| `druks.apps` | `App`, `AppSettings`, `Choices`, `Secret` |
 | `druks.services` | `Service`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
 | `druks.secrets.fields` | `EncryptedJsonField`, `SecretsMapping` |
 | `druks.agents` | `Agent`, `AgentOutput` |

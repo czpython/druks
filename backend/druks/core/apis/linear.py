@@ -26,9 +26,7 @@ def compute_delivery_key(
     return hashlib.sha256(composite.encode()).hexdigest()
 
 
-# Granular timeouts: short connect/write phases, longer read for slow Linear
-# responses, bounded pool wait so a saturated pool fails fast instead of
-# stalling the request indefinitely.
+# A long read timeout for slow Linear answers. A short pool wait fails fast on a full pool.
 _DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=5.0, write=10.0, pool=5.0)
 _DEFAULT_LIMITS = httpx.Limits(max_connections=20, max_keepalive_connections=10)
 
@@ -43,9 +41,7 @@ class LinearClient:
     ) -> None:
         self.api_key = api_key
         self.api_url = api_url
-        # One long-lived AsyncClient per LinearClient instance — pools
-        # connections across the many GraphQL calls a single build run
-        # makes. Tests inject a stub client; production builds the default.
+        # One AsyncClient per LinearClient pools connections across the calls of a build run.
         self._client = client or httpx.AsyncClient(
             timeout=_DEFAULT_TIMEOUT,
             limits=_DEFAULT_LIMITS,
@@ -78,7 +74,7 @@ class LinearClient:
         )
         issue = data["issue"]
         # Linear answers an unknown identifier with a null issue, not an error.
-        if issue is None:
+        if not issue:
             raise UnknownTicketError(issue_id, "Linear")
         current_status = issue["state"]["name"]
         if current_status == status_name:
@@ -109,6 +105,28 @@ class LinearClient:
             "status": issue_result["state"]["name"],
             "changed": bool(result["issueUpdate"]["success"]),
         }
+
+    async def list_workflow_states(self) -> list[dict]:
+        """The workflow states of every team in the workspace, one page after another."""
+        states: list[dict] = []
+        cursor = None
+        while True:
+            data = await self._execute(
+                """
+                query DruksWorkflowStates($after: String) {
+                  workflowStates(first: 250, after: $after) {
+                    nodes { name type }
+                    pageInfo { hasNextPage endCursor }
+                  }
+                }
+                """,
+                {"after": cursor},
+            )
+            page = data["workflowStates"]
+            states += page["nodes"]
+            if not page["pageInfo"]["hasNextPage"]:
+                return states
+            cursor = page["pageInfo"]["endCursor"]
 
     async def _execute(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         response = await self._client.post(

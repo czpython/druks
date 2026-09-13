@@ -21,6 +21,7 @@ import {
   type Account,
   type AgentSetting,
   type AgentsResponse,
+  type AppSettingChoices,
   type AppSettings,
   type Billing,
   type McpRegistryCandidate,
@@ -46,7 +47,14 @@ import { useTicker } from '../lib/useTicker'
 import { useFormatters } from '../lib/preferences'
 import { Bar } from './UsagePanel'
 import { harnessColors } from '../lib/harnessColors'
-import { SETTINGS_FIELDS, isFieldVisible, type Catalog, type CatalogChoice, type Defaults } from './settings'
+import {
+  SETTINGS_FIELDS,
+  isFieldVisible,
+  withLiveChoices,
+  type Catalog,
+  type CatalogChoice,
+  type Defaults,
+} from './settings'
 
 const keyOnly = (harness: Harness | undefined) =>
   Boolean(harness) && !harness!.billingOptions.includes('subscription')
@@ -832,7 +840,7 @@ export function ServicesPane() {
     const channel = new BroadcastChannel('druks-service-connect')
     channel.onmessage = () =>
       void queryClient.invalidateQueries({
-        predicate: (query) => ['services', 'connections'].includes(String(query.queryKey[0])),
+        predicate: (query) => ['services', 'connections', 'appSettingChoices'].includes(String(query.queryKey[0])),
       })
     return () => channel.close()
   }, [queryClient])
@@ -955,7 +963,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
         setValues({})
         setFormOpen(false)
         await queryClient.invalidateQueries({
-          predicate: (query) => ['services', 'connections'].includes(String(query.queryKey[0])),
+          predicate: (query) => ['services', 'connections', 'appSettingChoices'].includes(String(query.queryKey[0])),
         })
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
@@ -1135,7 +1143,7 @@ function ServiceAccess({ service }: { service: Service }) {
       .disconnectConnection(connection.id)
       .then(() =>
         queryClient.invalidateQueries({
-          predicate: (query) => ['services', 'connections'].includes(String(query.queryKey[0])),
+          predicate: (query) => ['services', 'connections', 'appSettingChoices'].includes(String(query.queryKey[0])),
         }),
       )
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
@@ -1261,7 +1269,7 @@ export function ConnectionsPane({ revokedOnly = false }: { revokedOnly?: boolean
       .disconnectConnection(connection.id)
       .then(async () => {
         await queryClient.invalidateQueries({
-          predicate: (query) => ['services', 'connections'].includes(String(query.queryKey[0])),
+          predicate: (query) => ['services', 'connections', 'appSettingChoices'].includes(String(query.queryKey[0])),
         })
         setNotice(`${identity} disconnected. Its record is in Revoked.`)
       })
@@ -2994,6 +3002,7 @@ function PatRow({
 
 export function AppPane({
   app,
+  liveChoices,
   section,
   edits,
   fieldErrors,
@@ -3013,6 +3022,7 @@ export function AppPane({
   busy,
 }: {
   app: AppSettings
+  liveChoices: AppSettingChoices
   section: string
   edits: UpdateAppsSettingsRequest
   fieldErrors: Record<string, string>
@@ -3042,7 +3052,7 @@ export function AppPane({
     ...app.settings.map((field) => ({
       scope: 'app' as const,
       kind: app.name,
-      field,
+      field: withLiveChoices(field, liveChoices[field.name], edits.appSettings?.[app.name]?.[field.name]),
     })),
   ]
   const optionEdit = (option: (typeof optionFields)[number]) =>

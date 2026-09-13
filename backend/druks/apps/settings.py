@@ -1,3 +1,5 @@
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any, Literal, get_args, get_origin
 
 from pydantic import BaseModel, SecretStr, ValidationError
@@ -5,27 +7,30 @@ from pydantic.fields import FieldInfo
 
 from .exceptions import SettingsDeclarationError
 
-# A declared field's Python annotation picks its wire kind, which is the only thing
-# the frontend switches on to choose an input control (checkbox / number / text /
-# select / password). ``SecretStr`` and a ``Literal`` choice set are the two rich
-# kinds an author reaches for beyond the scalars.
+
+@dataclass(frozen=True)
+class Choices:
+    """Live choices for a ``str`` setting, declared as ``Annotated[str, Choices(source)]``.
+    ``source`` returns ``(stored value, label)`` pairs."""
+
+    source: Callable[[], Awaitable[list[tuple[str, str]]]]
+
+
+# The annotation picks the wire kind, and the frontend picks the input control from it.
 _SCALAR_KINDS: dict[type, str] = {bool: "bool", int: "int", str: "str"}
 
 
 def _is_secret_annotation(annotation: object) -> bool:
-    # ``SecretStr`` anywhere in the annotation tree marks the field secret — bare, in a
-    # union (``SecretStr | None``), or in a container (``list[SecretStr]``) — so a
-    # secret can't slip through as a plaintext value from any shape it's declared in.
+    # SecretStr anywhere in the annotation marks the field secret, also inside a union or a
+    # container. A secret then cannot leak as plain text from any declared shape.
     if annotation is SecretStr:
         return True
     return any(_is_secret_annotation(arg) for arg in get_args(annotation))
 
 
 def _literal_members(annotation: object) -> tuple[Any, ...] | None:
-    # The choices of a ``Literal`` field, unwrapping an ``Optional``/union so
-    # ``Literal["a", "b"] | None`` — and a union of separate literals like
-    # ``Literal["a"] | Literal["b"]`` — is still recognized. None when the field
-    # declares no literal. Members keep their declared type (str, int, …).
+    # The members of a Literal, also inside a union such as ``Literal["a"] | None``.
+    # Members keep their declared type.
     if get_origin(annotation) is Literal:
         return get_args(annotation)
     members = [member for arg in get_args(annotation) for member in (_literal_members(arg) or ())]
@@ -44,17 +49,22 @@ def field_kind(field: FieldInfo) -> str:
 
 
 def field_choices(field: FieldInfo) -> list[str] | None:
-    # An enum's closed choice set, surfaced so the UI renders a select. The wire is
-    # always strings (the select submits ``e.target.value``); ``coerce_setting_value``
-    # maps a submitted string back to the member's declared type on the way in.
-    members = _literal_members(field.annotation)
-    if not members:
-        return None
-    return [str(member) for member in members]
+    # The wire carries choices as strings. coerce_setting_value maps a submitted string
+    # back to the declared member.
+    if members := _literal_members(field.annotation):
+        return [str(member) for member in members]
+
+
+def _nests_choices(annotation: object) -> bool:
+    # Pydantic moves Choices into the field metadata only from the outermost Annotated.
+    return any(isinstance(arg, Choices) or _nests_choices(arg) for arg in get_args(annotation))
+
+
+def field_choice_source(field: FieldInfo) -> Callable[[], Awaitable[list[tuple[str, str]]]] | None:
+    return next((item.source for item in field.metadata if isinstance(item, Choices)), None)
 
 
 def field_section(field: FieldInfo) -> str:
-    # The heading a field groups under; empty when it is ungrouped.
     metadata = field.json_schema_extra
     if isinstance(metadata, dict):
         return str(metadata.get("section", ""))
@@ -62,10 +72,7 @@ def field_section(field: FieldInfo) -> str:
 
 
 def field_multiline(field: FieldInfo) -> bool:
-    # A field whose pasted value carries meaningful newlines (a PEM private
-    # key); the UI renders a textarea instead of a one-line input. Declared as
-    # ``json_schema_extra={"multiline": True}``; presentation only — storage,
-    # redaction, and write-only semantics are unchanged.
+    # A pasted value with newlines, such as a PEM key, gets a textarea. Storage is the same.
     metadata = field.json_schema_extra
     if isinstance(metadata, dict):
         return bool(metadata.get("multiline", False))
@@ -89,35 +96,35 @@ def validate_field_choice_details(field: FieldInfo) -> dict[str, dict[str, str]]
 
 
 def field_visibility(field: FieldInfo) -> tuple[str, Any]:
-    # The sibling field this one is shown for and the value that field must hold. The
-    # name is empty when the field is always shown.
+    # The sibling field and the values that show this field. An empty name means always shown.
     metadata = field.json_schema_extra
     if isinstance(metadata, dict):
         condition = metadata.get("visible_when")
-        if isinstance(condition, dict):
-            controller, target = next(iter(condition.items()))
-            return str(controller), target
-    return "", None
+        if isinstance(condition, dict) and len(condition) == 1:
+            [(controller, targets)] = condition.items()
+            return str(controller), targets
+    return "", []
 
 
 def _nested_model(annotation: object) -> type[BaseModel] | None:
-    # A ``BaseModel`` anywhere in the annotation tree — the one shape the flat settings
-    # plane can't render or key by. ``SecretStr`` is a str, not a model, so it's clear.
+    # The flat settings plane cannot render or key a nested model.
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return annotation
     for arg in get_args(annotation):
         if nested := _nested_model(arg):
             return nested
-    return None
 
 
 def validate_settings_declaration(model: type[BaseModel]) -> None:
-    # A settings field is a scalar, a ``SecretStr``, a ``Literal``, or an Optional /
-    # container of those — never a nested model. Reject a nested model at declaration so
-    # a shape the plane can't render (or safely redact) fails loudly where it's written
-    # rather than at the first operator PATCH.
+    # A bad declaration fails when the app loads, not at the first save from the settings page.
     for name, field in model.model_fields.items():
         validate_field_choice_details(field)
+        source = field_choice_source(field)
+        if (source and field.annotation is not str) or _nests_choices(field.annotation):
+            raise SettingsDeclarationError(
+                f"settings field {name!r}: Choices applies only to a str field. "
+                "Declare it as Annotated[str, Choices(source)]."
+            )
         if nested := _nested_model(field.annotation):
             raise SettingsDeclarationError(
                 f"settings field {name!r}: nested models are not a supported settings "
@@ -127,10 +134,16 @@ def validate_settings_declaration(model: type[BaseModel]) -> None:
 
 
 def _validate_visible_when(model: type[BaseModel], name: str, field: FieldInfo) -> None:
-    # One equality condition against a sibling field, which the client must be able to
-    # read back to evaluate it: never a secret, whose value never leaves the server, and
-    # never itself conditional, which would let a condition hang off a hidden control.
-    controller_name, target = field_visibility(field)
+    # The client evaluates the condition, so its controller cannot be a secret. The controller
+    # cannot be conditional either, or a condition could depend on a hidden control.
+    metadata = field.json_schema_extra
+    has_visible_when = isinstance(metadata, dict) and "visible_when" in metadata
+    controller_name, targets = field_visibility(field)
+    if has_visible_when and not (controller_name and isinstance(targets, list) and targets):
+        raise SettingsDeclarationError(
+            f"settings field {name!r}: visible_when takes one {{field: [values]}} condition. "
+            "Name one controller with a non-empty list of values."
+        )
     if not controller_name:
         return
     controller = model.model_fields.get(controller_name)
@@ -148,20 +161,18 @@ def _validate_visible_when(model: type[BaseModel], name: str, field: FieldInfo) 
             f"settings field {name!r}: visible_when controller "
             f"{controller_name!r} cannot itself declare visible_when"
         )
-    members = _literal_members(controller.annotation)
-    # ``True == 1`` in Python, so a target must match a member's type as well as its
-    # value — otherwise it passes here and then never matches the client's comparison.
-    if members and not any(type(target) is type(member) and target == member for member in members):
-        raise SettingsDeclarationError(
-            f"settings field {name!r}: visible_when target {target!r} is not a member of "
-            f"{controller_name!r}"
-        )
+    # ``True == 1`` in Python. The type must match too, or the client never matches the target.
+    if members := _literal_members(controller.annotation):
+        for target in targets:
+            if not any(type(target) is type(member) and target == member for member in members):
+                raise SettingsDeclarationError(
+                    f"settings field {name!r}: visible_when target {target!r} is not a member of "
+                    f"{controller_name!r}"
+                )
 
 
 def coerce_setting_value(model: type[BaseModel], field: str, value: Any) -> Any:
-    # A select submits every choice as a string, but a ``Literal`` may hold ints or
-    # bools — map the submitted string back to the member it names so validation sees
-    # the declared type. Leaves non-enum fields and already-typed values untouched.
+    # A select submits strings, but a Literal can hold ints or bools.
     if not isinstance(value, str):
         return value
     field_info = model.model_fields.get(field)
@@ -176,12 +187,8 @@ def coerce_setting_value(model: type[BaseModel], field: str, value: Any) -> Any:
 def validate_setting_override(
     model: type[BaseModel], current: dict[str, Any], field: str, value: Any
 ) -> None:
-    # Merge the new value onto the currently-resolved settings and validate the whole
-    # model, so cross-field validators run against real state (not a blank shell of
-    # defaults). ``current`` is already a valid, resolved settings dump, so a sibling
-    # can't spuriously fail. On failure, raise a ValueError whose message is redacted —
-    # never the submitted input, and never a secret field's raw value — so a rejected
-    # secret can't ride out in the 422 body.
+    # Validate the whole model with the new value, so cross-field validators see real state.
+    # The error message is redacted, so a rejected secret never reaches the 422 body.
     try:
         model.model_validate({**current, field: value})
     except ValidationError as error:
@@ -189,11 +196,9 @@ def validate_setting_override(
 
 
 def _redacted_validation_message(model: type[BaseModel], error: ValidationError) -> str:
-    # Pydantic's ``str(ValidationError)`` (and each error's ``input``/``ctx``/``url``)
-    # echoes the submitted value — a secret leak — so rebuild from the safe keys only.
-    # ``msg`` is safe for a built-in error, but a custom validator can embed the raw
-    # value in it: drop ``msg`` for a secret field's error (and any model-level error,
-    # where a validator saw every field, secrets included) in favor of a generic line.
+    # A Pydantic error echoes the submitted value, so rebuild the message from safe keys.
+    # A custom validator can put a raw value in ``msg``, so a secret field error and a
+    # model-level error get a generic line.
     parts = []
     for detail in error.errors():
         location = tuple(detail["loc"])
@@ -206,9 +211,8 @@ def _redacted_validation_message(model: type[BaseModel], error: ValidationError)
 
 
 def _touches_secret(model: type[BaseModel], location: tuple[Any, ...]) -> bool:
-    # A field-level error names its field first; redact when that field is a secret. A
-    # model-level error has an empty location — a model validator can read every field,
-    # so redact whenever the model declares any secret at all.
+    # A model-level error has no location, and its validator can read every field. Redact
+    # it when the model declares any secret.
     fields = model.model_fields
     if not location:
         return any(field_kind(info) == "secret" for info in fields.values())

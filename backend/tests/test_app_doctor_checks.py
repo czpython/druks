@@ -7,12 +7,11 @@ from druks.apps import App, AppSettings
 from druks.database import db_session
 from druks.testing import make_settings
 from druks.user_settings.models import SettingsOverride
+from druks_field_notes.app import FieldNotes
 
 
 @asynccontextmanager
 async def _fixture_check_engine(_settings):
-    from druks.database import db_session
-
     yield db_session().bind
 
 
@@ -95,7 +94,7 @@ async def test_coherent_stored_settings_pass(
     installed, tmp_path: Path, druks_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await SettingsOverride.set_app_setting(
-        "software_factory", "linear_trigger_status", "Agent Queue", is_secret=False
+        "software_factory", "trigger_status", "Agent Queue", is_secret=False
     )
     monkeypatch.setattr(doctor, "_check_engine", _fixture_check_engine)
 
@@ -157,7 +156,6 @@ async def test_raising_app_check_is_isolated_and_does_not_stop_siblings(
 ) -> None:
     """A check that raises becomes one failing result tagged with the app name,
     and the app's other checks still run."""
-    from druks_field_notes import app as field_notes
 
     def boom() -> doctor.CheckResult:
         raise RuntimeError("provider unreachable")
@@ -165,7 +163,7 @@ async def test_raising_app_check_is_isolated_and_does_not_stop_siblings(
     def healthy() -> doctor.CheckResult:
         return doctor.CheckResult(name="healthy", ok=True, detail="ok")
 
-    monkeypatch.setattr(field_notes.FieldNotes, "checks", [boom, healthy])
+    monkeypatch.setattr(FieldNotes, "checks", [boom, healthy])
     settings = make_settings(tmp_path)
 
     results = await doctor.check_apps(settings)
@@ -184,12 +182,11 @@ async def test_broken_app_check_does_not_hide_core_failures(
     ``check_apps``, and a failing core check still reports its failure. Both
     are independent entries in ``CHECKS``, so ``run_checks`` runs them side by side —
     a broken app can't abort or hide the core checks."""
-    from druks_field_notes import app as field_notes
 
     def boom() -> doctor.CheckResult:
         raise RuntimeError("kaboom")
 
-    monkeypatch.setattr(field_notes.FieldNotes, "checks", [boom])
+    monkeypatch.setattr(FieldNotes, "checks", [boom])
     # A core check that genuinely fails: redis pointed at an unreachable port.
     settings = make_settings(tmp_path, redis_url="redis://127.0.0.1:1/0")
 
@@ -211,7 +208,6 @@ async def test_broken_app_check_does_not_hide_core_failures(
 def test_default_app_contributes_no_checks(tmp_path: Path) -> None:
     """An app that doesn't declare ``checks`` adds nothing because the base
     attribute is an empty list."""
-    from druks.apps import App
 
     class Plain(App):
         name = "plain_probe"
@@ -225,7 +221,6 @@ async def test_malformed_check_return_is_contained(
     """A check that returns something other than a ``CheckResult`` — a missing
     ``return`` yields ``None`` — becomes a failing result under its name rather than
     crashing the run with ``AttributeError`` and hiding later checks."""
-    from druks_field_notes import app as field_notes
 
     def check_forgot_return() -> doctor.CheckResult:
         return None  # type: ignore[return-value]  # the bug under test: no real return
@@ -234,7 +229,7 @@ async def test_malformed_check_return_is_contained(
         return doctor.CheckResult(name="healthy", ok=True, detail="ok")
 
     # The malformed check runs before a healthy one, which must still report.
-    monkeypatch.setattr(field_notes.FieldNotes, "checks", [check_forgot_return, healthy])
+    monkeypatch.setattr(FieldNotes, "checks", [check_forgot_return, healthy])
     settings = make_settings(tmp_path)
 
     results = await doctor.check_apps(settings)

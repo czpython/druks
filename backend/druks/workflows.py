@@ -32,6 +32,7 @@ from druks.apps.loader import resolve_workflow_app
 from druks.apps.registry import workflows
 from druks.apps.settings import (
     coerce_setting_value,
+    field_choice_source,
     validate_setting_override,
     validate_settings_declaration,
 )
@@ -727,6 +728,11 @@ class Workflow:
         cls.kind = f"{cls.app}.{local_kind}" if cls.app else local_kind
         _declare_subject(cls)
         validate_settings_declaration(cls.Settings)
+        if any(field_choice_source(field) for field in cls.Settings.model_fields.values()):
+            raise WorkflowError(
+                f"{cls.__name__}.Settings declares Choices, which applies only to app settings. "
+                "Declare the field on the app Settings."
+            )
         cls._body_method = _resolve_body_method(cls)
         # Before _wrap_steps: run()'s wrapper signature is (*args, **kwargs).
         cls._run_input_model = _input_model_from_signature(

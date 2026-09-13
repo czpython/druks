@@ -19,8 +19,8 @@ async def _open_ticket(*, project="Acme", full_name="acme/widget", title="one"):
     return await Ticket.create(project_repo=repo, title=title)
 
 
-def _pin_tracker(monkeypatch, tracker="druks"):
-    settings = SoftwareFactory.Settings(tracker=tracker)
+def _pin_tracker(monkeypatch):
+    settings = SoftwareFactory.Settings(tracker="druks")
 
     async def _settings(cls):
         return settings
@@ -55,10 +55,9 @@ def _no_start(monkeypatch) -> list[dict]:
         (TicketStatus.IN_PROGRESS, Status.IN_PROGRESS),
         (TicketStatus.IN_REVIEW, Status.IN_REVIEW),
         (TicketStatus.DONE, Status.DONE),
-        (TicketStatus.CANCELED, Status.DONE),
     ],
 )
-async def test_the_tracker_maps_every_asked_status_onto_the_board(druks_db, asked, board):
+async def test_the_tracker_maps_every_asked_status_onto_the_board(asked, board):
     ticket = await _open_ticket()
 
     async with DruksTracker() as tracker:
@@ -67,12 +66,12 @@ async def test_the_tracker_maps_every_asked_status_onto_the_board(druks_db, aske
     assert (await Ticket.get_for_identifier(ticket.identifier)).status == board
 
 
-async def test_the_tracker_raises_for_a_ticket_it_does_not_hold(druks_db):
+async def test_the_tracker_raises_for_a_ticket_it_does_not_hold():
     with pytest.raises(UnknownTicketError, match="NOPE-1"):
         await DruksTracker().set_status("NOPE-1", TicketStatus.IN_PROGRESS)
 
 
-async def test_a_work_item_writes_its_status_through_to_the_ticket(druks_db, monkeypatch):
+async def test_a_work_item_writes_its_status_through_to_the_ticket(monkeypatch):
     _pin_tracker(monkeypatch)
     ticket = await _open_ticket()
     item = await make_test_work_item(
@@ -84,7 +83,7 @@ async def test_a_work_item_writes_its_status_through_to_the_ticket(druks_db, mon
     assert (await Ticket.get_for_identifier(ticket.identifier)).status == Status.IN_REVIEW
 
 
-async def test_ready_for_agent_opens_a_build_against_the_ticket_repo(druks_db, monkeypatch):
+async def test_ready_for_agent_opens_a_build_against_the_ticket_repo(monkeypatch):
     await _connect_github()
     _pin_tracker(monkeypatch)
     # The same bare repo name in another org: the build takes the ticket's own repo.
@@ -116,5 +115,5 @@ async def test_ready_for_agent_on_a_parked_build_moves_the_ticket_to_in_review(
 
     await ticket.transition(Status.READY_FOR_AGENT)
 
-    assert started == []
+    assert not started
     assert (await Ticket.get_for_identifier(ticket.identifier)).status == Status.IN_REVIEW

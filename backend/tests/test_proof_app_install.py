@@ -17,6 +17,7 @@ _CHECK = textwrap.dedent(
     assert list(app.settings_model.model_fields) == [
         "board_size",
         "visibility",
+        "notebook",
         "sync_signing_key",
         "sync_token",
     ]

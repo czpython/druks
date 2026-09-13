@@ -744,10 +744,10 @@ export interface WorkflowSettingField {
   choiceDetails: Record<string, { label: string; help: string }>
   /** The heading this field groups under; empty for an ungrouped one. */
   section: string
-  /** The sibling field this one is shown for, and the value that field must hold.
+  /** The sibling field this one is shown for, and the values of it that show this one.
    * The name is empty when the field is always shown. */
   visibleWhenField: string
-  visibleWhenValue: unknown
+  visibleWhenValues: unknown[]
   /** For a secret field, whether a value is currently stored; null otherwise. */
   secretSet: boolean | null
   /** The value carries meaningful newlines (a pasted PEM) — render a textarea. */
@@ -772,6 +772,9 @@ export interface AppSettings {
   /** The app's own settings (not tied to a workflow). */
   settings: WorkflowSettingField[]
 }
+
+/** The live choices of an app's settings: field name to (stored value, label) pairs. */
+export type AppSettingChoices = Record<string, [string, string][]>
 
 export interface AppsSettingsResponse {
   allowedEfforts: string[]

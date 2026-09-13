@@ -2,6 +2,7 @@ import re
 
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import ReviewWork
+from druks.contrib.software_factory.enums import Status
 from druks.contrib.software_factory.github import get_review_actor
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
@@ -100,5 +101,9 @@ async def mention_asks_for_a_review(*, repo: str, pr_number: int, payload: dict)
 async def ticket_transition_drives_the_funnel(*, payload: dict) -> None:
     """Dispatch a build when a ticket from the chosen tracker enters its trigger status."""
     settings = await SoftwareFactory.settings()
-    if payload["source"] == settings.tracker and payload["status"] == settings.trigger_status:
+    trigger = settings.trigger_status
+    # The board has a fixed trigger. The hidden setting can keep a value of another tracker.
+    if settings.tracker == "druks":
+        trigger = Status.READY_FOR_AGENT.label
+    if payload["source"] == settings.tracker and payload["status"] == trigger:
         await Build.dispatch(ticket=payload)

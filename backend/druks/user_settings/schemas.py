@@ -102,29 +102,19 @@ class AgentsResponse(Schema):
 
 class SettingsFieldResponse(Schema):
     name: str
-    # Human label + one-line help, from the field's ``Field(title=, description=)``.
     label: str
     help: str
     type: str
-    # A secret field carries neither its stored value nor its default here — only
-    # whether one is set — so a raw secret can't ride out in any response.
+    # A secret field sends neither its value nor its default. secret_set says whether it is set.
     value: Any
     default: Any
-    # An enum field's allowed values; None for every other kind.
+    # The allowed values of an enum field.
     choices: list[str] | None
     choice_details: dict[str, dict[str, str]] = {}
-    # The heading this field groups under; empty for an ungrouped one.
     section: str
-    # The sibling field this one is shown for, and the value that field must hold. The
-    # name is empty when the field is always shown.
     visible_when_field: str
-    visible_when_value: Any
-    # For a secret field, whether a non-empty value is currently stored (override or
-    # default). None for every other kind — the UI shows a "set / not set" hint only
-    # for secrets.
+    visible_when_values: list[Any]
     secret_set: bool | None
-    # The value carries meaningful newlines (a pasted PEM) — the UI renders a
-    # textarea. Presentation only; declared via json_schema_extra.
     multiline: bool = False
     overridden: bool
 
@@ -134,7 +124,7 @@ class SettingsFieldResponse(Schema):
     ) -> "SettingsFieldResponse":
         kind = field_kind(field)
         secret = kind == "secret"
-        controller, target = field_visibility(field)
+        controller, targets = field_visibility(field)
         return cls(
             name=name,
             label=field.title or name,
@@ -146,7 +136,7 @@ class SettingsFieldResponse(Schema):
             choice_details=validate_field_choice_details(field),
             section=field_section(field),
             visible_when_field=controller,
-            visible_when_value=target,
+            visible_when_values=targets,
             secret_set=bool(value) if secret else None,
             multiline=field_multiline(field),
             overridden=overridden,
@@ -161,15 +151,12 @@ class WorkflowSettingsResponse(Schema):
 class AppSettingsResponse(Schema):
     name: str
     description: str
-    # A Lucide icon name the frontend renders (falls back to a default if unknown).
+    # A Lucide icon name.
     icon: str
-    # Built-in (platform-core) apps' agents are shown under the Druks tab, not
-    # a tab of their own.
+    # The agents of a built-in app show under the Druks tab.
     builtin: bool
     agents: list[AgentSettingResponse]
     workflows: list[WorkflowSettingsResponse]
-    # The app's own declared settings (not tied to a workflow). Rendered
-    # in the same options section as workflow ones.
     settings: list[SettingsFieldResponse]
 
 
@@ -179,7 +166,7 @@ class AppsSettingsResponse(Schema):
 
 
 class AppsSettingsUpdate(BaseModel):
-    # Each map is agent name -> value; null clears, i.e. inherit the operator default.
+    # Each map is agent name to value. Null inherits the operator default.
     agent_harnesses: dict[str, str | None] = Field(
         default_factory=dict,
         validation_alias="agentHarnesses",

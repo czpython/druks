@@ -5,7 +5,7 @@ import pytest
 # The documented v1 app-author surface: each concern namespace and the
 # exact names it exports. Pattern A — no root facade; druks stays thin.
 AUTHOR_SURFACE = {
-    "druks.apps": {"App", "AppSettings", "Secret"},
+    "druks.apps": {"App", "AppSettings", "Choices", "Secret"},
     "druks.browser": {"BrowserSession", "BrowserSessionSignedOutError", "BrowserSessionStatus"},
     "druks.services": {
         "OauthClient",

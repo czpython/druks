@@ -14,15 +14,9 @@ from druks.workflows import Workflow
 from pydantic import BaseModel, Field, SecretStr, field_validator
 
 
-@pytest.fixture
-def session(druks_db):
-    # The per-test connection session (rolled back at teardown).
-    return druks_db
-
-
-async def test_get_lazy_creates_row_with_the_shipped_defaults(session):
+async def test_get_lazy_creates_row_with_the_shipped_defaults(druks_db):
     row = await InstallationSettings.get()
-    await session.commit()
+    await druks_db.commit()
     assert (row.default_harness, row.default_model, row.default_billing) == (
         "claude",
         "anthropic/claude-opus-4-7",
@@ -31,10 +25,10 @@ async def test_get_lazy_creates_row_with_the_shipped_defaults(session):
     assert (row.default_effort, row.fast_mode, row.default_timeout) == ("high", False, 1800)
 
 
-async def test_update_persists_the_defaults(session):
+async def test_update_persists_the_defaults(druks_db):
     row = await InstallationSettings.get()
     await row.update(default_harness="codex", fast_mode=True)
-    await session.commit()
+    await druks_db.commit()
     row = await InstallationSettings.get()
     assert (row.default_harness, row.fast_mode) == ("codex", True)
 
@@ -45,22 +39,20 @@ class _Declared(BaseModel):
     label: str = ""
     conditional_label: str = Field(
         default="",
-        json_schema_extra={"section": "Advanced", "visible_when": {"flag": True}},
+        json_schema_extra={"section": "Advanced", "visible_when": {"flag": [True]}},
     )
     choice: Literal["a", "b", "c"] = "a"
     numeric_choice: Literal[1, 2, 3] = 1
     optional_choice: Literal["x", "y"] | None = None
-    # Optional so an unset secret resolves to None — a plain SecretStr with a length
-    # floor and an empty default couldn't satisfy its own constraint.
+    # Optional, because an empty default cannot satisfy the length floor.
     secret: SecretStr | None = Field(default=None, min_length=8)
     pasted_key: SecretStr | None = Field(default=None, json_schema_extra={"multiline": True})
 
     @field_validator("secret")
     @classmethod
     def _reject_forbidden_token(cls, value: SecretStr | None) -> SecretStr | None:
-        # A custom validator that embeds the raw value in its message — the redaction
-        # must keep this out of the surfaced error for a secret field.
-        if value is not None and "forbidden" in value.get_secret_value():
+        # The message embeds the raw value. The redaction must keep it out of the error.
+        if value and "forbidden" in value.get_secret_value():
             raise ValueError(f"token {value.get_secret_value()} is not allowed")
         return value
 
@@ -88,7 +80,8 @@ def test_field_metadata_projects_section_and_raw_visibility_target():
     assert projected["section"] == "Advanced"
     assert projected["visibleWhenField"] == "flag"
     # The target keeps its declared type; "True" would never match on the client.
-    assert projected["visibleWhenValue"] is True
+    assert projected["visibleWhenValues"] == [True]
+    assert projected["visibleWhenValues"][0] is True
 
 
 def test_enum_field_exposes_its_choices():
@@ -105,35 +98,24 @@ def test_secret_field_redacts_value_and_default_and_reports_set():
     assert unset["default"] is None
     assert unset["secretSet"] is False
 
-    setted = _field("secret", value="sk-raw")
-    assert setted["value"] is None
-    assert setted["secretSet"] is True
-    assert "sk-raw" not in str(setted)
+    stored = _field("secret", value="sk-raw")
+    assert stored["value"] is None
+    assert stored["secretSet"]
+    assert "sk-raw" not in str(stored)
 
 
 def test_multiline_projects_only_where_declared():
-    # A pasted-PEM secret opts into the textarea; everything else stays a
-    # one-line control. Redaction is unchanged by the presentation flag.
     projected = _field("pasted_key", value="-----BEGIN KEY-----\nbody\n-----END KEY-----")
     assert projected["type"] == "secret"
-    assert projected["multiline"] is True
+    assert projected["multiline"]
     assert projected["value"] is None
-    assert projected["secretSet"] is True
+    assert projected["secretSet"]
 
-    assert _field("secret", value="")["multiline"] is False
-    assert _field("label", value="hi")["multiline"] is False
-
-
-def test_optional_secret_is_still_treated_as_a_secret():
-    # SecretStr inside a union must not slip through as a plaintext string.
-    projected = _field("secret", value="sk-raw")
-    assert projected["type"] == "secret"
-    assert projected["value"] is None
-    assert "sk-raw" not in str(projected)
+    assert not _field("secret", value="")["multiline"]
+    assert not _field("label", value="hi")["multiline"]
 
 
 def test_optional_enum_exposes_its_choices():
-    # A Literal inside a union is still an enum with its choices surfaced.
     projected = _field("optional_choice", value="y")
     assert projected["type"] == "enum"
     assert projected["choices"] == ["x", "y"]
@@ -160,8 +142,6 @@ def test_union_of_separate_literals_collects_every_member():
 
 
 def test_secret_inside_a_container_is_redacted():
-    # A list of secrets is a legitimate declaration — classify it secret and redact it,
-    # not project the raw values.
     field = _RichlyDeclared.model_fields["secret_list"]
     projected = SettingsFieldResponse.from_field(
         "secret_list", field, value=["sk-one", "sk-two"], overridden=False
@@ -185,7 +165,7 @@ def test_nested_model_settings_field_is_rejected_at_declaration():
 
 def test_visible_when_rejects_an_unknown_controller():
     class _Settings(BaseModel):
-        dependent: str = Field(json_schema_extra={"visible_when": {"missing": True}})
+        dependent: str = Field(json_schema_extra={"visible_when": {"missing": [True]}})
 
     with pytest.raises(SettingsDeclarationError, match="missing.*not declared"):
         validate_settings_declaration(_Settings)
@@ -194,16 +174,36 @@ def test_visible_when_rejects_an_unknown_controller():
 def test_visible_when_rejects_a_target_outside_the_controller_literal():
     class _Settings(BaseModel):
         controller: Literal["one", "two"] = "one"
-        dependent: str = Field(json_schema_extra={"visible_when": {"controller": "three"}})
+        dependent: str = Field(json_schema_extra={"visible_when": {"controller": ["one", "three"]}})
 
     with pytest.raises(SettingsDeclarationError, match="three.*not a member"):
+        validate_settings_declaration(_Settings)
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        {"controller": "one"},
+        {"controller": []},
+        {"controller": ["one"], "flag": [True]},
+        {},
+        ["controller", "one"],
+    ],
+)
+def test_visible_when_rejects_every_shape_but_one_controller_with_a_list(condition):
+    class _Settings(BaseModel):
+        controller: Literal["one", "two"] = "one"
+        flag: bool = False
+        dependent: str = Field(json_schema_extra={"visible_when": condition})
+
+    with pytest.raises(SettingsDeclarationError, match="non-empty list"):
         validate_settings_declaration(_Settings)
 
 
 def test_visible_when_rejects_a_secret_controller():
     class _Settings(BaseModel):
         controller: SecretStr | None = None
-        dependent: str = Field(json_schema_extra={"visible_when": {"controller": "set"}})
+        dependent: str = Field(json_schema_extra={"visible_when": {"controller": ["set"]}})
 
     with pytest.raises(SettingsDeclarationError, match="controller.*cannot be secret"):
         validate_settings_declaration(_Settings)
@@ -212,8 +212,8 @@ def test_visible_when_rejects_a_secret_controller():
 def test_visible_when_rejects_a_controller_with_its_own_condition():
     class _Settings(BaseModel):
         root: bool = True
-        controller: str = Field(json_schema_extra={"visible_when": {"root": True}})
-        dependent: str = Field(json_schema_extra={"visible_when": {"controller": "shown"}})
+        controller: str = Field(json_schema_extra={"visible_when": {"root": [True]}})
+        dependent: str = Field(json_schema_extra={"visible_when": {"controller": ["shown"]}})
 
     with pytest.raises(SettingsDeclarationError, match="controller.*itself.*visible_when"):
         validate_settings_declaration(_Settings)
@@ -235,13 +235,10 @@ def test_workflow_settings_remain_plain_base_models():
 
 
 def test_coerce_maps_a_submitted_string_back_to_the_literal_member_type():
-    # A select submits every choice as a string; a numeric Literal needs the int back.
     assert coerce_setting_value(_Declared, "numeric_choice", "2") == 2
-    assert isinstance(coerce_setting_value(_Declared, "numeric_choice", "2"), int)
-    # A string Literal and non-enum fields pass through untouched.
     assert coerce_setting_value(_Declared, "choice", "b") == "b"
     assert coerce_setting_value(_Declared, "count", 3) == 3
-    # A value naming no member is left as-is for validation to reject.
+    # Validation rejects a value that names no member.
     assert coerce_setting_value(_Declared, "numeric_choice", "9") == "9"
 
 
@@ -251,13 +248,11 @@ def test_validate_setting_override_accepts_a_coerced_numeric_enum():
 
 
 def test_validate_setting_override_runs_against_resolved_state_not_a_blank_shell():
-    # An unrelated change validates against the currently-resolved settings; a sibling
-    # (the optional secret, unset) doesn't spuriously fail the whole model.
+    # The unset optional secret must not fail an unrelated change.
     validate_setting_override(_Declared, _resolved(), "count", 3)
 
 
 def test_validate_setting_override_never_echoes_the_submitted_value():
-    # A rejected value — especially a secret — must not appear in the error message.
     with pytest.raises(ValueError) as enum_error:
         validate_setting_override(_Declared, _resolved(), "choice", "GALAXY-SECRET")
     assert "choice" in str(enum_error.value)
@@ -270,8 +265,6 @@ def test_validate_setting_override_never_echoes_the_submitted_value():
 
 
 def test_secret_field_custom_validator_message_is_not_echoed():
-    # A custom validator can embed the raw value in its ValueError message; for a
-    # secret field that message must be replaced, never surfaced.
     with pytest.raises(ValueError) as error:
         validate_setting_override(_Declared, _resolved(), "secret", "forbidden-key-1")
     assert "secret" in str(error.value)

@@ -1,30 +1,31 @@
 import os
-from typing import Literal
+from typing import Annotated, Literal
 
 from druks.agents import Agent
-from druks.apps import App, AppSettings, Secret
+from druks.apps import App, AppSettings, Choices, Secret
 from druks.doctor import CheckResult
 from pydantic import Field, SecretStr, field_validator
 
 from druks_field_notes.contracts import GistOutput
 
-# The env var field_notes would read its summarizer credential from. Unset in a
-# bare install, so the check below reports it missing — the "app owns a check
-# for its own API key" case, kept to an env read so the proof package needs no real
-# provider.
+# The summarizer credential. A bare install leaves it unset, so the check reports it.
 API_KEY_ENV = "FIELD_NOTES_API_KEY"
 
 
 def check_summary_api_key() -> CheckResult:
-    """The summarizer needs its provider credential; report a missing one as a
-    failure the operator can act on rather than letting the first run blow up."""
-    if not os.environ.get(API_KEY_ENV):
-        return CheckResult(
-            name="summary_api_key",
-            ok=False,
-            detail=f"{API_KEY_ENV} is unset — the summarize agent can't authenticate.",
-        )
-    return CheckResult(name="summary_api_key", ok=True, detail="set")
+    """Report a missing summarizer credential before the first run fails."""
+    if os.environ.get(API_KEY_ENV):
+        return CheckResult(name="summary_api_key", ok=True, detail="set")
+    return CheckResult(
+        name="summary_api_key",
+        ok=False,
+        detail=f"{API_KEY_ENV} is unset — the summarize agent can't authenticate.",
+    )
+
+
+async def list_notebook_choices() -> list[tuple[str, str]]:
+    """The notebooks a note can go into. A real app reads them from its service."""
+    return [("field", "Field notebook"), ("lab", "Lab notebook")]
 
 
 class FieldNotes(App):
@@ -34,7 +35,7 @@ class FieldNotes(App):
     navigation = ["notes"]
 
     class Settings(AppSettings):
-        # How many recent notes the board shows — an operator knob, so it lives here.
+        # How many recent notes the board shows.
         board_size: int = Field(
             default=50,
             ge=1,
@@ -42,43 +43,42 @@ class FieldNotes(App):
             title="Board size",
             description="Most-recent notes shown on the field-notes board.",
         )
-        # A closed choice set: which notes the board surfaces. A Literal, so the API
-        # exposes the options and the settings UI renders a select.
+        # A Literal, so the settings page renders a select.
         visibility: Literal["private", "team", "public"] = Field(
             default="private",
             title="Visibility",
             description="Who the field-notes board is shared with.",
         )
-        # A secret: the key the app would use to reach an outside notes service.
-        # SecretStr, so its value is redacted everywhere it surfaces; empty means
-        # unset, and a malformed key is rejected server-side (with its raw value
-        # kept out of the error).
-        # A multiline secret: a pasted PEM-shaped credential whose newlines
-        # matter. ``multiline`` is presentation only — the settings UI renders
-        # a textarea; storage and redaction are the ordinary secret plane.
+        # Live choices, so the settings page renders a select from the source.
+        notebook: Annotated[str, Choices(list_notebook_choices)] = Field(
+            default="field",
+            title="Notebook",
+            description="The notebook that new notes go into.",
+        )
+        # A multiline secret keeps the newlines of a pasted PEM key.
         sync_signing_key: Secret = Field(
             title="Sync signing key",
             description="PEM key used to sign notes synced to the external service.",
             json_schema_extra={
                 "section": "Sharing",
-                "visible_when": {"visibility": "public"},
+                "visible_when": {"visibility": ["public"]},
                 "multiline": True,
             },
         )
+        # A secret. Druks redacts its value everywhere, and empty means unset.
         sync_token: Secret = Field(
             title="Sync token",
             description="API key for syncing notes to an external service.",
             json_schema_extra={
                 "section": "Sharing",
-                "visible_when": {"visibility": "public"},
+                "visible_when": {"visibility": ["public"]},
             },
         )
 
         @field_validator("sync_token")
         @classmethod
         def _well_formed_token(cls, value: SecretStr) -> SecretStr:
-            # A format check whose message names the offending value — the platform
-            # must keep that raw value out of the surfaced error for a secret field.
+            # The message names the raw value. The platform keeps it out of the surfaced error.
             if value and not value.get_secret_value().startswith("sk-"):
                 raise ValueError(f"sync token {value.get_secret_value()!r} must start with 'sk-'")
             return value
@@ -99,6 +99,5 @@ class FieldNotes(App):
         contract=GistOutput,
     )
 
-    # The app's own precondition, reported by `druks doctor` beside the
-    # platform's: the summarizer's API key must be set.
+    # `druks doctor` reports this precondition beside the platform checks.
     checks = [check_summary_api_key]
