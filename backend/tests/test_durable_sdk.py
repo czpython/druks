@@ -207,6 +207,22 @@ def _build_units():
 
         async def run(self) -> None: ...
 
+    class PolicyFlow(Workflow):
+        # dispatch() without a schedule: the launch policy a route or a body calls.
+        subject = Widget
+
+        @classmethod
+        async def dispatch(cls) -> str:
+            return await cls.start(subject=await Widget.get_for_subject_id("616161"))
+
+        async def run(self) -> None: ...
+
+    class DispatchingFlow(Workflow):
+        # A body launches a sibling through its policy; dispatch() reads with a
+        # session of its own where the body holds none.
+        async def run_multistep(self) -> None:
+            SINK.append(f"dispatched:{await PolicyFlow.dispatch()}")
+
     class SubjectFlow(Workflow):
         # Records the subject the platform threaded in, and returns a BaseModel
         # so the result rides its workflow.finished event.
@@ -287,6 +303,8 @@ def _build_units():
         RetryingStepFlow,
         EnqueueInStepFlow,
         ParentFlow,
+        PolicyFlow,
+        DispatchingFlow,
         record_task,
         retry_task,
         scheduled_task,
@@ -323,7 +341,7 @@ async def rt():
         await session.flush()
         session.add_all(
             Widget(id=subject_id)
-            for subject_id in (7, 4242, 636363, 424242, 515151, 878787, 909090, 313131)
+            for subject_id in (7, 4242, 636363, 424242, 515151, 878787, 909090, 313131, 616161)
         )
         session.add(
             VaultSecret(
@@ -354,6 +372,8 @@ async def rt():
         retrying_step_flow,
         enqueue_in_step_flow,
         parent_flow,
+        policy_flow,
+        dispatching_flow,
         record_task,
         retry_task,
         scheduled_task,
@@ -380,6 +400,8 @@ async def rt():
             RetryingStepFlow=retrying_step_flow,
             EnqueueInStepFlow=enqueue_in_step_flow,
             ParentFlow=parent_flow,
+            PolicyFlow=policy_flow,
+            DispatchingFlow=dispatching_flow,
             record_task=record_task,
             retry_task=retry_task,
             scheduled_task=scheduled_task,
@@ -887,6 +909,18 @@ async def test_body_starts_a_child_run(rt):
         await asyncio.sleep(0.1)
     assert child.state == RunState.FINISHED
     assert "child:ran" in SINK
+
+
+async def test_body_dispatches_a_sibling_through_its_policy(rt):
+    wfid = await rt.DispatchingFlow.start(subject=None)
+    await _wait_for(rt.engine, wfid, lambda row: row.state == RunState.FINISHED)
+    dispatched = next(entry for entry in SINK if entry.startswith("dispatched:"))
+    run = await _wait_for(
+        rt.engine,
+        dispatched.removeprefix("dispatched:"),
+        lambda row: row.state == RunState.FINISHED,
+    )
+    assert run.subject_label == "W-616161"
 
 
 async def test_enqueue_inside_a_step_fails_the_run(rt):

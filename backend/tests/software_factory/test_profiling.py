@@ -4,6 +4,7 @@ from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.models import Project, ProjectRepo
 from druks.contrib.software_factory.policy import RepoPolicy, VerificationProfile
 from druks.contrib.software_factory.workflows import Profile
+from druks.database import db_session
 from druks.durable.engine import configure_engine
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.skills.datastructures import InstalledSkill
@@ -110,9 +111,9 @@ class TestProfileRun:
         monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_no_policy))
 
         await Profile().run(repo_id=repo.id)
-        # The step commits on its own Session; re-fetch instead of trusting
-        # the identity-mapped `repo` object across that boundary.
-        repo = await ProjectRepo.get(repo.id)
+        # The step commits on its own session; the identity-mapped `repo` is
+        # stale across that boundary.
+        await db_session().refresh(repo)
 
         assert repo.profile["baseline"]["languages"] == ["python"]
         assert repo.effective_profile["verification"]["lint_commands"] == [
@@ -133,7 +134,7 @@ class TestProfileRun:
         monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_no_policy))
 
         await Profile().run(repo_id=repo.id)
-        repo = await ProjectRepo.get(repo.id)
+        await db_session().refresh(repo)
 
         assert repo.profile["baseline"]["recommended_skills"] == ["django-patterns"]
 
@@ -150,7 +151,7 @@ class TestProfileRun:
         monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_pinning_policy))
 
         await Profile().run(repo_id=repo.id)
-        repo = await ProjectRepo.get(repo.id)
+        await db_session().refresh(repo)
 
         # The pin replaces the whole verification section on the effective profile...
         assert repo.effective_profile["verification"]["test_commands"] == [
@@ -177,7 +178,7 @@ class TestProfileRun:
         monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_pinning_policy))
 
         await Profile().run(repo_id=repo.id)
-        repo = await ProjectRepo.get(repo.id)
+        await db_session().refresh(repo)
 
         assert repo.effective_profile["verification"]["test_commands"] == [
             {"command": "pytest", "ci_check": "Backend / tests"},
@@ -201,7 +202,7 @@ class TestRefreshOnly:
         monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_pinning_policy))
 
         await Profile().run(repo_id=repo.id, refresh_only=True)
-        repo = await ProjectRepo.get(repo.id)
+        await db_session().refresh(repo)
 
         # Baseline untouched — only the pin re-applies.
         assert repo.profile["baseline"]["verification"]["test_commands"] == [

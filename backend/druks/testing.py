@@ -4,6 +4,7 @@ import secrets
 import tempfile
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from unittest import mock
 
@@ -39,6 +40,7 @@ from druks.durable import AgentCall, Run
 from druks.durable.datastructures import Subject
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA, workflow_status
 from druks.durable.engine import _dbos_database_url, configure_engine
+from druks.exceptions import SessionNotBoundError
 from druks.models import Base, StoredSubject
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
@@ -73,6 +75,40 @@ _fixture_connection = None
 # be in mid-edit. Holding the failure here lets a suite that never asks for a druks
 # fixture finish, and gives one that does an error naming the app.
 _discovery_error: Exception | None = None
+
+# A request enters as in production: the task holds no session and none opens
+# on demand, so a read the app never bound fails here as it fails there.
+_in_request: ContextVar[bool] = ContextVar("_in_request", default=False)
+
+
+def _test_session() -> AsyncSession:
+    # pytest-asyncio runs fixtures and the test body on different tasks, so a
+    # harness task with no session gets its own on the fixture connection.
+    if _in_request.get():
+        raise SessionNotBoundError
+    return _session_factory()
+
+
+class _ProductionRequest:
+    """Hide the harness session for the request. The test client runs on the
+    caller's task, whose fixture session production never has."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "lifespan":
+            await self.app(scope, receive, send)
+            return
+        previous = db_session() if db_session.registry.has() else None
+        db_session.registry.clear()
+        token = _in_request.set(True)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _in_request.reset(token)
+            if previous:
+                db_session.registry.set(previous)
 
 
 def pytest_configure(config) -> None:
@@ -158,9 +194,7 @@ async def druks_db(_druks_schema: None) -> AsyncIterator[AsyncSession]:
         expire_on_commit=False,
     )
     db_session.registry.set(session)
-    # pytest-asyncio runs fixtures and the test body on different tasks, so a
-    # task with no session gets its own on the fixture connection, not the raise.
-    db_session.registry.createfunc = _session_factory
+    db_session.registry.createfunc = _test_session
     try:
         yield session
     finally:
@@ -210,6 +244,8 @@ def configure_app_for_test(
     if not engine:
         engine = _fixture_connection
     configure_session(engine)
+    if not any(middleware.cls is _ProductionRequest for middleware in app.user_middleware):
+        app.add_middleware(_ProductionRequest)
     app.state.settings = settings
     app.state.engine = engine
     if authenticated:

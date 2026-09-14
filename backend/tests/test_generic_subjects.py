@@ -12,7 +12,6 @@ from druks.durable.reads import get_subject_statuses
 from druks.durable.schemas import SubjectSummary
 from druks.models import StoredSubject
 from druks.testing import asgi_client, seed_dbos_status
-from fastapi import APIRouter
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import event, select
@@ -125,19 +124,22 @@ async def client(tmp_path: Path, druks_db, monkeypatch):
     await druks_db.flush()
     app = configure_app_for_test(settings=make_settings(tmp_path))
 
-    holder = APIRouter()
-    for subject_class in (Thing, Ticket):
-        holder.include_router(_ThingApp._get_subject_routes(subject_class), prefix="/api/faketest")
     catchall = next(
         i for i, r in enumerate(app.routes) if getattr(r, "path", "") == "/api/{path:path}"
     )
-    for route in reversed(holder.routes):
-        app.router.routes.insert(catchall, route)
+    mounted = len(app.router.routes)
+    for subject_class in (Thing, Ticket):
+        # Through the app, so the routes get its request dependencies like a
+        # loaded app's do; then ahead of the catch-all, where the loader puts them.
+        app.include_router(_ThingApp._get_subject_routes(subject_class), prefix="/api/faketest")
+    added = app.router.routes[mounted:]
+    del app.router.routes[mounted:]
+    app.router.routes[catchall:catchall] = added
     try:
         async with asgi_client(app) as test_client:
             yield test_client
     finally:
-        for route in holder.routes:
+        for route in added:
             app.router.routes.remove(route)
 
 

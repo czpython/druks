@@ -237,7 +237,8 @@ the same subject share one run.
 
 If the app requires prelaunch policy, wrap
 `start()` in a domain `dispatch()` method. This method can own lookup, snapshot,
-or routing policy.
+or routing policy. It binds its own database session, so a workflow body can
+call it.
 
 A browser start attributes itself. The request identity gate records the
 resolved account, and `start()` inherits it. A route does not require more
@@ -987,7 +988,8 @@ Druks scopes autogeneration to the table prefix and writes the version to
 `alembic_version_night_watch`. Query through `druks.db.db_session()` inside an
 HTTP request, durable step, or other platform-bound session. Outside those,
 `db_session()` raises. A workflow body holds no session: read inside a `@step`.
-`await self.subject` and `start()` bring their own.
+`await self.subject`, `start()`, and `dispatch()` bring their own. A row a step
+returns is detached: load what the body reads from it inside that step.
 
 HTTP response models subclass `druks.schemas.Schema`, whose snake_case fields
 serialize as camelCase. Request models are ordinary Pydantic models.
@@ -1381,7 +1383,7 @@ fixtures directly without a `conftest.py` or `pytest_plugins` declaration:
 | Fixture | Contract |
 | --- | --- |
 | `druks_db` | A SQLAlchemy `AsyncSession` bound to a per-test transaction. Commits become savepoints, and teardown rolls the outer transaction back. |
-| `druks_client` | An authenticated `TestClient` with installed apps mounted, sharing `druks_db`'s connection. |
+| `druks_client` | An authenticated `TestClient` with installed apps mounted, sharing `druks_db`'s connection. A request starts with no session bound, as in production. |
 | `druks_redis` | The test Redis database, flushed before the test. |
 | `druks_without_dispatch` | Workflow starts and run-phase writes become no-ops and a run-phase read finds no phase, for tests that stand up no durable engine. |
 | `druks_without_remote_config` | Every `.druks` namespace lookup misses, so prompts resolve to bundled templates and config to its declared defaults. |

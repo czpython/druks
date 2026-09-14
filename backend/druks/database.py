@@ -158,7 +158,7 @@ def configure_session(engine) -> None:
 
 
 @asynccontextmanager
-async def session_scope(engine=None) -> AsyncIterator[None]:
+async def session_scope(engine=None) -> AsyncIterator[AsyncSession]:
     """Bind a fresh DB session to ``db_session`` for the block — on ``engine``,
     else the configured one — commit on success, roll back on error, restore
     the prior binding. One transaction per request, and per unit of work
@@ -170,7 +170,7 @@ async def session_scope(engine=None) -> AsyncIterator[None]:
     session = get_session(engine) if engine else _session_factory()
     db_session.registry.set(session)
     try:
-        yield
+        yield session
     except BaseException:
         await session.rollback()
         raise

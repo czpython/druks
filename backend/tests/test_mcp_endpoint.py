@@ -1,5 +1,4 @@
 import ast
-import asyncio
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -14,10 +13,10 @@ from druks.api.server import mcp_app
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket
 from druks.core.apis.exceptions import UnknownTicketError
-from druks.database import _unbound_session, db_session
+from druks.database import db_session
 from druks.durable.models import Artifact, Run
 from druks.mcp.exceptions import InvalidAgentToolError
-from druks.mcp.server import PatTokenVerifier, create_mcp_app
+from druks.mcp.server import create_mcp_app
 from druks.testing import asgi_client, configure_app_for_test, make_settings
 from druks.usage.models import UsageScrape
 from fastapi import APIRouter, FastAPI
@@ -149,14 +148,6 @@ async def test_mcp_rejects_missing_and_dead_tokens(app, account):
         await row.revoke()
         revoked = await wire.post("/mcp", json=_INIT, headers=bearer)
         assert revoked.status_code == 401
-
-
-async def test_verify_token_binds_its_own_session(account, pat_token, monkeypatch):
-    # fastmcp's auth middleware runs on a task with no session bound. The test
-    # registry opens one lazily where production raises, so run under that.
-    monkeypatch.setattr(db_session.registry, "createfunc", _unbound_session)
-    access = await asyncio.create_task(PatTokenVerifier().verify_token(pat_token))
-    assert access.claims["account_id"] == account.id
 
 
 async def test_mcp_subpaths_never_reach_the_spa(app):

@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import nullcontext, suppress
 from contextvars import ContextVar
 from datetime import UTC, datetime
-from functools import partial
+from functools import partial, wraps
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -775,6 +775,8 @@ class Workflow:
                     "dispatch fires with no arguments — a schedule's dispatch must be "
                     "nullary"
                 )
+        if "dispatch" in vars(cls):
+            cls.dispatch = _bind_dispatch(vars(cls)["dispatch"])
         _wrap_steps(cls)
         _register_entry(cls)
         workflows.register(cls)
@@ -1072,6 +1074,19 @@ class Workflow:
             return handle.workflow_id
 
 
+def _bind_dispatch(method: classmethod) -> classmethod:
+    # dispatch() is launch policy that reads. A route, a subscriber, and the cron
+    # tick call it with a session bound; a workflow body calls it holding none.
+    policy = method.__func__
+
+    @wraps(policy)
+    async def dispatch(cls: type[Workflow], *args: Any, **kwargs: Any) -> Any:
+        async with bound_session():
+            return await policy(cls, *args, **kwargs)
+
+    return classmethod(dispatch)
+
+
 def _wrap_steps(cls: type[Workflow]) -> None:
     for method_name, method in list(vars(cls).items()):
         if getattr(method, "_durable_step", False):
@@ -1155,9 +1170,7 @@ async def _dispatch_instance(cls: type[Workflow], _context: dict[str, Any] | Non
     # The cron tick runs no workflow of its own kind — no Run row — it just calls
     # dispatch(), which start()s the real subject-backed run. Body level, not a
     # step: DBOS only allows the child-start inside start() from a workflow body.
-    # The session gives dispatch()'s reads a transaction, committed on exit.
-    async with step_session():
-        return await cls.dispatch()
+    return await cls.dispatch()
 
 
 def _register_entry(cls: type[Workflow]) -> None:

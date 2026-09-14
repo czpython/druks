@@ -1,13 +1,13 @@
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from dbos import DBOS, DBOSConfig, Queue
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.database import create_async_engine_from_url, db_session, get_session, session_scope
+from druks.database import create_async_engine_from_url, db_session, session_scope
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
 from druks.settings import load_settings
 from druks.user_settings.models import InstallationSettings
@@ -123,21 +123,9 @@ def _step_engine():
     return _engine
 
 
-@asynccontextmanager
-async def step_session() -> AsyncIterator[AsyncSession]:
+def step_session() -> AbstractAsyncContextManager[AsyncSession]:
     # One transaction per durable step (the body itself does no IO).
-    session = get_session(_step_engine())
-    db_session.registry.set(session)
-    try:
-        yield session
-    except BaseException:
-        await session.rollback()
-        raise
-    else:
-        await session.commit()
-    finally:
-        await db_session.remove()
-        await session.close()
+    return session_scope(_step_engine())
 
 
 @asynccontextmanager
