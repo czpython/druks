@@ -18,7 +18,6 @@ from druks.harnesses.config import AgentConfig, get_config
 from druks.harnesses.exceptions import (
     HarnessAuthError,
     HarnessError,
-    HarnessFirstByteTimeoutError,
     HarnessOverloadedError,
     HarnessRateLimitError,
     HarnessSandboxError,
@@ -35,7 +34,7 @@ from druks.sandbox.datastructures import (
     HomeFile,
 )
 from druks.sandbox.exceptions import SandboxUnreachable
-from druks.sandbox.host import Host
+from druks.sandbox.host import Host, _first_byte_killer
 from druks.user_settings.models import SettingsOverride
 
 
@@ -244,44 +243,18 @@ async def test_overall_timeout_raises_harness_timeout_error(
     assert run.kill_calls >= 1
 
 
-async def test_first_byte_kill_raises_typed_error(
-    ctx: SimpleNamespace,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    run = _FakeRun(stdout_chunks=[], stderr_chunks=[], wait_delay=10.0)
-    sandbox = _fake_sandbox(run)
+async def test_first_byte_killer_kills_only_a_silent_run():
+    silent_run = _FakeRun()
+    stderr_run = _FakeRun()
 
-    # Capture the originals BEFORE patching — otherwise patching
-    # ``asyncio.sleep`` / ``asyncio.wait_for`` aliases the singleton
-    # ``asyncio`` module's attributes and the fakes recurse into
-    # themselves.
-    real_sleep = asyncio.sleep
-    real_wait_for = asyncio.wait_for
-
-    async def fast_sleep(seconds: float) -> None:
-        # Don't compress the 0-arg yield (used for scheduling).
-        await real_sleep(0 if seconds == 0 else min(seconds, 0.02))
-
-    async def fast_wait_for(coro: Any, timeout: float) -> Any:
-        # Keep the relative ordering — overall wait_for needs a budget
-        # *bigger* than the first-byte killer's window so the killer
-        # fires first.
-        return await real_wait_for(coro, timeout=0.2)
-
-    monkeypatch.setattr("druks.sandbox.host.asyncio.sleep", fast_sleep)
-    monkeypatch.setattr("druks.sandbox.host.asyncio.wait_for", fast_wait_for)
-
-    with pytest.raises(HarnessFirstByteTimeoutError, match="no output"):
-        await Host._exec(
-            sandbox,
-            _inv(("claude",)),
-            run_id=_DEFAULT_RUN_ID,
-            artifact_dir=ctx.artifact_dir,
-            timeout=60,
-            first_byte_kill_seconds=1,
-        )
-
-    assert run.kill_calls >= 1
+    assert await _first_byte_killer(
+        run=silent_run, stdout_buf=bytearray(), stderr_buf=bytearray(), delay_seconds=0
+    )
+    assert not await _first_byte_killer(
+        run=stderr_run, stdout_buf=bytearray(), stderr_buf=bytearray(b"warn\n"), delay_seconds=0
+    )
+    assert silent_run.kill_calls == 1
+    assert stderr_run.kill_calls == 0
 
 
 async def test_sandbox_unreachable_translates_to_harness_error(
