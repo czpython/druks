@@ -1,15 +1,16 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Router } from 'wouter'
 
 import { api } from '../api/client'
+import { useSSE } from '../api/sse'
 import type { Block, Gate } from '../api/types'
 import { AppPage } from './AppPage'
 
 vi.mock('../api/client', async (original) => ({
   ...(await original<typeof import('../api/client')>()),
-  api: { listApps: vi.fn(), readPage: vi.fn(), getGate: vi.fn(), artifact: vi.fn() },
+  api: { listApps: vi.fn(), readPage: vi.fn(), getGate: vi.fn(), answerGate: vi.fn(), artifact: vi.fn() },
 }))
 vi.mock('../api/sse', () => ({ useSSE: vi.fn() }))
 
@@ -84,6 +85,27 @@ it.each<{ blocks: Block[] }>([
   expect((await screen.findByRole('alert')).textContent).toContain('unavailable')
   expect(api.getGate).not.toHaveBeenCalled()
   expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
+})
+
+it('does not report an answered decision as unavailable when its region rereads', async () => {
+  const decision = (blocks: Block[]): Block => ({
+    block: 'section', title: 'Decision', name: 'decision', controls: [],
+    follows: { subjectType: 'note', subjectId: 'a' }, blocks,
+  })
+  vi.mocked(api.getGate).mockResolvedValue(gate)
+  vi.mocked(api.answerGate).mockResolvedValue({ run, parkedAt, result: 'answered' })
+  mount([decision([{ block: 'gate_controls', run }])])
+  fireEvent.click(await screen.findByRole('button', { name: 'Approve' }))
+  await screen.findByText('Answer sent.')
+
+  vi.mocked(api.readPage).mockResolvedValue({
+    title: 'Delivery confirmation', description: '', controls: [], follows: null,
+    blocks: [decision([{ block: 'text', text: 'No decision is waiting.' }])],
+  })
+  await act(async () => vi.mocked(useSSE).mock.calls.at(-1)?.[1].handlers.snapshot?.({}))
+
+  expect(await screen.findByText('No decision is waiting.')).toBeTruthy()
+  expect(screen.queryByRole('alert')).toBeNull()
 })
 
 it('keeps direct app visits actionable', async () => {

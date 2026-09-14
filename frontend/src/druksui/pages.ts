@@ -9,6 +9,7 @@ import type { Block, Follows, Link, Operation, PageEntry, PageSnapshot } from '.
 export const PagesContext = createContext<{
   app: string
   target?: SubjectTarget
+  clearTarget?: () => void
   pages: PageEntry[]
   operations: Operation[]
 }>({

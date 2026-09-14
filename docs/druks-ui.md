@@ -114,7 +114,8 @@ The route must have exactly one parameter. Druks fills it with the subject ID.
 An app can declare one decision page for each subject type. Dashboard keeps
 the requested run and decision round in the URL. The page shows controls only
 for that run. A changed or missing decision shows an unavailable message.
-Ordinary subject links still open the platform subject page.
+When the operator answers on the page, the page removes the run and round from
+the URL. Ordinary subject links still open the platform subject page.
 
 Each page has a label. Druks derives the label from the name: underscores
 become spaces. `peer_history` becomes "peer history". Pass `label=` to

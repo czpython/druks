@@ -37,6 +37,7 @@ export function AppPage({ app, page }: { app: string; page: string }) {
   const run = query.get('run')
   const parkedAt = query.get('parkedAt')
   const target = run && parkedAt ? { run, parkedAt } : undefined
+  const [, navigate] = useLocation()
   const queryClient = useQueryClient()
   const roster = useQuery({ queryKey: ['apps'], queryFn: api.listApps, staleTime: 60_000 })
   const installed = roster.data?.find((entry) => entry.name === app)
@@ -87,6 +88,11 @@ export function AppPage({ app, page }: { app: string; page: string }) {
     () => (snapshot.data ? followedSubjects(snapshot.data) : []),
     [snapshot.data],
   )
+
+  // The reread after an answer drops the controls, so the URL must drop the decision too.
+  function clearTarget() {
+    navigate(`${location}${filters ? `?${filters}` : ''}`, { replace: true })
+  }
 
   const current = pages.find((entry) => entry.name === page)
   const root = pages.find((entry) => entry.name === current?.parent) ?? current
@@ -140,7 +146,7 @@ export function AppPage({ app, page }: { app: string; page: string }) {
           onSnapshot={reread}
         />
       ))}
-      <PagesContext.Provider value={{ app, pages, operations, target }}>
+      <PagesContext.Provider value={{ app, pages, operations, target, clearTarget }}>
         <Page inset className="dui-page">
           <PageChrome
             {...chrome}

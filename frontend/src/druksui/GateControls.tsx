@@ -8,7 +8,7 @@ import { InAppReview } from '../components/RunControls'
 /** The operator's answer to a parked run. The answer echoes the gate's ``parkedAt``,
  * so the server rejects one for a round that has since changed. ``expected`` is the
  * round an owner link named; a different current round is shown, not answered. */
-export function GateControls({ run, expected }: { run: string; expected?: string }) {
+export function GateControls({ run, expected, onAnswer }: { run: string; expected?: string; onAnswer?: () => void }) {
   const queryClient = useQueryClient()
   const [answeredAt, setAnsweredAt] = useState<string | null>(null)
   const gate = useQuery({
@@ -59,6 +59,7 @@ export function GateControls({ run, expected }: { run: string; expected?: string
         send={async (answer) => {
           await api.answerGate(run, { parkedAt, ...answer })
           setAnsweredAt(parkedAt)
+          onAnswer?.()
           await queryClient.invalidateQueries({ queryKey: ['gate', run] })
         }}
       />

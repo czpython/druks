@@ -82,7 +82,7 @@ export function Blocks({ blocks }: { blocks: Block[] }) {
 
 function BlockContent({ block }: { block: Block }) {
   const enclosingRegion = useContext(RegionContext)
-  const { target } = useContext(PagesContext)
+  const { target, clearTarget } = useContext(PagesContext)
 
   switch (block.block) {
     case 'text':
@@ -110,7 +110,7 @@ function BlockContent({ block }: { block: Block }) {
       )
     case 'gate_controls':
       if (target && target.run !== block.run) return null
-      return <GateControls run={block.run} expected={target?.parkedAt} />
+      return <GateControls run={block.run} expected={target?.parkedAt} onAnswer={target && clearTarget} />
     case 'timeline':
       return <Timeline title={block.title} items={block.items} />
     case 'progress':
