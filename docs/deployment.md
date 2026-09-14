@@ -180,7 +180,7 @@ Drukbox services put the value into the request:
 
 - `drukbox-exchange` runs `python -m secrets_exchange` from the Drukbox image
   on every shape. It keeps each issuer value in memory. It binds
-  `127.0.0.1:8781`, so only the proxy and the Druks web process reach it.
+  `127.0.0.1:8781`, so only the proxy and the Drukbox API reach it.
 - `drukbox-proxy` runs `ghcr.io/czpython/drukbox/proxy` under the `proxy`
   profile. A sandbox sends its HTTPS through it. The proxy swaps the
   placeholder for the value. It binds port 8880 at the host of
@@ -208,16 +208,17 @@ is no public issuer route.
 A subscription token is such a value. The issuer route is
 `GET /api/secrets/<identity id>/<name>`. It authenticates the sandbox's
 identity bearer and nothing else, and it answers `value` and the provider's
-`expires_at`. After every rotation Druks requests a refresh at
-`POST /refresh/<host id>/<service>` on `[sandbox].exchange_url`, one request for
-each live sandbox on the subscription.
+`expires_at`. After every rotation Druks orders a refresh through the Drukbox
+API at `POST /hosts/<host id>/secrets/<service>/refresh`, one request for each
+live sandbox on the subscription. Druks never connects to the exchange.
 
 An identity dies with its sandbox. Druks revokes it before it deletes the
 sandbox, and the issuer denies a terminal run's identity before any cleanup.
 A run that dies without its cleanup leaves its sandbox until the lease ends.
 The `release_orphan_boxes` task runs every hour and releases such a sandbox
-sooner. Drukbox reaps a sandbox at the end of its lease in any case. `druks doctor` probes the exchange at
-`[sandbox].exchange_url` on `/healthz` and names the corrective action.
+sooner. Drukbox reaps a sandbox at the end of its lease in any case. The
+Drukbox doctor checks the exchange, and `druks doctor` shows that result in
+its `drukbox` check.
 
 Drukbox encrypts the secret entries of each sandbox with `SECRETS_KEY`. The
 installer generates `[secrets].drukbox_secrets_key` and renders it as

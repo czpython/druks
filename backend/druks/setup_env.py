@@ -84,7 +84,6 @@ _KNOWN_TOML_KEYS = {
         "image",
         "proxy_url",
         "issuer_url",
-        "exchange_url",
         "browser_login_proxy",
         "browser_login_tz",
         "timeout",
@@ -204,11 +203,9 @@ image = ""
 # names the address of this host that its sandboxes reach, for example the
 # tailnet address on exe. docker-sbx runs no proxy and leaves it empty.
 proxy_url = ""
-# The mint base URL the exchange dials, and the exchange address. Both default
-# to the host loopback. Leave them empty unless web or the exchange listens
-# elsewhere.
+# The issuer base URL the secrets exchange dials. It defaults to the web
+# process on the host loopback. Leave it empty unless web listens elsewhere.
 issuer_url = ""
-exchange_url = ""
 # An HTTP proxy for the login window. The login then leaves from a different IP
 # than the box. Use it for sign-in flows that refuse the box IP. Examples:
 # http://172.17.0.1:8888, or http://user:pass@host:port for a proxy with a user
@@ -235,9 +232,8 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
     if provider == "docker":
         shape = (
             (("identity", "mode"), "none"),
-            # The same origin every local doc and the installer banner print —
-            # browser flows built from the endpoint (the GitHub manifest
-            # callback's BroadcastChannel) are origin-scoped.
+            # Browser flows built from the endpoint are origin-scoped, so this
+            # matches the origin every local doc prints.
             (("urls", "endpoint"), "http://127.0.0.1:8001"),
             (("sandbox", "service_url"), "http://127.0.0.1:8780"),
             (("sandbox", "service_token"), "dev-token"),
@@ -289,9 +285,8 @@ def _read_toml(path: Path) -> dict[str, Any]:
 
 
 def _canonical_config(raw: dict[str, Any]) -> dict[str, Any]:
-    """Validated copy with every known table and key present. Operator
-    additions are welcome as flat scalars, one table deep; anything more
-    structured is refused with its key named."""
+    """Validated copy with every known table and key present. Operator additions
+    are flat scalars, one table deep; more structure is refused by key."""
     config = copy.deepcopy(raw)
     timezone = config.setdefault("timezone", "UTC")
     if not isinstance(timezone, str):
@@ -393,9 +388,8 @@ def _render_env(
 ) -> str:
     provider = _get_string(config, ("sandbox", "provider"))
 
-    # Rendered on every shape. drukbox requires SERVICE_TOKENS and does not
-    # start without it. A compose-side default would replace that safe stop
-    # with a known token.
+    # drukbox refuses to start without SERVICE_TOKENS. A compose-side default
+    # would replace that safe stop with a known token.
     service_tokens = _get_string(config, ("sandbox", "service_token"))
     proxy_url = _get_string(config, ("sandbox", "proxy_url"))
 

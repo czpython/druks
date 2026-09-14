@@ -8,6 +8,8 @@ import druks.redis
 import httpx
 import pytest
 from conftest import connect_provider
+from drukbox_sdk import SandboxAPI
+from drukbox_sdk.exceptions import SandboxUnavailableError
 from druks.accounts.models import Account
 from druks.core import tasks
 from druks.database import db_session
@@ -89,6 +91,18 @@ def _mock_post(monkeypatch, response):
 
     monkeypatch.setattr(pbase.httpx.AsyncClient, "post", fake_post)
     return calls
+
+
+def _mock_refreshes(monkeypatch, error: Exception | None = None) -> list[tuple[str, str]]:
+    refreshes = []
+
+    async def fake_refresh(self, host_id, service):
+        refreshes.append((host_id, service))
+        if error:
+            raise error
+
+    monkeypatch.setattr(SandboxAPI, "refresh_secret", fake_refresh)
+    return refreshes
 
 
 def _mock_get(monkeypatch, response):
@@ -615,7 +629,6 @@ def _no_gate(subscription_id: str):
 
 
 _REFRESHED = {"access_token": "new", "refresh_token": "R1", "expires_in": 28800}
-_REFRESH_URL = "http://127.0.0.1:8781/refresh/{host_id}/anthropic"
 
 
 def _in(delta: timedelta) -> datetime:
@@ -643,6 +656,7 @@ async def test_two_fetches_inside_the_margin_rotate_once_request_once_and_answer
     )
     await _bound_identity(connection, host_id="host-other", run_id="run-other")
     calls = _mock_post(monkeypatch, _resp(200, _REFRESHED))
+    refreshes = _mock_refreshes(monkeypatch)
 
     first = await AnthropicProvider.issue_token(connection.id, except_host_id="host-mine")
     second = await AnthropicProvider.issue_token(connection.id, except_host_id="host-mine")
@@ -650,8 +664,8 @@ async def test_two_fetches_inside_the_margin_rotate_once_request_once_and_answer
     assert first.access_token == second.access_token == "new"
     assert [call["url"] for call in calls] == [
         AnthropicProvider._TOKEN_URL,
-        _REFRESH_URL.format(host_id="host-other"),
     ]
+    assert refreshes == [("host-other", "anthropic")]
 
 
 async def test_a_fetch_on_a_busy_subscription_answers_the_current_token(monkeypatch, druks_db):
@@ -735,14 +749,15 @@ async def test_a_rotation_requests_a_refresh_for_every_other_live_bound_identity
     )
     await _bound_identity(other, host_id="host-elsewhere", run_id="run-elsewhere")
     calls = _mock_post(monkeypatch, _resp(200, _REFRESHED))
+    refreshes = _mock_refreshes(monkeypatch)
 
     result = await AnthropicProvider.rotate_token(connection.id, except_host_id="host-mine")
 
     assert result.action == "refreshed"
     assert [call["url"] for call in calls] == [
         AnthropicProvider._TOKEN_URL,
-        _REFRESH_URL.format(host_id="host-a"),
     ]
+    assert refreshes == [("host-a", "anthropic")]
 
 
 async def test_a_failed_refresh_request_is_a_log_line_and_the_rotation_stands(
@@ -752,19 +767,14 @@ async def test_a_failed_refresh_request_is_a_log_line_and_the_rotation_stands(
         access="old", refresh="R0", expires_at=_in(timedelta(minutes=30))
     )
     await _bound_identity(connection, host_id="host-a", run_id="run-a")
-
-    async def fake_post(self, url, *, json=None, **_kwargs):
-        if "/refresh/" in url:
-            raise httpx.ConnectError("the exchange is down")
-        return _resp(200, _REFRESHED)
-
-    monkeypatch.setattr(pbase.httpx.AsyncClient, "post", fake_post)
+    _mock_post(monkeypatch, _resp(200, _REFRESHED))
+    _mock_refreshes(monkeypatch, error=SandboxUnavailableError("drukbox is down"))
 
     result = await AnthropicProvider.rotate_token(connection.id)
 
     assert result.action == "refreshed"
     assert (await _payload("anthropic"))["claudeAiOauth"]["accessToken"] == "new"
-    assert "refresh request for box host-a service anthropic failed" in caplog.text
+    assert "refresh of anthropic on box host-a failed: drukbox is down" in caplog.text
 
 
 async def test_a_failed_rotation_answers_the_live_token(monkeypatch, druks_db):
@@ -795,19 +805,21 @@ async def test_the_cron_requests_refreshes_after_a_rotation(monkeypatch, druks_d
     )
     await _bound_identity(connection, host_id="host-a", run_id="run-a")
     calls = _mock_post(monkeypatch, _resp(200, _REFRESHED))
+    refreshes = _mock_refreshes(monkeypatch)
 
     await tasks._refresh()
 
     assert [call["url"] for call in calls] == [
         AnthropicProvider._TOKEN_URL,
-        _REFRESH_URL.format(host_id="host-a"),
     ]
+    assert refreshes == [("host-a", "anthropic")]
 
 
 async def test_the_usage_fetch_requests_refreshes_after_its_rotation(monkeypatch, druks_db):
     connection = await _seed_claude(access="dead", refresh="R0", expires_at=_in(timedelta(hours=6)))
     await _bound_identity(connection, host_id="host-a", run_id="run-a")
     posts = _mock_post(monkeypatch, _resp(200, _REFRESHED))
+    refreshes = _mock_refreshes(monkeypatch)
     usage = {
         "five_hour": {"utilization": 16.0, "resets_at": "2026-06-04T23:19:59+00:00"},
         "seven_day": {"utilization": 48.0, "resets_at": "2026-06-07T16:00:00+00:00"},
@@ -824,8 +836,8 @@ async def test_the_usage_fetch_requests_refreshes_after_its_rotation(monkeypatch
     assert parsed.ok
     assert [call["url"] for call in posts] == [
         AnthropicProvider._TOKEN_URL,
-        _REFRESH_URL.format(host_id="host-a"),
     ]
+    assert refreshes == [("host-a", "anthropic")]
 
 
 def _jwt_in(delta: timedelta) -> str:
@@ -834,9 +846,6 @@ def _jwt_in(delta: timedelta) -> str:
 
 def _codex_refreshed() -> dict:
     return {"access_token": _jwt_in(timedelta(days=9)), "refresh_token": "R1", "id_token": "id-1"}
-
-
-_CODEX_REFRESH_URL = "http://127.0.0.1:8781/refresh/{host_id}/codex_subscription_token"
 
 
 async def test_a_codex_fetch_answers_a_fresh_token_with_its_exp_without_a_provider_call_or_the_gate(
@@ -870,6 +879,7 @@ async def test_two_codex_fetches_inside_the_margin_rotate_once_and_request_once(
     )
     refreshed = _codex_refreshed()
     calls = _mock_post(monkeypatch, _resp(200, refreshed))
+    refreshes = _mock_refreshes(monkeypatch)
 
     first = await OpenAiProvider.issue_token(connection.id, except_host_id="host-mine")
     second = await OpenAiProvider.issue_token(connection.id, except_host_id="host-mine")
@@ -878,8 +888,8 @@ async def test_two_codex_fetches_inside_the_margin_rotate_once_and_request_once(
     assert calls[0]["json"]["refresh_token"] == "R0"
     assert [call["url"] for call in calls] == [
         OpenAiProvider._TOKEN_URL,
-        _CODEX_REFRESH_URL.format(host_id="host-other"),
     ]
+    assert refreshes == [("host-other", "codex_subscription_token")]
 
 
 async def test_a_codex_fetch_on_a_busy_subscription_answers_the_current_token(

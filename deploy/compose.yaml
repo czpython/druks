@@ -137,8 +137,9 @@ services:
 
   # The secrets exchange. The proxy asks it for the value behind a placeholder.
   # On docker-sbx it pushes issuer values into each sandbox. Every shape runs it.
-  # It binds the host loopback, its default, so only the proxy and web reach it.
-  # It fetches issuer values from web over plain HTTP on the loopback.
+  # It binds the host loopback, its default, so only the proxy and the drukbox
+  # API reach it. It fetches issuer values from web over plain HTTP on the
+  # loopback.
   drukbox-exchange:
     <<: *drukbox
     entrypoint: [".venv/bin/python", "-m", "secrets_exchange"]

@@ -15,6 +15,7 @@ def _tailscale_record() -> SandboxHostRecord:
     return SandboxHostRecord(
         id="host-tailscale",
         name="ts",
+        service_account="admin",
         status="active",
         provider="exe.dev",
         image="ghcr.io/.../sandbox:test",
@@ -39,6 +40,7 @@ def _aws_direct_record() -> SandboxHostRecord:
     return SandboxHostRecord(
         id="host-aws",
         name="ec2",
+        service_account="admin",
         status="active",
         provider="aws",
         image="ami-0abc12345",
@@ -95,9 +97,8 @@ def test_ssh_connect_kwargs_dials_a_reattached_record_via_persisted_key(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
-    """A GET-built record never carries private_key (drukbox returns it once,
-    on create) — the dial must trust the key the acquirer persisted, or every
-    reattach to an AWS-direct host fails with 'no reachable address'."""
+    """A GET-built record carries no private_key, so the dial trusts the key the
+    acquirer persisted."""
     monkeypatch.setattr(
         "druks.sandbox.host.load_settings",
         lambda: type("_S", (), {"sandbox_keys_dir": tmp_path})(),

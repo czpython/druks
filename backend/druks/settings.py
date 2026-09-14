@@ -18,17 +18,12 @@ from druks.core.utils.time import validate_timezone
 
 DEFAULT_DATA_DIR = Path("/var/lib/druks")
 
-# The MCP default-server catalog Druks ships: an explicit empty ``mcpServers``
-# map, so a fresh install registers and delivers no built-in servers.
-# ``mcp_catalog_path`` points a deployment at its own file instead. The file
-# stays even though it declares nothing: startup loads the configured path
-# unconditionally (see druks/api/server.py) and a missing file raises
-# ``InvalidCatalogError`` during boot.
+# The empty MCP catalog Druks ships. Startup loads ``mcp_catalog_path``
+# unconditionally, so the file stays even though it declares nothing.
 PACKAGED_MCP_CATALOG = Path(__file__).with_name("mcp") / "catalog.json"
 
-# The trust pins for the MCP registry picker's official badge (see
-# druks/mcp/registry.py); ``mcp_trusted_path`` points a deployment at its
-# own file instead.
+# Trust pins for the registry picker's official badge; ``mcp_trusted_path``
+# points a deployment at its own file.
 PACKAGED_MCP_TRUSTED = Path(__file__).with_name("mcp") / "trusted.json"
 
 
@@ -41,9 +36,7 @@ def _expand_path(value: Any) -> Any:
 
 
 def _expand_optional_path(value: Any) -> Any:
-    if value in (None, ""):
-        return None
-    return _expand_path(value)
+    return _expand_path(value) if value else None
 
 
 SecretsKey = Annotated[str, BeforeValidator(validate_keys)]
@@ -72,13 +65,8 @@ class _PrunedTomlSource(TomlConfigSettingsSource):
 
 
 class Identity(BaseModel):
-    # How a browser request resolves an account. ``none``: no authentication —
-    # loopback-only deployments with a single operator account. ``header``: the
-    # edge (exe.dev, Teleport, Cloudflare Access, …) authenticates and asserts
-    # the operator's email in ``identity.header``; druks maps it to an account.
-    # ``jwt``: the edge asserts a signed JWT in ``identity.header`` instead;
-    # druks verifies it against the JWKS below and maps its identity claim.
-    # Bearer personal access tokens resolve first in every mode.
+    # ``none``: no authentication. ``header``: the edge asserts an email in
+    # ``identity.header``; ``jwt``: a signed JWT there. Bearer tokens resolve first.
     mode: Literal["none", "header", "jwt"] = "none"
     # No default: the operator names their edge's header explicitly — druks
     # blesses no provider.
@@ -119,53 +107,37 @@ class Identity(BaseModel):
 
 
 class Urls(BaseModel):
-    # The base URL the operator's browser reaches druks at (the dashboard host,
-    # not the webhook ingress). The OAuth connect flow builds its callback
-    # redirect from it; empty disables connecting OAuth MCP servers, loudly.
+    # The dashboard base URL. OAuth connect callbacks build on it; empty
+    # disables connecting OAuth MCP servers, loudly.
     endpoint: str = ""
-    # Public hostname webhook senders POST to (Caddy serves it; see
-    # deploy/compose.yaml). Druks itself only reads it for the doctor's
-    # ingress probe — empty when the edge carries webhooks some other way.
+    # The public webhook hostname Caddy serves. Druks reads it only for the
+    # doctor's ingress probe.
     webhook_host: str = ""
 
 
 class Secrets(BaseModel):
-    # Encrypts stored secrets (MCP tokens, OAuth grants, the GitHub service
-    # identity) at rest. Required — a missing or malformed key refuses boot;
+    # Encrypts stored secrets at rest. A missing or malformed key refuses boot;
     # `druks setup` generates one.
     secrets_key: SecretsKey
 
 
 class Sandbox(BaseModel):
-    # Connection details for clawhaven-sandbox-service. Druks calls
-    # ``POST /hosts`` per agent run to provision a VM, then SSHes in
-    # over Tailscale to execute the CLI inside it. See
-    # ``docs/design/sandboxed-execution.md`` for the full architecture.
-    #
+    # The drukbox control plane. An empty service_url turns sandbox execution off.
     service_url: str = ""
     service_token: str = ""
     # Empty → drukbox decides.
     image: str = ""
-    # The issuer base URL the secrets exchange dials for a value. It is
-    # the web process on the host loopback, over plain HTTP, on every shape.
-    # It never derives from the dashboard, webhook, ingress, or provider
-    # settings. Only an explicit value changes it.
+    # The issuer base URL the secrets exchange dials: the web process on the
+    # host loopback. Only an explicit value changes it.
     issuer_url: str = "http://127.0.0.1:8001"
-    # The secrets exchange, for refresh requests and the doctor probe. The
-    # exchange binds the host loopback.
-    exchange_url: str = "http://127.0.0.1:8781"
     # The browser home: browser containers boot on this provider with this image.
     browser_sandbox_provider: str = "docker"
     browser_sandbox_image: str = "ghcr.io/czpython/druks/browser:latest"
-    # An HTTP proxy for the login window. The login then leaves from a different
-    # IP than the box. Use it for sign-in flows that refuse the box IP. The value
-    # can include a user name and password (http://user:pass@host:port); the
-    # login browser authenticates the proxy. If it is empty, the login uses the
-    # box IP. Only the login window uses the proxy. Borrows keep the box IP.
+    # An HTTP proxy for the login window only, so the login leaves from another
+    # IP. It may carry a user name and password. Empty keeps the box IP.
     browser_login_proxy: str = ""
-    # The timezone of the login browser. Set it to the region of the login proxy.
-    # Use an IANA zone name, for example "Europe/Madrid". If it is empty, the
-    # browser keeps the container default. Only the login window uses it.
+    # The IANA timezone of the login window, in the login proxy's region. Empty
+    # keeps the container default.
     browser_login_tz: str = ""
     # Sized for the slowest provisioner.
     timeout: float = 180.0
@@ -180,9 +152,8 @@ class Settings(BaseSettings):
         # Frozen so accidental ``settings.field = ...`` raises rather than
         # silently mutating shared state.
         frozen=True,
-        # Validation errors surface in boot logs and doctor output; a bad
-        # secrets.secrets_key (or any secret-bearing field) must not echo its
-        # value there.
+        # A bad secret-bearing field must not echo its value in boot logs or
+        # doctor output.
         hide_input_in_errors=True,
     )
 
@@ -222,22 +193,14 @@ class Settings(BaseSettings):
         default=Path("~/.config/druks/harnesses"),
         alias="DRUKS_HARNESS_CONFIG_ROOT",
     )
-    # Canonical shared-skills directory Druks pushes into every VM, at both
-    # ``~/.claude/skills`` and ``~/.codex/skills`` (the CLIs read their own
-    # path; the content is one shared set). Centralizing here means skills
-    # are curated once on the Druks host instead of duplicated per-repo or
-    # baked per-image. Must hold REAL skill dirs, not symlinks to a path
-    # outside the deploy mount — the push tars with symlink-follow, so
-    # cross-mount symlink targets would be unreadable in the container and
-    # silently dropped. ``None`` => fall back to the per-CLI ``skills``
-    # subdir of each credentials home (local-dev fallback).
+    # Shared skills pushed into every VM. Real directories only: the push
+    # follows symlinks and drops a target outside the mount.
     sandbox_skills_dir: OptionalExpandedPath = Field(  # type: ignore[assignment]
         default=None,
         alias="DRUKS_SKILLS_DIR",
     )
-    # The MCP default-server catalog the app mounts at startup; a deployment
-    # points this at its own mounted file to declare default servers (no
-    # secrets in the file — see druks/mcp/catalog.py).
+    # The MCP default-server catalog loaded at startup. No secrets in the file
+    # (see druks/mcp/catalog.py).
     mcp_catalog_path: ExpandedPath = Field(
         default=PACKAGED_MCP_CATALOG,
         alias="DRUKS_MCP_CATALOG",
@@ -281,9 +244,8 @@ class Settings(BaseSettings):
 
     @property
     def skills_dir(self) -> Path:
-        # Operator-installed skills, pushed into every VM. Defaults to a writable
-        # dir under ``data_dir`` (the UI installs into it); an explicit
-        # ``DRUKS_SKILLS_DIR`` still overrides for external trees.
+        # Operator-installed skills, pushed into every VM. ``DRUKS_SKILLS_DIR``
+        # overrides the writable default under ``data_dir``.
         return self.sandbox_skills_dir or (self.data_dir / "skills")
 
 
@@ -296,13 +258,8 @@ def setup_logging(settings: Settings) -> None:
         level=settings.log_level,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    # asyncssh logs every channel open/close/exit and every sftp client
-    # start/exit at INFO. A single sandbox operation opens dozens of channels
-    # and emits ~6 lines each — drowns the worker log otherwise. The
-    # library exposes a first-party knob (``set_log_level`` /
-    # ``set_sftp_log_level``); ``NOTSET`` would track the root logger,
-    # so we explicitly gate to WARNING. Real failures (auth, connection
-    # drops) stay audible.
+    # asyncssh logs every channel and sftp event at INFO, dozens per sandbox
+    # operation. Real failures stay audible at WARNING.
     asyncssh.set_log_level(logging.WARNING)
     asyncssh.set_sftp_log_level(logging.WARNING)
 

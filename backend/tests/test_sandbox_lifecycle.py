@@ -98,10 +98,7 @@ class _FakeAPI:
     create_record: SandboxHostRecord | None = None
     create_raises: Exception | None = None
     delete_raises: Exception | None = None
-    # When set, every get_host call raises this exception instead of
-    # returning from get_host_responses. Used by the attach() tests
-    # to simulate the provider 404'ing a host we still have in our
-    # local registry.
+    # The attach() tests: the provider 404s a host still in our registry.
     get_host_raises: Exception | None = None
 
     async def create_host(
@@ -146,6 +143,7 @@ def _record(
     return SandboxHostRecord(
         id=host_id,
         name="x",
+        service_account="admin",
         status=status,
         provider="exe.dev",
         image="ghcr.io/.../sandbox:test",
@@ -166,11 +164,8 @@ def _record(
     )
 
 
-# NOTE: ``Host.upload_file`` (mkdir + sftp + chmod) and
-# ``Host.write_secret`` (printf with shell quoting) are exercised
-# against the real Host in test_sandbox_host.py — the fake here
-# just records the calls. Tests below cover the credentials.push
-# orchestration that drives them.
+# The real ``Host.upload_file`` and ``Host.write_secret`` run in
+# test_sandbox_host.py; the fake records the calls.
 
 
 async def test_push_writes_one_credential_file():
@@ -443,10 +438,8 @@ def patched_real_sandbox(monkeypatch: pytest.MonkeyPatch) -> list[_FakeSandbox]:
 
 @pytest.fixture
 def patched_sandbox_api(monkeypatch: pytest.MonkeyPatch) -> list[_FakeAPI]:
-    """Stub ``Client._api`` to hand out a per-test fake. Tests
-    append the FakeAPI they want returned (in order) and assert on it
-    afterwards. Aclose is stubbed because the fake has no http to
-    close."""
+    """Stub ``Client._api`` with the last fake a test appended. ``aclose`` is
+    stubbed: the fake has no HTTP to close."""
     apis: list[_FakeAPI] = []
 
     def _fake_api(self: Any) -> _FakeAPI:
@@ -479,9 +472,7 @@ async def test_acquire_uploads_helper_and_closes_ssh_without_releasing(
     remaining = (expires_at - datetime.now(UTC)).total_seconds()
     assert 0 < remaining <= SANDBOX_HOST_LEASE_SECONDS
 
-    # Helper uploaded once per acquire (long-lived hosts pay this
-    # once, not per-run). The default settings SSH user is exedev,
-    # so the destination is /home/exedev/druks-sandbox.
+    # One upload per acquire; the default SSH user is exedev.
     fake = patched_real_sandbox[0]
     assert any(u.remote.endswith("/druks-sandbox") for u in fake.uploads), (
         "expected druks-sandbox helper upload"
@@ -497,9 +488,8 @@ async def test_acquire_releases_host_when_helper_upload_fails(
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
-    """Regression: if anything between ``create_host`` and the yield
-    raises, ``acquire`` must release the host itself — the caller never
-    learns the id, so leaving cleanup to them would orphan the VM."""
+    """A raise between ``create_host`` and the yield releases the host: the
+    caller never learns the id."""
 
     api = _FakeAPI(create_record=_record(status="active"))
     patched_sandbox_api.append(api)
@@ -531,10 +521,8 @@ async def test_acquire_translates_transient_create_failures(
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
-    """A transient control-plane failure from ``create_host`` (a 502
-    provisioning error or a transport/503 unavailable error) is translated at
-    the client boundary into the classified, transient-retryable harness error
-    with the SDK exception preserved as the cause."""
+    """A 502 or 503 from ``create_host`` becomes the transient harness error,
+    with the SDK error as its cause."""
     api = _FakeAPI(create_raises=sdk_error)
     patched_sandbox_api.append(api)
 
@@ -634,9 +622,7 @@ async def test_acquire_passes_through_fatal_create_failure(
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
-    """A non-transient SDK failure (auth, and the other ``SandboxAPIError``
-    subclasses) is left untouched — it must not become a provisioning failure
-    and so must not enter the transient retry path."""
+    """A fatal SDK failure passes through untouched and never enters the retry path."""
     fatal = SandboxAuthError("token revoked")
     api = _FakeAPI(create_raises=fatal)
     patched_sandbox_api.append(api)
@@ -655,10 +641,8 @@ async def test_acquire_classifies_setup_reachability_failure_after_rollback(
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
-    """A freshly created host that never becomes reachable/usable during SSH +
-    helper setup is rolled back (host deleted, key removed) and re-raised as a
-    classified provisioning failure carrying the original reachability error as
-    its cause — so the run retries instead of dead-ending on an empty code."""
+    """A host that never becomes reachable during setup is rolled back and raised
+    as a transient provisioning failure."""
     api = _FakeAPI(create_record=_record(status="active"))
     patched_sandbox_api.append(api)
     unreachable = SandboxUnreachable("failed to write /root/.gitconfig")
@@ -706,9 +690,7 @@ async def test_attach_translates_unavailable_lookup_failure(
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
-    """A transport/503 while looking up an existing host is classified as a
-    provisioning failure (transient retry re-attaches once the service
-    recovers), distinct from a 404 which stays ``HostGone``."""
+    """A 503 on lookup is a transient provisioning failure; a 404 stays ``HostGone``."""
     unavailable = SandboxUnavailableError("exe.dev transport failed")
     api = _FakeAPI(create_record=None, get_host_raises=unavailable)
     patched_sandbox_api.append(api)
@@ -769,9 +751,7 @@ async def test_release_swallows_sdk_delete_failure(
     patched_sandbox_api: list[_FakeAPI],
 ):
 
-    # provider 503s on delete — release must not raise, since the
-    # caller's intent is "I'm done with this host"; surfacing the
-    # error would force every operations.cleanup path to catch it.
+    # release never raises: the caller is done with the host.
     api = _FakeAPI(
         create_record=None,
         delete_raises=RuntimeError("provider 503"),

@@ -162,7 +162,8 @@ follow with `druks doctor --sandbox`.
 
 ### The secrets exchange is unreachable
 
-`druks doctor` reports `secrets_exchange` with the URL it probed. Run:
+`druks doctor` reports the `drukbox` check as `exchange:` with the fix from
+the Drukbox doctor. On the Druks stack, run:
 
 ```bash
 docker compose up -d drukbox-exchange

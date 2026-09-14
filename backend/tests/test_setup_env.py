@@ -413,9 +413,8 @@ def test_missing_known_tables_gap_without_rewriting_the_operators_file(tmp_path)
 
 
 def test_nested_operator_content_is_refused(tmp_path):
-    """Operator additions are flat scalars, one table deep — druks.toml is
-    druks' file, and structure it can't own round-trip is refused, not
-    silently re-rendered."""
+    """Operator additions are flat scalars, one table deep; other structure is
+    refused, not re-rendered."""
     env_path = tmp_path / ".env"
     _run(env_path, provider="docker")
     toml_path = tmp_path / "druks.toml"
@@ -452,7 +451,6 @@ def test_setup_toml_is_the_settings_source(tmp_path, monkeypatch):
             "sandbox.image=druks-sandbox:test",
             "sandbox.proxy_url=http://100.64.0.10:8880",
             "sandbox.issuer_url=http://10.0.0.5:8001",
-            "sandbox.exchange_url=http://10.0.0.5:8781",
             "sandbox.timeout=240",
             "sandbox.exe.EXE_API_TOKEN=exe-token",
             "sandbox.exe.TAILSCALE_TAILNET=tail.ts.net",
@@ -472,7 +470,6 @@ def test_setup_toml_is_the_settings_source(tmp_path, monkeypatch):
     assert settings.sandbox.service_url == config["sandbox"]["service_url"]
     assert settings.sandbox.image == config["sandbox"]["image"]
     assert settings.sandbox.issuer_url == config["sandbox"]["issuer_url"]
-    assert settings.sandbox.exchange_url == config["sandbox"]["exchange_url"]
     assert settings.sandbox.timeout == float(config["sandbox"]["timeout"])
 
 
@@ -493,7 +490,6 @@ def test_a_hosted_install_keeps_the_internal_issuer_url(tmp_path, monkeypatch):
     settings = Settings()
 
     assert settings.sandbox.issuer_url == "http://127.0.0.1:8001"
-    assert settings.sandbox.exchange_url == "http://127.0.0.1:8781"
 
 
 def test_exe_shape_requires_the_proxy_address(tmp_path):

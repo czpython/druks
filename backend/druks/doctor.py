@@ -43,16 +43,14 @@ class CheckResult:
     name: str
     ok: bool
     detail: str
-    # A not-ok check the operator clears in the dashboard, not the shell (an
-    # unconnected harness, an uninstalled App). Expected on a fresh box, so it
-    # prints but never drives the exit code — only a genuine fault does.
+    # The operator clears it in the dashboard, so it prints but never drives
+    # the exit code.
     pending: bool = False
 
 
 @asynccontextmanager
 async def _check_engine(settings: Settings):
-    # One seam for every DB-reading check; the suite patches it to hand the
-    # fixture's connection in instead of a fresh engine.
+    # The suite patches this to hand in the fixture's connection.
     engine = create_async_engine_from_url(settings.database_url)
     try:
         yield engine
@@ -61,10 +59,8 @@ async def _check_engine(settings: Settings):
 
 
 async def check_service_identities(settings: Settings) -> list[CheckResult]:
-    """One result per declared service, so a newly-declared one is covered
-    without editing doctor. Declarations self-register through the same
-    discovery walk the loader runs. Identities are database-backed like harness
-    connections — this reports each row's presence, not a file or setting."""
+    """One result per declared service. An identity is a database row, like a
+    harness connection."""
     for app in iter_apps():
         app.discover()
 
@@ -98,11 +94,8 @@ async def check_service_identities(settings: Settings) -> list[CheckResult]:
 
 
 async def check_installations(settings: Settings) -> CheckResult:
-    """Where druks may act = the operator App's installation accounts;
-    this check is the audit surface for that set. The zero-argument client
-    factory reads the service-identity row, so a one-off Session is bound
-    into the ambient ``db_session`` registry for the duration."""
-
+    """The operator App's installation accounts: where druks may act. The
+    client factory reads the identity row, so a session is bound for the call."""
     try:
         async with _check_engine(settings) as engine:
             async with session_scope(engine):
@@ -168,10 +161,8 @@ def _credentials_check(
 
 
 def check_provider_credentials(settings: Settings) -> list[CheckResult]:
-    # One result per registered provider, so a newly-registered one is covered
-    # without editing doctor. Credentials live in the DB: this reports the row's
-    # presence + expiry, not a host file. A plain session reads it directly —
-    # doctor is a one-off, so it never binds the ambient db_session registry.
+    # One result per registered provider. Doctor is a one-off, so a plain
+    # session reads the rows and never binds the ambient registry.
     engine = create_engine_from_url(settings.database_url)
     try:
         with Session(engine) as session:
@@ -222,9 +213,8 @@ def check_provider_credentials(settings: Settings) -> list[CheckResult]:
 
 
 def check_webhook_ingress(settings: Settings) -> CheckResult:
-    """An unsigned probe POST must come back 401 — druks itself rejecting
-    it proves the path DNS → TLS → edge → druks works. Anything else means
-    the request died in front of druks (wrong DNS record, foreign proxy)."""
+    """An unsigned probe must come back 401 from druks itself. Anything else
+    died in front of it."""
     host = settings.urls.webhook_host
     if not host:
         return CheckResult(name="webhook_ingress", ok=True, detail="not configured")
@@ -278,10 +268,17 @@ async def check_drukbox(settings: Settings) -> CheckResult:
             ok=True,
             detail="not configured (deployments: [sandbox].service_url in druks.toml)",
         )
+    api = SandboxAPI(
+        base_url=settings.sandbox.service_url,
+        token=settings.sandbox.service_token,
+        timeout=settings.sandbox.timeout,
+    )
     try:
-        report = await _drukbox_doctor(settings)
+        report = await api.doctor()
     except Exception as error:  # noqa: BLE001 — surface any SDK/transport failure as fail
         return CheckResult(name="drukbox", ok=False, detail=f"unreachable: {error}")
+    finally:
+        await api.aclose()
     if report.ok:
         return CheckResult(name="drukbox", ok=True, detail=f"{report.active_provider} ok")
     fail = next(c for c in report.checks if c.status != "ok")
@@ -291,49 +288,9 @@ async def check_drukbox(settings: Settings) -> CheckResult:
     return CheckResult(name="drukbox", ok=False, detail=detail)
 
 
-async def _drukbox_doctor(settings: Settings):
-    api = SandboxAPI(
-        base_url=settings.sandbox.service_url,
-        token=settings.sandbox.service_token,
-        timeout=settings.sandbox.timeout,
-    )
-    try:
-        return await api.doctor()
-    finally:
-        await api.aclose()
-
-
-async def check_secrets_exchange(settings: Settings) -> CheckResult:
-    if not settings.sandbox.service_url:
-        return CheckResult(
-            name="secrets_exchange", ok=True, detail="not configured (sandbox execution is off)"
-        )
-    url = f"{settings.sandbox.exchange_url.rstrip('/')}/healthz"
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as http:
-            status = (await http.get(url)).status_code
-    except httpx.HTTPError as error:
-        return CheckResult(
-            name="secrets_exchange",
-            ok=False,
-            detail=f"drukbox-exchange is unreachable at {url}: {error}. "
-            "Start it: docker compose up -d drukbox-exchange",
-        )
-    if status != 200:
-        return CheckResult(
-            name="secrets_exchange",
-            ok=False,
-            detail=f"drukbox-exchange answered {status} at {url}. "
-            "Read its log: docker compose logs drukbox-exchange",
-        )
-    return CheckResult(name="secrets_exchange", ok=True, detail=url)
-
-
 async def check_sandbox_e2e(settings: Settings) -> CheckResult | list[CheckResult]:
-    """Provision a real VM, exercise the acquire and reattach dial paths, and
-    probe each registered harness CLI's presence on the image. Costs one
-    VM-minute — opt-in via ``druks doctor --sandbox``, never part of the
-    default check set."""
+    """Provision a real VM, dial it twice, and look for each harness CLI. Costs
+    a VM-minute: opt-in with ``--sandbox``."""
     if not settings.sandbox.service_url:
         return CheckResult(name="sandbox_e2e", ok=True, detail="not configured")
     try:
@@ -392,8 +349,7 @@ async def check_declared_sandboxes(settings: Settings) -> CheckResult | list[Che
 async def _sandbox_e2e() -> list[CheckResult]:
     start = time.monotonic()
     binary_results: list[CheckResult] = []
-    # acquire rolls its own host back on failure; once it yields, we own
-    # the release.
+    # Once acquire yields, we own the release.
     async with sandbox_client.acquire() as sandbox:
         host_id = sandbox.id
         try:
@@ -453,11 +409,8 @@ def check_redis(settings: Settings) -> CheckResult:
 
 
 def _defined_capability(module: ModuleType) -> tuple[str, str] | None:
-    """The capability a leaf module DEFINES itself (not merely imports), as
-    ``(role, registry_key)``, or None. The key is how ``autodiscover``'s import side
-    effect records it — comparing against the keys discovery already registered
-    tells a stray (never imported) from one a canonical role module re-exports
-    (imported transitively, so registered fine)."""
+    """The capability a leaf module defines itself, as ``(role, registry key)``,
+    or None. A re-export from a canonical role module is already registered."""
     name = module.__name__
     for value in vars(module).values():
         if isinstance(value, type) and issubclass(value, Workflow) and value.__module__ == name:
@@ -484,11 +437,9 @@ def _defined_capability(module: ModuleType) -> tuple[str, str] | None:
 
 
 def check_capability_modules(settings: Settings) -> CheckResult:
-    """A capability self-registers as an import side effect, but ``autodiscover``
-    only imports leaf modules named for their role. A capability under any other
-    filename (the natural singular ``webhook.py``, say) silently never registers —
-    catch that by running the real discovery, then importing each off-canon leaf and
-    flagging any whose capability the discovery walk didn't already register."""
+    """``autodiscover`` imports only leaf modules named for their role, so a
+    capability under another filename never registers. Import each off-canon
+    leaf and flag it."""
     by_role = {
         "workflows": workflows,
         "webhooks": webhooks,
@@ -498,9 +449,7 @@ def check_capability_modules(settings: Settings) -> CheckResult:
     packages = [app.package for app in iter_apps()]
     strays: list[str] = []
     for package in packages:
-        # The canonical walk first, then snapshot what it registered — so a
-        # capability a role module re-exports counts as discovered, and importing
-        # an off-canon module below (which self-registers too) can't mask a stray.
+        # The canonical walk first, so an off-canon import below cannot mask a stray.
         autodiscover(package)
         discovered = {role: set(registry._items) for role, registry in by_role.items()}
         # Tasks register straight into DBOS's own map — it is their registry.
@@ -530,11 +479,8 @@ def check_capability_modules(settings: Settings) -> CheckResult:
 
 
 async def check_apps(settings: Settings) -> list[CheckResult]:
-    """Each installed app's resolved settings and own checks, namespaced under it.
-    Read off the class headlessly through the loader, so doctor never imports an
-    app's private modules. A check or settings clean that raises is contained
-    under the app's name. Core checks remain separate from app checks."""
-
+    """Each installed app's settings and own checks, namespaced under it. A
+    raise is contained under the app's name."""
     async with _check_engine(settings) as engine, session_scope(engine):
         results: list[CheckResult] = []
         for app in iter_apps():
@@ -567,9 +513,8 @@ async def check_apps(settings: Settings) -> list[CheckResult]:
 
 
 async def _run_app_check(app_name: str, check) -> CheckResult:
-    """One app check, its result namespaced under the app. A check that
-    raises, or returns anything but a ``CheckResult`` (a missing ``return`` yields
-    ``None``), becomes a failing result rather than escaping and hiding later checks."""
+    """A check that raises, or returns no ``CheckResult``, becomes a failing
+    result."""
     label = getattr(check, "__name__", repr(check))
     try:
         outcome = check()
@@ -596,7 +541,6 @@ CHECKS = (
     check_database,
     check_redis,
     check_drukbox,
-    check_secrets_exchange,
     check_capability_modules,
     check_apps,
     check_declared_sandboxes,
@@ -604,8 +548,6 @@ CHECKS = (
 
 
 async def run_checks(settings: Settings, *, sandbox: bool = False) -> list[CheckResult]:
-    # A check yields one result, or several (check_provider_credentials fans out
-    # over the provider registry).
     results: list[CheckResult] = []
     for check in CHECKS:
         outcome = check(settings)

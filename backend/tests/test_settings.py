@@ -105,7 +105,6 @@ def test_only_an_explicit_issuer_url_changes_the_mint_base(tmp_path):
     settings = make_settings(tmp_path, urls=public, sandbox={"issuer_url": "http://10.0.0.5:8001"})
 
     assert settings.sandbox.issuer_url == "http://10.0.0.5:8001"
-    assert settings.sandbox.exchange_url == "http://127.0.0.1:8781"
 
 
 def test_auth_mode_environment_variable_is_ignored(tmp_path, monkeypatch):
@@ -160,9 +159,7 @@ def test_missing_explicit_config_refuses_construction(tmp_path, monkeypatch):
 
 
 def test_ensure_data_dirs_provisions_skills_dir(tmp_path):
-    # The settings UI installs skill collections into skills_dir; if startup
-    # doesn't create it, the first install's write raises OSError → opaque 500.
-    # This is the DRUKS_SKILLS_DIR-outside-data_dir case that bit us.
+    # Startup creates skills_dir, or the first skill install's write raises OSError.
     skills_dir = tmp_path / "shared" / "skills"
     settings = make_settings(tmp_path, sandbox_skills_dir=skills_dir)
     ensure_data_dirs(settings)

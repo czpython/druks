@@ -56,9 +56,8 @@ class _FakeConnection:
         self.wait_closed_called = False
 
     def start_sftp_client(self) -> _FakeSFTP:
-        # Note: asyncssh's real ``start_sftp_client`` is async; here it
-        # returns the async-context-manager directly. Tests await it via
-        # ``async with`` so the return-value semantics line up.
+        # The fake ``start_sftp_client`` returns the context manager directly;
+        # tests use ``async with``.
         return self.sftp
 
     async def run(
@@ -83,6 +82,7 @@ def fake_record() -> SandboxHostRecord:
     return SandboxHostRecord(
         id="host-abc",
         name="abc",
+        service_account="admin",
         status="active",
         provider="exe.dev",
         image="ghcr.io/.../sandbox:test",
@@ -353,9 +353,8 @@ async def test_exec_closed_channel_without_status_is_not_ok(
     assert result.ok is False
 
 
-# Tar streaming — exercises the local-tar half of upload_dir against a real
-# ``tar -xf -`` subprocess. The SSH half is covered by the integration
-# suite; here we only need to know we build the right tar.
+# The local tar half of upload_dir against a real ``tar -xf -``; the SSH half
+# is integration-covered.
 
 
 class _SubprocessTarSink:

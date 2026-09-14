@@ -40,7 +40,7 @@ host-run development template for that environment plane.
 | `[urls]` | Dashboard callback base URL and public webhook hostname |
 | `[secrets]` | Generated deployment secrets |
 | `[paths]` | Host data and harness configuration paths |
-| `[sandbox]` | Drukbox provider, service URL and token, image override, and the proxy, issuer, and exchange addresses |
+| `[sandbox]` | Drukbox provider, service URL and token, image override, and the proxy and issuer addresses |
 | `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
 | `[env]` | Additional deployment environment settings rendered verbatim |
 
@@ -509,7 +509,6 @@ before provisioning a VM if its selected credential is missing.
 | `sandbox.image` | Optional provider image override |
 | `sandbox.proxy_url` | The secrets proxy, at the address a sandbox dials. The docker shape sets `http://172.17.0.1:8880`. docker-sbx leaves it empty |
 | `sandbox.issuer_url` | The issuer base URL the secrets exchange dials. The default is `http://127.0.0.1:8001` on every shape. Only an explicit value changes it |
-| `sandbox.exchange_url` | The secrets exchange, for refresh requests and the doctor probe. The default is `http://127.0.0.1:8781` |
 | `sandbox.browser_login_proxy` | Login-window egress proxy. An empty value keeps the box IP |
 | `sandbox.browser_login_tz` | Login-window timezone (IANA zone). An empty value keeps the container default |
 
