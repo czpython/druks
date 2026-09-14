@@ -3,8 +3,8 @@
 You are reviewing pull request #{{ workflow.subject.number }} on `{{ workflow.subject.repo }}`,
 at {{ workflow.input.requested_by }}'s request.
 
-The repo is cloned at `{{ workspace.repo_path }}`, and `gh` is authenticated there — that is
-the identity your review will be published under. Only your FINAL response must be the JSON
+The repo is cloned at `{{ workspace.repo_path }}`. Your GitHub access is already authenticated
+as the identity your review will be published under. Only your FINAL response must be the JSON
 matching the requested schema; everything before it is free-form and never parsed.
 
 ## How to review

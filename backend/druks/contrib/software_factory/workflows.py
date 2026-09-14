@@ -470,18 +470,6 @@ class ReviewWorkspace(RepoWorkspace):
     # A checkout of the default branch, with room beside it for siblings. The reviewer
     # checks out the PR itself. The add_dirs grant needs the directory to exist.
     @classmethod
-    async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
-        actor = await get_review_actor()
-        return (
-            RequiredMcpServer(
-                name=GITHUB_MCP_NAME,
-                url=GITHUB_MCP_URL,
-                secret_id=(await actor.service.get()).id,
-                resource=cls.get_repo(subject),
-            ),
-        )
-
-    @classmethod
     async def get_secret_refs(cls, subject: Any) -> list[SecretRef]:
         # The review is authored under the review actor's identity.
         actor = await get_review_actor()
@@ -492,6 +480,18 @@ class ReviewWorkspace(RepoWorkspace):
                 resource=cls.get_repo(subject),
             )
         ]
+
+    @classmethod
+    async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
+        actor = await get_review_actor()
+        return (
+            RequiredMcpServer(
+                name=GITHUB_MCP_NAME,
+                url=GITHUB_MCP_URL,
+                secret_id=(await actor.service.get()).id,
+                resource=cls.get_repo(subject),
+            ),
+        )
 
     @property
     def related_root(self) -> str:
@@ -516,8 +516,8 @@ class PullRequestReview(Workflow):
 
     @classmethod
     async def dispatch(cls, *, repo: str, pr_number: int, requested_by: str) -> str:
-        # A separate review identity still clones with the operator App. The lookup
-        # raises a clear error before the run starts a VM.
+        # The review workspace sets its git author from the operator App, even when a
+        # reviewer is connected. The lookup raises a clear error before the run starts a VM.
         await Github.get()
         # The review runs under the account with the requester's name. Without that
         # account, it runs under the default account.

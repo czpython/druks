@@ -316,9 +316,9 @@ A sandbox never holds an installation token. It holds a placeholder in
 secrets proxy swaps the placeholder for a token that Druks mints for the
 sandbox's repo, with the expiry GitHub gives it, and fetches a new one before
 it expires. The `software_factory` build clones and pushes as the operator App.
-A review clones as the reviewer App when one is connected. The build's GitHub
-MCP server acts as the review identity through a second entry, for
-`api.githubcopilot.com`. The identities stay separate.
+A review clones as the reviewer App when one is connected. Builds and reviews
+also get the GitHub MCP server for `api.githubcopilot.com`. It acts as the
+review identity through a second entry.
 
 **To upgrade an existing installation**, paste the credentials one time on each
 active host. Open **Settings → Connections → Services**. Connect GitHub with the

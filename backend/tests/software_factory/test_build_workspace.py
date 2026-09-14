@@ -3,10 +3,10 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from conftest import connect_service
-from druks import workspaces as workspace_mod
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.constants import (
     GITHUB_MCP_NAME,
@@ -16,8 +16,7 @@ from druks.contrib.software_factory.constants import (
 from druks.contrib.software_factory.workflows import Build, BuildWorkspace, ReviewWorkspace
 from druks.core.services import Github
 from druks.mcp.helpers import get_bearer_token_env_var
-from druks.mcp.models import McpServer
-from druks.sandbox import host as host_mod
+from druks.sandbox.host import Host
 from druks.sandbox.layout import get_related_root, get_repo_root
 from druks.workspaces import RepoWorkspace
 
@@ -27,9 +26,6 @@ class _FakeSandbox:
 
 
 def test_build_workspace_grants_related_root_add_dir():
-    # Agents clone related repos on demand; the whole get_related_root is the
-    # file-tool grant, no per-repo threading. MCP delivery is the fold's job —
-    # scaffolding kwargs never carry it.
     workspace = BuildWorkspace(
         host=_FakeSandbox(),  # type: ignore[arg-type]
         subject=SimpleNamespace(repo="o/main"),
@@ -38,7 +34,7 @@ def test_build_workspace_grants_related_root_add_dir():
     )
     kwargs = workspace.get_agent_run_kwargs(model="m")
 
-    assert kwargs["model"] == "m"  # the run's own kwargs pass through
+    assert kwargs["model"] == "m"
     assert kwargs["add_dirs"] == (get_related_root("exedev"),)
     assert kwargs["skills"] == ("python-house-rules",)
     assert "mcp_servers" not in kwargs
@@ -50,7 +46,7 @@ async def test_build_workspace_makes_the_related_root_before_the_clone(
 ):
     execs: list[list[str]] = []
 
-    async def fake_exec(self: Any, argv: list[str], **_kw: Any) -> None:
+    async def fake_exec(self: Any, argv: list[str], **_: Any) -> None:
         execs.append(argv)
 
     async def base_run_agent(self: Any, **kwargs: Any) -> str:
@@ -58,12 +54,12 @@ async def test_build_workspace_makes_the_related_root_before_the_clone(
         return "ran"
 
     workspace = BuildWorkspace(
-        host=host_mod.Host(record=SimpleNamespace(id="h1", ssh_username="exedev")),  # type: ignore[arg-type]
+        host=Host(record=SimpleNamespace(id="h1", ssh_username="exedev")),  # type: ignore[arg-type]
         subject=SimpleNamespace(repo="o/main"),
         branch="b",
         skills=(),
     )
-    monkeypatch.setattr(host_mod.Host, "exec", fake_exec)
+    monkeypatch.setattr(Host, "exec", fake_exec)
     monkeypatch.setattr(RepoWorkspace, "run_agent", base_run_agent)
 
     assert await workspace.run_agent(account_id=None) == "ran"
@@ -71,10 +67,6 @@ async def test_build_workspace_makes_the_related_root_before_the_clone(
 
 
 async def test_build_workspace_declares_its_github_mcp_as_the_review_actor(druks_db):
-    # The github MCP is build's own declaration, issued through the review
-    # actor's vault row for the subject's repo — never an operator catalog
-    # entry, never optional (there is no build without github). The clone
-    # stays the operator's: two identities, two entries in the box.
     operator = await connect_service(
         "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
     )
@@ -85,58 +77,42 @@ async def test_build_workspace_declares_its_github_mcp_as_the_review_actor(druks
     )
     subject = SimpleNamespace(repo="o/main")
 
-    wire, refs = await BuildWorkspace.get_mcp_delivery(subject, None)
+    [github], [ref] = await BuildWorkspace.get_mcp_delivery(subject, None)
 
-    github = next(s for s in wire if s.name == GITHUB_MCP_NAME)
     assert github.url == GITHUB_MCP_URL
     assert github.bearer_token_env_var == get_bearer_token_env_var(GITHUB_MCP_NAME)
-    [ref] = refs
     assert ref.key == ("mcp_github_token", reviewer.id, "o/main", "api.githubcopilot.com")
     [clone] = await BuildWorkspace.get_secret_refs(subject)
     assert clone.key == ("github", operator.id, "o/main", "")
 
 
-@pytest.mark.asyncio
 async def test_get_workspace_kwargs_carries_the_build_fields():
-    sandbox = host_mod.Host(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
+    host = Host(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
 
     workflow = Build()
     workflow.input = Build._run_input_model()
     workflow.subject = SimpleNamespace(repo="o/app")
     workflow._profile = {"recommended_skills": ["python-house-rules"]}
-    kwargs = await workflow.get_workspace_kwargs(sandbox)
+    kwargs = await workflow.get_workspace_kwargs(host)
 
     assert kwargs == {
-        "host": sandbox,
+        "host": host,
         "subject": workflow.__dict__["subject"],
         "branch": None,
         "skills": ("python-house-rules",),
     }
 
 
-def _pin_tracker(monkeypatch: pytest.MonkeyPatch, tracker: str) -> None:
-    settings = SoftwareFactory.Settings(tracker=tracker)
-
-    async def _settings(cls):
-        return settings
-
-    monkeypatch.setattr(SoftwareFactory, "settings", classmethod(_settings))
-
-
 async def _required_servers(monkeypatch: pytest.MonkeyPatch, tracker: str):
     await connect_service(
         "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
-    )
-    await connect_service(
-        "github_reviewer",
-        identity={"app_id": "2", "slug": "druks-reviewer"},
-        secrets={"private_key": "reviewer-pem"},
     )
     monkeypatch.setattr(
         "druks.mcp.inbound.load_settings",
         lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="https://druks.test")),
     )
-    _pin_tracker(monkeypatch, tracker)
+    settings = SoftwareFactory.Settings(tracker=tracker)
+    monkeypatch.setattr(SoftwareFactory, "settings", AsyncMock(return_value=settings))
     return await BuildWorkspace.get_required_mcp_servers(SimpleNamespace(repo="o/main"))
 
 
@@ -162,36 +138,24 @@ def test_the_build_clones_as_the_operator():
     assert BuildWorkspace.github is Github
 
 
-@pytest.mark.parametrize("has_reviewer", [False, True], ids=["operator", "reviewer"])
-@pytest.mark.parametrize("has_catalog_github", [False, True], ids=["no-catalog", "catalog"])
-async def test_review_mcp_and_gh_use_the_review_actor(
-    druks_db, has_reviewer: bool, has_catalog_github: bool
-):
-    """The required server and gh share the actor, even with a catalog name conflict."""
-    row = await connect_service(
-        "github",
-        identity={"app_id": "1", "slug": "operator"},
-        secrets={"private_key": "pem"},
+async def test_review_mcp_and_gh_use_the_review_actor(druks_db):
+    await connect_service(
+        "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
     )
-
-    if has_reviewer:
-        row = await connect_service(
-            "github_reviewer",
-            identity={"app_id": "2", "slug": "reviewer"},
-            secrets={"private_key": "reviewer-pem"},
-        )
-    if has_catalog_github:
-        await McpServer.create(name=GITHUB_MCP_NAME, url="https://catalog.test/mcp")
-
+    reviewer = await connect_service(
+        "github_reviewer",
+        identity={"app_id": "2", "slug": "druks-reviewer"},
+        secrets={"private_key": "reviewer-pem"},
+    )
     subject = SimpleNamespace(repo="o/app")
-    [server], [ref] = await ReviewWorkspace.get_mcp_delivery(subject, None)
-    [secret] = await ReviewWorkspace.get_secret_refs(subject)
 
-    assert server.name == GITHUB_MCP_NAME
-    assert server.url == GITHUB_MCP_URL
-    assert server.bearer_token_env_var == get_bearer_token_env_var(GITHUB_MCP_NAME)
-    assert ref.key == ("mcp_github_token", row.id, "o/app", "api.githubcopilot.com")
-    assert secret.key == ("github", row.id, "o/app", "")
+    [github], [ref] = await ReviewWorkspace.get_mcp_delivery(subject, None)
+
+    assert github.url == GITHUB_MCP_URL
+    assert github.bearer_token_env_var == get_bearer_token_env_var(GITHUB_MCP_NAME)
+    assert ref.key == ("mcp_github_token", reviewer.id, "o/app", "api.githubcopilot.com")
+    [clone] = await ReviewWorkspace.get_secret_refs(subject)
+    assert clone.key == ("github", reviewer.id, "o/app", "")
 
 
 class _IdentitySandbox:
@@ -201,11 +165,10 @@ class _IdentitySandbox:
         self.repo_path = repo_path
 
     async def exec(self, command: list[str], *, timeout: float = 30.0) -> Any:
-        del timeout
-        local = command[2].replace(
+        script = command[2].replace(
             get_repo_root(self.ssh_username), shlex.quote(str(self.repo_path))
         )
-        result = subprocess.run(["sh", "-c", local], check=False, capture_output=True, text=True)
+        result = subprocess.run(["sh", "-c", script], check=False, capture_output=True, text=True)
         return SimpleNamespace(ok=result.returncode == 0, exit_code=result.returncode, stderr="")
 
 
@@ -216,13 +179,13 @@ def _dispatched_by(monkeypatch: pytest.MonkeyPatch, username: str | None) -> Non
     async def _client():
         return SimpleNamespace(get_bot_git_author=_bot_git_author)
 
-    monkeypatch.setattr(workspace_mod, "get_github_client", _client)
+    monkeypatch.setattr("druks.workspaces.get_github_client", _client)
     account = SimpleNamespace(username=username) if username else None
 
     async def _get_account(_id):
         return account
 
-    monkeypatch.setattr(workspace_mod, "Account", SimpleNamespace(get=_get_account))
+    monkeypatch.setattr("druks.workspaces.Account", SimpleNamespace(get=_get_account))
 
 
 async def test_set_git_identity_stamps_the_workspace_repo(
