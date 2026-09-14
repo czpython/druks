@@ -1,4 +1,5 @@
 import inspect
+import logging
 from collections.abc import Awaitable, Callable
 from contextlib import nullcontext, suppress
 from contextvars import ContextVar
@@ -113,6 +114,8 @@ current_workflow: ContextVar["Workflow"] = ContextVar("current_workflow")
 # True while a @step body runs. An agent run inside one is already memoized by that
 # step, so it skips wrapping itself; outside, it wraps itself in its own step.
 _in_step: ContextVar[bool] = ContextVar("_in_step", default=False)
+
+logger = logging.getLogger(__name__)
 
 task_queue = Queue("druks_tasks")
 
@@ -464,7 +467,7 @@ class _Task:
             @DBOS.scheduled(every)
             @DBOS.workflow(name=f"{self.name}.scheduled")
             async def _scheduled_entry(scheduled_at: datetime, started_at: datetime | None) -> None:
-                await self._run({})
+                await _enqueue_unless_active(task_queue, self.name, self._entry, {})
 
             self._scheduled_entry = _scheduled_entry
 
@@ -1151,7 +1154,23 @@ async def _run_instance(
         await instance._reap_run()
 
 
-async def _dispatch_instance(cls: type[Workflow], _context: dict[str, Any] | None = None) -> Any:
+async def _enqueue_unless_active(
+    queue: Queue, name: str, entry: Callable[..., Any], *args: Any
+) -> None:
+    # One run of a scheduled kind at a time. DBOS holds the slot while a run is
+    # enqueued or pending and frees it at the terminal outcome, so the tick that
+    # finds it held gets the live run's handle and starts nothing.
+    workflow_id = str(uuid7())
+    with (
+        SetWorkflowID(workflow_id),
+        SetEnqueueOptions(deduplication_id=name, duplication_policy="return-existing"),
+    ):
+        handle = await queue.enqueue_async(entry, *args)
+    if handle.workflow_id != workflow_id:
+        logger.info("%s tick skipped: run %s is still active", name, handle.workflow_id)
+
+
+async def _dispatch_instance(cls: type[Workflow]) -> Any:
     # The cron tick runs no workflow of its own kind — no Run row — it just calls
     # dispatch(), which start()s the real subject-backed run. Body level, not a
     # step: DBOS only allows the child-start inside start() from a workflow body.
@@ -1171,5 +1190,8 @@ def _register_entry(cls: type[Workflow]) -> None:
     cls._entry = staticmethod(_entry)  # type: ignore[assignment]
 
     if cls.every:
-        fire = _dispatch_instance if getattr(cls, "dispatch", None) else _run_instance
-        register_schedule(cls, partial(fire, cls))
+        if getattr(cls, "dispatch", None):
+            fire = partial(_dispatch_instance, cls)
+        else:
+            fire = partial(_enqueue_unless_active, run_queue, cls.kind, cls._entry, None, {})
+        register_schedule(cls, fire)

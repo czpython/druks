@@ -55,15 +55,13 @@ def init_dbos() -> None:
     _initialized = True
 
 
-def register_schedule(
-    cls: "type[Workflow]", run: Callable[[dict[str, Any]], Awaitable[Any]]
-) -> None:
+def register_schedule(cls: "type[Workflow]", run: Callable[[], Awaitable[Any]]) -> None:
     # The scheduled entry must satisfy DBOS's ScheduledWorkflow signature exactly
     # — DBOS invokes it as fn(scheduled_at, context) — or the cron silently never
-    # fires. A cron carries no subject (a framework run), so run() gets no kwargs.
+    # fires. A cron carries no subject (a framework run), so run() gets no arguments.
     @DBOS.workflow(name=f"{cls.kind}.scheduled")
     async def _sched_entry(_scheduled_at: datetime, context: dict[str, Any] | None = None) -> None:
-        await run(context or {})
+        await run()
 
     _scheduled.append((cls, _sched_entry))
 

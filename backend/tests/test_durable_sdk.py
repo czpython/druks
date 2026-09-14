@@ -68,6 +68,7 @@ class ReviewResult(AgentOutput):
 
 
 SINK: list[str] = []
+SLOW_TASK_RELEASE = asyncio.Event()
 TASK_RETRY_ATTEMPTS = 0
 STEP_RETRY_ATTEMPTS = 0
 
@@ -101,6 +102,12 @@ def _build_units():
     @task(every="0 6 * * *")
     async def scheduled_task() -> None:
         SINK.append("task:scheduled")
+
+    @task(every="0 5 * * *")
+    async def slow_task() -> None:
+        SINK.append("slow_task:started")
+        await SLOW_TASK_RELEASE.wait()
+        SINK.append("slow_task:finished")
 
     class Approve(Gate):
         # The on_wait override is what lets the subjectless flows below park
@@ -194,6 +201,14 @@ def _build_units():
         async def run(self) -> None:  # pragma: no cover - not fired in tests
             SINK.append("swept")
 
+    class SlowSweep(Workflow):
+        # A subjectless cron whose run outlives the next tick.
+        every = "0 5 * * *"
+
+        async def run_multistep(self) -> None:
+            await Approve.wait()
+            SINK.append("slow:swept")
+
     class ScheduledDispatch(Workflow):
         # every + a dispatch() classmethod: the tick fires dispatch(), never the
         # subjectless run(). dispatch() start()s for real — the enqueue must work
@@ -284,12 +299,14 @@ def _build_units():
         AttributedFlow,
         AnnounceFlow,
         ScheduledDispatch,
+        SlowSweep,
         RetryingStepFlow,
         EnqueueInStepFlow,
         ParentFlow,
         record_task,
         retry_task,
         scheduled_task,
+        slow_task,
     )
 
 
@@ -351,12 +368,14 @@ async def rt():
         attributed_flow,
         announce_flow,
         scheduled_dispatch,
+        slow_sweep,
         retrying_step_flow,
         enqueue_in_step_flow,
         parent_flow,
         record_task,
         retry_task,
         scheduled_task,
+        slow_task,
     ) = _build_units()
     os.environ["DRUKS_DATABASE_URL"] = URL
     init_dbos()
@@ -377,12 +396,14 @@ async def rt():
             AttributedFlow=attributed_flow,
             AnnounceFlow=announce_flow,
             ScheduledDispatch=scheduled_dispatch,
+            SlowSweep=slow_sweep,
             RetryingStepFlow=retrying_step_flow,
             EnqueueInStepFlow=enqueue_in_step_flow,
             ParentFlow=parent_flow,
             record_task=record_task,
             retry_task=retry_task,
             scheduled_task=scheduled_task,
+            slow_task=slow_task,
         )
     finally:
         shutdown()
@@ -404,6 +425,7 @@ async def rt():
         workflows._items.pop("attributed_flow", None)
         workflows._items.pop("announce_flow", None)
         workflows._items.pop("scheduled_dispatch", None)
+        workflows._items.pop("slow_sweep", None)
         workflows._items.pop("retrying_step_flow", None)
         workflows._items.pop("enqueue_in_step_flow", None)
         workflows._items.pop("child_flow", None)
@@ -420,6 +442,15 @@ async def _state(engine, workflow_id: str) -> Run | None:
         return await session.get(Run, workflow_id)
     finally:
         await session.close()
+
+
+async def _wait_until(predicate, timeout=15.0):
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(0.1)
+    raise AssertionError("timed out")
 
 
 async def _wait_for(engine, workflow_id, predicate, timeout=15.0):
@@ -900,7 +931,59 @@ async def test_scheduled_task_runs_nullary_body(rt):
 
     SINK.clear()
     await rt.scheduled_task._scheduled_entry(datetime.now(UTC), None)
-    assert "task:scheduled" in SINK
+    await _wait_until(lambda: "task:scheduled" in SINK)
+
+
+async def test_scheduled_task_tick_skips_while_the_previous_task_runs(rt):
+    from datetime import UTC, datetime
+
+    SINK.clear()
+    SLOW_TASK_RELEASE.clear()
+    await rt.slow_task._scheduled_entry(datetime.now(UTC), None)
+    await _wait_until(lambda: SINK.count("slow_task:started") == 1)
+    await rt.slow_task._scheduled_entry(datetime.now(UTC), None)
+    await asyncio.sleep(0.5)
+    assert SINK.count("slow_task:started") == 1
+
+    SLOW_TASK_RELEASE.set()
+    await _wait_until(lambda: "slow_task:finished" in SINK)
+    await rt.slow_task._scheduled_entry(datetime.now(UTC), None)
+    await _wait_until(lambda: SINK.count("slow_task:started") == 2)
+
+
+async def test_scheduled_tick_skips_while_the_previous_run_is_active(rt):
+    from datetime import UTC, datetime
+
+    from druks.durable.engine import _scheduled
+
+    _, fn = next(row for row in _scheduled if row[0].kind == "slow_sweep")
+    await fn(datetime.now(UTC), None)
+    await fn(datetime.now(UTC), None)
+
+    async def sweeps():
+        session = get_session(rt.engine)
+        try:
+            return list((await session.scalars(select(Run).where(Run.kind == "slow_sweep"))).all())
+        finally:
+            await session.close()
+
+    deadline = asyncio.get_event_loop().time() + 15
+    while asyncio.get_event_loop().time() < deadline:
+        runs = await sweeps()
+        if runs and runs[0].state == RunState.PARKED:
+            break
+        await asyncio.sleep(0.1)
+    assert [run.state for run in runs] == [RunState.PARKED]
+
+    await runs[0].resume(action="go")
+    await _wait_for(rt.engine, runs[0].id, lambda row: row.state == RunState.FINISHED)
+    await fn(datetime.now(UTC), None)
+    deadline = asyncio.get_event_loop().time() + 15
+    while asyncio.get_event_loop().time() < deadline:
+        if len(await sweeps()) == 2:
+            break
+        await asyncio.sleep(0.1)
+    assert len(await sweeps()) == 2
 
 
 async def test_scheduled_task_must_be_nullary(rt):

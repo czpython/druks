@@ -345,7 +345,8 @@ class Sweep(Workflow):
 ```
 
 The tick fires the workflow's body with no subject and no input, so every body
-parameter needs a default. A workflow whose runs are *about* something (it
+parameter needs a default. A tick that finds the previous tick's run still
+enqueued or running starts nothing. A workflow whose runs are *about* something (it
 declares a `subject`) must not start that way. Give it a `dispatch()` classmethod
 and the schedule fires that instead — it resolves the subject and starts the
 real run:
@@ -396,7 +397,8 @@ and never reaches the timeline.
 
 It has no subject, gate, or operator settings.
 It cannot make agent calls. `every=` on a task is a fixed UTC cadence that the
-code owns. An operator can change only a workflow schedule, on the Schedules
+code owns. A tick that finds the previous tick's task still running starts
+nothing. An operator can change only a workflow schedule, on the Schedules
 page or in the app settings.
 `retries=` sets retries after the first attempt, both here and on `@step`.
 
