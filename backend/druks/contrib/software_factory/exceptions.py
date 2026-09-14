@@ -1,7 +1,8 @@
 from druks.api.exceptions import AgentApiError
+from druks.exceptions import DruksError
 
 
-class PrefixTakenError(Exception):
+class PrefixTakenError(DruksError):
     def __init__(self, name: str) -> None:
         super().__init__(
             f"Druks cannot derive an unused ticket prefix from project name {name!r}. "

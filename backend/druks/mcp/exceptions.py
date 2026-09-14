@@ -1,7 +1,8 @@
+from druks.exceptions import DruksError
 from druks.mcp.enums import IdentityMode
 
 
-class McpServerError(Exception):
+class McpServerError(DruksError):
     pass
 
 

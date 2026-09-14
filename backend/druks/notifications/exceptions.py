@@ -1,4 +1,7 @@
-class NotificationError(Exception):
+from druks.exceptions import DruksError
+
+
+class NotificationError(DruksError):
     pass
 
 

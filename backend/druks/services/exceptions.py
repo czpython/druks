@@ -1,4 +1,7 @@
-class ServiceNotConnectedError(Exception):
+from druks.exceptions import DruksError
+
+
+class ServiceNotConnectedError(DruksError):
     """No identity is connected for this service — the appliance has nothing to
     act as there. The message names the service so any refusal is actionable."""
 
@@ -9,12 +12,12 @@ class ServiceNotConnectedError(Exception):
         )
 
 
-class ServiceConnectError(Exception):
+class ServiceConnectError(DruksError):
     """A rejected connect. The message is authored by the service's ``verify``
     and safe to show; it never quotes anything the operator pasted."""
 
 
-class OauthPageError(Exception):
+class OauthPageError(DruksError):
     """A failure on a browser-navigated OAuth door — the connect and callback
     routes, whose failures render an operator page instead of the JSON envelope."""
 
@@ -23,7 +26,7 @@ class OauthPageError(Exception):
         self.status_code = status_code
 
 
-class OauthExchangeError(Exception):
+class OauthExchangeError(DruksError):
     """Completing an OAuth connect flow failed — an unknown or expired state,
     or a rejected code exchange. Nothing is stored on failure, so re-running
     the connect flow is always safe. ``context`` is the begun flow's stash
@@ -36,7 +39,7 @@ class OauthExchangeError(Exception):
         self.context = context
 
 
-class OauthRefreshError(Exception):
+class OauthRefreshError(DruksError):
     """Minting an access token from a stored grant failed — the provider
     rejected the refresh token, the token endpoint is unreachable, or a
     concurrent refresh never freed the lock. Re-connecting replaces the

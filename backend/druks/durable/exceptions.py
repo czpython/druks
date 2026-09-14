@@ -1,7 +1,9 @@
 from typing import Any, ClassVar
 
+from druks.exceptions import DruksError
 
-class FatalError(Exception):
+
+class FatalError(DruksError):
     """End the run as failed on purpose: the message becomes the run's recorded
     failure reason and the raise reaches DBOS as the terminal outcome. Raise
     this for a deliberate domain stop, so a reader can tell it from a crash."""
@@ -20,11 +22,11 @@ class FatalError(Exception):
         return {}
 
 
-class WorkflowError(Exception):
+class WorkflowError(DruksError):
     pass
 
 
-class AgentCallNotFound(Exception):
+class AgentCallNotFound(DruksError):
     def __init__(self, agent_call_id: str) -> None:
         super().__init__(f"No agent call {agent_call_id}.")
         self.agent_call_id = agent_call_id

@@ -1,4 +1,7 @@
-class FileError(Exception):
+from druks.exceptions import DruksError
+
+
+class FileError(DruksError):
     pass
 
 

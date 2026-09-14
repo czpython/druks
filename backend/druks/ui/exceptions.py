@@ -1,11 +1,14 @@
-class PageRouteError(Exception):
+from druks.exceptions import DruksError
+
+
+class PageRouteError(DruksError):
     """An app's pages cannot make a route table. Raised at declaration for a
     nested child, and at boot for two landing pages, a repeated page name,
     two routes a request cannot tell apart, a signature that does not match its
     route, or a navigation entry that is not a static top-level page."""
 
 
-class PageReadError(Exception):
+class PageReadError(DruksError):
     """A page could not be read. The message names the app and the page;
     whatever the app's own code said stays in the process log, because it can
     carry a query, a URL, or a credential."""

@@ -150,6 +150,6 @@ GitHub adds the pull request number.
   what the next line does. Do not add section-divider banner comments.
 - If the signature and body do not make a contract obvious, add a class, module,
   or function docstring.
-- Exception classes live in the package's `exceptions.py`, not in contracts or
-  models.
+- Exception classes live in the package's `exceptions.py` and subclass
+  `DruksError`, not in contracts or models.
 - Keep forward-looking notes in the issue tracker, not in source comments.

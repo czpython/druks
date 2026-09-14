@@ -1,7 +1,9 @@
 from typing import ClassVar
 
+from druks.exceptions import DruksError
 
-class AgentApiError(Exception):
+
+class AgentApiError(DruksError):
     # Base for the agent surface's wire errors: each subclass names its HTTP
     # status and stable code, serialized as the one {code, message, retryable}
     # response shape. Messages are authored for the caller — never tracebacks,

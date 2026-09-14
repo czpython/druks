@@ -1,4 +1,7 @@
-class SandboxError(Exception):
+from druks.exceptions import DruksError
+
+
+class SandboxError(DruksError):
     """Base for everything ``druks.sandbox`` raises out of its layer."""
 
 

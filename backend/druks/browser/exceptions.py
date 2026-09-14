@@ -2,9 +2,10 @@ from typing import ClassVar
 
 from druks.browser.constants import SESSION_SIGNED_OUT_SIGNAL
 from druks.durable.exceptions import FatalError
+from druks.exceptions import DruksError
 
 
-class BrowserApiError(Exception):
+class BrowserApiError(DruksError):
     # Raised from a browser route; the app maps it to this status with its
     # message as the detail, so routes stay a single line and never hand-map.
     status_code: ClassVar[int] = 500
@@ -27,7 +28,7 @@ class BrowserSessionAnonymousError(BrowserApiError):
         )
 
 
-class BrowserSessionNotReadyError(Exception):
+class BrowserSessionNotReadyError(DruksError):
     def __init__(self, name: str, status: str) -> None:
         super().__init__(f"Browser session {name!r} is {status}; log in before borrowing it.")
 
@@ -59,12 +60,12 @@ class BrowserExportError(BrowserApiError):
         super().__init__(f"Browser session {name!r} export failed: {detail}")
 
 
-class BrowserSessionWriterLockedError(Exception):
+class BrowserSessionWriterLockedError(DruksError):
     def __init__(self, session_id: str) -> None:
         super().__init__(f"Browser session {session_id!r} already has a persisting writer.")
 
 
-class BrowserClientMissingError(Exception):
+class BrowserClientMissingError(DruksError):
     def __init__(self, name: str) -> None:
         super().__init__(
             f"{name}.browser() drives the session with playwright, which the app "
@@ -79,6 +80,6 @@ class BrowserLoginWindowGoneError(BrowserApiError):
         super().__init__("This login window is no longer open.")
 
 
-class BrowserVncError(Exception):
+class BrowserVncError(DruksError):
     # A malformed VNC handshake on the bridge — the socket closes, no HTTP body.
     ...

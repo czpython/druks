@@ -1,24 +1,27 @@
-class AppConfigError(Exception):
+from druks.exceptions import DruksError
+
+
+class AppConfigError(DruksError):
     """An app's ``.druks`` config could not be parsed or validated.
 
     Raised at intake (and by push-time validation) so bad config fails
     loudly where the work starts instead of half-applying."""
 
 
-class SettingsDeclarationError(Exception):
+class SettingsDeclarationError(DruksError):
     """A ``Settings`` inner class declares a field the settings plane can't render or
     validate — e.g. a nested model. Raised at declaration (app/workflow subclass
     creation) so a bad settings shape fails loudly where it's written, not at the first
     operator PATCH."""
 
 
-class SubscriberDeclarationError(Exception):
+class SubscriberDeclarationError(DruksError):
     """A subscriber's signature asks for a routing key — one a filter matches on but
     no body is handed. Raised at declaration, so it fails on import instead of
     inside the durable step that publishes the signal."""
 
 
-class AppLoadError(Exception):
+class AppLoadError(DruksError):
     """An app could not be loaded, headlessly or at full boot. The concrete
     subclass names the failed stage; nothing raises this base directly."""
 

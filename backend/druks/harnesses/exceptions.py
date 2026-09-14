@@ -1,6 +1,8 @@
 from enum import StrEnum
 from typing import ClassVar
 
+from druks.exceptions import DruksError
+
 
 class Retry(StrEnum):
     # Spaced attempts now, once the quota window resets, or not at all.
@@ -9,7 +11,7 @@ class Retry(StrEnum):
     NEVER = "never"
 
 
-class HarnessError(Exception):
+class HarnessError(DruksError):
     # Recorded beside the message on the failed call and its run; "" means
     # unclassified, which is never retried.
     code: ClassVar[str] = ""
@@ -74,7 +76,7 @@ class HarnessSandboxProvisioningError(HarnessSandboxError):
     code = "sandbox_provisioning"
 
 
-class OAuthTokenError(Exception):
+class OAuthTokenError(DruksError):
     """No usable subscription is available.
 
     ``tag`` is a short, stable code surfaced on the usage snapshot's
@@ -88,7 +90,7 @@ class OAuthTokenError(Exception):
         self.tag = tag
 
 
-class GrantError(Exception):
+class GrantError(DruksError):
     """A token-refresh grant produced no usable grant. ``tag`` is the short,
     stable code recorded on the rotation report: ``network`` (request never
     completed), ``invalid_grant`` (provider revoked/rejected the refresh
@@ -100,7 +102,7 @@ class GrantError(Exception):
         self.tag = tag
 
 
-class ConnectError(Exception):
+class ConnectError(DruksError):
     """A connect flow could not complete — expired/single-use pending state, a
     paste with no code, a state mismatch, or a provider-rejected exchange. The
     message is user-facing (surfaced inline in the Settings card)."""
@@ -132,7 +134,7 @@ class HarnessFirstByteTimeoutError(HarnessError):
     retry_delays = (0, 0)
 
 
-class CatalogError(Exception):
+class CatalogError(DruksError):
     """A provider's model list could not be read. ``tag`` names why:
     ``network``, ``timeout``, ``unparseable``, ``unexpected_payload``,
     ``empty_list``, or ``http_<status>``."""

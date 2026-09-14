@@ -1,4 +1,7 @@
-class GitHubAppNotInstalledError(Exception):
+from druks.exceptions import DruksError
+
+
+class GitHubAppNotInstalledError(DruksError):
     """The GitHub App has no installation covering the repo — it was never
     installed there, the repo isn't in the installation's selected
     repositories, or the repo doesn't exist. The message names the repo so a
@@ -12,7 +15,7 @@ class GitHubAppNotInstalledError(Exception):
         self.repo = repo
 
 
-class LinearAPIError(Exception):
+class LinearAPIError(DruksError):
     """Raised when Linear's GraphQL endpoint returns a logical error.
 
     Distinct from ``httpx.HTTPError`` (transport / HTTP-status failures)
@@ -20,7 +23,7 @@ class LinearAPIError(Exception):
     """
 
 
-class JiraAPIError(Exception):
+class JiraAPIError(DruksError):
     """Jira REST returned a non-2xx response. Distinct from ``httpx.HTTPError``
     (transport) so callers can ``except (httpx.HTTPError, JiraAPIError)``."""
 
@@ -29,7 +32,7 @@ class JiraAPIError(Exception):
         self.status_code = status_code
 
 
-class UnknownTicketError(Exception):
+class UnknownTicketError(DruksError):
     """The tracker has no ticket under the given key. Each provider raises it
     from its own not-found signal, so callers can answer "that ticket doesn't
     exist" without knowing which provider spoke."""
