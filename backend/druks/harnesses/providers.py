@@ -57,9 +57,7 @@ _OPENAI_NON_CHAT_MARKERS = (
     "-instruct",
     "-embedding",
 )
-# The connect-flow pending state (PKCE verifier + state) lives in Redis this
-# long — enough to authorize and paste, short enough that an abandoned attempt
-# clears.
+# Long enough to authorize and paste, short enough that an abandoned connect clears.
 _CONNECT_PENDING_TTL_SECONDS = 600
 # Per-row refresh lock: five minutes outlives the token request timeout and
 # expires before the next 15-minute cron tick if the holder dies mid-refresh.
@@ -234,11 +232,10 @@ class Provider:
         margin: timedelta | None = None,
         except_host_id: str = "",
     ) -> RotationResult:
-        """Refresh one subscription's token when it is inside the expiry margin.
-        A Redis lock elects one refresher per row; the loser reports ``locked``
-        and never presents the refresh token a concurrent token request may have burned.
-        A refresh that succeeds requests a refresh for every live box on the
-        subscription, except ``except_host_id``, whose answer carries it."""
+        """Refresh one subscription's token when it is inside the expiry margin. A Redis
+        lock elects one refresher per row, and the loser reports ``locked``. A successful
+        refresh asks every live box except ``except_host_id`` to fetch again. A connect
+        or a Disconnect that commits during the grant request keeps its state."""
         moment = now or _utc_now()
         row = await VaultSecret.reload(subscription_id)
         if not row:
@@ -261,8 +258,7 @@ class Provider:
         if not await redis.set(lock_key, "1", nx=True, ex=_REFRESH_LOCK_TTL_SECONDS):
             return RotationResult(cls.id, "locked", subscription_id=subscription_id)
         try:
-            # Re-read after winning the lock: the previous holder may have
-            # advanced this lineage (or deleted the row) after our first read.
+            # The previous holder may have rotated or revoked the row since the first read.
             row = await VaultSecret.reload(subscription_id)
             if not row:
                 return RotationResult(
@@ -281,40 +277,44 @@ class Provider:
                 grant = await _post_grant(cls._TOKEN_URL, cls._grant_body(refresh_token))
                 new_expiry = cls._apply_refresh(data, grant, moment)
             except exceptions.GrantError as exc:
-                if exc.tag == "invalid_grant":
-                    # The provider revoked this row's refresh lineage;
-                    # presenting it again can never succeed. Drop only this
-                    # subscription so the provider reads as disconnected — the
-                    # UI shows Reconnect and the next tick has no row to hammer.
+                if exc.tag == "invalid_grant" and await cls._still_holds(row, refresh_token):
+                    # The provider revoked this refresh lineage, so presenting it again
+                    # can never succeed. Only this subscription disconnects.
                     await row.revoke("invalid_grant")
-                    await db_session().commit()
                     logger.warning(
                         "%s subscription %s auto-disconnected after invalid_grant; "
                         "reconnect to restore",
                         cls.id,
                         row.id,
                     )
+                await db_session().commit()
                 return RotationResult(cls.id, "failed", error=exc.tag, subscription_id=row.id)
             except ValueError:
                 return RotationResult(
                     cls.id, "failed", error="bad_response", subscription_id=row.id
                 )
 
-            await row.update_secrets(data, expires_at=new_expiry)
-            # The grant is externally anchored — the provider may have killed
-            # the old refresh token the moment it issued this one — so the new
-            # lineage must be committed before the lock releases; deferring to
-            # the step's own commit would let a concurrent refresher take the
-            # freed lock and re-present the superseded token.
+            if await cls._still_holds(row, refresh_token):
+                await row.update_secrets(data, expires_at=new_expiry)
+                # The provider may have killed the old refresh token when it issued this
+                # one. Commit before the lock releases, so no refresher presents the old one.
+                await db_session().commit()
+                # The rotation ended the value every box holds.
+                await sandbox_client.request_refreshes(row.id, except_host_id=except_host_id)
+                return RotationResult(
+                    cls.id, "refreshed", expires_at=new_expiry, subscription_id=row.id
+                )
             await db_session().commit()
-            # The refresh requests go out before the lock releases: a rotation
-            # ends the value every box on this subscription holds.
-            await sandbox_client.request_refreshes(row.id, except_host_id=except_host_id)
-            return RotationResult(
-                cls.id, "refreshed", expires_at=new_expiry, subscription_id=row.id
-            )
+            return RotationResult(cls.id, "failed", error="no_credentials", subscription_id=row.id)
         finally:
             await redis.delete(lock_key)
+
+    @classmethod
+    async def _still_holds(cls, row: VaultSecret, refresh_token: str) -> bool:
+        """Re-read the row and check that it is live and still holds ``refresh_token``.
+        A connect or a Disconnect can commit during the grant request."""
+        await db_session().refresh(row)
+        return row.is_live and cls._refresh_state(dict(row.secrets))[0] == refresh_token
 
     @classmethod
     def refresh_is_due(cls, subscription: VaultSecret) -> bool:
@@ -360,11 +360,9 @@ class Provider:
     async def fetch_usage(
         cls, subscription: VaultSecret, *, now: datetime | None = None
     ) -> ParsedUsage:
-        """Fetch + parse the subscription's remaining-quota snapshot, refreshing
-        the token once on a 401. A provider can revoke an access token
-        server-side while its JWT ``exp`` is still days out (a subscription
-        change does exactly this), so the 401 — not the stored expiry — is what
-        says the token is dead."""
+        """Fetch and parse the subscription's remaining quota, refreshing the token once
+        on a 401. A provider can revoke a token whose JWT ``exp`` is days away, so the
+        401 decides that the token is dead, not the stored expiry."""
         parsed = await cls._usage_snapshot(subscription, now=now)
         if parsed.error != "unauthorized":
             return parsed
@@ -620,7 +618,7 @@ def _b64url(raw: bytes) -> str:
 
 
 def _parse_pasted(raw: str) -> tuple[str | None, str | None]:
-    """Pull (code, state) out of whatever the operator pasted — a bare code, a
+    """Pull (code, state) out of what the operator pasted: a bare code, a
     ``code#state`` pair, a raw query string, or a full redirect URL."""
     value = raw.strip().strip("'\"")
     if not value:
@@ -892,9 +890,8 @@ def _parse_iso(value: object) -> datetime | None:
 OPENAI_AUTH_CLAIM = "https://api.openai.com/auth"
 _OPENAI_PROFILE_CLAIM = "https://api.openai.com/profile"
 
-# ChatGPT subscription usage endpoint — the standalone fetch the codex CLI's
-# account/rateLimits/read RPC uses for the ``chatgpt`` auth app. Returns the
-# same numbers /status shows without a completion.
+# The endpoint behind the codex CLI's account/rateLimits/read RPC. It returns the
+# numbers /status shows, without a completion.
 _CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 _CODEX_USER_AGENT = "codex-cli"
 
@@ -1054,9 +1051,8 @@ class OpenAiProvider(Provider):
         except (AttributeError, KeyError, TypeError, ValueError):
             return ParsedUsage(ok=False, error="unexpected_payload", plan_tier=plan, raw=raw)
         if not five_hour and not weeks:
-            # Business/enterprise accounts with unlimited credits carry
-            # ``rate_limit: null`` — no windows is the expected shape, not
-            # a parse failure. Report permanently-full buckets.
+            # Accounts with unlimited credits carry ``rate_limit: null``. Report full
+            # buckets, not a parse failure.
             credits = data.get("credits")
             if isinstance(credits, dict) and credits.get("unlimited"):
                 full = ParsedMetric(percent_left=100, resets_at=None)
@@ -1120,8 +1116,8 @@ class OpenAiProvider(Provider):
             raise exceptions.CatalogError("unexpected_payload") from exc
         if models:
             return models
-        # A 200 with nothing selectable is what a stale-low client_version
-        # produces — never let it read as "no models".
+        # A stale client_version gets a 200 with nothing selectable. It must not read
+        # as "no models".
         raise exceptions.CatalogError("empty_list")
 
 

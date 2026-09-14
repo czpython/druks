@@ -198,18 +198,70 @@ async def test_the_refresh_time_survives_revocation_until_a_reconnect(monkeypatc
     assert not (await _seed_claude(access="fresh")).last_refreshed_at
 
 
-async def test_a_refresh_that_a_revoke_overtakes_records_no_time(monkeypatch, druks_db):
-    connection = await _seed_claude(expires_at=_NOW - timedelta(minutes=1))
+_GRANT_ANSWERS = [
+    _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 28800}),
+    _resp(400, {"error": "invalid_grant"}),
+]
+
+
+def _mock_post_that_writes(monkeypatch, response, subscription_id: str, **values) -> list[str]:
+    urls = []
+
+    async def fake_post(self, url, **_kwargs):
+        urls.append(url)
+        # Another session's write, so the rotation's row object stays stale.
+        await db_session().execute(
+            update(VaultSecret)
+            .where(VaultSecret.id == subscription_id)
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        return response
+
+    monkeypatch.setattr(pbase.httpx.AsyncClient, "post", fake_post)
+    return urls
+
+
+@pytest.mark.parametrize("response", _GRANT_ANSWERS, ids=["granted", "invalid_grant"])
+async def test_a_reconnect_during_the_grant_request_keeps_its_token(
+    monkeypatch, druks_db, response
+):
+    connection = await _seed_claude(refresh="R0", expires_at=_NOW - timedelta(minutes=1))
     connection_id = connection.id
+    await _bound_identity(connection, host_id="host-a", run_id="run-a")
+    reconnected = _claude_payload(access="reconnected", refresh="R9")
+    urls = _mock_post_that_writes(monkeypatch, response, connection_id, secrets=reconnected)
 
-    async def revoke_then_grant(self, url, **_kwargs):
-        await connection.revoke("user")
-        return _resp(200, {"access_token": "new", "expires_in": 3600})
+    result = await AnthropicProvider.rotate_token(connection_id, now=_NOW)
 
-    monkeypatch.setattr(pbase.httpx.AsyncClient, "post", revoke_then_grant)
-    await AnthropicProvider.rotate_token(connection_id, now=_NOW)
+    assert result.action == "failed"
+    assert urls == [AnthropicProvider._TOKEN_URL]
     db_session().expunge_all()
-    assert not (await VaultSecret.get(connection_id)).last_refreshed_at
+    row = await VaultSecret.get(connection_id)
+    assert row.is_live
+    assert dict(row.secrets) == reconnected
+
+
+@pytest.mark.parametrize("response", _GRANT_ANSWERS, ids=["granted", "invalid_grant"])
+async def test_a_disconnect_during_the_grant_request_stays_a_disconnect(
+    monkeypatch, druks_db, response
+):
+    connection = await _seed_claude(refresh="R0", expires_at=_NOW - timedelta(minutes=1))
+    connection_id = connection.id
+    await _bound_identity(connection, host_id="host-a", run_id="run-a")
+    urls = _mock_post_that_writes(
+        monkeypatch, response, connection_id, revoked_at=_NOW, revoked_reason="user", secrets={}
+    )
+
+    result = await AnthropicProvider.rotate_token(connection_id, now=_NOW)
+
+    assert result.action == "failed"
+    assert urls == [AnthropicProvider._TOKEN_URL]
+    db_session().expunge_all()
+    row = await VaultSecret.get(connection_id)
+    assert row.revoked_reason == "user"
+    assert not row.last_refreshed_at
+    assert not dict(row.secrets)
 
 
 async def test_claude_network_error_keeps_row(monkeypatch, druks_db):
