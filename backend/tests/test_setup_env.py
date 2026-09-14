@@ -490,6 +490,25 @@ def test_a_hosted_install_keeps_the_internal_issuer_url(tmp_path, monkeypatch):
     settings = Settings()
 
     assert settings.sandbox.issuer_url == "http://127.0.0.1:8001"
+    assert "DRUKS_ISSUER_HOST" not in read_env(env_path)
+
+
+def test_a_remote_issuer_url_renders_the_issuer_listener(tmp_path):
+    env_path = tmp_path / ".env"
+
+    _run(
+        env_path,
+        set_values=(
+            "sandbox.proxy_url=http://100.64.0.10:8880",
+            "sandbox.issuer_url=http://100.64.0.10:8001",
+            "sandbox.exe.EXE_API_TOKEN=exe-token",
+            "sandbox.exe.TAILSCALE_TAILNET=tail.ts.net",
+        ),
+    )
+
+    values = read_env(env_path)
+    assert values["DRUKS_ISSUER_HOST"] == "http://100.64.0.10:8001"
+    assert values["DRUKS_ISSUER_BIND_HOST"] == "100.64.0.10"
 
 
 def test_exe_shape_requires_the_proxy_address(tmp_path):

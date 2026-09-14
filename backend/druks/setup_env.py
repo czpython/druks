@@ -36,6 +36,8 @@ _OWNED_ENV_KEYS = frozenset(
         "DRUKS_UPSTREAM",
         "DRUKS_HARNESS_CONFIG_ROOT",
         "DRUKS_WEBHOOK_HOST",
+        "DRUKS_ISSUER_HOST",
+        "DRUKS_ISSUER_BIND_HOST",
         "DATABASE_URL",
         "REDIS_URL",
         "DRUKS_AUTH_HEADER",
@@ -203,8 +205,8 @@ image = ""
 # names the address of this host that its sandboxes reach, for example the
 # tailnet address on exe. docker-sbx runs no proxy and leaves it empty.
 proxy_url = ""
-# The issuer base URL the secrets exchange dials. It defaults to the web
-# process on the host loopback. Leave it empty unless web listens elsewhere.
+# The issuer base URL the secrets exchange dials; loopback web by default. For a
+# drukbox on another server, set the address of this host that drukbox reaches.
 issuer_url = ""
 # An HTTP proxy for the login window. The login then leaves from a different IP
 # than the box. Use it for sign-in flows that refuse the box IP. Examples:
@@ -392,6 +394,7 @@ def _render_env(
     # would replace that safe stop with a known token.
     service_tokens = _get_string(config, ("sandbox", "service_token"))
     proxy_url = _get_string(config, ("sandbox", "proxy_url"))
+    issuer_url = _get_string(config, ("sandbox", "issuer_url"))
 
     sections = (
         (
@@ -408,6 +411,9 @@ def _render_env(
                 ),
                 ("DRUKS_UPSTREAM", "127.0.0.1:8001"),
                 ("DRUKS_WEBHOOK_HOST", _get_string(config, ("urls", "webhook_host"))),
+                ("DRUKS_ISSUER_HOST", issuer_url),
+                # The issuer listener binds the address drukbox dials and nothing else.
+                ("DRUKS_ISSUER_BIND_HOST", urlsplit(issuer_url).hostname or ""),
                 ("DATABASE_URL", "sqlite+aiosqlite:////data/drukbox.db"),
                 ("REDIS_URL", "redis://127.0.0.1:6379/2"),
             ),

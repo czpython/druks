@@ -233,9 +233,10 @@ authentication. Keep the listener on loopback. Never publish it.
 
 A public listener that bypasses the identity edge must not forward the
 configured identity header. The shipped webhook listener serves only
-provider-authenticated `/_external/*` and PAT-authenticated `/mcp` routes. These
-routes do not resolve the header. A future public listener must keep the same
-isolation.
+provider-authenticated `/_external/*` and PAT-authenticated `/mcp` routes. The
+issuer listener serves only the `/api/secrets/*` route, which authenticates the
+sandbox's identity bearer. These routes do not resolve the header. A future
+public listener must keep the same isolation.
 
 Public `POST /_external/*` routes bypass the identity gate and use their own
 authentication. Webhooks use signature validation. The notification response
@@ -508,7 +509,7 @@ before provisioning a VM if its selected credential is missing.
 | `sandbox.timeout` | Control-plane request timeout. The default is 180 seconds |
 | `sandbox.image` | Optional provider image override |
 | `sandbox.proxy_url` | The secrets proxy, at the address a sandbox dials. The docker shape sets `http://172.17.0.1:8880`. docker-sbx leaves it empty |
-| `sandbox.issuer_url` | The issuer base URL the secrets exchange dials. The default is `http://127.0.0.1:8001` on every shape. Only an explicit value changes it |
+| `sandbox.issuer_url` | The issuer base URL the secrets exchange dials. The default is `http://127.0.0.1:8001`. For a Drukbox on another server, set the address of the Druks host that Drukbox reaches. The installer then serves the issuer route there ([the issuer listener](deployment.md#the-issuer-listener)) |
 | `sandbox.browser_login_proxy` | Login-window egress proxy. An empty value keeps the box IP |
 | `sandbox.browser_login_tz` | Login-window timezone (IANA zone). An empty value keeps the container default |
 

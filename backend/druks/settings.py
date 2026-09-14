@@ -128,7 +128,7 @@ class Sandbox(BaseModel):
     # Empty → drukbox decides.
     image: str = ""
     # The issuer base URL the secrets exchange dials: the web process on the
-    # host loopback. Only an explicit value changes it.
+    # host loopback, or the Caddy issuer listener for a drukbox on another server.
     issuer_url: str = "http://127.0.0.1:8001"
     # The browser home: browser containers boot on this provider with this image.
     browser_sandbox_provider: str = "docker"

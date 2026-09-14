@@ -110,3 +110,24 @@ http://:8000 {
 		respond 404
 	}
 }
+
+# The issuer listener for a drukbox on another server, at [sandbox].issuer_url.
+# Serves the identity-bearer-authenticated GET /api/secrets/* and nothing else;
+# nothing here resolves DRUKS_AUTH_HEADER. Unset → an inert loopback listener.
+{$DRUKS_ISSUER_HOST:http://127.0.0.1:8082} {
+	bind {$DRUKS_ISSUER_BIND_HOST:127.0.0.1}
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+	@secrets {
+		method GET
+		path /api/secrets/*
+	}
+	handle @secrets {
+		reverse_proxy {$DRUKS_UPSTREAM}
+	}
+	handle {
+		respond 404
+	}
+}

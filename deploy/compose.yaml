@@ -191,6 +191,10 @@ services:
       # The addresses where Caddy serves the webhook host. The default is
       # every interface. Set one address to keep the other addresses free.
       DRUKS_WEBHOOK_BIND_HOST: ${DRUKS_WEBHOOK_BIND_HOST:-0.0.0.0 ::}
+      # The issuer listener for a drukbox on another server, rendered from
+      # [sandbox].issuer_url. Empty collapses to an inert loopback default.
+      DRUKS_ISSUER_HOST: ${DRUKS_ISSUER_HOST:-http://127.0.0.1:8082}
+      DRUKS_ISSUER_BIND_HOST: ${DRUKS_ISSUER_BIND_HOST:-127.0.0.1}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

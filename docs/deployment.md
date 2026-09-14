@@ -202,8 +202,9 @@ sandbox with secrets installs the certificate at boot and trusts the proxy for
 the hosts with a registered secret. No service in the deployment uses that CA.
 The exchange fetches an issuer value from the Druks web process at
 `[sandbox].issuer_url`, `http://127.0.0.1:8001` on every shape, over plain
-HTTP on the host loopback. The API and the exchange trust no extra CA. There
-is no public issuer route.
+HTTP on the host loopback. The API and the exchange trust no extra CA. A
+Drukbox on another server reaches the issuer route through
+[the issuer listener](#the-issuer-listener).
 
 A subscription token is such a value. The issuer route is
 `GET /api/secrets/<identity id>/<name>`. It authenticates the sandbox's
@@ -229,6 +230,25 @@ installer generates `[secrets].drukbox_secrets_key` and renders it as
 An install from before these services has `SECRETS_KEY` in `[env]` or in
 `[sandbox.<provider>]`. Move that value to `[secrets].drukbox_secrets_key`,
 set `[sandbox].proxy_url`, and run the installer again.
+
+### The issuer listener
+
+A Drukbox on another server fetches each value from the Druks instance that
+owns it, at the issuer URL on the secret. The web process binds loopback, so
+Caddy serves the issuer route at a configured address:
+
+1. Set `[sandbox].issuer_url` to the address of the Druks host that Drukbox
+   reaches, for example `http://100.64.0.5:8001` on the tailnet.
+2. Run the installer again.
+
+The installer renders `DRUKS_ISSUER_HOST` and `DRUKS_ISSUER_BIND_HOST` from
+that value. Caddy binds that address and serves only `GET /api/secrets/*`. It
+answers 404 for every other path. The route authenticates the sandbox's
+identity bearer. Nothing served there resolves the identity header. On the
+tailnet, the policy needs one grant from the Drukbox host to the Druks host on
+that port. The listener is plain HTTP. Give it an address that only the
+tailnet or a private network reaches. Leave `[sandbox].issuer_url` empty for a
+local Drukbox: the exchange reaches web on loopback.
 
 ## Update / redeploy
 
