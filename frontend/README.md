@@ -30,8 +30,10 @@ runs lint, tests, and build for PRs into `main` and `codex/` stack branches.
 
 `src/components/Page.tsx` owns page width, outer spacing, and scrolling. Use
 `<Page inset>` for a page with outer spacing. Use the shared `--page-gutter`
-for full-width list headers and rows. Do not cap or center a page body in
-page-specific CSS. Individual controls, forms, and prose can limit their width.
+for full-width list headers and rows. The Dashboard is the only page that
+centers its body and limits it to 1040px in `src/dashboard.css`. Other page
+bodies fill the available width. Individual controls, forms, and prose can
+limit their width.
 
 `DetailLayout` owns the detail rail and main pane. Its `railWidth` prop sets
 the desktop rail width. The shared CSS stacks the panes on narrow screens.
