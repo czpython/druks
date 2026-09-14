@@ -123,6 +123,13 @@ npm --prefix frontend run build
 The PR workflows in `.github/workflows/on-pull-request-*.yml` are the source of
 truth for CI, including the proof-app install phase.
 
+## Commits
+
+Use `<linear-ticket> -- <commit-msg>` for each commit message, for example
+`DRU-547 -- Deliver GitHub MCP to review workspaces`. If no Linear ticket
+exists, use only `<commit-msg>`. Do not add an issue or pull request number.
+GitHub adds the pull request number.
+
 ## Documentation discipline
 
 - Put product behavior, setup, operations, troubleshooting, and app author
