@@ -1383,7 +1383,7 @@ fixtures directly without a `conftest.py` or `pytest_plugins` declaration:
 | `druks_db` | A SQLAlchemy `AsyncSession` bound to a per-test transaction. Commits become savepoints, and teardown rolls the outer transaction back. |
 | `druks_client` | An authenticated `TestClient` with installed apps mounted, sharing `druks_db`'s connection. |
 | `druks_redis` | The test Redis database, flushed before the test. |
-| `druks_without_dispatch` | Workflow starts and run-phase writes become no-ops, for tests that stand up no durable engine. |
+| `druks_without_dispatch` | Workflow starts and run-phase writes become no-ops and a run-phase read finds no phase, for tests that stand up no durable engine. |
 | `druks_without_remote_config` | Every `.druks` namespace lookup misses, so prompts resolve to bundled templates and config to its declared defaults. |
 
 The fixtures are not autouse. A test that requests `druks_client` also gets
