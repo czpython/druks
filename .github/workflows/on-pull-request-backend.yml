@@ -13,9 +13,19 @@ permissions:
 
 jobs:
   backend:
+    # Branch protection requires the "backend" check, so the 3.11 job keeps that name.
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     # A stalled await must terminate before the runner limit.
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            python-version: "3.11"
+          - name: backend (3.14)
+            python-version: "3.14"
     # Test services use druks.testing defaults and never the runtime database.
     services:
       postgres:
@@ -46,7 +56,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
       - run: uv sync --locked --dev
       - run: uv run ruff check backend
       # The proof app is a standalone distribution that depends on druks;

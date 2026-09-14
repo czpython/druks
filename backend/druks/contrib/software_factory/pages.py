@@ -138,7 +138,7 @@ async def board(
         updated_since = Base.utc_now() - timedelta(days=7)
     elif updated == "month":
         updated_since = Base.utc_now() - timedelta(days=30)
-    projects = await Project.list()
+    projects = await Project.list_all()
     repos = await ProjectRepo.list_all()
     accounts = await Account.list_all()
     account_names = {account.id: account.username for account in accounts}

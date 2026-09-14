@@ -81,7 +81,7 @@ class Project(Base):
         return (await db_session().scalars(stmt)).first()
 
     @classmethod
-    async def list(cls) -> list["Project"]:
+    async def list_all(cls) -> list["Project"]:
         return list(await db_session().scalars(select(cls).order_by(cls.name)))
 
     @classmethod
