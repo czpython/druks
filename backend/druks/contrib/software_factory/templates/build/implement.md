@@ -72,7 +72,6 @@ Stage only the paths your implementation changed; explicit staging is what keeps
 The PR body carries the plan block — the plan document reviewers review the diff against. The block is exactly these lines, in order:
 
 - `<!-- Plan authored by Druks. Reviews, evaluations, and the full audit trail live in the Druks dashboard, not here. -->`
-- `**Ticket:** [<ticket ref>](<url>)` when the ticket has a URL.
 - `## Plan` — the approved plan markdown (the **Current plan** section above), verbatim. Copy only that section: it stops at the end of `## Current plan` and does NOT include the prompt's rendered `## Acceptance criteria`.
 - `## Acceptance Criteria` — `- <id>: <description>` bullets, an indented `- Verification: <how>` when one is specified. This bullet section is the one place the acceptance criteria appear; do not also fold them into `## Plan`.
 - `<!-- End of the Druks plan. -->`
