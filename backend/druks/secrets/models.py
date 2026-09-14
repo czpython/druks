@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import ColumnElement, ForeignKey, Index, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy_encrypted_field import EncryptedJsonField
 
@@ -340,11 +341,17 @@ class VaultSecret(Base, Uuid7Pk):
         )
         await db_session().refresh(self)
 
-    async def revoke(self, reason: str = "") -> None:
-        self.revoked_at = self.revoked_at or Base.utc_now()
+    async def revoke(self, reason: str = "", *, session: AsyncSession) -> None:
+        """Revoke in ``session``. A repeat revoke keeps the first stamp."""
+        now = Base.utc_now()
+        await session.execute(
+            update(VaultSecret)
+            .where(VaultSecret.id == self.id, VaultSecret.revoked_at.is_(None))
+            .values(revoked_at=now, revoked_reason=reason, secrets={})
+        )
+        self.revoked_at = self.revoked_at or now
         self.revoked_reason = self.revoked_reason or reason
         self.secrets = {}
-        await db_session().flush()
 
     async def issue_token(self, resource: str, *, host_id: str = "") -> tuple[str, datetime | None]:
         """The token a box fetches, and its expiry. A rotation skips the refresh

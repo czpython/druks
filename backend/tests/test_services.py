@@ -555,7 +555,7 @@ async def test_with_scopes_declares_the_union_and_reads_connections(declared_ser
     assert not await NightWatch.acme.get("missing")
 
     # The handle serves live connections only; the revoked row survives.
-    await row.revoke("user")
+    await row.revoke("user", session=db_session())
     assert not await NightWatch.acme.list_for_account(None)
     assert not await NightWatch.acme.get(row.id)
     assert (await VaultSecret.get(row.id)).identity == {"email": "night@acme.test"}
@@ -650,6 +650,7 @@ def oauth_events(monkeypatch):
         events.append((name, kwargs))
 
     monkeypatch.setattr("druks.services.routes.publish", record)
+    monkeypatch.setattr("druks.services.oauth.publish", record)
     return events
 
 
@@ -740,6 +741,7 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
         published.append((name, kwargs))
 
     monkeypatch.setattr("druks.services.routes.publish", record)
+    monkeypatch.setattr("druks.services.oauth.publish", record)
     await close_client()
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
     with TestClient(configure_app_for_test(settings=settings)) as client:
@@ -819,7 +821,7 @@ async def test_fresh_sign_in_with_matching_identity_resurrects_revoked_connectio
         identity={"sub": "account-1"},
     )
     connection_id = connection.id
-    await connection.revoke("user")
+    await connection.revoke("user", session=db_session())
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
@@ -926,7 +928,7 @@ async def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_liv
         identity={"sub": "account-1"},
     )
     revoked_id = revoked.id
-    await revoked.revoke("user")
+    await revoked.revoke("user", session=db_session())
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
@@ -969,7 +971,7 @@ async def test_fresh_sign_in_without_the_declared_identity_fact_creates_a_new_co
         identity={"sub": "account-1"},
     )
     revoked_id = revoked.id
-    await revoked.revoke("user")
+    await revoked.revoke("user", session=db_session())
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
@@ -1005,6 +1007,7 @@ async def test_fresh_sign_in_after_revoke_creates_a_new_connection(
         published.append((name, kwargs))
 
     monkeypatch.setattr("druks.services.routes.publish", record)
+    monkeypatch.setattr("druks.services.oauth.publish", record)
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
     with TestClient(configure_app_for_test(settings=settings)) as client:
 
@@ -1060,6 +1063,7 @@ async def test_reconsent_returns_a_revoked_connection_to_life(
         published.append((name, kwargs))
 
     monkeypatch.setattr("druks.services.routes.publish", record)
+    monkeypatch.setattr("druks.services.oauth.publish", record)
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
     with TestClient(configure_app_for_test(settings=settings)) as client:
         consent = client.get("/api/oauth/acme/connect", follow_redirects=False)
@@ -1106,6 +1110,7 @@ async def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch
         published.append((name, kwargs))
 
     monkeypatch.setattr("druks.services.routes.publish", record)
+    monkeypatch.setattr("druks.services.oauth.publish", record)
     me = await Account.get_or_create("op@example.com")
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         row = await VaultSecret.connect(
@@ -1156,6 +1161,7 @@ async def test_replacing_the_client_credentials_revokes_its_connections(
         published.append((name, kwargs))
 
     monkeypatch.setattr("druks.services.routes.publish", record)
+    monkeypatch.setattr("druks.services.oauth.publish", record)
     row = await VaultSecret.connect(
         Audience.service("acme"), account_id=None, refresh_token="rt-old", scopes=[]
     )

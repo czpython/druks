@@ -5,6 +5,7 @@ from druks.accounts.context import current_account_id
 from druks.accounts.dependencies import current_session_account
 from druks.apps.registry import services
 from druks.core.templates import render_page
+from druks.database import db_session
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.services.exceptions import (
@@ -60,13 +61,7 @@ async def connect_service(slug: str, payload: dict[str, str]) -> ServiceResponse
         # revoke every live one; the consents stay on record.
         client = OauthClient(provider=slug)
         for connection in await VaultSecret.list_connections(Audience.service(slug)):
-            await client.disconnect(connection, reason="client_replaced")
-            await publish(
-                "oauth.disconnected",
-                provider=slug,
-                connection_id=connection.id,
-                account_id=connection.account_id,
-            )
+            await client.disconnect(connection, reason="client_replaced", session=db_session())
     return ServiceResponse.from_row(service, row)
 
 
@@ -187,10 +182,6 @@ async def disconnect_connection(connection_id: str) -> None:
     if row.revoked_at:
         # Revoking is idempotent — the second delete finds the state true.
         return
-    await OauthClient(provider=row.audience_name).disconnect(row, reason="user")
-    await publish(
-        "oauth.disconnected",
-        provider=row.audience_name,
-        connection_id=row.id,
-        account_id=row.account_id,
+    await OauthClient(provider=row.audience_name).disconnect(
+        row, reason="user", session=db_session()
     )

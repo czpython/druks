@@ -203,7 +203,7 @@ async def test_a_refresh_that_a_revoke_overtakes_records_no_time(monkeypatch, dr
     connection_id = connection.id
 
     async def revoke_then_grant(self, url, **_kwargs):
-        await connection.revoke("user")
+        await connection.revoke("user", session=db_session())
         return _resp(200, {"access_token": "new", "expires_in": 3600})
 
     monkeypatch.setattr(pbase.httpx.AsyncClient, "post", revoke_then_grant)
@@ -408,7 +408,7 @@ async def test_disconnect_removes_only_the_addressed_login(druks_db):
     mine = await _seed_claude(provider_email="a@example.com")
     other = await _seed_claude(provider_email="b@example.com")
 
-    await mine.revoke("user")
+    await mine.revoke("user", session=db_session())
 
     assert await VaultSecret.reload(other.id)
     # Another account's subscription never stands in.
@@ -419,7 +419,7 @@ async def test_disconnect_removes_only_the_addressed_login(druks_db):
 async def test_reconnect_restores_execution(druks_db):
     mine = await _seed_claude(provider_email="a@example.com")
     account_id = mine.account_id
-    await mine.revoke("user")
+    await mine.revoke("user", session=db_session())
     with pytest.raises(HarnessNotConnectedError):
         await AnthropicProvider.get_subscription(account_id)
 

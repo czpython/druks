@@ -426,7 +426,9 @@ async def disconnect(name: str, account_id: str | None, *, reason: str = "user")
     # The grant's secrets carry its client, so one revoke ends both.
     connection = await get_connection(name, account_id)
     if connection:
-        await OauthClient(provider=Audience.mcp(name)).disconnect(connection, reason=reason)
+        await OauthClient(provider=Audience.mcp(name)).disconnect(
+            connection, reason=reason, session=db_session()
+        )
 
 
 async def get_access_token(name: str, account_id: str | None) -> tuple[str, datetime | None]:

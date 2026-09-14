@@ -151,7 +151,7 @@ async def test_run_refuses_unconnected_harness(druks_db, tmp_path, monkeypatch, 
             Audience.provider("anthropic"),
             (await Account.get_for_username("op@example.com")).id,
         )
-    ).revoke("user")
+    ).revoke("user", session=db_session())
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     _patch_ephemeral(monkeypatch, sandbox)
 

@@ -1,4 +1,5 @@
 from druks.accounts.models import Account
+from druks.database import db_session
 from druks.secrets.enums import IdentityStatus
 from druks.secrets.models import VaultSecret
 
@@ -56,5 +57,5 @@ async def test_conflicting_owners_prevent_attribution(druks_db, caplog):
     assert not await Account.lookup(AUTHORITY, "user-1")
     assert "multiple accounts" in caplog.text
 
-    await second.revoke("user")
+    await second.revoke("user", session=db_session())
     assert await Account.lookup(AUTHORITY, "user-1") is owner

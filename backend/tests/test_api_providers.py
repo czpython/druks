@@ -3,6 +3,7 @@ from pathlib import Path
 
 from conftest import connect_provider
 from druks.accounts.models import Account
+from druks.database import db_session
 from druks.harnesses import directory
 from druks.harnesses.models import ProviderCatalog
 from druks.harnesses.providers import AnthropicProvider
@@ -93,13 +94,13 @@ async def test_logins_read_an_expired_token_as_not_connected(tmp_path: Path, dru
 async def test_revoked_subscription_keeps_its_facts_for_its_owner(tmp_path: Path, druks_db):
     mine = await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "x"}})
     await mine.update_secrets(dict(mine.secrets), expires_at=None)
-    await mine.revoke("invalid_grant")
+    await mine.revoke("invalid_grant", session=db_session())
     other = await connect_provider(
         AnthropicProvider,
         {"claudeAiOauth": {"accessToken": "y"}},
         provider_email="someone-else@example.com",
     )
-    await other.revoke("invalid_grant")
+    await other.revoke("invalid_grant", session=db_session())
     assert not await VaultSecret.list_subscriptions()
 
     with _build_client(tmp_path) as client:

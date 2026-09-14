@@ -188,7 +188,7 @@ async def create_key(
 async def remove_key(provider_id: str) -> None:
     """Removing a directory provider's key also removes the provider."""
     if stored := await VaultSecret.lookup(SecretKind.STATIC, Audience.provider(provider_id)):
-        await stored.revoke("user")
+        await stored.revoke("user", session=db_session())
     if is_registered(provider_id):
         return
     if catalog := await ProviderCatalog.get(provider_id):
@@ -203,4 +203,4 @@ async def disconnect(provider_id: str, account: Account = Depends(current_sessio
     if subscription := await VaultSecret.lookup(
         SecretKind.SUBSCRIPTION, Audience.provider(provider.id), account.id
     ):
-        await subscription.revoke("user")
+        await subscription.revoke("user", session=db_session())

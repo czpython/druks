@@ -57,8 +57,8 @@ async def test_one_row_per_audience_account_and_header_except_an_oauth_connectio
 async def test_a_revoked_secret_keeps_its_facts_and_loses_its_secrets(druks_db):
     row = await _static(identity={"slug": "linear"})
 
-    await row.revoke("user")
-    await row.revoke("server_removed")
+    await row.revoke("user", session=db_session())
+    await row.revoke("server_removed", session=db_session())
 
     assert row.revoked_at and row.revoked_reason == "user"
     assert dict(row.secrets) == {}
@@ -85,7 +85,7 @@ async def test_a_revoked_secret_issues_nothing(druks_db, kind):
     row = VaultSecret(kind=kind, audience="mcp:linear", secrets={"value": "x"})
     db_session().add(row)
     await db_session().flush()
-    await row.revoke("user")
+    await row.revoke("user", session=db_session())
 
     with pytest.raises(SecretRevokedError, match="mcp:linear"):
         await row.issue_token("")

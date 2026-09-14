@@ -1,5 +1,6 @@
 import os
 
+import httpx
 import psycopg
 import pytest
 from druks.accounts.models import Account
@@ -7,6 +8,7 @@ from druks.database import configure_session, db_session, get_session
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
+from druks.services import OauthClient, OauthRefreshError
 from druks.testing import init_db
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -143,3 +145,59 @@ async def test_payload_is_ciphertext_at_rest(engine):
 
     block = await _committed(engine, read_logins)
     assert block["accessToken"] == "supersecret"
+
+
+async def test_invalid_grant_refresh_revokes_past_the_callers_rollback(engine, monkeypatch):
+    # The refresh runs inside a durable step whose session rolls back when the
+    # error propagates. The revoke commits on its own, so it outlives that rollback.
+    def dead_grant(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": "invalid_grant"})
+
+    monkeypatch.setattr(
+        "druks.services.oauth._http",
+        lambda: httpx.AsyncClient(transport=httpx.MockTransport(dead_grant)),
+    )
+    published = []
+
+    async def record(name, **kwargs):
+        published.append((name, kwargs))
+
+    monkeypatch.setattr("druks.services.oauth.publish", record)
+    client = OauthClient(
+        provider="acme",
+        authorization_endpoint="https://auth.acme.test/authorize",
+        token_endpoint="https://auth.acme.test/token",
+        client_id="client-123",
+        client_secret="secret-123",
+    )
+
+    async def connect():
+        row = await VaultSecret.connect(
+            Audience.service("acme"), account_id=None, refresh_token="rt-old", scopes=[]
+        )
+        return row.id
+
+    connection_id = await _committed(engine, connect)
+
+    session = get_session(engine)
+    db_session.registry.set(session)
+    try:
+        connection = await VaultSecret.get(connection_id)
+        with pytest.raises(OauthRefreshError, match="sign in again"):
+            await client.get_access_token(connection=connection)
+        await session.rollback()
+    finally:
+        await db_session.remove()
+        await session.close()
+
+    async def read_back():
+        row = await VaultSecret.get(connection_id)
+        return row.revoked_reason, dict(row.secrets)
+
+    assert await _committed(engine, read_back) == ("invalid_grant", {})
+    assert published == [
+        (
+            "oauth.disconnected",
+            {"provider": "acme", "connection_id": connection_id, "account_id": None},
+        )
+    ]

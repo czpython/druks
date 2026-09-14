@@ -8,9 +8,12 @@ from typing import Any, cast
 from urllib.parse import urlencode
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from druks.database import db_session, get_session
 from druks.redis import get_client
 from druks.secrets.models import VaultSecret
+from druks.signals import publish
 
 from .constants import (
     OAUTH_CONNECT_STATE_TTL_SECONDS,
@@ -221,6 +224,17 @@ class OauthClient:
                 except httpx.HTTPError as error:
                     raise OauthRefreshError(self.provider, str(error)) from error
             if response.status_code != 200:
+                if "invalid_grant" in response.text:
+                    # The provider withdrew the grant; presenting it again can never
+                    # succeed. The revoke commits on its own: the caller's step
+                    # session rolls back when this error propagates.
+                    async with get_session(db_session().bind) as session:
+                        await self.disconnect(connection, reason="invalid_grant", session=session)
+                        await session.commit()
+                    raise OauthRefreshError(
+                        self.provider,
+                        "the provider revoked the grant; sign in again to restore the connection",
+                    )
                 await redis.delete(token_key)
                 raise OauthRefreshError(
                     self.provider, f"HTTP {response.status_code} from the token endpoint"
@@ -262,10 +276,19 @@ class OauthClient:
         async for key in redis.scan_iter(match=f"{self.provider}:access_token:{connection_id}*"):
             await redis.delete(key)
 
-    async def disconnect(self, connection: VaultSecret, *, reason: str) -> None:
-        """Revoke the grant and evict its cached access token."""
-        await connection.revoke(reason)
+    async def disconnect(
+        self, connection: VaultSecret, *, reason: str, session: AsyncSession
+    ) -> None:
+        """Revoke the grant in ``session``, evict its cached access token, and
+        publish ``oauth.disconnected``."""
+        await connection.revoke(reason, session=session)
         await self.evict_access_token(connection.id)
+        await publish(
+            "oauth.disconnected",
+            provider=self.provider,
+            connection_id=connection.id,
+            account_id=connection.account_id,
+        )
 
 
 def _expiry(seconds: int) -> datetime | None:

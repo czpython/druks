@@ -8,6 +8,7 @@ from conftest import IDENTITY_HEADER, connect_provider, header_client
 from druks.accounts.dependencies import resolve_single_operator
 from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.models import Account, PersonalAccessToken
+from druks.database import db_session
 from druks.harnesses import providers
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.secrets.datastructures import Audience
@@ -170,7 +171,7 @@ async def test_onboarding_after_the_only_subscription_is_revoked(
     subscription = await connect_provider(
         AnthropicProvider, {"claudeAiOauth": {"accessToken": "x"}}
     )
-    await subscription.revoke(reason)
+    await subscription.revoke(reason, session=db_session())
 
     with _client(tmp_path) as client:
         response = client.get("/api/auth/me")

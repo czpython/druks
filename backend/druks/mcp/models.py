@@ -175,7 +175,7 @@ class McpServer(Base, Uuid7Pk):
 
     async def delete(self) -> None:
         for secret in await VaultSecret.list_tokens(Audience.mcp(self.name)):
-            await secret.revoke("server_removed")
+            await secret.revoke("server_removed", session=db_session())
         session = db_session()
         await session.delete(self)
         await session.flush()

@@ -166,6 +166,27 @@ async def test_get_refresh_rejection_evicts_and_raises(token_endpoint):
     assert not await redis.get(_lock_key(connection))
 
 
+@pytest.mark.parametrize(("status", "response"), [(500, {}), (400, {"error": "invalid_client"})])
+async def test_other_refresh_failures_leave_the_connection_live(
+    token_endpoint, monkeypatch, status, response
+):
+    token_endpoint.status = status
+    token_endpoint.response = response
+    published = []
+
+    async def record(name, **kwargs):
+        published.append(name)
+
+    monkeypatch.setattr("druks.services.oauth.publish", record)
+    connection = await _connection()
+
+    with pytest.raises(OauthRefreshError, match=f"HTTP {status}"):
+        await _client().get_access_token(connection=connection)
+
+    assert await VaultSecret.reload(connection.id)
+    assert not published
+
+
 async def test_get_refresh_uses_basic_auth(token_endpoint):
     connection = await _connection()
 
@@ -181,7 +202,7 @@ async def test_disconnect_revokes_the_connection_and_drops_the_cached_token(toke
     connection = await _connection()
     await get_client().set(_token_key(connection), "at-cached")
 
-    await _client().disconnect(connection, reason="user")
+    await _client().disconnect(connection, reason="user", session=db_session())
 
     revoked = await VaultSecret.get(connection.id)
     assert revoked.revoked_at
@@ -193,7 +214,7 @@ async def test_disconnect_revokes_the_connection_and_drops_the_cached_token(toke
 
     # A second revoke keeps the first stamp.
     first_stamp = revoked.revoked_at
-    await revoked.revoke("client_replaced")
+    await revoked.revoke("client_replaced", session=db_session())
     assert revoked.revoked_at == first_stamp
     assert revoked.revoked_reason == "user"
 
@@ -203,7 +224,7 @@ async def test_a_revoke_landing_mid_refresh_is_not_overwritten(token_endpoint):
     exchange = token_endpoint.handler
 
     async def revoke_then_rotate(request: httpx.Request) -> httpx.Response:
-        await connection.revoke("user")
+        await connection.revoke("user", session=db_session())
         return exchange(request)
 
     token_endpoint.handler = revoke_then_rotate
@@ -218,7 +239,7 @@ async def test_a_revoke_landing_mid_refresh_is_not_overwritten(token_endpoint):
 
 async def test_get_refuses_a_revoked_connection(token_endpoint):
     connection = await _connection()
-    await connection.revoke("user")
+    await connection.revoke("user", session=db_session())
 
     with pytest.raises(OauthRefreshError, match="revoked"):
         await _client().get_access_token(connection=connection)
@@ -370,7 +391,7 @@ async def test_disconnect_evicts_the_scope_variant_keys(token_endpoint):
     await redis.set(_token_key(connection), "at-full")
     await redis.set(scoped_key, "at-narrow")
 
-    await _client().disconnect(connection, reason="user")
+    await _client().disconnect(connection, reason="user", session=db_session())
 
     assert not await redis.get(_token_key(connection))
     assert not await redis.get(scoped_key)

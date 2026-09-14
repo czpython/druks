@@ -286,7 +286,7 @@ class Provider:
                     # presenting it again can never succeed. Drop only this
                     # subscription so the provider reads as disconnected — the
                     # UI shows Reconnect and the next tick has no row to hammer.
-                    await row.revoke("invalid_grant")
+                    await row.revoke("invalid_grant", session=db_session())
                     await db_session().commit()
                     logger.warning(
                         "%s subscription %s auto-disconnected after invalid_grant; "
