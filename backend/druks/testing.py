@@ -28,7 +28,13 @@ import druks.skills.models  # noqa: F401
 import druks.user_settings.models  # noqa: F401
 from druks.accounts.models import Account
 from druks.apps.loader import import_app_models, iter_apps
-from druks.database import _session_factory, configure_session, create_engine_from_url, db_session
+from druks.database import (
+    _session_factory,
+    _unbound_session,
+    configure_session,
+    create_engine_from_url,
+    db_session,
+)
 from druks.durable import AgentCall, Run
 from druks.durable.datastructures import Subject
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA, workflow_status
@@ -152,10 +158,14 @@ async def druks_db(_druks_schema: None) -> AsyncIterator[AsyncSession]:
         expire_on_commit=False,
     )
     db_session.registry.set(session)
+    # pytest-asyncio runs fixtures and the test body on different tasks, so a
+    # task with no session gets its own on the fixture connection, not the raise.
+    db_session.registry.createfunc = _session_factory
     try:
         yield session
     finally:
         _fixture_connection = None
+        db_session.registry.createfunc = _unbound_session
         await db_session.remove()
         configure_engine(None)
         if transaction.is_active:

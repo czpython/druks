@@ -138,3 +138,14 @@ async def step_session() -> AsyncIterator[AsyncSession]:
     finally:
         await db_session.remove()
         await session.close()
+
+
+@asynccontextmanager
+async def bound_session() -> AsyncIterator[None]:
+    # The session this task already holds, else a step's own for the block: a
+    # body starts a child run outside any step and holds none.
+    if db_session.registry.has():
+        yield
+        return
+    async with step_session():
+        yield

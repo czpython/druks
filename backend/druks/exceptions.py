@@ -9,3 +9,13 @@ class DruksError(Exception):
 
     def __reduce__(self) -> tuple[Any, ...]:
         return copyreg.__newobj__, (type(self),), {"args": self.args, **vars(self)}
+
+
+class SessionNotBoundError(DruksError):
+    """``db_session()`` ran on a task that holds no session."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "No database session is bound to this task. "
+            "Read inside a @step, a dispatch(), or a request."
+        )

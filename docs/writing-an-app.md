@@ -985,7 +985,9 @@ uv run druks init-db
 
 Druks scopes autogeneration to the table prefix and writes the version to
 `alembic_version_night_watch`. Query through `druks.db.db_session()` inside an
-HTTP request, durable step, or other platform-bound session.
+HTTP request, durable step, or other platform-bound session. Outside those,
+`db_session()` raises. A workflow body holds no session: read inside a `@step`.
+`await self.subject` and `start()` bring their own.
 
 HTTP response models subclass `druks.schemas.Schema`, whose snake_case fields
 serialize as camelCase. Request models are ordinary Pydantic models.

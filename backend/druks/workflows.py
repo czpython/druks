@@ -39,7 +39,13 @@ from druks.apps.settings import (
 from druks.database import get_session
 from druks.durable.activity import set_run_phase
 from druks.durable.datastructures import Subject
-from druks.durable.engine import _step_engine, register_schedule, run_queue, step_session
+from druks.durable.engine import (
+    _step_engine,
+    bound_session,
+    register_schedule,
+    run_queue,
+    step_session,
+)
 from druks.durable.enums import AgentCallStatus, RunState, WorkflowEvent
 from druks.durable.exceptions import FatalError, GateTimeout, SubjectlessGate, WorkflowError
 from druks.durable.models import AgentCall, Run
@@ -167,7 +173,8 @@ class _DeclaredSubject:
                 if "subject" in run.__dict__:
                     return run.__dict__["subject"]
                 if run._subject:
-                    return await self.subject_class.get_for_subject_id(str(run._subject["id"]))
+                    async with bound_session():
+                        return await self.subject_class.get_for_subject_id(str(run._subject["id"]))
 
             return resolve()
         return self.subject_class
@@ -1000,68 +1007,69 @@ class Workflow:
         # subject is required (no default) so a run can't silently lose its
         # timeline by omission — pass subject=None explicitly for a background run.
         cls._validate_subject(subject)
-        account = await Account.get_for_run(account_id or current_account_id.get())
-        account_id = account.id
-        wire: dict[str, Any] = {}
-        if cls._run_input_model:
-            wire = cls._run_input_model.model_validate(input).model_dump(mode="json")
-        elif input:
-            raise WorkflowError(f"{cls.__name__}.{cls._body_method}() takes no input")
-        wire[_ACCOUNT_INPUT_KEY] = account_id
-        workflow_id = str(uuid7())
-        # A subject has at most one active run per workflow kind, enforced by
-        # DBOS queue deduplication: the slot is claimed atomically at enqueue,
-        # held while the workflow is enqueued or pending (a parked run keeps
-        # it), and freed by DBOS itself at the terminal outcome — including
-        # when DBOS gives up on a dead workflow. On a held slot, return-existing
-        # hands back the holder's handle. Subjectless runs are unbounded.
-        enqueue_options = (
-            SetEnqueueOptions(
-                deduplication_id=f"{cls.kind}:{subject.subject_type}:{subject.id}",
-                duplication_policy="return-existing",
+        async with bound_session():
+            account = await Account.get_for_run(account_id or current_account_id.get())
+            account_id = account.id
+            wire: dict[str, Any] = {}
+            if cls._run_input_model:
+                wire = cls._run_input_model.model_validate(input).model_dump(mode="json")
+            elif input:
+                raise WorkflowError(f"{cls.__name__}.{cls._body_method}() takes no input")
+            wire[_ACCOUNT_INPUT_KEY] = account_id
+            workflow_id = str(uuid7())
+            # A subject has at most one active run per workflow kind, enforced by
+            # DBOS queue deduplication: the slot is claimed atomically at enqueue,
+            # held while the workflow is enqueued or pending (a parked run keeps
+            # it), and freed by DBOS itself at the terminal outcome — including
+            # when DBOS gives up on a dead workflow. On a held slot, return-existing
+            # hands back the holder's handle. Subjectless runs are unbounded.
+            enqueue_options = (
+                SetEnqueueOptions(
+                    deduplication_id=f"{cls.kind}:{subject.subject_type}:{subject.id}",
+                    duplication_policy="return-existing",
+                )
+                if subject
+                else nullcontext()
             )
-            if subject
-            else nullcontext()
-        )
-        # The workflow's routing metadata, stamped as DBOS custom attributes so
-        # "runs for this subject" is answered by workflow_status itself. The
-        # subject id is stamped as a string — the one shape every reader compares.
-        attributes = None
-        if subject:
-            attributes = {
-                "subject_type": subject.subject_type,
-                "subject_id": str(subject.id),
-                "subject_label": subject.label,
-            }
-        subject_record = subject.identity if subject else None
-        with (
-            SetWorkflowID(workflow_id),
-            SetWorkflowAttributes(attributes),
-            enqueue_options,
-        ):
-            handle = await run_queue.enqueue_async(cls._entry, subject_record, wire)
-        if handle.workflow_id == workflow_id:
-            # The body also creates its row (idempotently) — this one just makes it
-            # visible before an executor picks the workflow up.
-            await Run.create_row(
-                _step_engine(), workflow_id=workflow_id, kind=cls.kind, account_id=account_id
-            )
+            # The workflow's routing metadata, stamped as DBOS custom attributes so
+            # "runs for this subject" is answered by workflow_status itself. The
+            # subject id is stamped as a string — the one shape every reader compares.
+            attributes = None
             if subject:
-                # Its own transaction lets readers see the admission before the caller commits.
-                async with get_session(_step_engine()) as session:
-                    await Event.emit(
-                        type=WorkflowEvent.SCHEDULED,
-                        subject=subject.identity,
-                        label=subject.label,
-                        payload={"run": workflow_id, "kind": cls.kind},
-                        app=cls.app,
-                        session=session,
-                    )
-                    await session.commit()
-                await publish(WorkflowEvent.SCHEDULED, subject=subject.identity, kind=cls.kind)
-            return workflow_id
-        # The slot was held — the handle is the subject's live run.
-        return handle.workflow_id
+                attributes = {
+                    "subject_type": subject.subject_type,
+                    "subject_id": str(subject.id),
+                    "subject_label": subject.label,
+                }
+            subject_record = subject.identity if subject else None
+            with (
+                SetWorkflowID(workflow_id),
+                SetWorkflowAttributes(attributes),
+                enqueue_options,
+            ):
+                handle = await run_queue.enqueue_async(cls._entry, subject_record, wire)
+            if handle.workflow_id == workflow_id:
+                # The body also creates its row (idempotently) — this one just makes it
+                # visible before an executor picks the workflow up.
+                await Run.create_row(
+                    _step_engine(), workflow_id=workflow_id, kind=cls.kind, account_id=account_id
+                )
+                if subject:
+                    # Its own transaction lets readers see the admission before the caller commits.
+                    async with get_session(_step_engine()) as session:
+                        await Event.emit(
+                            type=WorkflowEvent.SCHEDULED,
+                            subject=subject.identity,
+                            label=subject.label,
+                            payload={"run": workflow_id, "kind": cls.kind},
+                            app=cls.app,
+                            session=session,
+                        )
+                        await session.commit()
+                    await publish(WorkflowEvent.SCHEDULED, subject=subject.identity, kind=cls.kind)
+                return workflow_id
+            # The slot was held — the handle is the subject's live run.
+            return handle.workflow_id
 
 
 def _wrap_steps(cls: type[Workflow]) -> None:

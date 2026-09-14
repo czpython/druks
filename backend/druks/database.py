@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy_encrypted_field import configure
 
+from druks.exceptions import SessionNotBoundError
 from druks.settings import load_settings
 
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
@@ -141,6 +142,15 @@ def _session_scope() -> object | None:
 
 _session_factory = async_sessionmaker(class_=AsyncSession, autoflush=True, expire_on_commit=False)
 db_session: async_scoped_session = async_scoped_session(_session_factory, scopefunc=_session_scope)
+
+
+def _unbound_session() -> AsyncSession:
+    raise SessionNotBoundError
+
+
+# A request, a step, and session_scope bind the session they own and close.
+# A read outside those fails instead of opening a session nothing closes.
+db_session.registry.createfunc = _unbound_session
 
 
 def configure_session(engine) -> None:

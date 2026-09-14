@@ -169,6 +169,15 @@ def _build_units():
         async def run_multistep(self) -> None:
             await self.unreliable()
 
+    class ChildFlow(Workflow):
+        async def run(self) -> None:
+            SINK.append("child:ran")
+
+    class ParentFlow(Workflow):
+        # The child starts from the body, outside any step, where no session is bound.
+        async def run_multistep(self) -> None:
+            await ChildFlow.start(subject=None)
+
     class EnqueueInStepFlow(Workflow):
         # A retried step would enqueue again, so enqueue() must refuse in-step.
         @step
@@ -277,6 +286,7 @@ def _build_units():
         ScheduledDispatch,
         RetryingStepFlow,
         EnqueueInStepFlow,
+        ParentFlow,
         record_task,
         retry_task,
         scheduled_task,
@@ -343,6 +353,7 @@ async def rt():
         scheduled_dispatch,
         retrying_step_flow,
         enqueue_in_step_flow,
+        parent_flow,
         record_task,
         retry_task,
         scheduled_task,
@@ -368,6 +379,7 @@ async def rt():
             ScheduledDispatch=scheduled_dispatch,
             RetryingStepFlow=retrying_step_flow,
             EnqueueInStepFlow=enqueue_in_step_flow,
+            ParentFlow=parent_flow,
             record_task=record_task,
             retry_task=retry_task,
             scheduled_task=scheduled_task,
@@ -394,6 +406,8 @@ async def rt():
         workflows._items.pop("scheduled_dispatch", None)
         workflows._items.pop("retrying_step_flow", None)
         workflows._items.pop("enqueue_in_step_flow", None)
+        workflows._items.pop("child_flow", None)
+        workflows._items.pop("parent_flow", None)
         if db_url_snap is None:
             os.environ.pop("DRUKS_DATABASE_URL", None)
         else:
@@ -842,6 +856,39 @@ async def test_step_retries(rt):
     assert STEP_RETRY_ATTEMPTS > 1
 
 
+async def test_db_session_on_a_task_with_no_bound_session_raises(rt):
+    from druks.exceptions import SessionNotBoundError
+
+    async def read() -> None:
+        db_session()
+
+    with pytest.raises(SessionNotBoundError):
+        await asyncio.create_task(read())
+
+
+async def test_body_starts_a_child_run(rt):
+    wfid = await rt.ParentFlow.start(subject=None)
+    await _wait_for(rt.engine, wfid, lambda row: row.state == RunState.FINISHED)
+
+    async def child_run():
+        session = get_session(rt.engine)
+        try:
+            return (
+                await session.execute(select(Run).where(Run.kind == "child_flow"))
+            ).scalar_one_or_none()
+        finally:
+            await session.close()
+
+    deadline = asyncio.get_event_loop().time() + 15
+    while asyncio.get_event_loop().time() < deadline:
+        child = await child_run()
+        if child and child.state == RunState.FINISHED:
+            break
+        await asyncio.sleep(0.1)
+    assert child.state == RunState.FINISHED
+    assert "child:ran" in SINK
+
+
 async def test_enqueue_inside_a_step_fails_the_run(rt):
     wfid = await rt.EnqueueInStepFlow.start(subject=None)
     failed = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FAILED)
@@ -961,7 +1008,8 @@ async def test_apply_schedules_drops_undeclared(rt):
     DBOS.create_schedule(schedule_name="stale_cron", workflow_fn=fn, schedule=cls.every)
     assert "stale_cron" in {s["schedule_name"] for s in DBOS.list_schedules()}
 
-    await apply_schedules()
+    async with session_scope(rt.engine):
+        await apply_schedules()
 
     live = {s["schedule_name"] for s in DBOS.list_schedules()}
     assert "stale_cron" not in live  # undeclared → dropped
@@ -986,18 +1034,21 @@ async def test_apply_schedules_resolves_operator_overrides(rt):
     # and its row locks deadlock any later test touching the same rows.
     async with session_scope(rt.engine):
         await SettingsOverride.write("workflow:daily_sweep:schedule", "0 9 * * *")
-    await apply_schedules()
+    async with session_scope(rt.engine):
+        await apply_schedules()
     assert sweep_cron() == "0 9 * * *"  # override wins over the declared default
 
     async with session_scope(rt.engine):
         await SettingsOverride.write("workflow:daily_sweep:schedule_enabled", False)
-    await apply_schedules()
+    async with session_scope(rt.engine):
+        await apply_schedules()
     assert sweep_cron() is None  # paused → no schedule, nothing fires
 
     async with session_scope(rt.engine):
         await SettingsOverride.write("workflow:daily_sweep:schedule", None)
         await SettingsOverride.write("workflow:daily_sweep:schedule_enabled", None)
-    await apply_schedules()
+    async with session_scope(rt.engine):
+        await apply_schedules()
     assert sweep_cron() == "0 6 * * *"  # overrides cleared → declared default
 
 
@@ -1029,14 +1080,16 @@ async def test_apply_schedules_evaluates_cron_in_installation_timezone(rt, monke
         rows = {s["schedule_name"]: s["cron_timezone"] for s in DBOS.list_schedules()}
         return rows.get("daily_sweep")
 
-    await apply_schedules()
+    async with session_scope(rt.engine):
+        await apply_schedules()
     assert sweep_timezone() == "UTC"  # the settings default
 
     from druks.durable import engine
 
     settings = engine.load_settings().model_copy(update={"timezone": "Europe/Madrid"})
     monkeypatch.setattr(engine, "load_settings", lambda: settings)
-    await apply_schedules()
+    async with session_scope(rt.engine):
+        await apply_schedules()
     assert sweep_timezone() == "Europe/Madrid"
 
 
