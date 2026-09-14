@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from druks.api.server import SpaCacheControl, _release_db_session, serve_spa
+from druks.api.server import SpaCacheControl, _request_session, serve_spa
 from druks.database import db_session
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -74,7 +74,7 @@ def test_request_that_never_touches_the_db_opens_no_connection(monkeypatch):
     # Outside a loop the registry scopes to None; an earlier test's leftover
     # binding under that key would masquerade as ours below.
     db_session.registry.clear()
-    app = FastAPI(dependencies=[Depends(_release_db_session)])
+    app = FastAPI(dependencies=[Depends(_request_session)])
 
     @app.get("/plain")
     async def plain() -> dict[str, str]:

@@ -27,7 +27,6 @@ from druks.core.templates import render_page
 from druks.database import (
     configure_session,
     create_async_engine_from_url,
-    db_session,
     session_scope,
 )
 from druks.durable.engine import init_dbos, launch, shutdown
@@ -114,31 +113,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await close_client()
 
 
-async def _release_db_session() -> AsyncIterator[None]:
-    """Bind a fresh DB session for the request and commit it on success, roll
-    back on error — one transaction per request. Model writes ``flush()``
-    without committing, so this is the commit boundary. The session is the
-    request's own, never an ambient one already on this task (the test client
-    runs requests on the caller's task), and the prior binding is restored
-    after. The session object is lazy — a frontend response (the SPA, an
-    app's dist/) that never touches the DB opens no connection, and the
-    commit is a no-op."""
-    previous = db_session() if db_session.registry.has() else None
-    session = db_session.session_factory()
-    db_session.registry.set(session)
-    try:
+async def _request_session() -> AsyncIterator[None]:
+    async with session_scope():
         yield
-    except BaseException:
-        await session.rollback()
-        raise
-    else:
-        await session.commit()
-    finally:
-        await session.close()
-        if previous:
-            db_session.registry.set(previous)
-        else:
-            db_session.registry.clear()
 
 
 def _mcp_lifespan(app: FastAPI) -> AbstractAsyncContextManager[Mapping[str, Any] | None]:
@@ -151,7 +128,7 @@ def _mcp_lifespan(app: FastAPI) -> AbstractAsyncContextManager[Mapping[str, Any]
 app = FastAPI(
     title="Druks",
     lifespan=combine_lifespans(lifespan, _mcp_lifespan),
-    dependencies=[Depends(_release_db_session)],
+    dependencies=[Depends(_request_session)],
 )
 
 

@@ -19,7 +19,7 @@ from mcp.types import ToolAnnotations
 from druks.accounts.exceptions import InvalidPatError
 from druks.accounts.models import PersonalAccessToken
 from druks.apps.loader import iter_apps
-from druks.database import db_session
+from druks.database import session_scope
 from druks.mcp.exceptions import InvalidAgentToolError
 
 _INSTRUCTIONS = """\
@@ -40,23 +40,19 @@ surface.
 
 class PatTokenVerifier(TokenVerifier):
     async def verify_token(self, token: str) -> AccessToken | None:
-        # Auth middleware runs outside the request session boundary, so this
-        # owns one — authenticate stamps last_used_at.
+        # Auth middleware runs before the request dependency binds a session;
+        # authenticate stamps last_used_at.
         try:
-            pat = await PersonalAccessToken.authenticate(token)
-            access = AccessToken(
-                token=token,
-                client_id=pat.token_prefix,
-                scopes=[],
-                claims={"account_id": pat.account_id, "pat_id": pat.id},
-            )
-            await db_session().commit()
-            return access
+            async with session_scope():
+                pat = await PersonalAccessToken.authenticate(token)
+                return AccessToken(
+                    token=token,
+                    client_id=pat.token_prefix,
+                    scopes=[],
+                    claims={"account_id": pat.account_id, "pat_id": pat.id},
+                )
         except InvalidPatError:
-            await db_session().rollback()
             return
-        finally:
-            await db_session.remove()
 
 
 class CallerPat(httpx2.Auth):

@@ -137,7 +137,7 @@ def _session_scope() -> object | None:
     try:
         return asyncio.current_task()
     except RuntimeError:
-        return None
+        return
 
 
 _session_factory = async_sessionmaker(class_=AsyncSession, autoflush=True, expire_on_commit=False)
@@ -158,21 +158,27 @@ def configure_session(engine) -> None:
 
 
 @asynccontextmanager
-async def session_scope(engine) -> AsyncIterator[None]:
-    """Bind a fresh DB session to the ``db_session`` registry for the block,
-    removing it on exit — for work that runs outside the request/task session
-    boundary (launch's schedule reconcile, a stream's per-poll snapshot), so it
-    can't leak a session per viewer. Commits on success like the request
-    boundary — a bare Session close rolls back, silently discarding the
-    block's writes."""
-    async with get_session(engine) as session:
-        db_session.registry.set(session)
-        try:
-            yield
-        except BaseException:
-            await session.rollback()
-            raise
+async def session_scope(engine=None) -> AsyncIterator[None]:
+    """Bind a fresh DB session to ``db_session`` for the block — on ``engine``,
+    else the configured one — commit on success, roll back on error, restore
+    the prior binding. One transaction per request, and per unit of work
+    outside one: an auth middleware, a stream's per-poll snapshot, launch's
+    schedule reconcile."""
+    # A block nested in a request (a websocket handler's operator check) and
+    # the test client on the caller's task find their own session back after.
+    previous = db_session() if db_session.registry.has() else None
+    session = get_session(engine) if engine else _session_factory()
+    db_session.registry.set(session)
+    try:
+        yield
+    except BaseException:
+        await session.rollback()
+        raise
+    else:
+        await session.commit()
+    finally:
+        await session.close()
+        if previous:
+            db_session.registry.set(previous)
         else:
-            await session.commit()
-        finally:
-            await db_session.remove()
+            db_session.registry.clear()
