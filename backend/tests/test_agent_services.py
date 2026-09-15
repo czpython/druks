@@ -8,6 +8,7 @@ from conftest import connect_anthropic_subscription, make_test_note, seed_note_r
 from druks.accounts.models import Account
 from druks.api import runs
 from druks.api.exceptions import RunNotActive, RunNotFailed, RunNotFound, SubjectBusy
+from druks.database import db_session
 from druks.durable.engine import run_queue
 from druks.durable.enums import WorkflowEvent
 from druks.durable.exceptions import AgentCallNotFound
@@ -293,22 +294,22 @@ async def test_cancel_run_paths(druks_db):
     item = await make_test_note()
     run = await seed_note_run(druks_db, note=item, state="running")
 
-    result = await runs.cancel_run(run.id, reason="stuck")
+    result = await runs.cancel_run(db_session(), run.id, reason="stuck")
     assert result.result == "cancelled"
     druks_db.expunge_all()
     assert (await Run.get(run.id)).state == "cancelled"
     assert (await Run.get(run.id)).failure == "stuck"
 
-    again = await runs.cancel_run(run.id, reason="stuck")
+    again = await runs.cancel_run(db_session(), run.id, reason="stuck")
     assert again.result == "already_cancelled"
 
     finished_item = await make_test_note()
     finished = await seed_note_run(druks_db, note=finished_item, state="finished")
     with pytest.raises(RunNotActive):
-        await runs.cancel_run(finished.id, reason="late")
+        await runs.cancel_run(db_session(), finished.id, reason="late")
 
     with pytest.raises(RunNotFound):
-        await runs.cancel_run("no-such-run", reason="x")
+        await runs.cancel_run(db_session(), "no-such-run", reason="x")
 
 
 async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):

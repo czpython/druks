@@ -5,8 +5,8 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import AwareDatetime
 
-from druks.api.dependencies import EngineDep
-from druks.database import db_session, session_scope
+from druks.api.dependencies import EngineDep, SessionDep
+from druks.database import session_scope
 from druks.durable.live import SSE_HEADERS
 from druks.events import reads
 from druks.events.feed import FeedDestinations, FeedItem, FeedResponse
@@ -44,6 +44,7 @@ def _check_range(from_at: AwareDatetime | None, until: AwareDatetime | None) -> 
 
 @router.get("", response_model=FeedResponse, response_model_by_alias=True)
 async def list_feed(
+    session: SessionDep,
     app: Annotated[str | None, Query()] = None,
     search: Annotated[str | None, Query(alias="q")] = None,
     kind: Annotated[str | None, Query()] = None,
@@ -57,24 +58,26 @@ async def list_feed(
     cursor = _parse_cursor(before)
     if cursor:
         history = history.where(Event.id < cursor)
-    events = list(await db_session().scalars(history.order_by(Event.id.desc()).limit(limit + 1)))
+    events = list(await session.scalars(history.order_by(Event.id.desc()).limit(limit + 1)))
     next_cursor = str(events[limit - 1].id) if len(events) > limit else None
     return FeedResponse.model_validate({"items": events[:limit], "next_cursor": next_cursor})
 
 
 @router.get("/kinds", response_model=list[str])
-async def list_feed_kinds(app: Annotated[str | None, Query()] = None) -> list[str]:
-    return await reads.list_kinds(app)
+async def list_feed_kinds(
+    session: SessionDep, app: Annotated[str | None, Query()] = None
+) -> list[str]:
+    return await reads.list_kinds(session, app)
 
 
 @router.get("/{seq}/destinations", response_model=FeedDestinations, response_model_by_alias=True)
-async def get_feed_destinations(seq: int) -> FeedDestinations:
-    event = await db_session().scalar(Event.get_history().where(Event.id == seq))
+async def get_feed_destinations(session: SessionDep, seq: int) -> FeedDestinations:
+    event = await session.scalar(Event.get_history().where(Event.id == seq))
     if not event:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, f"No Activity event {seq}. Use a seq from the feed."
         )
-    return await reads.get_destinations(event)
+    return await reads.get_destinations(session, event)
 
 
 @router.get("/stream")
@@ -100,8 +103,8 @@ async def stream_feed(
                 statement = history.where(Event.id > last_seq).order_by(Event.id)
             else:
                 statement = history.order_by(Event.id.desc())
-            async with session_scope(engine):
-                events = await db_session().scalars(statement.limit(_SSE_PAGE_SIZE))
+            async with session_scope(engine) as session:
+                events = await session.scalars(statement.limit(_SSE_PAGE_SIZE))
                 items = [FeedItem.model_validate(event) for event in events]
             if not last_seq:
                 items.reverse()

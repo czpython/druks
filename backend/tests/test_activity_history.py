@@ -114,20 +114,29 @@ async def test_pages_follow_the_cursor(druks_client, history):
 async def test_activity_keeps_decisions_failures_and_stops(druks_db, druks_client):
     db_session.registry.set(druks_db)
     for kind in ["workflow.running", "workflow.finished", "workflow.step", "workflow.retry"]:
-        await Event.emit(type=kind, app="field_notes", payload={"run": "gone"})
+        await Event.emit(druks_db, type=kind, app="field_notes", payload={"run": "gone"})
     round_facts = {"run": "gone", "gate": "review", "input_requested_at": "2026-09-09T01:00:00Z"}
-    await Event.emit(type="workflow.scheduled", app="field_notes", payload={"run": "gone"})
-    await Event.emit(type="workflow.parked", app="field_notes", payload=round_facts)
     await Event.emit(
+        druks_db, type="workflow.scheduled", app="field_notes", payload={"run": "gone"}
+    )
+    await Event.emit(druks_db, type="workflow.parked", app="field_notes", payload=round_facts)
+    await Event.emit(
+        druks_db,
         type="workflow.running",
         app="field_notes",
         payload={**round_facts, "result": {"action": "approve"}},
     )
     await Event.emit(
-        type="workflow.failed", app="field_notes", payload={"run": "gone", "failure": "Timed out"}
+        druks_db,
+        type="workflow.failed",
+        app="field_notes",
+        payload={"run": "gone", "failure": "Timed out"},
     )
     await Event.emit(
-        type="workflow.cancelled", app="field_notes", payload={"run": "gone", "failure": "Stopped"}
+        druks_db,
+        type="workflow.cancelled",
+        app="field_notes",
+        payload={"run": "gone", "failure": "Stopped"},
     )
     items = (await druks_client.get("/api/events")).json()["items"]
     kinds = [
@@ -201,6 +210,7 @@ async def test_search_does_not_read_payloads_or_current_subject_text(druks_db, d
     db_session.registry.set(druks_db)
     note = await Note.create(body="Needle")
     await Event.emit(
+        druks_db,
         type="build.rejected",
         app="field_notes",
         subject=note.identity,
@@ -225,8 +235,8 @@ async def test_stream_catches_up_in_pages_then_sends_new_rows_once(
 ):
     db_session.registry.set(druks_db)
     for number in range(5):
-        await Event.emit(type="summary.ready", app="field_notes", label=str(number))
-        await Event.emit(type="later.kind", app="field_notes", label=str(number))
+        await Event.emit(druks_db, type="summary.ready", app="field_notes", label=str(number))
+        await Event.emit(druks_db, type="later.kind", app="field_notes", label=str(number))
     matching = list(
         await druks_db.scalars(
             select(Event.id).where(Event.type == "summary.ready").order_by(Event.id)
@@ -235,12 +245,12 @@ async def test_stream_catches_up_in_pages_then_sends_new_rows_once(
 
     async def record_a_new_row(_seconds):
         if len(matching) == 5:
-            await Event.emit(type="summary.ready", app="field_notes", label="new")
+            await Event.emit(druks_db, type="summary.ready", app="field_notes", label="new")
             matching.append(await druks_db.scalar(select(func.max(Event.id))))
 
     @asynccontextmanager
     async def scope(_engine):
-        yield
+        yield druks_db
 
     queries = []
 

@@ -9,6 +9,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 from druks.core.utils.time import ensure_utc
+from druks.database import db_session
 from druks.exceptions import DetachedRowError
 
 if TYPE_CHECKING:
@@ -87,7 +88,7 @@ class StoredSubject(Base):
         # The event log is built on this module's Base.
         from druks.events.models import Event
 
-        await Event.announce(self, topic, facts)
+        await Event.announce(db_session(), self, topic, facts)
 
     @classmethod
     async def get_for_subject_id(cls, subject_id: str) -> Self | None:
