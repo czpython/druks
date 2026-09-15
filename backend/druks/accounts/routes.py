@@ -16,7 +16,9 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.get("/me", response_model=IdentityResponse, response_model_by_alias=True)
 async def get_identity(
-    request: Request, account: Account | None = Depends(current_account_or_setup)
+    session: SessionDep,
+    request: Request,
+    account: Account | None = Depends(current_account_or_setup),
 ) -> IdentityResponse:
     return IdentityResponse(
         auth_mode=request.app.state.settings.identity.mode,
@@ -26,8 +28,10 @@ async def get_identity(
         onboarding_required=not (
             account
             and (
-                await VaultSecret.list_subscriptions(account_id=account.id, include_revoked=True)
-                or await VaultSecret.list_keys()
+                await VaultSecret.list_subscriptions(
+                    session, account_id=account.id, include_revoked=True
+                )
+                or await VaultSecret.list_keys(session)
             )
         ),
     )

@@ -342,7 +342,7 @@ async def test_add_from_registry_writes_the_row_and_redacts_the_secret(
     row = await McpServer.get_for_name("observer")
     assert row.url == "https://mcp.acme.com/mcp"
     assert row.headers == {"X-Region": "eu"}
-    [secret] = await VaultSecret.list_tokens(Audience.mcp("observer"))
+    [secret] = await VaultSecret.list_tokens(druks_db, Audience.mcp("observer"))
     assert secret.header == "X-Api-Key"
     assert "acme-api-secret" not in repr(secret.secrets)
     assert secret.secrets["value"] == "acme-api-secret"
@@ -450,11 +450,11 @@ async def test_removing_a_connected_row_drops_its_grant(tmp_path, monkeypatch, d
             json={"name": "grafana", "registry": "io.github.grafana/mcp-grafana", "headers": {}},
         )
         await VaultSecret.connect(
-            Audience.mcp("grafana"), account_id=None, refresh_token="rt", scopes=[]
+            druks_db, Audience.mcp("grafana"), account_id=None, refresh_token="rt", scopes=[]
         )
 
         assert client.delete("/api/mcp-servers/grafana").status_code == 204
 
     # An orphan grant would revive as this name's credential on re-add.
     assert not await McpServer.get_for_name("grafana")
-    assert not await VaultSecret.list_connections(Audience.mcp("grafana"))
+    assert not await VaultSecret.list_connections(druks_db, Audience.mcp("grafana"))

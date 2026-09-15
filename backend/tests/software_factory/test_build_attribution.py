@@ -40,6 +40,7 @@ async def test_tracker_webhook_starts_under_the_connected_account(
 ):
     owner = await Account.get_or_create(druks_db, "github-boss")
     await VaultSecret.connect(
+        druks_db,
         "mcp:renamed_company_tracker",
         account_id=owner.id,
         refresh_token="rt",

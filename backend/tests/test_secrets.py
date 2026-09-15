@@ -2,6 +2,7 @@ import base64
 import os
 
 import pytest
+from druks.database import db_session
 from druks.mcp.constants import BEARER_HEADER
 from druks.mcp.models import McpServer
 from druks.secrets.datastructures import Audience
@@ -31,7 +32,9 @@ async def _store_token(token: str = _TOKEN) -> None:
 
 
 async def _get_token() -> VaultSecret:
-    return await VaultSecret.lookup(SecretKind.STATIC, Audience.mcp("linear"), header=BEARER_HEADER)
+    return await VaultSecret.lookup(
+        db_session(), SecretKind.STATIC, Audience.mcp("linear"), header=BEARER_HEADER
+    )
 
 
 async def _store_grant(refresh_token: str = "rt-secret", client_secret: str = "") -> VaultSecret:
@@ -39,6 +42,7 @@ async def _store_grant(refresh_token: str = "rt-secret", client_secret: str = ""
         name="notion", url="https://mcp.notion.test/sse"
     )
     return await VaultSecret.connect(
+        db_session(),
         Audience.mcp("notion"),
         account_id=None,
         refresh_token=refresh_token,
@@ -68,7 +72,7 @@ async def test_grant_secret_halves_round_trip(druks_db):
     await _store_grant(refresh_token="rt-secret", client_secret="cs-secret")
 
     druks_db.expunge_all()
-    [grant] = await VaultSecret.list_connections(Audience.mcp("notion"))
+    [grant] = await VaultSecret.list_connections(druks_db, Audience.mcp("notion"))
     assert grant.secrets["refresh_token"] == "rt-secret"
     assert grant.secrets["client_secret"] == "cs-secret"
 
@@ -147,5 +151,5 @@ async def test_prepended_key_still_decrypts(monkeypatch, tmp_path, druks_db):
     _set_key(monkeypatch, tmp_path, f"{_key()},{old_key}")
     druks_db.expunge_all()
     assert (await _get_token()).secrets["value"] == _TOKEN
-    [grant] = await VaultSecret.list_connections(Audience.mcp("notion"))
+    [grant] = await VaultSecret.list_connections(druks_db, Audience.mcp("notion"))
     assert grant.secrets["refresh_token"] == "rt-secret"

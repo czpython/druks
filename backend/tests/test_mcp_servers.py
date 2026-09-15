@@ -6,6 +6,7 @@ import pytest
 from conftest import connect_service
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.apps.registry import mcp_servers
+from druks.database import db_session
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
@@ -60,7 +61,9 @@ async def _refs() -> dict[str, SecretRef]:
 
 
 async def _bearer_row(name: str) -> VaultSecret:
-    return await VaultSecret.lookup(SecretKind.STATIC, Audience.mcp(name), header=BEARER_HEADER)
+    return await VaultSecret.lookup(
+        db_session(), SecretKind.STATIC, Audience.mcp(name), header=BEARER_HEADER
+    )
 
 
 async def _github_row() -> VaultSecret:
@@ -283,7 +286,7 @@ async def test_declared_headers_deliver_inline_and_secret_values_are_entries(dru
     # No bearer: neither the wire shape nor the box carries an Authorization entry.
     assert grafana.bearer_token_env_var == ""
     [ref] = refs.values()
-    row = await VaultSecret.get(ref.secret_id)
+    row = await druks_db.get(VaultSecret, ref.secret_id)
     assert (ref.name, ref.host, row.header) == (
         "mcp_grafana_header_0",
         "mcp.grafana.com",
@@ -306,10 +309,10 @@ async def test_two_secret_headers_bind_two_entries_beside_the_bearer(druks_db):
     acme = next(s for s in kwargs["mcp_servers"] if s.name == "acme")
     assert acme.env_headers == {"X-Api-Key": "MCP_ACME_HEADER_0", "X-Org": "MCP_ACME_HEADER_1"}
     assert set(refs) == {"mcp_acme_token", "mcp_acme_header_0", "mcp_acme_header_1"}
-    org = await VaultSecret.get(refs["mcp_acme_header_1"].secret_id)
+    org = await druks_db.get(VaultSecret, refs["mcp_acme_header_1"].secret_id)
     assert org.header == "X-Org"
     assert await org.issue_token("") == ("org-secret", None)
-    key = await VaultSecret.get(refs["mcp_acme_header_0"].secret_id)
+    key = await druks_db.get(VaultSecret, refs["mcp_acme_header_0"].secret_id)
     assert await key.issue_token("") == ("key-secret", None)
 
 
@@ -622,7 +625,7 @@ def _requiring_druks(monkeypatch, allowed_tools=()) -> type[Workspace]:
 
 async def _druks_row(account_id: str) -> VaultSecret:
     return await VaultSecret.lookup(
-        SecretKind.STATIC, Audience.mcp(DRUKS_SERVER_NAME), account_id, BEARER_HEADER
+        db_session(), SecretKind.STATIC, Audience.mcp(DRUKS_SERVER_NAME), account_id, BEARER_HEADER
     )
 
 

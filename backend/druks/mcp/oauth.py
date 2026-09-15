@@ -44,12 +44,12 @@ def _http() -> httpx.AsyncClient:
 async def get_connection(name: str, account_id: str | None) -> VaultSecret | None:
     # One live grant per (server, account) — MCP's policy over the vault.
     # Revoked rows stay behind as history.
-    rows = await VaultSecret.list_account_connections(Audience.mcp(name), account_id)
+    rows = await VaultSecret.list_account_connections(db_session(), Audience.mcp(name), account_id)
     return rows[0] if rows else None
 
 
 async def list_connections(name: str) -> list[VaultSecret]:
-    return await VaultSecret.list_connections(Audience.mcp(name))
+    return await VaultSecret.list_connections(db_session(), Audience.mcp(name))
 
 
 def _origin(url: str) -> str:
@@ -425,6 +425,7 @@ async def complete_connect(*, state: str, code: str) -> str:
     connection = await get_connection(name, account_id)
     if connection:
         await connection.reconnect(
+            db_session(),
             refresh_token=tokens["refresh_token"],
             scopes=scopes,
             identity=identity,
@@ -436,6 +437,7 @@ async def complete_connect(*, state: str, code: str) -> str:
         await evict_access_token(name, account_id)
     else:
         await VaultSecret.connect(
+            db_session(),
             Audience.mcp(name),
             account_id=account_id,
             refresh_token=tokens["refresh_token"],

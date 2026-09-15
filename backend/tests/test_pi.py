@@ -264,6 +264,6 @@ def test_parse_treats_a_broken_stream_as_invalid_output(tmp_path: Path) -> None:
 
 async def test_a_pasted_key_becomes_the_catalog_entry(client, druks_db) -> None:
     assert client.post("/api/providers/openai/key", json={"key": _API_KEY}).status_code == 200
-    stored = await VaultSecret.lookup(SecretKind.STATIC, Audience.provider("openai"))
+    stored = await VaultSecret.lookup(druks_db, SecretKind.STATIC, Audience.provider("openai"))
 
     assert PiHarness.get_secrets("openai", stored.secrets["value"]) == {"openai": Secret(_API_KEY)}

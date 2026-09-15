@@ -43,7 +43,9 @@ async def test_list_shows_only_the_requesting_accounts_login(tmp_path: Path, dru
 
 async def test_keys_list_the_installations_keys_for_every_account(tmp_path: Path, druks_db):
     ops = await Account.get_or_create(druks_db, "ops@example.com")
-    stored = await VaultSecret.paste(Audience.provider("openai"), "sk-openai-4f2a", pasted_by=ops)
+    stored = await VaultSecret.paste(
+        druks_db, Audience.provider("openai"), "sk-openai-4f2a", pasted_by=ops
+    )
     with _build_client(tmp_path) as client:
         [key] = client.get("/api/providers/keys").json()
     assert key == {
@@ -56,6 +58,7 @@ async def test_keys_list_the_installations_keys_for_every_account(tmp_path: Path
 
 async def test_logins_report_the_provider_identity(tmp_path: Path, druks_db):
     await VaultSecret.store(
+        druks_db,
         SecretKind.SUBSCRIPTION,
         Audience.provider("anthropic"),
         account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
@@ -79,6 +82,7 @@ async def test_logins_report_the_provider_identity(tmp_path: Path, druks_db):
 
 async def test_logins_read_an_expired_token_as_not_connected(tmp_path: Path, druks_db):
     await VaultSecret.store(
+        druks_db,
         SecretKind.SUBSCRIPTION,
         Audience.provider("anthropic"),
         account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
@@ -93,15 +97,15 @@ async def test_logins_read_an_expired_token_as_not_connected(tmp_path: Path, dru
 
 async def test_revoked_subscription_keeps_its_facts_for_its_owner(tmp_path: Path, druks_db):
     mine = await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "x"}})
-    await mine.update_secrets(dict(mine.secrets), expires_at=None)
-    await mine.revoke("invalid_grant", session=db_session())
+    await mine.update_secrets(db_session(), dict(mine.secrets), expires_at=None)
+    await mine.revoke(db_session(), "invalid_grant")
     other = await connect_provider(
         AnthropicProvider,
         {"claudeAiOauth": {"accessToken": "y"}},
         provider_email="someone-else@example.com",
     )
-    await other.revoke("invalid_grant", session=db_session())
-    assert not await VaultSecret.list_subscriptions()
+    await other.revoke(db_session(), "invalid_grant")
+    assert not await VaultSecret.list_subscriptions(druks_db)
 
     with _build_client(tmp_path) as client:
         [subscription] = client.get("/api/providers/subscriptions").json()
@@ -130,13 +134,14 @@ async def test_disconnect_removes_only_the_requesting_accounts_login(tmp_path: P
         assert client.delete("/api/providers/anthropic/connection").status_code == 204
         assert client.get("/api/providers/subscriptions").json() == []
     # The request revoked in its own session. reload reads past this identity map.
-    assert not await VaultSecret.reload(mine_id)
-    assert await VaultSecret.reload(other_id)
+    assert not await VaultSecret.reload(druks_db, mine_id)
+    assert await VaultSecret.reload(druks_db, other_id)
 
 
 async def test_removing_the_key_leaves_every_subscription(tmp_path: Path, druks_db):
     mine = await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "x"}})
     await VaultSecret.paste(
+        druks_db,
         Audience.provider("anthropic"),
         "sk-shared",
         pasted_by=await Account.get_or_create(druks_db, "ops@example.com"),
@@ -145,8 +150,8 @@ async def test_removing_the_key_leaves_every_subscription(tmp_path: Path, druks_
     with _build_client(tmp_path) as client:
         response = client.delete("/api/providers/anthropic/key")
     assert response.status_code == 204
-    assert await VaultSecret.list_keys() == []
-    assert await VaultSecret.reload(mine_id)
+    assert await VaultSecret.list_keys(druks_db) == []
+    assert await VaultSecret.reload(druks_db, mine_id)
 
 
 _GROQ = {
@@ -177,7 +182,7 @@ async def test_a_key_for_a_directory_provider_adds_it(tmp_path: Path, druks_db, 
 
         assert client.delete("/api/providers/groq/key").status_code == 204
         assert client.get("/api/providers/catalogs").json() == []
-    assert await VaultSecret.list_keys() == []
+    assert await VaultSecret.list_keys(druks_db) == []
 
 
 def test_directory_lists_only_providers_one_can_add(tmp_path: Path, monkeypatch):

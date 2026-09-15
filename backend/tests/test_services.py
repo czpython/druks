@@ -540,6 +540,7 @@ async def test_with_scopes_declares_the_union_and_reads_connections(declared_ser
     from druks.secrets.models import VaultSecret
 
     row = await VaultSecret.connect(
+        db_session(),
         Audience.service("acme"),
         account_id=None,
         refresh_token="rt-1",
@@ -555,10 +556,10 @@ async def test_with_scopes_declares_the_union_and_reads_connections(declared_ser
     assert not await NightWatch.acme.get("missing")
 
     # The handle serves live connections only; the revoked row survives.
-    await row.revoke("user", session=db_session())
+    await row.revoke(db_session(), "user")
     assert not await NightWatch.acme.list_for_account(None)
     assert not await NightWatch.acme.get(row.id)
-    assert (await VaultSecret.get(row.id)).identity == {"email": "night@acme.test"}
+    assert (await db_session().get(VaultSecret, row.id)).identity == {"email": "night@acme.test"}
 
 
 async def test_get_identity_without_a_declared_endpoint_is_empty(declared_services):
@@ -762,7 +763,7 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
             == 400
         )
 
-        [connection] = await VaultSecret.list_connections(Audience.service("acme"))
+        [connection] = await VaultSecret.list_connections(db_session(), Audience.service("acme"))
         assert connection.secrets["refresh_token"] == "rt-1"
         assert connection.identity == {"email": "op@acme.test"}
         assert connection.scopes == ["profile.read", "posts.write"]
@@ -777,7 +778,7 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
         state = dict(parse_qsl(urlparse(reconnect.headers["location"]).query))["state"]
         finish = client.get("/api/oauth/callback", params={"state": state, "code": "c-2"})
         assert finish.status_code == 200
-        assert len(await VaultSecret.list_connections(Audience.service("acme"))) == 1
+        assert len(await VaultSecret.list_connections(db_session(), Audience.service("acme"))) == 1
 
     assert [name for name, _ in published] == ["oauth.connected", "oauth.connected"]
     fresh, reconsent = (kwargs for _, kwargs in published)
@@ -814,6 +815,7 @@ async def test_fresh_sign_in_with_matching_identity_resurrects_revoked_connectio
     )
     account = await Account.get_or_create(druks_db, "op@example.com")
     connection = await VaultSecret.connect(
+        db_session(),
         Audience.service(keyed_acme.slug),
         account_id=account.id,
         refresh_token="rt-old",
@@ -821,25 +823,28 @@ async def test_fresh_sign_in_with_matching_identity_resurrects_revoked_connectio
         identity={"sub": "account-1"},
     )
     connection_id = connection.id
-    await connection.revoke("user", session=db_session())
+    await connection.revoke(db_session(), "user")
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
         _complete_oauth_sign_in(client, keyed_acme.slug)
 
     db_session().expunge_all()
-    resurrected = await VaultSecret.get(connection_id)
+    resurrected = await db_session().get(VaultSecret, connection_id)
     assert resurrected
     assert not resurrected.revoked_at
     assert not resurrected.revoked_reason
     assert resurrected.secrets["refresh_token"] == "rt-1"
     assert [
-        row.id for row in await VaultSecret.list_connections(Audience.service(keyed_acme.slug))
+        row.id
+        for row in await VaultSecret.list_connections(
+            db_session(), Audience.service(keyed_acme.slug)
+        )
     ] == [connection_id]
     assert (
         len(
             await VaultSecret.list_connections(
-                Audience.service(keyed_acme.slug), include_revoked=True
+                db_session(), Audience.service(keyed_acme.slug), include_revoked=True
             )
         )
         == 1
@@ -867,6 +872,7 @@ async def test_matching_fresh_sign_in_lands_on_live_connection_and_evicts_cached
     )
     account = await Account.get_or_create(druks_db, "op@example.com")
     connection = await VaultSecret.connect(
+        db_session(),
         Audience.service(keyed_acme.slug),
         account_id=account.id,
         refresh_token="rt-old",
@@ -887,13 +893,13 @@ async def test_matching_fresh_sign_in_lands_on_live_connection_and_evicts_cached
         _complete_oauth_sign_in(client, keyed_acme.slug)
 
     db_session().expunge_all()
-    reconnected = await VaultSecret.get(connection_id)
+    reconnected = await db_session().get(VaultSecret, connection_id)
     assert reconnected
     assert reconnected.secrets["refresh_token"] == "rt-1"
     assert (
         len(
             await VaultSecret.list_connections(
-                Audience.service(keyed_acme.slug), include_revoked=True
+                db_session(), Audience.service(keyed_acme.slug), include_revoked=True
             )
         )
         == 1
@@ -913,6 +919,7 @@ async def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_liv
     )
     account = await Account.get_or_create(druks_db, "op@example.com")
     live = await VaultSecret.connect(
+        db_session(),
         Audience.service(keyed_acme.slug),
         account_id=account.id,
         refresh_token="rt-live-old",
@@ -921,6 +928,7 @@ async def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_liv
     )
     live_id = live.id
     revoked = await VaultSecret.connect(
+        db_session(),
         Audience.service(keyed_acme.slug),
         account_id=account.id,
         refresh_token="rt-revoked-old",
@@ -928,15 +936,15 @@ async def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_liv
         identity={"sub": "account-1"},
     )
     revoked_id = revoked.id
-    await revoked.revoke("user", session=db_session())
+    await revoked.revoke(db_session(), "user")
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
         _complete_oauth_sign_in(client, keyed_acme.slug)
 
     db_session().expunge_all()
-    reconnected = await VaultSecret.get(live_id)
-    still_revoked = await VaultSecret.get(revoked_id)
+    reconnected = await db_session().get(VaultSecret, live_id)
+    still_revoked = await db_session().get(VaultSecret, revoked_id)
     assert reconnected
     assert still_revoked
     assert reconnected.secrets["refresh_token"] == "rt-1"
@@ -945,7 +953,7 @@ async def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_liv
     assert (
         len(
             await VaultSecret.list_connections(
-                Audience.service(keyed_acme.slug), include_revoked=True
+                db_session(), Audience.service(keyed_acme.slug), include_revoked=True
             )
         )
         == 2
@@ -964,6 +972,7 @@ async def test_fresh_sign_in_without_the_declared_identity_fact_creates_a_new_co
     )
     account = await Account.get_or_create(druks_db, "op@example.com")
     revoked = await VaultSecret.connect(
+        db_session(),
         Audience.service(acme.slug),
         account_id=account.id,
         refresh_token="rt-old",
@@ -971,20 +980,24 @@ async def test_fresh_sign_in_without_the_declared_identity_fact_creates_a_new_co
         identity={"sub": "account-1"},
     )
     revoked_id = revoked.id
-    await revoked.revoke("user", session=db_session())
+    await revoked.revoke(db_session(), "user")
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
         _complete_oauth_sign_in(client, acme.slug)
 
     db_session().expunge_all()
-    [created] = await VaultSecret.list_connections(Audience.service(acme.slug))
+    [created] = await VaultSecret.list_connections(db_session(), Audience.service(acme.slug))
     assert created.id != revoked_id
     assert (
-        len(await VaultSecret.list_connections(Audience.service(acme.slug), include_revoked=True))
+        len(
+            await VaultSecret.list_connections(
+                db_session(), Audience.service(acme.slug), include_revoked=True
+            )
+        )
         == 2
     )
-    assert (await VaultSecret.get(revoked_id)).revoked_at
+    assert (await db_session().get(VaultSecret, revoked_id)).revoked_at
     assert oauth_events[-1][1]["connection_id"] == created.id
     assert oauth_events[-1][1]["reconsent"] is False
 
@@ -1022,16 +1035,20 @@ async def test_fresh_sign_in_after_revoke_creates_a_new_connection(
             )
 
         sign_in()
-        [first] = await VaultSecret.list_connections(Audience.service("acme"))
+        [first] = await VaultSecret.list_connections(db_session(), Audience.service("acme"))
         assert client.delete(f"/api/oauth/connections/{first.id}").status_code == 204
 
         # The identity facts do not include "sub", so the sign-in cannot
         # match the existing row. The revoked row stays as history.
         sign_in()
-        [live] = await VaultSecret.list_connections(Audience.service("acme"))
+        [live] = await VaultSecret.list_connections(db_session(), Audience.service("acme"))
         assert live.id != first.id
         assert (
-            len(await VaultSecret.list_connections(Audience.service("acme"), include_revoked=True))
+            len(
+                await VaultSecret.list_connections(
+                    db_session(), Audience.service("acme"), include_revoked=True
+                )
+            )
             == 2
         )
 
@@ -1069,7 +1086,7 @@ async def test_reconsent_returns_a_revoked_connection_to_life(
         consent = client.get("/api/oauth/acme/connect", follow_redirects=False)
         state = dict(parse_qsl(urlparse(consent.headers["location"]).query))["state"]
         client.get("/api/oauth/callback", params={"state": state, "code": "c-1"})
-        [connection] = await VaultSecret.list_connections(Audience.service("acme"))
+        [connection] = await VaultSecret.list_connections(db_session(), Audience.service("acme"))
         assert client.delete(f"/api/oauth/connections/{connection.id}").status_code == 204
 
         # Reconsent names the row and makes the revoked consent live again.
@@ -1084,7 +1101,7 @@ async def test_reconsent_returns_a_revoked_connection_to_life(
 
         # The routes wrote in their own transactions; drop stale instances.
         db_session().expunge_all()
-        [live] = await VaultSecret.list_connections(Audience.service("acme"))
+        [live] = await VaultSecret.list_connections(db_session(), Audience.service("acme"))
         assert live.id == connection.id
         assert not live.revoked_at
         assert not live.revoked_reason
@@ -1114,6 +1131,7 @@ async def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch
     me = await Account.get_or_create(druks_db, "op@example.com")
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         row = await VaultSecret.connect(
+            db_session(),
             Audience.service("acme"),
             account_id=me.id,
             refresh_token="rt-1",
@@ -1126,10 +1144,10 @@ async def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch
         assert listed["revokedAt"] is None
 
         assert client.delete(f"/api/oauth/connections/{row.id}").status_code == 204
-        assert not await VaultSecret.list_connections(Audience.service("acme"))
+        assert not await VaultSecret.list_connections(db_session(), Audience.service("acme"))
         # The route revoked in its own transaction; drop the stale instance.
         db_session().expunge_all()
-        revoked = await VaultSecret.get(row.id)
+        revoked = await db_session().get(VaultSecret, row.id)
         assert revoked.revoked_at
         assert revoked.revoked_reason == "user"
         assert "refresh_token" not in revoked.secrets
@@ -1163,7 +1181,7 @@ async def test_replacing_the_client_credentials_revokes_its_connections(
     monkeypatch.setattr("druks.services.routes.publish", record)
     monkeypatch.setattr("druks.services.oauth.publish", record)
     row = await VaultSecret.connect(
-        Audience.service("acme"), account_id=None, refresh_token="rt-old", scopes=[]
+        db_session(), Audience.service("acme"), account_id=None, refresh_token="rt-old", scopes=[]
     )
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
@@ -1174,8 +1192,10 @@ async def test_replacing_the_client_credentials_revokes_its_connections(
 
     # The new client can never refresh the old client's connections.
     db_session().expunge_all()
-    assert not await VaultSecret.list_connections(Audience.service("acme"))
-    [revoked] = await VaultSecret.list_connections(Audience.service("acme"), include_revoked=True)
+    assert not await VaultSecret.list_connections(db_session(), Audience.service("acme"))
+    [revoked] = await VaultSecret.list_connections(
+        db_session(), Audience.service("acme"), include_revoked=True
+    )
     assert revoked.id == row.id
     assert revoked.revoked_reason == "client_replaced"
     assert "refresh_token" not in revoked.secrets
@@ -1204,6 +1224,7 @@ async def test_list_serves_the_connections_beside_the_declared_union(tmp_path, a
         assert before["usedBy"] == ["night_watch.acme"]
 
         row = await VaultSecret.connect(
+            db_session(),
             Audience.service("acme"),
             account_id=None,
             refresh_token="rt-1",

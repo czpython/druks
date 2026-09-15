@@ -5,6 +5,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
+from druks.api.dependencies import SessionDep
 from druks.core.apis.github import GITHUB
 from druks.core.services import Github
 from druks.core.templates import render_page
@@ -43,7 +44,9 @@ async def create_github_app(request: Request) -> HTMLResponse:
 
 
 @router.get("/manifest/callback", response_class=HTMLResponse)
-async def github_manifest_callback(request: Request, code: str = "") -> HTMLResponse:
+async def github_manifest_callback(
+    session: SessionDep, request: Request, code: str = ""
+) -> HTMLResponse:
     if not code:
         raise HTTPException(status_code=400, detail="Missing code in the GitHub redirect.")
     api_url = request.app.state.settings.github_api_url
@@ -62,6 +65,7 @@ async def github_manifest_callback(request: Request, code: str = "") -> HTMLResp
     app = converted.json()
     slug = app["slug"]
     await VaultSecret.store(
+        session,
         Github.secret_kind,
         Audience.service(GITHUB),
         identity={"app_id": str(app["id"]), "slug": slug},

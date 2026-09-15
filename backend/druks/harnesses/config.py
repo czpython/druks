@@ -106,7 +106,9 @@ async def get_config(agent_name: str, account_id: str | None) -> AgentConfig:
     secret_refs: list[SecretRef] = []
     identity: dict = {}
     if billing == "api_key":
-        provider_key = await VaultSecret.lookup(SecretKind.STATIC, Audience.provider(provider_id))
+        provider_key = await VaultSecret.lookup(
+            db_session(), SecretKind.STATIC, Audience.provider(provider_id)
+        )
         if not provider_key:
             label = await provider_label(provider_id)
             raise HarnessNotConnectedError(f"add the {label} API key in Settings → Providers.")

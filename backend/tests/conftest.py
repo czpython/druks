@@ -58,13 +58,19 @@ async def connect_anthropic_subscription(email: str) -> VaultSecret:
 async def connect_service(slug: str, *, identity: dict, secrets: dict) -> VaultSecret:
     """Seed the vault row a finished connect flow would leave for a service."""
     return await VaultSecret.store(
-        services.get(slug).secret_kind, Audience.service(slug), identity=identity, secrets=secrets
+        db_session(),
+        services.get(slug).secret_kind,
+        Audience.service(slug),
+        identity=identity,
+        secrets=secrets,
     )
 
 
 async def installation_key() -> VaultSecret:
     account = await Account.get_or_create(db_session(), "op@example.com")
-    return await VaultSecret.paste(Audience.provider("anthropic"), "test-key", pasted_by=account)
+    return await VaultSecret.paste(
+        db_session(), Audience.provider("anthropic"), "test-key", pasted_by=account
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -223,6 +229,7 @@ async def connect_provider(provider_cls, payload: dict, *, provider_email: str =
     account = await Account.get_or_create(db_session(), provider_email)
     _, expires_at = provider_cls._refresh_state(payload)
     return await VaultSecret.store(
+        db_session(),
         SecretKind.SUBSCRIPTION,
         Audience.provider(provider_cls.id),
         account_id=account.id,

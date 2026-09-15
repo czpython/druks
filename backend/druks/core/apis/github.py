@@ -12,6 +12,7 @@ from githubkit.exception import GraphQLFailed, RequestFailed
 
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.utils.time import ensure_utc
+from druks.database import db_session
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
@@ -592,6 +593,6 @@ async def get_github_client() -> GitHubClient:
     ``ServiceNotConnectedError`` when GitHub isn't connected. ``github_api_url``
     stays a Settings input because it is transport, not identity. PEM plaintext
     exists only here, feeding the client's auth strategy."""
-    if row := await VaultSecret.lookup(SecretKind.APP_KEY, Audience.service(GITHUB)):
+    if row := await VaultSecret.lookup(db_session(), SecretKind.APP_KEY, Audience.service(GITHUB)):
         return GitHubClient.from_secret(row)
     raise ServiceNotConnectedError(GITHUB)

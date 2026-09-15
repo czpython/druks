@@ -213,7 +213,9 @@ async def test_unattended_api_key_uses_installation_config_without_a_default_acc
     session = db_session()
     session.add(account)
     await session.flush()
-    await VaultSecret.paste(Audience.provider("anthropic"), "test-api-key", pasted_by=account)
+    await VaultSecret.paste(
+        druks_db, Audience.provider("anthropic"), "test-api-key", pasted_by=account
+    )
     installation = await InstallationSettings.get()
     await installation.update(default_billing="api_key", default_effort="low")
     assert await Account.get_default(druks_db) is None

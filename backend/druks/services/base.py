@@ -82,12 +82,12 @@ class ScopedService:
         return [
             Connection(self.service, row)
             for row in await VaultSecret.list_account_connections(
-                Audience.service(self.service.slug), account_id
+                db_session(), Audience.service(self.service.slug), account_id
             )
         ]
 
     async def get(self, connection_id: str) -> Connection | None:
-        row = await VaultSecret.get(connection_id)
+        row = await db_session().get(VaultSecret, connection_id)
         if (
             row
             and row.kind == SecretKind.OAUTH
@@ -216,7 +216,9 @@ class Service:
     @classmethod
     async def get(cls) -> VaultSecret:
         """The connected identity's vault row, or ServiceNotConnectedError."""
-        if row := await VaultSecret.lookup(cls.secret_kind, Audience.service(cls.slug)):
+        if row := await VaultSecret.lookup(
+            db_session(), cls.secret_kind, Audience.service(cls.slug)
+        ):
             return row
         raise ServiceNotConnectedError(cls.slug)
 
@@ -278,7 +280,9 @@ class Service:
 
     @classmethod
     async def is_connected(cls) -> bool:
-        return bool(await VaultSecret.lookup(cls.secret_kind, Audience.service(cls.slug)))
+        return bool(
+            await VaultSecret.lookup(db_session(), cls.secret_kind, Audience.service(cls.slug))
+        )
 
     @classmethod
     async def connect(cls, payload: dict[str, Any]) -> VaultSecret:
@@ -310,6 +314,7 @@ class Service:
         if all(str(value).strip() for value in (*identity.values(), *secrets.values())):
             proven = await cls.verify(settings)
             return await VaultSecret.store(
+                db_session(),
                 cls.secret_kind,
                 Audience.service(cls.slug),
                 identity={**identity, **proven},

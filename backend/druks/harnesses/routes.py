@@ -8,7 +8,6 @@ from druks.accounts.dependencies import current_session_account, current_session
 from druks.accounts.models import Account
 from druks.accounts.schemas import AccountResponse
 from druks.api.dependencies import SessionDep
-from druks.database import db_session
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
@@ -44,11 +43,14 @@ async def list_providers() -> tuple[Provider, ...]:
     response_model_by_alias=True,
 )
 async def list_subscriptions(
+    session: SessionDep,
     account: Account = Depends(current_session_account),
 ) -> list[ProviderSubscriptionResponse]:
     return [
         ProviderSubscriptionResponse.from_secret(row)
-        for row in await VaultSecret.list_subscriptions(account_id=account.id, include_revoked=True)
+        for row in await VaultSecret.list_subscriptions(
+            session, account_id=account.id, include_revoked=True
+        )
     ]
 
 
@@ -59,7 +61,7 @@ async def list_subscriptions(
     dependencies=[Depends(current_session_account)],
 )
 async def list_keys(session: SessionDep) -> list[ProviderKeyResponse]:
-    return [await _key_response(session, row) for row in await VaultSecret.list_keys()]
+    return [await _key_response(session, row) for row in await VaultSecret.list_keys(session)]
 
 
 async def _key_response(session: AsyncSession, row: VaultSecret) -> ProviderKeyResponse:
@@ -136,6 +138,7 @@ async def complete_connection(
         # get_or_create is atomic, so concurrent completions of one email converge.
         resolved = account or await Account.get_or_create(session, completed.provider_email)
     await VaultSecret.store(
+        session,
         SecretKind.SUBSCRIPTION,
         Audience.provider(provider.id),
         account_id=resolved.id,
@@ -146,14 +149,14 @@ async def complete_connection(
     # Build the reply, then commit before provider I/O. Flushed rows hold their locks
     # across an await, and after the commit the reply would need another read.
     response = AccountResponse.model_validate(resolved)
-    await db_session().commit()
+    await session.commit()
     try:
         # The flow is already spent, so a failed refresh only logs.
         await provider.refresh_catalog()
     except Exception:
         logging.getLogger(__name__).exception("Catalog refresh after connect failed")
         with suppress(Exception):
-            await db_session().rollback()
+            await session.rollback()
     return response
 
 
@@ -174,7 +177,9 @@ async def create_key(
     if is_registered(provider_id):
         provider = get_provider(provider_id)
         if "api_key" in provider.billing_options:
-            stored = await VaultSecret.paste(Audience.provider(provider.id), key, pasted_by=account)
+            stored = await VaultSecret.paste(
+                session, Audience.provider(provider.id), key, pasted_by=account
+            )
             await provider.refresh_catalog()
             return await _key_response(session, stored)
         raise HTTPException(status_code=422, detail=f"{provider.label} does not accept API keys.")
@@ -183,17 +188,20 @@ async def create_key(
     except KeyError as error:
         raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}") from error
     return await _key_response(
-        session, await VaultSecret.paste(Audience.provider(provider_id), key, pasted_by=account)
+        session,
+        await VaultSecret.paste(session, Audience.provider(provider_id), key, pasted_by=account),
     )
 
 
 @router.delete(
     "/{provider_id}/key", status_code=204, dependencies=[Depends(current_session_account)]
 )
-async def remove_key(provider_id: str) -> None:
+async def remove_key(session: SessionDep, provider_id: str) -> None:
     """Removing a directory provider's key also removes the provider."""
-    if stored := await VaultSecret.lookup(SecretKind.STATIC, Audience.provider(provider_id)):
-        await stored.revoke("user", session=db_session())
+    if stored := await VaultSecret.lookup(
+        session, SecretKind.STATIC, Audience.provider(provider_id)
+    ):
+        await stored.revoke(session, "user")
     if is_registered(provider_id):
         return
     if catalog := await ProviderCatalog.get(provider_id):
@@ -203,9 +211,11 @@ async def remove_key(provider_id: str) -> None:
 
 
 @router.delete("/{provider_id}/connection", status_code=204)
-async def disconnect(provider_id: str, account: Account = Depends(current_session_account)) -> None:
+async def disconnect(
+    session: SessionDep, provider_id: str, account: Account = Depends(current_session_account)
+) -> None:
     provider = _resolve_provider(provider_id)
     if subscription := await VaultSecret.lookup(
-        SecretKind.SUBSCRIPTION, Audience.provider(provider.id), account.id
+        session, SecretKind.SUBSCRIPTION, Audience.provider(provider.id), account.id
     ):
-        await subscription.revoke("user", session=db_session())
+        await subscription.revoke(session, "user")

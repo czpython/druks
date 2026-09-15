@@ -8,6 +8,7 @@ AUTHORITY = "https://issuer.example.com"
 
 async def _grant(account, *, subject="user-1", authority=AUTHORITY):
     return await VaultSecret.connect(
+        db_session(),
         "mcp:company_tracker",
         account_id=account.id if account else None,
         refresh_token="refresh-token",
@@ -57,5 +58,5 @@ async def test_conflicting_owners_prevent_attribution(druks_db, caplog):
     assert not await Account.lookup(druks_db, AUTHORITY, "user-1")
     assert "multiple accounts" in caplog.text
 
-    await second.revoke("user", session=db_session())
+    await second.revoke(db_session(), "user")
     assert await Account.lookup(druks_db, AUTHORITY, "user-1") is owner

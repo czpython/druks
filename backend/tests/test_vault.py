@@ -30,7 +30,12 @@ async def test_a_pasted_value_issues_itself_with_no_expiry(druks_db):
     row = await _static()
 
     assert await row.issue_token("") == ("lin_secret", None)
-    assert await VaultSecret.lookup(SecretKind.STATIC, "mcp:linear", header="Authorization") is row
+    assert (
+        await VaultSecret.lookup(
+            db_session(), SecretKind.STATIC, "mcp:linear", header="Authorization"
+        )
+        is row
+    )
 
 
 async def test_one_row_per_audience_account_and_header_except_an_oauth_connection(druks_db):
@@ -51,20 +56,25 @@ async def test_one_row_per_audience_account_and_header_except_an_oauth_connectio
         )
     await db_session().flush()
 
-    assert len(await VaultSecret.list_connections("gmail")) == 2
+    assert len(await VaultSecret.list_connections(db_session(), "gmail")) == 2
 
 
 async def test_a_revoked_secret_keeps_its_facts_and_loses_its_secrets(druks_db):
     row = await _static(identity={"slug": "linear"})
 
-    await row.revoke("user", session=db_session())
-    await row.revoke("server_removed", session=db_session())
+    await row.revoke(db_session(), "user")
+    await row.revoke(db_session(), "server_removed")
 
     assert row.revoked_at and row.revoked_reason == "user"
     assert dict(row.secrets) == {}
     assert row.identity == {"slug": "linear"}
-    assert not (await VaultSecret.get(row.id)).is_live
-    assert await VaultSecret.lookup(SecretKind.STATIC, "mcp:linear", header="Authorization") is None
+    assert not (await db_session().get(VaultSecret, row.id)).is_live
+    assert (
+        await VaultSecret.lookup(
+            db_session(), SecretKind.STATIC, "mcp:linear", header="Authorization"
+        )
+        is None
+    )
 
 
 async def test_the_secrets_column_is_ciphertext_bound_to_the_vault(druks_db):
@@ -85,14 +95,16 @@ async def test_a_revoked_secret_issues_nothing(druks_db, kind):
     row = VaultSecret(kind=kind, audience="mcp:linear", secrets={"value": "x"})
     db_session().add(row)
     await db_session().flush()
-    await row.revoke("user", session=db_session())
+    await row.revoke(db_session(), "user")
 
     with pytest.raises(SecretRevokedError, match="mcp:linear"):
         await row.issue_token("")
 
 
 async def test_a_service_grant_issues_through_the_services_client(druks_db, monkeypatch):
-    row = await VaultSecret.connect("service:acme", account_id=None, refresh_token="rt", scopes=[])
+    row = await VaultSecret.connect(
+        db_session(), "service:acme", account_id=None, refresh_token="rt", scopes=[]
+    )
     expiry = datetime.now(UTC) + timedelta(hours=1)
 
     class Client:
@@ -111,7 +123,9 @@ async def test_a_service_grant_issues_through_the_services_client(druks_db, monk
 
 
 async def test_an_mcp_grant_issues_through_the_servers_client(druks_db, monkeypatch):
-    row = await VaultSecret.connect("mcp:linear", account_id=None, refresh_token="rt", scopes=[])
+    row = await VaultSecret.connect(
+        db_session(), "mcp:linear", account_id=None, refresh_token="rt", scopes=[]
+    )
 
     async def get_access_token(name, account_id):
         assert (name, account_id) == ("linear", None)

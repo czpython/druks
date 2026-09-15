@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy_encrypted_field import EncryptedJsonField
 
 from druks.core.models import Uuid7Pk
-from druks.database import db_session, get_session
+from druks.database import get_session
 from druks.models import Base
 from druks.secrets.enums import IdentityStatus, SecretKind
 from druks.secrets.exceptions import SecretRevokedError
@@ -60,15 +60,10 @@ class VaultSecret(Base, Uuid7Pk):
     revoked_reason: Mapped[str] = mapped_column(default="")
 
     @classmethod
-    async def get(cls, secret_id: str) -> "VaultSecret | None":
-        # Revoked rows too. The caller reads is_live.
-        return await db_session().get(cls, secret_id)
-
-    @classmethod
-    async def reload(cls, secret_id: str) -> "VaultSecret | None":
+    async def reload(cls, session: AsyncSession, secret_id: str) -> "VaultSecret | None":
         """The live row, read past the identity map, so a refresher never
         presents a token that a peer already rotated."""
-        return await db_session().scalar(
+        return await session.scalar(
             select(cls)
             .where(cls.id == secret_id, cls.revoked_at.is_(None))
             .execution_options(populate_existing=True)
@@ -76,10 +71,15 @@ class VaultSecret(Base, Uuid7Pk):
 
     @classmethod
     async def lookup(
-        cls, kind: SecretKind, audience: str, account_id: str | None = None, header: str = ""
+        cls,
+        session: AsyncSession,
+        kind: SecretKind,
+        audience: str,
+        account_id: str | None = None,
+        header: str = "",
     ) -> "VaultSecret | None":
         """The live row of a kind that keeps one per audience, account, and header."""
-        return await db_session().scalar(
+        return await session.scalar(
             select(cls).where(
                 cls.kind == kind,
                 cls.audience == audience,
@@ -90,26 +90,29 @@ class VaultSecret(Base, Uuid7Pk):
         )
 
     @classmethod
-    async def list_keys(cls) -> list["VaultSecret"]:
+    async def list_keys(cls, session: AsyncSession) -> list["VaultSecret"]:
         """The installation's provider API keys."""
-        return await cls._list(SecretKind.STATIC, cls.audience.startswith("provider:"))
+        return await cls._list(session, SecretKind.STATIC, cls.audience.startswith("provider:"))
 
     @classmethod
-    async def list_tokens(cls, audience: str | None = None) -> list["VaultSecret"]:
+    async def list_tokens(
+        cls, session: AsyncSession, audience: str | None = None
+    ) -> list["VaultSecret"]:
         """The MCP bearer tokens and secret headers: one server's, or every server's."""
         where = cls.audience == audience if audience else cls.audience.startswith("mcp:")
-        return await cls._list(SecretKind.STATIC, where)
+        return await cls._list(session, SecretKind.STATIC, where)
 
     @classmethod
-    async def list_installation_tokens(cls) -> list["VaultSecret"]:
+    async def list_installation_tokens(cls, session: AsyncSession) -> list["VaultSecret"]:
         """The MCP bearers and secret headers the installation holds."""
         return await cls._list(
-            SecretKind.STATIC, cls.audience.startswith("mcp:"), cls.account_id.is_(None)
+            session, SecretKind.STATIC, cls.audience.startswith("mcp:"), cls.account_id.is_(None)
         )
 
     @classmethod
     async def list_subscriptions(
         cls,
+        session: AsyncSession,
         audience: str | None = None,
         *,
         account_id: str | None = None,
@@ -124,20 +127,27 @@ class VaultSecret(Base, Uuid7Pk):
             clauses.append(cls.account_id == account_id)
         if include_revoked:
             clauses.append(cls.revoked_reason != "user")
-        return await cls._list(SecretKind.SUBSCRIPTION, *clauses, include_revoked=include_revoked)
+        return await cls._list(
+            session, SecretKind.SUBSCRIPTION, *clauses, include_revoked=include_revoked
+        )
 
     @classmethod
     async def _list(
-        cls, kind: SecretKind, *clauses: ColumnElement[bool], include_revoked: bool = False
+        cls,
+        session: AsyncSession,
+        kind: SecretKind,
+        *clauses: ColumnElement[bool],
+        include_revoked: bool = False,
     ) -> list["VaultSecret"]:
         query = select(cls).where(cls.kind == kind, *clauses)
         if not include_revoked:
             query = query.where(cls.revoked_at.is_(None))
-        return list(await db_session().scalars(query.order_by(cls.audience, cls.id)))
+        return list(await session.scalars(query.order_by(cls.audience, cls.id)))
 
     @classmethod
     async def store(
         cls,
+        session: AsyncSession,
         kind: SecretKind,
         audience: str,
         *,
@@ -150,7 +160,7 @@ class VaultSecret(Base, Uuid7Pk):
     ) -> "VaultSecret":
         """Store the one row per audience, account, and header. A second store
         replaces the first and revives a revoked row."""
-        row = await db_session().scalar(
+        row = await session.scalar(
             select(cls).where(
                 cls.kind == kind,
                 cls.audience == audience,
@@ -160,7 +170,7 @@ class VaultSecret(Base, Uuid7Pk):
         )
         if not row:
             row = cls(kind=kind, audience=audience, account_id=account_id, header=header)
-            db_session().add(row)
+            session.add(row)
         row.secrets = secrets
         row.identity = identity or {}
         row.scopes = scopes or []
@@ -169,15 +179,22 @@ class VaultSecret(Base, Uuid7Pk):
         row.revoked_at = None
         row.revoked_reason = ""
         row.updated_at = Base.utc_now()
-        await db_session().flush()
+        await session.flush()
         return row
 
     @classmethod
     async def paste(
-        cls, audience: str, value: str, *, pasted_by: "Account", header: str = ""
+        cls,
+        session: AsyncSession,
+        audience: str,
+        value: str,
+        *,
+        pasted_by: "Account",
+        header: str = "",
     ) -> "VaultSecret":
         """Store a value the operator pasted for an audience, and who pasted it."""
         return await cls.store(
+            session,
             SecretKind.STATIC,
             audience,
             secrets={"value": value},
@@ -188,6 +205,7 @@ class VaultSecret(Base, Uuid7Pk):
     @classmethod
     async def connect(
         cls,
+        session: AsyncSession,
         audience: str,
         *,
         account_id: str | None,
@@ -210,12 +228,13 @@ class VaultSecret(Base, Uuid7Pk):
             identity_status=identity_status,
             identity_error=identity_error,
         )
-        db_session().add(row)
-        await db_session().flush()
+        session.add(row)
+        await session.flush()
         return row
 
     async def reconnect(
         self,
+        session: AsyncSession,
         *,
         refresh_token: str,
         scopes: list[str] | None,
@@ -238,25 +257,25 @@ class VaultSecret(Base, Uuid7Pk):
         self.updated_at = Base.utc_now()
         self.revoked_at = None
         self.revoked_reason = ""
-        await db_session().flush()
+        await session.flush()
 
     @classmethod
     async def list_connections(
-        cls, audience: str, *, include_revoked: bool = False
+        cls, session: AsyncSession, audience: str, *, include_revoked: bool = False
     ) -> list["VaultSecret"]:
         """Every account's OAuth connections at an audience."""
         query = select(cls).where(cls.kind == SecretKind.OAUTH, cls.audience == audience)
         if not include_revoked:
             query = query.where(cls.revoked_at.is_(None))
-        return list(await db_session().scalars(query.order_by(cls.created_at)))
+        return list(await session.scalars(query.order_by(cls.created_at)))
 
     @classmethod
     async def list_account_connections(
-        cls, audience: str, account_id: str | None
+        cls, session: AsyncSession, audience: str, account_id: str | None
     ) -> list["VaultSecret"]:
         """One account's live OAuth connections at an audience. None is the appliance's own."""
         return list(
-            await db_session().scalars(
+            await session.scalars(
                 select(cls)
                 .where(
                     cls.kind == SecretKind.OAUTH,
@@ -270,10 +289,10 @@ class VaultSecret(Base, Uuid7Pk):
 
     @classmethod
     async def get_for_identity(
-        cls, audience: str, account_id: str | None, key: str, value: Any
+        cls, session: AsyncSession, audience: str, account_id: str | None, key: str, value: Any
     ) -> "VaultSecret | None":
         return (
-            await db_session().scalars(
+            await session.scalars(
                 select(cls)
                 .where(
                     cls.kind == SecretKind.OAUTH,
@@ -287,41 +306,43 @@ class VaultSecret(Base, Uuid7Pk):
         ).first()
 
     @classmethod
-    async def list_owned_by(cls, account_id: str | None) -> list["VaultSecret"]:
+    async def list_owned_by(
+        cls, session: AsyncSession, account_id: str | None
+    ) -> list["VaultSecret"]:
         # The audit read, revoked rows included.
         return list(
-            await db_session().scalars(
+            await session.scalars(
                 select(cls)
                 .where(cls.kind == SecretKind.OAUTH, cls.account_id == account_id)
                 .order_by(cls.created_at)
             )
         )
 
-    async def get_refresh_token(self) -> str:
-        if fresh := await VaultSecret.reload(self.id):
+    async def get_refresh_token(self, session: AsyncSession) -> str:
+        if fresh := await VaultSecret.reload(session, self.id):
             return fresh.secrets["refresh_token"]
         # The services package imports the vault.
         from druks.services.exceptions import OauthRefreshError
 
         raise OauthRefreshError(self.audience_name, "the connection was revoked mid-refresh")
 
-    async def update_refresh_token(self, rotated: str) -> None:
+    async def update_refresh_token(self, session: AsyncSession, rotated: str) -> None:
         # The provider already invalidated the old token. A later rollback of the
         # enclosing transaction must not lose the new one, so this commits on its own.
-        async with get_session(db_session().bind) as session:
-            fresh = await session.get(VaultSecret, self.id)
+        async with get_session(session.bind) as own:
+            fresh = await own.get(VaultSecret, self.id)
             stored = (
-                await session.execute(
+                await own.execute(
                     update(VaultSecret)
                     .where(VaultSecret.id == self.id, VaultSecret.revoked_at.is_(None))
                     .values(secrets={**dict(fresh.secrets), "refresh_token": rotated})
                 )
             ).rowcount
-            await session.commit()
+            await own.commit()
         if stored:
             # Expire, never assign: the enclosing commit must not rewrite secrets
             # over a revoke that lands between the two commits.
-            db_session().expire(self, ["secrets"])
+            session.expire(self, ["secrets"])
             return
         from druks.services.exceptions import OauthRefreshError
 
@@ -336,18 +357,20 @@ class VaultSecret(Base, Uuid7Pk):
     def is_live(self) -> bool:
         return not self.revoked_at
 
-    async def update_secrets(self, secrets: dict[str, Any], *, expires_at: datetime | None) -> None:
+    async def update_secrets(
+        self, session: AsyncSession, secrets: dict[str, Any], *, expires_at: datetime | None
+    ) -> None:
         """A rotation's write, on the live row only, so an earlier revoke keeps
         its cleared secrets."""
-        await db_session().execute(
+        await session.execute(
             update(type(self))
             .where(type(self).id == self.id, type(self).revoked_at.is_(None))
             .values(secrets=secrets, expires_at=expires_at, last_refreshed_at=Base.utc_now())
         )
-        await db_session().refresh(self)
+        await session.refresh(self)
 
-    async def revoke(self, reason: str = "", *, session: AsyncSession) -> None:
-        """Revoke in ``session``. A repeat revoke keeps the first stamp."""
+    async def revoke(self, session: AsyncSession, reason: str = "") -> None:
+        """A repeat revoke keeps the first stamp."""
         now = Base.utc_now()
         await session.execute(
             update(VaultSecret)

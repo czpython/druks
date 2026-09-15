@@ -1,5 +1,6 @@
 import logging
 
+from druks.database import db_session
 from druks.files.storage import reap_deleted_file_bytes
 from druks.harnesses.datastructures import RotationResult
 from druks.harnesses.directory import refresh_added_catalogs
@@ -31,7 +32,7 @@ async def refresh_tokens() -> None:
 
 @task(every="*/5 * * * *")
 async def refresh_usage() -> None:
-    for subscription in await VaultSecret.list_subscriptions():
+    for subscription in await VaultSecret.list_subscriptions(db_session()):
         if await UsageScrape.is_due(subscription, now=Base.utc_now()):
             await get_provider(subscription.audience_name).poll_usage(subscription)
 
@@ -56,7 +57,7 @@ async def refresh_catalogs() -> None:
 
 
 async def _refresh() -> dict[str, object]:
-    subscriptions = await VaultSecret.list_subscriptions()
+    subscriptions = await VaultSecret.list_subscriptions(db_session())
 
     # A rotation ends the token every box holds, so a due one waits for an
     # idle subscription unless it is urgent. Plain values: each refresh

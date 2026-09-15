@@ -390,11 +390,11 @@ async def test_the_issuer_answers_503_for_a_disconnected_mcp_grant(druks_db, tmp
     )
     server.identity_mode = IdentityMode.SHARED
     grant = await VaultSecret.connect(
-        Audience.mcp("linear"), account_id=None, refresh_token="rt", scopes=[]
+        druks_db, Audience.mcp("linear"), account_id=None, refresh_token="rt", scopes=[]
     )
     identity, bearer, entry = await _mcp_identity()
     assert entry["issuer"]["refresh"] == "1h"
-    await grant.revoke("user", session=db_session())
+    await grant.revoke(db_session(), "user")
 
     response = await _fetch(tmp_path, identity.id, bearer, "mcp_linear_token")
 

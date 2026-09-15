@@ -60,6 +60,7 @@ async def test_check_judges_the_triple_together(druks_db):
 
 async def _key() -> VaultSecret:
     return await VaultSecret.paste(
+        db_session(),
         Audience.provider("anthropic"),
         "sk-shared",
         pasted_by=await Account.get_or_create(db_session(), "ops@example.com"),
@@ -89,19 +90,19 @@ async def test_call_keeps_its_billing_reference_after_disconnect(druks_db, billi
     )
 
     if billing == "subscription":
-        await subscription.revoke("user", session=db_session())
-        await subscription.update_secrets({"late_refresh": "secret"}, expires_at=None)
+        await subscription.revoke(db_session(), "user")
+        await subscription.update_secrets(db_session(), {"late_refresh": "secret"}, expires_at=None)
         assert not dict(subscription.secrets)
         assert not subscription.is_live
-        assert await type(subscription).reload(subscription.id) is None
+        assert await type(subscription).reload(db_session(), subscription.id) is None
         assert call.subscription_id == subscription.id
         connected = await connect_anthropic_subscription("a@example.com")
         assert connected.id == subscription.id
     else:
-        await key.revoke("user", session=db_session())
+        await key.revoke(db_session(), "user")
         await db_session().refresh(key)
         assert dict(key.secrets) == {}
-        assert await VaultSecret.lookup(SecretKind.STATIC, key.audience) is None
+        assert await VaultSecret.lookup(druks_db, SecretKind.STATIC, key.audience) is None
         assert call.api_key_id == key.id
         assert (await _key()).id == key.id
 
@@ -228,6 +229,7 @@ async def test_an_added_provider_refuses_until_its_transport_is_proven(druks_db)
         label="OpenRouter",
     )
     await VaultSecret.paste(
+        druks_db,
         Audience.provider("openrouter"),
         "sk-openrouter",
         pasted_by=await Account.get_or_create(druks_db, "ops@example.com"),

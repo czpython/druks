@@ -134,7 +134,7 @@ async def _provider_usage(
 ) -> schemas.AgentProviderUsage:
     is_connected = bool(
         await VaultSecret.lookup(
-            SecretKind.SUBSCRIPTION, Audience.provider(provider_id), account_id
+            db_session(), SecretKind.SUBSCRIPTION, Audience.provider(provider_id), account_id
         )
     )
     row = await UsageScrape.latest_for(provider_id, account_id)

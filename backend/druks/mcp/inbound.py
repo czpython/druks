@@ -24,7 +24,7 @@ async def get_druks_account_token(
 ) -> VaultSecret:
     """This account's token row, minted when a run of theirs first needs it."""
     audience = Audience.mcp(DRUKS_SERVER_NAME)
-    row = await VaultSecret.lookup(SecretKind.STATIC, audience, account_id, BEARER_HEADER)
+    row = await VaultSecret.lookup(session, SecretKind.STATIC, audience, account_id, BEARER_HEADER)
     if row:
         held = await PersonalAccessToken.get_for_prefix(session, row.identity["token_prefix"])
         if held and held.status == "active":
@@ -36,6 +36,7 @@ async def get_druks_account_token(
         allowed_tools=list(allowed_tools) or None,
     )
     return await VaultSecret.store(
+        session,
         SecretKind.STATIC,
         audience,
         secrets={"value": token},

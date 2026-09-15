@@ -68,6 +68,7 @@ async def _committed(engine, work):
 async def _connect(payload: dict) -> str:
     account = await Account.get_or_create(db_session(), "op@example.com")
     row = await VaultSecret.store(
+        db_session(),
         SecretKind.SUBSCRIPTION,
         Audience.provider("anthropic"),
         account_id=account.id,
@@ -90,7 +91,7 @@ async def test_reconnect_overwrites_the_payload_on_the_same_row(engine):
     reconnected_id = await _committed(engine, connect_again)
 
     async def read_back():
-        row = await VaultSecret.get(connection_id)
+        row = await db_session().get(VaultSecret, connection_id)
         return dict(row.secrets)["claudeAiOauth"]["accessToken"]
 
     assert reconnected_id == connection_id
@@ -108,15 +109,15 @@ async def test_rotation_persists_new_payload_across_sessions(engine):
     connection_id = await _committed(engine, connect_old)
 
     async def rotate_in_place():
-        row = await VaultSecret.get(connection_id)
+        row = await db_session().get(VaultSecret, connection_id)
         data = dict(row.secrets)
         data["claudeAiOauth"]["accessToken"] = "new"
-        await row.update_secrets(data, expires_at=None)
+        await row.update_secrets(db_session(), data, expires_at=None)
 
     await _committed(engine, rotate_in_place)
 
     async def read_back():
-        row = await VaultSecret.get(connection_id)
+        row = await db_session().get(VaultSecret, connection_id)
         return dict(row.secrets)["claudeAiOauth"]
 
     block = await _committed(engine, read_back)
@@ -137,6 +138,7 @@ async def test_payload_is_ciphertext_at_rest(engine):
 
     async def read_logins():
         row = await VaultSecret.lookup(
+            db_session(),
             SecretKind.SUBSCRIPTION,
             Audience.provider("anthropic"),
             (await Account.get_default(db_session())).id,
@@ -173,7 +175,11 @@ async def test_invalid_grant_refresh_revokes_past_the_callers_rollback(engine, m
 
     async def connect():
         row = await VaultSecret.connect(
-            Audience.service("acme"), account_id=None, refresh_token="rt-old", scopes=[]
+            db_session(),
+            Audience.service("acme"),
+            account_id=None,
+            refresh_token="rt-old",
+            scopes=[],
         )
         return row.id
 
@@ -182,7 +188,7 @@ async def test_invalid_grant_refresh_revokes_past_the_callers_rollback(engine, m
     session = get_session(engine)
     db_session.registry.set(session)
     try:
-        connection = await VaultSecret.get(connection_id)
+        connection = await db_session().get(VaultSecret, connection_id)
         with pytest.raises(OauthRefreshError, match="sign in again"):
             await client.get_access_token(connection=connection)
         await session.rollback()
@@ -191,7 +197,7 @@ async def test_invalid_grant_refresh_revokes_past_the_callers_rollback(engine, m
         await session.close()
 
     async def read_back():
-        row = await VaultSecret.get(connection_id)
+        row = await db_session().get(VaultSecret, connection_id)
         return row.revoked_reason, dict(row.secrets)
 
     assert await _committed(engine, read_back) == ("invalid_grant", {})

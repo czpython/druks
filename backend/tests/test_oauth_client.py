@@ -58,6 +58,7 @@ async def _connection(
     refresh_token: str = "rt-old", scopes: list[str] | None = None
 ) -> VaultSecret:
     return await VaultSecret.connect(
+        db_session(),
         Audience.service(_PROVIDER),
         account_id=None,
         refresh_token=refresh_token,
@@ -99,7 +100,7 @@ async def test_get_refreshes_persists_rotation_and_fills_with_skewed_ttl(token_e
     # The expiry is the cache lifetime: the provider's 300s less the skew.
     assert timedelta(seconds=230) < expires_at - datetime.now(UTC) <= timedelta(seconds=240)
     db_session().expunge_all()
-    assert (await VaultSecret.get(connection.id)).secrets["refresh_token"] == "rt-new"
+    assert (await db_session().get(VaultSecret, connection.id)).secrets["refresh_token"] == "rt-new"
     refresh = token_endpoint.requests[0]
     assert refresh["grant_type"] == "refresh_token"
     assert refresh["refresh_token"] == "rt-old"
@@ -116,7 +117,7 @@ async def test_get_fills_the_cache_only_after_the_rotation_is_saved(token_endpoi
     token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-new", "expires_in": 300}
     connection = await _connection()
 
-    def _unsavable(self, rotated: str) -> None:
+    def _unsavable(self, session, rotated: str) -> None:
         raise RuntimeError("rotation write failed")
 
     monkeypatch.setattr(VaultSecret, "update_refresh_token", _unsavable)
@@ -160,7 +161,7 @@ async def test_get_refresh_rejection_evicts_and_raises(token_endpoint):
     with pytest.raises(OauthRefreshError, match="HTTP 400"):
         await _client().get_access_token(connection=connection)
 
-    assert (await VaultSecret.get(connection.id)).secrets["refresh_token"] == "rt-old"
+    assert (await db_session().get(VaultSecret, connection.id)).secrets["refresh_token"] == "rt-old"
     redis = get_client()
     assert not await redis.get(_token_key(connection))
     assert not await redis.get(_lock_key(connection))
@@ -183,7 +184,7 @@ async def test_other_refresh_failures_leave_the_connection_live(
     with pytest.raises(OauthRefreshError, match=f"HTTP {status}"):
         await _client().get_access_token(connection=connection)
 
-    assert await VaultSecret.reload(connection.id)
+    assert await VaultSecret.reload(db_session(), connection.id)
     assert not published
 
 
@@ -204,7 +205,7 @@ async def test_disconnect_revokes_the_connection_and_drops_the_cached_token(toke
 
     await _client().disconnect(connection, reason="user", session=db_session())
 
-    revoked = await VaultSecret.get(connection.id)
+    revoked = await db_session().get(VaultSecret, connection.id)
     assert revoked.revoked_at
     assert revoked.revoked_reason == "user"
     # Nothing secret outlives the consent at rest.
@@ -214,7 +215,7 @@ async def test_disconnect_revokes_the_connection_and_drops_the_cached_token(toke
 
     # A second revoke keeps the first stamp.
     first_stamp = revoked.revoked_at
-    await revoked.revoke("client_replaced", session=db_session())
+    await revoked.revoke(db_session(), "client_replaced")
     assert revoked.revoked_at == first_stamp
     assert revoked.revoked_reason == "user"
 
@@ -224,7 +225,7 @@ async def test_a_revoke_landing_mid_refresh_is_not_overwritten(token_endpoint):
     exchange = token_endpoint.handler
 
     async def revoke_then_rotate(request: httpx.Request) -> httpx.Response:
-        await connection.revoke("user", session=db_session())
+        await connection.revoke(db_session(), "user")
         return exchange(request)
 
     token_endpoint.handler = revoke_then_rotate
@@ -233,13 +234,13 @@ async def test_a_revoke_landing_mid_refresh_is_not_overwritten(token_endpoint):
         await _client().get_access_token(connection=connection)
 
     # The rotated token is not stored and no access token is cached.
-    assert "refresh_token" not in (await VaultSecret.get(connection.id)).secrets
+    assert "refresh_token" not in (await db_session().get(VaultSecret, connection.id)).secrets
     assert not await get_client().get(_token_key(connection))
 
 
 async def test_get_refuses_a_revoked_connection(token_endpoint):
     connection = await _connection()
-    await connection.revoke("user", session=db_session())
+    await connection.revoke(db_session(), "user")
 
     with pytest.raises(OauthRefreshError, match="revoked"):
         await _client().get_access_token(connection=connection)

@@ -206,7 +206,7 @@ class OauthClient:
         try:
             data = {
                 "grant_type": "refresh_token",
-                "refresh_token": await connection.get_refresh_token(),
+                "refresh_token": await connection.get_refresh_token(db_session()),
                 **self.extra_token_params,
             }
             if requested:
@@ -250,7 +250,7 @@ class OauthClient:
                     self.provider, "the token endpoint returned no access token"
                 )
             if tokens.get("refresh_token"):
-                await connection.update_refresh_token(tokens["refresh_token"])
+                await connection.update_refresh_token(db_session(), tokens["refresh_token"])
             if requested and tokens.get("scope") and set(tokens["scope"].split()) != set(requested):
                 # The provider ignored the narrowing. The sandbox must never hold this token.
                 raise OauthRefreshError(
@@ -281,7 +281,7 @@ class OauthClient:
     ) -> None:
         """Revoke the grant in ``session``, evict its cached access token, and
         publish ``oauth.disconnected``."""
-        await connection.revoke(reason, session=session)
+        await connection.revoke(session, reason)
         await self.evict_access_token(connection.id)
         await publish(
             "oauth.disconnected",

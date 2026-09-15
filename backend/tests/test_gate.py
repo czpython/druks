@@ -103,7 +103,7 @@ class _FakeLogin:
 
 class _FakeLogins:
     @classmethod
-    async def list_subscriptions(cls):
+    async def list_subscriptions(cls, session):
         return [
             _FakeLogin(subscription_id) for subscription_id in ("subscription-1", "subscription-2")
         ]

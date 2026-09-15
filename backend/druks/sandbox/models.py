@@ -108,7 +108,7 @@ class SandboxIdentity(Base, Uuid7Pk):
         issuer_url = load_settings().sandbox.issuer_url.rstrip("/")
         entries = {}
         for ref in secret_refs:
-            secret = await VaultSecret.get(ref.secret_id)
+            secret = await db_session().get(VaultSecret, ref.secret_id)
             # A custom entry names its host, variable, and header; a catalog
             # entry leaves those to Drukbox.
             fields = {}

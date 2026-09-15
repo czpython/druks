@@ -3,6 +3,7 @@ import logging
 
 import httpx
 
+from druks.database import db_session
 from druks.redis import get_client
 from druks.secrets.models import VaultSecret
 
@@ -81,7 +82,7 @@ async def add_provider(provider_id: str) -> ProviderCatalog:
 
 async def refresh_added_catalogs() -> None:
     """Re-read the directory for every provider the operator added by key."""
-    keys = await VaultSecret.list_keys()
+    keys = await VaultSecret.list_keys(db_session())
     added = [row.audience_name for row in keys if not is_registered(row.audience_name)]
     for provider_id in added:
         try:

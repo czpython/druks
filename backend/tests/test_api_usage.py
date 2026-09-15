@@ -309,6 +309,7 @@ async def test_usage_excludes_another_accounts_scrape(client, druks_db) -> None:
 
 async def test_usage_reports_viewers_subscription_identity(client, druks_db) -> None:
     await VaultSecret.store(
+        druks_db,
         SecretKind.SUBSCRIPTION,
         Audience.provider("anthropic"),
         account_id=(await Account.get_or_create(druks_db, "other@example.com")).id,
@@ -321,6 +322,7 @@ async def test_usage_reports_viewers_subscription_identity(client, druks_db) -> 
     assert _provider(body, "anthropic")["providerEmail"] is None
 
     await VaultSecret.store(
+        druks_db,
         SecretKind.SUBSCRIPTION,
         Audience.provider("anthropic"),
         account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
@@ -394,6 +396,7 @@ async def test_refresh_scrapes_only_the_viewers_logins(client, druks_db, monkeyp
 async def test_refresh_never_scrapes_a_key(client, druks_db, monkeypatch) -> None:
     # A key has no quota; only a subscription is polled.
     await VaultSecret.paste(
+        druks_db,
         Audience.provider("anthropic"),
         "sk",
         pasted_by=await Account.get_or_create(druks_db, "op@example.com"),

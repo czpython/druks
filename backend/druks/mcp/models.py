@@ -61,7 +61,7 @@ class McpServer(Base, Uuid7Pk):
         rows = {server.name: server for server in await cls.list_all()}
         tokens: dict[str, VaultSecret] = {}
         secret_headers: dict[str, dict[str, VaultSecret]] = {}
-        for secret in await VaultSecret.list_installation_tokens():
+        for secret in await VaultSecret.list_installation_tokens(db_session()):
             if secret.header == BEARER_HEADER:
                 tokens[secret.audience_name] = secret
             else:
@@ -112,7 +112,7 @@ class McpServer(Base, Uuid7Pk):
                     grant_account = get_grant_account(server["identity_mode"], account_id)
                     server["has_token"] = bool(
                         await VaultSecret.list_account_connections(
-                            Audience.mcp(server["name"]), grant_account
+                            db_session(), Audience.mcp(server["name"]), grant_account
                         )
                     )
             else:
@@ -165,17 +165,21 @@ class McpServer(Base, Uuid7Pk):
         audience = Audience.mcp(name)
         if token:
             await VaultSecret.store(
-                SecretKind.STATIC, audience, header=BEARER_HEADER, secrets={"value": token}
+                db_session(),
+                SecretKind.STATIC,
+                audience,
+                header=BEARER_HEADER,
+                secrets={"value": token},
             )
         for header, value in (secret_headers or {}).items():
             await VaultSecret.store(
-                SecretKind.STATIC, audience, header=header, secrets={"value": value}
+                db_session(), SecretKind.STATIC, audience, header=header, secrets={"value": value}
             )
         return server
 
     async def delete(self) -> None:
-        for secret in await VaultSecret.list_tokens(Audience.mcp(self.name)):
-            await secret.revoke("server_removed", session=db_session())
+        for secret in await VaultSecret.list_tokens(db_session(), Audience.mcp(self.name)):
+            await secret.revoke(db_session(), "server_removed")
         session = db_session()
         await session.delete(self)
         await session.flush()

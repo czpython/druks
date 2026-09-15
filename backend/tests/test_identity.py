@@ -171,7 +171,7 @@ async def test_onboarding_after_the_only_subscription_is_revoked(
     subscription = await connect_provider(
         AnthropicProvider, {"claudeAiOauth": {"accessToken": "x"}}
     )
-    await subscription.revoke(reason, session=db_session())
+    await subscription.revoke(db_session(), reason)
 
     with _client(tmp_path) as client:
         response = client.get("/api/auth/me")
@@ -202,7 +202,7 @@ async def test_none_zero_setup_flow_creates_the_operator(tmp_path, monkeypatch, 
     account = await Account.get_for_username(druks_db, "me@example.com")
     assert (await Account.get_default(druks_db)).id == account.id
     assert await VaultSecret.lookup(
-        SecretKind.SUBSCRIPTION, Audience.provider("anthropic"), account.id
+        druks_db, SecretKind.SUBSCRIPTION, Audience.provider("anthropic"), account.id
     )
 
 
@@ -220,9 +220,9 @@ async def test_a_pasted_key_is_the_providers_and_names_its_paster(tmp_path, druk
     assert "api-key-value" not in response.text
     account = await Account.get_for_username(druks_db, "operator@example.com")
     assert not await VaultSecret.lookup(
-        SecretKind.SUBSCRIPTION, Audience.provider("anthropic"), account.id
+        druks_db, SecretKind.SUBSCRIPTION, Audience.provider("anthropic"), account.id
     )
-    stored = await VaultSecret.lookup(SecretKind.STATIC, Audience.provider("anthropic"))
+    stored = await VaultSecret.lookup(druks_db, SecretKind.STATIC, Audience.provider("anthropic"))
     assert stored.secrets["value"] == "api-key-value"
     assert stored.identity["pasted_by"] == account.id
 
@@ -245,7 +245,7 @@ async def test_a_second_pasted_key_replaces_the_first(tmp_path, druks_db):
             )
             assert response.status_code == 200
 
-    [stored] = await VaultSecret.list_keys()
+    [stored] = await VaultSecret.list_keys(druks_db)
     assert stored.secrets["value"] == "key-two"
     assert (
         await druks_db.get(Account, stored.identity["pasted_by"])
@@ -284,7 +284,7 @@ async def test_api_key_connect_refuses_setup_scope(tmp_path, druks_db):
 
     assert response.status_code == 409
     assert not await Account.list_all(druks_db)
-    assert not await VaultSecret.list_subscriptions()
+    assert not await VaultSecret.list_subscriptions(druks_db)
 
 
 async def test_concurrent_setup_completions_with_one_email_converge(
@@ -311,7 +311,7 @@ async def test_concurrent_setup_completions_with_one_email_converge(
             == 200
         )
     assert len(await Account.list_all(druks_db)) == 1
-    assert len(await VaultSecret.list_subscriptions()) == 2
+    assert len(await VaultSecret.list_subscriptions(druks_db)) == 2
 
 
 async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, monkeypatch, druks_db):
@@ -336,7 +336,7 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
     operator = await Account.get_for_username(druks_db, "a@example.com")
     assert len(await Account.list_all(druks_db)) == 1
     codex_connection = await VaultSecret.lookup(
-        SecretKind.SUBSCRIPTION, Audience.provider("openai"), operator.id
+        druks_db, SecretKind.SUBSCRIPTION, Audience.provider("openai"), operator.id
     )
     assert codex_connection.identity["email"] == "b@example.com"
 
@@ -351,7 +351,7 @@ async def test_a_connect_survives_a_failed_catalog_refresh(tmp_path, monkeypatch
         assert response.status_code == 200
     account = await Account.get_for_username(druks_db, "me@example.com")
     assert await VaultSecret.lookup(
-        SecretKind.SUBSCRIPTION, Audience.provider("anthropic"), account.id
+        druks_db, SecretKind.SUBSCRIPTION, Audience.provider("anthropic"), account.id
     )
 
 
@@ -371,7 +371,7 @@ async def test_a_bound_connect_cannot_complete_under_another_operator(
         )
         assert response.status_code == 422
         assert "different operator" in response.json()["detail"]
-    assert not await VaultSecret.list_subscriptions()
+    assert not await VaultSecret.list_subscriptions(druks_db)
 
 
 async def test_first_account_remains_default_after_other_connections(
@@ -411,7 +411,7 @@ async def test_reconnect_records_provider_email_but_keeps_the_operator(
         assert response.json()["username"] == "me@example.com"
     account = await Account.get_for_username(druks_db, "me@example.com")
     codex = await VaultSecret.lookup(
-        SecretKind.SUBSCRIPTION, Audience.provider("openai"), account.id
+        druks_db, SecretKind.SUBSCRIPTION, Audience.provider("openai"), account.id
     )
     assert codex.identity["email"] == "corp-seat@corp.com"
 

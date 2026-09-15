@@ -3,9 +3,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from druks.accounts.context import current_account_id
 from druks.accounts.dependencies import current_session_account
+from druks.api.dependencies import SessionDep
 from druks.apps.registry import services
 from druks.core.templates import render_page
-from druks.database import db_session
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.services.exceptions import (
@@ -23,7 +23,7 @@ oauth_router = APIRouter(prefix="/api/oauth", tags=["oauth"])
 
 
 @router.get("", response_model=list[ServiceResponse], response_model_by_alias=True)
-async def list_services() -> list[ServiceResponse]:
+async def list_services(session: SessionDep) -> list[ServiceResponse]:
     entries = []
     for service in services.all():
         try:
@@ -34,7 +34,7 @@ async def list_services() -> list[ServiceResponse]:
         if service.token_endpoint:
             # The detail shows revoked connections as history beside the live.
             connections = await VaultSecret.list_connections(
-                Audience.service(service.slug), include_revoked=True
+                session, Audience.service(service.slug), include_revoked=True
             )
         entries.append(ServiceResponse.from_row(service, row, connections))
     return entries
@@ -48,7 +48,9 @@ async def list_services() -> list[ServiceResponse]:
     response_model_by_alias=True,
     dependencies=[Depends(current_session_account)],
 )
-async def connect_service(slug: str, payload: dict[str, str]) -> ServiceResponse:
+async def connect_service(
+    session: SessionDep, slug: str, payload: dict[str, str]
+) -> ServiceResponse:
     service = services.get(slug)
     if not service:
         raise HTTPException(status_code=404, detail=f"No service {slug!r}.")
@@ -60,8 +62,8 @@ async def connect_service(slug: str, payload: dict[str, str]) -> ServiceResponse
         # A replaced client can never refresh the old client's connections —
         # revoke every live one; the consents stay on record.
         client = OauthClient(provider=slug)
-        for connection in await VaultSecret.list_connections(Audience.service(slug)):
-            await client.disconnect(connection, reason="client_replaced", session=db_session())
+        for connection in await VaultSecret.list_connections(session, Audience.service(slug)):
+            await client.disconnect(connection, reason="client_replaced", session=session)
     return ServiceResponse.from_row(service, row)
 
 
@@ -74,12 +76,12 @@ def _get_oauth_service(slug: str):
 
 @oauth_router.get("/{slug}/connect", dependencies=[Depends(current_session_account)])
 async def connect_oauth_service(
-    slug: str, request: Request, connection: str = "", next: str = ""
+    session: SessionDep, slug: str, request: Request, connection: str = "", next: str = ""
 ) -> RedirectResponse:
     service = _get_oauth_service(slug)
     account_id = current_account_id.get()
     if connection:
-        row = await VaultSecret.get(connection)
+        row = await session.get(VaultSecret, connection)
         if not row or row.audience != Audience.service(slug):
             raise OauthPageError(f"No connection {connection!r} on {slug!r}.", status_code=404)
     if next and (not next.startswith("/") or next.startswith(("//", "/\\"))):
@@ -105,7 +107,9 @@ async def connect_oauth_service(
 
 
 @oauth_router.get("/callback", response_class=HTMLResponse)
-async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Response:
+async def oauth_callback(
+    session: SessionDep, state: str = "", code: str = "", error: str = ""
+) -> Response:
     if error:
         raise OauthPageError(
             f"The authorization server denied the request: {error}", status_code=400
@@ -128,24 +132,25 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
     # matches a fresh sign-in to one. Both make a revoked row live again.
     row = None
     if connection_id:
-        row = await VaultSecret.get(connection_id)
+        row = await session.get(VaultSecret, connection_id)
         if not row:
             raise OauthPageError(
                 "The connection was removed while consent was open.", status_code=400
             )
     elif service.identity_key and (value := identity.get(service.identity_key)):
         row = await VaultSecret.get_for_identity(
-            Audience.service(provider), pending["account_id"], service.identity_key, value
+            session, Audience.service(provider), pending["account_id"], service.identity_key, value
         )
     reconsent = bool(row)
     if row:
         await row.reconnect(
-            refresh_token=tokens["refresh_token"], scopes=granted, identity=identity
+            session, refresh_token=tokens["refresh_token"], scopes=granted, identity=identity
         )
         # A token cached before this consent must not serve the new one.
         await OauthClient(provider=provider).evict_access_token(row.id)
     else:
         row = await VaultSecret.connect(
+            session,
             Audience.service(provider),
             account_id=pending["account_id"],
             refresh_token=tokens["refresh_token"],
@@ -165,8 +170,8 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
 
 
 @oauth_router.get("/connections", dependencies=[Depends(current_session_account)])
-async def list_connections() -> list[ConnectionResponse]:
-    rows = await VaultSecret.list_owned_by(current_account_id.get())
+async def list_connections(session: SessionDep) -> list[ConnectionResponse]:
+    rows = await VaultSecret.list_owned_by(session, current_account_id.get())
     return [ConnectionResponse.from_secret(row) for row in rows]
 
 
@@ -175,13 +180,11 @@ async def list_connections() -> list[ConnectionResponse]:
     status_code=204,
     dependencies=[Depends(current_session_account)],
 )
-async def disconnect_connection(connection_id: str) -> None:
-    row = await VaultSecret.get(connection_id)
+async def disconnect_connection(session: SessionDep, connection_id: str) -> None:
+    row = await session.get(VaultSecret, connection_id)
     if not row or row.kind != "oauth":
         raise HTTPException(status_code=404, detail=f"No connection {connection_id!r}.")
     if row.revoked_at:
         # Revoking is idempotent — the second delete finds the state true.
         return
-    await OauthClient(provider=row.audience_name).disconnect(
-        row, reason="user", session=db_session()
-    )
+    await OauthClient(provider=row.audience_name).disconnect(row, reason="user", session=session)

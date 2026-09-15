@@ -10,6 +10,7 @@ import httpx
 import pytest
 from druks.accounts.models import Account
 from druks.apps.registry import mcp_servers
+from druks.database import db_session
 from druks.mcp import oauth
 from druks.mcp.enums import IdentityMode, TokenSource
 from druks.mcp.exceptions import (
@@ -132,6 +133,7 @@ async def _store_grant(
         )
     server.identity_mode = identity_mode
     return await VaultSecret.connect(
+        db_session(),
         Audience.mcp(_NAME),
         account_id=account_id,
         refresh_token=refresh_token,
@@ -762,7 +764,7 @@ async def test_the_ref_binds_the_accounts_own_grant(auth_server, druks_db):
     ref = await _ref(first.id)
 
     assert ref.secret_id == grant.id
-    assert (await VaultSecret.get(ref.secret_id)).account_id == first.id
+    assert (await druks_db.get(VaultSecret, ref.secret_id)).account_id == first.id
 
 
 async def test_a_disconnected_grant_issues_nothing(auth_server, druks_db):
@@ -771,7 +773,7 @@ async def test_a_disconnected_grant_issues_nothing(auth_server, druks_db):
     await oauth.disconnect(_NAME, None)
 
     with pytest.raises(SecretRevokedError, match=_NAME):
-        await (await VaultSecret.get(ref.secret_id)).issue_token("")
+        await (await druks_db.get(VaultSecret, ref.secret_id)).issue_token("")
 
 
 # --- API: connect / callback / disconnect / badge ---------------------------

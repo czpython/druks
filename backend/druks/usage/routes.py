@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
+from druks.api.dependencies import SessionDep
 from druks.core.utils.time import operator_local_day
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.harnesses.providers import Provider, get_providers
@@ -47,12 +48,14 @@ _MAX_SPARK_POINTS = 72
     response_model=UsageResponse,
     response_model_by_alias=True,
 )
-async def get_usage(account: Account = Depends(current_account)) -> UsageResponse:
+async def get_usage(
+    session: SessionDep, account: Account = Depends(current_account)
+) -> UsageResponse:
     now = datetime.now(UTC)
     summaries = []
     for provider in get_providers():
         subscription = await VaultSecret.lookup(
-            SecretKind.SUBSCRIPTION, Audience.provider(provider.id), account.id
+            session, SecretKind.SUBSCRIPTION, Audience.provider(provider.id), account.id
         )
         summaries.append(
             _summarize(
@@ -67,11 +70,11 @@ async def get_usage(account: Account = Depends(current_account)) -> UsageRespons
 
 
 @router.post("/refresh")
-async def refresh_usage(account: Account = Depends(current_account)) -> None:
+async def refresh_usage(session: SessionDep, account: Account = Depends(current_account)) -> None:
     now = datetime.now(UTC)
     for provider in get_providers():
         subscription = await VaultSecret.lookup(
-            SecretKind.SUBSCRIPTION, Audience.provider(provider.id), account.id
+            session, SecretKind.SUBSCRIPTION, Audience.provider(provider.id), account.id
         )
         row = await UsageScrape.latest_for(provider.id, account.id)
         age = _age_seconds(row.scraped_at, now=now) if row else None

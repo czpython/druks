@@ -163,13 +163,13 @@ class Provider:
         """The subscription a call runs with: the selected row, read fresh so a
         vanished one fails the call; else ``account_id``'s own. A miss raises."""
         if subscription_id:
-            if row := await VaultSecret.reload(subscription_id):
+            if row := await VaultSecret.reload(db_session(), subscription_id):
                 return row
             raise exceptions.HarnessNotConnectedError(
                 "the selected subscription was removed — reconnect it in Settings → Providers."
             )
         if row := await VaultSecret.lookup(
-            SecretKind.SUBSCRIPTION, Audience.provider(cls.id), account_id
+            db_session(), SecretKind.SUBSCRIPTION, Audience.provider(cls.id), account_id
         ):
             return row
         raise exceptions.HarnessNotConnectedError(
@@ -205,7 +205,7 @@ class Provider:
         subscription is idle or the token is urgent. The gate holds every other
         fetch and every new call until the rotation and its refresh requests end.
         Raises :class:`OAuthTokenError` when the row holds nothing valid."""
-        row = await VaultSecret.reload(subscription_id)
+        row = await VaultSecret.reload(db_session(), subscription_id)
         if row and cls.refresh_is_due(row):
             async with gate.shut(subscription_id) as is_idle:
                 if is_idle or cls.refresh_is_urgent(row):
@@ -220,7 +220,7 @@ class Provider:
                         rotation = await cls.rotate_token(
                             subscription_id, except_host_id=except_host_id
                         )
-            row = await VaultSecret.reload(subscription_id)
+            row = await VaultSecret.reload(db_session(), subscription_id)
         if not row:
             raise exceptions.OAuthTokenError("no_credentials", "the subscription is disconnected")
         return cls.load_token(row)
@@ -240,7 +240,7 @@ class Provider:
         A refresh that succeeds requests a refresh for every live box on the
         subscription, except ``except_host_id``, whose answer carries it."""
         moment = now or _utc_now()
-        row = await VaultSecret.reload(subscription_id)
+        row = await VaultSecret.reload(db_session(), subscription_id)
         if not row:
             return RotationResult(
                 cls.id, "failed", error="no_credentials", subscription_id=subscription_id
@@ -263,7 +263,7 @@ class Provider:
         try:
             # Re-read after winning the lock: the previous holder may have
             # advanced this lineage (or deleted the row) after our first read.
-            row = await VaultSecret.reload(subscription_id)
+            row = await VaultSecret.reload(db_session(), subscription_id)
             if not row:
                 return RotationResult(
                     cls.id, "failed", error="no_credentials", subscription_id=subscription_id
@@ -286,7 +286,7 @@ class Provider:
                     # presenting it again can never succeed. Drop only this
                     # subscription so the provider reads as disconnected — the
                     # UI shows Reconnect and the next tick has no row to hammer.
-                    await row.revoke("invalid_grant", session=db_session())
+                    await row.revoke(db_session(), "invalid_grant")
                     await db_session().commit()
                     logger.warning(
                         "%s subscription %s auto-disconnected after invalid_grant; "
@@ -300,7 +300,7 @@ class Provider:
                     cls.id, "failed", error="bad_response", subscription_id=row.id
                 )
 
-            await row.update_secrets(data, expires_at=new_expiry)
+            await row.update_secrets(db_session(), data, expires_at=new_expiry)
             # The grant is externally anchored — the provider may have killed
             # the old refresh token the moment it issued this one — so the new
             # lineage must be committed before the lock releases; deferring to
@@ -371,7 +371,7 @@ class Provider:
         # rotate_token drops the row when the refresh lineage is also revoked,
         # so the account then reads disconnected and the card asks for a Reconnect.
         result = await cls.rotate_token(subscription.id, margin=timedelta.max)
-        refreshed = await VaultSecret.reload(subscription.id)
+        refreshed = await VaultSecret.reload(db_session(), subscription.id)
         if result.action != "refreshed" or not refreshed:
             return ParsedUsage(ok=False, error="auth_required")
         return await cls._usage_snapshot(refreshed, now=now)
@@ -490,8 +490,10 @@ class Provider:
     async def refresh_catalog(cls) -> None:
         """Store a fresh catalog, read over a subscription before the key. A
         failed fetch logs and keeps the stored one."""
-        subscriptions = await VaultSecret.list_subscriptions(Audience.provider(cls.id))
-        key = await VaultSecret.lookup(SecretKind.STATIC, Audience.provider(cls.id))
+        subscriptions = await VaultSecret.list_subscriptions(
+            db_session(), Audience.provider(cls.id)
+        )
+        key = await VaultSecret.lookup(db_session(), SecretKind.STATIC, Audience.provider(cls.id))
         if subscriptions:
             fetch = cls.fetch_catalog(subscriptions[0])
         elif key:

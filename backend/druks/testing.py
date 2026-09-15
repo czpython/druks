@@ -463,6 +463,7 @@ async def seed_call(
     """An agent call on a run, stamped with the id of the agent that made it."""
     if not (subscription_id or api_key_id):
         key = await VaultSecret.paste(
+            session,
             Audience.provider(model.partition("/")[0]),
             "test-key",
             pasted_by=await Account.get_for_run(session, run.account_id),
