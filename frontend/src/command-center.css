@@ -75,7 +75,7 @@
 .sidebar-message { margin: 12px 10px; color: var(--text-dim); font-size: 13px; overflow-wrap: anywhere; }
 .sidebar-retry { text-decoration: underline; min-height: 44px; color: var(--text); }
 .sidebar-footer { padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--border); }
-.sidebar-account { flex: 0 0 auto; padding: 16px 10px 0; font-size: 13px; color: var(--text-mid); overflow-wrap: anywhere; }
+.sidebar-account { flex: 0 0 auto; padding: 16px 10px 0; font-size: 13px; color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .navigation-toggle, .navigation-close { display: none; align-items: center; justify-content: center; width: 44px; height: 44px; flex-shrink: 0; color: var(--text-mid); border-radius: 5px; }
 .sidebar-drawer { inset: 0 auto 0 0; width: min(300px, calc(100vw - 44px)); height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: var(--surface); }
 .sidebar-drawer .sidebar { width: 100%; }

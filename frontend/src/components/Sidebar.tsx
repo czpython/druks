@@ -37,7 +37,7 @@ export function Sidebar({
         <span>druks</span>
       </Link>
       {children}
-      <div className="sidebar-account">
+      <div className="sidebar-account" title={account.username}>
         {account.username}
       </div>
     </>
