@@ -77,7 +77,7 @@ async def test_build_workspace_declares_its_github_mcp_as_the_review_actor(druks
     )
     subject = SimpleNamespace(repo="o/main")
 
-    [github], [ref] = await BuildWorkspace.get_mcp_delivery(subject, None)
+    [github], [ref] = await BuildWorkspace.get_mcp_delivery(druks_db, subject, None)
 
     assert github.url == GITHUB_MCP_URL
     assert github.bearer_token_env_var == get_bearer_token_env_var(GITHUB_MCP_NAME)
@@ -149,7 +149,7 @@ async def test_review_mcp_and_gh_use_the_review_actor(druks_db):
     )
     subject = SimpleNamespace(repo="o/app")
 
-    [github], [ref] = await ReviewWorkspace.get_mcp_delivery(subject, None)
+    [github], [ref] = await ReviewWorkspace.get_mcp_delivery(druks_db, subject, None)
 
     assert github.url == GITHUB_MCP_URL
     assert github.bearer_token_env_var == get_bearer_token_env_var(GITHUB_MCP_NAME)
@@ -172,7 +172,7 @@ class _IdentitySandbox:
         return SimpleNamespace(ok=result.returncode == 0, exit_code=result.returncode, stderr="")
 
 
-def _dispatched_by(monkeypatch: pytest.MonkeyPatch, username: str | None) -> None:
+def _dispatched_by(monkeypatch: pytest.MonkeyPatch, username: str | None) -> SimpleNamespace:
     async def _bot_git_author() -> tuple[str, str]:
         return "app[bot]", "1+app[bot]@users.noreply.github.com"
 
@@ -185,7 +185,7 @@ def _dispatched_by(monkeypatch: pytest.MonkeyPatch, username: str | None) -> Non
     async def _get_account(_model, _id):
         return account
 
-    monkeypatch.setattr("druks.workspaces.db_session", lambda: SimpleNamespace(get=_get_account))
+    return SimpleNamespace(get=_get_account)
 
 
 async def test_set_git_identity_stamps_the_workspace_repo(
@@ -197,8 +197,8 @@ async def test_set_git_identity_stamps_the_workspace_repo(
     hook = repo_path / ".git" / "hooks" / "prepare-commit-msg"
     message = repo_path / "COMMIT_EDITMSG"
 
-    _dispatched_by(monkeypatch, "dev@example.com")
-    await workspace.set_git_identity("account-1")
+    session = _dispatched_by(monkeypatch, "dev@example.com")
+    await workspace.set_git_identity(session, "account-1")
     message.write_text("Change\n")
     subprocess.run([str(hook), str(message), "squash"], check=True)
     subprocess.run([str(hook), str(message)], check=True)
@@ -212,14 +212,14 @@ async def test_set_git_identity_stamps_the_workspace_repo(
     assert message.read_text().count("Co-Authored-By: dev@example.com <dev@example.com>") == 1
 
     # A reused warm host follows the next run's dispatcher.
-    _dispatched_by(monkeypatch, "second@example.com")
-    await workspace.set_git_identity("account-2")
+    session = _dispatched_by(monkeypatch, "second@example.com")
+    await workspace.set_git_identity(session, "account-2")
     message.write_text("Change\n")
     subprocess.run([str(hook), str(message)], check=True)
     assert "dev@example.com" not in message.read_text()
     assert "Co-Authored-By: second@example.com" in message.read_text()
 
     # A system dispatch keeps the author but credits nobody.
-    _dispatched_by(monkeypatch, None)
-    await workspace.set_git_identity(None)
+    session = _dispatched_by(monkeypatch, None)
+    await workspace.set_git_identity(session, None)
     assert not hook.exists()

@@ -7,6 +7,8 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from druks.accounts.models import Account
 from druks.core.apis.github import get_github_client
 from druks.core.models import uuid7_str
@@ -62,7 +64,7 @@ class Workspace:
         return []
 
     async def prepare_context(
-        self, context: dict[str, Any], *, agent_call_id: str
+        self, session: AsyncSession, context: dict[str, Any], *, agent_call_id: str
     ) -> dict[str, Any]:
         # Every File in the call's kwargs lands in the VM and reads as its
         # in-VM path; a file arrives as a File or inside a list, never buried
@@ -70,10 +72,10 @@ class Workspace:
         prepared: dict[str, Any] = {}
         for key, value in context.items():
             if type(value) is File:
-                prepared[key] = await self._upload_input_file(value, agent_call_id)
+                prepared[key] = await self._upload_input_file(session, value, agent_call_id)
             elif type(value) is list:
                 prepared[key] = [
-                    await self._upload_input_file(item, agent_call_id)
+                    await self._upload_input_file(session, item, agent_call_id)
                     if type(item) is File
                     else item
                     for item in value
@@ -82,7 +84,9 @@ class Workspace:
                 prepared[key] = value
         return prepared
 
-    async def save_files(self, files: list[File], *, app: str, agent_call_id: str) -> None:
+    async def save_files(
+        self, session: AsyncSession, files: list[File], *, app: str, agent_call_id: str
+    ) -> None:
         storage = get_file_storage()
         staged: list[tuple[File, FileRecord, Path]] = []
         try:
@@ -91,8 +95,8 @@ class Workspace:
                     file, app=app, agent_call_id=agent_call_id
                 )
                 staged.append((file, record, temp))
-            db_session().add_all([record for _, record, _ in staged])
-            await db_session().flush()
+            session.add_all([record for _, record, _ in staged])
+            await session.flush()
             for file, record, temp in staged:
                 storage.save(temp, record.id)
                 file._hydrate(record)
@@ -131,8 +135,10 @@ class Workspace:
         )
         return record, temp
 
-    async def _upload_input_file(self, file: File, agent_call_id: str) -> str:
-        record = await db_session().get(FileRecord, file.id)
+    async def _upload_input_file(
+        self, session: AsyncSession, file: File, agent_call_id: str
+    ) -> str:
+        record = await session.get(FileRecord, file.id)
         if not record or record.deleted_at:
             raise FileUnavailableError(f"file {file.id} is deleted or missing")
         source = get_file_storage().path(file.id)
@@ -144,23 +150,27 @@ class Workspace:
         return remote
 
     async def run_agent(self, *, account_id: str | None, **kwargs: Any) -> AgentResult:
-        run_kwargs = await self.with_mcp_servers(account_id, **self.get_agent_run_kwargs(**kwargs))
+        run_kwargs = await self.with_mcp_servers(
+            db_session(), account_id, **self.get_agent_run_kwargs(**kwargs)
+        )
         # with_mcp_servers is the run's last DB read; commit so the step's
         # connection isn't held idle through the minutes the agent runs.
         await db_session().commit()
         return await self.host.run_agent(**run_kwargs)
 
-    async def with_mcp_servers(self, account_id: str | None, **kwargs: Any) -> dict[str, Any]:
+    async def with_mcp_servers(
+        self, session: AsyncSession, account_id: str | None, **kwargs: Any
+    ) -> dict[str, Any]:
         # The harness names each server's url, variables, and plain headers.
         # Every credential is a box entry, so nothing rides ``extra_env``.
-        wire, _ = await self.get_mcp_delivery(self.subject, account_id)
+        wire, _ = await self.get_mcp_delivery(session, self.subject, account_id)
         if wire:
             kwargs["mcp_servers"] = wire
         return kwargs
 
     @classmethod
     async def get_mcp_delivery(
-        cls, subject: Any, account_id: str | None
+        cls, session: AsyncSession, subject: Any, account_id: str | None
     ) -> tuple[tuple[McpServer, ...], list[SecretRef]]:
         """The MCP servers a box of this workspace reaches: the wire shapes for
         the harness and the secret refs for the box's entries, one per bearer
@@ -182,8 +192,8 @@ class Workspace:
             if server.secret_id:
                 secret_id = server.secret_id
             else:
-                account = await Account.get_for_run(db_session(), account_id)
-                row = await get_druks_account_token(db_session(), account.id, server.allowed_tools)
+                account = await Account.get_for_run(session, account_id)
+                row = await get_druks_account_token(session, account.id, server.allowed_tools)
                 secret_id = row.id
             refs.append(
                 SecretRef(
@@ -194,7 +204,7 @@ class Workspace:
                 )
             )
         run_account = account_id
-        for server in await mcp_models.McpServer.list_enabled(db_session()):
+        for server in await mcp_models.McpServer.list_enabled(session):
             name = server["name"]
             if name in required_names:
                 continue
@@ -209,10 +219,10 @@ class Workspace:
                     raise MissingTokenError(name)
             elif source:
                 if server["identity_mode"] == IdentityMode.PER_USER and not run_account:
-                    account = await Account.get_default(db_session())
+                    account = await Account.get_default(session)
                     run_account = account.id if account else None
                 grant_account = get_grant_account(server["identity_mode"], run_account)
-                secret = await oauth.get_connection(db_session(), name, grant_account)
+                secret = await oauth.get_connection(session, name, grant_account)
                 if not secret:
                     raise MissingGrantError(name, grant_account)
             if source:
@@ -276,10 +286,10 @@ class RepoWorkspace(Workspace):
             ref=self.branch,
             target_path=self.repo_path,
         )
-        await self.set_git_identity(account_id)
+        await self.set_git_identity(db_session(), account_id)
         return await super().run_agent(account_id=account_id, **kwargs)
 
-    async def set_git_identity(self, account_id: str | None) -> None:
+    async def set_git_identity(self, session: AsyncSession, account_id: str | None) -> None:
         """Commits in the repo are authored as the operator's bot user, with a
         prepare-commit-msg hook crediting the account that dispatched the run.
         Rewritten before every agent call so a reused warm host follows the
@@ -292,7 +302,7 @@ class RepoWorkspace(Workspace):
             f"git config user.email {shlex.quote(author_email)}",
             "rm -f .git/hooks/prepare-commit-msg",
         ]
-        if account_id and (account := await db_session().get(Account, account_id)):
+        if account_id and (account := await session.get(Account, account_id)):
             trailer = f"Co-Authored-By: {account.username} <{account.username}>"
             hook = (
                 "#!/bin/sh\n"

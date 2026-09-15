@@ -314,7 +314,7 @@ class Agent:
             # starting. A provisioning failure happens before this and records
             # no call.
             async with _runner(workflow, host_id, workflow_id, self.id, config) as runner:
-                context = await runner.prepare_context(context, agent_call_id=call_id)
+                context = await runner.prepare_context(db_session(), context, agent_call_id=call_id)
                 # Templates read the live workflow + the workspace the agent runs in,
                 # alongside whatever the workflow's get_prompt_context composes.
                 prompt_context = await workflow.get_prompt_context(**context)
@@ -363,6 +363,7 @@ class Agent:
                         ) from error
                     if workspace_files:
                         await runner.save_files(
+                            db_session(),
                             workspace_files,
                             app=workflow.app,
                             agent_call_id=call_id,
