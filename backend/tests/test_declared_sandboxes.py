@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import druks.agents as agent_module
 import druks.workflows as workflow_module
 import pytest
+from druks.database import db_session
 from druks.sandbox import datastructures, templates
 from druks.sandbox.client import Client
 from druks.sandbox.datastructures import Sandbox
@@ -238,7 +239,9 @@ async def test_warm_lease_uses_workflow_template(monkeypatch):
     monkeypatch.setattr(workflow_module, "set_run_phase", AsyncMock())
 
     assert (
-        await workflow._lease_host(SimpleNamespace(secrets={}, secret_refs=[], secrets_id=""))
+        await workflow._lease_host(
+            db_session(), SimpleNamespace(secrets={}, secret_refs=[], secrets_id="")
+        )
         == "host-1"
     )
     resolve.assert_awaited_once_with(sandbox)
@@ -274,7 +277,9 @@ async def test_ephemeral_lease_uses_workflow_template(monkeypatch):
     monkeypatch.setattr(agent_module, "get_template_id", resolve)
 
     config = SimpleNamespace(secrets={}, secret_refs=[], secrets_id="")
-    async with agent_module._runner(workflow, None, "run-1", "summarize", config) as runner:
+    async with agent_module._runner(
+        db_session(), workflow, None, "run-1", "summarize", config
+    ) as runner:
         assert runner == "workspace"
 
     resolve.assert_awaited_once_with(sandbox)

@@ -866,26 +866,26 @@ class Workflow:
         # Built per agent call, so nothing is held across steps.
         return self.workspace_class(**await self.get_workspace_kwargs(host))
 
-    async def get_secret_refs(self) -> list[SecretRef]:
+    async def get_secret_refs(self, session: AsyncSession) -> list[SecretRef]:
         # The secrets a box of this run fetches beyond its config's: the
         # workspace's and its MCP servers', read before the box exists.
         subject = await self.subject
-        _, mcp = await self.workspace_class.get_mcp_delivery(db_session(), subject, self.account_id)
+        _, mcp = await self.workspace_class.get_mcp_delivery(session, subject, self.account_id)
         return [*await self.workspace_class.get_secret_refs(subject), *mcp]
 
-    async def _lease_host(self, config: "AgentConfig") -> str | None:
+    async def _lease_host(self, session: AsyncSession, config: "AgentConfig") -> str | None:
         # The warm VM, provisioned once per segment; state is carried in git, so
         # only the host-id matters across steps — held-across-steps never fights replay.
         if not self.steps_reuse_sandbox:
             return
-        refs = [*config.secret_refs, *await self.get_secret_refs()]
+        refs = [*config.secret_refs, *await self.get_secret_refs(session)]
         # A crashed process left its box behind. Its identity finds it again.
         if (
             not self._host
             and refs
             and (
                 identity := await SandboxIdentity.lookup(
-                    db_session(), self._workflow_id, "workflow", refs
+                    session, self._workflow_id, "workflow", refs
                 )
             )
         ):
@@ -912,7 +912,7 @@ class Workflow:
             identity, entries, key = None, {}, config.secrets_id
             if refs:
                 identity, entries = await SandboxIdentity.create(
-                    db_session(), run_id=self._workflow_id, scoped_to="workflow", secret_refs=refs
+                    session, run_id=self._workflow_id, scoped_to="workflow", secret_refs=refs
                 )
                 key = identity.id
             self._host = await sandbox_client.provision(
