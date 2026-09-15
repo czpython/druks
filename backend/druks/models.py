@@ -124,7 +124,9 @@ class StoredSubject(Base):
     async def get_status(self, *, workflow: "type[Workflow] | None" = None) -> "SubjectStatus":
         from druks.durable.reads import get_subject_status
 
-        return await get_subject_status(self.subject_type, str(self.id), workflow=workflow)
+        return await get_subject_status(
+            db_session(), self.subject_type, str(self.id), workflow=workflow
+        )
 
     @classmethod
     async def get_statuses(cls, subject_ids: Sequence[str | int]) -> "dict[str, SubjectStatus]":
@@ -133,13 +135,13 @@ class StoredSubject(Base):
         from druks.durable.reads import get_subject_statuses
 
         return await get_subject_statuses(
-            cls.subject_type, [str(subject_id) for subject_id in subject_ids]
+            db_session(), cls.subject_type, [str(subject_id) for subject_id in subject_ids]
         )
 
     async def get_phase(self) -> str | None:
         from druks.durable.reads import get_subject_phase
 
-        return await get_subject_phase(self.subject_type, str(self.id))
+        return await get_subject_phase(db_session(), self.subject_type, str(self.id))
 
     @classmethod
     async def list_open(cls, *, limit: int = 50) -> list[Self]:

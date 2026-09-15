@@ -175,6 +175,7 @@ async def test_destinations_report_what_still_exists(druks_db, druks_client, tmp
     druks_db.expunge_all()
     for call in calls:
         await Artifact.record(
+            druks_db,
             call_dir=call.call_dir,
             call_id=call.id,
             kind="markdown",
@@ -182,7 +183,7 @@ async def test_destinations_report_what_still_exists(druks_db, druks_client, tmp
             content=call.id,
             event={"topic": "summary.ready"},
         )
-    artifacts = [await Artifact.get_for_call(call.id) for call in calls]
+    artifacts = [await Artifact.get_for_call(druks_db, call.id) for call in calls]
     items = (await druks_client.get("/api/events")).json()["items"]
     assert [item["artifactId"] for item in items] == [artifacts[1].id, artifacts[0].id]
     destinations = f"/api/events/{items[1]['seq']}/destinations"

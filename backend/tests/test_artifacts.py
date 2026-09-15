@@ -36,6 +36,7 @@ async def _seed_call(druks_db) -> AgentCall:
 async def test_record_writes_content_and_descriptor(druks_db, tmp_path):
     await _seed_call(druks_db)
     await Artifact.record(
+        druks_db,
         call_dir=tmp_path,
         call_id="call-1",
         kind="markdown",
@@ -43,7 +44,7 @@ async def test_record_writes_content_and_descriptor(druks_db, tmp_path):
         content="# Plan\nbody",
         event={},
     )
-    artifact = await Artifact.get_for_call("call-1")
+    artifact = await Artifact.get_for_call(druks_db, "call-1")
     assert artifact is not None
     assert (artifact.kind, artifact.title, artifact.path) == (
         "markdown",
@@ -58,6 +59,7 @@ async def test_record_is_idempotent_per_call(druks_db, tmp_path):
     await _seed_call(druks_db)
     for _ in range(2):
         await Artifact.record(
+            druks_db,
             call_dir=tmp_path,
             call_id="call-1",
             kind="markdown",
@@ -74,6 +76,7 @@ async def test_record_is_idempotent_per_call(druks_db, tmp_path):
 async def test_artifact_cascades_with_its_call(druks_db, tmp_path):
     call = await _seed_call(druks_db)
     await Artifact.record(
+        druks_db,
         call_dir=tmp_path,
         call_id="call-1",
         kind="markdown",
@@ -81,11 +84,11 @@ async def test_artifact_cascades_with_its_call(druks_db, tmp_path):
         content="x",
         event={},
     )
-    assert await Artifact.get_for_call("call-1") is not None
+    assert await Artifact.get_for_call(druks_db, "call-1") is not None
 
     await druks_db.delete(call)
     await druks_db.flush()
-    assert await Artifact.get_for_call("call-1") is None
+    assert await Artifact.get_for_call(druks_db, "call-1") is None
 
 
 async def test_get_latest_for_run_returns_the_newest_calls_artifact(druks_db, tmp_path):
@@ -111,6 +114,7 @@ async def test_get_latest_for_run_returns_the_newest_calls_artifact(druks_db, tm
         )
         await druks_db.flush()
         await Artifact.record(
+            druks_db,
             call_dir=tmp_path / call_id,
             call_id=call_id,
             kind="markdown",
@@ -118,7 +122,7 @@ async def test_get_latest_for_run_returns_the_newest_calls_artifact(druks_db, tm
             content="x",
             event={},
         )
-    latest = await Artifact.get_latest_for_run("run-1")
+    latest = await Artifact.get_latest_for_run(druks_db, "run-1")
     assert latest is not None and latest.title == "Revised plan"
 
 
@@ -145,6 +149,7 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     )
     await druks_db.flush()
     await Artifact.record(
+        druks_db,
         call_dir=tmp_path,
         call_id="call-1",
         kind="markdown",
@@ -160,7 +165,7 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
         "presentation": "in_app",
         "controls": ["approve"],
         "label": "Review: Plan",
-        "artifact_id": (await Artifact.get_for_call("call-1")).id,
+        "artifact_id": (await Artifact.get_for_call(druks_db, "call-1")).id,
     }
 
     external = Run(
@@ -210,6 +215,7 @@ async def test_get_artifact_returns_recorded_content(druks_db, tmp_path, monkeyp
     druks_db.add(call)
     await druks_db.flush()
     await Artifact.record(
+        druks_db,
         call_dir=call.call_dir,
         call_id="call-1",
         kind="markdown",
@@ -217,7 +223,7 @@ async def test_get_artifact_returns_recorded_content(druks_db, tmp_path, monkeyp
         content="# Plan\nbody",
         event={},
     )
-    result = await get_artifact((await Artifact.get_for_call("call-1")).id)
+    result = await get_artifact(druks_db, (await Artifact.get_for_call(druks_db, "call-1")).id)
     assert (result.kind, result.title, result.content) == (
         "markdown",
         "Implementation plan",
@@ -227,7 +233,7 @@ async def test_get_artifact_returns_recorded_content(druks_db, tmp_path, monkeyp
 
 async def test_get_artifact_404_when_missing(druks_db):
     with pytest.raises(HTTPException) as exc:
-        await get_artifact("nope")
+        await get_artifact(druks_db, "nope")
     assert exc.value.status_code == 404
 
 
@@ -260,5 +266,5 @@ async def test_get_artifact_404_when_content_gone(druks_db, tmp_path, monkeypatc
     )
     await druks_db.flush()
     with pytest.raises(HTTPException) as exc:
-        await get_artifact("art-1")
+        await get_artifact(druks_db, "art-1")
     assert exc.value.status_code == 404

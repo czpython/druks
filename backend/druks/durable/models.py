@@ -8,12 +8,13 @@ from dbos import DBOS
 from sqlalchemy import CheckConstraint, ForeignKey, Index, Select, String, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship, selectinload
 
 from druks.accounts.models import Account
 from druks.apps.registry import workflows
 from druks.core.models import Uuid7Pk
-from druks.database import db_session, get_session
+from druks.database import get_session
 from druks.durable.dbos_state import (
     state_expression,
     subject_filter,
@@ -122,12 +123,9 @@ class Run(Base):
             await session.commit()
 
     @classmethod
-    async def get(cls, workflow_id: str) -> "Run | None":
-        return await db_session().get(cls, workflow_id)
-
-    @classmethod
     async def list_for_subject(
         cls,
+        session: AsyncSession,
         subject_type: str,
         subject_id: str,
         kind: str | None = None,
@@ -150,11 +148,11 @@ class Run(Base):
             stmt = stmt.where(cls.kind == kind)
         if include_calls:
             stmt = stmt.options(selectinload(cls.agent_calls))
-        return list(await db_session().scalars(stmt))
+        return list(await session.scalars(stmt))
 
     @classmethod
     async def get_latest_for_subject(
-        cls, subject_type: str, subject_id: str, kind: str | None = None
+        cls, session: AsyncSession, subject_type: str, subject_id: str, kind: str | None = None
     ) -> "Run | None":
         """The run that speaks for the subject: a subject holds at most one active
         run per kind (queue dedup) and the next starts only once the last is
@@ -168,11 +166,11 @@ class Run(Base):
         )
         if kind:
             stmt = stmt.where(cls.kind == kind)
-        return (await db_session().scalars(stmt)).first()
+        return (await session.scalars(stmt)).first()
 
     @classmethod
     async def get_latest_for_subjects(
-        cls, subject_type: str, subject_ids: list[str]
+        cls, session: AsyncSession, subject_type: str, subject_ids: list[str]
     ) -> dict[str, "Run"]:
         """The driving run of each subject, keyed by subject id — get_latest_for_subject
         for a whole board in one statement. Agent calls come with it: the status read
@@ -202,7 +200,7 @@ class Run(Base):
             .where(driving.c.rank == 1)
             .options(selectinload(cls.agent_calls))
         )
-        rows = await db_session().execute(stmt)
+        rows = await session.execute(stmt)
         return {found_id: run for found_id, run in rows}
 
     @classmethod
@@ -307,7 +305,7 @@ class Run(Base):
             raise ValueError(f"run {self.id} is not parked on an ask")
         if ask.get("presentation") != "in_app":
             return ask
-        artifact = await Artifact.get_latest_for_run(self.id)
+        artifact = await Artifact.get_latest_for_run(self.session, self.id)
         return {
             "label": f"Review: {artifact.title}" if artifact else "Review",
             "artifact_id": artifact.id if artifact else None,
@@ -378,7 +376,7 @@ class Run(Base):
 
     async def get_subject(self) -> dict[str, str] | None:
         # Stamped at start; a subjectless cron has none.
-        attributes = await db_session().scalar(
+        attributes = await self.session.scalar(
             select(workflow_status.c.attributes).where(workflow_status.c.workflow_uuid == self.id)
         )
         if attributes:
@@ -395,7 +393,7 @@ class Run(Base):
         self.input_gate = None
         self.input_request = None
         self.failure = failure
-        await db_session().flush()
+        await self.session.flush()
         await DBOS.cancel_workflow_async(self.id)
         # The body raises DBOSWorkflowCancelledError and re-raises without
         # emitting, so the canceller announces the terminal state itself.
@@ -613,26 +611,28 @@ class AgentCall(Base, Uuid7Pk):
             await session.commit()
 
     @classmethod
-    async def get(cls, agent_call_id: str) -> "AgentCall":
-        call = await db_session().get(cls, agent_call_id)
+    async def get(cls, session: AsyncSession, agent_call_id: str) -> "AgentCall":
+        call = await session.get(cls, agent_call_id)
         if not call:
             raise AgentCallNotFound(agent_call_id)
         return call
 
     @classmethod
-    async def list_for_run(cls, run_id: str) -> list["AgentCall"]:
+    async def list_for_run(cls, session: AsyncSession, run_id: str) -> list["AgentCall"]:
         # Execution order — the same order Run.agent_calls loads.
         stmt = select(cls).where(cls.run_id == run_id).order_by(cls.created_at, cls.id)
-        return list(await db_session().scalars(stmt))
+        return list(await session.scalars(stmt))
 
     @classmethod
-    async def list_for_subject(cls, subject_type: str, subject_id: str) -> list["AgentCall"]:
+    async def list_for_subject(
+        cls, session: AsyncSession, subject_type: str, subject_id: str
+    ) -> list["AgentCall"]:
         stmt = (
             select(cls)
             .where(subject_filter(cls.run_id, subject_type, subject_id))
             .order_by(cls.created_at, cls.id)
         )
-        return list(await db_session().scalars(stmt))
+        return list(await session.scalars(stmt))
 
     async def record_cost(self, *, cost_usd: float | None, cost_metadata: dict | None) -> None:
         if cost_usd is None and not cost_metadata:
@@ -641,7 +641,7 @@ class AgentCall(Base, Uuid7Pk):
             self.cost_usd = cost_usd
         if cost_metadata:
             self.cost_metadata = cost_metadata
-        await db_session().flush()
+        await self.session.flush()
 
 
 class Artifact(Base, Uuid7Pk):
@@ -660,6 +660,7 @@ class Artifact(Base, Uuid7Pk):
     @classmethod
     async def record(
         cls,
+        session: AsyncSession,
         *,
         call_dir: Path,
         call_id: str,
@@ -674,7 +675,6 @@ class Artifact(Base, Uuid7Pk):
         name = f"artifact.{'md' if kind == 'markdown' else 'txt'}"
         call_dir.mkdir(parents=True, exist_ok=True)
         (call_dir / name).write_text(content)
-        session = db_session()
         artifact_id = await session.scalar(
             pg_insert(cls)
             .values(agent_call_id=call_id, kind=kind, title=title, path=name)
@@ -682,7 +682,7 @@ class Artifact(Base, Uuid7Pk):
             .returning(cls.id)
         )
         if artifact_id and event:
-            call = await AgentCall.get(call_id)
+            call = await AgentCall.get(session, call_id)
             run = call.run
             payload = {
                 "run": run.id,
@@ -703,14 +703,14 @@ class Artifact(Base, Uuid7Pk):
         await session.flush()
 
     @classmethod
-    async def get_for_call(cls, call_id: str) -> "Artifact | None":
-        return await db_session().scalar(select(cls).where(cls.agent_call_id == call_id))
+    async def get_for_call(cls, session: AsyncSession, call_id: str) -> "Artifact | None":
+        return await session.scalar(select(cls).where(cls.agent_call_id == call_id))
 
     @classmethod
-    async def get_latest_for_run(cls, run_id: str) -> "Artifact | None":
+    async def get_latest_for_run(cls, session: AsyncSession, run_id: str) -> "Artifact | None":
         # The run's most recent renderable output, reached through its calls — an
         # in-app review shows this beside its controls. Newest call wins.
-        return await db_session().scalar(
+        return await session.scalar(
             select(cls)
             .join(AgentCall, AgentCall.id == cls.agent_call_id)
             .where(AgentCall.run_id == run_id)

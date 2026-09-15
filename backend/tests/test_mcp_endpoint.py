@@ -499,6 +499,7 @@ async def test_get_agent_call_serves_bounded_tails(app, pat_token, druks_db):
     (call_dir / "stderr.log").write_bytes(b"e" * 10240)
     await finish_agent_run(call, last_error="boom " * 100)
     await Artifact.record(
+        druks_db,
         call_dir=call_dir,
         call_id=call.id,
         kind="markdown",

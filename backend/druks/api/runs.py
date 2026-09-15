@@ -22,10 +22,12 @@ router = APIRouter(prefix="/api/runs", tags=["runs"])
 
 
 @router.post("/{run}/resume", status_code=status.HTTP_204_NO_CONTENT)
-async def resume_run(run_id: Annotated[str, Path(alias="run")], body: ResumeRequest) -> None:
+async def resume_run(
+    session: SessionDep, run_id: Annotated[str, Path(alias="run")], body: ResumeRequest
+) -> None:
     # The in-app half of a gate: the operator answers the parked run from Druks
     # (external gates resume through their own webhook).
-    run = await Run.get(run_id)
+    run = await session.get(Run, run_id)
     if not run:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found")
     ask = run.input_request
@@ -69,7 +71,7 @@ async def cancel_run(
 ) -> CancelRunResponse:
     """Cancel an active run, recording the reason as its failure; a repeat
     cancel reports already_cancelled."""
-    run = await Run.get(run_id)
+    run = await session.get(Run, run_id)
     if not run:
         raise RunNotFound(run_id)
     if run.state == RunState.CANCELLED.value:
@@ -104,13 +106,14 @@ async def cancel_run(
     ),
 )
 async def retry_run(
+    session: SessionDep,
     run_id: Annotated[
         str, Path(alias="run", description="The failed run, from list_open_subjects.")
     ],
 ) -> RetryRunResponse:
     """Rerun a failed run from the step that killed it, reusing every
     completed step."""
-    run = await Run.get(run_id)
+    run = await session.get(Run, run_id)
     if not run:
         raise RunNotFound(run_id)
     if run.state != RunState.FAILED.value:
@@ -118,7 +121,7 @@ async def retry_run(
 
     subject = await run.get_subject()
     if subject:
-        latest = await Run.get_latest_for_subject(subject["type"], subject["id"])
+        latest = await Run.get_latest_for_subject(session, subject["type"], subject["id"])
         if latest and latest.is_active:
             raise SubjectBusy(latest.id)
 

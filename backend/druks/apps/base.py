@@ -7,6 +7,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
 from pydantic import BaseModel, Field, SecretStr
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.database import db_session
 from druks.models import StoredSubject
@@ -460,7 +461,7 @@ class App:
         from fastapi import APIRouter, HTTPException, Response, status
         from fastapi.responses import FileResponse, StreamingResponse
 
-        from druks.api.dependencies import EngineDep
+        from druks.api.dependencies import EngineDep, SessionDep
         from druks.durable import reads
         from druks.durable.enums import AgentCallStatus
         from druks.durable.live import SSE_HEADERS
@@ -477,6 +478,7 @@ class App:
 
         @router.get("", response_model=TranscriptChunk, response_model_by_alias=True)
         async def get_transcript(
+            session: SessionDep,
             call_id: str,
             stream: Literal["stdout", "stderr"],
             response: Response,
@@ -489,7 +491,7 @@ class App:
                 raise HTTPException(
                     status.HTTP_400_BAD_REQUEST, f"limit must be in 1..{max_limit}."
                 )
-            call = await AgentCall.get(call_id)
+            call = await AgentCall.get(session, call_id)
             if call.live_status == AgentCallStatus.RUNNING:
                 response.headers["Cache-Control"] = "no-store"
             else:
@@ -510,16 +512,17 @@ class App:
             )
 
         @router.get("/files", response_model=AgentCallFiles, response_model_by_alias=True)
-        async def list_files(call_id: str) -> AgentCallFiles:
-            return await reads.get_agent_call_files(call_id)
+        async def list_files(session: SessionDep, call_id: str) -> AgentCallFiles:
+            return await reads.get_agent_call_files(session, call_id)
 
         @router.get("/files/{file_name:path}")
         async def get_file(
+            session: SessionDep,
             call_id: str,
             file_name: str,
             disposition: Literal["inline", "attachment"] = "inline",
         ) -> FileResponse:
-            call = await AgentCall.get(call_id)
+            call = await AgentCall.get(session, call_id)
             resolved = call.get_file_path(file_name)
             if not resolved:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found for this call.")
@@ -585,7 +588,7 @@ class App:
         from fastapi.responses import StreamingResponse
 
         from druks.accounts.context import current_account_id
-        from druks.api.dependencies import EngineDep
+        from druks.api.dependencies import EngineDep, SessionDep
         from druks.database import session_scope
         from druks.durable import reads
         from druks.durable.live import SSE_HEADERS, stream
@@ -594,10 +597,10 @@ class App:
         subject_type = subject_class.subject_type
         router = APIRouter(prefix=f"/{subject_type}", tags=[f"{cls.name}:{subject_type}"])
 
-        async def board(account_id: str | None) -> SubjectList:
+        async def board(session: AsyncSession, account_id: str | None) -> SubjectList:
             summaries = await subject_class.list_summaries(account_id)
             statuses = await reads.get_subject_statuses(
-                subject_type, [summary.id for summary in summaries]
+                session, subject_type, [summary.id for summary in summaries]
             )
             return SubjectList(
                 rows=[
@@ -606,15 +609,17 @@ class App:
                 ]
             )
 
-        async def subject_response(subject_id: str) -> SubjectResponse | None:
+        async def subject_response(
+            session: AsyncSession, subject_id: str
+        ) -> SubjectResponse | None:
             if subject := await subject_class.get_for_subject_id(subject_id):
                 return await reads.get_subject_response(
-                    subject_type, subject_id, summary=subject.get_summary()
+                    session, subject_type, subject_id, summary=subject.get_summary()
                 )
 
         @router.get("", response_model=SubjectList, response_model_by_alias=True)
-        async def list_subjects() -> SubjectList:
-            return await board(current_account_id.get())
+        async def list_subjects(session: SessionDep) -> SubjectList:
+            return await board(session, current_account_id.get())
 
         # ``/stream`` before ``/{subject_id}`` so the literal path wins over the id matcher.
         @router.get("/stream", response_class=StreamingResponse)
@@ -623,8 +628,8 @@ class App:
             account_id = current_account_id.get()
 
             async def snapshot() -> SubjectList:
-                async with session_scope(engine):
-                    return await board(account_id)
+                async with session_scope(engine) as session:
+                    return await board(session, account_id)
 
             return StreamingResponse(
                 stream(snapshot), media_type="text/event-stream", headers=SSE_HEADERS
@@ -636,8 +641,8 @@ class App:
         @router.get("/{subject_id:path}/stream", response_class=StreamingResponse)
         async def stream_subject(subject_id: str, engine: EngineDep) -> StreamingResponse:
             async def snapshot() -> SubjectResponse | None:
-                async with session_scope(engine):
-                    return await subject_response(subject_id)
+                async with session_scope(engine) as session:
+                    return await subject_response(session, subject_id)
 
             return StreamingResponse(
                 stream(snapshot), media_type="text/event-stream", headers=SSE_HEADERS
@@ -646,8 +651,8 @@ class App:
         @router.get(
             "/{subject_id:path}", response_model=SubjectResponse, response_model_by_alias=True
         )
-        async def read_subject(subject_id: str) -> SubjectResponse:
-            response = await subject_response(subject_id)
+        async def read_subject(session: SessionDep, subject_id: str) -> SubjectResponse:
+            response = await subject_response(session, subject_id)
             if not response:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, f"No {subject_type} {subject_id!r}.")
             return response

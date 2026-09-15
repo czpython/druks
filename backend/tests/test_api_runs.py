@@ -66,7 +66,7 @@ async def test_list_files_inventories_call_artifacts(
 
 async def test_get_agent_call_files_raises_for_unknown_call(druks_db):
     with pytest.raises(AgentCallNotFound):
-        await get_agent_call_files("missing")
+        await get_agent_call_files(druks_db, "missing")
 
 
 def test_transcript_unknown_call_returns_unified_404(client: TestClient, druks_db):

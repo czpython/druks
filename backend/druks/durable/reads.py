@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import Engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.database import session_scope
 from druks.durable.activity import get_run_phase
@@ -36,9 +37,9 @@ _TRANSCRIPT_KEEPALIVE_SECONDS = 15.0
 _TERMINAL_CALL_STATES = {"succeeded", "failed", "abandoned"}
 
 
-async def get_agent_call_files(call_id: str) -> AgentCallFiles:
-    call = await AgentCall.get(call_id)
-    artifact = await Artifact.get_for_call(call.id)
+async def get_agent_call_files(session: AsyncSession, call_id: str) -> AgentCallFiles:
+    call = await AgentCall.get(session, call_id)
+    artifact = await Artifact.get_for_call(session, call.id)
     layout = call.artifact_layout
 
     def named(path: Path) -> ArtifactFile | None:
@@ -66,32 +67,40 @@ async def get_agent_call_files(call_id: str) -> AgentCallFiles:
     )
 
 
-async def list_subject_timeline(subject_type: str, subject_id: str) -> list[RunResponse]:
+async def list_subject_timeline(
+    session: AsyncSession, subject_type: str, subject_id: str
+) -> list[RunResponse]:
     # The subject's whole timeline: every run about it, oldest first, each
     # with its agent calls.
-    runs = await Run.list_for_subject(subject_type, subject_id, include_calls=True)
+    runs = await Run.list_for_subject(session, subject_type, subject_id, include_calls=True)
     return await _timeline(runs)
 
 
 async def get_subject_status(
-    subject_type: str, subject_id: str, *, workflow: "type[Workflow] | None" = None
+    session: AsyncSession,
+    subject_type: str,
+    subject_id: str,
+    *,
+    workflow: "type[Workflow] | None" = None,
 ) -> SubjectStatus:
     kind = workflow.kind if workflow else None
-    latest = await Run.get_latest_for_subject(subject_type, subject_id, kind=kind)
+    latest = await Run.get_latest_for_subject(session, subject_type, subject_id, kind=kind)
     return await _status(latest)
 
 
 async def get_subject_statuses(
-    subject_type: str, subject_ids: list[str]
+    session: AsyncSession, subject_type: str, subject_ids: list[str]
 ) -> dict[str, SubjectStatus]:
     """The status of every subject on a board, keyed by subject id — one driving-run
     read for the whole page."""
-    driving_runs = await Run.get_latest_for_subjects(subject_type, subject_ids)
+    driving_runs = await Run.get_latest_for_subjects(session, subject_type, subject_ids)
     return {subject_id: await _status(driving_runs.get(subject_id)) for subject_id in subject_ids}
 
 
-async def get_subject_phase(subject_type: str, subject_id: str) -> str | None:
-    runs = await Run.list_for_subject(subject_type, subject_id)
+async def get_subject_phase(
+    session: AsyncSession, subject_type: str, subject_id: str
+) -> str | None:
+    runs = await Run.list_for_subject(session, subject_type, subject_id)
     active_run = next((run for run in runs if run.is_active), None)
     if active_run and active_run.is_running:
         return await get_run_phase(active_run.id)
@@ -99,12 +108,12 @@ async def get_subject_phase(subject_type: str, subject_id: str) -> str | None:
 
 
 async def get_subject_response(
-    subject_type: str, subject_id: str, *, summary: SubjectSummary
+    session: AsyncSession, subject_type: str, subject_id: str, *, summary: SubjectSummary
 ) -> SubjectResponse:
     # list_for_subject is newest-first, so runs[0] is the driving run the status
     # reads — the same row get_latest_for_subject would return, its calls already
     # eager-loaded here.
-    runs = await Run.list_for_subject(subject_type, subject_id, include_calls=True)
+    runs = await Run.list_for_subject(session, subject_type, subject_id, include_calls=True)
     latest = runs[0] if runs else None
     return SubjectResponse(
         summary=summary,
@@ -218,9 +227,9 @@ async def stream_transcript(
     elapsed = 0.0
     last_keepalive = 0.0
     while True:
-        async with session_scope(engine):
+        async with session_scope(engine) as session:
             try:
-                call = await AgentCall.get(call_id)
+                call = await AgentCall.get(session, call_id)
             except AgentCallNotFound:
                 return
             path = call.get_stream_path(stream)

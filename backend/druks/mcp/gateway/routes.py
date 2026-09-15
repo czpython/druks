@@ -26,11 +26,12 @@ router = APIRouter(prefix="/api", tags=["agent"])
     ),
 )
 async def get_gate(
+    session: SessionDep,
     run: Annotated[str, Path(description="The parked run, from list_open_subjects.")],
 ) -> schemas.GateResponse:
     """A parked run's open gate: the ask, a bounded artifact chunk, and
     parkedAt — echo parkedAt unchanged to answer_gate."""
-    return await services.get_gate(run)
+    return await services.get_gate(session, run)
 
 
 @router.post(
@@ -74,11 +75,12 @@ async def answer_gate(
     responses=agent_error_responses(gate_errors.AgentCallNotFound("call-123")),
 )
 async def get_agent_call(
+    session: SessionDep,
     call: Annotated[str, Path(description="An agent call, latestAgentCall in list_open_subjects.")],
 ) -> schemas.AgentCallDetailResponse:
     """One agent call's metadata with bounded transcript and stderr tails and
     an artifact chunk."""
-    return await services.get_agent_call(call)
+    return await services.get_agent_call(session, call)
 
 
 @router.get(
