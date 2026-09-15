@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # platform's app; the files concern owns the mechanics.
 @task(every="0 * * * *")
 async def reap_deleted_files() -> None:
-    await reap_deleted_file_bytes()
+    await reap_deleted_file_bytes(db_session())
 
 
 @task(every="*/15 * * * *")
