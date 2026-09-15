@@ -300,3 +300,43 @@ it('sends the operator timezone day boundaries to history and the live stream', 
   await waitFor(() => expect(new URL(source().url, window.location.origin).searchParams.get('until')).toBe('2026-09-09T22:00:00.000Z'))
   expect(new URL(source().url, window.location.origin).searchParams.get('from')).toBe('2026-09-07T22:00:00.000Z')
 })
+
+it('shows a classified failure and preserves its original message in a disclosure', async () => {
+  const failure = 'codex exited with 1. You hit your spend cap set by the owner of your workspace.'
+  history.mockResolvedValue({ items: [{ ...result, app: 'software_factory', topic: 'workflow.failed',
+    subjectType: 'work_item', subjectId: '42', subjectLabel: 'DRU-42', payload: {
+      kind: 'software_factory.build', run: 'failed-attempt', title: 'Keep the recorded title', failure_code: 'spend_cap', failure,
+    },
+  }], streamCursor: '10:20:10', nextCursor: null })
+  mount()
+  fireEvent.click(await screen.findByRole('button', { name: /Build failed DRU-42 · Keep the recorded title/ }))
+  const details = screen.getByRole('complementary', { name: 'Activity details' })
+  expect(within(details).getByText('Workspace spend cap reached')).toBeTruthy()
+  expect(within(details).getByText('Ask a workspace owner to increase the spend cap before continuing.')).toBeTruthy()
+  const technical = within(details).getByText('Technical details').closest('details')!
+  expect(technical.open).toBe(false)
+  expect(within(technical).getByText(failure)).toBeTruthy()
+  expect((await within(details).findByRole('link', { name: 'Open work' })).getAttribute('href'))
+    .toBe('/software_factory/work-items/42?run=failed-attempt')
+})
+
+it('shows the received Factory reply above its unchanged recorded values', async () => {
+  history.mockResolvedValue({ items: [{ ...result, app: 'software_factory', topic: 'workflow.running',
+    subjectType: 'work_item', subjectId: '42', payload: {
+      kind: 'software_factory.build', run: 'review-attempt', gate: 'review_work',
+      input_requested_at: '2026-09-09T15:00:00.123456Z',
+      result: { action: 'approve', note: 'The tests cover this change.' },
+    },
+  }], streamCursor: '10:20:10', nextCursor: null })
+  mount()
+  fireEvent.click(await screen.findByRole('button', { name: /Implementation review · Reply: Approve/ }))
+  const details = screen.getByRole('complementary', { name: 'Activity details' })
+  expect(within(details).getByText('Implementation review · Reply: Approve')).toBeTruthy()
+  const recorded = within(details).getByText('Recorded response').closest('details')!
+  expect(recorded.open).toBe(false)
+  expect(recorded.textContent).toContain('"action": "approve"')
+  expect(recorded.textContent).toContain('The tests cover this change.')
+  const target = new URL((await within(details).findByRole('link', { name: 'Open work' })).getAttribute('href')!, window.location.origin)
+  expect(target.searchParams.get('run')).toBe('review-attempt')
+  expect(target.searchParams.get('parkedAt')).toBe('2026-09-09T15:00:00.123456Z')
+})

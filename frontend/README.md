@@ -158,6 +158,13 @@ operator timezone. The detail panel reads `/api/events/{seq}/destinations` to
 show which recorded work, run, and saved result still exist. Its owner links use
 the `subjectPath` target described above.
 
+An app can supply `activity(event)` in its UI registration. It returns optional
+`context`, `icon` (a Lucide icon), and `tone` (`neutral`, `positive`, `negative`,
+or `attention`). Use the recorded payload only. The shared `eventLine()` adds
+the recorded work key and title, lifecycle defaults, failure wording, and owner
+destination. Keep `activityLabel({ topic })` usable without a payload so the
+same registration names filter choices.
+
 History returns `streamCursor`, a PostgreSQL snapshot, including for an empty
 page. The live stream starts from that snapshot. Each `batch-end` event carries
 the next snapshot in its data and SSE ID. The page retains it for pause and

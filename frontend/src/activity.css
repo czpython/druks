@@ -27,7 +27,9 @@
 .activity-row[aria-current="true"] { background: var(--surface-2); }
 .activity-row[aria-current="true"] strong, .activity-row[aria-current="true"] .activity-row-glyph { color: var(--accent); }
 .activity-row-glyph { margin-top: 4px; color: var(--text-dim); }
-.activity-row.event-kind-failed .activity-row-glyph { color: var(--outcome-failed); }
+.activity-row.activity-tone-negative .activity-row-glyph { color: var(--outcome-failed); }
+.activity-row.activity-tone-positive .activity-row-glyph { color: var(--outcome-merged); }
+.activity-row.activity-tone-attention .activity-row-glyph { color: var(--accent); }
 .activity-row-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
 .activity-row strong { font-weight: 600; }
 .activity-context { font-size: 14px; color: var(--text-mid); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

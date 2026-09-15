@@ -1,4 +1,6 @@
-import type { ActivityEvent } from '../registry'
+import { FileCheck2, FilePenLine, FileText, GitMerge, GitPullRequest, GitPullRequestClosed, OctagonX, type LucideIcon } from 'lucide-react'
+import type { FeedItem } from '../../api/types'
+import type { ActivityEvent, ActivityPresentation } from '../registry'
 
 const TOPICS: Record<string, string> = {
   'plan.prepared': 'Plan prepared',
@@ -28,4 +30,38 @@ export function activityLabel(event: ActivityEvent): string | undefined {
     }
   }
   return undefined
+}
+
+const TOPIC_ICONS: Record<string, LucideIcon> = {
+  'plan.prepared': FileText,
+  'plan.revised': FilePenLine,
+  'pr.opened': GitPullRequest,
+  'review.completed': FileCheck2,
+  merged: GitMerge,
+  closed: GitPullRequestClosed,
+  'build.rejected': OctagonX,
+}
+
+const REPLY_ACTIONS: Record<string, string> = {
+  approve: 'Approve',
+  request_changes: 'Request changes',
+  revise_contract: 'Revise contract',
+}
+
+export function activity(event: FeedItem): Partial<ActivityPresentation> {
+  const { repo, pr_number: pullRequest, gate, result } = event.payload
+  let context: string | undefined
+  if (['pr.opened', 'merged', 'closed'].includes(event.topic)) {
+    context = [typeof repo === 'string' && repo, typeof pullRequest === 'number' && `#${pullRequest}`]
+      .filter(Boolean).join(' · ') || undefined
+  } else if (event.topic === 'workflow.running' && gate) {
+    const gateName = gate === 'review_work' ? 'Implementation review' : gate === 'review' ? 'Plan review' : undefined
+    const action = typeof result?.action === 'string' ? REPLY_ACTIONS[result.action] : undefined
+    context = [gateName, action && `Reply: ${action}`].filter(Boolean).join(' · ') || undefined
+  }
+  return {
+    context,
+    icon: TOPIC_ICONS[event.topic],
+    tone: event.topic === 'merged' ? 'positive' : event.topic === 'build.rejected' ? 'negative' : undefined,
+  }
 }
