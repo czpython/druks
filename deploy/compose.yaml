@@ -114,7 +114,7 @@ services:
     entrypoint:
       - sh
       - -c
-      - "while true; do .venv/bin/python -m hosts.janitor || true; sleep 60; done"
+      - "while true; do .venv/bin/python -m janitor || true; sleep 60; done"
     # The image HEALTHCHECK probes the HTTP API. On the host network, the
     # janitor would probe the port of the drukbox service. That doubles the
     # /healthz traffic and reports a status that is not its own.
