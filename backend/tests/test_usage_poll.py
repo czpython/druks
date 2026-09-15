@@ -81,14 +81,16 @@ async def test_successful_fetch_persists_per_provider(druks_db) -> None:
     assert [r["status"] for r in results] == ["recorded", "recorded"]
     assert all(r["parse_ok"] for r in results)
 
-    claude_row = await UsageScrape.latest_for("anthropic", (await _connection()).account_id)
+    claude_row = await UsageScrape.latest_for(
+        druks_db, "anthropic", (await _connection()).account_id
+    )
     assert claude_row is not None
     assert claude_row.five_hour_percent_left == 84
     assert claude_row.weeks == [
         {"percent_left": 52, "resets_at": None, "model": None},
     ]
 
-    codex_row = await UsageScrape.latest_for("openai", (await _connection()).account_id)
+    codex_row = await UsageScrape.latest_for(druks_db, "openai", (await _connection()).account_id)
     assert codex_row is not None
     assert codex_row.plan_tier == "prolite"
     assert codex_row.weeks[0]["percent_left"] == 61
@@ -115,7 +117,7 @@ async def test_claude_weekly_windows_survive_parse_and_poll_in_order(druks_db) -
     await _poll(_provider("anthropic", lambda: parsed))
     await druks_db.flush()
 
-    row = await UsageScrape.latest_for("anthropic", (await _connection()).account_id)
+    row = await UsageScrape.latest_for(druks_db, "anthropic", (await _connection()).account_id)
     assert row is not None
     assert [(week["percent_left"], week["model"]) for week in row.weeks] == [
         (70, None),
@@ -132,7 +134,9 @@ async def test_credential_error_records_error_snapshot(druks_db) -> None:
     assert all(r["status"] == "recorded" for r in results)
     assert all(not r["parse_ok"] for r in results)
 
-    claude_row = await UsageScrape.latest_for("anthropic", (await _connection()).account_id)
+    claude_row = await UsageScrape.latest_for(
+        druks_db, "anthropic", (await _connection()).account_id
+    )
     assert claude_row is not None
     assert claude_row.parse_ok is False
     assert claude_row.error == "token_expired"
@@ -147,7 +151,7 @@ async def test_fetch_crash_writes_crash_snapshot(druks_db) -> None:
     await druks_db.flush()
     assert all(r["status"] == "errored" and r["error"] == "crashed" for r in results)
 
-    row = await UsageScrape.latest_for("anthropic", (await _connection()).account_id)
+    row = await UsageScrape.latest_for(druks_db, "anthropic", (await _connection()).account_id)
     assert row is not None
     assert row.parse_ok is False
 
@@ -166,7 +170,7 @@ async def test_snapshot_persists_unlimited_flag(druks_db) -> None:
     )
     await druks_db.flush()
 
-    row = await UsageScrape.latest_for("openai", (await _connection()).account_id)
+    row = await UsageScrape.latest_for(druks_db, "openai", (await _connection()).account_id)
     assert row is not None
     assert row.unlimited is True
 
@@ -181,8 +185,8 @@ async def test_two_accounts_of_one_provider_snapshot_independently(druks_db) -> 
     await druks_db.flush()
 
     assert (
-        await UsageScrape.latest_for("anthropic", first.account_id)
+        await UsageScrape.latest_for(druks_db, "anthropic", first.account_id)
     ).five_hour_percent_left == 84
     assert (
-        await UsageScrape.latest_for("anthropic", second.account_id)
+        await UsageScrape.latest_for(druks_db, "anthropic", second.account_id)
     ).five_hour_percent_left == 30

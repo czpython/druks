@@ -430,7 +430,7 @@ class Provider:
                 parse_ok=False,
                 raw_output=None,
                 error="crashed",
-            ).save()
+            ).save(session)
             return {
                 "provider": cls.id,
                 "account_id": account_id,
@@ -452,7 +452,7 @@ class Provider:
             snapshot.five_hour_percent_left = parsed.five_hour.percent_left
             snapshot.five_hour_resets_at = parsed.five_hour.resets_at
         snapshot.weeks = _WEEKLY_WINDOWS.dump_python(parsed.weeks, mode="json")
-        await snapshot.save()
+        await snapshot.save(session)
         return {
             "provider": cls.id,
             "account_id": account_id,

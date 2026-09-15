@@ -1,16 +1,16 @@
 from datetime import datetime
 
 from sqlalchemy import Row, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.database import db_session
 from druks.durable.models import AgentCall
 from druks.secrets.models import VaultSecret
 
 
 async def list_finished_calls(
-    account_id: str | None, *, since: datetime, until: datetime
+    session: AsyncSession, account_id: str | None, *, since: datetime, until: datetime
 ) -> list[Row]:
-    result = await db_session().execute(
+    result = await session.execute(
         select(
             AgentCall.model,
             AgentCall.cost_usd,

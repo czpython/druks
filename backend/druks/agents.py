@@ -209,7 +209,9 @@ class Agent:
                 # The scrape belongs to the subscription account.
                 config = await get_config(db_session(), self.id, workflow.account_id)
                 provider_id = config.model.partition("/")[0]
-                scrape = await UsageScrape.latest_for(provider_id, config.charged_account_id)
+                scrape = await UsageScrape.latest_for(
+                    db_session(), provider_id, config.charged_account_id
+                )
                 if scrape:
                     now = datetime.now(UTC)
                     reset = scrape.soonest_reset_after(now)

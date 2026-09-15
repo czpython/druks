@@ -45,7 +45,7 @@ async def _seed(snapshots: list[UsageScrape]) -> None:
     for snap in snapshots:
         if not snap.account_id:
             snap.account_id = viewer
-        await snap.save()
+        await snap.save(db_session())
 
 
 def _provider(body: dict, provider_id: str) -> dict:
@@ -299,7 +299,7 @@ async def test_usage_today_aggregates_spend_and_tokens_by_provider(
 async def test_usage_excludes_another_accounts_scrape(client, druks_db) -> None:
     snap = UsageScrape(provider="anthropic", parse_ok=True, five_hour_percent_left=54)
     snap.account_id = (await Account.get_or_create(druks_db, "other@example.com")).id
-    await snap.save()
+    await snap.save(druks_db)
 
     body = client.get("/api/usage").json()
     assert _provider(body, "anthropic")["available"] is False
@@ -389,7 +389,7 @@ async def test_refresh_scrapes_only_the_viewers_logins(client, druks_db, monkeyp
     assert client.post("/api/usage/refresh").status_code == 200
     assert fetched == [viewer.account_id]
     assert (
-        await UsageScrape.latest_for("anthropic", viewer.account_id)
+        await UsageScrape.latest_for(druks_db, "anthropic", viewer.account_id)
     ).five_hour_percent_left == 50
 
 
