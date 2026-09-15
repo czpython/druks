@@ -19,6 +19,7 @@ from druks.browser.exceptions import (
 )
 from druks.browser.locks import acquire_writer_lock, release_writer_lock
 from druks.browser.models import StoredBrowserSession
+from druks.database import db_session
 from druks.sandbox.client import sandbox_client
 from druks.settings import load_settings
 
@@ -73,7 +74,7 @@ class BrowserSession:
     async def get_status(self) -> BrowserSessionStatus:
         """Where the login stands: READY to borrow, STALE after a run found it
         signed out, NEEDS_LOGIN before the first sign-in."""
-        row = await StoredBrowserSession.get_for_name(self.name)
+        row = await StoredBrowserSession.get_for_name(db_session(), self.name)
         if row:
             return BrowserSessionStatus(row.status)
         return self.initial_status
@@ -137,6 +138,7 @@ class BrowserSession:
         then the declaration alone puts the session in the pane, wanting a
         login."""
         return await StoredBrowserSession.get_or_create(
+            db_session(),
             name=self.name,
             payload_format=BrowserSessionPayloadFormat.PROFILE_DIR,
             site=self.site,
