@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import druks.workflows as sdk
 import pytest
 from drukbox_sdk import Secret
+from druks.database import db_session
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.workflows import Workflow
 
@@ -80,8 +81,8 @@ async def test_warm_host_reused_while_lease_covers_another_call(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
-    first = await flow._lease_host(_NONE)
-    second = await flow._lease_host(_NONE)
+    first = await flow._lease_host(db_session(), _NONE)
+    second = await flow._lease_host(db_session(), _NONE)
 
     assert first == second == "host-1"
     assert fake.provisions == ["wf-1:workflow"]
@@ -96,8 +97,8 @@ async def test_warm_host_rotates_when_lease_cannot_cover_a_call(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
-    first = await flow._lease_host(_NONE)
-    second = await flow._lease_host(_NONE)
+    first = await flow._lease_host(db_session(), _NONE)
+    second = await flow._lease_host(db_session(), _NONE)
 
     assert first == "host-1"
     assert second == "host-2"
@@ -112,8 +113,10 @@ async def test_warm_host_keeps_its_entries_across_calls(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
-    first = await flow._lease_host(_ANTHROPIC)
-    second = await flow._lease_host(_config({"anthropic": _ENTRY}, _ANTHROPIC.secrets_id))
+    first = await flow._lease_host(db_session(), _ANTHROPIC)
+    second = await flow._lease_host(
+        db_session(), _config({"anthropic": _ENTRY}, _ANTHROPIC.secrets_id)
+    )
 
     assert first == second == "host-1"
     assert fake.provisions == ["wf-1:workflow:anthropic.20260907T110000"]
@@ -129,8 +132,8 @@ async def test_warm_host_rotates_when_a_call_needs_other_entries(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
-    first = await flow._lease_host(_ANTHROPIC)
-    second = await flow._lease_host(_NONE)
+    first = await flow._lease_host(db_session(), _ANTHROPIC)
+    second = await flow._lease_host(db_session(), _NONE)
 
     assert first == "host-1"
     assert second == "host-2"
@@ -147,9 +150,9 @@ async def test_provisioning_key_names_the_pasted_key(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     replaced = _config({"anthropic": _ENTRY}, "anthropic.20260907T120000")
 
-    await _warm_workflow()._lease_host(_ANTHROPIC)
-    await _warm_workflow()._lease_host(_ANTHROPIC)
-    await _warm_workflow()._lease_host(replaced)
+    await _warm_workflow()._lease_host(db_session(), _ANTHROPIC)
+    await _warm_workflow()._lease_host(db_session(), _ANTHROPIC)
+    await _warm_workflow()._lease_host(db_session(), replaced)
 
     assert fake.provisions == [
         "wf-1:workflow:anthropic.20260907T110000",
@@ -166,7 +169,7 @@ async def test_no_warm_host_when_reuse_disabled(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow(reuse=False)
 
-    assert await flow._lease_host(_NONE) is None
+    assert await flow._lease_host(db_session(), _NONE) is None
     assert fake.provisions == []
 
 
@@ -174,7 +177,6 @@ async def test_a_replay_finds_the_warm_box_through_its_identity(
     monkeypatch: pytest.MonkeyPatch, druks_db
 ) -> None:
     from conftest import connect_provider
-    from druks.database import db_session
     from druks.harnesses.providers import AnthropicProvider
     from druks.sandbox.models import SandboxIdentity, SecretRef
     from druks.testing import seed_run
@@ -194,7 +196,7 @@ async def test_a_replay_finds_the_warm_box_through_its_identity(
     flow = _warm_workflow()
     config = SimpleNamespace(secrets={}, secret_refs=secrets, secrets_id=subscription.id)
 
-    assert await flow._lease_host(config) == "host-crashed"
+    assert await flow._lease_host(db_session(), config) == "host-crashed"
 
     assert client.reattached == ["host-crashed"]
     assert client.provisions == []

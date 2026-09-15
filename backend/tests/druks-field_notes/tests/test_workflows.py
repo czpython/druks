@@ -46,5 +46,5 @@ async def test_survey_workspace_clones_the_subject_repo(druks_db):
     row = await connect_service(
         "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
     )
-    [secret] = await workflow.get_secret_refs()
+    [secret] = await workflow.get_secret_refs(druks_db)
     assert secret.key == ("github", row.id, "acme/widgets", "")
