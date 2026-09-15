@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from drukbox_sdk import Secret
 
+from druks.database import db_session
 from druks.mcp import models as mcp_models
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox.models import SecretRef
@@ -153,7 +154,10 @@ class Harness(ABC):
         # the declared values only for a declared-but-not-delivered entry.
         # token_present reads the delivered shape: it names a bearer env var
         # iff the box holds an entry behind it.
-        declared = {server["name"]: server for server in await mcp_models.McpServer.list_enabled()}
+        declared = {
+            server["name"]: server
+            for server in await mcp_models.McpServer.list_enabled(db_session())
+        }
         delivered_by_name = {server.name: server for server in mcp_servers}
         mcp = []
         for name in sorted(declared.keys() | delivered_by_name.keys()):

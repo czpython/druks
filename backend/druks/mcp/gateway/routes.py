@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Path
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
+from druks.api.dependencies import SessionDep
 from druks.api.exceptions import RunNotFound, agent_error_responses
 from druks.mcp.gateway import exceptions as gate_errors
 from druks.mcp.gateway import schemas, services
@@ -47,6 +48,7 @@ async def get_gate(
     ),
 )
 async def answer_gate(
+    session: SessionDep,
     run: Annotated[str, Path(description="The parked run from get_gate.")],
     body: schemas.AnswerGateRequest,
 ) -> schemas.GateAnswerResponse:
@@ -55,6 +57,7 @@ async def answer_gate(
     already_answered. Empty request_changes is valid only when get_gate's ask
     has non-blank context."""
     return await services.answer_gate(
+        session,
         run,
         parked_at=body.parked_at,
         control=body.control,
@@ -84,7 +87,9 @@ async def get_agent_call(
     response_model=schemas.AgentUsageResponse,
     response_model_by_alias=True,
 )
-async def get_usage(account: Account = Depends(current_account)) -> schemas.AgentUsageResponse:
+async def get_usage(
+    session: SessionDep, account: Account = Depends(current_account)
+) -> schemas.AgentUsageResponse:
     """The caller's harness quota snapshot and today's spend. Pure read — it
     never triggers a scrape."""
-    return await services.get_usage(account)
+    return await services.get_usage(session, account)

@@ -715,7 +715,9 @@ async def test_usage_agent_route_matches_the_service(client: TestClient, druks_d
     response = client.get("/api/usage/summary")
     assert response.status_code == 200
     body = response.json()
-    assert body == (await services.get_usage(account)).model_dump(mode="json", by_alias=True)
+    assert body == (await services.get_usage(druks_db, account)).model_dump(
+        mode="json", by_alias=True
+    )
     assert len(response.content) <= 4 * 1024
 
     today = client.get("/api/usage/today").json()

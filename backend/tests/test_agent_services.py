@@ -164,20 +164,31 @@ async def test_get_gate_refuses_when_not_parked_or_external(druks_db):
 async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
     with pytest.raises(RunNotFound):
         await services.answer_gate(
-            "no-such-run", parked_at=datetime.now(UTC), control="approve", answers={}, note=""
+            druks_db,
+            "no-such-run",
+            parked_at=datetime.now(UTC),
+            control="approve",
+            answers={},
+            note="",
         )
 
     item = await make_test_note()
     finished = await seed_note_run(druks_db, note=item, state="finished")
     with pytest.raises(exceptions.GateNotOpen):
         await services.answer_gate(
-            finished.id, parked_at=datetime.now(UTC), control="approve", answers={}, note=""
+            druks_db,
+            finished.id,
+            parked_at=datetime.now(UTC),
+            control="approve",
+            answers={},
+            note="",
         )
 
     parked_item = await make_test_note()
     run = await _park(druks_db, parked_item)
     with pytest.raises(exceptions.GateRoundStale):
         await services.answer_gate(
+            druks_db,
             run.id,
             parked_at=run.input_requested_at - timedelta(seconds=5),
             control="approve",
@@ -186,7 +197,7 @@ async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
         )
     with pytest.raises(exceptions.InvalidGateAnswer):
         await services.answer_gate(
-            run.id, parked_at=run.input_requested_at, control="merge", answers={}, note=""
+            druks_db, run.id, parked_at=run.input_requested_at, control="merge", answers={}, note=""
         )
 
     external_item = await make_test_note()
@@ -197,6 +208,7 @@ async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
     )
     with pytest.raises(exceptions.GateNotAnswerable):
         await services.answer_gate(
+            druks_db,
             external.id,
             parked_at=external.input_requested_at,
             control="approve",
@@ -459,7 +471,7 @@ async def test_get_usage_is_a_bounded_pure_read(druks_db, account):
         ).save()
 
     await druks_db.flush()
-    usage = await services.get_usage(account)
+    usage = await services.get_usage(druks_db, account)
 
     assert usage.runs_today == 30
     assert usage.spend_today_usd == pytest.approx(15.0)
@@ -497,7 +509,7 @@ async def test_get_usage_only_counts_the_callers_spend(druks_db, account):
     )
     await druks_db.flush()
 
-    usage = await services.get_usage(account)
+    usage = await services.get_usage(druks_db, account)
 
     assert usage.runs_today == 0
     assert usage.spend_today_usd == 0.0

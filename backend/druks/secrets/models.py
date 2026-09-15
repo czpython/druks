@@ -400,9 +400,9 @@ class VaultSecret(Base, Uuid7Pk):
             if self.audience.startswith("mcp:"):
                 from druks.mcp import oauth
 
-                return await oauth.get_access_token(self.audience_name, self.account_id)
+                return await oauth.get_access_token(session, self.audience_name, self.account_id)
             client = await services.get(self.audience_name).get_oauth_client()
-            return await client.get_access_token(connection=self)
+            return await client.get_access_token(session, connection=self)
         from druks.harnesses.providers import get_provider
 
         token = await get_provider(self.audience_name).issue_token(

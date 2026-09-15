@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.database import db_session, get_session
+from druks.database import get_session
 from druks.redis import get_client
 from druks.secrets.models import VaultSecret
 from druks.signals import publish
@@ -156,6 +156,7 @@ class OauthClient:
 
     async def get_access_token(
         self,
+        session: AsyncSession,
         *,
         connection: VaultSecret,
         scopes: tuple[str, ...] = (),
@@ -206,7 +207,7 @@ class OauthClient:
         try:
             data = {
                 "grant_type": "refresh_token",
-                "refresh_token": await connection.get_refresh_token(db_session()),
+                "refresh_token": await connection.get_refresh_token(session),
                 **self.extra_token_params,
             }
             if requested:
@@ -228,9 +229,9 @@ class OauthClient:
                     # The provider withdrew the grant; presenting it again can never
                     # succeed. The revoke commits on its own: the caller's step
                     # session rolls back when this error propagates.
-                    async with get_session(db_session().bind) as session:
-                        await self.disconnect(connection, reason="invalid_grant", session=session)
-                        await session.commit()
+                    async with get_session(session.bind) as own:
+                        await self.disconnect(connection, reason="invalid_grant", session=own)
+                        await own.commit()
                     raise OauthRefreshError(
                         self.provider,
                         "the provider revoked the grant; sign in again to restore the connection",
@@ -250,7 +251,7 @@ class OauthClient:
                     self.provider, "the token endpoint returned no access token"
                 )
             if tokens.get("refresh_token"):
-                await connection.update_refresh_token(db_session(), tokens["refresh_token"])
+                await connection.update_refresh_token(session, tokens["refresh_token"])
             if requested and tokens.get("scope") and set(tokens["scope"].split()) != set(requested):
                 # The provider ignored the narrowing. The sandbox must never hold this token.
                 raise OauthRefreshError(

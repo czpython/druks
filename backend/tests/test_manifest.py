@@ -50,7 +50,7 @@ async def _seed_skills(*names: str, disabled: tuple[str, ...] = ()) -> None:
 async def test_manifest_records_the_delivered_capability_set(druks_db):
     """Records model, harness, each MCP server's declared/delivered/token
     presence, and the delivered skills."""
-    await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await models.McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
     await _seed_skills("alpha", "beta")
 
     linear = McpServer(name="linear", url=_LINEAR_URL, bearer_token_env_var=_LINEAR_ENV)
@@ -82,7 +82,7 @@ async def test_manifest_records_the_delivered_capability_set(druks_db):
 async def test_missing_mcp_token_records_absence(druks_db):
     """A delivered server that names no bearer var holds no entry behind one:
     token_present False — recorded, not failed."""
-    await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await models.McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
 
     manifest = await _build(mcp_servers=(McpServer(name="linear", url=_LINEAR_URL),))
 
@@ -95,7 +95,7 @@ async def test_declared_but_undelivered_server_still_reads_declared(druks_db):
     """An enabled registry server is declared even on a call that didn't
     deliver it — declared True, delivered False, so the manifest shows exactly
     what this call ran without."""
-    await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await models.McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
 
     manifest = await _build()
 
@@ -109,7 +109,7 @@ async def test_records_the_delivered_server_not_the_registry_duplicate(druks_db)
     """When a workspace requires a server under an enabled entry's name, the
     workspace's wins delivery — the manifest records what the harness actually
     ran (the delivered url/env var), not the registry's values."""
-    await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await models.McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
     required = McpServer(
         name="linear",
         url="https://required.internal/linear",
@@ -129,7 +129,7 @@ async def test_records_the_delivered_server_not_the_registry_duplicate(druks_db)
 async def test_hash_is_stable_for_identical_capabilities(druks_db):
     """Identical capability sets hash the same; changing the model, MCP token
     availability, or the delivered skill set moves the hash."""
-    await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await models.McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
     linear = McpServer(name="linear", url=_LINEAR_URL, bearer_token_env_var=_LINEAR_ENV)
     with_token = {"mcp_servers": (linear,)}
 
@@ -160,7 +160,7 @@ async def test_curated_skills_change_the_recorded_set_and_the_hash(druks_db):
 async def test_manifest_records_token_presence_never_the_value(druks_db):
     """The secret token never lands in the manifest — only its env-var name and
     a presence boolean."""
-    await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await models.McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
     linear = McpServer(name="linear", url=_LINEAR_URL, bearer_token_env_var=_LINEAR_ENV)
 
     manifest = await _build(mcp_servers=(linear,))
@@ -175,6 +175,7 @@ async def test_manifest_stays_presence_only_for_a_declared_header_server(druks_d
     entry: no header value — plain or secret — lands in the manifest, and a
     bearer-less server simply reads token_present False."""
     await models.McpServer.create(
+        druks_db,
         name="grafana",
         url="https://mcp.grafana.com/mcp",
         token_source="",
