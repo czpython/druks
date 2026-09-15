@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from drukbox_sdk import Secret
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.database import db_session
 from druks.mcp import models as mcp_models
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox.models import SecretRef
@@ -72,7 +72,7 @@ class Harness(ABC):
         self.sandbox = sandbox
 
     @abstractmethod
-    async def build_invocation(self, **kwargs: object) -> AgentInvocation:
+    async def build_invocation(self, session: AsyncSession, **kwargs: object) -> AgentInvocation:
         """Assemble this CLI's full invocation (argv, stdin, credentials,
         env) for one prompt. Pure — never touches the live sandbox; the
         sandbox executes the returned invocation."""
@@ -132,6 +132,7 @@ class Harness(ABC):
 
     async def get_manifest(
         self,
+        session: AsyncSession,
         *,
         mcp_servers: tuple["McpServer", ...],
         skills: Collection[str],
@@ -155,8 +156,7 @@ class Harness(ABC):
         # token_present reads the delivered shape: it names a bearer env var
         # iff the box holds an entry behind it.
         declared = {
-            server["name"]: server
-            for server in await mcp_models.McpServer.list_enabled(db_session())
+            server["name"]: server for server in await mcp_models.McpServer.list_enabled(session)
         }
         delivered_by_name = {server.name: server for server in mcp_servers}
         mcp = []
@@ -181,7 +181,7 @@ class Harness(ABC):
             "harness": self.name,
             "mcp_servers": mcp,
             "skills_delivered": sorted(
-                skill.name for skill in await Skill.list_delivered(db_session(), skills)
+                skill.name for skill in await Skill.list_delivered(session, skills)
             ),
         }
         canonical = json.dumps(capability, sort_keys=True, separators=(",", ":"))

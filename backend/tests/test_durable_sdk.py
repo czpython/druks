@@ -753,7 +753,7 @@ def _fake_ephemeral_returning(output: dict, seen: list[dict], held: list[bool]):
 
     @contextlib.asynccontextmanager
     async def _fake_ephemeral(self, **_kw):
-        async def _run_agent(**kwargs):
+        async def _run_agent(_session, **kwargs):
             seen.append(kwargs)
             # The agent runs for minutes in production, so the step commits before
             # handing over: its own session holds no connection through the wait.

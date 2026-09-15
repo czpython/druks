@@ -5,7 +5,8 @@ import shlex
 from pathlib import Path
 from typing import Any
 
-from druks.database import db_session
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
@@ -58,6 +59,7 @@ class ClaudeHarness(Harness):
 
     async def build_invocation(
         self,
+        session: AsyncSession,
         *,
         prompt: str,
         schema: dict[str, object],
@@ -125,6 +127,7 @@ class ClaudeHarness(Harness):
             args=("sh", "-c", wrapper),
             stdin=prompt.encode("utf-8"),
             credentials=await _get_credentials(
+                session,
                 self.sandbox,
                 include_plugins=include_plugins,
                 skills=skills,
@@ -201,6 +204,7 @@ class ClaudeHarness(Harness):
 
 
 async def _get_credentials(
+    session: AsyncSession,
     sandbox: SandboxSettings,
     *,
     include_plugins: bool = True,
@@ -239,7 +243,7 @@ async def _get_credentials(
         HomeCopy(
             ".claude/skills",
             skills_dir,
-            excludes=await Skill.delivery_excludes(db_session(), skills),
+            excludes=await Skill.delivery_excludes(session, skills),
         )
     )
     return Credentials(home=tuple(home))

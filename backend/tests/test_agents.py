@@ -256,7 +256,7 @@ async def test_running_call_visible_then_finished(
     await SettingsOverride.set_agent_billing(druks_db, DUMMY_AGENT.id, billing)
     during: dict[str, object] = {}
 
-    async def _run_agent(*, call_id, config, **_kwargs):
+    async def _run_agent(_session, *, call_id, config, **_kwargs):
         row = await AgentCall.get(db_session(), call_id)
         assert row.subscription_id == (config.subscription.id if config.subscription else None)
         assert row.api_key_id == (config.api_key.id if config.api_key else None)
@@ -299,7 +299,7 @@ async def test_crash_after_start_fails_the_call(druks_db, tmp_path, monkeypatch,
     row instead of leaving it dangling RUNNING."""
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
 
-    async def _boom(**_kwargs):
+    async def _boom(_session, **_kwargs):
         raise RuntimeError("kaboom")
 
     sandbox.run_agent = _boom
@@ -408,7 +408,7 @@ async def test_a_carried_failure_is_raised_with_its_code(
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     overloaded = HarnessOverloadedError("claude exited with 1. API Error: 529 Overloaded.")
 
-    async def _run_agent(**_kwargs):
+    async def _run_agent(_session, **_kwargs):
         return make_agent_result(None, agent="dummy", error=overloaded)
 
     sandbox.run_agent = _run_agent

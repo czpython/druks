@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from drukbox_sdk import Secret
+from druks.database import db_session
 from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import (
     HarnessAuthError,
@@ -87,6 +88,7 @@ async def test_build_invocation_writes_the_run_files_and_pi_argv(
     public = McpServer(name="public", url="https://public.example.test/mcp")
 
     invocation = await _harness().build_invocation(
+        db_session(),
         prompt="A large prompt stays on stdin.",
         schema={"type": "object"},
         run_id="run-1",
@@ -159,6 +161,7 @@ async def test_build_invocation_without_servers_or_effort_is_bare(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     invocation = await _harness(effort=None).build_invocation(
+        db_session(),
         prompt="Prompt",
         schema={"type": "object"},
         run_id="run-1",
