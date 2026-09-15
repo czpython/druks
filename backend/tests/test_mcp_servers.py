@@ -51,12 +51,12 @@ def _sandbox_config() -> SandboxSettings:
 async def _delivery() -> dict:
     # Delivery at the workspace seam: the enabled servers become wire shapes on
     # ``mcp_servers``; their credentials are box entries, never env.
-    return await Workspace(host=_FakeSandbox()).with_mcp_servers(None)  # type: ignore[arg-type]
+    return await Workspace(host=_FakeSandbox()).with_mcp_servers(db_session(), None)  # type: ignore[arg-type]
 
 
 async def _refs() -> dict[str, SecretRef]:
     # The secret refs a box of a plain workspace binds, one per entry, by name.
-    _, refs = await Workspace.get_mcp_delivery(None, None)
+    _, refs = await Workspace.get_mcp_delivery(db_session(), None, None)
     return {ref.name: ref for ref in refs}
 
 
@@ -167,7 +167,7 @@ async def test_required_server_delivers_beside_the_registry(druks_db):
         )
     )
 
-    wire, refs = await workspace.get_mcp_delivery(None, None)
+    wire, refs = await workspace.get_mcp_delivery(db_session(), None, None)
 
     github = next(s for s in wire if s.name == "github")
     assert github.url == "https://api.githubcopilot.com/mcp/"
@@ -195,7 +195,7 @@ async def test_required_server_owns_its_name_against_a_registry_twin(druks_db):
         RequiredMcpServer(name="notion", url="https://required.internal/notion", secret_id=row.id),
     )
 
-    wire, refs = await workspace.get_mcp_delivery(None, None)
+    wire, refs = await workspace.get_mcp_delivery(db_session(), None, None)
 
     delivered = [s for s in wire if s.name == "linear"]
     assert len(delivered) == 1
@@ -214,7 +214,7 @@ async def test_duplicate_required_names_are_refused(druks_db):
     )
 
     with pytest.raises(ValueError, match="duplicate required"):
-        await workspace.get_mcp_delivery(None, None)
+        await workspace.get_mcp_delivery(db_session(), None, None)
 
 
 async def test_enabled_static_server_without_token_raises_loudly(druks_db):
@@ -654,7 +654,7 @@ async def test_delivery_mints_the_run_account_its_own_token(druks_db, monkeypatc
     workspace = _requiring_druks(monkeypatch, allowed_tools)
     account = await Account.get_or_create(druks_db, "op@example.com")
 
-    wire, refs = await workspace.get_mcp_delivery(None, account.id)
+    wire, refs = await workspace.get_mcp_delivery(db_session(), None, account.id)
 
     row = await _druks_row(account.id)
     minted = await PersonalAccessToken.authenticate(druks_db, row.secrets["value"])
@@ -670,18 +670,18 @@ async def test_delivery_mints_the_run_account_its_own_token(druks_db, monkeypatc
 async def test_a_later_run_reuses_the_token_and_a_retired_one_is_replaced(druks_db, monkeypatch):
     workspace = _requiring_druks(monkeypatch)
     account = await Account.get_or_create(druks_db, "op@example.com")
-    await workspace.get_mcp_delivery(None, account.id)
+    await workspace.get_mcp_delivery(db_session(), None, account.id)
     first = (await _druks_row(account.id)).secrets["value"]
     # No tools: the token carries the account's whole API.
     assert (await PersonalAccessToken.authenticate(druks_db, first)).allowed_tools is None
 
-    await workspace.get_mcp_delivery(None, account.id)
+    await workspace.get_mcp_delivery(db_session(), None, account.id)
 
     assert (await _druks_row(account.id)).secrets["value"] == first
     assert len(await PersonalAccessToken.list_for_account(druks_db, account.id)) == 1
 
     await (await PersonalAccessToken.authenticate(druks_db, first)).revoke()
-    await workspace.get_mcp_delivery(None, account.id)
+    await workspace.get_mcp_delivery(db_session(), None, account.id)
 
     assert (await _druks_row(account.id)).secrets["value"] != first
     assert len(await PersonalAccessToken.list_for_account(druks_db, account.id)) == 2
@@ -692,8 +692,8 @@ async def test_two_accounts_hold_their_own_tokens(druks_db, monkeypatch):
     first = await Account.get_or_create(druks_db, "first@example.com")
     second = await Account.get_or_create(druks_db, "second@example.com")
 
-    await workspace.get_mcp_delivery(None, first.id)
-    await workspace.get_mcp_delivery(None, second.id)
+    await workspace.get_mcp_delivery(db_session(), None, first.id)
+    await workspace.get_mcp_delivery(db_session(), None, second.id)
 
     rows = [await _druks_row(first.id), await _druks_row(second.id)]
     holders = [

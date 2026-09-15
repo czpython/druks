@@ -870,7 +870,7 @@ class Workflow:
         # The secrets a box of this run fetches beyond its config's: the
         # workspace's and its MCP servers', read before the box exists.
         subject = await self.subject
-        _, mcp = await self.workspace_class.get_mcp_delivery(subject, self.account_id)
+        _, mcp = await self.workspace_class.get_mcp_delivery(db_session(), subject, self.account_id)
         return [*await self.workspace_class.get_secret_refs(subject), *mcp]
 
     async def _lease_host(self, config: "AgentConfig") -> str | None:

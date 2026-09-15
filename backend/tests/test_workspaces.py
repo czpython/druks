@@ -31,7 +31,7 @@ async def test_repo_workspace_clones_before_every_agent_call_and_writes_no_token
     async def _ensure(_host: Any, *, repo_url: str, ref: str | None, target_path: str) -> None:
         host.events.append(("clone", repo_url, ref, target_path))
 
-    async def _git_identity(self: RepoWorkspace, account_id: str | None) -> None:
+    async def _git_identity(self: RepoWorkspace, session, account_id: str | None) -> None:
         host.events.append(("git_identity", account_id))
 
     async def _run(self: Workspace, *, account_id: str | None, **kwargs: Any) -> str:
