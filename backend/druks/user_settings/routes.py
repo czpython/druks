@@ -184,7 +184,7 @@ async def update_app_settings(body: AppsSettingsUpdate) -> AppsSettingsResponse:
 
     settings_problems = {}
     for app in changed_apps:
-        if problems := (await app.settings()).clean():
+        if problems := await app.get_settings_problems():
             settings_problems[app.name] = problems
     if settings_problems:
         raise HTTPException(status_code=422, detail=settings_problems)
