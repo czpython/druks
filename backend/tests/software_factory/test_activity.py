@@ -61,6 +61,7 @@ async def test_first_delivery_records_its_pr_and_work_title(druks_db, druks_clie
     await item.update(title="A renamed queue")
     await workflow.implement()
     await workflow.implement()
+    db_session().expunge_all()
     item = await WorkItem.get(item.id)
     assert item.pr_number == 42
     await item.start_attempt()
