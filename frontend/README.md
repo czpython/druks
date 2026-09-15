@@ -158,6 +158,14 @@ operator timezone. The detail panel reads `/api/events/{seq}/destinations` to
 show which recorded work, run, and saved result still exist. Its owner links use
 the `subjectPath` target described above.
 
+The compact toolbar opens app and type choices in Filters, and local day inputs
+in Date range. Active values stay visible below it. Consecutive entries share a
+calendar-day heading in the account timezone, including across page boundaries.
+Rows show the recorded work key and title above the activity and its context.
+The detail panel retains full recorded text, with raw errors, replies, and
+references under disclosure controls. Escape closes an open toolbar control
+before details; each close action returns focus to its trigger or selected row.
+
 An app can supply `activity(event)` in its UI registration. It returns optional
 `context`, `icon` (a Lucide icon), and `tone` (`neutral`, `positive`, `negative`,
 or `attention`). Use the recorded payload only. The shared `eventLine()` adds
