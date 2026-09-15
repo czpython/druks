@@ -8,7 +8,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import UserDefinedType
 
 from druks.apps.loader import iter_apps, resolve_workflow_app
-from druks.database import db_session
 from druks.models import Base, StoredSubject
 from druks.signals import publish
 
@@ -60,7 +59,7 @@ class Event(Base):
         until: datetime | None = None,
     ) -> Select[tuple["Event"]]:
         """The recorded Activity that matches these filters, as a query. Search reads the
-        recorded subject label literally; from is inclusive and until is exclusive."""
+        recorded key and title literally; from is inclusive and until is exclusive."""
         # The durable package imports this module.
         from druks.durable.enums import WorkflowEvent
 
@@ -85,7 +84,10 @@ class Event(Base):
             statement = statement.where(cls.app == app)
         if search and search.strip():
             statement = statement.where(
-                cls.subject_label.icontains(search.strip(), autoescape=True)
+                or_(
+                    cls.subject_label.icontains(search.strip(), autoescape=True),
+                    cls.payload["title"].as_string().icontains(search.strip(), autoescape=True),
+                )
             )
         if topic:
             statement = statement.where(cls.type == topic)
@@ -98,17 +100,21 @@ class Event(Base):
     @classmethod
     async def emit(
         cls,
+        session: AsyncSession,
         *,
         type: str,
         subject: dict[str, Any] | None = None,
         label: str | None = None,
+        title: str | None = None,
         payload: dict[str, Any] | None = None,
         app: str | None = None,
-        session: AsyncSession | None = None,
     ) -> None:
-        """Record in the supplied session or the current domain transaction."""
-        session = session or db_session()
+        """Record the supplied work identity, title, and facts in this transaction."""
         subject = subject or {}
+        payload = dict(payload or {})
+        payload.pop("title", None)
+        if title:
+            payload["title"] = title
         session.add(
             cls(
                 type=type,
@@ -116,14 +122,18 @@ class Event(Base):
                 subject_id=str(subject["id"]) if "id" in subject else None,
                 subject_label=label or None,
                 app=app,
-                payload=payload or {},
+                payload=payload,
             )
         )
         await session.flush()
 
     @classmethod
     async def announce(
-        cls, subject: "Subject | StoredSubject", topic: str, facts: dict[str, Any]
+        cls,
+        session: AsyncSession,
+        subject: "Subject | StoredSubject",
+        topic: str,
+        facts: dict[str, Any],
     ) -> None:
         """Record a subject's domain fact and notify subscribers, in the current
         transaction. A failing subscriber rolls the domain change back with it."""
@@ -139,6 +149,12 @@ class Event(Base):
                 "package before importing it."
             ) from None
         await cls.emit(
-            type=topic, subject=subject.identity, label=subject.label, payload=facts, app=app
+            session,
+            type=topic,
+            subject=subject.identity,
+            label=subject.label,
+            title=subject.get_summary().title,
+            payload=facts,
+            app=app,
         )
         await publish(topic, subject=subject.identity, **facts)

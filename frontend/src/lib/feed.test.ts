@@ -12,19 +12,20 @@ function event(fields: Partial<FeedItem>): FeedItem {
     seq: 1,
     at: '2026-07-26T12:00:00Z',
     topic: 'workflow.running',
+    payload: {},
     ...fields,
   }
 }
 
 describe('eventLine', () => {
   it('names the workflow and what it did', () => {
-    const line = eventLine(event({ topic: 'workflow.running', workflow: 'software_factory.build' }))
+    const line = eventLine(event({ topic: 'workflow.running', payload: { kind: 'software_factory.build' } }))
 
     expect(line.label).toBe('Build response received')
   })
 
   it('names a recorded input request', () => {
-    expect(eventLine(event({ topic: 'workflow.parked', workflow: 'software_factory.build' })).label).toBe(
+    expect(eventLine(event({ topic: 'workflow.parked', payload: { kind: 'software_factory.build' } })).label).toBe(
       'Build input requested',
     )
   })
@@ -40,7 +41,7 @@ describe('eventLine', () => {
     const line = eventLine(
       event({
         topic: 'workflow.finished',
-        workflow: 'software_factory.build',
+        payload: { kind: 'software_factory.build' },
         app: 'software_factory',
         subjectType: 'work_item',
         subjectId: '42',
@@ -56,7 +57,7 @@ describe('eventLine', () => {
     const line = eventLine(
       event({
         topic: 'workflow.running',
-        workflow: 'software_factory.profile',
+        payload: { kind: 'software_factory.profile' },
         app: 'software_factory',
         subjectType: 'project_repo',
         subjectId: '3',
@@ -89,7 +90,7 @@ describe('eventLine', () => {
 
 it('retains the recorded run and decision round in Factory links', () => {
   const line = eventLine(event({ app: 'software_factory', subjectType: 'work_item', subjectId: '42',
-    run: 'older-run', parkedAt: '2026-09-09T01:00:00Z' }))
+    payload: { run: 'older-run', input_requested_at: '2026-09-09T01:00:00Z' } }))
   const target = new URL(line.path!, 'https://druks.test')
   expect(target.searchParams.get('run')).toBe('older-run')
   expect(target.searchParams.get('parkedAt')).toBe('2026-09-09T01:00:00Z')

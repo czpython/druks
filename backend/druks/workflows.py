@@ -24,6 +24,7 @@ from dbos._error import (
     DBOSWorkflowCancelledError,
 )
 from pydantic import BaseModel, Field, create_model
+from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_utils import uuid7
 
 from druks.accounts.context import current_account_id
@@ -36,7 +37,7 @@ from druks.apps.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
-from druks.database import get_session
+from druks.database import db_session, get_session
 from druks.durable.activity import set_run_phase
 from druks.durable.datastructures import Subject
 from druks.durable.engine import (
@@ -555,10 +556,10 @@ async def _emit_run_event(
     # own arguments, so a replay stamps the same routing every time.
     async def _transition() -> dict[str, Any] | None:
         async with step_session() as session:
-            run = await Run.get(workflow_id)
+            run = await session.get(Run, workflow_id)
             # Read before the flush: flushing the update unloads the row's
             # computed columns, and reading one back would be implicit IO.
-            label = run.subject_label
+            label, title = run.subject_label, run.subject_title
             gate = run.input_gate if state == RunState.RUNNING and result else None
             if facts:
                 for field, value in facts.items():
@@ -569,7 +570,9 @@ async def _emit_run_event(
                 return {
                     "kind": run.kind,
                     "subject": subject,
-                    "payload": await _log_run_event(run, state, subject, label, result, gate),
+                    "payload": await _log_run_event(
+                        session, run, state, subject, label, title, result, gate
+                    ),
                 }
 
     transition = await DBOS.run_step_async(
@@ -593,10 +596,12 @@ async def _emit_run_event(
 
 
 async def _log_run_event(
+    session: AsyncSession,
     run: Run,
     state: RunState,
     subject: dict[str, Any],
     label: str | None,
+    title: str | None,
     result: Any = None,
     gate: str | None = None,
 ) -> dict[str, Any]:
@@ -618,9 +623,11 @@ async def _log_run_event(
     elif isinstance(result, dict):
         payload["result"] = result
     await Event.emit(
+        session,
         type=WorkflowEvent.for_state(state),
         subject=subject,
         label=label,
+        title=title,
         payload=payload,
         app=workflows.get(run.kind).app,
     )
@@ -803,12 +810,14 @@ class Workflow:
             raise WorkflowError("announce() runs in the workflow body, not inside a @step")
 
         async def record() -> None:
-            async with step_session():
-                run = await Run.get(self.workflow_id)
+            async with step_session() as session:
+                run = await session.get(Run, self.workflow_id)
                 await Event.emit(
+                    session,
                     type=topic,
                     subject=self._subject,
                     label=run.subject_label,
+                    title=run.subject_title,
                     payload={**facts, "run": self.workflow_id, "kind": self.kind},
                     app=self.app,
                 )
@@ -988,7 +997,7 @@ class Workflow:
         runs = await Run.list_for_subject(subject.subject_type, str(subject.id), kind=cls.kind)
         run = next((run for run in runs if run.is_active), None)
         if run:
-            await run.cancel(failure=failure)
+            await run.cancel(db_session(), failure=failure)
 
     @classmethod
     async def start(
@@ -1042,6 +1051,7 @@ class Workflow:
                     "subject_type": subject.subject_type,
                     "subject_id": str(subject.id),
                     "subject_label": subject.label,
+                    "subject_title": subject.get_summary().title,
                 }
             subject_record = subject.identity if subject else None
             with (
@@ -1060,12 +1070,13 @@ class Workflow:
                     # Its own transaction lets readers see the admission before the caller commits.
                     async with get_session(_step_engine()) as session:
                         await Event.emit(
+                            session,
                             type=WorkflowEvent.SCHEDULED,
                             subject=subject.identity,
-                            label=subject.label,
+                            label=attributes["subject_label"],
+                            title=attributes["subject_title"],
                             payload={"run": workflow_id, "kind": cls.kind},
                             app=cls.app,
-                            session=session,
                         )
                         await session.commit()
                     await publish(WorkflowEvent.SCHEDULED, subject=subject.identity, kind=cls.kind)

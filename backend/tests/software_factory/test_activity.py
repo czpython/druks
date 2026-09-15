@@ -91,6 +91,7 @@ async def test_review_result_belongs_to_the_identity_only_pull_request(druks_db,
     )
     for _ in range(2):
         await Artifact.record(
+            druks_db,
             call_id=call.id,
             call_dir=tmp_path,
             event=report.to_event(),

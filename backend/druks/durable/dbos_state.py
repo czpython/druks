@@ -88,11 +88,10 @@ def state_expression(
     return sa.func.coalesce(mapped, missing)
 
 
-def subject_label_expression(run_id: sa.ColumnElement) -> sa.ColumnElement:
-    # How the run's subject showed itself, stamped at start(); a subjectless cron
-    # has none.
+def subject_attribute_expression(run_id: sa.ColumnElement, name: str) -> sa.ColumnElement:
+    """The subject attribute recorded when this run started."""
     return (
-        sa.select(workflow_status.c.attributes["subject_label"].as_string())
+        sa.select(workflow_status.c.attributes[name].as_string())
         .where(workflow_status.c.workflow_uuid == run_id)
         .correlate_except(workflow_status)
         .scalar_subquery()

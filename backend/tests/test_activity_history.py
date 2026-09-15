@@ -160,20 +160,29 @@ async def test_pages_follow_the_cursor(druks_client, history):
 async def test_activity_keeps_decisions_failures_and_stops(druks_db, druks_client):
     db_session.registry.set(druks_db)
     for kind in ["workflow.running", "workflow.finished", "workflow.step", "workflow.retry"]:
-        await Event.emit(type=kind, app="field_notes", payload={"run": "gone"})
+        await Event.emit(druks_db, type=kind, app="field_notes", payload={"run": "gone"})
     round_facts = {"run": "gone", "gate": "review", "input_requested_at": "2026-09-09T01:00:00Z"}
-    await Event.emit(type="workflow.scheduled", app="field_notes", payload={"run": "gone"})
-    await Event.emit(type="workflow.parked", app="field_notes", payload=round_facts)
     await Event.emit(
+        druks_db, type="workflow.scheduled", app="field_notes", payload={"run": "gone"}
+    )
+    await Event.emit(druks_db, type="workflow.parked", app="field_notes", payload=round_facts)
+    await Event.emit(
+        druks_db,
         type="workflow.running",
         app="field_notes",
         payload={**round_facts, "result": {"action": "approve"}},
     )
     await Event.emit(
-        type="workflow.failed", app="field_notes", payload={"run": "gone", "failure": "Timed out"}
+        druks_db,
+        type="workflow.failed",
+        app="field_notes",
+        payload={"run": "gone", "failure": "Timed out"},
     )
     await Event.emit(
-        type="workflow.cancelled", app="field_notes", payload={"run": "gone", "failure": "Stopped"}
+        druks_db,
+        type="workflow.cancelled",
+        app="field_notes",
+        payload={"run": "gone", "failure": "Stopped"},
     )
     items = (await druks_client.get("/api/events")).json()["items"]
     kinds = [
@@ -188,8 +197,14 @@ async def test_activity_keeps_decisions_failures_and_stops(druks_db, druks_clien
         {"app": "field_notes", "topic": topic} for topic in sorted(kinds)
     ]
     cancelled, failed, receipt = items[:3]
-    assert (receipt["gate"], receipt["parkedAt"]) == ("review", "2026-09-09T01:00:00Z")
-    assert (failed["failure"], cancelled["failure"]) == ("Timed out", "Stopped")
+    assert (receipt["payload"]["gate"], receipt["payload"]["input_requested_at"]) == (
+        "review",
+        "2026-09-09T01:00:00Z",
+    )
+    assert (failed["payload"]["failure"], cancelled["payload"]["failure"]) == (
+        "Timed out",
+        "Stopped",
+    )
 
 
 async def test_destinations_report_what_still_exists(druks_db, druks_client, tmp_path, monkeypatch):
@@ -214,6 +229,7 @@ async def test_destinations_report_what_still_exists(druks_db, druks_client, tmp
     druks_db.expunge_all()
     for call in calls:
         await Artifact.record(
+            druks_db,
             call_dir=call.call_dir,
             call_id=call.id,
             kind="markdown",
@@ -223,7 +239,7 @@ async def test_destinations_report_what_still_exists(druks_db, druks_client, tmp
         )
     artifacts = [await Artifact.get_for_call(call.id) for call in calls]
     items = (await druks_client.get("/api/events")).json()["items"]
-    assert [item["artifactId"] for item in items] == [artifacts[1].id, artifacts[0].id]
+    assert [item["payload"]["artifact_id"] for item in items] == [artifacts[1].id, artifacts[0].id]
     destinations = f"/api/events/{items[1]['seq']}/destinations"
     assert (await druks_client.get(destinations)).json() == {
         "isSubjectAvailable": True,
@@ -239,16 +255,17 @@ async def test_destinations_report_what_still_exists(druks_db, druks_client, tmp
         "isArtifactAvailable": False,
     }
     recorded = (await druks_client.get("/api/events")).json()["items"][1]
-    assert (recorded["subjectLabel"], recorded["artifactId"]) == (
+    assert (recorded["subjectLabel"], recorded["payload"]["artifact_id"]) == (
         items[1]["subjectLabel"],
         artifacts[0].id,
     )
 
 
-async def test_search_does_not_read_payloads_or_current_subject_text(druks_db, druks_client):
+async def test_search_does_not_read_other_facts_or_current_subject_text(druks_db, druks_client):
     db_session.registry.set(druks_db)
     note = await Note.create(body="Needle")
     await Event.emit(
+        druks_db,
         type="build.rejected",
         app="field_notes",
         subject=note.identity,
@@ -261,4 +278,4 @@ async def test_search_does_not_read_payloads_or_current_subject_text(druks_db, d
 
     assert not await search("needle")
     [item] = await search("recorded")
-    assert (item["reason"], item["run"]) == ("Needle", None)
+    assert (item["payload"]["reason"], item["payload"].get("run")) == ("Needle", None)

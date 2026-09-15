@@ -4,7 +4,13 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
-from conftest import connect_anthropic_subscription, make_test_note, seed_note_run
+from conftest import (
+    connect_anthropic_subscription,
+    finish_agent_run,
+    make_test_note,
+    seed_note_agent_run,
+    seed_note_run,
+)
 from druks.accounts.models import Account
 from druks.api import runs
 from druks.api.exceptions import RunNotActive, RunNotFailed, RunNotFound, SubjectBusy
@@ -14,8 +20,9 @@ from druks.durable.exceptions import AgentCallNotFound
 from druks.durable.models import AgentCall, Artifact, Run
 from druks.durable.reads import read_slice
 from druks.mcp.gateway import exceptions, services
-from druks.testing import seed_call, seed_dbos_status
+from druks.testing import seed_call, seed_dbos_status, seed_run
 from druks.usage.models import UsageScrape
+from druks_field_notes.workflows import Summarize
 
 pytestmark = pytest.mark.usefixtures("_data_dir")
 
@@ -121,6 +128,7 @@ async def test_get_gate_serves_the_artifact(druks_db):
     run = await _park(druks_db, item)
     call = await seed_call(druks_db, run, "generate_plan")
     await Artifact.record(
+        druks_db,
         call_dir=call.call_dir,
         call_id=call.id,
         kind="markdown",
@@ -232,8 +240,6 @@ async def test_agent_call_get_returns_the_call_or_raises(druks_db):
 
 
 async def test_get_agent_call_serves_bounded_tails(druks_db):
-    from conftest import finish_agent_run, seed_note_agent_run
-
     call = await seed_note_agent_run()
     call_dir = call.call_dir
     call_dir.mkdir(parents=True, exist_ok=True)
@@ -241,6 +247,7 @@ async def test_get_agent_call_serves_bounded_tails(druks_db):
     (call_dir / "stderr.log").write_bytes(b"e" * 10240)
     await finish_agent_run(call, last_error="boom " * 100)
     await Artifact.record(
+        druks_db,
         call_dir=call_dir,
         call_id=call.id,
         kind="markdown",
@@ -264,8 +271,6 @@ async def test_get_agent_call_serves_bounded_tails(druks_db):
 
 
 async def test_get_agent_call_without_files_reads_empty(druks_db):
-    from conftest import seed_note_agent_run
-
     call = await seed_note_agent_run()
 
     detail = await services.get_agent_call(call.id)
@@ -293,22 +298,22 @@ async def test_cancel_run_paths(druks_db):
     item = await make_test_note()
     run = await seed_note_run(druks_db, note=item, state="running")
 
-    result = await runs.cancel_run(run.id, reason="stuck")
+    result = await runs.cancel_run(druks_db, run.id, reason="stuck")
     assert result.result == "cancelled"
     druks_db.expunge_all()
     assert (await Run.get(run.id)).state == "cancelled"
     assert (await Run.get(run.id)).failure == "stuck"
 
-    again = await runs.cancel_run(run.id, reason="stuck")
+    again = await runs.cancel_run(druks_db, run.id, reason="stuck")
     assert again.result == "already_cancelled"
 
     finished_item = await make_test_note()
     finished = await seed_note_run(druks_db, note=finished_item, state="finished")
     with pytest.raises(RunNotActive):
-        await runs.cancel_run(finished.id, reason="late")
+        await runs.cancel_run(druks_db, finished.id, reason="late")
 
     with pytest.raises(RunNotFound):
-        await runs.cancel_run("no-such-run", reason="x")
+        await runs.cancel_run(druks_db, "no-such-run", reason="x")
 
 
 async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):
@@ -383,7 +388,7 @@ async def test_retry_run_refuses_a_non_failed_run(druks_db, monkeypatch):
     monkeypatch.setattr(Run, "retry", retry)
 
     with pytest.raises(RunNotFailed) as error:
-        await runs.retry_run(run.id)
+        await runs.retry_run(druks_db, run.id)
 
     assert error.value.code == "RUN_NOT_FAILED"
     assert error.value.retryable is False
@@ -398,7 +403,7 @@ async def test_retry_run_refuses_a_busy_subject(druks_db, monkeypatch):
     monkeypatch.setattr(Run, "retry", retry)
 
     with pytest.raises(SubjectBusy) as error:
-        await runs.retry_run(failed.id)
+        await runs.retry_run(druks_db, failed.id)
 
     assert str(error.value) == f"The subject already has active run {active.id}."
     assert error.value.retryable is True
@@ -410,7 +415,7 @@ async def test_retry_run_retries_a_failed_run(druks_db, monkeypatch):
     retry = mock.AsyncMock(return_value="retried-run")
     monkeypatch.setattr(Run, "retry", retry)
 
-    result = await runs.retry_run(run.id)
+    result = await runs.retry_run(druks_db, run.id)
 
     assert result.run == "retried-run"
     retry.assert_awaited_once_with()
@@ -418,7 +423,7 @@ async def test_retry_run_retries_a_failed_run(druks_db, monkeypatch):
 
 async def test_retry_run_refuses_a_missing_run(druks_db):
     with pytest.raises(RunNotFound) as error:
-        await runs.retry_run("no-such-run")
+        await runs.retry_run(druks_db, "no-such-run")
 
     assert error.value.code == "RUN_NOT_FOUND"
     assert error.value.retryable is False
@@ -428,10 +433,6 @@ async def test_retry_run_refuses_a_missing_run(druks_db):
 
 
 async def test_get_usage_is_a_bounded_pure_read(druks_db, account):
-    from druks.durable.models import AgentCall
-    from druks.testing import seed_run
-    from druks_field_notes.workflows import Summarize
-
     now = datetime.now(UTC)
     run = await seed_run(druks_db, kind=Summarize.kind, run_id="run-usage")
     for index in range(30):
@@ -489,10 +490,6 @@ async def test_get_usage_is_a_bounded_pure_read(druks_db, account):
 
 
 async def test_get_usage_only_counts_the_callers_spend(druks_db, account):
-    from druks.durable.models import AgentCall
-    from druks.testing import seed_run
-    from druks_field_notes.workflows import Summarize
-
     other = await Account.get_or_create(druks_db, "other@example.com")
     run = await seed_run(druks_db, kind=Summarize.kind, run_id="run-usage-other")
     druks_db.add(

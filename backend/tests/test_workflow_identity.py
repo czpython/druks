@@ -173,7 +173,9 @@ async def test_lifecycle_event_stamps_the_declaring_app(druks_db):
     druks_db.add(run)
     await druks_db.flush()
 
-    payload = await _log_run_event(run, RunState.FINISHED, {"type": "note", "id": 1}, None)
+    payload = await _log_run_event(
+        druks_db, run, RunState.FINISHED, {"type": "note", "id": 1}, None, None
+    )
 
     event = (await druks_db.scalars(select(Event).filter_by(type="workflow.finished"))).one()
     assert payload["run"] == run.id

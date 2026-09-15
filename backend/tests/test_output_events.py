@@ -38,6 +38,7 @@ async def test_output_persistence_keeps_one_event_per_call(druks_db, output_call
     for call in calls:
         for _ in range(2):
             await Artifact.record(
+                druks_db,
                 call_dir=tmp_path / call.id,
                 call_id=call.id,
                 kind="markdown",
@@ -60,6 +61,7 @@ async def test_output_persistence_keeps_one_event_per_call(druks_db, output_call
             "agent_call_id": call.id,
             "artifact_id": artifact.id,
             "summary": "No unresolved findings.",
+            "title": "The reviewed work",
         }
 
 
@@ -67,6 +69,7 @@ async def test_artifact_without_an_event_records_none(druks_db, output_calls, tm
     db_session.registry.set(druks_db)
     _, _, calls = output_calls
     await Artifact.record(
+        druks_db,
         call_dir=tmp_path,
         call_id=calls[0].id,
         kind="markdown",
@@ -85,6 +88,7 @@ async def test_rollback_removes_the_artifact_and_its_event(druks_db, output_call
     with pytest.raises(RuntimeError, match="Roll back the step"):
         async with druks_db.begin_nested():
             await Artifact.record(
+                druks_db,
                 call_dir=tmp_path,
                 call_id=call_id,
                 kind="markdown",
@@ -97,6 +101,7 @@ async def test_rollback_removes_the_artifact_and_its_event(druks_db, output_call
     assert not list(await druks_db.scalars(select(Event)))
 
     await Artifact.record(
+        druks_db,
         call_dir=tmp_path,
         call_id=call_id,
         kind="markdown",

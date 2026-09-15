@@ -3,13 +3,14 @@ from druks.apps import loader
 from druks.db import db_session
 from druks.events.models import Event
 from druks.signals import subscribe
-from druks.workflows import Subject, WorkflowError
+from druks.workflows import Subject, SubjectSummary, WorkflowError
 from druks_field_notes.models import Note
 from sqlalchemy import select
 
 
 class Report(Subject):
-    pass
+    def get_summary(self) -> SubjectSummary:
+        return SubjectSummary.model_validate(self)
 
 
 async def test_identity_subject_uses_its_registered_app(druks_db, monkeypatch):
@@ -46,7 +47,7 @@ async def test_stored_subject_announces_with_its_app(druks_db):
     assert event.app == "field_notes"
     assert event.subject_id == str(note.id)
     assert event.subject_label == note.label
-    assert event.payload == {"revision": 2}
+    assert event.payload == {"revision": 2, "title": "An observation"}
 
 
 async def test_subject_delivery_error_rolls_back_with_the_domain_transaction(druks_db):

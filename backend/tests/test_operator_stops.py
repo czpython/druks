@@ -26,7 +26,12 @@ async def test_operator_stop_records_its_reason_and_exact_run_once(druks_client,
     assert repeated.json() == {"run": run.id, "result": "already_cancelled"}
     events = list(await druks_db.scalars(select(Event).filter_by(type=WorkflowEvent.CANCELLED)))
     assert len(events) == 1
-    assert events[0].payload == {"run": run.id, "kind": Summarize.kind, "failure": "Wrong source"}
+    assert events[0].payload == {
+        "run": run.id,
+        "kind": Summarize.kind,
+        "failure": "Wrong source",
+        "title": "Stop this work",
+    }
     assert events[0].app == "field_notes"
     assert events[0].subject_id == str(note.id)
     assert events[0].subject_label == note.label

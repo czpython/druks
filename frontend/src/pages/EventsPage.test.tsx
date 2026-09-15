@@ -27,8 +27,8 @@ class FeedSource extends EventTarget {
 }
 const result: FeedItem = {
   id: 'event:10', seq: 10, at: '2026-09-09T15:00:00Z', topic: 'gist.prepared', app: 'field_notes',
-  subjectType: 'note', subjectId: '7', subjectLabel: 'Pump A', run: 'run-ten',
-  artifactId: 'saved-ten', summary: 'The pump ran hot.',
+  subjectType: 'note', subjectId: '7', subjectLabel: 'Pump A',
+  payload: { run: 'run-ten', artifact_id: 'saved-ten', summary: 'The pump ran hot.' },
 }
 const app: App = {
   name: 'field_notes', builtin: false, description: '', icon: 'box', hasFrontend: false,
@@ -97,7 +97,7 @@ it('keeps full type choices during search, pagination, and live updates', async 
   expect(screen.queryByRole('option', { name: 'Usage' })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Load older activity' }))
   await screen.findByRole('button', { name: /Older kind Pump A/ })
-  const input = screen.getByRole('searchbox', { name: 'Search work labels' })
+  const input = screen.getByRole('searchbox', { name: 'Search work' })
   input.focus()
   fireEvent.change(input, { target: { value: '50' } })
   fireEvent.change(input, { target: { value: '50%_pump' } })
@@ -244,10 +244,11 @@ it('reads a selection outside the loaded pages and leaves no gap when it closes'
 
 it('shows past request facts and preserves filters and selection after returning from the owner', async () => {
   window.history.replaceState(null, '', '/events?app=field_notes&q=Pump')
-  history.mockResolvedValue({ items: [{ ...result, artifactId: null, topic: 'workflow.parked',
-    gate: 'review', parkedAt: '2026-09-09T15:00:00.123456Z', inputRequest: {
+  history.mockResolvedValue({ items: [{ ...result, topic: 'workflow.parked',
+    payload: { ...result.payload, artifact_id: null, gate: 'review',
+      input_requested_at: '2026-09-09T15:00:00.123456Z', input_request: {
       presentation: 'in_app', controls: ['approve'], context: 'Recorded context',
-    } }], streamCursor: '10:20:10', nextCursor: null })
+    } } }], streamCursor: '10:20:10', nextCursor: null })
   mount()
   fireEvent.click(await screen.findByRole('button', { name: /Input requested Pump A/ }))
   const returnUrl = window.location.pathname + window.location.search
@@ -263,7 +264,7 @@ it('shows past request facts and preserves filters and selection after returning
 })
 
 it('retries the exact saved artifact and replaces it on another selection', async () => {
-  history.mockResolvedValue({ items: [result, { ...result, id: 'event:9', seq: 9, artifactId: 'saved-nine', subjectLabel: 'Pump B' }], streamCursor: '10:20:10', nextCursor: null })
+  history.mockResolvedValue({ items: [result, { ...result, id: 'event:9', seq: 9, payload: { ...result.payload, artifact_id: 'saved-nine' }, subjectLabel: 'Pump B' }], streamCursor: '10:20:10', nextCursor: null })
   artifact.mockRejectedValueOnce(new Error('Offline'))
   mount()
   fireEvent.click(await screen.findByRole('button', { name: /Gist prepared Pump A/ }))
@@ -275,7 +276,7 @@ it('retries the exact saved artifact and replaces it on another selection', asyn
 
 it('shows Factory review findings through the shared saved-result renderer', async () => {
   history.mockResolvedValue({ items: [{ ...result, app: 'software_factory', topic: 'review.completed',
-    subjectType: 'work_item', subjectId: '42', subjectLabel: 'DRU-42', artifactId: 'review-ten',
+    subjectType: 'work_item', subjectId: '42', subjectLabel: 'DRU-42', payload: { ...result.payload, artifact_id: 'review-ten' },
   }], streamCursor: '10:20:10', nextCursor: null })
   artifact.mockResolvedValue({ kind: 'markdown', title: 'Review', content: '## Missing validation\nRecorded evidence.\n\nSource: backend/app.py:12' })
   mount()

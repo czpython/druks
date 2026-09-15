@@ -499,6 +499,7 @@ async def test_get_agent_call_serves_bounded_tails(app, pat_token, druks_db):
     (call_dir / "stderr.log").write_bytes(b"e" * 10240)
     await finish_agent_run(call, last_error="boom " * 100)
     await Artifact.record(
+        druks_db,
         call_dir=call_dir,
         call_id=call.id,
         kind="markdown",
@@ -526,7 +527,7 @@ async def test_get_agent_call_serves_bounded_tails(app, pat_token, druks_db):
 async def test_cancel_run_is_destructive_but_repeatable(app, pat_token, druks_db, monkeypatch):
     cancels = []
 
-    async def _spy(self, *, failure):
+    async def _spy(self, session, *, failure):
         cancels.append({"id": self.id, "failure": failure})
 
     monkeypatch.setattr(Run, "cancel", _spy)

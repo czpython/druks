@@ -35,7 +35,7 @@ export function eventLine(event: FeedItem): EventLine {
 function label(event: FeedItem): string {
   const verb = LIFECYCLE_VERBS[event.topic]
   if (verb) {
-    const workflow = localName(event.workflow)
+    const workflow = localName(event.payload.kind)
     return words(workflow ? `${workflow} ${verb}` : verb)
   }
   return words(event.topic)
@@ -44,8 +44,8 @@ function label(event: FeedItem): string {
 function subjectPath(event: FeedItem): string | undefined {
   if (event.app && event.subjectType && event.subjectId) {
     const ui = getAppUI(event.app)
-    const target = event.run
-      ? { run: event.run, parkedAt: event.parkedAt ?? undefined }
+    const target = event.payload.run
+      ? { run: event.payload.run, parkedAt: event.payload.input_requested_at ?? undefined }
       : undefined
     return ui?.subjectPath?.({ type: event.subjectType, id: event.subjectId }, target)
   }

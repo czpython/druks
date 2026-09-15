@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from unittest import mock
 
+import asyncssh
 import pytest
 from conftest import CONFIG_PROBE
 from dbos._error import DBOSWorkflowCancelledError
@@ -8,14 +9,19 @@ from druks.accounts.models import Account
 from druks.database import db_session as ambient_session
 from druks.durable.dbos_state import workflow_status
 from druks.durable.enums import RunState
+from druks.durable.exceptions import FatalError, GateTimeout, WorkflowError
 from druks.durable.models import Run
 from druks.events.models import Event
 from druks.harnesses.config import get_config
-from druks.harnesses.exceptions import HarnessNotConnectedError
+from druks.harnesses.exceptions import (
+    HarnessNotConnectedError,
+    HarnessOverloadedError,
+    HarnessSandboxProvisioningError,
+)
 from druks.models import Base
 from druks.signals import subscribe
 from druks.testing import seed_run
-from druks.workflows import Workflow, WorkflowEvent, _emit_run_event, _execute_run
+from druks.workflows import Workflow, WorkflowEvent, _emit_run_event, _execute_run, _in_step
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from sqlalchemy import select, update
@@ -240,7 +246,6 @@ async def test_failure_writes_the_reason_and_reraises(druks_db, _inline_steps):
     # gate pair cleared with them, so a failed run never keeps a stale ask),
     # then the exception reaches DBOS so it records the terminal ERROR that
     # derived state reads.
-    from druks.durable.exceptions import FatalError
 
     item, run = await _item_and_run(
         druks_db,
@@ -276,7 +281,6 @@ async def test_failure_writes_the_reason_and_reraises(druks_db, _inline_steps):
 async def test_gate_timeout_stamps_its_failure_code(druks_db, _inline_steps):
     # A gate timeout stamps its code beside the reason so read-sides can tell an
     # unanswered gate from a crash without parsing the failure text.
-    from druks.durable.exceptions import GateTimeout
 
     item, run = await _item_and_run(druks_db, "running")
 
@@ -309,8 +313,6 @@ async def test_unattended_execution_without_subscription_records_not_connected(
 
 @pytest.mark.asyncio
 async def test_a_harness_failure_stamps_its_code(druks_db, _inline_steps):
-    from druks.harnesses.exceptions import HarnessOverloadedError
-
     item, run = await _item_and_run(druks_db, "running")
 
     async def body() -> None:
@@ -330,7 +332,6 @@ async def test_an_exhausted_provisioning_failure_stamps_its_code(druks_db, _inli
     # An exhausted transient provisioning failure records the classified
     # ``sandbox_provisioning`` code rather than the empty string a raw drukbox
     # SDK exception used to leave behind — so the dashboard/taxonomy can name it.
-    from druks.harnesses.exceptions import HarnessSandboxProvisioningError
 
     item, run = await _item_and_run(druks_db, "running")
 
@@ -350,7 +351,6 @@ async def test_an_exhausted_provisioning_failure_stamps_its_code(druks_db, _inli
 async def test_a_foreign_code_never_becomes_the_failure_code(druks_db, _inline_steps):
     """``code`` is a common attribute name — asyncssh's is an int — so only
     the declaring families stamp the run; anything else records a crash."""
-    import asyncssh
 
     item, run = await _item_and_run(druks_db, "running")
 
@@ -384,21 +384,23 @@ async def test_announce_carries_the_runs_routing(druks_db):
         return await fn()
 
     with mock.patch("druks.workflows.DBOS.run_step_async", side_effect=run_inline):
-        await workflow.announce("test.announced", pr_number=12)
+        await workflow.announce("test.announced", pr_number=12, title="Forged title")
 
-    assert received == [(note.identity, {"pr_number": 12})]
+    assert received == [(note.identity, {"pr_number": 12, "title": "Forged title"})]
     assert checkpoints == ["test.announced", "test.announced:propagate"]
     event = (await ambient_session().scalars(select(Event).filter_by(type="test.announced"))).one()
     assert event.app == "field_notes"
     assert event.subject_label == note.label
-    assert event.payload == {"pr_number": 12, "run": run.id, "kind": workflow.kind}
+    assert event.payload == {
+        "pr_number": 12,
+        "run": run.id,
+        "kind": workflow.kind,
+        "title": "run in running",
+    }
 
 
 @pytest.mark.asyncio
 async def test_announce_refuses_inside_a_step():
-    from druks.durable.exceptions import WorkflowError
-    from druks.workflows import _in_step
-
     workflow = Workflow()
     token = _in_step.set(True)
     try:

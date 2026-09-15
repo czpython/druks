@@ -34,11 +34,10 @@ async def test_cancel_frees_subject_immediately(druks_db, monkeypatch):
         input_request={"label": "Review", "presentation": "in_app"},
     )
 
-    await run.cancel(failure="pr merged while parked")
+    await run.cancel(druks_db, failure="pr merged while parked")
 
     # cancel() never writes state — the already-loaded Run still carries the old
     # one until expired/re-selected, which is exactly what responses must do.
-    # (cancel flushes the ambient session; the fixture session holds `run`.)
     await druks_db.flush()
     await druks_db.refresh(run)
     assert run.state == RunState.CANCELLED.value

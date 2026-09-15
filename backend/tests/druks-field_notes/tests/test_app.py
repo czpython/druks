@@ -1,7 +1,7 @@
 import pytest
 from druks.apps.settings import field_kind, field_multiline
 from druks_field_notes.app import FieldNotes
-from druks_field_notes.models import Note
+from druks_field_notes.models import Note, Repository
 from pydantic import ValidationError
 
 
@@ -14,6 +14,9 @@ async def test_the_board_honors_the_board_size(druks_db):
 
     assert [summary.id for summary in summaries] == [str(newest.id)]
     assert summaries[0].body == "second"
+    assert summaries[0].title == "second"
+    repository = await Repository.create(repo="acme/observations")
+    assert repository.get_summary().title is None
 
 
 def test_settings_validate_the_sync_token():
