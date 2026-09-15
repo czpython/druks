@@ -45,6 +45,7 @@ class FeedItem(Schema):
 
 class FeedResponse(Schema):
     items: list[FeedItem]
+    stream_cursor: str
     # Event sequence cursor for the next (older) page; None at the tail.
     next_cursor: str | None = None
 

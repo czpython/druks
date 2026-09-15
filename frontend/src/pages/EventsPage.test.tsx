@@ -21,7 +21,7 @@ class FeedSource extends EventTarget {
     FeedSource.instances.push(this)
   }
   close() { this.closed = true }
-  emit(type: string, data?: FeedItem) {
+  emit(type: string, data?: FeedItem | { cursor: string }) {
     this.dispatchEvent(data ? new MessageEvent(type, { data: JSON.stringify(data) }) : new Event(type))
   }
 }
@@ -54,7 +54,7 @@ beforeEach(() => {
   FeedSource.instances = []
   vi.stubGlobal('EventSource', FeedSource)
   HTMLElement.prototype.scrollTo = vi.fn()
-  history.mockResolvedValue({ items: [result], nextCursor: null })
+  history.mockResolvedValue({ items: [result], streamCursor: '10:20:10', nextCursor: null })
   topics.mockResolvedValue([{ app: 'field_notes', topic: 'gist.prepared' }, { app: 'field_notes', topic: 'older.kind' }])
   destinations.mockResolvedValue({ isSubjectAvailable: true, isRunAvailable: true, isArtifactAvailable: true })
   artifact.mockResolvedValue({ kind: 'markdown', title: 'Gist', content: '# Saved finding\nExact old result.' })
@@ -89,8 +89,8 @@ it('shows exact saved results and restores row focus after Close and Escape', as
 
 it('keeps full type choices during search, pagination, and live updates', async () => {
   history.mockImplementation(async (params) => params?.before
-    ? { items: [{ ...result, id: 'event:2', seq: 2, topic: 'older.kind' }], nextCursor: null }
-    : { items: [result], nextCursor: '10' })
+    ? { items: [{ ...result, id: 'event:2', seq: 2, topic: 'older.kind' }], streamCursor: '10:20:10', nextCursor: null }
+    : { items: [result], streamCursor: '10:20:10', nextCursor: '10' })
   mount()
   await screen.findByRole('button', { name: /Gist prepared Pump A/ })
   expect(screen.queryByRole('option', { name: 'Core' })).toBeNull()
@@ -138,36 +138,70 @@ it.each(['field_notes', 'software_factory'])('selects the owning app for %s topi
   expect(screen.getByRole('option', { name: owner === 'field_notes' ? 'Notes combined' : 'Pull request merged' })).toBeTruthy()
 })
 
-it('buffers and deduplicates arrivals while reading, then resumes after the last received sequence', async () => {
+it('buffers and deduplicates arrivals while reading, then resumes from the last complete snapshot', async () => {
   mount()
   fireEvent.click(await screen.findByRole('button', { name: /Gist prepared Pump A/ }))
+  const connection = source()
   act(() => {
     source().emit('open')
     source().emit('message', { ...result, id: 'event:12', seq: 12, subjectLabel: 'New work' })
     source().emit('message', { ...result, id: 'event:12', seq: 12, subjectLabel: 'New work' })
+    source().emit('batch-end', { cursor: '10:30:10' })
   })
   expect(screen.getByRole('button', { name: 'New activity · 1' })).toBeTruthy()
   expect(screen.queryByRole('button', { name: /Gist prepared New work/ })).toBeNull()
-  const connection = source()
+  expect(source()).toBe(connection)
   fireEvent.click(screen.getByRole('button', { name: 'Pause updates' }))
   expect(connection.closed).toBe(true)
   expect(screen.getByText('Paused')).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: 'Resume updates' }))
-  expect(new URL(source().url, window.location.origin).searchParams.get('after')).toBe('12')
+  expect(new URL(source().url, window.location.origin).searchParams.get('after')).toBe('10:30:10')
+  act(() => {
+    source().emit('message', { ...result, id: 'event:9', seq: 9, subjectLabel: 'Late work' })
+    source().emit('message', { ...result, id: 'event:9', seq: 9, subjectLabel: 'Late work' })
+  })
   await act(async () => source().emit('error'))
   expect(screen.getByText('Reconnecting')).toBeTruthy()
   act(() => source().emit('open'))
   expect(screen.getByText('Live')).toBeTruthy()
-  fireEvent.click(screen.getByRole('button', { name: 'New activity · 1' }))
+  fireEvent.click(screen.getByRole('button', { name: 'New activity · 2' }))
   expect(await screen.findByRole('button', { name: /Gist prepared New work/ })).toBeTruthy()
+  expect(screen.getAllByRole('button', { name: /Gist prepared Late work/ })).toHaveLength(1)
   expect(screen.getByRole('complementary')).toBeTruthy()
 })
 
-it('starts live updates on an empty feed without a cursor', async () => {
-  history.mockResolvedValue({ items: [], nextCursor: null })
+it('resumes an interrupted batch and shows each replayed row once', async () => {
+  mount()
+  await screen.findByRole('button', { name: /Gist prepared Pump A/ })
+  const connection = source()
+  const received = { ...result, id: 'event:12', seq: 12, subjectLabel: 'Received work' }
+  const late = { ...result, id: 'event:9', seq: 9, subjectLabel: 'Late work' }
+  act(() => connection.emit('message', received))
+  fireEvent.click(screen.getByRole('button', { name: 'Pause updates' }))
+  expect(connection.closed).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Resume updates' }))
+  expect(source()).not.toBe(connection)
+  expect(new URL(source().url, window.location.origin).searchParams.get('after')).toBe('10:20:10')
+  const resumed = source()
+  act(() => {
+    resumed.emit('message', received)
+    resumed.emit('message', late)
+    resumed.emit('message', late)
+    resumed.emit('batch-end', { cursor: '30:40:' })
+  })
+  expect(source()).toBe(resumed)
+  expect(screen.getAllByRole('button', { name: /Gist prepared Received work/ })).toHaveLength(1)
+  expect(screen.getAllByRole('button', { name: /Gist prepared Late work/ })).toHaveLength(1)
+  fireEvent.click(screen.getByRole('button', { name: 'Pause updates' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Resume updates' }))
+  expect(new URL(source().url, window.location.origin).searchParams.get('after')).toBe('30:40:')
+})
+
+it('starts live updates on an empty feed from its read snapshot', async () => {
+  history.mockResolvedValue({ items: [], streamCursor: '10:20:10', nextCursor: null })
   mount()
   await screen.findByText('No activity matches these filters.')
-  expect(new URL(source().url, window.location.origin).searchParams.has('after')).toBe(false)
+  expect(new URL(source().url, window.location.origin).searchParams.get('after')).toBe('10:20:10')
   act(() => source().emit('message', result))
   expect(await screen.findByRole('button', { name: /Gist prepared Pump A/ })).toBeTruthy()
 })
@@ -176,7 +210,7 @@ it('retries failed reads and shows missing destinations without hiding historica
   history.mockRejectedValueOnce(new Error('Offline'))
   mount()
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Could not load activity'))
-  history.mockResolvedValue({ items: [result], nextCursor: null })
+  history.mockResolvedValue({ items: [result], streamCursor: '10:20:10', nextCursor: null })
   destinations.mockResolvedValue({ isSubjectAvailable: false, isRunAvailable: false, isArtifactAvailable: false })
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
   fireEvent.click(await screen.findByRole('button', { name: /Gist prepared Pump A/ }))
@@ -198,8 +232,8 @@ it('shows the saved result when the destination check fails, then retries the ch
 it('reads a selection outside the loaded pages and leaves no gap when it closes', async () => {
   window.history.replaceState(null, '', '/events?selected=5')
   history.mockImplementation(async (params) => params?.limit === 1
-    ? { items: [{ ...result, id: 'event:5', seq: 5, subjectLabel: 'Pump E' }], nextCursor: null }
-    : { items: [result], nextCursor: '10' })
+    ? { items: [{ ...result, id: 'event:5', seq: 5, subjectLabel: 'Pump E' }], streamCursor: '10:20:10', nextCursor: null }
+    : { items: [result], streamCursor: '10:20:10', nextCursor: '10' })
   mount()
   const details = await screen.findByRole('complementary', { name: 'Activity details' })
   expect(await within(details).findByText('Pump E')).toBeTruthy()
@@ -213,7 +247,7 @@ it('shows past request facts and preserves filters and selection after returning
   history.mockResolvedValue({ items: [{ ...result, artifactId: null, topic: 'workflow.parked',
     gate: 'review', parkedAt: '2026-09-09T15:00:00.123456Z', inputRequest: {
       presentation: 'in_app', controls: ['approve'], context: 'Recorded context',
-    } }], nextCursor: null })
+    } }], streamCursor: '10:20:10', nextCursor: null })
   mount()
   fireEvent.click(await screen.findByRole('button', { name: /Input requested Pump A/ }))
   const returnUrl = window.location.pathname + window.location.search
@@ -229,7 +263,7 @@ it('shows past request facts and preserves filters and selection after returning
 })
 
 it('retries the exact saved artifact and replaces it on another selection', async () => {
-  history.mockResolvedValue({ items: [result, { ...result, id: 'event:9', seq: 9, artifactId: 'saved-nine', subjectLabel: 'Pump B' }], nextCursor: null })
+  history.mockResolvedValue({ items: [result, { ...result, id: 'event:9', seq: 9, artifactId: 'saved-nine', subjectLabel: 'Pump B' }], streamCursor: '10:20:10', nextCursor: null })
   artifact.mockRejectedValueOnce(new Error('Offline'))
   mount()
   fireEvent.click(await screen.findByRole('button', { name: /Gist prepared Pump A/ }))
@@ -242,7 +276,7 @@ it('retries the exact saved artifact and replaces it on another selection', asyn
 it('shows Factory review findings through the shared saved-result renderer', async () => {
   history.mockResolvedValue({ items: [{ ...result, app: 'software_factory', topic: 'review.completed',
     subjectType: 'work_item', subjectId: '42', subjectLabel: 'DRU-42', artifactId: 'review-ten',
-  }], nextCursor: null })
+  }], streamCursor: '10:20:10', nextCursor: null })
   artifact.mockResolvedValue({ kind: 'markdown', title: 'Review', content: '## Missing validation\nRecorded evidence.\n\nSource: backend/app.py:12' })
   mount()
   fireEvent.click(await screen.findByRole('button', { name: /Review completed DRU-42/ }))

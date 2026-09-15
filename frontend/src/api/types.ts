@@ -841,6 +841,7 @@ export interface FeedItem {
 export interface FeedResponse {
   items: FeedItem[]
   nextCursor: string | null
+  streamCursor: string
 }
 
 // Whether the subject, run, and artifact that one Activity row recorded still exist.

@@ -1,9 +1,12 @@
 import asyncio
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import AwareDatetime
+from sqlalchemy import text
+from sqlalchemy.exc import DataError
 
 from druks.api.dependencies import EngineDep, SessionDep
 from druks.database import session_scope
@@ -16,21 +19,6 @@ router = APIRouter(prefix="/api/events", tags=["feed"])
 
 _SSE_POLL_INTERVAL_SECONDS = 2.0
 _SSE_PAGE_SIZE = 100
-
-
-def _parse_cursor(raw: str | None) -> int | None:
-    if raw is None:
-        return
-    try:
-        cursor = int(raw)
-        if cursor < 1:
-            raise ValueError
-        return cursor
-    except ValueError as error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid event cursor: {raw!r}. Use a returned sequence.",
-        ) from error
 
 
 def _check_range(from_at: AwareDatetime | None, until: AwareDatetime | None) -> None:
@@ -55,12 +43,24 @@ async def list_feed(
 ) -> FeedResponse:
     _check_range(from_at, until)
     history = Event.get_history(app=app, search=search, topic=topic, from_at=from_at, until=until)
-    cursor = _parse_cursor(before)
-    if cursor:
-        history = history.where(Event.id < cursor)
-    events = list(await session.scalars(history.order_by(Event.id.desc()).limit(limit + 1)))
+    if before is not None:
+        try:
+            sequence = int(before)
+            if sequence < 1:
+                raise ValueError
+        except ValueError as error:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Invalid event cursor: {before!r}. Use a returned sequence.",
+            ) from error
+        history = history.where(Event.id < sequence)
+    events, snapshot = await reads.list_events(
+        session, history.order_by(Event.id.desc()).limit(limit + 1)
+    )
     next_cursor = str(events[limit - 1].id) if len(events) > limit else None
-    return FeedResponse.model_validate({"items": events[:limit], "next_cursor": next_cursor})
+    return FeedResponse.model_validate(
+        {"items": events[:limit], "next_cursor": next_cursor, "stream_cursor": snapshot}
+    )
 
 
 @router.get("/topics")
@@ -93,30 +93,39 @@ async def stream_feed(
 ) -> StreamingResponse:
     _check_range(from_at, until)
     history = Event.get_history(app=app, search=search, topic=topic, from_at=from_at, until=until)
-    last_seq = _parse_cursor(request.headers.get("last-event-id") or after)
+    cursor = request.headers.get("last-event-id") or after
+    if cursor:
+        try:
+            async with session_scope(engine) as session:
+                await session.execute(
+                    text("SELECT CAST(:cursor AS pg_snapshot)").bindparams(cursor=cursor)
+                )
+        except DataError as error:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Invalid Activity snapshot. Use streamCursor from the history response.",
+            ) from error
 
     async def feed_stream():
-        nonlocal last_seq
+        nonlocal cursor
         while not await request.is_disconnected():
-            # Without a cursor the stream opens on the newest page; with one it reads forward.
-            if last_seq:
-                statement = history.where(Event.id > last_seq).order_by(Event.id)
+            if cursor:
+                statement = history.where(
+                    text(
+                        "events.xid >= pg_snapshot_xmin(CAST(:cursor AS pg_snapshot)) "
+                        "AND NOT pg_visible_in_snapshot(events.xid, CAST(:cursor AS pg_snapshot))"
+                    ).bindparams(cursor=cursor)
+                )
             else:
-                statement = history.order_by(Event.id.desc())
+                statement = history.order_by(Event.id.desc()).limit(_SSE_PAGE_SIZE)
             async with session_scope(engine) as session:
-                events = await session.scalars(statement.limit(_SSE_PAGE_SIZE))
-                items = [FeedItem.model_validate(event) for event in events]
-            if not last_seq:
-                items.reverse()
+                events, snapshot = await reads.list_events(session, statement)
+                items = [FeedItem.model_validate(event) for event in reversed(events)]
             for item in items:
-                yield f"id: {item.seq}\ndata: {item.model_dump_json(by_alias=True)}\n\n"
-            if items:
-                last_seq = items[-1].seq
-            if len(items) < _SSE_PAGE_SIZE:
-                try:
-                    await asyncio.sleep(_SSE_POLL_INTERVAL_SECONDS)
-                except asyncio.CancelledError:
-                    return
+                yield f"data: {item.model_dump_json(by_alias=True)}\n\n"
+            yield f"event: batch-end\nid: {snapshot}\ndata: {json.dumps({'cursor': snapshot})}\n\n"
+            cursor = snapshot
+            await asyncio.sleep(_SSE_POLL_INTERVAL_SECONDS)
 
     return StreamingResponse(
         feed_stream(),
