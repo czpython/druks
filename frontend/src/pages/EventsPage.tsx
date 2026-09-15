@@ -1,6 +1,7 @@
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
-import { ArrowUpRight, ChevronRight, CircleDot, Pause, Play, RefreshCw, Search, X } from 'lucide-react'
+import { ArrowDown, ArrowUpRight, CalendarDays, ChevronDown, ChevronRight, CircleDot, Pause, Play, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react'
 import { Link, useLocation } from 'wouter'
 
 import { api, eventQuery } from '../api/client'
@@ -39,7 +40,12 @@ export function EventsPage() {
 function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLSearchParams }) {
   const [, navigate] = useLocation()
   const queryClient = useQueryClient()
-  const { absTime, absTimeCompact, timezone } = useFormatters()
+  const { absTime, timezone } = useFormatters()
+  const calendar = useMemo(() => ({
+    day: new Intl.DateTimeFormat('en-GB', { timeZone: timezone, day: 'numeric', month: 'long', year: 'numeric' }),
+    time: new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }),
+  }), [timezone])
+  const today = calendar.day.format(new Date())
   const queryKey = ['activity', filters] as const
   const history = useInfiniteQuery({
     queryKey,
@@ -85,6 +91,13 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
   const rowList = useRef<HTMLOListElement>(null)
   const rows = useRef(new Map<number, HTMLButtonElement>())
   const returnFocus = useRef(0)
+  const [control, setControl] = useState<{
+    name: 'filters' | 'dates'
+    trigger: HTMLButtonElement
+    top: number
+    left: number
+  } | null>(null)
+  const controlPanel = useRef<HTMLDivElement>(null)
   const scope = eventQuery(filters)
   const [previousScope, setPreviousScope] = useState(scope)
   if (previousScope !== scope) {
@@ -155,6 +168,42 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
     },
   })
 
+  function toggleControl(name: 'filters' | 'dates', trigger: HTMLButtonElement) {
+    if (control?.name === name) {
+      closeControl()
+    } else {
+      const bounds = trigger.getBoundingClientRect()
+      setControl({ name, trigger, top: bounds.bottom + 8, left: Math.max(16, Math.min(bounds.left, window.innerWidth - 336)) })
+    }
+  }
+  function closeControl() {
+    control?.trigger.focus()
+    setControl(null)
+  }
+  const dismissControl = useEffectEvent(closeControl)
+  useLayoutEffect(() => {
+    if (control) controlPanel.current?.querySelector<HTMLElement>('select, input')?.focus()
+  }, [control])
+  useEffect(() => {
+    if (control) {
+      const outside = (event: PointerEvent) => {
+        if (!controlPanel.current?.contains(event.target as Node) && !control.trigger.contains(event.target as Node)) dismissControl()
+      }
+      const moved = (event: Event) => {
+        if (!controlPanel.current?.contains(event.target as Node)) dismissControl()
+      }
+      document.addEventListener('pointerdown', outside)
+      document.addEventListener('scroll', moved, true)
+      window.addEventListener('resize', moved)
+      return () => {
+        document.removeEventListener('pointerdown', outside)
+        document.removeEventListener('scroll', moved, true)
+        window.removeEventListener('resize', moved)
+      }
+    }
+    return undefined
+  }, [control])
+
   function closeDetails() {
     returnFocus.current = selectedSeq
     updateParams('selected', '')
@@ -163,18 +212,19 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
     if (event.key === 'Escape' && !document.querySelector('dialog[open]')) {
       event.preventDefault()
       event.stopPropagation()
-      closeDetails()
+      if (control) closeControl()
+      else closeDetails()
     }
   })
   useEffect(() => {
-    if (selectedSeq) {
+    if (selectedSeq || control) {
       // The window catches Escape wherever focus is, before the shell reads it as leaving the page.
       const listener = (event: KeyboardEvent) => closeOnEscape(event)
       window.addEventListener('keydown', listener, true)
       return () => window.removeEventListener('keydown', listener, true)
     }
     return undefined
-  }, [selectedSeq])
+  }, [selectedSeq, control])
   useLayoutEffect(() => {
     if (!selectedSeq && returnFocus.current) {
       // A selection read outside the loaded pages has no row, so focus returns to the list.
@@ -190,10 +240,7 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
           setIsReadingHistory(event.currentTarget.scrollTop > 32)
         }}>
           <header className="activity-header">
-            <div>
-              <h1>Activity</h1>
-              <p>What changed in your apps.</p>
-            </div>
+            <h1>Activity</h1>
             <div className="activity-connection">
               <span role="status" className={isPaused ? '' : connection === 'Live' ? 'activity-live' : ''}>
                 <CircleDot size={12} aria-hidden="true" />{isPaused ? 'Paused' : connection}
@@ -210,20 +257,53 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
               </button>
             </div>
           </header>
-          <div className="activity-filters">
+          <div className="activity-toolbar">
             <label className="activity-search">
-              <Search size={17} aria-hidden="true" />
+              <Search size={16} aria-hidden="true" />
               <input type="search" aria-label="Search work" placeholder="Search work…"
                 value={searchText} onChange={(event) => setSearchText(event.target.value)} />
             </label>
-            <select aria-label="App" value={filters.app ?? ''}
+            <button type="button" className="activity-filter-trigger" aria-expanded={control?.name === 'filters'}
+              aria-controls="activity-filters" onClick={(event) => toggleControl('filters', event.currentTarget)}>
+              <SlidersHorizontal size={16} aria-hidden="true" />Filters
+              {(filters.app || filters.topic) && <span className="activity-filter-count">{Number(Boolean(filters.app)) + Number(Boolean(filters.topic))}</span>}
+              <ChevronDown size={14} aria-hidden="true" />
+            </button>
+            <button type="button" className="activity-filter-trigger" aria-expanded={control?.name === 'dates'}
+              aria-controls="activity-dates" onClick={(event) => toggleControl('dates', event.currentTarget)}>
+              <CalendarDays size={16} aria-hidden="true" />Date range<ChevronDown size={14} aria-hidden="true" />
+            </button>
+            <button type="button" className="activity-refresh" aria-label="Refresh activity" disabled={history.isFetching}
+              onClick={() => {
+                setPending([])
+                void history.refetch()
+                void topics.refetch()
+              }}><RefreshCw size={16} aria-hidden="true" /></button>
+          </div>
+          {(filters.q || filters.app || filters.topic || params.get('start') || params.get('end')) &&
+            <div className="activity-active-filters" aria-label="Active filters">
+              {filters.q && <span>Search: {filters.q}</span>}
+              {filters.app && <span>{appLabel(filters.app)}</span>}
+              {filters.app && filters.topic && <span>{activityTypeLabel({ app: filters.app, topic: filters.topic })}</span>}
+              {params.get('start') && <span>From {params.get('start')}</span>}
+              {params.get('end') && <span>Through {params.get('end')}</span>}
+              <button type="button" onClick={() => navigate('/events', { replace: true })}>Clear filters<X size={14} aria-hidden="true" /></button>
+            </div>}
+          {control && createPortal(<div ref={controlPanel} id={`activity-${control.name}`} className="activity-control"
+            role="group" aria-label={control.name === 'filters' ? 'Activity filters' : 'Activity date range'}
+            style={{ top: control.top, left: control.left }}>
+            <header><strong>{control.name === 'filters' ? 'Filters' : 'Date range'}</strong>
+              <button type="button" aria-label="Close filter control" onClick={closeControl}><X size={16} /></button>
+            </header>
+            {control.name === 'filters' ? <>
+            <label>App<select aria-label="App" value={filters.app ?? ''}
               onChange={(event) => updateParams('app', event.target.value)}>
               <option value="">All apps</option>
               {apps.map((app) => <option key={app.name} value={app.name}>{appLabel(app.name)}</option>)}
               {filters.app && !apps.some((app) => app.name === filters.app) &&
                 <option value={filters.app}>{appLabel(filters.app)}</option>}
-            </select>
-            <select aria-label="Activity type" value={filters.app && filters.topic ? JSON.stringify([filters.app, filters.topic]) : ''}
+            </select></label>
+            <label>Activity type<select aria-label="Activity type" value={filters.app && filters.topic ? JSON.stringify([filters.app, filters.topic]) : ''}
               onChange={(event) => {
                 const next = new URLSearchParams(params)
                 next.delete('selected')
@@ -243,24 +323,26 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
                 <option value={JSON.stringify([filters.app, filters.topic])}>
                   {activityTypeLabel({ app: filters.app, topic: filters.topic })}
                 </option>}
-            </select>
+            </select></label>
+              <button type="button" className="activity-clear" onClick={() => {
+                const next = new URLSearchParams(params)
+                for (const key of ['app', 'topic', 'selected']) next.delete(key)
+                navigate(`/events${next.size ? `?${next}` : ''}`, { replace: true })
+              }}>Clear app and type</button>
+            </> : <>
             <div className="activity-dates">
               <label>From<input type="date" value={params.get('start') ?? ''}
                 max={params.get('end') ?? undefined} onChange={(event) => updateParams('start', event.target.value)} /></label>
               <label>Through<input type="date" value={params.get('end') ?? ''}
                 min={params.get('start') ?? undefined} onChange={(event) => updateParams('end', event.target.value)} /></label>
             </div>
-            <div className="activity-filter-footer">
-              <span>Dates in {timezone}</span>
-              <button type="button" onClick={() => navigate('/events', { replace: true })}>Clear filters</button>
-              <button type="button" aria-label="Refresh activity" disabled={history.isFetching}
-                onClick={() => {
-                  setPending([])
-                  void history.refetch()
-                  void topics.refetch()
-                }}><RefreshCw size={15} aria-hidden="true" /></button>
-            </div>
-          </div>
+              <button type="button" className="activity-clear" onClick={() => {
+                const next = new URLSearchParams(params)
+                for (const key of ['start', 'end', 'selected']) next.delete(key)
+                navigate(`/events${next.size ? `?${next}` : ''}`, { replace: true })
+              }}>Clear dates</button>
+            </>}
+          </div>, document.body)}
           {installed.isError && <p role="alert">Could not load app choices.{' '}
             <button type="button" onClick={() => void installed.refetch()}>Retry apps</button></p>}
           {topics.isError && <p role="alert">Could not load activity types.{' '}
@@ -282,27 +364,33 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
             <span>{events.length} {events.length === 1 ? 'activity' : 'activities'} shown</span><span>Newest first</span>
           </div>}
           <ol className="activity-rows" aria-label="Activity history" ref={rowList} tabIndex={-1}>
-            {events.map((event) => {
+            {events.map((event, index) => {
               const line = eventLine(event)
               const Icon = line.icon
-              return <li key={event.id}>
-                <button type="button" className={`activity-row activity-tone-${line.tone}`}
+              const day = calendar.day.format(new Date(event.at))
+              const previous = events[index - 1]
+              const startsDay = !previous || calendar.day.format(new Date(previous.at)) !== day
+              return <Fragment key={event.id}>
+                {startsDay && <li className="activity-day"><h2>{day === today ? `Today · ${day}` : day}</h2></li>}
+                <li><button type="button" className={`activity-row activity-tone-${line.tone}`}
                   aria-current={event.seq === selectedSeq || undefined}
                   ref={(node) => { if (node) rows.current.set(event.seq, node); else rows.current.delete(event.seq) }}
                   onClick={() => updateParams('selected', String(event.seq))}>
                   <Icon size={16} className="activity-row-glyph" aria-hidden="true" />
-                  <span className="activity-row-body"><strong>{line.label}</strong>{' '}
-                    <span>{line.subject || 'No work label recorded'}{line.title && ` · ${line.title}`}</span>{' '}
-                    {line.context && <span className="activity-context">{line.context}</span>}
+                  <span className="activity-row-body">
+                    <span className="activity-row-work"><span className="activity-work-key">{line.subject || 'No work label recorded'}</span>
+                      {line.title && <> · <span>{line.title}</span></>}
+                    </span>
+                    <span className="activity-context"><strong>{line.label}</strong>{line.context && <> · {line.context}</>}</span>
                   </span>
-                  <time dateTime={event.at} title={`${absTime(event.at)} ${timezone}`}>{absTimeCompact(event.at)}</time>
+                  <time dateTime={event.at} title={`${absTime(event.at)} ${timezone}`}>{calendar.time.format(new Date(event.at))}</time>
                   <ChevronRight size={15} aria-hidden="true" />
-                </button>
-              </li>
+                </button></li>
+              </Fragment>
             })}
           </ol>
           {history.hasNextPage && <button type="button" className="activity-older" disabled={history.isFetchingNextPage}
-            onClick={() => void history.fetchNextPage()}>{history.isFetchingNextPage ? 'Loading older activity…' : 'Load older activity'}</button>}
+            onClick={() => void history.fetchNextPage()}><ArrowDown size={16} aria-hidden="true" />{history.isFetchingNextPage ? 'Loading older activity…' : 'Load older activity'}</button>}
         </div>
         {selectedSeq > 0 && <aside className="activity-detail" aria-label="Activity details">
           <button type="button" className="activity-close" aria-label="Close details" onClick={closeDetails}><X size={18} /></button>
@@ -345,8 +433,10 @@ function ActivityDetail({ event }: { event: FeedItem }) {
 
   return <>
     <h2 ref={title} tabIndex={-1}>{line.label}</h2>
-    <p className="activity-work-label">{line.subject || 'No work label recorded'}</p>
-    {line.title && <p className="activity-prose">{line.title}</p>}
+    <div className="activity-work-identity">
+      <p className="activity-work-label">{line.subject || 'No work label recorded'}</p>
+      {line.title && <p>{line.title}</p>}
+    </div>
     {event.payload.artifact_id ? <section className="activity-result" aria-label="Saved result">
       {available && !available.isArtifactAvailable ? <p role="status">This saved result is no longer available.</p> :
         artifact.isError ? <p role="alert">Could not load the saved result.{' '}
@@ -354,9 +444,10 @@ function ActivityDetail({ event }: { event: FeedItem }) {
           artifact.isPending ? <p role="status">Loading saved result…</p> :
             <><h3>{artifact.data.title}</h3>{artifact.data.kind === 'markdown'
               ? <Markdown source={artifact.data.content} /> : <pre>{artifact.data.content}</pre>}</>}
-    </section> : !event.payload.result && line.context && <p className="activity-prose">{line.context}</p>}
-    {line.guidance && <p className="activity-prose">{line.guidance}</p>}
-    {event.payload.failure && <details><summary>Technical details</summary><pre>{event.payload.failure}</pre></details>}
+    </section> : !event.payload.result && line.context && <section className={`activity-explanation activity-tone-${line.tone}`}>
+      <p className="activity-detail-context">{line.context}</p>
+      {line.guidance && <p>{line.guidance}</p>}
+    </section>}
     {request && <section className="activity-request" aria-label="Recorded request">
       <h3>Input was requested</h3>
       {request.label && <p>{request.label}</p>}
@@ -366,11 +457,33 @@ function ActivityDetail({ event }: { event: FeedItem }) {
       </div>)}
       <p className="activity-muted">This is the recorded request. Open the work to check its current state.</p>
     </section>}
-    {event.payload.result && <section aria-label="Recorded response">
-      <h3>Response received</h3>
-      {line.context && <p>{line.context}</p>}
+    {event.payload.result && <section className="activity-response" aria-label="Recorded response">
+      {line.context && <p className="activity-detail-context">{line.context}</p>}
+      <dl className="activity-reply-values">{Object.entries(event.payload.result)
+        .filter(([name, value]) => value !== '' && value !== null
+          && !(typeof value === 'object' && Object.keys(value).length === 0)
+          && !(name === 'action' && line.context))
+        .map(([name, value]) => <Fragment key={name}>
+          <dt>{name.replaceAll('_', ' ')}</dt>
+          <dd>{value !== null && typeof value === 'object' ? Object.entries(value).map(([field, answer]) =>
+            <p key={field}><strong>{field.replaceAll('_', ' ')}</strong>: {String(answer)}</p>) : String(value)}</dd>
+        </Fragment>)}
+      </dl>
       <details><summary>Recorded response</summary><pre>{JSON.stringify(event.payload.result, null, 2)}</pre></details>
     </section>}
+    <dl className="activity-metadata">
+      <dt>Recorded</dt><dd><time dateTime={event.at}>{absTime(event.at)}</time></dd>
+      <dt>App</dt><dd>{appLabel(event.app || 'druks')}</dd>
+    </dl>
+      <details className="activity-technical"><summary>Technical details</summary>
+        {event.payload.failure && <pre>{event.payload.failure}</pre>}
+        <dl>
+        <dt>Activity type</dt><dd>{event.topic}</dd>
+        {event.payload.run && <><dt>Run</dt><dd>{event.payload.run}</dd></>}
+        {event.payload.gate && <><dt>Gate</dt><dd>{event.payload.gate}</dd></>}
+        {event.payload.input_requested_at && <><dt>Request round</dt><dd>{event.payload.input_requested_at}</dd></>}
+        {event.payload.artifact_id && <><dt>Artifact</dt><dd>{event.payload.artifact_id}</dd></>}
+      </dl></details>
     <div className="activity-destinations">
       {externalRequest ?
         <a className="activity-primary" href={externalRequest} target="_blank" rel="noreferrer">View request<ArrowUpRight size={16} aria-hidden="true" /></a> :
@@ -381,16 +494,6 @@ function ActivityDetail({ event }: { event: FeedItem }) {
       {destinations.isError && <p role="alert">Could not check these destinations.{' '}
         <button type="button" onClick={() => void destinations.refetch()}>Retry destinations</button></p>}
     </div>
-    <footer className="activity-source">
-      <p>{appLabel(event.app || 'druks')}</p>
-      <time dateTime={event.at}>{absTime(event.at)} {timezone}</time>
-      <details><summary>Recorded references</summary><dl>
-        <dt>Activity type</dt><dd>{event.topic}</dd>
-        {event.payload.run && <><dt>Run</dt><dd>{event.payload.run}</dd></>}
-        {event.payload.gate && <><dt>Gate</dt><dd>{event.payload.gate}</dd></>}
-        {event.payload.input_requested_at && <><dt>Request round</dt><dd>{event.payload.input_requested_at}</dd></>}
-        {event.payload.artifact_id && <><dt>Artifact</dt><dd>{event.payload.artifact_id}</dd></>}
-      </dl></details>
-    </footer>
+    <p className="activity-source">Recorded activity · {timezone}</p>
   </>
 }
