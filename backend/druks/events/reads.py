@@ -1,10 +1,28 @@
-from sqlalchemy import select
+from sqlalchemy import Select, Text, func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from druks.apps.loader import get_app
 from druks.durable.models import Artifact, Run
 from druks.events.feed import FeedDestinations
 from druks.events.models import Event
+
+
+async def list_events(
+    session: AsyncSession, statement: Select[tuple[Event]]
+) -> tuple[list[Event], str]:
+    """Read events and their visibility snapshot in one statement, including an empty page."""
+    snapshot = select(func.pg_current_snapshot().cast(Text).label("cursor")).cte("snapshot")
+    event = aliased(Event, statement.subquery())
+    rows = (
+        await session.execute(
+            select(snapshot.c.cursor, event)
+            .select_from(snapshot)
+            .outerjoin(event, true())
+            .order_by(event.id.desc())
+        )
+    ).all()
+    return [event for _, event in rows if event], rows[0].cursor
 
 
 async def list_topics(session: AsyncSession, app: str | None) -> list[dict[str, str]]:

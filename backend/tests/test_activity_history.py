@@ -14,8 +14,6 @@ from druks.events.models import Event
 from druks.testing import seed_run
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
-from sqlalchemy import event as sqlalchemy_event
-from sqlalchemy import func, select
 
 
 @pytest.fixture
@@ -124,7 +122,11 @@ async def test_same_topic_keeps_its_owner_in_history_and_stream(
     request = SimpleNamespace(headers={}, is_disconnected=AsyncMock(side_effect=[False, True]))
     response = await routes.stream_feed(request=request, engine=None, app=owner, topic="merged")
     messages = [message async for message in response.body_iterator]
-    streamed = [json.loads(message.splitlines()[1].removeprefix("data: ")) for message in messages]
+    streamed = [
+        json.loads(message.removeprefix("data: "))
+        for message in messages
+        if message.startswith("data: ")
+    ]
     assert streamed == rows
 
 
@@ -260,56 +262,3 @@ async def test_search_does_not_read_payloads_or_current_subject_text(druks_db, d
     assert not await search("needle")
     [item] = await search("recorded")
     assert (item["reason"], item["run"]) == ("Needle", None)
-
-
-@pytest.mark.parametrize(
-    ("header_row", "after_row", "first_sent_row"),
-    [(None, 0, 1), (2, 0, 3), (None, None, 3)],
-)
-async def test_stream_catches_up_in_pages_then_sends_new_rows_once(
-    druks_db, monkeypatch, header_row, after_row, first_sent_row
-):
-    db_session.registry.set(druks_db)
-    for number in range(5):
-        await Event.emit(type="summary.ready", app="field_notes", label=str(number))
-        await Event.emit(type="later.kind", app="field_notes", label=str(number))
-    matching = list(
-        await druks_db.scalars(
-            select(Event.id).where(Event.type == "summary.ready").order_by(Event.id)
-        )
-    )
-
-    async def record_a_new_row(_seconds):
-        if len(matching) == 5:
-            await Event.emit(type="summary.ready", app="field_notes", label="new")
-            matching.append(await druks_db.scalar(select(func.max(Event.id))))
-
-    @asynccontextmanager
-    async def scope(_engine):
-        yield druks_db
-
-    queries = []
-
-    def record(_connection, _cursor, statement, _parameters, _context, _many):
-        queries.append(statement)
-
-    monkeypatch.setattr(routes, "session_scope", scope)
-    monkeypatch.setattr(routes, "_SSE_PAGE_SIZE", 2)
-    monkeypatch.setattr(routes.asyncio, "sleep", record_a_new_row)
-    headers = {"last-event-id": str(matching[header_row])} if header_row is not None else {}
-    after = str(matching[after_row]) if after_row is not None else None
-    request = SimpleNamespace(
-        headers=headers, is_disconnected=AsyncMock(side_effect=[False] * 5 + [True])
-    )
-    engine = druks_db.bind.sync_engine
-    sqlalchemy_event.listen(engine, "before_cursor_execute", record)
-    try:
-        response = await routes.stream_feed(
-            request=request, engine=None, app="field_notes", topic="summary.ready", after=after
-        )
-        messages = [message async for message in response.body_iterator]
-    finally:
-        sqlalchemy_event.remove(engine, "before_cursor_execute", record)
-    sequences = [int(message.splitlines()[0].removeprefix("id: ")) for message in messages]
-    assert sequences == matching[first_sent_row:]
-    assert not any("SELECT DISTINCT" in query for query in queries)

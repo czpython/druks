@@ -156,6 +156,11 @@ operator timezone. The detail panel reads `/api/events/{seq}/destinations` to
 show which recorded work, run, and saved result still exist. Its owner links use
 the `subjectPath` target described above.
 
+History returns `streamCursor`, a PostgreSQL snapshot, including for an empty
+page. The live stream starts from that snapshot. Each `batch-end` event carries
+the next snapshot in its data and SSE ID. The page retains it for pause and
+resume. Event sequences order history; they do not determine commit visibility.
+
 ## API and live data
 
 Shared requests use `src/api/client.ts`. The Activity feed and transcript
