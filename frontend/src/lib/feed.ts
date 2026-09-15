@@ -1,5 +1,5 @@
-import type { FeedItem } from '../api/types'
-import { getAppUI, registeredApps } from '../apps/registry'
+import type { EventTopic, FeedItem } from '../api/types'
+import { getAppUI } from '../apps/registry'
 import { zonedParts } from './format'
 
 // What a workflow doing something is called when its app gives no label of its own.
@@ -19,7 +19,7 @@ export interface EventLine {
   subject: string
   // Where the row navigates, when the app has a page for its subject.
   path?: string
-  // The row's class for its kind, so a failed run stands out.
+  // The row's class for its topic, so a failed run stands out.
   bucket: string
 }
 
@@ -28,17 +28,17 @@ export function eventLine(event: FeedItem): EventLine {
     label: (event.app && getAppUI(event.app)?.activityLabel?.(event)) || label(event),
     subject: event.subjectLabel ?? '',
     path: subjectPath(event),
-    bucket: isLifecycle(event) ? `event-kind-${event.kind.slice('workflow.'.length)}` : 'event-kind-audit',
+    bucket: isLifecycle(event) ? `event-kind-${event.topic.slice('workflow.'.length)}` : 'event-kind-audit',
   }
 }
 
 function label(event: FeedItem): string {
-  const verb = LIFECYCLE_VERBS[event.kind]
+  const verb = LIFECYCLE_VERBS[event.topic]
   if (verb) {
     const workflow = localName(event.workflow)
     return words(workflow ? `${workflow} ${verb}` : verb)
   }
-  return words(event.kind)
+  return words(event.topic)
 }
 
 function subjectPath(event: FeedItem): string | undefined {
@@ -53,12 +53,11 @@ function subjectPath(event: FeedItem): string | undefined {
 }
 
 function isLifecycle(event: FeedItem): boolean {
-  return event.kind in LIFECYCLE_VERBS
+  return event.topic in LIFECYCLE_VERBS
 }
 
-// "software_factory.build" → "build": the durable kind identifies the workflow, its tail names it.
-function localName(kind: string | null | undefined): string {
-  return kind ? (kind.split('.').pop() ?? '') : ''
+function localName(workflow: string | null | undefined): string {
+  return workflow ? (workflow.split('.').pop() ?? '') : ''
 }
 
 function words(identifier: string): string {
@@ -67,14 +66,9 @@ function words(identifier: string): string {
 }
 
 /** Type filters name an exact topic without inventing a workflow or gate. */
-export function activityTypeLabel(kind: string, app?: string): string {
-  if (LIFECYCLE_VERBS[kind]) return words(LIFECYCLE_VERBS[kind])
-  const apps = app ? [getAppUI(app)] : registeredApps()
-  for (const entry of apps) {
-    const label = entry?.activityLabel?.({ kind })
-    if (label) return label
-  }
-  return words(kind)
+export function activityTypeLabel({ app, topic }: EventTopic): string {
+  if (LIFECYCLE_VERBS[topic]) return words(LIFECYCLE_VERBS[topic])
+  return getAppUI(app)?.activityLabel?.({ topic }) || words(topic)
 }
 
 /** Convert a calendar day to its start, or the next day's start, in UTC. */

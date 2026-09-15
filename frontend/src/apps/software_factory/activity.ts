@@ -11,9 +11,9 @@ const TOPICS: Record<string, string> = {
 }
 
 export function activityLabel(event: ActivityEvent): string | undefined {
-  if (TOPICS[event.kind]) return TOPICS[event.kind]
+  if (TOPICS[event.topic]) return TOPICS[event.topic]
   if (event.workflow === 'software_factory.build') {
-    switch (event.kind) {
+    switch (event.topic) {
       case 'workflow.scheduled': return 'Build queued'
       case 'workflow.failed': return 'Build failed'
       case 'workflow.cancelled': return 'Build cancelled'

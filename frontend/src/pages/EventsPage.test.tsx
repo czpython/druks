@@ -26,7 +26,7 @@ class FeedSource extends EventTarget {
   }
 }
 const result: FeedItem = {
-  id: 'event:10', seq: 10, at: '2026-09-09T15:00:00Z', kind: 'gist.prepared', app: 'field_notes',
+  id: 'event:10', seq: 10, at: '2026-09-09T15:00:00Z', topic: 'gist.prepared', app: 'field_notes',
   subjectType: 'note', subjectId: '7', subjectLabel: 'Pump A', run: 'run-ten',
   artifactId: 'saved-ten', summary: 'The pump ran hot.',
 }
@@ -35,7 +35,7 @@ const app: App = {
   subjectTypes: ['note'], navigation: [], pages: [], operations: [],
 }
 const history = vi.spyOn(api, 'listEvents')
-const kinds = vi.spyOn(api, 'listEventKinds')
+const topics = vi.spyOn(api, 'listEventTopics')
 const destinations = vi.spyOn(api, 'getEventDestinations')
 const artifact = vi.spyOn(api, 'artifact')
 const settings = vi.spyOn(api, 'getPersonalSettings')
@@ -55,7 +55,7 @@ beforeEach(() => {
   vi.stubGlobal('EventSource', FeedSource)
   HTMLElement.prototype.scrollTo = vi.fn()
   history.mockResolvedValue({ items: [result], nextCursor: null })
-  kinds.mockResolvedValue(['gist.prepared', 'older.kind'])
+  topics.mockResolvedValue([{ app: 'field_notes', topic: 'gist.prepared' }, { app: 'field_notes', topic: 'older.kind' }])
   destinations.mockResolvedValue({ isSubjectAvailable: true, isRunAvailable: true, isArtifactAvailable: true })
   artifact.mockResolvedValue({ kind: 'markdown', title: 'Gist', content: '# Saved finding\nExact old result.' })
   settings.mockResolvedValue({ timezone: 'UTC', gateParkDestinationId: null })
@@ -89,7 +89,7 @@ it('shows exact saved results and restores row focus after Close and Escape', as
 
 it('keeps full type choices during search, pagination, and live updates', async () => {
   history.mockImplementation(async (params) => params?.before
-    ? { items: [{ ...result, id: 'event:2', seq: 2, kind: 'older.kind' }], nextCursor: null }
+    ? { items: [{ ...result, id: 'event:2', seq: 2, topic: 'older.kind' }], nextCursor: null }
     : { items: [result], nextCursor: '10' })
   mount()
   await screen.findByRole('button', { name: /Gist prepared Pump A/ })
@@ -104,15 +104,38 @@ it('keeps full type choices during search, pagination, and live updates', async 
   await waitFor(() => expect(history).toHaveBeenLastCalledWith(expect.objectContaining({ q: '50%_pump', before: undefined })))
   expect(history).not.toHaveBeenCalledWith(expect.objectContaining({ q: '50' }))
   expect(document.activeElement).toBe(input)
-  expect(screen.getByRole('option', { name: 'Older kind' })).toBeTruthy()
-  fireEvent.change(screen.getByRole('combobox', { name: 'Activity type' }), { target: { value: 'older.kind' } })
-  await waitFor(() => expect(history).toHaveBeenLastCalledWith(expect.objectContaining({ q: '50%_pump', kind: 'older.kind' })))
-  act(() => source().emit('message', { ...result, id: 'event:30', seq: 30, kind: 'new.kind' }))
+  expect(screen.getByRole('option', { name: 'Older kind · Field Notes' })).toBeTruthy()
+  fireEvent.change(screen.getByRole('combobox', { name: 'Activity type' }), { target: { value: JSON.stringify(['field_notes', 'older.kind']) } })
+  await waitFor(() => expect(history).toHaveBeenLastCalledWith(expect.objectContaining({ q: '50%_pump', topic: 'older.kind' })))
+  act(() => source().emit('message', { ...result, id: 'event:30', seq: 30, topic: 'new.kind' }))
   expect(screen.queryByRole('option', { name: 'New kind' })).toBeNull()
-  expect(kinds).toHaveBeenCalledTimes(1)
+  expect(topics).toHaveBeenCalledTimes(2)
   fireEvent.change(screen.getByRole('combobox', { name: 'App' }), { target: { value: 'field_notes' } })
-  await waitFor(() => expect(history).toHaveBeenLastCalledWith(expect.objectContaining({ app: 'field_notes', kind: 'older.kind' })))
-  expect(kinds).toHaveBeenLastCalledWith('field_notes')
+  await waitFor(() => expect(history).toHaveBeenLastCalledWith(expect.objectContaining({ app: 'field_notes', topic: undefined })))
+  expect(topics).toHaveBeenLastCalledWith('field_notes')
+})
+
+it.each(['field_notes', 'software_factory'])('selects the owning app for %s topics in history and the stream', async (owner) => {
+  registerAppUI({ name: 'field_notes', routes: [], activityLabel: ({ topic }) => topic === 'merged' ? 'Notes combined' : undefined })
+  topics.mockResolvedValue([
+    { app: 'field_notes', topic: 'merged' },
+    { app: 'software_factory', topic: 'merged' },
+    { app: 'field_notes', topic: 'workflow.failed' },
+    { app: 'software_factory', topic: 'workflow.failed' },
+  ])
+  mount()
+  await screen.findByRole('option', { name: 'Notes combined · Field Notes' })
+  expect(screen.getByRole('option', { name: 'Pull request merged · Software Factory' })).toBeTruthy()
+  expect(screen.getByRole('option', { name: 'Failed · Field Notes' })).toBeTruthy()
+  expect(screen.getByRole('option', { name: 'Failed · Software Factory' })).toBeTruthy()
+  fireEvent.change(screen.getByRole('combobox', { name: 'Activity type' }), {
+    target: { value: JSON.stringify([owner, 'merged']) },
+  })
+  await waitFor(() => expect(history).toHaveBeenLastCalledWith(expect.objectContaining({ app: owner, topic: 'merged' })))
+  await waitFor(() => expect(new URL(source().url, window.location.origin).searchParams.get('app')).toBe(owner))
+  expect(new URL(source().url, window.location.origin).searchParams.get('topic')).toBe('merged')
+  expect(new URLSearchParams(window.location.search).get('app')).toBe(owner)
+  expect(screen.getByRole('option', { name: owner === 'field_notes' ? 'Notes combined' : 'Pull request merged' })).toBeTruthy()
 })
 
 it('buffers and deduplicates arrivals while reading, then resumes after the last received sequence', async () => {
@@ -187,7 +210,7 @@ it('reads a selection outside the loaded pages and leaves no gap when it closes'
 
 it('shows past request facts and preserves filters and selection after returning from the owner', async () => {
   window.history.replaceState(null, '', '/events?app=field_notes&q=Pump')
-  history.mockResolvedValue({ items: [{ ...result, artifactId: null, kind: 'workflow.parked',
+  history.mockResolvedValue({ items: [{ ...result, artifactId: null, topic: 'workflow.parked',
     gate: 'review', parkedAt: '2026-09-09T15:00:00.123456Z', inputRequest: {
       presentation: 'in_app', controls: ['approve'], context: 'Recorded context',
     } }], nextCursor: null })
@@ -217,7 +240,7 @@ it('retries the exact saved artifact and replaces it on another selection', asyn
 })
 
 it('shows Factory review findings through the shared saved-result renderer', async () => {
-  history.mockResolvedValue({ items: [{ ...result, app: 'software_factory', kind: 'review.completed',
+  history.mockResolvedValue({ items: [{ ...result, app: 'software_factory', topic: 'review.completed',
     subjectType: 'work_item', subjectId: '42', subjectLabel: 'DRU-42', artifactId: 'review-ten',
   }], nextCursor: null })
   artifact.mockResolvedValue({ kind: 'markdown', title: 'Review', content: '## Missing validation\nRecorded evidence.\n\nSource: backend/app.py:12' })

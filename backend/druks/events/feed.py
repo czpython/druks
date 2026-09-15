@@ -14,7 +14,7 @@ class FeedItem(Schema):
     at: datetime = Field(validation_alias="created_at")
     # The event type verbatim: a lifecycle topic ("workflow.finished") or the
     # milestone an app recorded ("merged"). The words are the client's.
-    kind: str = Field(validation_alias="type")
+    topic: str = Field(validation_alias="type")
     app: str | None = None
     # The durable kind of the workflow a lifecycle row is about ("software_factory.build").
     workflow: str | None = Field(default=None, validation_alias=AliasPath("payload", "kind"))
