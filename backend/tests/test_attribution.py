@@ -11,7 +11,7 @@ async def test_run_projects_its_account(druks_db):
     await druks_db.flush()
 
     run = await druks_db.get(Run, "run-attr-1")
-    await run.awaitable_attrs.agent_calls
+    await druks_db.refresh(run, ["agent_calls"])
     assert run.account_id == account.id
     response = RunResponse.from_run(run, input_request=None)
     assert response.account_username == "dev@example.com"
@@ -22,7 +22,7 @@ async def test_a_run_projects_the_default_account(druks_db):
     await druks_db.flush()
 
     run = await druks_db.get(Run, "run-attr-2")
-    await run.awaitable_attrs.agent_calls
+    await druks_db.refresh(run, ["agent_calls"])
     assert run.account_id == (await Account.get_default()).id
     response = RunResponse.from_run(run, input_request=None)
     assert response.account_username == "op@example.com"

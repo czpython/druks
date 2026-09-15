@@ -75,10 +75,10 @@ class Run(Base):
     subject_label: Mapped[str | None] = column_property(subject_label_expression(id))
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     account: Mapped[Account] = relationship(lazy="joined", foreign_keys=[account_id])
-    # The run's agent calls in execution order — lazy, so a parked board row that
-    # never reads them costs no query; the timeline read eager-loads them.
+    # The run's agent calls in execution order. Never lazy-loaded: the reads
+    # that hand a row to the status or timeline eager-load them in one query.
     agent_calls: Mapped[list["AgentCall"]] = relationship(
-        back_populates="run", order_by="AgentCall.created_at, AgentCall.id"
+        back_populates="run", order_by="AgentCall.created_at, AgentCall.id", lazy="raise"
     )
 
     # When the run last changed — the newest of creation, the parked ask, and
@@ -164,6 +164,7 @@ class Run(Base):
             .where(subject_filter(cls.id, subject_type, subject_id))
             .order_by(cls.created_at.desc(), cls.id.desc())
             .limit(1)
+            .options(selectinload(cls.agent_calls))
         )
         if kind:
             stmt = stmt.where(cls.kind == kind)

@@ -48,7 +48,7 @@ class SecretRef(Base):
     # as an MCP server. Empty for a Drukbox catalog entry.
     host: Mapped[str] = mapped_column(default="")
 
-    identity: Mapped["SandboxIdentity"] = relationship(back_populates="secret_refs")
+    identity: Mapped["SandboxIdentity"] = relationship(back_populates="secret_refs", lazy="raise")
     secret: Mapped[VaultSecret] = relationship(lazy="selectin")
 
     @property
@@ -63,7 +63,7 @@ class SandboxIdentity(Base, Uuid7Pk):
     __tablename__ = "sandbox_identities"
 
     run_id: Mapped[str] = mapped_column(ForeignKey("durable_runs.id", ondelete="CASCADE"))
-    run: Mapped["Run"] = relationship()
+    run: Mapped["Run"] = relationship(lazy="raise")
     # What the box serves in its run: ``workflow`` for the warm box, the agent
     # id for an ephemeral one. A replay finds the box through it.
     scoped_to: Mapped[str]

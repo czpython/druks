@@ -146,7 +146,7 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     )
 
     await druks_db.refresh(run)
-    await run.awaitable_attrs.agent_calls
+    await druks_db.refresh(run, ["agent_calls"])
     ask = RunResponse.from_run(run, input_request=await run.get_ask()).input_request
     assert ask == {
         "presentation": "in_app",
@@ -165,7 +165,7 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     druks_db.add(external)
     await druks_db.flush()
     await druks_db.refresh(external)
-    await external.awaitable_attrs.agent_calls
+    await druks_db.refresh(external, ["agent_calls"])
     response = RunResponse.from_run(external, input_request=await external.get_ask())
     assert response.input_request == {
         "presentation": "external",
@@ -176,7 +176,7 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
 async def test_run_response_projects_the_parked_gate(druks_db):
     run = await seed_run(druks_db, kind=Summarize.kind, run_id="run-gate", input_gate="review")
 
-    await run.awaitable_attrs.agent_calls
+    await druks_db.refresh(run, ["agent_calls"])
     response = RunResponse.from_run(run, input_request=None)
     assert response.gate == "review"
 

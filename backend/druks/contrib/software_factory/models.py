@@ -439,7 +439,9 @@ class Ticket(Base):
     creator_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
-    comments: Mapped[list[Comment]] = relationship(order_by=[Comment.created_at, Comment.id])
+    comments: Mapped[list[Comment]] = relationship(
+        order_by=[Comment.created_at, Comment.id], lazy="raise"
+    )
 
     @classmethod
     async def create(

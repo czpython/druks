@@ -134,15 +134,11 @@ async def _status(driving_run: Run | None) -> SubjectStatus:
     # driving run alone decides parked-ness.
     parked = driving_run.state == RunState.PARKED.value
     # ``agent`` is the *running* run's latest agent — a parked run's calls are
-    # history, not the current step. Reading agent_calls only when not parked
-    # keeps a parked board row off the agent_calls query. ``gate`` is the
-    # inverse: only a parked run's input_gate is a live ask (a timed-out run
-    # keeps the stale column).
+    # history, not the current step. ``gate`` is the inverse: only a parked
+    # run's input_gate is a live ask (a timed-out run keeps the stale column).
     agent = None
-    if not parked:
-        calls = await driving_run.awaitable_attrs.agent_calls
-        if calls:
-            agent = calls[-1].agent
+    if not parked and driving_run.agent_calls:
+        agent = driving_run.agent_calls[-1].agent
     return SubjectStatus(
         state=RunState(driving_run.state),
         run=driving_run.id,
