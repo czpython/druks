@@ -381,7 +381,7 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
             account = await Account.get_for_run(session, run.account_id)
             destination_id = account.gate_park_destination_id
             if destination_id:
-                return await run.create_park_notification(destination_id, subject)
+                return await run.create_park_notification(session, destination_id, subject)
 
     notification_id = await DBOS.run_step_async(
         StepOptions(name="notifications.gate_park", **_IO_RETRIES), _create

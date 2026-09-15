@@ -7,6 +7,7 @@ from urllib.parse import parse_qs
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
 
+from druks.database import db_session
 from druks.notifications.buttons import decode_button
 from druks.notifications.exceptions import (
     AlreadyAcknowledgedError,
@@ -102,7 +103,7 @@ class SlackInteractivity(Webhook):
         except MalformedButtonError as error:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown button.") from error
         try:
-            await respond_to_notification(token, {"control": choice_id})
+            await respond_to_notification(db_session(), token, {"control": choice_id})
         except (
             UnknownTokenError,
             AlreadyAcknowledgedError,

@@ -91,28 +91,31 @@ def fake_slack(monkeypatch):
 
 
 async def test_create_get_list_delete_round_trip(druks_db):
-    beta = await Destination.create(name="beta", kind="slack_webhook", url=_WEBHOOK_URL)
-    alpha = await Destination.create(name="alpha", kind="slack_webhook", url=_WEBHOOK_URL)
+    beta = await Destination.create(druks_db, name="beta", kind="slack_webhook", url=_WEBHOOK_URL)
+    alpha = await Destination.create(druks_db, name="alpha", kind="slack_webhook", url=_WEBHOOK_URL)
 
-    assert (await Destination.get(beta.id)).id == beta.id
-    assert (await Destination.get_for_name("alpha")).id == alpha.id
-    assert await Destination.get("no-such-id") is None
-    assert await Destination.get_for_name("no-such-name") is None
-    assert [destination.name for destination in await Destination.list_all()] == ["alpha", "beta"]
+    assert (await druks_db.get(Destination, beta.id)).id == beta.id
+    assert (await Destination.get_for_name(druks_db, "alpha")).id == alpha.id
+    assert await druks_db.get(Destination, "no-such-id") is None
+    assert await Destination.get_for_name(druks_db, "no-such-name") is None
+    assert [destination.name for destination in await Destination.list_all(druks_db)] == [
+        "alpha",
+        "beta",
+    ]
     assert beta.is_enabled is True
 
-    await beta.delete()
-    assert await Destination.get_for_name("beta") is None
-    assert [destination.name for destination in await Destination.list_all()] == ["alpha"]
+    await beta.delete(druks_db)
+    assert await Destination.get_for_name(druks_db, "beta") is None
+    assert [destination.name for destination in await Destination.list_all(druks_db)] == ["alpha"]
 
 
 async def test_create_rejects_unknown_kind_without_echoing_the_url(druks_db):
     with pytest.raises(UnknownDestinationKindError) as excinfo:
-        await Destination.create(name="pager", kind="pagerduty", url=_WEBHOOK_URL)
+        await Destination.create(druks_db, name="pager", kind="pagerduty", url=_WEBHOOK_URL)
 
     assert "pagerduty" in str(excinfo.value)
     assert _WEBHOOK_URL not in str(excinfo.value)
-    assert await Destination.get_for_name("pager") is None
+    assert await Destination.get_for_name(druks_db, "pager") is None
 
 
 # --- routes: CRUD + redaction ---------------------------------------------

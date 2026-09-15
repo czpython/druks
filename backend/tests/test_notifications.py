@@ -2,6 +2,7 @@ from datetime import timedelta
 
 import pytest
 from druks.accounts.models import Account
+from druks.database import db_session
 from druks.durable import Run
 from druks.models import Base
 from druks.notifications.exceptions import InvalidChoiceError
@@ -17,7 +18,7 @@ _SUBJECT = {"type": "work_item", "id": 1}
 
 
 async def _destination(name: str = "ops") -> Destination:
-    return await Destination.create(name=name, kind="slack_webhook", url=_WEBHOOK_URL)
+    return await Destination.create(db_session(), name=name, kind="slack_webhook", url=_WEBHOOK_URL)
 
 
 # --- entity ------------------------------------------------------------------
@@ -26,7 +27,7 @@ async def _destination(name: str = "ops") -> Destination:
 async def test_unique_token_collision_raises(druks_db):
     destination = await _destination()
     first = await Notification.create(
-        destination_id=destination.id, reason="r", body="b", subject=_SUBJECT
+        druks_db, destination_id=destination.id, reason="r", body="b", subject=_SUBJECT
     )
 
     duplicate = Notification(
@@ -46,13 +47,17 @@ async def test_list_recent_newest_first_with_limit(druks_db):
     ids = [
         (
             await Notification.create(
-                destination_id=destination.id, reason="r", body=f"note {i}", subject=_SUBJECT
+                druks_db,
+                destination_id=destination.id,
+                reason="r",
+                body=f"note {i}",
+                subject=_SUBJECT,
             )
         ).id
         for i in range(3)
     ]
 
-    listed = await Notification.list_recent(limit=2)
+    listed = await Notification.list_recent(druks_db, limit=2)
     assert [notification.id for notification in listed] == [ids[2], ids[1]]
 
 
@@ -64,6 +69,7 @@ async def test_endpoints_list_and_get_omit_the_token(tmp_path, druks_db):
     tokens = []
     for index in range(3):
         notification = await Notification.create(
+            druks_db,
             destination_id=destination.id,
             reason="gate.parked",
             body=f"note {index}",
@@ -71,9 +77,9 @@ async def test_endpoints_list_and_get_omit_the_token(tmp_path, druks_db):
         )
         tokens.append(notification.correlation_token)
     failed = await Notification.create(
-        destination_id=destination.id, reason="gate.parked", body="bad", subject=_SUBJECT
+        druks_db, destination_id=destination.id, reason="gate.parked", body="bad", subject=_SUBJECT
     )
-    await failed.mark_failed("DeliveryError: HTTPStatusError")
+    await failed.mark_failed(druks_db, "DeliveryError: HTTPStatusError")
     tokens.append(failed.correlation_token)
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
@@ -169,6 +175,7 @@ async def _parked_notification(druks_db, *, ask=None, run_state="parked"):
     await seed_dbos_status(druks_db, run.id, run_state)
     destination = await _destination(name=f"dest-{run.id[-8:]}")
     notification = await Notification.create(
+        druks_db,
         destination_id=destination.id,
         reason="gate.parked",
         body="review the plan",
@@ -194,13 +201,14 @@ async def test_respond_resumes_and_marks_acknowledged(druks_db, resume_spy):
     run, notification = await _parked_notification(druks_db)
 
     await respond_to_notification(
+        druks_db,
         notification.correlation_token,
         {"control": "approve", "answers": {"q1": "a"}, "note": ""},
     )
 
     assert resume_spy == [{"id": run.id, "action": "approve", "answers": {"q1": "a"}, "note": ""}]
-    assert (await Notification.get(notification.id)).state == "acknowledged"
-    assert (await Notification.get(notification.id)).is_acknowledged
+    assert (await druks_db.get(Notification, notification.id)).state == "acknowledged"
+    assert (await druks_db.get(Notification, notification.id)).is_acknowledged
 
 
 async def test_respond_route_codes_and_secret_hygiene(tmp_path, druks_db, resume_spy):
@@ -268,7 +276,7 @@ async def test_respond_external_notification_not_answerable(tmp_path, druks_db, 
 async def test_respond_runless_notification_not_answerable(tmp_path, druks_db, resume_spy):
     destination = await _destination(name="runless-dest")
     notification = await Notification.create(
-        destination_id=destination.id, reason="r", body="b", subject=_SUBJECT
+        druks_db, destination_id=destination.id, reason="r", body="b", subject=_SUBJECT
     )
     client = TestClient(configure_app_for_test(settings=make_settings(tmp_path)))
 
@@ -295,6 +303,7 @@ async def test_respond_stale_round_409(tmp_path, druks_db, resume_spy):
     await seed_dbos_status(druks_db, run.id, "parked")
     destination = await _destination(name="stale-dest")
     notification = await Notification.create(
+        druks_db,
         destination_id=destination.id,
         reason="gate.parked",
         body="review",
@@ -326,31 +335,6 @@ async def test_respond_run_no_longer_parked_409(tmp_path, druks_db, resume_spy):
     assert resume_spy == []
 
 
-async def test_respond_corrupt_correlation_500_and_logged(
-    tmp_path, druks_db, resume_spy, monkeypatch, caplog
-):
-    run, notification = await _parked_notification(druks_db)
-
-    async def _missing(cls, run_id):
-        return None
-
-    monkeypatch.setattr(Run, "get", classmethod(_missing))
-    client = TestClient(
-        configure_app_for_test(settings=make_settings(tmp_path)), raise_server_exceptions=False
-    )
-
-    response = client.post(
-        f"/_external/notifications/{notification.correlation_token}/respond",
-        json={"control": "approve"},
-    )
-
-    assert response.status_code == 500
-    assert response.json() == {"error": "INTERNAL_ERROR", "detail": "Internal server error"}
-    assert "references run" in caplog.text
-    assert notification.correlation_token not in response.text
-    assert resume_spy == []
-
-
 async def test_respond_direct_call_rejects_whitespace_only_content(druks_db, resume_spy):
     # The core is also the direct-call boundary (the Slack rail bypasses the
     # HTTP models' whitespace stripping) — blank means blank on every path.
@@ -358,16 +342,18 @@ async def test_respond_direct_call_rejects_whitespace_only_content(druks_db, res
 
     with pytest.raises(InvalidChoiceError):
         await respond_to_notification(
+            druks_db,
             notification.correlation_token,
             {"control": "approve", "answers": {"q1": "   "}},
         )
     with pytest.raises(InvalidChoiceError):
         await respond_to_notification(
+            druks_db,
             notification.correlation_token,
             {"control": "request_changes", "note": "   "},
         )
     assert resume_spy == []
-    assert (await Notification.get(notification.id)).state == "pending"
+    assert (await druks_db.get(Notification, notification.id)).state == "pending"
 
 
 async def test_respond_ask_without_presentation_not_answerable(tmp_path, druks_db, resume_spy):

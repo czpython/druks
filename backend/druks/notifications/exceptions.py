@@ -25,13 +25,6 @@ class StaleRoundError(NotificationError):
         super().__init__("The run has moved past the round this notification was sent for.")
 
 
-class CorruptCorrelationError(NotificationError):
-    def __init__(self, notification_id: str, run_id: str):
-        super().__init__(
-            f"Notification {notification_id} references run {run_id}, which does not exist."
-        )
-
-
 class UnknownDestinationKindError(NotificationError):
     def __init__(self, kind: str, supported: tuple[str, ...]):
         super().__init__(f"Unknown destination kind {kind!r}; supported: {', '.join(supported)}.")
