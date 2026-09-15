@@ -294,7 +294,7 @@ class ReviewReport(AgentOutput):
         return {"kind": "markdown", "title": "Review", "content": "\n\n".join(sections)}
 
     def to_event(self) -> dict[str, str]:
-        return {"topic": "review.completed"}
+        return {"topic": "review.completed", "summary": self.summary}
 
 
 class EvalCheckOutput(AgentOutput):
