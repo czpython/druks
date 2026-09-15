@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { Link, useLocation } from 'wouter'
 
 import { useSSE } from '../../api/sse'
-import { buildApi } from './api'
+import { buildApi, SOFTWARE_FACTORY } from './api'
 import type { Resolution, WorkItemDetail, WorkItemSummary } from './api'
 import type {
   AgentCallSummary,
@@ -677,6 +677,7 @@ function TranscriptBody({
       )}
       <div className="ins-xscript">
         <RunTranscript
+          app={SOFTWARE_FACTORY}
           basePath={buildApi.transcriptBase(call.id)}
           stream="stdout"
           isLive={Boolean(isLive)}

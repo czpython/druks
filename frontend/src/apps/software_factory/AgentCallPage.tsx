@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'wouter'
 
-import { buildApi } from './api'
+import { buildApi, SOFTWARE_FACTORY } from './api'
 import type { WorkItemSummary } from './api'
 import type { AgentCallFiles, AgentCallSummary } from '../../api/types'
 import { Cost, Kebab, TokenBreakdown, Tokens } from '../../components/Common'
@@ -181,6 +181,7 @@ function RunView({
             )}
           </div>
           <RunTranscript
+            app={SOFTWARE_FACTORY}
             basePath={buildApi.transcriptBase(runId)}
             stream="stdout"
             isLive={call.status === 'running'}

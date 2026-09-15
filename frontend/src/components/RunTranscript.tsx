@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { useSSE } from '../api/sse'
+import { getAppUI } from '../apps/registry'
 import { StreamTranscript } from './StreamTranscript'
+import type { HarnessResultRenderer } from './StreamTranscript'
 
 const TRANSCRIPT_CHUNK_LIMIT = 256 * 1024
 
 interface RunTranscriptProps {
+  // The app the call belongs to. Its registered UI renders the call's final
+  // structured result.
+  app: string
   // Full URL of an agent call's transcript resource, e.g.
   // ``/api/<app>/transcripts/<callId>``. It serves the paginated chunk
   // directly and the live SSE at ``/stream``. Live tailing works the same way: the
@@ -25,12 +30,14 @@ interface RunTranscriptProps {
  * pages; the only difference is ``basePath``.
  */
 export function RunTranscript({
+  app,
   basePath,
   stream = 'stdout',
   isLive,
   maxBytes,
 }: RunTranscriptProps) {
   const transcriptKey = `${basePath}:${stream}`
+  const renderHarnessResult = getAppUI(app)?.harnessResult
   const [initial, setInitial] = useState<{
     key: string
     text: string
@@ -82,13 +89,18 @@ export function RunTranscript({
         key={transcriptKey}
         eventsUrl={`${basePath}/stream?stream=${stream}&offset=${initial.nextOffset}`}
         initialText={initial.text}
+        renderHarnessResult={renderHarnessResult}
       />
     )
   }
 
   return (
     <>
-      <StreamTranscript text={initial.text} complete={initial.eof} />
+      <StreamTranscript
+        text={initial.text}
+        complete={initial.eof}
+        renderHarnessResult={renderHarnessResult}
+      />
       {bounded && (
         <div className="run-truncated mono dim">
           output continues — open the agent call to read all of it
@@ -101,9 +113,11 @@ export function RunTranscript({
 function RunTranscriptLive({
   eventsUrl,
   initialText,
+  renderHarnessResult,
 }: {
   eventsUrl: string
   initialText: string
+  renderHarnessResult?: HarnessResultRenderer
 }) {
   const [text, setText] = useState(initialText)
   const [complete, setComplete] = useState(false)
@@ -129,5 +143,12 @@ function RunTranscriptLive({
     ),
   })
 
-  return <StreamTranscript text={text} complete={complete} isLive={!complete} />
+  return (
+    <StreamTranscript
+      text={text}
+      complete={complete}
+      isLive={!complete}
+      renderHarnessResult={renderHarnessResult}
+    />
+  )
 }
