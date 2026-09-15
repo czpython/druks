@@ -378,9 +378,22 @@ async def test_reconnect_replaces_stale_identity_even_when_lookup_fails(
     assert grant.account_id == account.id
     assert grant.identity == {}
     assert grant.identity_status == status
+    assert grant.identity_error == (
+        "UserInfo request failed (HTTP 503)." if status == "failed" else None
+    )
     assert grant.scopes is None
     assert grant.secrets["refresh_token"] == "rt-new"
     assert (await oauth.get_access_token(_NAME, account.id))[0] == "at-1"
+
+    auth_server.userinfo_status = 200
+    auth_server.userinfo_endpoint = f"{_AUTH_BASE}/userinfo"
+    url = await oauth.begin_connect(
+        _NAME, _SERVER_URL, _ENDPOINT, account_id=account.id, identity_mode=IdentityMode.PER_USER
+    )
+    await oauth.complete_connect(state=dict(parse_qsl(urlparse(url).query))["state"], code="third")
+    grant = await oauth.get_connection(_NAME, account.id)
+    assert grant.identity_status == "resolved"
+    assert grant.identity_error is None
 
 
 async def test_connection_api_exposes_identity_facts_without_tokens(
@@ -399,6 +412,7 @@ async def test_connection_api_exposes_identity_facts_without_tokens(
     assert response.status_code == 200
     grant = next(item for item in response.json() if item["provider"] == _NAME)
     assert grant["identityStatus"] == "resolved"
+    assert grant["identityError"] is None
     assert grant["identity"]["subject"] == "user-1"
     assert grant["scopes"] == ["read"]
     for secret in ("access_token", "refresh_token", "client_secret", "at-1", "rt-1", "client-123"):

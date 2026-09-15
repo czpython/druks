@@ -59,22 +59,26 @@ def token(**overrides):
     ("overrides", "claim"),
     [({"aud": "other-client"}, "aud"), ({"nonce": "other-consent"}, "nonce")],
 )
-async def test_a_mismatched_claim_fails_and_logs_the_claim(
+async def test_a_mismatched_claim_records_a_safe_failure_and_logs_the_claim(
     pending, requests, caplog, overrides, claim
 ):
-    identity, status = await oauth.get_grant_identity(
+    identity, status, error = await oauth.get_grant_identity(
         {"id_token": token(**overrides), "access_token": "access-secret"}, pending
     )
     assert (identity, status) == ({}, "failed")
+    assert error == "ID token validation failed."
+    assert error in caplog.text
     assert f"'{claim}'" in caplog.text
+    assert "access-secret" not in caplog.text
 
 
 async def test_an_unreadable_id_token_falls_back_to_userinfo(pending, requests, caplog):
     pending["userinfo_endpoint"] = f"{ISSUER}/userinfo"
-    identity, status = await oauth.get_grant_identity(
+    identity, status, error = await oauth.get_grant_identity(
         {"id_token": "not-a-token", "access_token": "access-secret"}, pending
     )
     assert status == "resolved"
+    assert error is None
     assert identity["source"] == "userinfo"
     assert identity["subject"] == "userinfo-subject"
     assert requests[-1].headers["authorization"] == "Bearer access-secret"
@@ -102,9 +106,42 @@ async def test_userinfo_failure_does_not_follow_redirect_or_expose_credentials(
     assert await oauth.get_grant_identity({"access_token": "access-secret"}, pending) == (
         {},
         "failed",
+        "UserInfo request failed (HTTP 302).",
     )
     assert len(requests) == 1
     assert "access-secret" not in caplog.text
+
+
+async def test_no_identity_source_records_unavailable(pending):
+    assert await oauth.get_grant_identity({"access_token": "access-secret"}, pending) == (
+        {},
+        "unavailable",
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        ([], "Identity response must be a JSON object."),
+        ({}, "Identity response has no stable subject."),
+        ({"sub": " "}, "Identity response has no stable subject."),
+    ],
+)
+async def test_invalid_userinfo_records_a_safe_reason(pending, monkeypatch, payload, reason):
+    pending["userinfo_endpoint"] = f"{ISSUER}/userinfo"
+    monkeypatch.setattr(
+        oauth,
+        "_http",
+        lambda: httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+        ),
+    )
+    assert await oauth.get_grant_identity({"access_token": "access-secret"}, pending) == (
+        {},
+        "failed",
+        reason,
+    )
 
 
 @pytest.mark.parametrize("payload", [[], {}, {"sub": " "}])

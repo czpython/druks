@@ -142,6 +142,7 @@ describe('Account grant groups', () => {
     scopes: ['read'],
     identity: { email: 'mailbox@example.invalid' },
     identityStatus: null,
+    identityError: null,
     connectedAt: '2026-09-05T08:00:00Z',
     revokedAt: null,
     revokedReason: '',
@@ -178,7 +179,8 @@ describe('Account grant groups', () => {
   }
 
   it.each([
-    ['unavailable', null, 'Account identity unavailable', 'Permissions not reported'],
+    ['unavailable', null, 'Provider offered no account identity', 'Permissions not reported'],
+    [null, null, 'Account identity not recorded', 'Permissions not reported'],
     ['failed', [], 'Account identity lookup failed', 'No permissions granted'],
     ['resolved', ['read'], 'provider-user-1', 'read'],
   ] as const)('shows the %s identity and scope outcome', async (status, scopes, label, permissions) => {
@@ -188,6 +190,7 @@ describe('Account grant groups', () => {
         provider: 'jira',
         identity: status === 'resolved' ? { subject: 'provider-user-1' } : {},
         identityStatus: status,
+        identityError: status === 'failed' ? 'UserInfo request failed (HTTP 503).' : null,
         scopes: scopes === null ? null : [...scopes],
       },
     ])
@@ -195,6 +198,13 @@ describe('Account grant groups', () => {
     const current = within(screen.getByRole('region', { name: 'Current accounts' }))
     expect(await current.findByText(label)).toBeTruthy()
     expect(current.getByText(permissions)).toBeTruthy()
+    if (status === 'unavailable') {
+      expect(current.getByText('Check the server URL and the provider’s identity support.')).toBeTruthy()
+      expect(current.queryByText(/Reconnect/)).toBeNull()
+    } else if (status !== 'resolved') {
+      expect(current.getByText(/Reconnect to try to record account identity/)).toBeTruthy()
+      if (status === 'failed') expect(current.getByText(/HTTP 503/)).toBeTruthy()
+    }
     expect(current.getByRole('button', { name: 'Disconnect' })).toBeTruthy()
   })
 

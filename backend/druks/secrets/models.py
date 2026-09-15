@@ -47,6 +47,7 @@ class VaultSecret(Base, Uuid7Pk):
     # Non-secret facts: the App slug, the subscription's email.
     identity: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     identity_status: Mapped[str | None]
+    identity_error: Mapped[str | None]
     # What the provider granted, for an OAuth connection.
     scopes: Mapped[list[str] | None] = mapped_column(JSONB(none_as_null=True))
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -194,6 +195,7 @@ class VaultSecret(Base, Uuid7Pk):
         scopes: list[str] | None,
         identity: dict[str, Any] | None = None,
         identity_status: IdentityStatus | None = None,
+        identity_error: str | None = None,
         secrets: dict[str, Any] | None = None,
     ) -> "VaultSecret":
         """A new OAuth connection. ``secrets`` holds the client it refreshes
@@ -206,6 +208,7 @@ class VaultSecret(Base, Uuid7Pk):
             scopes=scopes,
             identity=identity or {},
             identity_status=identity_status,
+            identity_error=identity_error,
         )
         db_session().add(row)
         await db_session().flush()
@@ -218,6 +221,7 @@ class VaultSecret(Base, Uuid7Pk):
         scopes: list[str] | None,
         identity: dict[str, Any] | None = None,
         identity_status: IdentityStatus | None = None,
+        identity_error: str | None = None,
         secrets: dict[str, Any] | None = None,
     ) -> None:
         """A fresh consent on a live or revoked connection. The stored client
@@ -230,6 +234,7 @@ class VaultSecret(Base, Uuid7Pk):
         if identity is not None:
             self.identity = identity
         self.identity_status = identity_status
+        self.identity_error = identity_error
         self.updated_at = Base.utc_now()
         self.revoked_at = None
         self.revoked_reason = ""

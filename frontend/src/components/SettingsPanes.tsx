@@ -1105,6 +1105,25 @@ function connectionIdentity(connection: Connection): string | null {
   )
 }
 
+const reconnectHint = 'Reconnect to try to record account identity.'
+
+function missingIdentityCopy(connection: Connection): { label: string; hint: string } {
+  switch (connection.identityStatus) {
+    case 'unavailable':
+      return {
+        label: 'Provider offered no account identity',
+        hint: 'Check the server URL and the provider’s identity support.',
+      }
+    case 'failed':
+      return {
+        label: 'Account identity lookup failed',
+        hint: connection.identityError ? `${connection.identityError} ${reconnectHint}` : reconnectHint,
+      }
+    default:
+      return { label: 'Account identity not recorded', hint: reconnectHint }
+  }
+}
+
 const revokeReasonCopy: Record<string, string> = {
   user: 'by you',
   client_replaced: 'client credentials replaced',
@@ -1329,11 +1348,13 @@ export function ConnectionsPane({ revokedOnly = false }: { revokedOnly?: boolean
               <tr key={connection.id}>
                 <th scope="row">
                   <span className="connection-name">
-                    {connectionIdentity(connection) ??
-                      (connection.identityStatus === 'failed'
-                        ? 'Account identity lookup failed'
-                        : 'Account identity unavailable')}
+                    {connectionIdentity(connection) ?? missingIdentityCopy(connection).label}
                   </span>
+                  {!connectionIdentity(connection) && !revokedOnly && (
+                    <span className="connection-context">
+                      {missingIdentityCopy(connection).hint}
+                    </span>
+                  )}
                   {revokedOnly && (
                     <span className="connection-context">{revokedCopy(connection)}</span>
                   )}

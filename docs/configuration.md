@@ -634,8 +634,11 @@ grant. It tries these sources in order:
 Druks stores the issuer, the `sub` claim, the source, and the name and email
 if they are present. It stores `email_verified` only if the provider sends a
 Boolean. `identity_status` is `resolved`, `unavailable` if the provider has
-no source, or `failed`. A failed lookup does not change the connection. The
-log names the check that failed.
+no source, or `failed`. A failed lookup does not change the connection.
+`identity_error` records the reason for a failed lookup, such as an HTTP
+status or an invalid identity response. It contains no provider response
+body or token. The log carries the underlying error. A reconnect records a
+new outcome.
 
 The identity comes from the authorization server itself if it offers `openid`.
 It comes from the OpenID provider at the origin root if that provider has the

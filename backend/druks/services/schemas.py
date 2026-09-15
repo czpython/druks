@@ -24,6 +24,7 @@ class ConnectionResponse(Schema):
     scopes: list[str] | None
     identity: dict[str, Any]
     identity_status: str | None
+    identity_error: str | None
     connected_at: datetime
     revoked_at: datetime | None
     revoked_reason: str
@@ -36,6 +37,7 @@ class ConnectionResponse(Schema):
             scopes=row.scopes,
             identity=row.identity,
             identity_status=row.identity_status,
+            identity_error=row.identity_error,
             connected_at=row.updated_at,
             revoked_at=row.revoked_at,
             revoked_reason=row.revoked_reason,

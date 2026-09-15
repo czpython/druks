@@ -625,6 +625,7 @@ export interface Connection {
     subscription?: string
   }
   identityStatus: 'resolved' | 'unavailable' | 'failed' | null
+  identityError: string | null
   connectedAt: string
   revokedAt: string | null
   revokedReason: string

@@ -276,63 +276,81 @@ async def begin_connect(
     )
 
 
-async def get_grant_identity(tokens: dict, pending: dict) -> tuple[dict, IdentityStatus]:
+async def get_grant_identity(
+    tokens: dict, pending: dict
+) -> tuple[dict, IdentityStatus, str | None]:
     """The grant's identity and the lookup outcome. A failed lookup keeps the grant."""
     status = IdentityStatus.UNAVAILABLE
+    failures = []
     for source in ("id_token", "userinfo"):
         try:
             if source == "id_token" and isinstance(tokens.get("id_token"), str):
                 claims = read_id_token(tokens, pending)
             elif source == "userinfo" and pending["userinfo_endpoint"]:
-                async with _http() as client:
-                    response = await client.get(
-                        pending["userinfo_endpoint"],
-                        headers={"Authorization": f"Bearer {tokens['access_token']}"},
-                        follow_redirects=False,
-                    )
-                    response.raise_for_status()
-                    claims = response.json()
+                claims = await read_userinfo(tokens, pending)
             else:
                 continue
             identity = get_identity_facts(claims, authority=pending["issuer"], source=source)
-            return identity, IdentityStatus.RESOLVED
-        except (
-            IdentityLookupError,
-            JoseError,
-            httpx.HTTPError,
-            httpx.InvalidURL,
-            ValueError,
-        ) as error:
-            # These errors name the failed check, never the token.
+            return identity, IdentityStatus.RESOLVED, None
+        except IdentityLookupError as error:
             logger.warning(
-                "MCP identity lookup failed for %s via %s: %r", pending["name"], source, error
+                "MCP identity lookup failed for %s via %s: %s",
+                pending["name"],
+                source,
+                error,
+                exc_info=error,
             )
+            failures.append(str(error))
             status = IdentityStatus.FAILED
-    return {}, status
+    return {}, status, " ".join(failures) or None
 
 
 def read_id_token(tokens: dict, pending: dict) -> dict:
     """The ID token's claims, checked for the code flow. TLS to the token
     endpoint stands in for the signature check (OpenID Connect Core 3.1.3.7)."""
-    token = jws.extract_compact(tokens["id_token"].encode())
-    payload = json.loads(token.payload)
-    if not isinstance(payload, dict):
-        raise IdentityLookupError("The ID token payload is not a JSON object.")
-    claims = CodeIDToken(
-        payload,
-        token.headers(),
-        options={
-            "iss": {"value": pending["issuer"]},
-            "aud": {"value": pending["client_id"]},
-        },
-        params={
-            "client_id": pending["client_id"],
-            "nonce": pending["nonce"],
-            "access_token": tokens["access_token"],
-        },
-    )
-    claims.validate(leeway=30)
+    try:
+        token = jws.extract_compact(tokens["id_token"].encode())
+        payload = json.loads(token.payload)
+        if not isinstance(payload, dict):
+            raise IdentityLookupError("The ID token payload is not a JSON object.")
+        claims = CodeIDToken(
+            payload,
+            token.headers(),
+            options={
+                "iss": {"value": pending["issuer"]},
+                "aud": {"value": pending["client_id"]},
+            },
+            params={
+                "client_id": pending["client_id"],
+                "nonce": pending["nonce"],
+                "access_token": tokens["access_token"],
+            },
+        )
+        claims.validate(leeway=30)
+    except (JoseError, ValueError) as error:
+        raise IdentityLookupError("ID token validation failed.") from error
     return dict(claims)
+
+
+async def read_userinfo(tokens: dict, pending: dict) -> Any:
+    """The userinfo response body, fetched with the grant's access token."""
+    try:
+        async with _http() as client:
+            response = await client.get(
+                pending["userinfo_endpoint"],
+                headers={"Authorization": f"Bearer {tokens['access_token']}"},
+                follow_redirects=False,
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as error:
+        raise IdentityLookupError(
+            f"UserInfo request failed (HTTP {error.response.status_code})."
+        ) from error
+    except (httpx.HTTPError, httpx.InvalidURL) as error:
+        raise IdentityLookupError("UserInfo request failed.") from error
+    except ValueError as error:
+        raise IdentityLookupError("UserInfo response is not JSON.") from error
 
 
 def get_identity_facts(payload: Any, *, authority: str, source: str) -> dict[str, Any]:
@@ -361,7 +379,7 @@ async def complete_connect(*, state: str, code: str) -> str:
     except OauthExchangeError as error:
         raise OauthConnectError(error.context.get("name", "unknown"), error.reason) from error
     name = pending["name"]
-    identity, identity_status = await get_grant_identity(tokens, pending)
+    identity, identity_status, identity_error = await get_grant_identity(tokens, pending)
     # An omitted scope means the provider granted the requested scopes (RFC 6749 section 5.1).
     scope = tokens.get("scope", " ".join(pending["scopes"]) or None)
     scopes = scope.split() if isinstance(scope, str) else None
@@ -399,6 +417,7 @@ async def complete_connect(*, state: str, code: str) -> str:
             scopes=scopes,
             identity=identity,
             identity_status=identity_status,
+            identity_error=identity_error,
             secrets=client,
         )
         # A reconsent's stale cached token must not serve until its TTL runs out.
@@ -411,6 +430,7 @@ async def complete_connect(*, state: str, code: str) -> str:
             scopes=scopes,
             identity=identity,
             identity_status=identity_status,
+            identity_error=identity_error,
             secrets=client,
         )
     return name
