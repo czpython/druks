@@ -88,10 +88,13 @@ async def mention_asks_for_a_review(*, repo: str, pr_number: int, payload: dict)
     handle = await (await get_review_actor()).client.get_mention_handle()
     # Only the full handle counts. An email address or a longer handle is not a mention.
     mention = rf"(?<!\w)@{re.escape(handle)}(?![\w-])"
-    is_mentioned = handle and re.search(mention, payload["body"], re.IGNORECASE)
-    if is_mentioned and await ProjectRepo.get_for_repo(repo):
+    note, mentions = re.subn(mention, "", payload["body"], flags=re.IGNORECASE)
+    if handle and mentions and await ProjectRepo.get_for_repo(repo):
         await PullRequestReview.dispatch(
-            repo=repo, pr_number=pr_number, requested_by=payload["author"]
+            repo=repo,
+            pr_number=pr_number,
+            requested_by=payload["author"],
+            note=note.strip(),
         )
 
 

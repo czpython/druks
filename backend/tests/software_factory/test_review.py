@@ -70,7 +70,7 @@ async def test_the_pull_request_board_and_page_mount(client: TestClient, druks_d
 def test_the_run_carries_the_pull_request_once():
     # The repo and the number are the subject, so they are not also input: the body
     # takes what only the request knows.
-    assert list(PullRequestReview._run_input_model.model_fields) == ["requested_by"]
+    assert list(PullRequestReview._run_input_model.model_fields) == ["requested_by", "note"]
 
 
 async def test_a_queued_run_replays_through_its_subject():
@@ -84,7 +84,7 @@ async def test_a_queued_run_replays_through_its_subject():
         account_id="review-account",
     )
 
-    assert run_kwargs == {"requested_by": "dev@example.com"}
+    assert run_kwargs == {"requested_by": "dev@example.com", "note": ""}
     subject = await instance.subject
     assert (subject.repo, subject.number) == ("acme/app", 7)
 
@@ -92,7 +92,7 @@ async def test_a_queued_run_replays_through_its_subject():
 async def test_the_reviewer_prompt_names_the_pull_request_it_is_about():
     workflow = SimpleNamespace(
         subject=PullRequest.get("acme/app", 7),
-        input=SimpleNamespace(requested_by="dev@example.com"),
+        input=SimpleNamespace(requested_by="dev@example.com", note=""),
     )
     workspace = SimpleNamespace(
         repo_path="/home/agent/work/repo", related_root="/home/agent/related"
@@ -116,7 +116,7 @@ async def test_comment_mode_reviews_publish_as_comments():
     # its reviews publish as comments — the prompt carries that rule.
     workflow = SimpleNamespace(
         subject=PullRequest.get("acme/app", 7),
-        input=SimpleNamespace(requested_by="dev@example.com"),
+        input=SimpleNamespace(requested_by="dev@example.com", note=""),
     )
     workspace = SimpleNamespace(
         repo_path="/home/agent/work/repo", related_root="/home/agent/related"
@@ -217,11 +217,15 @@ async def test_review_dispatch_starts_once_github_is_connected(druks_db, monkeyp
     monkeypatch.setattr(PullRequestReview, "start", classmethod(_start))
 
     run_id = await PullRequestReview.dispatch(
-        repo="acme/app", pr_number=7, requested_by="dev@example.com"
+        repo="acme/app",
+        pr_number=7,
+        requested_by="dev@example.com",
+        note="Focus on the upgrade path.",
     )
 
     assert run_id == "run-review"
     assert len(started) == 1
+    assert started[0]["note"] == "Focus on the upgrade path."
 
 
 async def test_a_passer_by_cannot_spend_a_review(monkeypatch):

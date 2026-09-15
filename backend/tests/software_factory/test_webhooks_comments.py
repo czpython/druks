@@ -10,15 +10,16 @@ from druks.testing import make_settings
 
 
 @pytest.mark.parametrize(
-    "sender_type,body,is_dispatched",
+    "sender_type,body,is_dispatched,note",
     [
-        ("User", "@Reviewer please review again", True),
-        ("Bot", "@reviewer please review again", False),
-        ("User", "Mail ops@reviewer.dev or ask @reviewer-team", False),
+        ("User", "@Reviewer please review again", True, "please review again"),
+        ("User", "  @Reviewer  ", True, ""),
+        ("Bot", "@reviewer please review again", False, ""),
+        ("User", "Mail ops@reviewer.dev or ask @reviewer-team", False, ""),
     ],
 )
 async def test_review_comment_mention_asks_for_a_review(
-    tmp_path, monkeypatch, sender_type, body, is_dispatched
+    tmp_path, monkeypatch, sender_type, body, is_dispatched, note
 ):
     actor = SimpleNamespace(
         client=SimpleNamespace(get_mention_handle=AsyncMock(return_value="reviewer"))
@@ -38,6 +39,11 @@ async def test_review_comment_mention_asks_for_a_review(
     await events.on_pull_request_review_comment_created()
 
     if is_dispatched:
-        dispatch.assert_awaited_once_with(repo="acme/widget", pr_number=7, requested_by="writer")
+        dispatch.assert_awaited_once_with(
+            repo="acme/widget",
+            pr_number=7,
+            requested_by="writer",
+            note=note,
+        )
     else:
         dispatch.assert_not_awaited()

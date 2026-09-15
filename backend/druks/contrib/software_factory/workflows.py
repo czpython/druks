@@ -515,7 +515,7 @@ class PullRequestReview(Workflow):
     workspace_class = ReviewWorkspace
 
     @classmethod
-    async def dispatch(cls, *, repo: str, pr_number: int, requested_by: str) -> str:
+    async def dispatch(cls, *, repo: str, pr_number: int, requested_by: str, note: str = "") -> str:
         # The review workspace sets its git author from the operator App, even when a
         # reviewer is connected. The lookup raises a clear error before the run starts a VM.
         await Github.get()
@@ -526,9 +526,10 @@ class PullRequestReview(Workflow):
             subject=PullRequest.get(repo, pr_number),
             account_id=account.id if account else None,
             requested_by=requested_by,
+            note=note,
         )
 
-    async def run(self, requested_by: str) -> None:
+    async def run(self, requested_by: str, note: str = "") -> None:
         await SoftwareFactory.review_pull_request()
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:

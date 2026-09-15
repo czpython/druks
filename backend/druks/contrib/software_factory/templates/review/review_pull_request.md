@@ -7,6 +7,14 @@ The repo is cloned at `{{ workspace.repo_path }}`. Your GitHub access is already
 as the identity your review will be published under. Only your FINAL response must be the JSON
 matching the requested schema; everything before it is free-form and never parsed.
 
+{% if workflow.input.note %}
+## Requester's note
+
+Emphasis for this review. The review contract and repository checklist still bind.
+
+{{ workflow.input.note }}
+
+{% endif %}
 ## How to review
 
 Check the pull request out, read its diff end to end, then read the code it lands in. A diff on
