@@ -4,32 +4,33 @@ import { activityDay, activityTypeLabel, eventLine } from './feed'
 // Software Factory's own registration, not a stand-in: its subjectPath is what makes a row navigate.
 import '../apps/software_factory/ui'
 import type { FeedItem } from '../api/types'
+import { registerAppUI } from '../apps/registry'
 
 function event(fields: Partial<FeedItem>): FeedItem {
   return {
     id: 'event:1',
     seq: 1,
     at: '2026-07-26T12:00:00Z',
-    kind: 'workflow.running',
+    topic: 'workflow.running',
     ...fields,
   }
 }
 
 describe('eventLine', () => {
   it('names the workflow and what it did', () => {
-    const line = eventLine(event({ kind: 'workflow.running', workflow: 'software_factory.build' }))
+    const line = eventLine(event({ topic: 'workflow.running', workflow: 'software_factory.build' }))
 
     expect(line.label).toBe('Build response received')
   })
 
   it('names a recorded input request', () => {
-    expect(eventLine(event({ kind: 'workflow.parked', workflow: 'software_factory.build' })).label).toBe(
+    expect(eventLine(event({ topic: 'workflow.parked', workflow: 'software_factory.build' })).label).toBe(
       'Build input requested',
     )
   })
 
   it("words an app's milestone through the app", () => {
-    const line = eventLine(event({ kind: 'merged', app: 'software_factory' }))
+    const line = eventLine(event({ topic: 'merged', app: 'software_factory' }))
 
     expect(line.label).toBe('Pull request merged')
     expect(line.bucket).toBe('event-kind-audit')
@@ -38,7 +39,7 @@ describe('eventLine', () => {
   it('names the subject as it showed itself, and links where the app says', () => {
     const line = eventLine(
       event({
-        kind: 'workflow.finished',
+        topic: 'workflow.finished',
         workflow: 'software_factory.build',
         app: 'software_factory',
         subjectType: 'work_item',
@@ -54,7 +55,7 @@ describe('eventLine', () => {
   it("leaves a row about a subject with no page of its own unclickable", () => {
     const line = eventLine(
       event({
-        kind: 'workflow.running',
+        topic: 'workflow.running',
         workflow: 'software_factory.profile',
         app: 'software_factory',
         subjectType: 'project_repo',
@@ -71,7 +72,7 @@ describe('eventLine', () => {
   it("words an unregistered app's topic and gives it no page", () => {
     const line = eventLine(
       event({
-        kind: 'note.gist_approved',
+        topic: 'note.gist_approved',
         app: 'field_notes',
         subjectType: 'note',
         subjectId: '7',
@@ -106,8 +107,15 @@ it.each([
 })
 
 it('uses shared type words and registered Factory topic labels', () => {
-  expect(activityTypeLabel('workflow.scheduled', 'software_factory')).toBe('Queued')
-  expect(activityTypeLabel('workflow.parked')).toBe('Input requested')
-  expect(activityTypeLabel('review.completed')).toBe('Review completed')
-  expect(activityTypeLabel('unknown.topic_name')).toBe('Unknown topic name')
+  expect(activityTypeLabel({ app: 'software_factory', topic: 'workflow.scheduled' })).toBe('Queued')
+  expect(activityTypeLabel({ app: 'field_notes', topic: 'workflow.parked' })).toBe('Input requested')
+  expect(activityTypeLabel({ app: 'software_factory', topic: 'review.completed' })).toBe('Review completed')
+  expect(activityTypeLabel({ app: 'field_notes', topic: 'unknown.topic_name' })).toBe('Unknown topic name')
+})
+
+it('labels each topic through its recorded app', () => {
+  registerAppUI({ name: 'publishing', routes: [], activityLabel: ({ topic }) => topic === 'merged' ? 'Notes combined' : undefined })
+  expect(activityTypeLabel({ app: 'software_factory', topic: 'merged' })).toBe('Pull request merged')
+  expect(activityTypeLabel({ app: 'publishing', topic: 'merged' })).toBe('Notes combined')
+  expect(activityTypeLabel({ app: 'unregistered', topic: 'merged' })).toBe('Merged')
 })

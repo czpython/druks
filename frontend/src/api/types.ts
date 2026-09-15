@@ -799,10 +799,15 @@ export interface UpdateAppsSettingsRequest {
 }
 
 
+export interface EventTopic {
+  app: string
+  topic: string
+}
+
 export interface EventFilters {
   q?: string
   app?: string
-  kind?: string
+  topic?: string
   from?: string
   until?: string
 }
@@ -813,9 +818,9 @@ export interface FeedItem {
   at: string
   // A lifecycle topic ("workflow.finished") or the milestone an app recorded
   // ("merged"). The words are this client's — see lib/feed.
-  kind: string
+  topic: string
   app?: string | null
-  // The durable kind of the workflow a lifecycle row is about ("software_factory.build").
+  // The workflow identity, such as "software_factory.build".
   workflow?: string | null
   subjectType?: string | null
   subjectId?: string | null

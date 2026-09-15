@@ -29,7 +29,7 @@ export function EventsPage() {
   const filters: EventFilters = {
     q: params.get('q') || undefined,
     app: params.get('app') || undefined,
-    kind: params.get('kind') || undefined,
+    topic: params.get('topic') || undefined,
     from: firstDay ? activityDay(firstDay, timezone) : undefined,
     until: lastDay ? activityDay(lastDay, timezone, true) : undefined,
   }
@@ -51,13 +51,13 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
   })
   const installed = useQuery({ queryKey: ['apps'], queryFn: api.listApps, staleTime: 60_000 })
   const apps = (installed.data ?? []).filter((app) => !app.builtin)
-  const kinds = useQuery({
-    queryKey: ['activity-kinds', filters.app ?? ''],
-    queryFn: () => api.listEventKinds(filters.app),
+  const topics = useQuery({
+    queryKey: ['activity-topics', filters.app ?? ''],
+    queryFn: () => api.listEventTopics(filters.app),
     staleTime: Infinity,
     retry: false,
   })
-  const kindChoices = kinds.data ?? []
+  const topicChoices = topics.data ?? []
 
   const events = [...new Map(history.data?.pages.flatMap((page) => page.items)
     .map((event) => [event.id, event])).values()].sort((left, right) => right.seq - left.seq)
@@ -112,6 +112,7 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
     const next = new URLSearchParams(params)
     if (value) next.set(name, value)
     else next.delete(name)
+    if (name === 'app') next.delete('topic')
     if (name !== 'selected') next.delete('selected')
     navigate(`/events${next.size ? `?${next}` : ''}`, { replace: true })
   }
@@ -217,12 +218,26 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
               {filters.app && !apps.some((app) => app.name === filters.app) &&
                 <option value={filters.app}>{appLabel(filters.app)}</option>}
             </select>
-            <select aria-label="Activity type" value={filters.kind ?? ''}
-              onChange={(event) => updateParams('kind', event.target.value)}>
+            <select aria-label="Activity type" value={filters.app && filters.topic ? JSON.stringify([filters.app, filters.topic]) : ''}
+              onChange={(event) => {
+                const next = new URLSearchParams(params)
+                next.delete('selected')
+                if (event.target.value) {
+                  const [app, topic] = JSON.parse(event.target.value) as [string, string]
+                  next.set('app', app)
+                  next.set('topic', topic)
+                } else next.delete('topic')
+                navigate(`/events${next.size ? `?${next}` : ''}`, { replace: true })
+              }}>
               <option value="">All activity</option>
-              {kindChoices.map((kind) => <option key={kind} value={kind}>{activityTypeLabel(kind, filters.app)}</option>)}
-              {filters.kind && !kindChoices.includes(filters.kind) &&
-                <option value={filters.kind}>{activityTypeLabel(filters.kind, filters.app)}</option>}
+              {topicChoices.map((choice) => <option key={JSON.stringify([choice.app, choice.topic])}
+                value={JSON.stringify([choice.app, choice.topic])}>
+                {activityTypeLabel(choice)}{!filters.app && ` · ${appLabel(choice.app)}`}
+              </option>)}
+              {filters.app && filters.topic && !topicChoices.some((choice) => choice.app === filters.app && choice.topic === filters.topic) &&
+                <option value={JSON.stringify([filters.app, filters.topic])}>
+                  {activityTypeLabel({ app: filters.app, topic: filters.topic })}
+                </option>}
             </select>
             <div className="activity-dates">
               <label>From<input type="date" value={params.get('start') ?? ''}
@@ -237,14 +252,14 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
                 onClick={() => {
                   setPending([])
                   void history.refetch()
-                  void kinds.refetch()
+                  void topics.refetch()
                 }}><RefreshCw size={15} aria-hidden="true" /></button>
             </div>
           </div>
           {installed.isError && <p role="alert">Could not load app choices.{' '}
             <button type="button" onClick={() => void installed.refetch()}>Retry apps</button></p>}
-          {kinds.isError && <p role="alert">Could not load activity types.{' '}
-            <button type="button" onClick={() => void kinds.refetch()}>Retry types</button></p>}
+          {topics.isError && <p role="alert">Could not load activity types.{' '}
+            <button type="button" onClick={() => void topics.refetch()}>Retry types</button></p>}
           {history.isPending && <p className="activity-message" role="status">Loading activity…</p>}
           {history.isError && <div className="activity-message" role="alert">
             <p>Could not load activity. {events.length > 0 && 'The last read remains visible.'}</p>
@@ -361,7 +376,7 @@ function ActivityDetail({ event }: { event: FeedItem }) {
       <p>{appLabel(event.app || 'druks')}</p>
       <time dateTime={event.at}>{absTime(event.at)} {timezone}</time>
       <details><summary>Recorded references</summary><dl>
-        <dt>Activity type</dt><dd>{event.kind}</dd>
+        <dt>Activity type</dt><dd>{event.topic}</dd>
         {event.run && <><dt>Run</dt><dd>{event.run}</dd></>}
         {event.gate && <><dt>Gate</dt><dd>{event.gate}</dd></>}
         {event.parkedAt && <><dt>Request round</dt><dd>{event.parkedAt}</dd></>}

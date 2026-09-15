@@ -149,8 +149,9 @@ and only runs while the owner page is visible.
 
 ## Activity
 
-Activity at `/events` keeps its filters and selection in the URL. History, the
-live stream, and `/api/events/kinds` use the same filters. Day filters use the
+Activity at `/events` keeps its filters and selection in the URL. History and the
+live stream use the same filters. `/api/events/topics` returns app-owned topic
+choices. A type choice applies both its app and topic. Day filters use the
 operator timezone. The detail panel reads `/api/events/{seq}/destinations` to
 show which recorded work, run, and saved result still exist. Its owner links use
 the `subjectPath` target described above.
