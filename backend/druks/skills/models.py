@@ -2,10 +2,10 @@ from collections.abc import Collection
 from datetime import datetime
 
 from sqlalchemy import Boolean, ForeignKey, String, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from druks.core.models import Uuid7Pk
-from druks.database import db_session
 from druks.models import Base
 from druks.skills.datastructures import InstalledSkill
 
@@ -26,23 +26,18 @@ class SkillCollection(Base, Uuid7Pk):
     )
 
     @classmethod
-    async def list_all(cls) -> list["SkillCollection"]:
-        return list((await db_session().execute(select(cls).order_by(cls.name))).scalars())
+    async def list_all(cls, session: AsyncSession) -> list["SkillCollection"]:
+        return list((await session.execute(select(cls).order_by(cls.name))).scalars())
 
     @classmethod
-    async def get(cls, collection_id: str) -> "SkillCollection | None":
-        return await db_session().get(cls, collection_id)
-
-    @classmethod
-    async def get_for_source(cls, source: str) -> "SkillCollection | None":
-        result = await db_session().execute(select(cls).where(cls.source == source))
+    async def get_for_source(cls, session: AsyncSession, source: str) -> "SkillCollection | None":
+        result = await session.execute(select(cls).where(cls.source == source))
         return result.scalar_one_or_none()
 
     @classmethod
     async def create(
-        cls, *, source: str, name: str, skills: list[InstalledSkill]
+        cls, session: AsyncSession, *, source: str, name: str, skills: list[InstalledSkill]
     ) -> "SkillCollection":
-        session = db_session()
         collection = cls(source=source, name=name)
         collection.skills = [
             Skill(
@@ -58,9 +53,8 @@ class SkillCollection(Base, Uuid7Pk):
         return collection
 
     async def delete(self) -> None:
-        session = db_session()
-        await session.delete(self)
-        await session.flush()
+        await self.session.delete(self)
+        await self.session.flush()
 
 
 class Skill(Base, Uuid7Pk):
@@ -79,32 +73,37 @@ class Skill(Base, Uuid7Pk):
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
 
     @classmethod
-    async def installed_names(cls) -> set[str]:
-        return set((await db_session().execute(select(cls.name))).scalars())
+    async def installed_names(cls, session: AsyncSession) -> set[str]:
+        return set((await session.execute(select(cls.name))).scalars())
 
     @classmethod
-    async def list_enabled(cls) -> list["Skill"]:
+    async def list_enabled(cls, session: AsyncSession) -> list["Skill"]:
         # The operator's enabled catalog.
         stmt = select(cls).where(cls.enabled.is_(True)).order_by(cls.name)
-        return list(await db_session().scalars(stmt))
+        return list(await session.scalars(stmt))
 
     @classmethod
-    async def list_delivered(cls, requested: Collection[str]) -> list["Skill"]:
+    async def list_delivered(
+        cls, session: AsyncSession, requested: Collection[str]
+    ) -> list["Skill"]:
         # What one call receives: the enabled skills it named, or the whole enabled
         # catalog when it named none.
-        enabled = await cls.list_enabled()
+        enabled = await cls.list_enabled(session)
         if requested:
             return [skill for skill in enabled if skill.name in requested]
         return enabled
 
     @classmethod
-    async def delivery_excludes(cls, requested: Collection[str]) -> tuple[str, ...]:
+    async def delivery_excludes(
+        cls, session: AsyncSession, requested: Collection[str]
+    ) -> tuple[str, ...]:
         # Patterns are anchored to the skills_dir tar root (``-C skills_dir .``);
         # excluded skills remain installed on disk.
-        delivered = {skill.name for skill in await cls.list_delivered(requested)}
-        return tuple(f"./{name}" for name in sorted(await cls.installed_names() - delivered))
+        delivered = {skill.name for skill in await cls.list_delivered(session, requested)}
+        installed = await cls.installed_names(session)
+        return tuple(f"./{name}" for name in sorted(installed - delivered))
 
     @classmethod
-    async def get(cls, name: str) -> "Skill | None":
-        result = await db_session().execute(select(cls).where(cls.name == name))
+    async def get(cls, session: AsyncSession, name: str) -> "Skill | None":
+        result = await session.execute(select(cls).where(cls.name == name))
         return result.scalar_one_or_none()

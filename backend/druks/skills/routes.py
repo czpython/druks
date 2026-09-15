@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Body, HTTPException
 from githubkit.exception import RequestFailed, RequestTimeout
 
-from druks.api.dependencies import SettingsDep
-from druks.database import db_session
+from druks.api.dependencies import SessionDep, SettingsDep
 
 from .install import fetch_collection, remove_files
 from .models import Skill, SkillCollection
@@ -12,21 +11,24 @@ router = APIRouter(prefix="/api/skills", tags=["skills"])
 
 
 @router.get("", response_model=list[CollectionResponse])
-async def list_collections() -> list[SkillCollection]:
-    return await SkillCollection.list_all()
+async def list_collections(session: SessionDep) -> list[SkillCollection]:
+    return await SkillCollection.list_all(session)
 
 
 @router.post("", response_model=CollectionResponse)
 async def install_collection(
+    session: SessionDep,
     settings: SettingsDep,
     url: str = Body(..., embed=True),
 ) -> SkillCollection:
-    if await SkillCollection.get_for_source(url):
+    if await SkillCollection.get_for_source(session, url):
         raise HTTPException(
             status_code=409, detail=f"Collection {url!r} already installed; remove it first."
         )
     try:
-        contents = await fetch_collection(url, settings.skills_dir, await Skill.installed_names())
+        contents = await fetch_collection(
+            url, settings.skills_dir, await Skill.installed_names(session)
+        )
     except (ValueError, RequestFailed, RequestTimeout) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except OSError as error:
@@ -35,16 +37,20 @@ async def install_collection(
         raise HTTPException(
             status_code=500, detail=f"Could not write skills under {settings.skills_dir}: {error}"
         ) from error
-    return await SkillCollection.create(source=url, name=contents.name, skills=contents.skills)
+    return await SkillCollection.create(
+        session, source=url, name=contents.name, skills=contents.skills
+    )
 
 
 @router.post("/{collection_id}/sync", response_model=CollectionResponse)
-async def sync_collection(collection_id: str, settings: SettingsDep) -> SkillCollection:
-    collection = await SkillCollection.get(collection_id)
+async def sync_collection(
+    session: SessionDep, collection_id: str, settings: SettingsDep
+) -> SkillCollection:
+    collection = await session.get(SkillCollection, collection_id)
     if not collection:
         raise HTTPException(status_code=404, detail=f"Collection {collection_id!r} not found")
     current_skills = {skill.name: skill for skill in collection.skills}
-    reserved_names = await Skill.installed_names() - current_skills.keys()
+    reserved_names = await Skill.installed_names(session) - current_skills.keys()
     try:
         contents = await fetch_collection(collection.source, settings.skills_dir, reserved_names)
     except (ValueError, RequestFailed, RequestTimeout) as error:
@@ -75,27 +81,28 @@ async def sync_collection(collection_id: str, settings: SettingsDep) -> SkillCol
             )
         )
     collection.updated_at = SkillCollection.utc_now()
-    await db_session().flush()
+    await session.flush()
     return collection
 
 
 @router.patch("/{collection_id}/skills/{name}", response_model=SkillResponse)
 async def set_skill_enabled(
+    session: SessionDep,
     collection_id: str,
     name: str,
     enabled: bool = Body(..., embed=True),
 ) -> Skill:
-    skill = await Skill.get(name)
+    skill = await Skill.get(session, name)
     if not skill or skill.collection_id != collection_id:
         raise HTTPException(status_code=404, detail=f"Skill {name!r} not found")
     skill.enabled = enabled
-    await db_session().flush()
+    await session.flush()
     return skill
 
 
 @router.delete("/{collection_id}", status_code=204)
-async def remove_collection(collection_id: str) -> None:
-    collection = await SkillCollection.get(collection_id)
+async def remove_collection(session: SessionDep, collection_id: str) -> None:
+    collection = await session.get(SkillCollection, collection_id)
     if not collection:
         raise HTTPException(status_code=404, detail=f"Collection {collection_id!r} not found")
     for skill in collection.skills:
