@@ -511,7 +511,7 @@ async def test_body_level_invalid_output_retries_once_then_reraises(
 
 
 def _async_scrape(make):
-    async def latest_for(_cls, _harness, _account_id):
+    async def latest_for(_cls, _session, _harness, _account_id):
         return make()
 
     return latest_for

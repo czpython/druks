@@ -8,6 +8,7 @@ from conftest import (
     seed_note_run,
 )
 from druks.core.tasks import refresh_usage
+from druks.database import db_session
 from druks.harnesses.datastructures import ParsedMetric, ParsedUsage
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.models import Base
@@ -42,7 +43,7 @@ async def _scrape(
         parse_ok=not error,
         error=error,
     )
-    await row.save()
+    await row.save(db_session())
     return row
 
 
@@ -53,7 +54,7 @@ async def test_first_scrape_ignores_other_subscriptions(subscription) -> None:
     await _scrape(other_account, NOW)
     await _scrape(other_provider, NOW)
 
-    assert await UsageScrape.is_due(subscription, now=NOW)
+    assert await UsageScrape.is_due(db_session(), subscription, now=NOW)
 
 
 @pytest.mark.parametrize("count,minutes", [(1, 5), (2, 10), (3, 20), (4, 40), (5, 60), (6, 60)])
@@ -71,8 +72,10 @@ async def test_unchanged_scrapes_double_interval_to_one_hour(
         )
     due_at = NOW + timedelta(minutes=minutes)
 
-    assert not await UsageScrape.is_due(subscription, now=due_at - timedelta(seconds=1))
-    assert await UsageScrape.is_due(subscription, now=due_at)
+    assert not await UsageScrape.is_due(
+        db_session(), subscription, now=due_at - timedelta(seconds=1)
+    )
+    assert await UsageScrape.is_due(db_session(), subscription, now=due_at)
 
 
 @pytest.mark.parametrize(
@@ -93,8 +96,8 @@ async def test_changed_values_restart_the_interval(subscription, changes) -> Non
         await _scrape(subscription, NOW - timedelta(minutes=5 - index), **values)
     await _scrape(subscription, NOW, **(values | changes))
 
-    assert not await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=4))
-    assert await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=5))
+    assert not await UsageScrape.is_due(db_session(), subscription, now=NOW + timedelta(minutes=4))
+    assert await UsageScrape.is_due(db_session(), subscription, now=NOW + timedelta(minutes=5))
 
 
 @pytest.mark.parametrize("status", ["succeeded", "failed"])
@@ -108,7 +111,7 @@ async def test_finished_call_polls_on_the_next_tick(subscription, druks_db, stat
     call.finished_at = NOW + timedelta(seconds=1)
     await druks_db.flush()
 
-    assert await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=1))
+    assert await UsageScrape.is_due(druks_db, subscription, now=NOW + timedelta(minutes=1))
 
 
 @pytest.mark.parametrize("source", ["other_account", "other_provider", "api_key", "running", "old"])
@@ -138,7 +141,7 @@ async def test_unrelated_or_unfinished_calls_do_not_bypass_delay(
         call.finished_at = NOW
     await druks_db.flush()
 
-    assert not await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=1))
+    assert not await UsageScrape.is_due(druks_db, subscription, now=NOW + timedelta(minutes=1))
 
 
 @pytest.mark.parametrize("window", ["five_hour", "weekly"])
@@ -155,7 +158,7 @@ async def test_finished_call_bypasses_exhausted_window(subscription, druks_db, w
     call.finished_at = NOW + timedelta(seconds=1)
     await druks_db.flush()
 
-    assert await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=1))
+    assert await UsageScrape.is_due(druks_db, subscription, now=NOW + timedelta(minutes=1))
 
 
 async def test_soonest_exhausted_reset_controls_polling(subscription) -> None:
@@ -179,8 +182,8 @@ async def test_soonest_exhausted_reset_controls_polling(subscription) -> None:
         ],
     )
 
-    assert not await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=59))
-    assert await UsageScrape.is_due(subscription, now=NOW + timedelta(hours=1))
+    assert not await UsageScrape.is_due(db_session(), subscription, now=NOW + timedelta(minutes=59))
+    assert await UsageScrape.is_due(db_session(), subscription, now=NOW + timedelta(hours=1))
 
 
 @pytest.mark.parametrize("reset", [None, NOW - timedelta(seconds=1), NOW])
@@ -188,8 +191,8 @@ async def test_zero_without_a_future_reset_uses_normal_interval(subscription, re
     """An unknown or expired reset cannot block polling indefinitely."""
     await _scrape(subscription, NOW, five=0, reset=reset)
 
-    assert not await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=4))
-    assert await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=5))
+    assert not await UsageScrape.is_due(db_session(), subscription, now=NOW + timedelta(minutes=4))
+    assert await UsageScrape.is_due(db_session(), subscription, now=NOW + timedelta(minutes=5))
 
 
 @pytest.mark.parametrize("error", [None, "timeout"])
@@ -200,7 +203,7 @@ async def test_eight_idle_hours_need_at_most_twelve_polls(subscription, error) -
     for minute in range(0, 8 * 60 + 1, 5):
         now = NOW + timedelta(minutes=minute)
 
-        if await UsageScrape.is_due(subscription, now=now):
+        if await UsageScrape.is_due(db_session(), subscription, now=now):
             await _scrape(subscription, now, five=None if error else 50, error=error)
             polls += 1
 
@@ -230,4 +233,6 @@ async def test_task_polls_only_due_subscriptions(subscription, monkeypatch) -> N
     await refresh_usage._function()
 
     assert fetched == expected
-    assert (await UsageScrape.latest_for("openai", openai.account_id)).scraped_at == NOW
+    assert (
+        await UsageScrape.latest_for(db_session(), "openai", openai.account_id)
+    ).scraped_at == NOW

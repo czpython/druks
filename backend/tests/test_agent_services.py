@@ -468,7 +468,7 @@ async def test_get_usage_is_a_bounded_pure_read(druks_db, account):
                     "model": "Fable",
                 },
             ],
-        ).save()
+        ).save(druks_db)
 
     await druks_db.flush()
     usage = await services.get_usage(druks_db, account)

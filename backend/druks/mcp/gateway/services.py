@@ -116,7 +116,7 @@ async def get_usage(session: AsyncSession, account: Account) -> schemas.AgentUsa
     now = datetime.now(UTC)
     timezone, local_start = operator_local_day(load_settings().timezone, now)
     rows = await list_finished_calls(
-        account.id, since=local_start, until=local_start + timedelta(days=1)
+        session, account.id, since=local_start, until=local_start + timedelta(days=1)
     )
     spend = 0.0
     tokens = 0
@@ -146,10 +146,12 @@ async def _provider_usage(
             session, SecretKind.SUBSCRIPTION, Audience.provider(provider_id), account_id
         )
     )
-    row = await UsageScrape.latest_for(provider_id, account_id)
+    row = await UsageScrape.latest_for(session, provider_id, account_id)
     if not row:
         return schemas.AgentProviderUsage(id=provider_id, is_connected=is_connected)
-    history = await UsageScrape.history_for(provider_id, account_id, since=now - WEEK_RANGE)
+    history = await UsageScrape.history_for(
+        session, provider_id, account_id, since=now - WEEK_RANGE
+    )
     five_hour_cutoff = now - FIVE_HOUR_RANGE
     five_hour = [
         UsageHistoryPoint(t=point.scraped_at, pct=point.five_hour_percent_left)

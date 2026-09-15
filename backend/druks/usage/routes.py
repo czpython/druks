@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
@@ -59,7 +60,7 @@ async def get_usage(
         )
         summaries.append(
             _summarize(
-                await UsageScrape.latest_for(provider.id, account.id),
+                await UsageScrape.latest_for(session, provider.id, account.id),
                 provider=provider,
                 now=now,
                 connected=bool(subscription),
@@ -76,7 +77,7 @@ async def refresh_usage(session: SessionDep, account: Account = Depends(current_
         subscription = await VaultSecret.lookup(
             session, SecretKind.SUBSCRIPTION, Audience.provider(provider.id), account.id
         )
-        row = await UsageScrape.latest_for(provider.id, account.id)
+        row = await UsageScrape.latest_for(session, provider.id, account.id)
         age = _age_seconds(row.scraped_at, now=now) if row else None
         if subscription and (age is None or age >= _REFRESH_FLOOR_SECONDS):
             await provider.poll_usage(session, subscription)
@@ -87,11 +88,13 @@ async def refresh_usage(session: SessionDep, account: Account = Depends(current_
     response_model=UsageHistoryResponse,
     response_model_by_alias=True,
 )
-async def get_usage_history(account: Account = Depends(current_account)) -> UsageHistoryResponse:
+async def get_usage_history(
+    session: SessionDep, account: Account = Depends(current_account)
+) -> UsageHistoryResponse:
     now = datetime.now(UTC)
     return UsageHistoryResponse(
         providers=[
-            await _provider_history(provider.id, account.id, now=now)
+            await _provider_history(session, provider.id, account.id, now=now)
             for provider in get_providers()
         ],
     )
@@ -102,12 +105,14 @@ async def get_usage_history(account: Account = Depends(current_account)) -> Usag
     response_model=UsageTodayResponse,
     response_model_by_alias=True,
 )
-async def get_usage_today(account: Account = Depends(current_account)) -> UsageTodayResponse:
+async def get_usage_today(
+    session: SessionDep, account: Account = Depends(current_account)
+) -> UsageTodayResponse:
     # Deriving the operator-local-day window here (the query just takes it) keeps
     # this total identical to the sys-strip's and the agent surface's figures.
     timezone, local_start = operator_local_day(load_settings().timezone, datetime.now(UTC))
     rows = await list_finished_calls(
-        account.id, since=local_start, until=local_start + timedelta(days=1)
+        session, account.id, since=local_start, until=local_start + timedelta(days=1)
     )
     timezone_name = str(timezone)
 
@@ -134,7 +139,7 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
     # A call billed to the API key is charged to the installation.
     key_spend = dict.fromkeys(ids, 0.0)
     for model, cost_usd, _metadata, _finished_at in await list_finished_calls(
-        None, since=local_start, until=local_start + timedelta(days=1)
+        session, None, since=local_start, until=local_start + timedelta(days=1)
     ):
         provider = model.partition("/")[0]
         if provider in key_spend and cost_usd is not None:
@@ -159,9 +164,9 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
 
 
 async def _provider_history(
-    provider_id: str, account_id: str, *, now: datetime
+    session: AsyncSession, provider_id: str, account_id: str, *, now: datetime
 ) -> UsageProviderHistory:
-    rows = await UsageScrape.history_for(provider_id, account_id, since=now - WEEK_RANGE)
+    rows = await UsageScrape.history_for(session, provider_id, account_id, since=now - WEEK_RANGE)
     five_hour_cutoff = now - FIVE_HOUR_RANGE
     five_hour = [
         UsageHistoryPoint(t=row.scraped_at, pct=row.five_hour_percent_left)

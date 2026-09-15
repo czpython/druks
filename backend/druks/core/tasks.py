@@ -33,7 +33,7 @@ async def refresh_tokens() -> None:
 @task(every="*/5 * * * *")
 async def refresh_usage() -> None:
     for subscription in await VaultSecret.list_subscriptions(db_session()):
-        if await UsageScrape.is_due(subscription, now=Base.utc_now()):
+        if await UsageScrape.is_due(db_session(), subscription, now=Base.utc_now()):
             await get_provider(subscription.audience_name).poll_usage(db_session(), subscription)
 
 

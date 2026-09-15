@@ -4,9 +4,10 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import ForeignKey, Index, delete, select
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
-from druks.db import Base, db_session
+from druks.db import Base
 
 if TYPE_CHECKING:
     from druks.secrets.models import VaultSecret
@@ -49,7 +50,9 @@ class UsageScrape(Base):
     unlimited: Mapped[bool] = mapped_column(default=False)
 
     @classmethod
-    async def is_due(cls, subscription: "VaultSecret", *, now: datetime) -> bool:
+    async def is_due(
+        cls, session: AsyncSession, subscription: "VaultSecret", *, now: datetime
+    ) -> bool:
         """Scrape history, completed calls, and window resets determine when a poll is due."""
         # Cycle: durable.models loads harnesses, whose providers load UsageScrape.
         from druks.durable.models import AgentCall
@@ -63,7 +66,7 @@ class UsageScrape(Base):
             .order_by(cls.scraped_at.desc(), cls.id.desc())
             .limit(len(_POLL_INTERVAL_MINUTES))
         )
-        rows = list(await db_session().scalars(stmt))
+        rows = list(await session.scalars(stmt))
 
         if not rows:
             return True
@@ -73,7 +76,7 @@ class UsageScrape(Base):
             AgentCall.finished_at > latest_scrape.scraped_at,
         )
 
-        if await db_session().scalar(select(finished_call.exists())):
+        if await session.scalar(select(finished_call.exists())):
             return True
         exhausted_reset = latest_scrape.soonest_reset_after(
             latest_scrape.scraped_at, exhausted_only=True
@@ -95,18 +98,20 @@ class UsageScrape(Base):
         return now >= latest_scrape.scraped_at + interval
 
     @classmethod
-    async def latest_for(cls, provider_id: str, account_id: str) -> "UsageScrape | None":
+    async def latest_for(
+        cls, session: AsyncSession, provider_id: str, account_id: str
+    ) -> "UsageScrape | None":
         stmt = (
             select(cls)
             .where(cls.provider == provider_id, cls.account_id == account_id)
             .order_by(cls.scraped_at.desc())
             .limit(1)
         )
-        return (await db_session().execute(stmt)).scalar_one_or_none()
+        return (await session.execute(stmt)).scalar_one_or_none()
 
     @classmethod
     async def history_for(
-        cls, provider_id: str, account_id: str, *, since: datetime
+        cls, session: AsyncSession, provider_id: str, account_id: str, *, since: datetime
     ) -> list["UsageScrape"]:
         """The account's successful scrapes for ``provider_id`` since ``since``,
         oldest first. Feeds the usage page's trend sparklines / burn-rate
@@ -118,7 +123,7 @@ class UsageScrape(Base):
             .where(cls.parse_ok.is_(True))
             .order_by(cls.scraped_at.asc())
         )
-        return list((await db_session().execute(stmt)).scalars())
+        return list((await session.execute(stmt)).scalars())
 
     @property
     def quota(self) -> tuple[str | None, int | None, list[int | None]]:
@@ -152,18 +157,16 @@ class UsageScrape(Base):
         if resets:
             return min(resets)
 
-    async def save(self) -> None:
+    async def save(self, session: AsyncSession) -> None:
         if not self.scraped_at:
             self.scraped_at = Base.utc_now()
-        session = db_session()
         session.add(self)
         await session.flush()
 
     @classmethod
-    async def prune_older_than(cls, *, days: int) -> int:
+    async def prune_older_than(cls, session: AsyncSession, *, days: int) -> int:
         cutoff = Base.utc_now() - timedelta(days=days)
         stmt = delete(cls).where(cls.scraped_at < cutoff)
-        session = db_session()
         result = await session.execute(stmt)
         await session.flush()
         return result.rowcount
