@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from druks.accounts.models import Account
 from druks.apps.registry import services
-from druks.database import db_session
+from druks.db import db_session
 from druks.mcp import oauth
 from druks.secrets.enums import SecretKind
 from druks.secrets.exceptions import SecretRevokedError

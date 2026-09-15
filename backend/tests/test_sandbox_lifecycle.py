@@ -15,7 +15,7 @@ from drukbox_sdk.exceptions import (
     SandboxUnavailableError,
     SandboxValidationError,
 )
-from druks.database import db_session
+from druks.db import db_session
 from druks.harnesses.exceptions import HarnessSandboxProvisioningError, Retry
 from druks.harnesses.providers import AnthropicProvider
 from druks.sandbox import credentials as creds_module

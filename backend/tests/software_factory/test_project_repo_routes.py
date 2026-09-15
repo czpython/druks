@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from druks.database import db_session
+from druks.db import db_session
 from fastapi.testclient import TestClient
 
 

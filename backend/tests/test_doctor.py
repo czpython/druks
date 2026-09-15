@@ -8,7 +8,7 @@ import httpx
 import pytest
 from conftest import connect_service
 from druks import doctor
-from druks.database import db_session
+from druks.db import db_session
 from druks.sandbox.exceptions import TemplateNotFound
 from druks.secrets.models import VaultSecret
 from druks.testing import make_settings
@@ -16,7 +16,7 @@ from druks.testing import make_settings
 
 @asynccontextmanager
 async def _fixture_check_engine(_settings):
-    from druks.database import db_session
+    from druks.db import db_session
 
     yield db_session().bind
 

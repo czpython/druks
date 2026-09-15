@@ -13,7 +13,7 @@ from druks.contrib.software_factory.enums import Resolution
 from druks.contrib.software_factory.models import WorkItem
 from druks.contrib.software_factory.subscribers import pr_close_settles_the_item
 from druks.contrib.software_factory.workflows import Build, PullRequestReview
-from druks.database import db_session
+from druks.db import db_session
 from druks.durable.models import AgentCall, Artifact
 from druks.events.models import Event
 from druks.testing import seed_run

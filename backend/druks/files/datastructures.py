@@ -6,7 +6,7 @@ from pydantic import GetCoreSchemaHandler
 from pydantic_core import CoreSchema, core_schema
 
 from druks.core.models import uuid7_str
-from druks.database import db_session
+from druks.db import db_session
 from druks.files.constants import MAX_FILE_BYTES
 from druks.files.exceptions import FileTooLargeError, FileUnavailableError
 from druks.files.models import FileRecord

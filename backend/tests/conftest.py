@@ -11,7 +11,8 @@ from druks.apps.loader import (
     register_workflow_package,
 )
 from druks.apps.registry import services
-from druks.database import create_engine_from_url, db_session
+from druks.database import create_engine_from_url
+from druks.db import db_session
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
 from druks.harnesses.providers import AnthropicProvider
 from druks.models import Base
@@ -98,7 +99,7 @@ def _no_durable_dispatch(request):
     async def _dbos_cancel(workflow_id: str) -> None:
         # DBOS's half of Run.cancel(): without a launched engine the real call
         # raises, and derived state needs the terminal status it would write.
-        from druks.database import db_session
+        from druks.db import db_session
         from druks.durable.dbos_state import workflow_status
         from sqlalchemy import update
 
@@ -212,7 +213,7 @@ def _no_druks_namespace_fetches(monkeypatch):
 
 
 def bind_ambient_session(session) -> None:
-    from druks.database import db_session
+    from druks.db import db_session
 
     db_session.registry.set(session)
 
@@ -263,7 +264,7 @@ def make_agent_result(output, *, agent="agent", error=None, cost_usd=None, cost_
 
 async def finish_agent_run(call, *, status=None, last_error=None):
     # Mark a seeded AgentCall finished (prod builds finished rows via AgentCall.record).
-    from druks.database import db_session
+    from druks.db import db_session
     from druks.durable.enums import AgentCallStatus
 
     call.status = (status or AgentCallStatus.SUCCEEDED).value
@@ -292,7 +293,7 @@ async def seed_note_run(session, *, note=None, state: str = "running", **kwargs)
 
 async def seed_note_agent_run(*, agent: str = "implement", model: str = "openai/gpt-5.5", **kwargs):
     """A run on a fresh note with one agent call on it — the call is what the caller wants."""
-    from druks.database import db_session
+    from druks.db import db_session
     from druks.testing import seed_call
 
     session = db_session()

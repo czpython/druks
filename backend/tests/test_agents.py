@@ -7,7 +7,7 @@ import pytest
 from conftest import installation_key, make_agent_result
 from druks import agents
 from druks.accounts.models import Account
-from druks.database import db_session
+from druks.db import db_session
 from druks.durable import AgentCall, WorkflowError
 from druks.files import File
 from druks.sandbox.exceptions import SandboxDownloadError

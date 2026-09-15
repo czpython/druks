@@ -7,7 +7,7 @@ from urllib.parse import parse_qs
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
 
-from druks.database import db_session
+from druks.db import db_session
 from druks.notifications.buttons import decode_button
 from druks.notifications.exceptions import (
     AlreadyAcknowledgedError,

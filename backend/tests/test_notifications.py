@@ -2,7 +2,7 @@ from datetime import timedelta
 
 import pytest
 from druks.accounts.models import Account
-from druks.database import db_session
+from druks.db import db_session
 from druks.durable import Run
 from druks.models import Base
 from druks.notifications.exceptions import InvalidChoiceError

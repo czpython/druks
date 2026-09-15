@@ -2,7 +2,7 @@ from pathlib import Path
 
 from druks.api.dependencies import request_session
 from druks.api.server import SpaCacheControl, serve_spa
-from druks.database import db_session
+from druks.db import db_session
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 

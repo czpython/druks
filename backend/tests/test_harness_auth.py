@@ -8,7 +8,7 @@ import pytest
 from conftest import connect_provider, make_jwt
 from drukbox_sdk import Secret
 from druks.accounts.models import Account
-from druks.database import db_session
+from druks.db import db_session
 from druks.harnesses.claude import ClaudeHarness, _get_credentials
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings

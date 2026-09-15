@@ -5,7 +5,7 @@ import pytest
 from conftest import CONFIG_PROBE
 from dbos._error import DBOSWorkflowCancelledError
 from druks.accounts.models import Account
-from druks.database import db_session as ambient_session
+from druks.db import db_session as ambient_session
 from druks.durable.dbos_state import workflow_status
 from druks.durable.enums import RunState
 from druks.durable.models import Run

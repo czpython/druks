@@ -1,7 +1,7 @@
 from druks.browser.constants import SESSION_SIGNED_OUT_SIGNAL
 from druks.browser.enums import BrowserSessionStatus
 from druks.browser.models import StoredBrowserSession
-from druks.database import db_session
+from druks.db import db_session
 from druks.signals import subscribe
 
 

@@ -13,7 +13,7 @@ from conftest import (
 )
 from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.models import Account
-from druks.database import db_session
+from druks.db import db_session
 from druks.durable.models import Run
 from druks.harnesses.config import get_config
 from druks.harnesses.exceptions import HarnessNotConnectedError

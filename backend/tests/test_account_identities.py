@@ -1,5 +1,5 @@
 from druks.accounts.models import Account
-from druks.database import db_session
+from druks.db import db_session
 from druks.secrets.enums import IdentityStatus
 from druks.secrets.models import VaultSecret
 

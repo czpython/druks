@@ -6,7 +6,7 @@ import pytest
 from conftest import connect_service
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.apps.registry import mcp_servers
-from druks.database import db_session
+from druks.db import db_session
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings

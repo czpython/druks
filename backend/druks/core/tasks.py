@@ -1,6 +1,6 @@
 import logging
 
-from druks.database import db_session
+from druks.db import db_session
 from druks.files.storage import reap_deleted_file_bytes
 from druks.harnesses.datastructures import RotationResult
 from druks.harnesses.directory import refresh_added_catalogs

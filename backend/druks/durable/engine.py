@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Any
 from dbos import DBOS, DBOSConfig, Queue
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.database import create_async_engine_from_url, db_session, session_scope
+from druks.database import create_async_engine_from_url, session_scope
+from druks.db import db_session
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
 from druks.settings import load_settings
 from druks.user_settings.models import InstallationSettings

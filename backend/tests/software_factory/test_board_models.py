@@ -3,7 +3,7 @@ from druks.accounts.models import Account
 from druks.contrib.software_factory.enums import Status
 from druks.contrib.software_factory.exceptions import PrefixTakenError
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket, derive_prefix
-from druks.database import db_session
+from druks.db import db_session
 
 
 async def _open_repo(*, name="Druks", full_name="acme/druks"):

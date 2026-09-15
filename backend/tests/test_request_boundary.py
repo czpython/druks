@@ -1,6 +1,6 @@
 import pytest
 from druks.api.dependencies import SessionDep, request_session
-from druks.database import db_session
+from druks.db import db_session
 from druks.exceptions import SessionNotBoundError
 from druks.testing import _ProductionRequest, asgi_client
 from fastapi import Depends, FastAPI

@@ -30,13 +30,8 @@ import druks.user_settings.models  # noqa: F401
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.apps.loader import import_app_models, iter_apps
-from druks.database import (
-    _session_factory,
-    _unbound_session,
-    configure_session,
-    create_engine_from_url,
-    db_session,
-)
+from druks.database import configure_session, create_engine_from_url
+from druks.db import db_session
 from druks.durable import AgentCall, Run
 from druks.durable.datastructures import Subject
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA, workflow_status
@@ -87,7 +82,7 @@ def _test_session() -> AsyncSession:
     # harness task with no session gets its own on the fixture connection.
     if _in_request.get():
         raise SessionNotBoundError
-    return _session_factory()
+    return db_session.session_factory()
 
 
 class _ProductionRequest:
@@ -137,7 +132,7 @@ def pytest_configure(config) -> None:
     os.environ["DRUKS_REDIS_URL"] = TEST_REDIS_URL
     # App commits become savepoints inside the fixture's outer transaction, which
     # remains available for rollback at test teardown.
-    _session_factory.configure(join_transaction_mode="create_savepoint")
+    db_session.session_factory.configure(join_transaction_mode="create_savepoint")
     # A Workflow class resolves its declaring app at definition time, so
     # ownership must be claimed before collection imports a module that defines one.
     try:
@@ -195,12 +190,13 @@ async def druks_db(_druks_schema: None) -> AsyncIterator[AsyncSession]:
         expire_on_commit=False,
     )
     db_session.registry.set(session)
+    unbound = db_session.registry.createfunc
     db_session.registry.createfunc = _test_session
     try:
         yield session
     finally:
         _fixture_connection = None
-        db_session.registry.createfunc = _unbound_session
+        db_session.registry.createfunc = unbound
         await db_session.remove()
         configure_engine(None)
         if transaction.is_active:

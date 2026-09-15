@@ -7,7 +7,7 @@ import pytest
 from druks.accounts.constants import PAT_TOKEN_TAG
 from druks.accounts.exceptions import InvalidPatError
 from druks.accounts.models import Account, PersonalAccessToken
-from druks.database import db_session as session_registry
+from druks.db import db_session as session_registry
 from druks.models import Base
 from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
