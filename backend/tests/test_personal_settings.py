@@ -33,7 +33,7 @@ async def test_account_creation_copies_defaults_once(tmp_path, druks_db, monkeyp
     destination = await Destination.create(
         druks_db, name="New account gates", kind="slack_webhook", url="https://example.invalid/hook"
     )
-    installation = await InstallationSettings.get()
+    installation = await InstallationSettings.get_or_create(druks_db)
     await installation.update(gate_park_destination_id=destination.id)
     monkeypatch.setattr(
         "druks.accounts.models.load_settings",
@@ -162,11 +162,11 @@ async def test_migrations_preserve_preferences_and_installation_execution(druks_
     )
     assert await druks_db.scalar(text("SELECT to_regclass('personal_settings')")) is None
     druks_db.expunge_all()
-    assert (await InstallationSettings.get()).id == 1
+    assert (await InstallationSettings.get_or_create(druks_db)).id == 1
 
 
 async def test_the_database_refuses_duplicate_installation_settings(druks_db):
-    await InstallationSettings.get()
+    await InstallationSettings.get_or_create(druks_db)
     with pytest.raises(IntegrityError):
         async with druks_db.begin_nested():
             druks_db.add(InstallationSettings(id=2))
@@ -214,7 +214,7 @@ async def test_unattended_api_key_uses_installation_config_without_a_default_acc
     await VaultSecret.paste(
         druks_db, Audience.provider("anthropic"), "test-api-key", pasted_by=account
     )
-    installation = await InstallationSettings.get()
+    installation = await InstallationSettings.get_or_create(druks_db)
     await installation.update(default_billing="api_key", default_effort="low")
     assert await Account.get_default(druks_db) is None
 
@@ -228,7 +228,7 @@ async def test_unattended_api_key_uses_installation_config_without_a_default_acc
 async def test_accounts_share_execution_defaults_and_keep_their_own_subscriptions(druks_db):
     alice = await connect_anthropic_subscription("alice@example.com")
     bob = await connect_anthropic_subscription("bob@example.com")
-    installation = await InstallationSettings.get()
+    installation = await InstallationSettings.get_or_create(druks_db)
     personal = await druks_db.get(Account, bob.account_id)
     await personal.update_preferences(timezone="Europe/Madrid")
     await installation.update(default_effort="low", default_timeout=600, fast_mode=True)
@@ -241,7 +241,7 @@ async def test_accounts_share_execution_defaults_and_keep_their_own_subscription
         config = await get_config(druks_db, CONFIG_PROBE.id, account_id)
         assert config.subscription.id == subscription.id
         assert (config.effort, config.timeout, config.fast_mode) == ("low", 600, True)
-    await SettingsOverride.set_agent_effort(CONFIG_PROBE.id, "high")
+    await SettingsOverride.set_agent_effort(druks_db, CONFIG_PROBE.id, "high")
     for account_id in (None, alice.account_id, bob.account_id):
         assert (await get_config(druks_db, CONFIG_PROBE.id, account_id)).effort == "high"
 
@@ -251,7 +251,7 @@ async def test_personal_api_is_scoped_and_does_not_retime_schedules(
 ):
     calls = []
 
-    async def apply_schedules():
+    async def apply_schedules(druks_db):
         calls.append("retimed")
 
     monkeypatch.setattr("druks.user_settings.routes.apply_schedules", apply_schedules)
@@ -309,7 +309,7 @@ async def test_shared_agent_overrides_use_installation_settings_after_a_personal
         )
 
     assert response.status_code == 200
-    assert await SettingsOverride.read(f"agent_harness:{CONFIG_PROBE.id}") == "claude"
+    assert await SettingsOverride.read(druks_db, f"agent_harness:{CONFIG_PROBE.id}") == "claude"
 
 
 async def test_notification_default_only_seeds_new_accounts(tmp_path, druks_db):

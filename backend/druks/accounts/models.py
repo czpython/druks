@@ -90,7 +90,7 @@ class Account(Base, Uuid7Pk):
         account = await cls.get_for_username(session, username)
         if account:
             return account
-        installation = await InstallationSettings.get()
+        installation = await InstallationSettings.get_or_create(session)
         await session.execute(
             insert(cls)
             .values(

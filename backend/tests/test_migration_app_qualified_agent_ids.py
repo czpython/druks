@@ -33,11 +33,13 @@ async def _column(druks_db, statement: str) -> list[str]:
 
 
 async def test_bundled_agent_overrides_and_steps_take_the_apps_name(druks_db):
-    await SettingsOverride.set_agent_model("implement", "openai/gpt-5.5")
-    await SettingsOverride.set_agent_effort("review_pull_request", "low")
+    await SettingsOverride.set_agent_model(druks_db, "implement", "openai/gpt-5.5")
+    await SettingsOverride.set_agent_effort(druks_db, "review_pull_request", "low")
     # An agent of an app the migration does not know keeps its flat name.
-    await SettingsOverride.set_agent_timeout("engage", 90)
-    await SettingsOverride.set_workflow_setting("software_factory.build", "review_code", False)
+    await SettingsOverride.set_agent_timeout(druks_db, "engage", 90)
+    await SettingsOverride.set_workflow_setting(
+        druks_db, "software_factory.build", "review_code", False
+    )
     await seed_run(druks_db, kind="software_factory.build", run_id="build-run", state="failed")
     await seed_run(druks_db, kind="x_me.engage", run_id="engage-run", state="failed")
     for run_id, function_id, step in (

@@ -4,9 +4,9 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.apps.settings import field_choice_source, field_kind
-from druks.database import db_session
 
 from .models import InstallationSettings, SettingsOverride
 from .schemas import (
@@ -23,13 +23,15 @@ if TYPE_CHECKING:
 
 
 async def get_agent_setting(
-    agent: "Agent", *, settings: InstallationSettings
+    session: AsyncSession, agent: "Agent", *, settings: InstallationSettings
 ) -> AgentSettingResponse:
-    harness = await SettingsOverride.agent_harness(agent.id, settings=settings)
-    model = await SettingsOverride.agent_model(agent.id, settings=settings)
-    billing = await SettingsOverride.agent_billing(agent.id, settings=settings)
-    effort = await SettingsOverride.agent_effort(agent.id, settings=settings)
-    timeout = await SettingsOverride.agent_timeout(agent.id, agent.timeout, settings=settings)
+    harness = await SettingsOverride.agent_harness(session, agent.id, settings=settings)
+    model = await SettingsOverride.agent_model(session, agent.id, settings=settings)
+    billing = await SettingsOverride.agent_billing(session, agent.id, settings=settings)
+    effort = await SettingsOverride.agent_effort(session, agent.id, settings=settings)
+    timeout = await SettingsOverride.agent_timeout(
+        session, agent.id, agent.timeout, settings=settings
+    )
     return AgentSettingResponse(
         name=agent.id,
         label=agent.name or agent.id.rsplit(".", 1)[-1],
@@ -62,19 +64,22 @@ async def list_live_choices(model: type[BaseModel]) -> dict[str, list[tuple[str,
 
 
 async def get_settings_field(
-    name: str, field: FieldInfo, *, value: Any, override_key: str
+    session: AsyncSession, name: str, field: FieldInfo, *, value: Any, override_key: str
 ) -> SettingsFieldResponse:
-    overridden = bool(await db_session().get(SettingsOverride, override_key))
+    overridden = bool(await session.get(SettingsOverride, override_key))
     return SettingsFieldResponse.from_field(name, field, value=value, overridden=overridden)
 
 
-async def get_workflow_settings(workflow: "type[Workflow]") -> WorkflowSettingsResponse:
+async def get_workflow_settings(
+    session: AsyncSession, workflow: "type[Workflow]"
+) -> WorkflowSettingsResponse:
     kind = workflow.kind
     fields = [
         await get_settings_field(
+            session,
             name,
             field,
-            value=await SettingsOverride.workflow_setting(kind, name, field.default),
+            value=await SettingsOverride.workflow_setting(session, kind, name, field.default),
             override_key=f"workflow:{kind}:{name}",
         )
         for name, field in workflow.Settings.model_fields.items()
@@ -91,28 +96,29 @@ async def get_workflow_settings(workflow: "type[Workflow]") -> WorkflowSettingsR
                 # "cron" is a UI kind like enum/secret: the frontend renders
                 # cadence presets with a raw-cron escape hatch.
                 type="cron",
-                value=await workflow.get_schedule(),
+                value=await workflow.get_schedule(session),
                 default=workflow.every,
                 choices=None,
                 section="",
                 visible_when_field="",
                 visible_when_values=[],
                 secret_set=None,
-                overridden=await SettingsOverride.read(f"workflow:{kind}:schedule") is not None,
+                overridden=await SettingsOverride.read(session, f"workflow:{kind}:schedule")
+                is not None,
             ),
             SettingsFieldResponse(
                 name="schedule_enabled",
                 label=f"{label} enabled",
                 help="Pause the scheduled run without losing its cadence.",
                 type="bool",
-                value=await workflow.has_enabled_schedule(),
+                value=await workflow.has_enabled_schedule(session),
                 default=True,
                 choices=None,
                 section="",
                 visible_when_field="",
                 visible_when_values=[],
                 secret_set=None,
-                overridden=await SettingsOverride.read(f"workflow:{kind}:schedule_enabled")
+                overridden=await SettingsOverride.read(session, f"workflow:{kind}:schedule_enabled")
                 is not None,
             ),
         ]
@@ -120,7 +126,7 @@ async def get_workflow_settings(workflow: "type[Workflow]") -> WorkflowSettingsR
 
 
 async def get_app_settings(
-    app: "type[App]", *, settings: InstallationSettings
+    session: AsyncSession, app: "type[App]", *, settings: InstallationSettings
 ) -> AppSettingsResponse:
     model = app.settings_model
     return AppSettingsResponse(
@@ -128,19 +134,23 @@ async def get_app_settings(
         description=app.description,
         icon=app.icon,
         builtin=app.builtin,
-        agents=[await get_agent_setting(agent, settings=settings) for agent in app.agents()],
+        agents=[
+            await get_agent_setting(session, agent, settings=settings) for agent in app.agents()
+        ],
         # Surface only the workflows with operator knobs: tunable settings or a
         # schedule to retune.
         workflows=[
-            await get_workflow_settings(workflow)
+            await get_workflow_settings(session, workflow)
             for workflow in app.workflows()
             if workflow.Settings.model_fields or workflow.every
         ],
         settings=[
             await get_settings_field(
+                session,
                 name,
                 field,
                 value=await SettingsOverride.app_setting(
+                    session,
                     app.name,
                     name,
                     field.default,

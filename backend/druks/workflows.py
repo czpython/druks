@@ -24,6 +24,7 @@ from dbos._error import (
     DBOSWorkflowCancelledError,
 )
 from pydantic import BaseModel, Field, create_model
+from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_utils import uuid7
 
 from druks.accounts.context import current_account_id
@@ -36,7 +37,7 @@ from druks.apps.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
-from druks.database import get_session
+from druks.database import db_session, get_session
 from druks.durable.activity import set_run_phase
 from druks.durable.datastructures import Subject
 from druks.durable.engine import (
@@ -928,22 +929,24 @@ class Workflow:
     # operator override → the declared default. The reconciler and the settings
     # read both go through these, so the workflow owns its own knobs.
     @classmethod
-    async def get_schedule(cls) -> str | None:
-        return await SettingsOverride.workflow_setting(cls.kind, "schedule", cls.every)
+    async def get_schedule(cls, session: AsyncSession) -> str | None:
+        return await SettingsOverride.workflow_setting(session, cls.kind, "schedule", cls.every)
 
     @classmethod
-    async def has_enabled_schedule(cls) -> bool:
+    async def has_enabled_schedule(cls, session: AsyncSession) -> bool:
         # There is a schedule and it's on — False for unscheduled workflows too.
         if not cls.every:
             return False
-        return await SettingsOverride.workflow_setting(cls.kind, "schedule_enabled", True)
+        return await SettingsOverride.workflow_setting(session, cls.kind, "schedule_enabled", True)
 
     @classmethod
     async def settings(cls) -> BaseModel:
         """The workflow's ``Settings``, resolved through the override store — the read
         twin of ``override_setting``, like ``App.settings()`` for an app."""
         values = {
-            name: await SettingsOverride.workflow_setting(cls.kind, name, field.default)
+            name: await SettingsOverride.workflow_setting(
+                db_session(), cls.kind, name, field.default
+            )
             for name, field in cls.Settings.model_fields.items()
         }
         return cls.Settings.model_validate(values)
@@ -965,7 +968,7 @@ class Workflow:
             validate_setting_override(
                 cls.Settings, (await cls.settings()).model_dump(), field, value
             )
-        await SettingsOverride.set_workflow_setting(cls.kind, field, value)
+        await SettingsOverride.set_workflow_setting(db_session(), cls.kind, field, value)
 
     @classmethod
     def _validate_subject(cls, subject: "Subject | StoredSubject | None") -> None:

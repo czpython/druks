@@ -178,8 +178,8 @@ async def test_a_codex_subscription_config_carries_its_login_facts_and_its_ref(d
         },
         provider_email="a@example.com",
     )
-    await SettingsOverride.set_agent_harness(CONFIG_PROBE.id, "codex")
-    await SettingsOverride.set_agent_model(CONFIG_PROBE.id, "openai/gpt-5.5")
+    await SettingsOverride.set_agent_harness(druks_db, CONFIG_PROBE.id, "codex")
+    await SettingsOverride.set_agent_model(druks_db, CONFIG_PROBE.id, "openai/gpt-5.5")
 
     config = await get_config(druks_db, CONFIG_PROBE.id, subscription.account_id)
 
@@ -205,7 +205,7 @@ async def test_a_subscription_agent_refuses_without_the_actors_own_subscription(
 async def test_a_key_agent_runs_on_the_installations_key_for_anyone(druks_db):
     actor = await connect_anthropic_subscription("a@example.com")
     pasted = await _key()
-    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "api_key")
+    await SettingsOverride.set_agent_billing(druks_db, CONFIG_PROBE.id, "api_key")
 
     as_actor = await get_config(druks_db, CONFIG_PROBE.id, actor.account_id)
     unattended = await get_config(druks_db, CONFIG_PROBE.id, None)
@@ -222,7 +222,7 @@ async def test_a_key_agent_runs_on_the_installations_key_for_anyone(druks_db):
 
 async def test_a_key_agent_refuses_without_the_key(druks_db):
     actor = await connect_anthropic_subscription("a@example.com")
-    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "api_key")
+    await SettingsOverride.set_agent_billing(druks_db, CONFIG_PROBE.id, "api_key")
 
     with pytest.raises(HarnessNotConnectedError, match="add the Anthropic API key"):
         await get_config(druks_db, CONFIG_PROBE.id, actor.account_id)
@@ -242,9 +242,11 @@ async def test_an_added_provider_refuses_until_its_transport_is_proven(druks_db)
         "sk-openrouter",
         pasted_by=await Account.get_or_create(druks_db, "ops@example.com"),
     )
-    await SettingsOverride.set_agent_harness(CONFIG_PROBE.id, "opencode")
-    await SettingsOverride.set_agent_model(CONFIG_PROBE.id, "openrouter/anthropic/claude-sonnet-4")
-    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "api_key")
+    await SettingsOverride.set_agent_harness(druks_db, CONFIG_PROBE.id, "opencode")
+    await SettingsOverride.set_agent_model(
+        druks_db, CONFIG_PROBE.id, "openrouter/anthropic/claude-sonnet-4"
+    )
+    await SettingsOverride.set_agent_billing(druks_db, CONFIG_PROBE.id, "api_key")
 
     with pytest.raises(AgentConfigError, match="'openrouter'"):
         await get_config(druks_db, CONFIG_PROBE.id, None)
@@ -255,9 +257,9 @@ async def test_an_added_provider_without_a_key_names_it(druks_db):
     await ProviderCatalog.create(
         druks_db, "groq", [{"id": "groq/llama-4", "label": "Llama 4"}], label="Groq"
     )
-    await SettingsOverride.set_agent_harness(CONFIG_PROBE.id, "opencode")
-    await SettingsOverride.set_agent_model(CONFIG_PROBE.id, "groq/llama-4")
-    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "api_key")
+    await SettingsOverride.set_agent_harness(druks_db, CONFIG_PROBE.id, "opencode")
+    await SettingsOverride.set_agent_model(druks_db, CONFIG_PROBE.id, "groq/llama-4")
+    await SettingsOverride.set_agent_billing(druks_db, CONFIG_PROBE.id, "api_key")
 
     with pytest.raises(HarnessNotConnectedError, match="add the Groq API key in Settings"):
         await get_config(druks_db, CONFIG_PROBE.id, None)
@@ -281,8 +283,8 @@ async def test_an_added_provider_runs_only_on_an_unbound_cli_and_its_own_models(
 async def test_a_key_only_harness_bills_the_key(druks_db):
     await connect_anthropic_subscription("a@example.com")
     await _key()
-    await SettingsOverride.set_agent_harness(CONFIG_PROBE.id, "opencode")
-    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "api_key")
+    await SettingsOverride.set_agent_harness(druks_db, CONFIG_PROBE.id, "opencode")
+    await SettingsOverride.set_agent_billing(druks_db, CONFIG_PROBE.id, "api_key")
 
     config = await get_config(druks_db, CONFIG_PROBE.id, None)
 
@@ -292,7 +294,7 @@ async def test_a_key_only_harness_bills_the_key(druks_db):
 
 async def test_a_stored_triple_no_harness_runs_refuses(druks_db):
     await connect_anthropic_subscription("a@example.com")
-    await SettingsOverride.set_agent_harness(CONFIG_PROBE.id, "opencode")
+    await SettingsOverride.set_agent_harness(druks_db, CONFIG_PROBE.id, "opencode")
 
     with pytest.raises(AgentConfigError, match="opencode runs on an API key only"):
         await get_config(druks_db, CONFIG_PROBE.id, None)
@@ -300,9 +302,9 @@ async def test_a_stored_triple_no_harness_runs_refuses(druks_db):
 
 async def test_effort_timeout_and_fast_mode_follow_the_defaults_and_overrides(druks_db):
     await connect_anthropic_subscription("a@example.com")
-    settings = await InstallationSettings.get()
+    settings = await InstallationSettings.get_or_create(druks_db)
     await settings.update(default_effort="low", default_timeout=600, fast_mode=True)
-    await SettingsOverride.set_agent_effort(DECLARED.id, "medium")
+    await SettingsOverride.set_agent_effort(druks_db, DECLARED.id, "medium")
 
     probe = await get_config(druks_db, CONFIG_PROBE.id, None)
     declared = await get_config(druks_db, DECLARED.id, None)
@@ -320,7 +322,7 @@ async def test_an_agent_reads_its_own_config(druks_db):
 
     token = current_workflow.set(SimpleNamespace(account_id=None))
     subscribed = await CONFIG_PROBE.get_config()
-    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "api_key")
+    await SettingsOverride.set_agent_billing(druks_db, CONFIG_PROBE.id, "api_key")
     keyed = await CONFIG_PROBE.get_config()
     current_workflow.reset(token)
     with pytest.raises(WorkflowError, match="only inside a workflow"):
@@ -349,12 +351,14 @@ async def test_two_apps_declare_the_same_agent_name(druks_db):
 
     try:
         await connect_anthropic_subscription("a@example.com")
-        await SettingsOverride.set_agent_effort(BugHunter.file_tickets.id, "low")
+        await SettingsOverride.set_agent_effort(druks_db, BugHunter.file_tickets.id, "low")
         declared = (Ticketing.agents(), BugHunter.agents())
         ticketing = await get_config(druks_db, Ticketing.file_tickets.id, None)
         bug_hunter = await get_config(druks_db, BugHunter.file_tickets.id, None)
         settings = [
-            await reads.get_agent_setting(agent, settings=await InstallationSettings.get())
+            await reads.get_agent_setting(
+                druks_db, agent, settings=await InstallationSettings.get_or_create(druks_db)
+            )
             for agent in (Ticketing.file_tickets, BugHunter.file_tickets)
         ]
     finally:
