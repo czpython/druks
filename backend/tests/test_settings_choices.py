@@ -53,7 +53,10 @@ def test_choice_metadata_ignores_absent_values_and_schema_callbacks(metadata):
     assert validate_field_choice_details(MetadataApp.Settings.model_fields["policy"]) == {}
 
 
-STATUSES = [("todo", "Todo (unstarted)"), ("done", "Done (completed)")]
+STATUSES = [
+    {"value": "todo", "label": "Todo", "group": "To Do"},
+    {"value": "done", "label": "Done", "group": "Done"},
+]
 SOURCE_CALLS = []
 
 
@@ -76,8 +79,8 @@ async def test_live_choices_call_each_source_once_and_skip_empty_fields():
     SOURCE_CALLS.clear()
 
     assert await list_live_choices(_LiveSettings) == {
-        "status": [("", ""), *STATUSES],
-        "resting": [("", ""), *STATUSES],
+        "status": [{"value": "", "label": ""}, *STATUSES],
+        "resting": [{"value": "", "label": ""}, *STATUSES],
     }
     assert len(SOURCE_CALLS) == 1
 

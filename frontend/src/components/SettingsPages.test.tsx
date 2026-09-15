@@ -565,7 +565,7 @@ describe('SettingsPages app fields', () => {
     stubFetch()
     const choices = vi
       .spyOn(api, 'getAppSettingChoices')
-      .mockResolvedValue({ trigger_status: [['Agent Queue', 'Agent Queue (unstarted)']] })
+      .mockResolvedValue({ trigger_status: [{ value: 'Agent Queue', label: 'Agent Queue', group: 'To do' }] })
     renderSettings('/apps/software_factory/settings')
 
     const statusField = (await screen.findByText('Trigger status')).closest('.set-field')
@@ -575,8 +575,8 @@ describe('SettingsPages app fields', () => {
       return found as HTMLSelectElement
     })
     expect(Array.from(select.options, (option) => [option.value, option.text])).toEqual([
-      ['Agent Queue', 'Agent Queue (unstarted)'],
-      ['Ready for Agent', 'Ready for Agent'],
+      ['Agent Queue', 'Agent Queue'],
+      ['Ready for Agent', 'Ready for Agent (current value, not found in available choices)'],
     ])
     expect(select.value).toBe('Ready for Agent')
     expect(statusField?.textContent).toContain('A ticket entering this status opens a build.')
@@ -596,7 +596,7 @@ describe('SettingsPages app fields', () => {
     fireEvent.change(await screen.findByLabelText('Trigger status'), {
       target: { value: 'Agent Queue' },
     })
-    answer({ trigger_status: [['', ''], ['Todo', 'Todo (unstarted)']] })
+    answer({ trigger_status: [{ value: '', label: '' }, { value: 'Todo', label: 'Todo', group: 'To do' }] })
 
     const select = await waitFor(() => {
       const found = screen.getByText('Trigger status').closest('.set-field')?.querySelector('select')

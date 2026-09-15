@@ -47,7 +47,7 @@ async def get_agent_setting(
     )
 
 
-async def list_live_choices(model: type[BaseModel]) -> dict[str, list[tuple[str, str]]]:
+async def list_live_choices(model: type[BaseModel]) -> dict[str, list[dict[str, str]]]:
     """The live choices of each field that has any, keyed by field name, after an empty
     choice. Fields that share a source share one call."""
     sources = {
@@ -57,7 +57,9 @@ async def list_live_choices(model: type[BaseModel]) -> dict[str, list[tuple[str,
     }
     results = {source: await source() for source in set(sources.values())}
     return {
-        name: [("", ""), *results[source]] for name, source in sources.items() if results[source]
+        name: [{"value": "", "label": ""}, *results[source]]
+        for name, source in sources.items()
+        if results[source]
     }
 
 

@@ -22,7 +22,7 @@ async def connected_tracker(request, monkeypatch, druks_db):
     await SoftwareFactory.override_setting("tracker", request.param)
     statuses = AsyncMock(
         return_value=[
-            (name, name)
+            {"value": name, "label": name}
             for name in ("Ready for Agent", "In Progress", "In Review", "Done", "Backlog")
         ]
     )

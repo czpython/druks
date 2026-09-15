@@ -23,8 +23,8 @@ class Tracker(ABC):
     async def __aexit__(self, *exc) -> None:
         await self.aclose()
 
-    async def list_status_choices(self) -> list[tuple[str, str]]:
-        """The status names an operator can pick, as ``(name, label)`` pairs."""
+    async def list_status_choices(self) -> list[dict[str, str]]:
+        """The status choices, with a stored value, label, and optional group."""
         return []
 
     @abstractmethod

@@ -1,4 +1,5 @@
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -76,6 +77,11 @@ class JiraClient:
             body["fields"] = {"resolution": {"id": chosen["id"]}}
         await self._request("POST", f"/rest/api/3/issue/{key}/transitions", json=body)
 
-    async def list_statuses(self):
-        """The statuses of every active workflow. Browse projects is enough to read them."""
+    async def list_statuses(self, *, project_key: str = ""):
+        """Statuses in a project's workflows, or all active workflows when no project is set."""
+        if project_key:
+            groups = await self._request(
+                "GET", f"/rest/api/3/project/{quote(project_key, safe='')}/statuses"
+            )
+            return [status for group in groups for status in group["statuses"]]
         return await self._request("GET", "/rest/api/3/status")

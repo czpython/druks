@@ -1,3 +1,5 @@
+import { Fragment, useState } from 'react'
+
 import { CronField } from './CronField'
 import { Field, Select, Textarea, TextInput } from './Control'
 
@@ -8,7 +10,7 @@ interface SettingFieldProps {
   /** A field kind. The pane renders boolean fields as toggle rows. */
   type: string
   choices?: string[] | null
-  choiceDetails?: Record<string, { label: string; help: string }>
+  choiceDetails?: Record<string, { label: string; help: string; group?: string }>
   multiline?: boolean
   // Whether a secret is already stored; the value itself never leaves the server.
   secretSet?: boolean | null
@@ -39,23 +41,56 @@ function FieldControl({
   onChange,
   disabled,
 }: ControlProps) {
-  if (type === 'enum') {
+  const [query, setQuery] = useState('')
+  if (type === 'enum' || type === 'choices') {
     if (!choices?.length) {
       return <span className="set-field-error">{label} declares no choices</span>
     }
+    const needle = query.trim().toLocaleLowerCase()
+    const matches = choices.filter((choice) => {
+      const detail = choiceDetails?.[choice]
+      return `${detail?.label ?? choice} ${detail?.group ?? ''}`.toLocaleLowerCase().includes(needle)
+    })
+    const groups = new Map<string, string[]>()
+    for (const choice of choices) {
+      const detail = choiceDetails?.[choice]
+      if (type === 'choices' && choice && choice !== value && !matches.includes(choice)) continue
+      const group = detail?.group ?? ''
+      groups.set(group, [...(groups.get(group) ?? []), choice])
+    }
     return (
-      <Select
-        aria-label={label}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-      >
-        {choices.map((choice) => (
-          <option key={choice} value={choice}>
-            {choiceDetails?.[choice]?.label ?? choice.replaceAll('_', ' ')}
-          </option>
-        ))}
-      </Select>
+      <>
+        {type === 'choices' && (
+          <TextInput
+            type="search"
+            aria-label={`Search ${label}`}
+            placeholder="Search choices"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            disabled={disabled}
+          />
+        )}
+        <Select
+          aria-label={label}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
+        >
+          {[...groups].map(([group, values]) => {
+            const options = values.map((choice) => (
+              <option key={choice} value={choice}>
+                {choiceDetails?.[choice]?.label ?? choice.replaceAll('_', ' ')}
+              </option>
+            ))
+            return group
+              ? <optgroup key={group} label={group}>{options}</optgroup>
+              : <Fragment key="">{options}</Fragment>
+          })}
+        </Select>
+        {type === 'choices' && needle && matches.length === 0 && (
+          <span className="set-field-help" role="status">No choices match. The current value stays selected.</span>
+        )}
+      </>
     )
   }
 

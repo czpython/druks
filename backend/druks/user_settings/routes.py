@@ -124,7 +124,7 @@ async def get_app_settings() -> AppsSettingsResponse:
 
 
 @router.get("/apps/{name}/choices")
-async def get_app_setting_choices(name: str) -> dict[str, list[tuple[str, str]]]:
+async def get_app_setting_choices(name: str) -> dict[str, list[dict[str, str]]]:
     """The live choices of an app's settings. The settings page asks when it opens the app."""
     try:
         model = get_app(name).settings_model
