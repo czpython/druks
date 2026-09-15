@@ -280,7 +280,7 @@ class WorkItem(StoredSubject):
     ) -> "WorkItem":
         session = db_session()
         item = cls(
-            project_id=project_id,
+            project=await session.get(Project, project_id),
             source=source,
             title=title,
             ticket_key=ticket_key,
