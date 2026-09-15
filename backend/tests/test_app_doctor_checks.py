@@ -94,7 +94,7 @@ async def test_coherent_stored_settings_pass(
     installed, tmp_path: Path, druks_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await SettingsOverride.set_app_setting(
-        "software_factory", "trigger_status", "Agent Queue", is_secret=False
+        druks_db, "software_factory", "trigger_status", "Agent Queue", is_secret=False
     )
     monkeypatch.setattr(doctor, "_check_engine", _fixture_check_engine)
 

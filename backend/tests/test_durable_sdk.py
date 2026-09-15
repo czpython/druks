@@ -380,7 +380,7 @@ async def rt():
     ) = _build_units()
     os.environ["DRUKS_DATABASE_URL"] = URL
     init_dbos()
-    await launch()  # also runs await apply_schedules() for daily_sweep
+    await launch()  # also runs await apply_schedules(druks_db) for daily_sweep
     try:
         yield SimpleNamespace(
             engine=engine,
@@ -1042,8 +1042,8 @@ async def test_apply_schedules_drops_undeclared(rt):
     DBOS.create_schedule(schedule_name="stale_cron", workflow_fn=fn, schedule=cls.every)
     assert "stale_cron" in {s["schedule_name"] for s in DBOS.list_schedules()}
 
-    async with session_scope(rt.engine):
-        await apply_schedules()
+    async with session_scope(rt.engine) as session:
+        await apply_schedules(session)
 
     live = {s["schedule_name"] for s in DBOS.list_schedules()}
     assert "stale_cron" not in live  # undeclared → dropped
@@ -1066,23 +1066,23 @@ async def test_apply_schedules_resolves_operator_overrides(rt):
 
     # Each write commits — a bare test-task session stays idle-in-transaction
     # and its row locks deadlock any later test touching the same rows.
-    async with session_scope(rt.engine):
-        await SettingsOverride.write("workflow:daily_sweep:schedule", "0 9 * * *")
-    async with session_scope(rt.engine):
-        await apply_schedules()
+    async with session_scope(rt.engine) as session:
+        await SettingsOverride.write(session, "workflow:daily_sweep:schedule", "0 9 * * *")
+    async with session_scope(rt.engine) as session:
+        await apply_schedules(session)
     assert sweep_cron() == "0 9 * * *"  # override wins over the declared default
 
-    async with session_scope(rt.engine):
-        await SettingsOverride.write("workflow:daily_sweep:schedule_enabled", False)
-    async with session_scope(rt.engine):
-        await apply_schedules()
+    async with session_scope(rt.engine) as session:
+        await SettingsOverride.write(session, "workflow:daily_sweep:schedule_enabled", False)
+    async with session_scope(rt.engine) as session:
+        await apply_schedules(session)
     assert sweep_cron() is None  # paused → no schedule, nothing fires
 
-    async with session_scope(rt.engine):
-        await SettingsOverride.write("workflow:daily_sweep:schedule", None)
-        await SettingsOverride.write("workflow:daily_sweep:schedule_enabled", None)
-    async with session_scope(rt.engine):
-        await apply_schedules()
+    async with session_scope(rt.engine) as session:
+        await SettingsOverride.write(session, "workflow:daily_sweep:schedule", None)
+        await SettingsOverride.write(session, "workflow:daily_sweep:schedule_enabled", None)
+    async with session_scope(rt.engine) as session:
+        await apply_schedules(session)
     assert sweep_cron() == "0 6 * * *"  # overrides cleared → declared default
 
 
@@ -1092,8 +1092,8 @@ async def test_session_scope_commits_writes(rt):
     from druks.database import session_scope
     from druks.user_settings.models import SettingsOverride
 
-    async with session_scope(rt.engine):
-        await SettingsOverride.write("session_scope_commit_probe", {"landed": True})
+    async with session_scope(rt.engine) as session:
+        await SettingsOverride.write(session, "session_scope_commit_probe", {"landed": True})
 
     session = get_session(rt.engine)
     try:
@@ -1114,16 +1114,16 @@ async def test_apply_schedules_evaluates_cron_in_installation_timezone(rt, monke
         rows = {s["schedule_name"]: s["cron_timezone"] for s in DBOS.list_schedules()}
         return rows.get("daily_sweep")
 
-    async with session_scope(rt.engine):
-        await apply_schedules()
+    async with session_scope(rt.engine) as session:
+        await apply_schedules(session)
     assert sweep_timezone() == "UTC"  # the settings default
 
     from druks.durable import engine
 
     settings = engine.load_settings().model_copy(update={"timezone": "Europe/Madrid"})
     monkeypatch.setattr(engine, "load_settings", lambda: settings)
-    async with session_scope(rt.engine):
-        await apply_schedules()
+    async with session_scope(rt.engine) as session:
+        await apply_schedules(session)
     assert sweep_timezone() == "Europe/Madrid"
 
 
@@ -1136,10 +1136,10 @@ async def test_user_settings_get_recreates_the_singleton(rt):
 
     async with session_scope(rt.engine):
         await db_session().execute(delete(InstallationSettings))
-    async with session_scope(rt.engine):
-        assert (await InstallationSettings.get()).default_harness == "claude"
-    async with session_scope(rt.engine):
-        assert (await InstallationSettings.get()).id == 1
+    async with session_scope(rt.engine) as session:
+        assert (await InstallationSettings.get(session)).default_harness == "claude"
+    async with session_scope(rt.engine) as session:
+        assert (await InstallationSettings.get(session)).id == 1
 
 
 async def test_a_run_hydrates_the_subject_row_it_was_started_for(rt):

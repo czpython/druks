@@ -253,7 +253,7 @@ async def test_running_call_visible_then_finished(
     transcript has a row to stream onto, and is finished once it returns."""
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     await installation_key()
-    await SettingsOverride.set_agent_billing(DUMMY_AGENT.id, billing)
+    await SettingsOverride.set_agent_billing(druks_db, DUMMY_AGENT.id, billing)
     during: dict[str, object] = {}
 
     async def _run_agent(*, call_id, config, **_kwargs):
@@ -873,7 +873,7 @@ async def test_api_key_billing_hands_claude_a_placeholder(
 
     pasted = await installation_key()
     key = pasted.secrets["value"]
-    await SettingsOverride.set_agent_billing(DUMMY_AGENT.id, "api_key")
+    await SettingsOverride.set_agent_billing(druks_db, DUMMY_AGENT.id, "api_key")
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     seen: list[dict] = []
     keys: list[str] = []

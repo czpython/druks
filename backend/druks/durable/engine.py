@@ -68,7 +68,7 @@ def register_schedule(
     _scheduled.append((cls, _sched_entry))
 
 
-async def apply_schedules() -> None:
+async def apply_schedules(session: AsyncSession) -> None:
     # Declared crons name the schedule set; the operator's settings overrides only
     # retune or pause a declared name, never add one — so an undeclared sys-db
     # schedule is a renamed/removed cron: drop it. The workflow class owns its
@@ -84,8 +84,8 @@ async def apply_schedules() -> None:
     timezone = load_settings().timezone
     for cls, fn in _scheduled:
         await DBOS.delete_schedule_async(cls.kind)
-        cron = await cls.get_schedule()
-        if await cls.has_enabled_schedule() and cron:
+        cron = await cls.get_schedule(session)
+        if await cls.has_enabled_schedule(session) and cron:
             await DBOS.create_schedule_async(
                 schedule_name=cls.kind, workflow_fn=fn, schedule=cron, cron_timezone=timezone
             )
@@ -95,10 +95,10 @@ async def launch() -> None:
     # Called with the serving loop running, so DBOS captures it as the main
     # loop and async steps share it.
     DBOS.launch()
-    async with session_scope(_step_engine()):
+    async with session_scope(_step_engine()) as session:
         # Commit the singleton before concurrent settings requests can create it.
-        await InstallationSettings.get()
-        await apply_schedules()
+        await InstallationSettings.get(session)
+        await apply_schedules(session)
 
 
 def shutdown() -> None:
