@@ -3,6 +3,7 @@ import shlex
 from pathlib import Path
 
 from drukbox_sdk import Secret
+from druks.database import db_session
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
@@ -31,6 +32,7 @@ async def test_claude_build_invocation_carries_every_flag():
         effort="high",
         sandbox=_sandbox_config(),
     ).build_invocation(
+        db_session(),
         identity={"email": "op@example.com"},
         prompt="hello",
         schema=schema,
@@ -87,6 +89,7 @@ async def test_codex_build_invocation_carries_every_flag():
         effort="high",
         sandbox=_sandbox_config(),
     ).build_invocation(
+        db_session(),
         identity={"email": "op@example.com", "account_id": "acc-1"},
         prompt="hello",
         schema={"type": "object"},
@@ -148,6 +151,7 @@ async def test_claude_reads_its_key_from_a_placeholder_in_the_vm():
     inv = await ClaudeHarness(
         model="anthropic/claude-x", fast_mode=False, effort=None, sandbox=_sandbox_config()
     ).build_invocation(
+        db_session(),
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",
@@ -174,6 +178,7 @@ async def test_codex_reads_its_key_from_a_placeholder_in_the_vm():
     inv = await CodexHarness(
         model=_CODEX_MODEL, fast_mode=False, effort=None, sandbox=_sandbox_config()
     ).build_invocation(
+        db_session(),
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",

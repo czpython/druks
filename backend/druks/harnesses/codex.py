@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from drukbox_sdk import Secret
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.database import db_session
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
@@ -399,6 +399,7 @@ class CodexHarness(Harness):
 
     async def build_invocation(
         self,
+        session: AsyncSession,
         *,
         prompt: str,
         schema: dict[str, object],
@@ -440,7 +441,7 @@ class CodexHarness(Harness):
             name=self.name,
             args=tuple(cmd),
             stdin=_with_final_message_note(prompt).encode("utf-8"),
-            credentials=await self._get_credentials(sandbox, skills=skills),
+            credentials=await self._get_credentials(session, sandbox, skills=skills),
             env=extra_env,
             extra_artifact_filenames=("output.json", "session.jsonl"),
         )
@@ -515,7 +516,7 @@ class CodexHarness(Harness):
         return args
 
     async def _get_credentials(
-        self, sandbox: SandboxSettings, *, skills: tuple[str, ...] = ()
+        self, session: AsyncSession, sandbox: SandboxSettings, *, skills: tuple[str, ...] = ()
     ) -> Credentials:
         config_dir = sandbox.harness_config_root / self.name
         skills_dir = sandbox.skills_dir or config_dir / "skills"
@@ -526,7 +527,7 @@ class CodexHarness(Harness):
                 HomeCopy(
                     ".codex/skills",
                     skills_dir,
-                    excludes=await Skill.delivery_excludes(db_session(), skills),
+                    excludes=await Skill.delivery_excludes(session, skills),
                 ),
             )
         )

@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from druks.database import db_session
 from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import (
     HarnessError,
@@ -90,6 +91,7 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
         env_headers={"X-Trace-Key": "MCP_TRACE_KEY"},
     )
     invocation = await _harness().build_invocation(
+        db_session(),
         prompt="A large prompt stays on stdin.",
         schema={"type": "object", "properties": {"answer": {"type": "string"}}},
         run_id="run-1",
@@ -156,6 +158,7 @@ async def test_third_party_invocation_keeps_provider_key_and_model_namespace() -
     )
 
     invocation = await harness.build_invocation(
+        db_session(),
         prompt="Run it.",
         schema={"type": "object"},
         run_id="run-openrouter",

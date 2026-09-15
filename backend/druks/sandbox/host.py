@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Self
 import asyncssh
 from drukbox_sdk import SandboxHost as SandboxHostRecord
 from drukbox_sdk.exceptions import SandboxAPIError, SandboxUnavailableError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.core.utils.time import ensure_utc
 from druks.durable.enums import AgentCallStatus
@@ -201,6 +202,7 @@ class Host:
 
     async def run_agent(
         self,
+        session: AsyncSession,
         *,
         agent: str,
         config: "AgentConfig",
@@ -241,6 +243,7 @@ class Host:
         output: Any = None
         try:
             output = await self.run_prompt(
+                session,
                 harness,
                 prompt=prompt,
                 schema=schema,
@@ -278,6 +281,7 @@ class Host:
 
     async def run_prompt(
         self,
+        session: AsyncSession,
         harness: "Harness",
         *,
         prompt: str,
@@ -300,10 +304,11 @@ class Host:
         persist_manifest(
             artifact_dir,
             call_id=run_id,
-            manifest=await harness.get_manifest(mcp_servers=mcp_servers, skills=skills),
+            manifest=await harness.get_manifest(session, mcp_servers=mcp_servers, skills=skills),
         )
 
         invocation = await harness.build_invocation(
+            session,
             prompt=prompt,
             schema=schema,
             run_id=run_id,
