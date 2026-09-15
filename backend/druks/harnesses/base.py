@@ -180,7 +180,9 @@ class Harness(ABC):
             "model": self.model or "",
             "harness": self.name,
             "mcp_servers": mcp,
-            "skills_delivered": sorted(skill.name for skill in await Skill.list_delivered(skills)),
+            "skills_delivered": sorted(
+                skill.name for skill in await Skill.list_delivered(db_session(), skills)
+            ),
         }
         canonical = json.dumps(capability, sort_keys=True, separators=(",", ":"))
         return {

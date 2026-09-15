@@ -32,6 +32,7 @@ async def _seed_repo() -> ProjectRepo:
 
 async def _seed_skills(*names: str, disabled: tuple[str, ...] = ()) -> None:
     collection = await SkillCollection.create(
+        db_session(),
         source="test",
         name="test skills",
         skills=[

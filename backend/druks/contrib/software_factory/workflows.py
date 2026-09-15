@@ -227,7 +227,9 @@ class Build(Workflow):
             assignee_name=self.input.assignee_name,
             assignee_email=self.input.assignee_email,
             related_repos=await project_repo.siblings(),
-            skills=await Skill.list_delivered(self._profile.get("recommended_skills", [])),
+            skills=await Skill.list_delivered(
+                db_session(), self._profile.get("recommended_skills", [])
+            ),
             review_code=self._settings.review_code,
             review_mode=(await get_review_actor()).mode,
             journal=self.journal,
@@ -443,7 +445,7 @@ class Profile(Workflow):
             baseline = await SoftwareFactory.repo_profiler(repo=project_repo.full_name)
             # A skill can be disabled after the prompt renders, so read the enabled
             # skills again.
-            enabled = {skill.name for skill in await Skill.list_enabled()}
+            enabled = {skill.name for skill in await Skill.list_enabled(db_session())}
             baseline["recommended_skills"] = [
                 name for name in baseline["recommended_skills"] if name in enabled
             ]
@@ -461,7 +463,7 @@ class Profile(Workflow):
             "repo": (await ProjectRepo.get(self.input.repo_id)).full_name,
             "skills_catalog": [
                 {"name": skill.name, "description": skill.description}
-                for skill in await Skill.list_enabled()
+                for skill in await Skill.list_enabled(db_session())
             ],
             **await super().get_prompt_context(**context),
         }
