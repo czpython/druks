@@ -142,8 +142,18 @@ class SoftwareFactory(App):
     checks = [check_tracker_identity, check_review_identity]
 
     @classmethod
-    async def get_settings_problems(cls) -> dict[str, str]:
-        problems = await super().get_settings_problems()
+    async def get_settings_problems(cls, *, fields: set[str] | None = None) -> dict[str, str]:
+        problems = await super().get_settings_problems(fields=fields)
+        status_fields = (
+            "trigger_status",
+            "in_progress_status",
+            "in_review_status",
+            "done_status",
+            "resting_status",
+        )
+        # Save a tracker selection before its status choices can be loaded.
+        if fields is not None and not fields.intersection(status_fields):
+            return problems
         settings = await cls.settings()
         if settings.tracker not in ("linear", "jira"):
             return problems
@@ -159,13 +169,7 @@ class SoftwareFactory(App):
                 )
                 return problems
         names = {name for name, _ in choices}
-        for field in (
-            "trigger_status",
-            "in_progress_status",
-            "in_review_status",
-            "done_status",
-            "resting_status",
-        ):
+        for field in status_fields:
             name = getattr(settings, field)
             if not name and field in ("in_review_status", "resting_status"):
                 continue

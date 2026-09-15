@@ -163,8 +163,8 @@ class App:
         return model.model_validate(values)
 
     @classmethod
-    async def get_settings_problems(cls) -> dict[str, str]:
-        """Field errors for save and doctor. Override for checks that require I/O."""
+    async def get_settings_problems(cls, *, fields: set[str] | None = None) -> dict[str, str]:
+        """Field errors for save and doctor. ``fields`` names edits; None checks all settings."""
         return (await cls.settings()).clean()
 
     @classmethod

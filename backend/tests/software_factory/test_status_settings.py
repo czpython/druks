@@ -57,6 +57,13 @@ async def test_optional_empty_statuses_pass(connected_tracker):
     assert await SoftwareFactory.get_settings_problems() == {}
 
 
+async def test_tracker_selection_can_be_saved_before_choosing_its_statuses(connected_tracker):
+    await SoftwareFactory.override_setting("trigger_status", "Status from another tracker")
+    assert await SoftwareFactory.get_settings_problems(fields={"tracker"}) == {}
+    connected_tracker.assert_not_awaited()
+    assert "trigger_status" in await SoftwareFactory.get_settings_problems()
+
+
 @pytest.mark.parametrize("field", ["trigger_status", "in_progress_status", "done_status"])
 async def test_required_empty_statuses_are_field_errors(connected_tracker, field):
     await SoftwareFactory.override_setting(field, "")

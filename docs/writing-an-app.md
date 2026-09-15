@@ -1335,8 +1335,9 @@ review: Literal["human", "automatic"] = Field(
 )
 ```
 
-For checks that require I/O, override `async App.get_settings_problems()`.
-Call `await super().get_settings_problems()` to include `Settings.clean()` errors.
+For checks that require I/O, override `async App.get_settings_problems(*, fields=None)`.
+Call `await super().get_settings_problems(fields=fields)` to include `Settings.clean()` errors.
+Save passes the edited field names. Doctor passes `None` to check all settings.
 Return errors keyed by the settings field. Save rejects these errors, and
 doctor reports them. The normal settings read does not call this method.
 
