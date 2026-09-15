@@ -991,6 +991,7 @@ async def test_a_replay_resumes_the_ephemeral_box_through_its_identity(
         select(VaultSecret).where(VaultSecret.kind == SecretKind.SUBSCRIPTION)
     )
     identity, _ = await SandboxIdentity.create(
+        db_session(),
         run_id="wf-9",
         scoped_to="dummy",
         secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],
