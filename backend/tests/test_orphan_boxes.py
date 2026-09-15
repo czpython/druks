@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from conftest import connect_provider
 from druks.core import tasks
-from druks.database import db_session
+from druks.db import db_session
 from druks.durable.engine import _step_engine
 from druks.harnesses.providers import AnthropicProvider
 from druks.sandbox.models import SandboxIdentity, SecretRef

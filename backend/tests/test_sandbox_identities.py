@@ -6,7 +6,7 @@ import httpx
 import pytest
 from conftest import connect_provider, connect_service
 from druks.core.services import Github
-from druks.database import db_session
+from druks.db import db_session
 from druks.durable.engine import _step_engine
 from druks.harnesses import providers as pbase
 from druks.harnesses.providers import AnthropicProvider

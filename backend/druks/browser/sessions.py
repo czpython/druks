@@ -19,7 +19,7 @@ from druks.browser.exceptions import (
 )
 from druks.browser.locks import acquire_writer_lock, release_writer_lock
 from druks.browser.models import StoredBrowserSession
-from druks.database import db_session
+from druks.db import db_session
 from druks.sandbox.client import sandbox_client
 from druks.settings import load_settings
 

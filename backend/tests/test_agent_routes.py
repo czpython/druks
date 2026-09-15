@@ -10,7 +10,7 @@ from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Build, PullRequestReview
 from druks.core.apis.exceptions import LinearAPIError, UnknownTicketError
-from druks.database import db_session
+from druks.db import db_session
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
 from druks.durable.reads import read_transcript_chunk

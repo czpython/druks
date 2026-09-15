@@ -10,7 +10,7 @@ from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatu
 from druks.browser.exceptions import BrowserExportError, BrowserLoginWindowGoneError
 from druks.browser.login import LoginWindow, is_same_origin
 from druks.browser.models import StoredBrowserSession
-from druks.database import db_session
+from druks.db import db_session
 from druks.sandbox.datastructures import ExecResult
 from druks.testing import make_settings
 from fastapi import HTTPException, WebSocket

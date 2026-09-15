@@ -13,7 +13,7 @@ from druks.accounts.models import Account
 from druks.core.apis.github import get_github_client
 from druks.core.models import uuid7_str
 from druks.core.services import Github
-from druks.database import db_session
+from druks.db import db_session
 from druks.files.constants import MAX_FILE_BYTES
 from druks.files.datastructures import File
 from druks.files.exceptions import FileUnavailableError

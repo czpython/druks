@@ -5,7 +5,7 @@ from conftest import installation_key
 from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
 from druks.apps.base import App
-from druks.database import db_session
+from druks.db import db_session
 from druks.durable import AgentCall, Run
 from druks.durable.datastructures import Subject
 from druks.durable.reads import get_subject_statuses

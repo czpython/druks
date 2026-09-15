@@ -5,7 +5,7 @@ from urllib.parse import parse_qsl, urlparse
 
 import httpx
 import pytest
-from druks.database import db_session
+from druks.db import db_session
 from druks.redis import get_client
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret

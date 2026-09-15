@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import druks.agents as agent_module
 import druks.workflows as workflow_module
 import pytest
-from druks.database import db_session
+from druks.db import db_session
 from druks.sandbox import datastructures, templates
 from druks.sandbox.client import Client
 from druks.sandbox.datastructures import Sandbox

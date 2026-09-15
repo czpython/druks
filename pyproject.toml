@@ -99,9 +99,37 @@ target-version = "py311"
 extend-exclude = ["backend/migrations/versions"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = ["E", "F", "I", "UP", "B", "SIM", "TID251"]
 # SIM108 rewrites if/else into a ternary; formatter-wrapped ternaries are banned here, and plain if/else is the house form.
 ignore = ["SIM108"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# Internal code takes ``session: AsyncSession`` as a required parameter; only
+# author code and the seams that bind the registry read the ambient session.
+"druks.db.db_session".msg = "internal code takes session: AsyncSession; the ambient session is for author code and the session seams"
+"druks.database.db_session".msg = "internal code takes session: AsyncSession; the ambient session is for author code and the session seams"
+
+[tool.ruff.lint.per-file-ignores]
+# The seams that bind the registry, the author surface, and the author-style
+# entry points (tasks, subscribers, webhooks) read the ambient session.
+"backend/druks/database.py" = ["TID251"]
+"backend/druks/testing.py" = ["TID251"]
+"backend/druks/models.py" = ["TID251"]
+"backend/druks/durable/datastructures.py" = ["TID251"]
+"backend/druks/durable/engine.py" = ["TID251"]
+"backend/druks/workflows.py" = ["TID251"]
+"backend/druks/agents.py" = ["TID251"]
+"backend/druks/workspaces.py" = ["TID251"]
+"backend/druks/apps/base.py" = ["TID251"]
+"backend/druks/services/base.py" = ["TID251"]
+"backend/druks/files/datastructures.py" = ["TID251"]
+"backend/druks/browser/sessions.py" = ["TID251"]
+"backend/druks/browser/subscribers.py" = ["TID251"]
+"backend/druks/core/tasks.py" = ["TID251"]
+"backend/druks/core/webhooks/slack.py" = ["TID251"]
+"backend/druks/core/apis/github.py" = ["TID251"]
+"backend/druks/contrib/**" = ["TID251"]
+"backend/tests/**" = ["TID251"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI dependency markers are the documented way to declare injected

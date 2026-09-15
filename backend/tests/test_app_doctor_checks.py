@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from druks import doctor
 from druks.apps import App, AppSettings
-from druks.database import db_session
+from druks.db import db_session
 from druks.testing import make_settings
 from druks.user_settings.models import SettingsOverride
 from druks_field_notes.app import FieldNotes

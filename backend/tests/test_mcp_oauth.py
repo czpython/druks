@@ -10,7 +10,7 @@ import httpx
 import pytest
 from druks.accounts.models import Account
 from druks.apps.registry import mcp_servers
-from druks.database import db_session
+from druks.db import db_session
 from druks.mcp import oauth
 from druks.mcp.enums import IdentityMode, TokenSource
 from druks.mcp.exceptions import (
@@ -506,7 +506,7 @@ async def test_reconnect_after_disconnect_creates_a_new_grant(auth_server, druks
     state = dict(parse_qsl(urlparse(url).query))["state"]
     await oauth.complete_connect(druks_db, state=state, code="code-1")
 
-    from druks.database import db_session
+    from druks.db import db_session
 
     db_session().expunge_all()
     # A re-connect creates a new grant. The revoked row stays as history,

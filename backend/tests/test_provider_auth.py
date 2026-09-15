@@ -12,7 +12,7 @@ from drukbox_sdk import SandboxAPI
 from drukbox_sdk.exceptions import SandboxUnavailableError
 from druks.accounts.models import Account
 from druks.core import tasks
-from druks.database import db_session
+from druks.db import db_session
 from druks.harnesses import providers as pbase
 from druks.harnesses.datastructures import ParsedUsage
 from druks.harnesses.exceptions import HarnessNotConnectedError, OAuthTokenError

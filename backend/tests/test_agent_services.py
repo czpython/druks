@@ -8,7 +8,7 @@ from conftest import connect_anthropic_subscription, make_test_note, seed_note_r
 from druks.accounts.models import Account
 from druks.api import runs
 from druks.api.exceptions import RunNotActive, RunNotFailed, RunNotFound, SubjectBusy
-from druks.database import db_session
+from druks.db import db_session
 from druks.durable.engine import run_queue
 from druks.durable.enums import WorkflowEvent
 from druks.durable.exceptions import AgentCallNotFound

@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 import pytest
 from druks.accounts.models import Account
 from druks.core.webhooks.slack import SlackInteractivity, verify_slack_signature
-from druks.database import db_session as ambient_db_session
+from druks.db import db_session as ambient_db_session
 from druks.durable import Run
 from druks.models import Base
 from druks.notifications.buttons import encode_button

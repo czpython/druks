@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 from conftest import CONFIG_PROBE, connect_provider, installation_key, make_jwt
-from druks.database import db_session
+from druks.db import db_session
 from druks.durable.enums import AgentCallStatus
 from druks.harnesses.base import Harness
 from druks.harnesses.claude import ClaudeHarness

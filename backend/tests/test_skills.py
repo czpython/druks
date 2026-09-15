@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from druks.database import db_session
+from druks.db import db_session
 from druks.skills import install as install_mod
 from druks.skills import routes as routes_mod
 from druks.skills.datastructures import CollectionContents, InstalledSkill
