@@ -28,3 +28,7 @@ REGISTRY_CACHE_TTL_SECONDS = 300
 # Every dynamically-registered client pins this path as a redirect_uri, so
 # renaming it orphans existing registrations.
 OAUTH_CALLBACK_PATH = "/api/mcp-servers/oauth/callback"
+
+# Discovery and client registration together, so a slow provider cannot hold
+# the operator's Connect click for minutes.
+OAUTH_CONNECT_DEADLINE_SECONDS = 30

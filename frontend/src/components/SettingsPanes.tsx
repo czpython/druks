@@ -2323,6 +2323,7 @@ export function McpServersPane() {
   const [candidates, setCandidates] = useState<McpRegistryCandidate[] | null>(null)
   const [selected, setSelected] = useState<McpRegistryCandidate | null>(null)
   const [headerValues, setHeaderValues] = useState<Record<string, string>>({})
+  const [connectingName, setConnectingName] = useState<string | null>(null)
   const fieldId = useId()
   const servers = serversQuery.data ?? []
 
@@ -2435,11 +2436,19 @@ export function McpServersPane() {
 
   async function connect(name: string, identityMode: string) {
     setBusy(true)
+    setConnectingName(name)
     setError(null)
     // Opened synchronously, while the click's activation is still live — a tab
     // opened after the await reads as an unsolicited popup and gets blocked.
     const consentTab = window.open('', '_blank')
     try {
+      if (consentTab) {
+        consentTab.document.title = `Preparing sign-in for ${name}`
+        const message = consentTab.document.createElement('p')
+        message.textContent = `Preparing sign-in for ${name}…`
+        message.setAttribute('role', 'status')
+        consentTab.document.body.replaceChildren(message)
+      }
       const { authorizationUrl } = await api.connectMcpServer(name, identityMode)
       if (consentTab) consentTab.location.assign(authorizationUrl)
       else window.location.assign(authorizationUrl)
@@ -2447,6 +2456,7 @@ export function McpServersPane() {
       consentTab?.close()
       setError(e instanceof Error ? e.message : String(e))
     } finally {
+      setConnectingName(null)
       setBusy(false)
     }
   }
@@ -2503,6 +2513,7 @@ export function McpServersPane() {
                 key={server.name}
                 server={server}
                 busy={busy}
+                isConnecting={connectingName === server.name}
                 onToggle={toggle}
                 onRemove={remove}
                 onConnect={connect}
@@ -2717,6 +2728,7 @@ function tokenStatusLabel(server: McpServer): string {
 function McpServerRow({
   server,
   busy,
+  isConnecting,
   onToggle,
   onRemove,
   onConnect,
@@ -2724,6 +2736,7 @@ function McpServerRow({
 }: {
   server: McpServer
   busy: boolean
+  isConnecting: boolean
   onToggle: (name: string, isEnabled: boolean) => Promise<void>
   onRemove: (name: string) => Promise<void>
   onConnect: (name: string, identityMode: string) => Promise<void>
@@ -2746,6 +2759,7 @@ function McpServerRow({
         <span className="mcp-conn-dot" />
         {tokenStatusLabel(server)}
       </span>
+      {isConnecting && <p className="mcp-help" role="status">Preparing sign-in…</p>}
       <div className="mcp-row-foot">
         <span className="mcp-enable">
           <Switch

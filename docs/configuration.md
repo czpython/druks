@@ -610,6 +610,9 @@ is one of:
 - A static token, which Druks keeps in the vault
 - An OAuth connection, which requires `urls.endpoint`.
 
+Druks gives OAuth discovery and client registration 30 seconds in total.
+A timeout names the stage that was pending. Retry the connection.
+
 Druks delivers enabled servers through the selected harness unless an app
 workspace owns a required server with the same name. Each bearer token and
 each secret header is a Drukbox entry behind a vault row. The sandbox holds a

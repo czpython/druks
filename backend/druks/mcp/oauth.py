@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import secrets
@@ -13,7 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from druks.database import db_session
-from druks.mcp.constants import OAUTH_CALLBACK_PATH
+from druks.mcp.constants import OAUTH_CALLBACK_PATH, OAUTH_CONNECT_DEADLINE_SECONDS
 from druks.mcp.enums import IdentityMode
 from druks.mcp.exceptions import (
     GrantRefreshError,
@@ -35,7 +36,9 @@ logger = logging.getLogger(__name__)
 
 def _http() -> httpx.AsyncClient:
     # One construction point so the suite can swap in a MockTransport client.
-    return httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+    # A probe times out well inside the connect deadline, so one hung well-known
+    # URL still leaves time to try the next candidate.
+    return httpx.AsyncClient(timeout=10.0, follow_redirects=True)
 
 
 async def get_connection(name: str, account_id: str | None) -> VaultSecret | None:
@@ -231,49 +234,58 @@ async def begin_connect(
     render the consent URL. Nothing durable is written here — an abandoned
     consent simply expires."""
     redirect_uri = f"{endpoint.rstrip('/')}{OAUTH_CALLBACK_PATH}"
-    async with _http() as client:
-        authorization_server, resource = await _discover(client, name, server_url)
-        # Absent means the OAuth 2.1 baseline (S256); advertised-without-S256
-        # means the flow below cannot work — fail before the consent screen.
-        methods = authorization_server.get("code_challenge_methods_supported")
-        if methods is not None and "S256" not in methods:
-            raise OauthConnectError(name, "the authorization server does not support PKCE S256")
-        identity_provider = await _resolve_identity_provider(client, name, authorization_server)
-        provider_scopes = _supported_scopes(name, identity_provider)
-        scopes = ()
-        if "openid" in provider_scopes:
-            # A scope request replaces the provider's default grant, so it must
-            # also ask for the MCP resource's scopes.
-            identity_scopes = [
-                scope for scope in ("openid", "email", "profile") if scope in provider_scopes
-            ]
-            scopes = tuple(dict.fromkeys([*_supported_scopes(name, resource), *identity_scopes]))
-        registration = await _register_client(
-            client, name, authorization_server, redirect_uri, scopes
+    phase = "authorization discovery"
+    try:
+        async with asyncio.timeout(OAUTH_CONNECT_DEADLINE_SECONDS), _http() as client:
+            authorization_server, resource = await _discover(client, name, server_url)
+            # Absent means the OAuth 2.1 baseline (S256); advertised-without-S256
+            # means the flow below cannot work — fail before the consent screen.
+            methods = authorization_server.get("code_challenge_methods_supported")
+            if methods is not None and "S256" not in methods:
+                raise OauthConnectError(name, "the authorization server does not support PKCE S256")
+            phase = "identity discovery"
+            identity_provider = await _resolve_identity_provider(client, name, authorization_server)
+            provider_scopes = _supported_scopes(name, identity_provider)
+            scopes = ()
+            if "openid" in provider_scopes:
+                # A scope request replaces the provider's default grant, so it must
+                # also ask for the MCP resource's scopes.
+                identity_scopes = [
+                    scope for scope in ("openid", "email", "profile") if scope in provider_scopes
+                ]
+                scopes = tuple(
+                    dict.fromkeys([*_supported_scopes(name, resource), *identity_scopes])
+                )
+            phase = "client registration"
+            registration = await _register_client(
+                client, name, authorization_server, redirect_uri, scopes
+            )
+    except TimeoutError as error:
+        raise OauthConnectError(name, f"{phase} timed out. Retry the connection.") from error
+    else:
+        nonce = secrets.token_urlsafe(32)
+        return await OauthClient(
+            provider=Audience.mcp(name),
+            authorization_endpoint=authorization_server["authorization_endpoint"],
+            token_endpoint=authorization_server["token_endpoint"],
+            client_id=registration["client_id"],
+            client_secret=registration.get("client_secret", ""),
+            # RFC 8707: bind the tokens to the MCP server they are for.
+            extra_token_params={"resource": server_url},
+        ).begin_connect(
+            redirect_uri=redirect_uri,
+            scopes=scopes,
+            context={
+                "name": name,
+                "server_url": server_url,
+                "account_id": account_id,
+                "identity_mode": identity_mode,
+                "userinfo_endpoint": _same_origin_userinfo(identity_provider),
+                "issuer": identity_provider["issuer"],
+                "nonce": nonce,
+            },
+            extra_authorize_params={"resource": server_url, "nonce": nonce},
         )
-    nonce = secrets.token_urlsafe(32)
-    return await OauthClient(
-        provider=Audience.mcp(name),
-        authorization_endpoint=authorization_server["authorization_endpoint"],
-        token_endpoint=authorization_server["token_endpoint"],
-        client_id=registration["client_id"],
-        client_secret=registration.get("client_secret", ""),
-        # RFC 8707: bind the tokens to the MCP server they are for.
-        extra_token_params={"resource": server_url},
-    ).begin_connect(
-        redirect_uri=redirect_uri,
-        scopes=scopes,
-        context={
-            "name": name,
-            "server_url": server_url,
-            "account_id": account_id,
-            "identity_mode": identity_mode,
-            "userinfo_endpoint": _same_origin_userinfo(identity_provider),
-            "issuer": identity_provider["issuer"],
-            "nonce": nonce,
-        },
-        extra_authorize_params={"resource": server_url, "nonce": nonce},
-    )
 
 
 async def get_grant_identity(tokens: dict, pending: dict) -> tuple[dict, IdentityStatus]:
