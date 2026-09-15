@@ -219,7 +219,7 @@ async def test_task_polls_only_due_subscriptions(subscription, monkeypatch) -> N
     expected = [subscription.id, openai.id]
     fetched = []
 
-    async def fetch_usage(subscription, *, now=None):
+    async def fetch_usage(session, subscription, *, now=None):
         fetched.append(subscription.id)
         return ParsedUsage(ok=True, five_hour=ParsedMetric(percent_left=50, resets_at=None))
 
