@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from druks.api.dependencies import SessionDep
 from druks.harnesses.exceptions import OAuthTokenError
 
 from .exceptions import IdentityDenied
@@ -20,6 +21,7 @@ router = APIRouter(prefix="/api/secrets", tags=["secrets"])
 
 @router.get("/{identity_id}/{name}", include_in_schema=False)
 async def secret(
+    session: SessionDep,
     identity_id: str,
     name: str,
     bearer: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
@@ -33,7 +35,7 @@ async def secret(
         # Nothing in the request can pick another.
         ref = identity.get_secret_ref(name)
         value, expires_at = await ref.secret.issue_token(
-            ref.resource, host_id=identity.host_id or ""
+            session, ref.resource, host_id=identity.host_id or ""
         )
         # The identity can die during the source I/O.
         await SandboxIdentity.authenticate(identity_id, credential, name)

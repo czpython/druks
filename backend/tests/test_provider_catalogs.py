@@ -225,32 +225,32 @@ async def test_fetch_names_an_http_failure(monkeypatch, druks_db):
 async def test_refresh_stores_the_catalog_and_keeps_it_on_failure(monkeypatch, druks_db):
     await _claude_login()
     _mock_get(monkeypatch, _resp(200, {"data": [{"id": "claude-fable-5"}]}))
-    await AnthropicProvider.refresh_catalog()
-    [stored] = await ProviderCatalog.list_all()
+    await AnthropicProvider.refresh_catalog(druks_db)
+    [stored] = await ProviderCatalog.list_all(druks_db)
     assert stored.provider == "anthropic"
     assert stored.models == [{"id": "anthropic/claude-fable-5", "label": "claude-fable-5"}]
 
     _mock_get(monkeypatch, _resp(200, {"data": []}))
-    await AnthropicProvider.refresh_catalog()
-    [kept] = await ProviderCatalog.list_all()
+    await AnthropicProvider.refresh_catalog(druks_db)
+    [kept] = await ProviderCatalog.list_all(druks_db)
     assert kept.models == stored.models
 
 
 async def test_refresh_without_a_login_stores_nothing(monkeypatch, druks_db):
     calls = _mock_get(monkeypatch, _resp(200, {"data": [{"id": "claude-fable-5"}]}))
-    await AnthropicProvider.refresh_catalog()
+    await AnthropicProvider.refresh_catalog(druks_db)
     assert calls == []
-    assert await ProviderCatalog.list_all() == []
+    assert await ProviderCatalog.list_all(druks_db) == []
 
 
 async def test_openai_refresh_reads_its_own_list_over_the_key(monkeypatch, druks_db):
     account = await Account.get_or_create(druks_db, "op@example.com")
     await VaultSecret.paste(druks_db, Audience.provider("openai"), "sk-openai", pasted_by=account)
     calls = _mock_get(monkeypatch, _resp(200, {"data": [{"id": "gpt-5.5"}, {"id": "whisper-1"}]}))
-    await OpenAiProvider.refresh_catalog()
+    await OpenAiProvider.refresh_catalog(druks_db)
     assert calls[0]["url"] == "https://api.openai.com/v1/models"
     assert calls[0]["headers"] == {"Authorization": "Bearer sk-openai"}
-    [stored] = await ProviderCatalog.list_all()
+    [stored] = await ProviderCatalog.list_all(druks_db)
     assert stored.label == "OpenAI"
     assert stored.models == [{"id": "openai/gpt-5.5", "label": "gpt-5.5"}]
 
@@ -264,9 +264,9 @@ async def test_openai_refresh_reads_its_own_list_over_the_key(monkeypatch, druks
         monkeypatch,
         _resp(200, {"models": [{"slug": "gpt-5.6", "visibility": "list"}]}),
     )
-    await OpenAiProvider.refresh_catalog()
+    await OpenAiProvider.refresh_catalog(druks_db)
     assert calls[0]["url"].startswith("https://chatgpt.com/backend-api/codex/models")
-    [stored] = await ProviderCatalog.list_all()
+    [stored] = await ProviderCatalog.list_all(druks_db)
     assert [model["id"] for model in stored.models] == ["openai/gpt-5.6"]
 
 
@@ -300,11 +300,11 @@ async def test_directory_is_fetched_once_and_read_from_redis(monkeypatch, druks_
 async def test_adding_a_directory_provider_creates_its_catalog(monkeypatch, druks_db, druks_redis):
     _mock_get(monkeypatch, _resp(200, {"groq": _GROQ}))
 
-    added = await add_provider("groq")
+    added = await add_provider(druks_db, "groq")
 
     assert (added.provider, added.label, added.models) == ("groq", "Groq", [_LLAMA])
     with pytest.raises(KeyError):
-        await add_provider("nobody")
+        await add_provider(druks_db, "nobody")
 
 
 async def test_added_catalogs_refresh_from_the_directory(monkeypatch, druks_db, druks_redis):
@@ -313,9 +313,9 @@ async def test_added_catalogs_refresh_from_the_directory(monkeypatch, druks_db, 
     await VaultSecret.paste(druks_db, Audience.provider("anthropic"), "sk-ant", pasted_by=account)
     calls = _mock_get(monkeypatch, _resp(200, {"groq": _GROQ}))
 
-    await refresh_added_catalogs()
+    await refresh_added_catalogs(druks_db)
 
     # Only the added provider reads the directory; anthropic is registered.
     assert [call["url"] for call in calls] == ["https://models.dev/api.json"]
-    [stored] = await ProviderCatalog.list_all()
+    [stored] = await ProviderCatalog.list_all(druks_db)
     assert (stored.provider, stored.label) == ("groq", "Groq")

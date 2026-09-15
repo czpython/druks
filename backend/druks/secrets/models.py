@@ -381,7 +381,9 @@ class VaultSecret(Base, Uuid7Pk):
         self.revoked_reason = self.revoked_reason or reason
         self.secrets = {}
 
-    async def issue_token(self, resource: str, *, host_id: str = "") -> tuple[str, datetime | None]:
+    async def issue_token(
+        self, session: AsyncSession, resource: str, *, host_id: str = ""
+    ) -> tuple[str, datetime | None]:
         """The token a box fetches, and its expiry. A rotation skips the refresh
         request for ``host_id``, the box that asks."""
         if not self.is_live:
@@ -403,5 +405,7 @@ class VaultSecret(Base, Uuid7Pk):
             return await client.get_access_token(connection=self)
         from druks.harnesses.providers import get_provider
 
-        token = await get_provider(self.audience_name).issue_token(self.id, except_host_id=host_id)
+        token = await get_provider(self.audience_name).issue_token(
+            session, self.id, except_host_id=host_id
+        )
         return token.access_token, token.expires_at

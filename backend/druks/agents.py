@@ -150,7 +150,7 @@ class Agent:
         workflow = current_workflow.get(None)
         if not workflow:
             raise WorkflowError(f"agent {self.id!r} reads its config only inside a workflow")
-        return await get_config(self.id, workflow.account_id)
+        return await get_config(db_session(), self.id, workflow.account_id)
 
     async def __call__(
         self, *, contract: type[AgentOutput] | None = None, **context: object
@@ -207,7 +207,7 @@ class Agent:
             # recorded wait instead of re-reading the scrape.
             async with step_session():
                 # The scrape belongs to the subscription account.
-                config = await get_config(self.id, workflow.account_id)
+                config = await get_config(db_session(), self.id, workflow.account_id)
                 provider_id = config.model.partition("/")[0]
                 scrape = await UsageScrape.latest_for(provider_id, config.charged_account_id)
                 if scrape:
@@ -281,7 +281,7 @@ class Agent:
         workflow = current_workflow.get()
         # Refusing an unservable call here beats provisioning a VM and
         # 401ing mid-run.
-        config = await get_config(self.id, workflow.account_id)
+        config = await get_config(db_session(), self.id, workflow.account_id)
         model = config.model
         subscription_id = config.subscription.id if config.subscription else None
         api_key_id = config.api_key.id if config.api_key else None

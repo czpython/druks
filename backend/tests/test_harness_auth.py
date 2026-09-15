@@ -316,13 +316,13 @@ def test_an_unproven_provider_key_refuses_instead_of_entering_the_box():
 async def test_credential_without_a_selection_reads_the_accounts_row(druks_db):
     own = await _seed_claude(access="own", provider_email="a@example.com")
 
-    assert (await AnthropicProvider.get_subscription(own.account_id)).id == own.id
+    assert (await AnthropicProvider.get_subscription(druks_db, own.account_id)).id == own.id
 
 
 async def test_credential_without_any_row_raises(druks_db):
     account = await Account.get_or_create(druks_db, "a@example.com")
     with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
-        await AnthropicProvider.get_subscription(account.id)
+        await AnthropicProvider.get_subscription(druks_db, account.id)
 
 
 async def test_credential_for_a_deleted_row_raises(druks_db):
@@ -333,4 +333,4 @@ async def test_credential_for_a_deleted_row_raises(druks_db):
     # A disconnect between selection and push fails the call — it must never
     # fall through to another account's payload.
     with pytest.raises(HarnessNotConnectedError, match="removed"):
-        await AnthropicProvider.get_subscription(None, subscription_id=gone_id)
+        await AnthropicProvider.get_subscription(druks_db, None, subscription_id=gone_id)

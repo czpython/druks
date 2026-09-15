@@ -14,9 +14,9 @@ from urllib.parse import urlencode
 import httpx
 from drukbox_sdk import Secret
 from pydantic import TypeAdapter
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.core.utils.time import ensure_utc
-from druks.database import db_session
 from druks.redis import get_client
 from druks.sandbox import gate
 from druks.sandbox.client import sandbox_client
@@ -158,18 +158,18 @@ class Provider:
 
     @classmethod
     async def get_subscription(
-        cls, account_id: str | None, *, subscription_id: str | None = None
+        cls, session: AsyncSession, account_id: str | None, *, subscription_id: str | None = None
     ) -> VaultSecret:
         """The subscription a call runs with: the selected row, read fresh so a
         vanished one fails the call; else ``account_id``'s own. A miss raises."""
         if subscription_id:
-            if row := await VaultSecret.reload(db_session(), subscription_id):
+            if row := await VaultSecret.reload(session, subscription_id):
                 return row
             raise exceptions.HarnessNotConnectedError(
                 "the selected subscription was removed — reconnect it in Settings → Providers."
             )
         if row := await VaultSecret.lookup(
-            db_session(), SecretKind.SUBSCRIPTION, Audience.provider(cls.id), account_id
+            session, SecretKind.SUBSCRIPTION, Audience.provider(cls.id), account_id
         ):
             return row
         raise exceptions.HarnessNotConnectedError(
@@ -200,12 +200,14 @@ class Provider:
         raise NotImplementedError
 
     @classmethod
-    async def issue_token(cls, subscription_id: str, *, except_host_id: str = "") -> Token:
+    async def issue_token(
+        cls, session: AsyncSession, subscription_id: str, *, except_host_id: str = ""
+    ) -> Token:
         """The token a box can use now. A due token rotates first, while the
         subscription is idle or the token is urgent. The gate holds every other
         fetch and every new call until the rotation and its refresh requests end.
         Raises :class:`OAuthTokenError` when the row holds nothing valid."""
-        row = await VaultSecret.reload(db_session(), subscription_id)
+        row = await VaultSecret.reload(session, subscription_id)
         if row and cls.refresh_is_due(row):
             async with gate.shut(subscription_id) as is_idle:
                 if is_idle or cls.refresh_is_urgent(row):
@@ -213,14 +215,14 @@ class Provider:
                     # request. Wait for it, then read the row it advanced.
                     deadline = time.monotonic() + _TOKEN_REQUEST_TIMEOUT_SECONDS
                     rotation = await cls.rotate_token(
-                        subscription_id, except_host_id=except_host_id
+                        session, subscription_id, except_host_id=except_host_id
                     )
                     while rotation.action == "locked" and time.monotonic() < deadline:
                         await asyncio.sleep(_LOCK_POLL_SECONDS)
                         rotation = await cls.rotate_token(
-                            subscription_id, except_host_id=except_host_id
+                            session, subscription_id, except_host_id=except_host_id
                         )
-            row = await VaultSecret.reload(db_session(), subscription_id)
+            row = await VaultSecret.reload(session, subscription_id)
         if not row:
             raise exceptions.OAuthTokenError("no_credentials", "the subscription is disconnected")
         return cls.load_token(row)
@@ -228,6 +230,7 @@ class Provider:
     @classmethod
     async def rotate_token(
         cls,
+        session: AsyncSession,
         subscription_id: str,
         *,
         now: datetime | None = None,
@@ -240,7 +243,7 @@ class Provider:
         A refresh that succeeds requests a refresh for every live box on the
         subscription, except ``except_host_id``, whose answer carries it."""
         moment = now or _utc_now()
-        row = await VaultSecret.reload(db_session(), subscription_id)
+        row = await VaultSecret.reload(session, subscription_id)
         if not row:
             return RotationResult(
                 cls.id, "failed", error="no_credentials", subscription_id=subscription_id
@@ -263,7 +266,7 @@ class Provider:
         try:
             # Re-read after winning the lock: the previous holder may have
             # advanced this lineage (or deleted the row) after our first read.
-            row = await VaultSecret.reload(db_session(), subscription_id)
+            row = await VaultSecret.reload(session, subscription_id)
             if not row:
                 return RotationResult(
                     cls.id, "failed", error="no_credentials", subscription_id=subscription_id
@@ -286,8 +289,8 @@ class Provider:
                     # presenting it again can never succeed. Drop only this
                     # subscription so the provider reads as disconnected — the
                     # UI shows Reconnect and the next tick has no row to hammer.
-                    await row.revoke(db_session(), "invalid_grant")
-                    await db_session().commit()
+                    await row.revoke(session, "invalid_grant")
+                    await session.commit()
                     logger.warning(
                         "%s subscription %s auto-disconnected after invalid_grant; "
                         "reconnect to restore",
@@ -300,13 +303,13 @@ class Provider:
                     cls.id, "failed", error="bad_response", subscription_id=row.id
                 )
 
-            await row.update_secrets(db_session(), data, expires_at=new_expiry)
+            await row.update_secrets(session, data, expires_at=new_expiry)
             # The grant is externally anchored — the provider may have killed
             # the old refresh token the moment it issued this one — so the new
             # lineage must be committed before the lock releases; deferring to
             # the step's own commit would let a concurrent refresher take the
             # freed lock and re-present the superseded token.
-            await db_session().commit()
+            await session.commit()
             # The refresh requests go out before the lock releases: a rotation
             # ends the value every box on this subscription holds.
             await sandbox_client.request_refreshes(row.id, except_host_id=except_host_id)
@@ -358,7 +361,7 @@ class Provider:
 
     @classmethod
     async def fetch_usage(
-        cls, subscription: VaultSecret, *, now: datetime | None = None
+        cls, session: AsyncSession, subscription: VaultSecret, *, now: datetime | None = None
     ) -> ParsedUsage:
         """Fetch + parse the subscription's remaining-quota snapshot, refreshing
         the token once on a 401. A provider can revoke an access token
@@ -370,8 +373,8 @@ class Provider:
             return parsed
         # rotate_token drops the row when the refresh lineage is also revoked,
         # so the account then reads disconnected and the card asks for a Reconnect.
-        result = await cls.rotate_token(subscription.id, margin=timedelta.max)
-        refreshed = await VaultSecret.reload(db_session(), subscription.id)
+        result = await cls.rotate_token(session, subscription.id, margin=timedelta.max)
+        refreshed = await VaultSecret.reload(session, subscription.id)
         if result.action != "refreshed" or not refreshed:
             return ParsedUsage(ok=False, error="auth_required")
         return await cls._usage_snapshot(refreshed, now=now)
@@ -411,12 +414,14 @@ class Provider:
         return ParsedUsage(ok=False, error=tag)
 
     @classmethod
-    async def poll_usage(cls, subscription: VaultSecret) -> dict[str, object]:
+    async def poll_usage(
+        cls, session: AsyncSession, subscription: VaultSecret
+    ) -> dict[str, object]:
         """Fetch the subscription's quota snapshot and persist it as that
         account's UsageScrape row."""
         account_id = subscription.account_id
         try:
-            parsed = await cls.fetch_usage(subscription)
+            parsed = await cls.fetch_usage(session, subscription)
         except Exception:  # noqa: BLE001 — a crashed scrape records an error row, not a failed refresh
             logger.warning("usage fetch crashed for %s", cls.id, exc_info=True)
             await UsageScrape(
@@ -487,13 +492,11 @@ class Provider:
         )
 
     @classmethod
-    async def refresh_catalog(cls) -> None:
+    async def refresh_catalog(cls, session: AsyncSession) -> None:
         """Store a fresh catalog, read over a subscription before the key. A
         failed fetch logs and keeps the stored one."""
-        subscriptions = await VaultSecret.list_subscriptions(
-            db_session(), Audience.provider(cls.id)
-        )
-        key = await VaultSecret.lookup(db_session(), SecretKind.STATIC, Audience.provider(cls.id))
+        subscriptions = await VaultSecret.list_subscriptions(session, Audience.provider(cls.id))
+        key = await VaultSecret.lookup(session, SecretKind.STATIC, Audience.provider(cls.id))
         if subscriptions:
             fetch = cls.fetch_catalog(subscriptions[0])
         elif key:
@@ -505,7 +508,7 @@ class Provider:
         except (exceptions.CatalogError, exceptions.OAuthTokenError) as exc:
             logger.warning("catalog refresh for %s failed: %s", cls.id, exc.tag)
         else:
-            await ProviderCatalog.create(cls.id, list(models), label=cls.label)
+            await ProviderCatalog.create(session, cls.id, list(models), label=cls.label)
 
     @classmethod
     def _catalog_request(cls, subscription: VaultSecret | None, key: str | None) -> ProviderRequest:
@@ -539,12 +542,12 @@ def is_registered(provider_id: str) -> bool:
     return any(provider.id == provider_id for provider in get_providers())
 
 
-async def provider_label(provider_id: str) -> str:
+async def provider_label(session: AsyncSession, provider_id: str) -> str:
     """What to call a provider: the registry's name, or the one its catalog
     carries for a provider the operator added by key."""
     if is_registered(provider_id):
         return get_provider(provider_id).label
-    return (await ProviderCatalog.get(provider_id)).label
+    return (await session.get(ProviderCatalog, provider_id)).label
 
 
 def _utc_now() -> datetime:

@@ -204,7 +204,7 @@ async def test_unattended_subscription_requires_a_connection(druks_db):
     with pytest.raises(
         HarnessNotConnectedError, match="connect your Anthropic subscription"
     ) as error:
-        await get_config(CONFIG_PROBE.id, None)
+        await get_config(druks_db, CONFIG_PROBE.id, None)
     assert error.value.code == "not_connected"
 
 
@@ -220,7 +220,7 @@ async def test_unattended_api_key_uses_installation_config_without_a_default_acc
     await installation.update(default_billing="api_key", default_effort="low")
     assert await Account.get_default(druks_db) is None
 
-    config = await get_config(CONFIG_PROBE.id, None)
+    config = await get_config(druks_db, CONFIG_PROBE.id, None)
 
     assert config.api_key.secrets["value"] == "test-api-key"
     assert config.subscription is None
@@ -240,12 +240,12 @@ async def test_accounts_share_execution_defaults_and_keep_their_own_subscription
         (alice.account_id, alice),
         (bob.account_id, bob),
     ):
-        config = await get_config(CONFIG_PROBE.id, account_id)
+        config = await get_config(druks_db, CONFIG_PROBE.id, account_id)
         assert config.subscription.id == subscription.id
         assert (config.effort, config.timeout, config.fast_mode) == ("low", 600, True)
     await SettingsOverride.set_agent_effort(CONFIG_PROBE.id, "high")
     for account_id in (None, alice.account_id, bob.account_id):
-        assert (await get_config(CONFIG_PROBE.id, account_id)).effort == "high"
+        assert (await get_config(druks_db, CONFIG_PROBE.id, account_id)).effort == "high"
 
 
 async def test_personal_api_is_scoped_and_does_not_retime_schedules(
