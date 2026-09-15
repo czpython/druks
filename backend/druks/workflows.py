@@ -570,7 +570,9 @@ async def _emit_run_event(
                 return {
                     "kind": run.kind,
                     "subject": subject,
-                    "payload": await _log_run_event(run, state, subject, label, result, gate),
+                    "payload": await _log_run_event(
+                        session, run, state, subject, label, result, gate
+                    ),
                 }
 
     transition = await DBOS.run_step_async(
@@ -594,6 +596,7 @@ async def _emit_run_event(
 
 
 async def _log_run_event(
+    session: AsyncSession,
     run: Run,
     state: RunState,
     subject: dict[str, Any],
@@ -619,6 +622,7 @@ async def _log_run_event(
     elif isinstance(result, dict):
         payload["result"] = result
     await Event.emit(
+        session,
         type=WorkflowEvent.for_state(state),
         subject=subject,
         label=label,
@@ -804,9 +808,10 @@ class Workflow:
             raise WorkflowError("announce() runs in the workflow body, not inside a @step")
 
         async def record() -> None:
-            async with step_session():
+            async with step_session() as session:
                 run = await Run.get(self.workflow_id)
                 await Event.emit(
+                    session,
                     type=topic,
                     subject=self._subject,
                     label=run.subject_label,
@@ -1063,12 +1068,12 @@ class Workflow:
                     # Its own transaction lets readers see the admission before the caller commits.
                     async with get_session(_step_engine()) as session:
                         await Event.emit(
+                            session,
                             type=WorkflowEvent.SCHEDULED,
                             subject=subject.identity,
                             label=subject.label,
                             payload={"run": workflow_id, "kind": cls.kind},
                             app=cls.app,
-                            session=session,
                         )
                         await session.commit()
                     await publish(WorkflowEvent.SCHEDULED, subject=subject.identity, kind=cls.kind)

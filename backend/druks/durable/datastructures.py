@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
+from druks.database import db_session
 from druks.events.models import Event
 from druks.models import snake_name
 
@@ -41,7 +42,7 @@ class Subject:
 
     async def announce(self, topic: str, **facts: Any) -> None:
         """Record and deliver a domain fact in the current transaction."""
-        await Event.announce(self, topic, facts)
+        await Event.announce(db_session(), self, topic, facts)
 
     @classmethod
     async def get_for_subject_id(cls, subject_id: str) -> Self | None:
