@@ -45,7 +45,7 @@ def _anthropic(subscription) -> SecretRef:
 async def _bound_identity(subscription, *, state: str = "running") -> tuple[SandboxIdentity, str]:
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-1", state=state)
     identity, entries = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(subscription)]
+        db_session(), run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(subscription)]
     )
     await identity.bind("host-1")
     return identity, entries["anthropic"].headers["Authorization"].removeprefix("Bearer ")
@@ -87,7 +87,7 @@ async def test_an_identity_keeps_the_hash_and_puts_the_bearer_in_the_issuer_entr
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
 
     identity, entries = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(subscription)]
+        db_session(), run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(subscription)]
     )
 
     [entry] = entries.values()
@@ -117,10 +117,10 @@ async def test_one_box_holds_one_identity(druks_db):
     subscription = await _subscription()
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
     first, _ = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(subscription)]
+        db_session(), run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(subscription)]
     )
     second, _ = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(subscription)]
+        db_session(), run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(subscription)]
     )
 
     await first.bind("host-1")
@@ -133,7 +133,10 @@ async def test_an_identity_needs_its_run(druks_db):
 
     with pytest.raises(IntegrityError):
         await SandboxIdentity.create(
-            run_id="no-such-run", scoped_to="workflow", secret_refs=[_anthropic(subscription)]
+            db_session(),
+            run_id="no-such-run",
+            scoped_to="workflow",
+            secret_refs=[_anthropic(subscription)],
         )
 
 
@@ -148,7 +151,9 @@ async def test_a_ref_names_a_vault_row_that_exists(druks_db, source):
     }[source]
 
     with pytest.raises(IntegrityError):
-        await SandboxIdentity.create(run_id="run-1", scoped_to="workflow", secret_refs=[secret])
+        await SandboxIdentity.create(
+            db_session(), run_id="run-1", scoped_to="workflow", secret_refs=[secret]
+        )
 
 
 async def test_the_issuer_answers_a_fresh_token_with_its_expiry(druks_db, tmp_path, monkeypatch):
@@ -227,32 +232,34 @@ async def test_lookup_finds_the_live_bound_identity_of_a_scope(druks_db) -> None
     one = await _subscription("one@example.com")
     two = await _subscription("two@example.com")
     secrets = [_anthropic(one)]
-    await SandboxIdentity.create(run_id="run-1", scoped_to="workflow", secret_refs=secrets)
+    await SandboxIdentity.create(
+        db_session(), run_id="run-1", scoped_to="workflow", secret_refs=secrets
+    )
     revoked, _ = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="workflow", secret_refs=secrets
+        db_session(), run_id="run-1", scoped_to="workflow", secret_refs=secrets
     )
     await revoked.bind("host-revoked")
     await revoked.revoke()
     other_scope, _ = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="reviewer", secret_refs=secrets
+        db_session(), run_id="run-1", scoped_to="reviewer", secret_refs=secrets
     )
     await other_scope.bind("host-reviewer")
     other_secrets, _ = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(two)]
+        db_session(), run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(two)]
     )
     await other_secrets.bind("host-other")
     live, _ = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="workflow", secret_refs=secrets
+        db_session(), run_id="run-1", scoped_to="workflow", secret_refs=secrets
     )
     await live.bind("host-live")
 
-    found = await SandboxIdentity.lookup("run-1", "workflow", secrets)
+    found = await SandboxIdentity.lookup(db_session(), "run-1", "workflow", secrets)
 
     assert found is not None
     assert found.id == live.id
     more = [*secrets, SecretRef(name="github", secret_id="other", resource="acme/widgets")]
-    assert await SandboxIdentity.lookup("run-1", "workflow", more) is None
-    assert await SandboxIdentity.lookup("run-2", "workflow", secrets) is None
+    assert await SandboxIdentity.lookup(db_session(), "run-1", "workflow", more) is None
+    assert await SandboxIdentity.lookup(db_session(), "run-2", "workflow", secrets) is None
 
 
 async def _connect_github(slug: str = "github") -> None:
@@ -267,6 +274,7 @@ async def _github_identity() -> tuple[SandboxIdentity, str]:
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
     secret_id = (await Github.get()).id
     identity, entries = await SandboxIdentity.create(
+        db_session(),
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=[SecretRef(name="github", secret_id=secret_id, resource="acme/widgets")],
@@ -331,7 +339,7 @@ async def _mcp_identity() -> tuple[SandboxIdentity, str, dict]:
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
     [ref] = (await Workspace.get_mcp_delivery(None, None))[1]
     identity, entries = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="workflow", secret_refs=[ref]
+        db_session(), run_id="run-1", scoped_to="workflow", secret_refs=[ref]
     )
     await identity.bind("host-1")
     bearer = entries[ref.name].headers["Authorization"].removeprefix("Bearer ")

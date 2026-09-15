@@ -186,7 +186,7 @@ async def test_a_replay_finds_the_warm_box_through_its_identity(
     )
     secrets = [SecretRef(name="anthropic", secret_id=subscription.id)]
     identity, _ = await SandboxIdentity.create(
-        run_id="wf-1", scoped_to="workflow", secret_refs=secrets
+        db_session(), run_id="wf-1", scoped_to="workflow", secret_refs=secrets
     )
     await identity.bind("host-crashed")
     client = _FakeSandboxClient(lease=timedelta(hours=2))

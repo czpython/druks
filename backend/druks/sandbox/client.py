@@ -13,6 +13,7 @@ from drukbox_sdk.exceptions import (
     SandboxProvisioningError,
     SandboxUnavailableError,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_utils import uuid7
 
 from druks.durable.engine import _step_engine
@@ -268,12 +269,14 @@ class Client:
             await host.aclose()
             await self.release(host_id=host_id)
 
-    async def request_refreshes(self, secret_id: str, *, except_host_id: str = "") -> None:
+    async def request_refreshes(
+        self, session: AsyncSession, secret_id: str, *, except_host_id: str = ""
+    ) -> None:
         """Order a refresh on every live box of the secret, except the one whose
         answer carries the new token. A failure is a log line."""
         boxes = [
             (identity.host_id, ref.name)
-            for identity in await SandboxIdentity.list_for_secret(secret_id)
+            for identity in await SandboxIdentity.list_for_secret(session, secret_id)
             if identity.host_id != except_host_id
             for ref in identity.secret_refs
             if ref.secret_id == secret_id

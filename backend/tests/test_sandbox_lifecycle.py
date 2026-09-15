@@ -769,6 +769,7 @@ async def _identity() -> SandboxIdentity:
         AnthropicProvider, {"claudeAiOauth": {"accessToken": "test-token"}}
     )
     identity, _ = await SandboxIdentity.create(
+        db_session(),
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],
@@ -902,4 +903,7 @@ async def test_a_gone_box_loses_its_identity_and_the_retry_provisions_anew(
 
     await db_session().refresh(identity)
     assert not identity.is_live
-    assert await SandboxIdentity.lookup("run-1", "workflow", identity.secret_refs) is None
+    assert (
+        await SandboxIdentity.lookup(db_session(), "run-1", "workflow", identity.secret_refs)
+        is None
+    )

@@ -312,7 +312,7 @@ class Provider:
             await session.commit()
             # The refresh requests go out before the lock releases: a rotation
             # ends the value every box on this subscription holds.
-            await sandbox_client.request_refreshes(row.id, except_host_id=except_host_id)
+            await sandbox_client.request_refreshes(session, row.id, except_host_id=except_host_id)
             return RotationResult(
                 cls.id, "refreshed", expires_at=new_expiry, subscription_id=row.id
             )

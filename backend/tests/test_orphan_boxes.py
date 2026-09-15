@@ -17,6 +17,7 @@ async def _identity(run_id: str, *, state: str = "running", host_id: str = "") -
         AnthropicProvider, {"claudeAiOauth": {"accessToken": "test-token"}}
     )
     identity, _ = await SandboxIdentity.create(
+        db_session(),
         run_id=run_id,
         scoped_to="workflow",
         secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],
