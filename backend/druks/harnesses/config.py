@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 
 from drukbox_sdk import Secret
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.models import Account
-from druks.database import db_session
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.sandbox.models import SecretRef
 from druks.secrets.datastructures import Audience
@@ -58,7 +58,9 @@ class AgentConfig:
         return self.subscription.account_id if self.subscription else None
 
 
-async def check_config(harness_name: str, model: str, billing: str) -> type[Harness]:
+async def check_config(
+    session: AsyncSession, harness_name: str, model: str, billing: str
+) -> type[Harness]:
     """The harness that runs the triple; a triple no harness runs raises."""
     harness = get_harness(harness_name)
     if not harness:
@@ -69,7 +71,7 @@ async def check_config(harness_name: str, model: str, billing: str) -> type[Harn
         if not harness.has_provider(provider):
             raise AgentConfigError(f"{harness_name} does not run {provider.label} models.")
     else:
-        catalog = await ProviderCatalog.get(provider_id)
+        catalog = await session.get(ProviderCatalog, provider_id)
         if not catalog:
             raise AgentConfigError(
                 f"model {model!r} names no provider; add one in Settings → Providers."
@@ -83,7 +85,7 @@ async def check_config(harness_name: str, model: str, billing: str) -> type[Harn
     return harness
 
 
-async def get_config(agent_name: str, account_id: str | None) -> AgentConfig:
+async def get_config(session: AsyncSession, agent_name: str, account_id: str | None) -> AgentConfig:
     """Resolve shared execution settings and the supplied or default account's credential.
     A missing credential raises."""
     from druks.apps.registry import agents  # cycle: apps → agents → this module
@@ -92,13 +94,13 @@ async def get_config(agent_name: str, account_id: str | None) -> AgentConfig:
     if not agent:
         raise KeyError(f"no agent is registered as {agent_name!r}")
     if not account_id:
-        account = await Account.get_default(db_session())
+        account = await Account.get_default(session)
         account_id = account.id if account else None
     settings = await InstallationSettings.get()
     harness_name = (await SettingsOverride.agent_harness(agent_name, settings=settings)).value
     model = (await SettingsOverride.agent_model(agent_name, settings=settings)).value
     billing = (await SettingsOverride.agent_billing(agent_name, settings=settings)).value
-    harness_class = await check_config(harness_name, model, billing)
+    harness_class = await check_config(session, harness_name, model, billing)
     provider_id = model.partition("/")[0]
     subscription = None
     provider_key = None
@@ -107,15 +109,15 @@ async def get_config(agent_name: str, account_id: str | None) -> AgentConfig:
     identity: dict = {}
     if billing == "api_key":
         provider_key = await VaultSecret.lookup(
-            db_session(), SecretKind.STATIC, Audience.provider(provider_id)
+            session, SecretKind.STATIC, Audience.provider(provider_id)
         )
         if not provider_key:
-            label = await provider_label(provider_id)
+            label = await provider_label(session, provider_id)
             raise HarnessNotConnectedError(f"add the {label} API key in Settings → Providers.")
         secrets = harness_class.get_secrets(provider_id, provider_key.secrets["value"])
     else:
         provider = get_provider(provider_id)
-        subscription = await provider.get_subscription(account_id)
+        subscription = await provider.get_subscription(session, account_id)
         identity = provider.get_identity(subscription)
         secret_refs = harness_class.get_secret_refs(subscription)
     timeout = (

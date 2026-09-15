@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
@@ -71,10 +72,13 @@ async def get_personal_settings(
     return account
 
 
-async def check_agent_configs(settings: InstallationSettings) -> None:
-    await check_config(settings.default_harness, settings.default_model, settings.default_billing)
+async def check_agent_configs(session: AsyncSession, settings: InstallationSettings) -> None:
+    await check_config(
+        session, settings.default_harness, settings.default_model, settings.default_billing
+    )
     for agent in agents.all():
         await check_config(
+            session,
             (await SettingsOverride.agent_harness(agent.id, settings=settings)).value,
             (await SettingsOverride.agent_model(agent.id, settings=settings)).value,
             (await SettingsOverride.agent_billing(agent.id, settings=settings)).value,
@@ -94,13 +98,13 @@ async def _settings_changes(
 
 
 @router.patch("", response_model=SettingsResponse, response_model_by_alias=True)
-async def update_settings(body: UpdateSettingsRequest) -> InstallationSettings:
+async def update_settings(session: SessionDep, body: UpdateSettingsRequest) -> InstallationSettings:
     fields = await _settings_changes(body)
     settings = await InstallationSettings.get()
     if fields:
         await settings.update(**fields)
         if any(field in fields for field in _EXECUTION_DEFAULTS):
-            await check_agent_configs(settings)
+            await check_agent_configs(session, settings)
     return settings
 
 
@@ -142,7 +146,9 @@ async def get_app_setting_choices(name: str) -> dict[str, list[tuple[str, str]]]
     response_model_by_alias=True,
     dependencies=[Depends(current_session_account)],
 )
-async def update_app_settings(body: AppsSettingsUpdate) -> AppsSettingsResponse:
+async def update_app_settings(
+    session: SessionDep, body: AppsSettingsUpdate
+) -> AppsSettingsResponse:
     for name, harness in body.agent_harnesses.items():
         await SettingsOverride.set_agent_harness(name, harness)
     for name, model in body.agent_models.items():
@@ -156,7 +162,7 @@ async def update_app_settings(body: AppsSettingsUpdate) -> AppsSettingsResponse:
             raise HTTPException(status_code=422, detail=f"Unknown agent {name!r}")
     if body.agent_harnesses or body.agent_models or body.agent_billings:
         installation = await InstallationSettings.get()
-        await check_agent_configs(installation)
+        await check_agent_configs(session, installation)
 
     for name, effort in body.agent_efforts.items():
         await SettingsOverride.set_agent_effort(name, effort)

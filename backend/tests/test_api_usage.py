@@ -361,7 +361,7 @@ async def test_usage_today_counts_only_the_viewers_calls(client, druks_db) -> No
 
 
 def _fake_fetch(fetched: list):
-    async def fake(connection, *, now=None):
+    async def fake(session, connection, *, now=None):
         fetched.append(connection.account_id)
         return ParsedUsage(
             ok=True,

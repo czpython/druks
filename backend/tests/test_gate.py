@@ -89,7 +89,7 @@ class _FakeProvider:
         return subscription.id in cls.urgent_credential_ids
 
     @classmethod
-    async def rotate_token(cls, subscription_id):
+    async def rotate_token(cls, session, subscription_id):
         cls.rotated_credential_ids.append(subscription_id)
         return RotationResult(cls.id, "refreshed", subscription_id=subscription_id)
 

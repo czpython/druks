@@ -3,9 +3,9 @@ from typing import Any
 
 from sqlalchemy import String, select
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
-from druks.database import db_session
 from druks.models import Base
 
 
@@ -21,16 +21,13 @@ class ProviderCatalog(Base):
     fetched_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
 
     @classmethod
-    async def get(cls, provider: str) -> "ProviderCatalog | None":
-        return await db_session().get(cls, provider)
+    async def list_all(cls, session: AsyncSession) -> list["ProviderCatalog"]:
+        return list(await session.scalars(select(cls).order_by(cls.provider)))
 
     @classmethod
-    async def list_all(cls) -> list["ProviderCatalog"]:
-        return list(await db_session().scalars(select(cls).order_by(cls.provider)))
-
-    @classmethod
-    async def create(cls, provider: str, models: list[dict], *, label: str) -> "ProviderCatalog":
-        session = db_session()
+    async def create(
+        cls, session: AsyncSession, provider: str, models: list[dict], *, label: str
+    ) -> "ProviderCatalog":
         row = await session.get(cls, provider)
         if not row:
             row = cls(provider=provider)
@@ -41,7 +38,6 @@ class ProviderCatalog(Base):
         await session.flush()
         return row
 
-    async def delete(self) -> None:
-        session = db_session()
+    async def delete(self, session: AsyncSession) -> None:
         await session.delete(self)
         await session.flush()

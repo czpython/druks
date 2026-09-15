@@ -298,7 +298,7 @@ async def test_unattended_execution_without_subscription_records_not_connected(
     item, run = await _item_and_run(druks_db, "running")
 
     async def body() -> None:
-        await get_config(CONFIG_PROBE.id, None)
+        await get_config(druks_db, CONFIG_PROBE.id, None)
 
     with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
         await _execute_run(run.id, run.kind, {"type": "note", "id": item.id}, run.account_id, body)

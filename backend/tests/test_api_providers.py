@@ -213,6 +213,7 @@ def test_unknown_provider_is_404(tmp_path: Path):
 
 async def test_catalogs_list_what_each_provider_offers(tmp_path: Path, druks_db):
     await ProviderCatalog.create(
+        druks_db,
         "anthropic",
         [{"id": "anthropic/claude-fable-5", "label": "Claude Fable 5", "efforts": []}],
         label="Anthropic",

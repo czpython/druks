@@ -2,8 +2,8 @@ import json
 import logging
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.database import db_session
 from druks.redis import get_client
 from druks.secrets.models import VaultSecret
 
@@ -69,23 +69,23 @@ def parse_providers(raw: str) -> list[dict]:
     raise exceptions.CatalogError("empty_list")
 
 
-async def add_provider(provider_id: str) -> ProviderCatalog:
+async def add_provider(session: AsyncSession, provider_id: str) -> ProviderCatalog:
     """Make a directory provider one of the installation's, with the model
     list it publishes. A provider the directory does not list raises ``KeyError``."""
     for provider in await list_providers():
         if provider["provider"] == provider_id:
             return await ProviderCatalog.create(
-                provider_id, provider["models"], label=provider["label"]
+                session, provider_id, provider["models"], label=provider["label"]
             )
     raise KeyError(provider_id)
 
 
-async def refresh_added_catalogs() -> None:
+async def refresh_added_catalogs(session: AsyncSession) -> None:
     """Re-read the directory for every provider the operator added by key."""
-    keys = await VaultSecret.list_keys(db_session())
+    keys = await VaultSecret.list_keys(session)
     added = [row.audience_name for row in keys if not is_registered(row.audience_name)]
     for provider_id in added:
         try:
-            await add_provider(provider_id)
+            await add_provider(session, provider_id)
         except (exceptions.CatalogError, KeyError) as exc:
             logger.warning("directory refresh of %s failed: %s", provider_id, exc)

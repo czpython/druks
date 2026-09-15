@@ -700,7 +700,7 @@ async def test_delivery_binds_the_grant_and_the_row_issues_the_token(
     assert entry.bearer_token_env_var == var
     [ref] = refs
     assert ref.key == (var.lower(), grant.id, "", "mcp.linear.test")
-    token, expires_at = await grant.issue_token("")
+    token, expires_at = await grant.issue_token(druks_db, "")
     assert token == "at-1"
     assert expires_at > datetime.now(UTC)
     assert "at-1" not in repr(wire) + repr(refs)
@@ -773,7 +773,7 @@ async def test_a_disconnected_grant_issues_nothing(auth_server, druks_db):
     await oauth.disconnect(_NAME, None)
 
     with pytest.raises(SecretRevokedError, match=_NAME):
-        await (await druks_db.get(VaultSecret, ref.secret_id)).issue_token("")
+        await (await druks_db.get(VaultSecret, ref.secret_id)).issue_token(druks_db, "")
 
 
 # --- API: connect / callback / disconnect / badge ---------------------------

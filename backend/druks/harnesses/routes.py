@@ -75,8 +75,8 @@ async def _key_response(session: AsyncSession, row: VaultSecret) -> ProviderKeyR
     response_model_by_alias=True,
     dependencies=[Depends(current_session_account)],
 )
-async def list_catalogs() -> list[ProviderCatalog]:
-    return await ProviderCatalog.list_all()
+async def list_catalogs(session: SessionDep) -> list[ProviderCatalog]:
+    return await ProviderCatalog.list_all(session)
 
 
 @router.get(
@@ -152,7 +152,7 @@ async def complete_connection(
     await session.commit()
     try:
         # The flow is already spent, so a failed refresh only logs.
-        await provider.refresh_catalog()
+        await provider.refresh_catalog(session)
     except Exception:
         logging.getLogger(__name__).exception("Catalog refresh after connect failed")
         with suppress(Exception):
@@ -180,11 +180,11 @@ async def create_key(
             stored = await VaultSecret.paste(
                 session, Audience.provider(provider.id), key, pasted_by=account
             )
-            await provider.refresh_catalog()
+            await provider.refresh_catalog(session)
             return await _key_response(session, stored)
         raise HTTPException(status_code=422, detail=f"{provider.label} does not accept API keys.")
     try:
-        await directory.add_provider(provider_id)
+        await directory.add_provider(session, provider_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}") from error
     return await _key_response(
@@ -204,8 +204,8 @@ async def remove_key(session: SessionDep, provider_id: str) -> None:
         await stored.revoke(session, "user")
     if is_registered(provider_id):
         return
-    if catalog := await ProviderCatalog.get(provider_id):
-        await catalog.delete()
+    if catalog := await session.get(ProviderCatalog, provider_id):
+        await catalog.delete(session)
         return
     raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}")
 

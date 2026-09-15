@@ -197,9 +197,9 @@ async def test_the_issuer_denies_an_identity_revoked_during_the_source_io(
     identity, bearer = await _bound_identity(subscription)
     answer = AnthropicProvider.issue_token
 
-    async def revoke_then_answer(self, subscription_id, **kwargs):
+    async def revoke_then_answer(self, session, subscription_id, **kwargs):
         await SandboxIdentity.revoke_for_host(_step_engine(), identity.host_id)
-        return await answer(subscription_id, **kwargs)
+        return await answer(session, subscription_id, **kwargs)
 
     monkeypatch.setattr(AnthropicProvider, "issue_token", revoke_then_answer)
 

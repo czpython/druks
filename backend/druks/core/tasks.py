@@ -34,7 +34,7 @@ async def refresh_tokens() -> None:
 async def refresh_usage() -> None:
     for subscription in await VaultSecret.list_subscriptions(db_session()):
         if await UsageScrape.is_due(subscription, now=Base.utc_now()):
-            await get_provider(subscription.audience_name).poll_usage(subscription)
+            await get_provider(subscription.audience_name).poll_usage(db_session(), subscription)
 
 
 @task(every="0 * * * *")
@@ -52,8 +52,8 @@ async def _release_orphan_boxes() -> None:
 @task(every="0 6 * * *")
 async def refresh_catalogs() -> None:
     for provider in get_providers():
-        await provider.refresh_catalog()
-    await refresh_added_catalogs()
+        await provider.refresh_catalog(db_session())
+    await refresh_added_catalogs(db_session())
 
 
 async def _refresh() -> dict[str, object]:
@@ -78,11 +78,11 @@ async def _refresh() -> dict[str, object]:
         if is_due:
             async with gate.shut(subscription_id) as is_idle:
                 if is_idle or is_urgent:
-                    result = await provider.rotate_token(subscription_id)
+                    result = await provider.rotate_token(db_session(), subscription_id)
                 else:
                     result = RotationResult(provider_id, "busy", subscription_id=subscription_id)
         else:
-            result = await provider.rotate_token(subscription_id)
+            result = await provider.rotate_token(db_session(), subscription_id)
         _log_result(result)
         results.append(result)
 

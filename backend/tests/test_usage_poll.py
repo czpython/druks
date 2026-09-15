@@ -46,7 +46,7 @@ def _provider(id_: str, fetch):
         id = id_
 
         @classmethod
-        async def fetch_usage(cls, connection, *, now=None):
+        async def fetch_usage(cls, session, connection, *, now=None):
             return fetch()
 
     return _Fake
@@ -65,7 +65,7 @@ async def _connection(email: str = "op@example.com"):
 async def _poll(*providers) -> list[dict[str, object]]:
     # poll_usage is the unit under test: fetch -> parse -> persist a UsageScrape.
     connection = await _connection()
-    return [await h.poll_usage(connection) for h in providers]
+    return [await h.poll_usage(db_session(), connection) for h in providers]
 
 
 async def test_successful_fetch_persists_per_provider(druks_db) -> None:
@@ -176,8 +176,8 @@ async def test_two_accounts_of_one_provider_snapshot_independently(druks_db) -> 
     fake = _provider("anthropic", lambda: next(snapshots))
     first, second = await _connection("a@example.com"), await _connection("b@example.com")
 
-    await fake.poll_usage(first)
-    await fake.poll_usage(second)
+    await fake.poll_usage(druks_db, first)
+    await fake.poll_usage(druks_db, second)
     await druks_db.flush()
 
     assert (
