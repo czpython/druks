@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 from conftest import CONFIG_PROBE, connect_provider, installation_key, make_jwt
+from druks.database import db_session
 from druks.durable.enums import AgentCallStatus
 from druks.harnesses.base import Harness
 from druks.harnesses.claude import ClaudeHarness
@@ -306,7 +307,7 @@ async def test_run_prompt_builds_executes_and_parses(
         model = "claude-opus-4-8"
         first_byte_seconds = 17
 
-        async def get_manifest(self, **_kwargs: Any) -> dict[str, Any]:
+        async def get_manifest(self, _session: Any, **_kwargs: Any) -> dict[str, Any]:
             return {
                 "manifest_hash": "hash",
                 "schema_version": 2,
@@ -320,7 +321,7 @@ async def test_run_prompt_builds_executes_and_parses(
         def mint_run_id(call_id: str | None) -> str:
             return call_id or "minted-id"
 
-        async def build_invocation(self, **kwargs: Any) -> AgentInvocation:
+        async def build_invocation(self, _session: Any, **kwargs: Any) -> AgentInvocation:
             seen["build"] = kwargs
             return _inv(("claude", "--print"))
 
@@ -330,6 +331,7 @@ async def test_run_prompt_builds_executes_and_parses(
 
     payload = await Host.run_prompt(
         sandbox,
+        db_session(),
         _FakeHarness(),
         prompt="do the thing",
         schema={"type": "object"},
@@ -526,12 +528,13 @@ async def test_run_agent_carries_foreign_failures_as_harness_errors(
     sandbox = SimpleNamespace(id="host-abc", ssh_username="root")
     original = RuntimeError("kaboom")
 
-    async def run_prompt(harness: Any, **_kwargs: Any) -> Any:
+    async def run_prompt(_session: Any, harness: Any, **_kwargs: Any) -> Any:
         raise original
 
     sandbox.run_prompt = run_prompt
     result = await Host.run_agent(
         sandbox,
+        db_session(),
         agent="evaluate",
         config=agent_config,
         prompt="p",
@@ -552,12 +555,13 @@ async def test_run_agent_carries_a_taxonomy_failure_as_itself(ctx: SimpleNamespa
     sandbox = SimpleNamespace(id="host-abc", ssh_username="root")
     timeout = HarnessTimeoutError("claude timed out after 60s.")
 
-    async def run_prompt(harness: Any, **_kwargs: Any) -> Any:
+    async def run_prompt(_session: Any, harness: Any, **_kwargs: Any) -> Any:
         raise timeout
 
     sandbox.run_prompt = run_prompt
     result = await Host.run_agent(
         sandbox,
+        db_session(),
         agent="evaluate",
         config=agent_config,
         prompt="p",
@@ -595,6 +599,7 @@ async def test_claude_api_key_stays_on_the_server(
 
     result = await Host.run_agent(
         sandbox,
+        db_session(),
         agent="evaluate",
         config=config,
         prompt="p",
@@ -653,6 +658,7 @@ async def test_claude_subscription_token_stays_on_the_server(
 
     result = await Host.run_agent(
         sandbox,
+        db_session(),
         agent="evaluate",
         config=config,
         prompt="p",
@@ -709,6 +715,7 @@ async def test_codex_subscription_token_stays_on_the_server(
 
     result = await Host.run_agent(
         sandbox,
+        db_session(),
         agent="evaluate",
         config=config,
         prompt="p",

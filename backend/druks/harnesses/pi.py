@@ -4,6 +4,8 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
@@ -37,6 +39,7 @@ class PiHarness(Harness):
 
     async def build_invocation(
         self,
+        session: AsyncSession,
         *,
         prompt: str,
         schema: dict[str, object],

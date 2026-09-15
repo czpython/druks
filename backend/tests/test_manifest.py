@@ -31,7 +31,7 @@ async def _build(
     harness = harness or ClaudeHarness(
         model="anthropic/claude-opus-4-8", fast_mode=False, effort=None
     )
-    return await harness.get_manifest(mcp_servers=mcp_servers, skills=skills)
+    return await harness.get_manifest(db_session(), mcp_servers=mcp_servers, skills=skills)
 
 
 async def _seed_skills(*names: str, disabled: tuple[str, ...] = ()) -> None:
