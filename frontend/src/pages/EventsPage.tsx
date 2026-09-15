@@ -284,16 +284,16 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
           <ol className="activity-rows" aria-label="Activity history" ref={rowList} tabIndex={-1}>
             {events.map((event) => {
               const line = eventLine(event)
+              const Icon = line.icon
               return <li key={event.id}>
-                <button type="button" className={`activity-row ${line.bucket}`}
+                <button type="button" className={`activity-row activity-tone-${line.tone}`}
                   aria-current={event.seq === selectedSeq || undefined}
                   ref={(node) => { if (node) rows.current.set(event.seq, node); else rows.current.delete(event.seq) }}
                   onClick={() => updateParams('selected', String(event.seq))}>
-                  <CircleDot size={16} className="activity-row-glyph" aria-hidden="true" />
+                  <Icon size={16} className="activity-row-glyph" aria-hidden="true" />
                   <span className="activity-row-body"><strong>{line.label}</strong>{' '}
-                    <span>{line.subject || 'No work label recorded'}</span>{' '}
-                    {(event.payload.summary || event.payload.reason || event.payload.failure) &&
-                      <span className="activity-context">{event.payload.summary || event.payload.reason || event.payload.failure}</span>}
+                    <span>{line.subject || 'No work label recorded'}{line.title && ` · ${line.title}`}</span>{' '}
+                    {line.context && <span className="activity-context">{line.context}</span>}
                   </span>
                   <time dateTime={event.at} title={`${absTime(event.at)} ${timezone}`}>{absTimeCompact(event.at)}</time>
                   <ChevronRight size={15} aria-hidden="true" />
@@ -346,6 +346,7 @@ function ActivityDetail({ event }: { event: FeedItem }) {
   return <>
     <h2 ref={title} tabIndex={-1}>{line.label}</h2>
     <p className="activity-work-label">{line.subject || 'No work label recorded'}</p>
+    {line.title && <p className="activity-prose">{line.title}</p>}
     {event.payload.artifact_id ? <section className="activity-result" aria-label="Saved result">
       {available && !available.isArtifactAvailable ? <p role="status">This saved result is no longer available.</p> :
         artifact.isError ? <p role="alert">Could not load the saved result.{' '}
@@ -353,8 +354,9 @@ function ActivityDetail({ event }: { event: FeedItem }) {
           artifact.isPending ? <p role="status">Loading saved result…</p> :
             <><h3>{artifact.data.title}</h3>{artifact.data.kind === 'markdown'
               ? <Markdown source={artifact.data.content} /> : <pre>{artifact.data.content}</pre>}</>}
-    </section> : event.payload.summary && <p className="activity-prose">{event.payload.summary}</p>}
-    {(event.payload.reason || event.payload.failure) && <p className="activity-prose">{event.payload.reason || event.payload.failure}</p>}
+    </section> : !event.payload.result && line.context && <p className="activity-prose">{line.context}</p>}
+    {line.guidance && <p className="activity-prose">{line.guidance}</p>}
+    {event.payload.failure && <details><summary>Technical details</summary><pre>{event.payload.failure}</pre></details>}
     {request && <section className="activity-request" aria-label="Recorded request">
       <h3>Input was requested</h3>
       {request.label && <p>{request.label}</p>}
@@ -365,7 +367,9 @@ function ActivityDetail({ event }: { event: FeedItem }) {
       <p className="activity-muted">This is the recorded request. Open the work to check its current state.</p>
     </section>}
     {event.payload.result && <section aria-label="Recorded response">
-      <h3>Response received</h3><pre>{JSON.stringify(event.payload.result, null, 2)}</pre>
+      <h3>Response received</h3>
+      {line.context && <p>{line.context}</p>}
+      <details><summary>Recorded response</summary><pre>{JSON.stringify(event.payload.result, null, 2)}</pre></details>
     </section>}
     <div className="activity-destinations">
       {externalRequest ?

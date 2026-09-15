@@ -1,6 +1,6 @@
 import { registerAppUI, targetQuery } from '../registry'
 import { SOFTWARE_FACTORY } from './api'
-import { activityLabel } from './activity'
+import { activity, activityLabel } from './activity'
 import { parseLeadingId } from './slug'
 import { AgentCallPage } from './AgentCallPage'
 import { BoardPage } from './BoardPage'
@@ -16,6 +16,7 @@ registerAppUI({
   home: `/${SOFTWARE_FACTORY}`,
   navigationFor: softwareFactoryNavigation,
   activityLabel,
+  activity,
   parentPath: (location) => {
     const workItem = /^(\/software_factory\/work-items\/[^/]+)/.exec(location)?.[1]
     return workItem && (location.startsWith(`${workItem}/agent-calls/`) ? workItem : `/${SOFTWARE_FACTORY}`)

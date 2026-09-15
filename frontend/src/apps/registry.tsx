@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import type { LucideIcon } from 'lucide-react'
 
 import type { AppsSettingsResponse, FeedItem } from '../api/types'
 
@@ -9,6 +10,12 @@ export interface AppRoute {
 }
 
 export type ActivityEvent = Pick<FeedItem, 'topic'> & Partial<Pick<FeedItem, 'payload'>>
+
+export interface ActivityPresentation {
+  context?: string
+  icon: LucideIcon
+  tone: 'neutral' | 'positive' | 'negative' | 'attention'
+}
 
 export interface AppUI {
   name: string
@@ -26,6 +33,7 @@ export interface AppUI {
   // an app has subjects, never where its pages put them.
   subjectPath?: (subject: { type: string; id: string }, target?: SubjectTarget) => string | undefined
   activityLabel?: (event: ActivityEvent) => string | undefined
+  activity?: (event: FeedItem) => Partial<ActivityPresentation>
   parentPath?: (location: string) => string | undefined
 }
 
