@@ -4,8 +4,8 @@ import time
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.database import db_session
 from druks.files.constants import REAPER_GRACE_PERIOD
 from druks.files.models import FileRecord
 from druks.models import Base
@@ -51,10 +51,10 @@ def get_file_storage() -> LocalFileStorage:
     return LocalFileStorage(load_settings().files_dir)
 
 
-async def reap_deleted_file_bytes() -> int:
+async def reap_deleted_file_bytes(session: AsyncSession) -> int:
     cutoff = Base.utc_now() - REAPER_GRACE_PERIOD
     reaped = list(
-        await db_session().scalars(select(FileRecord.id).where(FileRecord.deleted_at <= cutoff))
+        await session.scalars(select(FileRecord.id).where(FileRecord.deleted_at <= cutoff))
     )
     storage = get_file_storage()
     for file_id in reaped:

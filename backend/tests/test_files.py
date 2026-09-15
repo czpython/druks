@@ -120,7 +120,7 @@ async def test_uploaded_file_delete_and_reap(druks_db, tmp_path, monkeypatch):
     record.deleted_at = Base.utc_now() - timedelta(days=2)
     await druks_db.flush()
 
-    assert await reap_deleted_file_bytes() == 1
+    assert await reap_deleted_file_bytes(druks_db) == 1
     assert await druks_db.get(FileRecord, file.id) is record
     assert not LocalFileStorage(tmp_path / "files").path(file.id).exists()
 
@@ -285,7 +285,7 @@ async def test_delete_and_reaper_leave_the_tombstone(druks_db, tmp_path, monkeyp
     record.deleted_at = Base.utc_now() - timedelta(days=2)
     await druks_db.flush()
 
-    assert await reap_deleted_file_bytes() == 1
+    assert await reap_deleted_file_bytes(druks_db) == 1
     assert await druks_db.get(FileRecord, file.id) is record
     assert reference.image.id == file.id
     assert not LocalFileStorage(tmp_path / "files").path(file.id).exists()
