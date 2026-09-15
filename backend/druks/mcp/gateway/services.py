@@ -1,9 +1,10 @@
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from druks.accounts.models import Account
 from druks.api.exceptions import RunNotFound
 from druks.core.utils.time import operator_local_day
-from druks.database import db_session
 from druks.durable.enums import RunState
 from druks.durable.exceptions import AgentCallNotFound
 from druks.durable.models import AgentCall, Artifact, Run
@@ -48,12 +49,18 @@ async def get_gate(run_id: str) -> schemas.GateResponse:
 
 
 async def answer_gate(
-    run_id: str, *, parked_at: datetime, control: str, answers: dict[str, str], note: str
+    session: AsyncSession,
+    run_id: str,
+    *,
+    parked_at: datetime,
+    control: str,
+    answers: dict[str, str],
+    note: str,
 ) -> schemas.GateAnswerResponse:
-    run = await Run.get(run_id)
+    # Read past the identity map: the receipt/park comparison must see the row as it is.
+    run = await session.get(Run, run_id, populate_existing=True)
     if not run:
         raise RunNotFound(run_id)
-    await db_session().refresh(run)  # the receipt/park comparison must read fresh
     if run.answer_parked_at == parked_at:
         return schemas.GateAnswerResponse(
             run=run.id, parked_at=parked_at, result="already_answered"
@@ -105,7 +112,7 @@ async def _artifact_content(artifact: Artifact | None) -> schemas.ArtifactConten
     )
 
 
-async def get_usage(account: Account) -> schemas.AgentUsageResponse:
+async def get_usage(session: AsyncSession, account: Account) -> schemas.AgentUsageResponse:
     now = datetime.now(UTC)
     timezone, local_start = operator_local_day(load_settings().timezone, now)
     rows = await list_finished_calls(
@@ -125,16 +132,18 @@ async def get_usage(account: Account) -> schemas.AgentUsageResponse:
         spend_today_usd=round(spend, 4),
         tokens_today=tokens,
         runs_today=len(rows),
-        providers=[await _provider_usage(p.id, account.id, now=now) for p in get_providers()],
+        providers=[
+            await _provider_usage(session, p.id, account.id, now=now) for p in get_providers()
+        ],
     )
 
 
 async def _provider_usage(
-    provider_id: str, account_id: str, *, now: datetime
+    session: AsyncSession, provider_id: str, account_id: str, *, now: datetime
 ) -> schemas.AgentProviderUsage:
     is_connected = bool(
         await VaultSecret.lookup(
-            db_session(), SecretKind.SUBSCRIPTION, Audience.provider(provider_id), account_id
+            session, SecretKind.SUBSCRIPTION, Audience.provider(provider_id), account_id
         )
     )
     row = await UsageScrape.latest_for(provider_id, account_id)

@@ -12,8 +12,8 @@ from joserfc import jws
 from joserfc.errors import JoseError
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.database import db_session
 from druks.mcp.constants import OAUTH_CALLBACK_PATH, OAUTH_CONNECT_DEADLINE_SECONDS
 from druks.mcp.enums import IdentityMode
 from druks.mcp.exceptions import (
@@ -41,15 +41,17 @@ def _http() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=10.0, follow_redirects=True)
 
 
-async def get_connection(name: str, account_id: str | None) -> VaultSecret | None:
+async def get_connection(
+    session: AsyncSession, name: str, account_id: str | None
+) -> VaultSecret | None:
     # One live grant per (server, account) — MCP's policy over the vault.
     # Revoked rows stay behind as history.
-    rows = await VaultSecret.list_account_connections(db_session(), Audience.mcp(name), account_id)
+    rows = await VaultSecret.list_account_connections(session, Audience.mcp(name), account_id)
     return rows[0] if rows else None
 
 
-async def list_connections(name: str) -> list[VaultSecret]:
-    return await VaultSecret.list_connections(db_session(), Audience.mcp(name))
+async def list_connections(session: AsyncSession, name: str) -> list[VaultSecret]:
+    return await VaultSecret.list_connections(session, Audience.mcp(name))
 
 
 def _origin(url: str) -> str:
@@ -382,7 +384,7 @@ def get_identity_facts(payload: Any, *, authority: str, source: str) -> dict[str
     return identity
 
 
-async def complete_connect(*, state: str, code: str) -> str:
+async def complete_connect(session: AsyncSession, *, state: str, code: str) -> str:
     """The callback half: the shared exchange, then the durable outcome —
     claim the server's identity mode and store the registration and the
     grant. Returns the server name."""
@@ -398,7 +400,6 @@ async def complete_connect(*, state: str, code: str) -> str:
     # The first completed connect claims the mode: insert the row if absent,
     # fill the mode if unclaimed. A concurrent claim wins the row lock; the
     # select reads whichever choice landed, and the grant goes under it.
-    session = db_session()
     await session.execute(
         pg_insert(McpServer)
         .values(
@@ -422,10 +423,10 @@ async def complete_connect(*, state: str, code: str) -> str:
         "client_id": pending["client_id"],
         "client_secret": pending["client_secret"],
     }
-    connection = await get_connection(name, account_id)
+    connection = await get_connection(session, name, account_id)
     if connection:
         await connection.reconnect(
-            db_session(),
+            session,
             refresh_token=tokens["refresh_token"],
             scopes=scopes,
             identity=identity,
@@ -434,10 +435,10 @@ async def complete_connect(*, state: str, code: str) -> str:
             secrets=client,
         )
         # A reconsent's stale cached token must not serve until its TTL runs out.
-        await evict_access_token(name, account_id)
+        await evict_access_token(session, name, account_id)
     else:
         await VaultSecret.connect(
-            db_session(),
+            session,
             Audience.mcp(name),
             account_id=account_id,
             refresh_token=tokens["refresh_token"],
@@ -450,27 +451,31 @@ async def complete_connect(*, state: str, code: str) -> str:
     return name
 
 
-async def evict_access_token(name: str, account_id: str | None) -> None:
-    connection = await get_connection(name, account_id)
+async def evict_access_token(session: AsyncSession, name: str, account_id: str | None) -> None:
+    connection = await get_connection(session, name, account_id)
     if connection:
         await OauthClient(provider=Audience.mcp(name)).evict_access_token(connection.id)
 
 
-async def disconnect(name: str, account_id: str | None, *, reason: str = "user") -> None:
+async def disconnect(
+    session: AsyncSession, name: str, account_id: str | None, *, reason: str = "user"
+) -> None:
     # The grant's secrets carry its client, so one revoke ends both.
-    connection = await get_connection(name, account_id)
+    connection = await get_connection(session, name, account_id)
     if connection:
         await OauthClient(provider=Audience.mcp(name)).disconnect(
-            connection, reason=reason, session=db_session()
+            connection, reason=reason, session=session
         )
 
 
-async def get_access_token(name: str, account_id: str | None) -> tuple[str, datetime | None]:
+async def get_access_token(
+    session: AsyncSession, name: str, account_id: str | None
+) -> tuple[str, datetime | None]:
     """The token for a connected server and its expiry, served by the shared
     engine from this server's grant — the issuer never answers a server the
     agent can't authenticate to."""
-    connection = await get_connection(name, account_id)
-    server = await McpServer.get_for_name(name)
+    connection = await get_connection(session, name, account_id)
+    server = await McpServer.get_for_name(session, name)
     if not connection or not server or "client_id" not in connection.secrets:
         raise MissingGrantError(name, account_id)
     client = OauthClient(
@@ -485,6 +490,6 @@ async def get_access_token(name: str, account_id: str | None) -> tuple[str, date
         mint_wait_attempts=OAUTH_MINT_WAIT_ATTEMPTS,
     )
     try:
-        return await client.get_access_token(connection=connection)
+        return await client.get_access_token(session, connection=connection)
     except OauthRefreshError as error:
         raise GrantRefreshError(name, error.reason) from error

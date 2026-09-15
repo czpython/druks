@@ -3,11 +3,11 @@ from typing import Any
 
 from sqlalchemy import Boolean, String, select
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from druks.apps.registry import mcp_servers
 from druks.core.models import Uuid7Pk
-from druks.database import db_session
 from druks.mcp.constants import BEARER_HEADER, NAME_PATTERN
 from druks.mcp.enums import TokenSource
 from druks.mcp.exceptions import InvalidServerNameError
@@ -41,27 +41,25 @@ class McpServer(Base, Uuid7Pk):
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @classmethod
-    async def list_all(cls) -> list["McpServer"]:
+    async def list_all(cls, session: AsyncSession) -> list["McpServer"]:
         # The raw overlay rows — not the merged registry view (_merged).
-        return list((await db_session().execute(select(cls).order_by(cls.name))).scalars())
+        return list((await session.execute(select(cls).order_by(cls.name))).scalars())
 
     @classmethod
-    async def get_for_name(cls, name: str) -> "McpServer | None":
-        return (
-            await db_session().execute(select(cls).where(cls.name == name))
-        ).scalar_one_or_none()
+    async def get_for_name(cls, session: AsyncSession, name: str) -> "McpServer | None":
+        return (await session.execute(select(cls).where(cls.name == name))).scalar_one_or_none()
 
     @classmethod
-    async def _merged(cls) -> dict[str, dict]:
+    async def _merged(cls, session: AsyncSession) -> dict[str, dict]:
         # The full view the API and delivery build from, keyed by
         # name: each built-in definition (url + auth from the registry)
         # overlaid with its operator row's enable choice and secrets, then any
         # fully custom rows. A secret is the vault row itself; its value is
         # read where it enters a run.
-        rows = {server.name: server for server in await cls.list_all()}
+        rows = {server.name: server for server in await cls.list_all(session)}
         tokens: dict[str, VaultSecret] = {}
         secret_headers: dict[str, dict[str, VaultSecret]] = {}
-        for secret in await VaultSecret.list_installation_tokens(db_session()):
+        for secret in await VaultSecret.list_installation_tokens(session):
             if secret.header == BEARER_HEADER:
                 tokens[secret.audience_name] = secret
             else:
@@ -96,8 +94,8 @@ class McpServer(Base, Uuid7Pk):
         return servers
 
     @classmethod
-    async def get_resolved(cls, account_id: str | None) -> dict[str, dict]:
-        servers = await cls._merged()
+    async def get_resolved(cls, session: AsyncSession, account_id: str | None) -> dict[str, dict]:
+        servers = await cls._merged(session)
         # has_token = nothing blocks this server's auth at delivery, read from
         # wherever its source keeps the secret: a stored grant for a connected
         # server, the stored token for a static one; a bearerless server has
@@ -112,7 +110,7 @@ class McpServer(Base, Uuid7Pk):
                     grant_account = get_grant_account(server["identity_mode"], account_id)
                     server["has_token"] = bool(
                         await VaultSecret.list_account_connections(
-                            db_session(), Audience.mcp(server["name"]), grant_account
+                            session, Audience.mcp(server["name"]), grant_account
                         )
                     )
             else:
@@ -120,27 +118,30 @@ class McpServer(Base, Uuid7Pk):
         return servers
 
     @classmethod
-    async def list_enabled(cls) -> list[dict]:
+    async def list_enabled(cls, session: AsyncSession) -> list[dict]:
         # The enabled subset — what a run delivers and the settings UI shows active.
-        return [server for server in (await cls._merged()).values() if server["is_enabled"]]
+        return [server for server in (await cls._merged(session)).values() if server["is_enabled"]]
 
     @classmethod
-    async def set_enabled(cls, name: str, is_enabled: bool) -> bool:
+    async def set_enabled(cls, session: AsyncSession, name: str, is_enabled: bool) -> bool:
         # A built-in has no row until an operator changes its state; the enable
         # choice creates one, carrying the built-in's url. False means the name
         # is neither a row nor a catalog entry.
-        server = await cls.get_for_name(name)
+        server = await cls.get_for_name(session, name)
         if server:
             server.is_enabled = is_enabled
             return True
         if name in mcp_servers:
-            await cls.create(name=name, url=mcp_servers.get(name)["url"], is_enabled=is_enabled)
+            await cls.create(
+                session, name=name, url=mcp_servers.get(name)["url"], is_enabled=is_enabled
+            )
             return True
         return False
 
     @classmethod
     async def create(
         cls,
+        session: AsyncSession,
         *,
         name: str,
         url: str,
@@ -152,7 +153,6 @@ class McpServer(Base, Uuid7Pk):
     ) -> "McpServer":
         if not NAME_PATTERN.match(name):
             raise InvalidServerNameError(name)
-        session = db_session()
         server = cls(
             name=name,
             url=url,
@@ -165,7 +165,7 @@ class McpServer(Base, Uuid7Pk):
         audience = Audience.mcp(name)
         if token:
             await VaultSecret.store(
-                db_session(),
+                session,
                 SecretKind.STATIC,
                 audience,
                 header=BEARER_HEADER,
@@ -173,13 +173,12 @@ class McpServer(Base, Uuid7Pk):
             )
         for header, value in (secret_headers or {}).items():
             await VaultSecret.store(
-                db_session(), SecretKind.STATIC, audience, header=header, secrets={"value": value}
+                session, SecretKind.STATIC, audience, header=header, secrets={"value": value}
             )
         return server
 
-    async def delete(self) -> None:
-        for secret in await VaultSecret.list_tokens(db_session(), Audience.mcp(self.name)):
-            await secret.revoke(db_session(), "server_removed")
-        session = db_session()
+    async def delete(self, session: AsyncSession) -> None:
+        for secret in await VaultSecret.list_tokens(session, Audience.mcp(self.name)):
+            await secret.revoke(session, "server_removed")
         await session.delete(self)
         await session.flush()

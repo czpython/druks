@@ -87,28 +87,28 @@ def _requiring(*servers: RequiredMcpServer) -> type[Workspace]:
 
 
 async def test_create_lists_and_deletes(druks_db):
-    server = await McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    server = await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
 
-    by_name = await McpServer.get_for_name("linear")
+    by_name = await McpServer.get_for_name(druks_db, "linear")
     assert by_name
     assert by_name.id == server.id
-    assert "linear" in {s.name for s in await McpServer.list_all()}
+    assert "linear" in {s.name for s in await McpServer.list_all(druks_db)}
 
-    await server.delete()
-    assert not await McpServer.get_for_name("linear")
+    await server.delete(druks_db)
+    assert not await McpServer.get_for_name(druks_db, "linear")
 
 
 async def test_enable_disable_moves_in_and_out_of_the_enabled_set(druks_db):
-    server = await McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
-    assert "linear" in {s["name"] for s in await McpServer.list_enabled()}
+    server = await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
+    assert "linear" in {s["name"] for s in await McpServer.list_enabled(druks_db)}
 
     server.is_enabled = False
     await druks_db.flush()
-    assert "linear" not in {s["name"] for s in await McpServer.list_enabled()}
+    assert "linear" not in {s["name"] for s in await McpServer.list_enabled(druks_db)}
 
     server.is_enabled = True
     await druks_db.flush()
-    assert "linear" in {s["name"] for s in await McpServer.list_enabled()}
+    assert "linear" in {s["name"] for s in await McpServer.list_enabled(druks_db)}
 
 
 # --- name validity: one identifier, shell/TOML-safe ----------------------
@@ -119,11 +119,11 @@ async def test_create_rejects_names_that_break_env_or_config(druks_db):
     # path; a leading digit and uppercase are rejected for the same reason.
     for bad in ("linear-app", "1linear", "Linear", "linear.app", "linear app"):
         with pytest.raises(InvalidServerNameError, match="Invalid MCP server name"):
-            await McpServer.create(name=bad, url=_LINEAR_URL, token=_TOKEN)
+            await McpServer.create(druks_db, name=bad, url=_LINEAR_URL, token=_TOKEN)
 
 
 async def test_valid_name_derives_shell_safe_env_var(druks_db):
-    server = await McpServer.create(name="linear_app", url=_LINEAR_URL, token=_TOKEN)
+    server = await McpServer.create(druks_db, name="linear_app", url=_LINEAR_URL, token=_TOKEN)
     # Every char of the derived var is a valid shell identifier char.
     var = get_bearer_token_env_var(server.name)
     assert var == "MCP_LINEAR_APP_TOKEN"
@@ -135,7 +135,7 @@ async def test_valid_name_derives_shell_safe_env_var(druks_db):
 
 
 async def test_delivery_names_the_variable_and_binds_the_static_row(druks_db):
-    await McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
     row = await _bearer_row("linear")
 
     kwargs = await _delivery()
@@ -156,7 +156,7 @@ async def test_required_server_delivers_beside_the_registry(druks_db):
     # A workspace declares a server with its own vault row and resource
     # (SoftwareFactory's review identity and repo): wire shape + entry ride
     # the same seam as every registry server.
-    await McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
     row = await _github_row()
     workspace = _requiring(
         RequiredMcpServer(
@@ -187,8 +187,8 @@ async def test_required_server_owns_its_name_against_a_registry_twin(druks_db):
     # Exactly one wire entry per name — the workspace's — and the registry twin
     # is skipped whole: it is neither bound to an entry nor resolved at all (a
     # tokenless twin would otherwise raise).
-    await McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
-    await McpServer.create(name="notion", url="https://mcp.notion.com/sse", token="")
+    await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await McpServer.create(druks_db, name="notion", url="https://mcp.notion.com/sse", token="")
     row = await _github_row()
     workspace = _requiring(
         RequiredMcpServer(name="linear", url="https://required.internal/linear", secret_id=row.id),
@@ -221,14 +221,14 @@ async def test_enabled_static_server_without_token_raises_loudly(druks_db):
     # A tokenless enabled static row can't authenticate; delivery raises rather
     # than shipping a header the harness can't fill. (The API rejects creating
     # one; this guards the model-level path.)
-    await McpServer.create(name="notion", url="https://mcp.notion.com/sse", token="")
+    await McpServer.create(druks_db, name="notion", url="https://mcp.notion.com/sse", token="")
 
     with pytest.raises(MissingTokenError, match="notion"):
         await _delivery()
 
 
 async def test_enabled_server_reaches_both_harness_configs_without_token(druks_db):
-    await McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
     kwargs = await _delivery()
     servers = kwargs["mcp_servers"]
 
@@ -262,6 +262,7 @@ async def _grafana_shaped_server() -> None:
     # A registry-installed shape: no bearer (empty token_source), one plain
     # declared header and one secret one.
     await McpServer.create(
+        db_session(),
         name="grafana",
         url="https://mcp.grafana.com/mcp",
         token_source="",
@@ -297,6 +298,7 @@ async def test_declared_headers_deliver_inline_and_secret_values_are_entries(dru
 
 async def test_two_secret_headers_bind_two_entries_beside_the_bearer(druks_db):
     await McpServer.create(
+        druks_db,
         name="acme",
         url="https://mcp.acme.com/mcp",
         token=_TOKEN,
@@ -350,7 +352,11 @@ async def test_bearer_and_declared_headers_combine_on_one_server(druks_db):
     # A static-token server may also declare plain headers; the Authorization
     # bearer keeps its env-ref form beside them.
     await McpServer.create(
-        name="acme", url="https://mcp.acme.com/mcp", token=_TOKEN, headers={"X-Region": "eu"}
+        druks_db,
+        name="acme",
+        url="https://mcp.acme.com/mcp",
+        token=_TOKEN,
+        headers={"X-Region": "eu"},
     )
 
     kwargs = await _delivery()
@@ -370,7 +376,9 @@ async def test_bearer_and_declared_headers_combine_on_one_server(druks_db):
 async def test_bearerless_server_delivers_without_a_bearer(druks_db):
     # The loud MissingTokenError is a static-source contract; a bearerless
     # server (auth in its headers, or no auth) delivers without any bearer.
-    await McpServer.create(name="public_docs", url="https://docs.example.com/mcp", token_source="")
+    await McpServer.create(
+        druks_db, name="public_docs", url="https://docs.example.com/mcp", token_source=""
+    )
 
     kwargs = await _delivery()
 
@@ -382,7 +390,7 @@ async def test_bearerless_server_delivers_without_a_bearer(druks_db):
 async def test_bearerless_server_merges_with_its_headers(druks_db):
     await _grafana_shaped_server()
 
-    grafana = (await McpServer._merged())["grafana"]
+    grafana = (await McpServer._merged(druks_db))["grafana"]
     assert grafana["token_source"] == ""
     assert grafana["headers"] == {"X-Grafana-URL": "https://acme.grafana.net"}
     assert grafana["secret_headers"]["X-Api-Key"].secrets["value"] == "grafana-api-secret"
@@ -489,7 +497,7 @@ async def test_routes_disable_and_refuse_deleting_a_builtin(tmp_path, registry_s
         assert disabled.status_code == 200
         assert disabled.json()["isEnabled"] is False
         # The overlay row now exists and the entry reads disabled everywhere.
-        assert await McpServer.get_for_name("figma_test")
+        assert await McpServer.get_for_name(druks_db, "figma_test")
 
 
 # --- catalog: the deploy-declarative default-server set -------------------
@@ -512,7 +520,7 @@ async def test_packaged_catalog_is_empty_and_delivers_nothing(registry_state, dr
     # entry.
     load_mcp_catalog(PACKAGED_MCP_CATALOG)
 
-    assert not [s for s in (await McpServer._merged()).values() if s["builtin"]]
+    assert not [s for s in (await McpServer._merged(druks_db)).values() if s["builtin"]]
 
     kwargs = await _delivery()
     assert "mcp_servers" not in kwargs
@@ -583,11 +591,13 @@ async def test_db_overlay_still_disables_a_catalog_entry(tmp_path, registry_stat
         _write_catalog(tmp_path, {"figma_test": _static_entry("https://mcp.figma.test/")})
     )
 
-    await McpServer.create(name="figma_test", url="https://mcp.figma.test/", is_enabled=False)
+    await McpServer.create(
+        druks_db, name="figma_test", url="https://mcp.figma.test/", is_enabled=False
+    )
 
-    resolved = (await McpServer._merged())["figma_test"]
+    resolved = (await McpServer._merged(druks_db))["figma_test"]
     assert resolved["builtin"] is True
-    assert "figma_test" not in {s["name"] for s in await McpServer.list_enabled()}
+    assert "figma_test" not in {s["name"] for s in await McpServer.list_enabled(druks_db)}
 
 
 async def test_catalog_enabled_false_ships_the_entry_dark(tmp_path, registry_state, druks_db):
@@ -604,10 +614,10 @@ async def test_catalog_enabled_false_ships_the_entry_dark(tmp_path, registry_sta
         )
     )
 
-    resolved = await McpServer._merged()
+    resolved = await McpServer._merged(druks_db)
     assert resolved["dark_test"]["is_enabled"] is False
     assert resolved["lit_test"]["is_enabled"] is True
-    enabled_names = {s["name"] for s in await McpServer.list_enabled()}
+    enabled_names = {s["name"] for s in await McpServer.list_enabled(druks_db)}
     assert "dark_test" not in enabled_names
     assert "lit_test" in enabled_names
 

@@ -160,9 +160,9 @@ async def test_connect_resolves_standard_identity(provider, druks_db):
     assert pending["token_endpoint"] == provider["oauth"]["token_endpoint"]
     provider["claims"]["nonce"] = params["nonce"]
 
-    await oauth.complete_connect(state=params["state"], code="test-authorization-code")
+    await oauth.complete_connect(druks_db, state=params["state"], code="test-authorization-code")
 
-    grant = await oauth.get_connection(NAME, None)
+    grant = await oauth.get_connection(druks_db, NAME, None)
     assert grant.identity_status == "resolved"
     assert grant.identity == {
         "authority": provider["openid"]["issuer"],
@@ -237,8 +237,8 @@ async def test_scoped_oauth_issuer_cannot_replace_the_id_token_issuer(provider, 
     )
     params = dict(parse_qsl(urlparse(url).query))
     provider["claims"].update(iss=provider["oauth"]["issuer"], nonce=params["nonce"])
-    await oauth.complete_connect(state=params["state"], code="test-authorization-code")
-    grant = await oauth.get_connection(NAME, None)
+    await oauth.complete_connect(druks_db, state=params["state"], code="test-authorization-code")
+    grant = await oauth.get_connection(druks_db, NAME, None)
     assert grant.identity == {}
     assert grant.identity_status == "failed"
     assert not grant.revoked_at

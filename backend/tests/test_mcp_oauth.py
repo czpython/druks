@@ -124,9 +124,10 @@ async def _store_grant(
     account_id: str | None = None,
     identity_mode: IdentityMode = IdentityMode.SHARED,
 ) -> VaultSecret:
-    server = await McpServer.get_for_name(_NAME)
+    server = await McpServer.get_for_name(db_session(), _NAME)
     if not server:
         server = await McpServer.create(
+            db_session(),
             name=_NAME,
             url=_SERVER_URL,
             token_source=TokenSource.OAUTH,
@@ -147,11 +148,13 @@ def _state_key(state: str) -> str:
 
 
 async def _token_key(account_id: str) -> str:
-    return f"mcp:{_NAME}:access_token:{(await oauth.get_connection(_NAME, account_id)).id}"
+    connection = await oauth.get_connection(db_session(), _NAME, account_id)
+    return f"mcp:{_NAME}:access_token:{connection.id}"
 
 
 async def _lock_key(account_id: str) -> str:
-    return f"mcp:{_NAME}:refresh_lock:{(await oauth.get_connection(_NAME, account_id)).id}"
+    connection = await oauth.get_connection(db_session(), _NAME, account_id)
+    return f"mcp:{_NAME}:refresh_lock:{connection.id}"
 
 
 @pytest.mark.parametrize(
@@ -305,10 +308,10 @@ async def test_complete_connect_exchanges_code_and_stores_the_grant(auth_server,
     )
     state = dict(parse_qsl(urlparse(url).query))["state"]
 
-    name = await oauth.complete_connect(state=state, code="code-1")
+    name = await oauth.complete_connect(druks_db, state=state, code="code-1")
 
     assert name == _NAME
-    grant = await oauth.get_connection(_NAME, None)
+    grant = await oauth.get_connection(druks_db, _NAME, None)
     assert grant.secrets["refresh_token"] == "rt-1"
     assert grant.identity == {
         "authority": _AUTH_BASE,
@@ -329,7 +332,7 @@ async def test_complete_connect_exchanges_code_and_stores_the_grant(auth_server,
     # Nothing is cached at connect (the grant is real only once this commits);
     # the first delivery mints from it, carrying the grant's resource binding.
     assert not await get_client().get(await _token_key(None))
-    assert (await oauth.get_access_token(_NAME, None))[0] == "at-1"
+    assert (await oauth.get_access_token(druks_db, _NAME, None))[0] == "at-1"
     refresh = auth_server.token_requests[1]
     assert refresh["grant_type"] == "refresh_token"
     assert refresh["resource"] == _SERVER_URL
@@ -349,8 +352,10 @@ async def test_connect_records_reported_scopes_only(auth_server, druks_db, token
     url = await oauth.begin_connect(
         _NAME, _SERVER_URL, _ENDPOINT, account_id=None, identity_mode=IdentityMode.SHARED
     )
-    await oauth.complete_connect(state=dict(parse_qsl(urlparse(url).query))["state"], code="code")
-    grant = await oauth.get_connection(_NAME, None)
+    await oauth.complete_connect(
+        druks_db, state=dict(parse_qsl(urlparse(url).query))["state"], code="code"
+    )
+    grant = await oauth.get_connection(druks_db, _NAME, None)
     assert grant.scopes == scopes
 
 
@@ -362,8 +367,10 @@ async def test_reconnect_replaces_stale_identity_even_when_lookup_fails(
     url = await oauth.begin_connect(
         _NAME, _SERVER_URL, _ENDPOINT, account_id=account.id, identity_mode=IdentityMode.PER_USER
     )
-    await oauth.complete_connect(state=dict(parse_qsl(urlparse(url).query))["state"], code="first")
-    first = await oauth.get_connection(_NAME, account.id)
+    await oauth.complete_connect(
+        druks_db, state=dict(parse_qsl(urlparse(url).query))["state"], code="first"
+    )
+    first = await oauth.get_connection(druks_db, _NAME, account.id)
     assert first.identity["subject"] == "user-1"
     auth_server.token_response["refresh_token"] = "rt-new"
     auth_server.token_response.pop("scope")
@@ -374,8 +381,10 @@ async def test_reconnect_replaces_stale_identity_even_when_lookup_fails(
     url = await oauth.begin_connect(
         _NAME, _SERVER_URL, _ENDPOINT, account_id=account.id, identity_mode=IdentityMode.PER_USER
     )
-    await oauth.complete_connect(state=dict(parse_qsl(urlparse(url).query))["state"], code="second")
-    grant = await oauth.get_connection(_NAME, account.id)
+    await oauth.complete_connect(
+        druks_db, state=dict(parse_qsl(urlparse(url).query))["state"], code="second"
+    )
+    grant = await oauth.get_connection(druks_db, _NAME, account.id)
     assert grant.id == first.id
     assert grant.account_id == account.id
     assert grant.identity == {}
@@ -385,15 +394,17 @@ async def test_reconnect_replaces_stale_identity_even_when_lookup_fails(
     )
     assert grant.scopes is None
     assert grant.secrets["refresh_token"] == "rt-new"
-    assert (await oauth.get_access_token(_NAME, account.id))[0] == "at-1"
+    assert (await oauth.get_access_token(druks_db, _NAME, account.id))[0] == "at-1"
 
     auth_server.userinfo_status = 200
     auth_server.userinfo_endpoint = f"{_AUTH_BASE}/userinfo"
     url = await oauth.begin_connect(
         _NAME, _SERVER_URL, _ENDPOINT, account_id=account.id, identity_mode=IdentityMode.PER_USER
     )
-    await oauth.complete_connect(state=dict(parse_qsl(urlparse(url).query))["state"], code="third")
-    grant = await oauth.get_connection(_NAME, account.id)
+    await oauth.complete_connect(
+        druks_db, state=dict(parse_qsl(urlparse(url).query))["state"], code="third"
+    )
+    grant = await oauth.get_connection(druks_db, _NAME, account.id)
     assert grant.identity_status == "resolved"
     assert grant.identity_error is None
 
@@ -422,7 +433,7 @@ async def test_connection_api_exposes_identity_facts_without_tokens(
 
     # The state is single-use.
     with pytest.raises(OauthConnectError, match="expired state"):
-        await oauth.complete_connect(state=state, code="code-1")
+        await oauth.complete_connect(druks_db, state=state, code="code-1")
 
 
 async def test_off_issuer_userinfo_is_dropped_and_logged(auth_server, druks_db, caplog):
@@ -437,9 +448,9 @@ async def test_off_issuer_userinfo_is_dropped_and_logged(auth_server, druks_db, 
     state = dict(parse_qsl(urlparse(url).query))["state"]
 
     with caplog.at_level("WARNING"):
-        await oauth.complete_connect(state=state, code="code-1")
+        await oauth.complete_connect(druks_db, state=state, code="code-1")
 
-    assert (await oauth.get_connection(_NAME, None)).identity == {}
+    assert (await oauth.get_connection(druks_db, _NAME, None)).identity == {}
     assert "evil.test" in caplog.text
 
 
@@ -455,8 +466,8 @@ async def test_complete_connect_without_refresh_token_stores_nothing(auth_server
     state = dict(parse_qsl(urlparse(url).query))["state"]
 
     with pytest.raises(OauthConnectError, match="no refresh token"):
-        await oauth.complete_connect(state=state, code="code-1")
-    assert not await oauth.list_connections(_NAME)
+        await oauth.complete_connect(druks_db, state=state, code="code-1")
+    assert not await oauth.list_connections(druks_db, _NAME)
 
 
 async def test_reconsent_replaces_the_grant_and_evicts_the_stale_token(auth_server, druks_db):
@@ -471,9 +482,9 @@ async def test_reconsent_replaces_the_grant_and_evicts_the_stale_token(auth_serv
         identity_mode=IdentityMode.SHARED,
     )
     state = dict(parse_qsl(urlparse(url).query))["state"]
-    await oauth.complete_connect(state=state, code="code-1")
+    await oauth.complete_connect(druks_db, state=state, code="code-1")
 
-    grant = await oauth.get_connection(_NAME, None)
+    grant = await oauth.get_connection(druks_db, _NAME, None)
     assert grant.secrets["refresh_token"] == "rt-1"
     # The stale narrow token must not keep serving until its TTL runs out.
     assert not await get_client().get(await _token_key(None))
@@ -481,9 +492,9 @@ async def test_reconsent_replaces_the_grant_and_evicts_the_stale_token(auth_serv
 
 async def test_reconnect_after_disconnect_creates_a_new_grant(auth_server, druks_db):
     await _store_grant(refresh_token="rt-stale")
-    revoked = await oauth.get_connection(_NAME, None)
-    await oauth.disconnect(_NAME, None)
-    assert not await oauth.get_connection(_NAME, None)
+    revoked = await oauth.get_connection(druks_db, _NAME, None)
+    await oauth.disconnect(druks_db, _NAME, None)
+    assert not await oauth.get_connection(druks_db, _NAME, None)
 
     url = await oauth.begin_connect(
         _NAME,
@@ -493,14 +504,14 @@ async def test_reconnect_after_disconnect_creates_a_new_grant(auth_server, druks
         identity_mode=IdentityMode.SHARED,
     )
     state = dict(parse_qsl(urlparse(url).query))["state"]
-    await oauth.complete_connect(state=state, code="code-1")
+    await oauth.complete_connect(druks_db, state=state, code="code-1")
 
     from druks.database import db_session
 
     db_session().expunge_all()
     # A re-connect creates a new grant. The revoked row stays as history,
     # so at most one live connection holds the (server, account) slot.
-    grant = await oauth.get_connection(_NAME, None)
+    grant = await oauth.get_connection(druks_db, _NAME, None)
     assert grant.id != revoked.id
     assert grant.secrets["refresh_token"] == "rt-1"
     assert revoked.revoked_at
@@ -519,10 +530,10 @@ async def test_two_shared_connects_converge_on_one_grant(auth_server, druks_db):
             identity_mode=IdentityMode.SHARED,
         )
         state = dict(parse_qsl(urlparse(url).query))["state"]
-        await oauth.complete_connect(state=state, code=account.id)
+        await oauth.complete_connect(druks_db, state=state, code=account.id)
 
-    grants = await oauth.list_connections(_NAME)
-    assert (await McpServer.get_for_name(_NAME)).identity_mode == IdentityMode.SHARED
+    grants = await oauth.list_connections(druks_db, _NAME)
+    assert (await McpServer.get_for_name(druks_db, _NAME)).identity_mode == IdentityMode.SHARED
     assert [grant.account_id for grant in grants] == [None]
 
 
@@ -539,10 +550,10 @@ async def test_two_per_user_connects_store_two_grants(auth_server, druks_db):
             identity_mode=IdentityMode.PER_USER,
         )
         state = dict(parse_qsl(urlparse(url).query))["state"]
-        await oauth.complete_connect(state=state, code=account.id)
+        await oauth.complete_connect(druks_db, state=state, code=account.id)
 
-    grants = await oauth.list_connections(_NAME)
-    assert (await McpServer.get_for_name(_NAME)).identity_mode == IdentityMode.PER_USER
+    grants = await oauth.list_connections(druks_db, _NAME)
+    assert (await McpServer.get_for_name(druks_db, _NAME)).identity_mode == IdentityMode.PER_USER
     assert {grant.account_id for grant in grants} == {first.id, second.id}
 
 
@@ -566,11 +577,11 @@ async def test_a_later_connect_stores_under_the_claimed_mode(auth_server, druks_
     first_state = dict(parse_qsl(urlparse(first_url).query))["state"]
     second_state = dict(parse_qsl(urlparse(second_url).query))["state"]
 
-    await oauth.complete_connect(state=first_state, code="first")
-    await oauth.complete_connect(state=second_state, code="second")
+    await oauth.complete_connect(druks_db, state=first_state, code="first")
+    await oauth.complete_connect(druks_db, state=second_state, code="second")
 
-    assert (await McpServer.get_for_name(_NAME)).identity_mode == IdentityMode.SHARED
-    grant_accounts = {grant.account_id for grant in await oauth.list_connections(_NAME)}
+    assert (await McpServer.get_for_name(druks_db, _NAME)).identity_mode == IdentityMode.SHARED
+    grant_accounts = {grant.account_id for grant in await oauth.list_connections(druks_db, _NAME)}
     assert grant_accounts == {None}
 
 
@@ -585,7 +596,7 @@ async def test_get_refreshes_on_cache_miss_and_persists_rotation(auth_server, dr
         "expires_in": 300,
     }
 
-    token, expires_at = await oauth.get_access_token(_NAME, None)
+    token, expires_at = await oauth.get_access_token(druks_db, _NAME, None)
 
     assert token == "at-2"
     # The expiry is the cache lifetime: the provider's 300s less the skew.
@@ -596,17 +607,17 @@ async def test_get_refreshes_on_cache_miss_and_persists_rotation(auth_server, dr
     assert refresh["refresh_token"] == "rt-old"
     assert refresh["resource"] == _SERVER_URL
     # Rotation: the provider's new refresh token replaced the stored one.
-    stored = await oauth.get_connection(_NAME, None)
+    stored = await oauth.get_connection(druks_db, _NAME, None)
     assert stored.secrets["refresh_token"] == "rt-new"
 
     # A second call within the TTL reuses the cache — no second refresh.
-    assert (await oauth.get_access_token(_NAME, None))[0] == "at-2"
+    assert (await oauth.get_access_token(druks_db, _NAME, None))[0] == "at-2"
     assert len(auth_server.token_requests) == 1
 
 
 async def test_get_without_grant_fails_loudly(druks_db):
     with pytest.raises(MissingGrantError, match=_NAME):
-        await oauth.get_access_token(_NAME, None)
+        await oauth.get_access_token(druks_db, _NAME, None)
 
 
 async def test_get_refresh_rejection_fails_loudly_and_evicts_the_cache(auth_server, druks_db):
@@ -614,7 +625,7 @@ async def test_get_refresh_rejection_fails_loudly_and_evicts_the_cache(auth_serv
     auth_server.token_status = 400
 
     with pytest.raises(GrantRefreshError, match=_NAME):
-        await oauth.get_access_token(_NAME, None)
+        await oauth.get_access_token(druks_db, _NAME, None)
     assert not await get_client().get(await _token_key(None))
 
 
@@ -623,7 +634,7 @@ async def test_get_rejects_a_malformed_token_response(auth_server, druks_db):
     auth_server.token_malformed = True
 
     with pytest.raises(GrantRefreshError, match="malformed JSON"):
-        await oauth.get_access_token(_NAME, None)
+        await oauth.get_access_token(druks_db, _NAME, None)
 
 
 async def test_get_rejects_a_token_response_without_an_access_token(auth_server, druks_db):
@@ -631,7 +642,7 @@ async def test_get_rejects_a_token_response_without_an_access_token(auth_server,
     auth_server.token_response = {"refresh_token": "rt-2", "expires_in": 3600}
 
     with pytest.raises(GrantRefreshError, match="no access token"):
-        await oauth.get_access_token(_NAME, None)
+        await oauth.get_access_token(druks_db, _NAME, None)
 
 
 async def test_get_losing_the_refresh_lock_polls_for_the_winners_token(
@@ -650,7 +661,7 @@ async def test_get_losing_the_refresh_lock_polls_for_the_winners_token(
         await redis.delete(await _lock_key(None))
 
     winner = asyncio.create_task(_winner_finishes())
-    assert await oauth.get_access_token(_NAME, None) == ("at-winner", None)
+    assert await oauth.get_access_token(druks_db, _NAME, None) == ("at-winner", None)
     await winner
     assert not auth_server.token_requests
 
@@ -662,7 +673,7 @@ async def test_get_times_out_loudly_when_the_refresh_lock_never_frees(druks_db, 
     await get_client().set(await _lock_key(None), "1")
 
     with pytest.raises(GrantRefreshError, match="concurrent refresh"):
-        await oauth.get_access_token(_NAME, None)
+        await oauth.get_access_token(druks_db, _NAME, None)
 
 
 async def test_get_cache_and_refresh_lock_are_per_account(auth_server, druks_db):
@@ -673,7 +684,7 @@ async def test_get_cache_and_refresh_lock_are_per_account(auth_server, druks_db)
     redis = get_client()
     await redis.set(await _lock_key(first.id), "1")
 
-    assert (await oauth.get_access_token(_NAME, second.id))[0] == "at-1"
+    assert (await oauth.get_access_token(druks_db, _NAME, second.id))[0] == "at-1"
     assert not await redis.get(await _token_key(first.id))
     assert await redis.get(await _token_key(second.id)) == b"at-1"
 
@@ -710,7 +721,9 @@ async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
     registry_state, druks_db
 ):
     _register_oauth_server()
-    server = await McpServer.create(name=_NAME, url=_SERVER_URL, token_source=TokenSource.OAUTH)
+    server = await McpServer.create(
+        db_session(), name=_NAME, url=_SERVER_URL, token_source=TokenSource.OAUTH
+    )
     server.identity_mode = IdentityMode.SHARED
 
     with pytest.raises(MissingGrantError, match=_NAME):
@@ -719,7 +732,9 @@ async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
 
 async def test_delivery_names_the_account_missing_its_per_user_grant(druks_db):
     account = await Account.get_or_create(druks_db, "run@example.com")
-    server = await McpServer.create(name=_NAME, url=_SERVER_URL, token_source=TokenSource.OAUTH)
+    server = await McpServer.create(
+        db_session(), name=_NAME, url=_SERVER_URL, token_source=TokenSource.OAUTH
+    )
     server.identity_mode = IdentityMode.PER_USER
 
     with pytest.raises(MissingGrantError) as error:
@@ -770,7 +785,7 @@ async def test_the_ref_binds_the_accounts_own_grant(auth_server, druks_db):
 async def test_a_disconnected_grant_issues_nothing(auth_server, druks_db):
     await _store_grant()
     ref = await _ref()
-    await oauth.disconnect(_NAME, None)
+    await oauth.disconnect(druks_db, _NAME, None)
 
     with pytest.raises(SecretRevokedError, match=_NAME):
         await (await druks_db.get(VaultSecret, ref.secret_id)).issue_token(druks_db, "")
@@ -831,9 +846,9 @@ async def test_callback_route_completes_the_connect(
         # The page notifies the opener tab, then closes itself.
         assert "BroadcastChannel('druks-mcp-connect')" in page.text
         assert "window.close()" in page.text
-        assert await oauth.get_connection(_NAME, None)
+        assert await oauth.get_connection(druks_db, _NAME, None)
         # Connecting is the explicit "use this server" — it enables too.
-        assert (await McpServer.get_for_name(_NAME)).is_enabled is True
+        assert (await McpServer.get_for_name(druks_db, _NAME)).is_enabled is True
 
         # Consent denied / unknown state both land loudly, storing nothing.
         assert (
@@ -856,7 +871,7 @@ async def test_disconnect_route_drops_grant_and_cache(
 ):
     _register_oauth_server()
     await _store_grant()
-    await oauth.get_access_token(_NAME, None)
+    await oauth.get_access_token(druks_db, _NAME, None)
     token_key = await _token_key(None)
     # The oauth engine's Redis client is bound to this test's loop; close it so the
     # route dials its own — the cached token lives in Redis either way.
@@ -864,10 +879,10 @@ async def test_disconnect_route_drops_grant_and_cache(
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         assert client.delete(f"/api/mcp-servers/{_NAME}/grant").status_code == 204
-        assert not await oauth.get_connection(_NAME, None)
+        assert not await oauth.get_connection(druks_db, _NAME, None)
         # The mirror of connect-enables: no grant, no calls, so no dead entry
         # riding into VMs.
-        assert (await McpServer.get_for_name(_NAME)).is_enabled is False
+        assert (await McpServer.get_for_name(druks_db, _NAME)).is_enabled is False
         assert client.delete(f"/api/mcp-servers/{_NAME}/grant").status_code == 404
 
     # Read the eviction on this test's own loop. Abandon whatever client the
@@ -913,8 +928,10 @@ async def test_shared_disconnect_allows_per_user_reconnect(
             == 200
         )
 
-    assert (await McpServer.get_for_name(_NAME)).identity_mode == IdentityMode.PER_USER
-    assert {grant.account_id for grant in await oauth.list_connections(_NAME)} == {operator.id}
+    assert (await McpServer.get_for_name(druks_db, _NAME)).identity_mode == IdentityMode.PER_USER
+    assert {grant.account_id for grant in await oauth.list_connections(druks_db, _NAME)} == {
+        operator.id
+    }
 
 
 async def test_api_has_token_reflects_the_grant_and_leaks_no_secret(
@@ -998,9 +1015,9 @@ async def test_per_user_disconnect_preserves_other_accounts_grant_and_cache(tmp_
         )
         assert response.status_code == 204
 
-    assert not await oauth.get_connection(_NAME, disconnected.id)
-    assert await oauth.get_connection(_NAME, connected.id)
-    assert (await McpServer.get_for_name(_NAME)).is_enabled is True
+    assert not await oauth.get_connection(druks_db, _NAME, disconnected.id)
+    assert await oauth.get_connection(druks_db, _NAME, connected.id)
+    assert (await McpServer.get_for_name(druks_db, _NAME)).is_enabled is True
     druks.redis._client = None
     assert not await get_client().get(disconnected_key)
     assert await get_client().get(connected_key) == b"connected-token"
@@ -1021,8 +1038,8 @@ async def test_removal_drops_every_grant_and_cached_token(tmp_path, druks_db):
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         assert client.delete(f"/api/mcp-servers/{_NAME}").status_code == 204
 
-    assert not await McpServer.get_for_name(_NAME)
-    assert not await oauth.list_connections(_NAME)
+    assert not await McpServer.get_for_name(druks_db, _NAME)
+    assert not await oauth.list_connections(druks_db, _NAME)
     druks.redis._client = None
     assert not await get_client().get(first_key)
     assert not await get_client().get(second_key)

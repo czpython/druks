@@ -28,7 +28,9 @@ def _set_key(monkeypatch, tmp_path, value: str) -> None:
 
 async def _store_token(token: str = _TOKEN) -> None:
     # The paste path: a server's bearer lands in the vault under its header.
-    await McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=token)
+    await McpServer.create(
+        db_session(), name="linear", url="https://mcp.linear.app/sse", token=token
+    )
 
 
 async def _get_token() -> VaultSecret:
@@ -38,8 +40,8 @@ async def _get_token() -> VaultSecret:
 
 
 async def _store_grant(refresh_token: str = "rt-secret", client_secret: str = "") -> VaultSecret:
-    await McpServer.get_for_name("notion") or await McpServer.create(
-        name="notion", url="https://mcp.notion.test/sse"
+    await McpServer.get_for_name(db_session(), "notion") or await McpServer.create(
+        db_session(), name="notion", url="https://mcp.notion.test/sse"
     )
     return await VaultSecret.connect(
         db_session(),
@@ -64,7 +66,7 @@ async def test_stored_secrets_are_ciphertext_and_reads_restore_them(druks_db):
     assert (await _get_token()).secrets["value"] == _TOKEN
     # The merged view every consumer reads carries the vault row itself, so
     # the plaintext exists only where the value is read.
-    merged = (await McpServer._merged())["linear"]
+    merged = (await McpServer._merged(druks_db))["linear"]
     assert merged["token"].secrets["value"] == _TOKEN
 
 

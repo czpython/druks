@@ -51,7 +51,9 @@ class Connection:
 
     async def get_access_token(self, scopes: tuple[str, ...] = (), cached: bool = True) -> str:
         client = await self.service.get_oauth_client()
-        token, _ = await client.get_access_token(connection=self.row, scopes=scopes, cached=cached)
+        token, _ = await client.get_access_token(
+            db_session(), connection=self.row, scopes=scopes, cached=cached
+        )
         return token
 
     async def disconnect(self) -> None:
