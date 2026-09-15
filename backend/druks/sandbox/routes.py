@@ -30,7 +30,7 @@ async def secret(
     says the source holds nothing valid now, and the exchange retries."""
     credential = bearer.credentials if bearer else ""
     try:
-        identity = await SandboxIdentity.authenticate(identity_id, credential, name)
+        identity = await SandboxIdentity.authenticate(session, identity_id, credential, name)
         # The ref is the whole selection: the vault row and the resource.
         # Nothing in the request can pick another.
         ref = identity.get_secret_ref(name)
@@ -38,7 +38,7 @@ async def secret(
             ref.resource, host_id=identity.host_id or ""
         )
         # The identity can die during the source I/O.
-        await SandboxIdentity.authenticate(identity_id, credential, name)
+        await SandboxIdentity.authenticate(session, identity_id, credential, name)
     except IdentityDenied:
         raise HTTPException(status_code=403) from None
     except OAuthTokenError:

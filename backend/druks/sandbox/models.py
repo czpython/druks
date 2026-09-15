@@ -6,10 +6,11 @@ from typing import TYPE_CHECKING
 
 from drukbox_sdk import Issuer
 from sqlalchemy import ForeignKey, LargeBinary, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from druks.core.models import Uuid7Pk
-from druks.database import db_session, get_session
+from druks.database import get_session
 from druks.mcp.constants import BEARER_HEADER, BEARER_PREFIX
 from druks.models import Base
 from druks.secrets.enums import SecretKind
@@ -79,7 +80,7 @@ class SandboxIdentity(Base, Uuid7Pk):
 
     @classmethod
     async def create(
-        cls, *, run_id: str, scoped_to: str, secret_refs: list[SecretRef]
+        cls, session: AsyncSession, *, run_id: str, scoped_to: str, secret_refs: list[SecretRef]
     ) -> tuple["SandboxIdentity", dict[str, Issuer]]:
         """The committed identity and the issuer entries for its box. Committed
         before the box exists: Drukbox fetches an issuer during provisioning."""
@@ -102,13 +103,12 @@ class SandboxIdentity(Base, Uuid7Pk):
             # The box lease bounds the identity: a box never outlives it.
             expires_at=now + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS),
         )
-        session = db_session()
         session.add(identity)
         await session.commit()
         issuer_url = load_settings().sandbox.issuer_url.rstrip("/")
         entries = {}
         for ref in secret_refs:
-            secret = await db_session().get(VaultSecret, ref.secret_id)
+            secret = await session.get(VaultSecret, ref.secret_id)
             # A custom entry names its host, variable, and header; a catalog
             # entry leaves those to Drukbox.
             fields = {}
@@ -130,11 +130,11 @@ class SandboxIdentity(Base, Uuid7Pk):
 
     @classmethod
     async def lookup(
-        cls, run_id: str, scoped_to: str, secret_refs: list[SecretRef]
+        cls, session: AsyncSession, run_id: str, scoped_to: str, secret_refs: list[SecretRef]
     ) -> "SandboxIdentity | None":
         """The live identity bound to the box scoped to a workflow or an agent,
         with these secrets. A replay finds the box a crashed process left."""
-        rows = await db_session().scalars(
+        rows = await session.scalars(
             select(cls)
             .where(
                 cls.run_id == run_id,
@@ -151,10 +151,12 @@ class SandboxIdentity(Base, Uuid7Pk):
         )
 
     @classmethod
-    async def authenticate(cls, identity_id: str, bearer: str, name: str) -> "SandboxIdentity":
+    async def authenticate(
+        cls, session: AsyncSession, identity_id: str, bearer: str, name: str
+    ) -> "SandboxIdentity":
         """The live identity of an active run that a fetch presents, holding the
         secret it names, read fresh. Else IdentityDenied."""
-        identity = await db_session().scalar(
+        identity = await session.scalar(
             select(cls)
             .options(selectinload(cls.run), selectinload(cls.secret_refs))
             .where(cls.id == identity_id)
@@ -183,17 +185,17 @@ class SandboxIdentity(Base, Uuid7Pk):
 
     async def bind(self, host_id: str) -> None:
         self.host_id = host_id
-        await db_session().commit()
+        await self.session.commit()
 
     async def revoke(self) -> None:
         # A second revoke keeps the first stamp.
         self.revoked_at = self.revoked_at or Base.utc_now()
-        await db_session().commit()
+        await self.session.commit()
 
     @classmethod
-    async def list_orphans(cls) -> list["SandboxIdentity"]:
+    async def list_orphans(cls, session: AsyncSession) -> list["SandboxIdentity"]:
         """The identities of boxes whose run ended: bound, inside their lease, not revoked."""
-        rows = await db_session().scalars(
+        rows = await session.scalars(
             select(cls)
             .options(selectinload(cls.run))
             .where(
@@ -216,9 +218,11 @@ class SandboxIdentity(Base, Uuid7Pk):
             await session.commit()
 
     @classmethod
-    async def list_for_secret(cls, secret_id: str) -> list["SandboxIdentity"]:
+    async def list_for_secret(
+        cls, session: AsyncSession, secret_id: str
+    ) -> list["SandboxIdentity"]:
         """The live identities with a bound box that hold a ref to the secret."""
-        rows = await db_session().scalars(
+        rows = await session.scalars(
             select(cls)
             .join(cls.secret_refs)
             .where(
