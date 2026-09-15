@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 
 import type { AppsSettingsResponse, FeedItem } from '../api/types'
+import type { HarnessResultRenderer } from '../components/StreamTranscript'
 
 export interface AppRoute {
   /** A wouter pattern under the router base, such as /notes/:id. */
@@ -39,6 +40,10 @@ export interface AppUI {
   subjectPath?: (subject: { type: string; id: string }, target?: SubjectTarget) => string | undefined
   activity?: (event: ActivityEvent) => ActivityPresentation
   parentPath?: (location: string) => string | undefined
+  // Renders the structured payload a harness emits as its final output. The
+  // shell knows a payload arrived, never its vocabulary. Return null for a
+  // payload that has its own view and stays out of the transcript.
+  harnessResult?: HarnessResultRenderer
 }
 
 /** The run an owner link selects and, for a decision, its request round. */

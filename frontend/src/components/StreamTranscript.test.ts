@@ -35,7 +35,7 @@ describe('parseStream noise suppression', () => {
     expect(rows[1]).toMatchObject({ kind: 'tool_use', name: 'Bash' })
   })
 
-  it('drops codex agent_message (the structured result) but keeps reasoning and tools', () => {
+  it('hands codex agent_message JSON to the app and keeps reasoning and tools', () => {
     const text = [
       line({
         type: 'item.completed',
@@ -53,8 +53,8 @@ describe('parseStream noise suppression', () => {
 
     const rows = parseStream(text, true)
 
-    expect(rows.map((r) => r.kind)).toEqual(['thinking', 'tool_use', 'tool_result'])
-    expect(rows[0]).toMatchObject({ kind: 'thinking', text: 'Examining the tests.' })
+    expect(rows.map((r) => r.kind)).toEqual(['harness_result', 'thinking', 'tool_use', 'tool_result'])
+    expect(rows[1]).toMatchObject({ kind: 'thinking', text: 'Examining the tests.' })
   })
 
   it('renders prose codex agent_message as text, like claude narration', () => {
@@ -74,14 +74,14 @@ describe('parseStream noise suppression', () => {
 
     const rows = parseStream(text, true)
 
-    expect(rows.map((r) => r.kind)).toEqual(['text'])
+    expect(rows.map((r) => r.kind)).toEqual(['text', 'harness_result'])
     expect(rows[0]).toMatchObject({
       kind: 'text',
       text: 'I will read the diff and the changed files.',
     })
   })
 
-  it('renders a verdict-shaped codex final result like claude harness results', () => {
+  it('hands every codex final JSON payload to the app as a harness result', () => {
     const text = [
       line({
         type: 'item.completed',
@@ -98,35 +98,13 @@ describe('parseStream noise suppression', () => {
 
     const rows = parseStream(text, true)
 
-    // The verdict result surfaces; the structural payload still drops.
-    expect(rows.map((r) => r.kind)).toEqual(['harness_result'])
-    expect(rows[0]).toMatchObject({
-      kind: 'harness_result',
-      verdict: 'request_changes',
-      findingsCount: 2,
-      isError: true,
-    })
-  })
-
-  it('falls back to status for implement results that have no verdict', () => {
-    const text = line({
-      type: 'item.completed',
-      item: {
-        type: 'agent_message',
-        text: '{"status":"success","summary":"Implemented the fix.","acceptance_results":[{},{}]}',
+    expect(rows).toEqual([
+      {
+        kind: 'harness_result',
+        result: { verdict: 'request_changes', body: 'Two findings.', findings: [{}, {}] },
       },
-    })
-
-    const rows = parseStream(text, true)
-
-    expect(rows.map((r) => r.kind)).toEqual(['harness_result'])
-    expect(rows[0]).toMatchObject({
-      kind: 'harness_result',
-      verdict: 'success',
-      body: 'Implemented the fix.',
-      acCount: 2,
-      isError: false,
-    })
+      { kind: 'harness_result', result: { plan_markdown: '# plan', questions: [] } },
+    ])
   })
 
   it('renders codex mcp_tool_call as a named tool call with its result text', () => {

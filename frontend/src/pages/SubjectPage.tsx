@@ -213,6 +213,7 @@ function RunBlock({
       )}
       {open && call && (
         <RunTranscript
+          app={app}
           basePath={subjectApi.transcriptBase(app, call.id)}
           isLive={call.status === 'running'}
         />

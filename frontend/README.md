@@ -46,6 +46,11 @@ that ships its own JavaScript sets `navigation` on the registration, or
 Import the module one time from `src/apps/index.ts`. The shell finds the
 registration and does not hardcode the app name.
 
+An app whose agent calls end with a structured payload registers
+`harnessResult(result)`. The shared transcript renders what it returns and
+drops the row when it returns `null`. Without a renderer the payload shows as a
+truncated event line. The payload vocabulary stays in the app.
+
 The work sidebar keeps the same destinations across app pages. The Dashboard
 opens at `/`. Activity, Usage, and Schedules have shared routes. Schedules appears
 directly below Usage. App-declared navigation appears below the page
