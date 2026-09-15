@@ -12,6 +12,7 @@ from typing import Any
 
 from drukbox_sdk import Secret
 
+from druks.database import db_session
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
@@ -523,7 +524,9 @@ class CodexHarness(Harness):
                 HomeCopy(".codex/config.toml", config_dir / "config.toml"),
                 HomeCopy(".codex/AGENTS.md", config_dir / "AGENTS.md"),
                 HomeCopy(
-                    ".codex/skills", skills_dir, excludes=await Skill.delivery_excludes(skills)
+                    ".codex/skills",
+                    skills_dir,
+                    excludes=await Skill.delivery_excludes(db_session(), skills),
                 ),
             )
         )

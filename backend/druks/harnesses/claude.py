@@ -5,6 +5,7 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from druks.database import db_session
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
@@ -235,7 +236,11 @@ async def _get_credentials(
         ]
     skills_dir = sandbox.skills_dir or config_dir / "skills"
     home.append(
-        HomeCopy(".claude/skills", skills_dir, excludes=await Skill.delivery_excludes(skills))
+        HomeCopy(
+            ".claude/skills",
+            skills_dir,
+            excludes=await Skill.delivery_excludes(db_session(), skills),
+        )
     )
     return Credentials(home=tuple(home))
 
