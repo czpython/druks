@@ -2,9 +2,11 @@ from datetime import UTC, datetime
 
 import pytest
 from conftest import installation_key
+from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import (
     ContractRevisionOutput,
     FindingOutput,
+    ImplementationOutput,
     PlanOutput,
     ReviewReport,
 )
@@ -20,6 +22,65 @@ from druks.testing import seed_run
 from sqlalchemy import select
 
 from software_factory.factories import make_test_work_item
+
+
+async def test_first_delivery_records_its_pr_and_work_title(druks_db, druks_client, monkeypatch):
+    item = await make_test_work_item(
+        repo="acme/widget", title="Repair the queue", ticket_key="ACME-42"
+    )
+    run = await seed_run(druks_db, kind=Build.kind, subject=item)
+    workflow = Build()
+    workflow._workflow_id = run.id
+    workflow._subject = item.identity
+    delivery = ImplementationOutput(
+        type="result",
+        status="success",
+        base_sha="base",
+        head_sha="head",
+        commit_sha="commit",
+        branch="agent/queue",
+        pr_number=42,
+        files_changed=["queue.py"],
+        acceptance_results=[],
+        checks=[],
+        known_risks=[],
+        summary="Repaired the queue.",
+        workspace_path="/work/queue",
+        workspace_retention=None,
+    )
+
+    async def implement():
+        workflow.journal.add(delivery)
+        return delivery
+
+    async def run_step(options, operation):
+        return await operation()
+
+    monkeypatch.setattr(SoftwareFactory, "implement", implement)
+    monkeypatch.setattr("druks.workflows.DBOS.run_step_async", run_step)
+    await item.update(title="A renamed queue")
+    await workflow.implement()
+    await workflow.implement()
+    db_session().expunge_all()
+    item = await WorkItem.get(item.id)
+    assert item.pr_number == 42
+    await item.start_attempt()
+    await item.update(pr_number=43, branch="agent/next")
+
+    response = await druks_client.get("/api/events?app=software_factory&topic=pr.opened")
+
+    assert response.status_code == 200
+    events = response.json()["items"]
+    assert len(events) == 1
+    assert events[0]["subjectLabel"] == "ACME-42"
+    assert events[0]["payload"] == {
+        "repo": "acme/widget",
+        "pr_number": 42,
+        "branch": "agent/queue",
+        "title": "Repair the queue",
+        "run": run.id,
+        "kind": Build.kind,
+    }
 
 
 def test_plan_outputs_declare_their_saved_results():
@@ -42,7 +103,9 @@ def test_plan_outputs_declare_their_saved_results():
     assert revision.to_artifact()["content"] == "# Revised plan"
 
 
-async def test_review_result_belongs_to_the_identity_only_pull_request(druks_db, tmp_path):
+async def test_review_result_belongs_to_the_identity_only_pull_request(
+    druks_db, druks_client, tmp_path
+):
     db_session.registry.set(druks_db)
     subject = PullRequest.get("acme/widget", 42)
     run = await seed_run(druks_db, kind=PullRequestReview.kind, subject=subject)
@@ -115,16 +178,24 @@ async def test_review_result_belongs_to_the_identity_only_pull_request(druks_db,
     assert event.payload["artifact_id"] == artifact.id
     assert event.payload["agent_call_id"] == call.id
     assert event.payload["run"] == run.id
-    assert "summary" not in event.payload
+    assert event.payload["summary"] == report.summary
+    response = await druks_client.get("/api/events?app=software_factory&topic=review.completed")
+    assert response.status_code == 200
+    assert response.json()["items"][0]["payload"] == event.payload
 
 
 async def test_owner_outcome_and_announcement_roll_back_together(druks_db):
     db_session.registry.set(druks_db)
     item = await make_test_work_item(repo="acme/widget", title="Atomic outcome")
+    await item.update(pr_number=42, branch="agent/atomic")
     item_id = item.id
     with pytest.raises(RuntimeError, match="Roll back the delivery"):
         async with druks_db.begin_nested():
-            await item.resolve(Resolution.MERGED, at=datetime.now(UTC))
+            await pr_close_settles_the_item(
+                repo=item.repo,
+                pr_number=42,
+                payload={"merged": True, "resolved_at": datetime.now(UTC)},
+            )
             raise RuntimeError("Roll back the delivery")
     druks_db.expunge_all()
     assert not (await WorkItem.get(item_id)).resolution
@@ -140,6 +211,7 @@ async def test_stale_pr_on_a_reused_branch_cannot_resolve_the_current_attempt(dr
         payload={"branch": item.branch, "merged": True, "resolved_at": datetime.now(UTC)},
     )
     assert not item.resolution
+    assert not list(await druks_db.scalars(select(Event)))
 
 
 @pytest.mark.parametrize(("pr_number", "branch"), [(None, None), (42, "agent/stopped")])
@@ -160,7 +232,8 @@ async def test_operator_stop_records_no_owner_close(druks_db, druks_client, pr_n
 
 
 @pytest.mark.parametrize("state", ["parked", "failed"])
-async def test_owner_merge_records_once_without_an_operator_stop(druks_db, state):
+@pytest.mark.parametrize("merged", [True, False])
+async def test_owner_outcome_records_once_without_an_operator_stop(druks_db, state, merged):
     item = await make_test_work_item(repo="acme/widget", title="Merged work")
     await item.update(pr_number=42, branch="agent/merged")
     await seed_run(
@@ -174,11 +247,18 @@ async def test_owner_merge_records_once_without_an_operator_stop(druks_db, state
         await pr_close_settles_the_item(
             repo=item.repo,
             pr_number=42,
-            payload={"branch": item.branch, "merged": True, "resolved_at": datetime.now(UTC)},
+            payload={"branch": item.branch, "merged": merged, "resolved_at": datetime.now(UTC)},
         )
     events = list(await druks_db.scalars(select(Event).where(Event.subject_id == str(item.id))))
-    assert [event.type for event in events] == ["merged"]
-    assert item.resolution == "merged"
+    outcome = "merged" if merged else "closed"
+    assert [event.type for event in events] == [outcome]
+    assert events[0].payload == {"repo": "acme/widget", "pr_number": 42, "title": "Merged work"}
+    assert item.resolution == outcome
+    await item.start_attempt()
+    await item.update(pr_number=43, branch="agent/next", title="Next attempt")
+    druks_db.expunge_all()
+    recorded = (await druks_db.scalars(select(Event).where(Event.id == events[0].id))).one()
+    assert recorded.payload == {"repo": "acme/widget", "pr_number": 42, "title": "Merged work"}
 
 
 async def test_owner_merge_replaces_an_operator_cancel(druks_db, druks_client):
@@ -198,5 +278,10 @@ async def test_owner_merge_replaces_an_operator_cancel(druks_db, druks_client):
     )
     events = list(await druks_db.scalars(select(Event).where(Event.subject_id == str(item.id))))
     assert [event.type for event in events] == ["workflow.cancelled", "merged"]
+    assert events[1].payload == {
+        "repo": "acme/widget",
+        "pr_number": 42,
+        "title": "Merged after a cancel",
+    }
     druks_db.expunge_all()
     assert (await WorkItem.get(item.id)).resolution == Resolution.MERGED
