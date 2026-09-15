@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import connect_anthropic_subscription, connect_provider
 from druks.accounts.models import Account
+from druks.database import db_session
 from druks.harnesses.datastructures import ParsedMetric, ParsedUsage
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.secrets.datastructures import Audience
@@ -32,7 +33,7 @@ def client(app_settings: Settings):
 
 async def _account_id() -> str:
     # The suite's auth gate stands in op@example.com (conftest override).
-    return (await Account.get_or_create("op@example.com")).id
+    return (await Account.get_or_create(db_session(), "op@example.com")).id
 
 
 async def _seed(snapshots: list[UsageScrape]) -> None:
@@ -297,7 +298,7 @@ async def test_usage_today_aggregates_spend_and_tokens_by_provider(
 
 async def test_usage_excludes_another_accounts_scrape(client, druks_db) -> None:
     snap = UsageScrape(provider="anthropic", parse_ok=True, five_hour_percent_left=54)
-    snap.account_id = (await Account.get_or_create("other@example.com")).id
+    snap.account_id = (await Account.get_or_create(druks_db, "other@example.com")).id
     await snap.save()
 
     body = client.get("/api/usage").json()
@@ -310,7 +311,7 @@ async def test_usage_reports_viewers_subscription_identity(client, druks_db) -> 
     await VaultSecret.store(
         SecretKind.SUBSCRIPTION,
         Audience.provider("anthropic"),
-        account_id=(await Account.get_or_create("other@example.com")).id,
+        account_id=(await Account.get_or_create(druks_db, "other@example.com")).id,
         secrets={"claudeAiOauth": {"accessToken": "other"}},
         identity={"email": "other-seat@example.com"},
         expires_at=None,
@@ -322,7 +323,7 @@ async def test_usage_reports_viewers_subscription_identity(client, druks_db) -> 
     await VaultSecret.store(
         SecretKind.SUBSCRIPTION,
         Audience.provider("anthropic"),
-        account_id=(await Account.get_or_create("op@example.com")).id,
+        account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         secrets={"claudeAiOauth": {"accessToken": "mine"}},
         identity={"email": "subscription@example.com"},
         expires_at=None,
@@ -395,7 +396,7 @@ async def test_refresh_never_scrapes_a_key(client, druks_db, monkeypatch) -> Non
     await VaultSecret.paste(
         Audience.provider("anthropic"),
         "sk",
-        pasted_by=await Account.get_or_create("op@example.com"),
+        pasted_by=await Account.get_or_create(druks_db, "op@example.com"),
     )
     poll_usage = AsyncMock()
     monkeypatch.setattr(AnthropicProvider, "poll_usage", poll_usage)

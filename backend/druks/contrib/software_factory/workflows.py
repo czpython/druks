@@ -16,6 +16,7 @@ from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.core.apis.github import get_github_client
 from druks.core.services import Github
+from druks.db import db_session
 from druks.mcp.inbound import get_druks_mcp_server
 from druks.sandbox.datastructures import RequiredMcpServer
 from druks.sandbox.layout import get_related_root, get_work_root
@@ -521,7 +522,7 @@ class PullRequestReview(Workflow):
         await Github.get()
         # The review runs under the account with the requester's name. Without that
         # account, it runs under the default account.
-        account = await Account.get_for_username(requested_by)
+        account = await Account.get_for_username(db_session(), requested_by)
         return await cls.start(
             subject=PullRequest.get(repo, pr_number),
             account_id=account.id if account else None,

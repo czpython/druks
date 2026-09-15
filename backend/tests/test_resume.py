@@ -21,7 +21,7 @@ async def _park(druks_db, *, context: str | None = None) -> None:
         ask["context"] = context
     druks_db.add(
         Run(
-            account_id=(await Account.get_or_create("op@example.com")).id,
+            account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
             id="r1",
             kind="build",
             input_gate="review_plan",
@@ -174,7 +174,11 @@ async def test_resume_404_when_run_missing(druks_db):
 
 async def test_resume_409_when_run_not_parked(druks_db):
     druks_db.add(
-        Run(id="r2", kind="build", account_id=(await Account.get_or_create("op@example.com")).id)
+        Run(
+            id="r2",
+            kind="build",
+            account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
+        )
     )
     await druks_db.flush()
     await seed_dbos_status(druks_db, "r2", "running")

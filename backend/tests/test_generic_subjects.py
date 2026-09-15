@@ -84,7 +84,7 @@ async def _seed_run(
     if state == "parked" and not input_gate:
         input_gate = "review"
     run = Run(
-        account_id=(await Account.get_or_create("op@example.com")).id,
+        account_id=(await Account.get_or_create(session, "op@example.com")).id,
         id=str(uuid7()),
         kind=kind,
         input_gate=input_gate,

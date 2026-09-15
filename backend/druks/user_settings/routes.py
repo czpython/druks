@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
+from druks.api.dependencies import SessionDep
 from druks.apps.loader import get_app, iter_apps
 from druks.apps.registry import agents, workflows
 from druks.durable.engine import apply_schedules
@@ -105,11 +106,13 @@ async def update_settings(body: UpdateSettingsRequest) -> InstallationSettings:
 
 @router.patch("/personal", response_model=PersonalSettingsResponse, response_model_by_alias=True)
 async def update_personal_settings(
-    body: UpdatePersonalSettingsRequest, account: Account = Depends(current_account)
+    body: UpdatePersonalSettingsRequest,
+    session: SessionDep,
+    account: Account = Depends(current_account),
 ) -> Account:
     fields = await _settings_changes(body)
     if fields:
-        await account.update_preferences(**fields)
+        await account.update_preferences(session, **fields)
     return account
 
 

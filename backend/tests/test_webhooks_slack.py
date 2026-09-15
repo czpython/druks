@@ -30,7 +30,7 @@ _IN_APP_ASK = {
 
 async def _parked_notification(druks_db):
     run = Run(
-        account_id=(await Account.get_or_create("op@example.com")).id,
+        account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         id=str(uuid7()),
         kind="notifications.test",
         input_gate="review",

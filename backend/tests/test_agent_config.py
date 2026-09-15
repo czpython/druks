@@ -62,7 +62,7 @@ async def _key() -> VaultSecret:
     return await VaultSecret.paste(
         Audience.provider("anthropic"),
         "sk-shared",
-        pasted_by=await Account.get_or_create("ops@example.com"),
+        pasted_by=await Account.get_or_create(db_session(), "ops@example.com"),
     )
 
 
@@ -187,7 +187,7 @@ async def test_a_codex_subscription_config_carries_its_login_facts_and_its_ref(d
 async def test_a_subscription_agent_refuses_without_the_actors_own_subscription(druks_db):
     await connect_anthropic_subscription("a@example.com")
     await _key()
-    stranger = await Account.get_or_create("stranger@example.com")
+    stranger = await Account.get_or_create(druks_db, "stranger@example.com")
 
     # A missing personal subscription cannot borrow another credential.
     with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
@@ -230,7 +230,7 @@ async def test_an_added_provider_refuses_until_its_transport_is_proven(druks_db)
     await VaultSecret.paste(
         Audience.provider("openrouter"),
         "sk-openrouter",
-        pasted_by=await Account.get_or_create("ops@example.com"),
+        pasted_by=await Account.get_or_create(druks_db, "ops@example.com"),
     )
     await SettingsOverride.set_agent_harness(CONFIG_PROBE.id, "opencode")
     await SettingsOverride.set_agent_model(CONFIG_PROBE.id, "openrouter/anthropic/claude-sonnet-4")
@@ -241,7 +241,7 @@ async def test_an_added_provider_refuses_until_its_transport_is_proven(druks_db)
 
 
 async def test_an_added_provider_without_a_key_names_it(druks_db):
-    await Account.get_or_create("ops@example.com")
+    await Account.get_or_create(druks_db, "ops@example.com")
     await ProviderCatalog.create("groq", [{"id": "groq/llama-4", "label": "Llama 4"}], label="Groq")
     await SettingsOverride.set_agent_harness(CONFIG_PROBE.id, "opencode")
     await SettingsOverride.set_agent_model(CONFIG_PROBE.id, "groq/llama-4")
@@ -252,7 +252,7 @@ async def test_an_added_provider_without_a_key_names_it(druks_db):
 
 
 async def test_an_added_provider_runs_only_on_an_unbound_cli_and_its_own_models(druks_db):
-    await Account.get_or_create("ops@example.com")
+    await Account.get_or_create(druks_db, "ops@example.com")
     await ProviderCatalog.create("groq", [{"id": "groq/llama-4", "label": "Llama 4"}], label="Groq")
 
     with pytest.raises(AgentConfigError, match="claude does not run Groq models"):

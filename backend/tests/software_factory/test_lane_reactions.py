@@ -119,7 +119,7 @@ async def test_pr_review_answers_through_the_review_gate(druks_db, monkeypatch):
     )
     await item.update(pr_number=12, branch="agent/acme-9")
     run = Run(
-        account_id=(await Account.get_or_create("op@example.com")).id,
+        account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         id=str(uuid7()),
         kind=Build.kind,
         input_gate=ReviewWork.name,

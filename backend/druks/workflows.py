@@ -376,9 +376,9 @@ async def _park(
 async def _notify_designated_destination(workflow_id: str, subject: dict[str, Any]) -> None:
     # The operator's settings select the destination for the recorded request.
     async def _create() -> str | None:
-        async with step_session():
+        async with step_session() as session:
             run = await Run.get(workflow_id)
-            account = await Account.get_for_run(run.account_id)
+            account = await Account.get_for_run(session, run.account_id)
             destination_id = account.gate_park_destination_id
             if destination_id:
                 return await run.create_park_notification(destination_id, subject)
@@ -1009,8 +1009,8 @@ class Workflow:
         # subject is required (no default) so a run can't silently lose its
         # timeline by omission — pass subject=None explicitly for a background run.
         cls._validate_subject(subject)
-        async with bound_session():
-            account = await Account.get_for_run(account_id or current_account_id.get())
+        async with bound_session() as session:
+            account = await Account.get_for_run(session, account_id or current_account_id.get())
             account_id = account.id
             wire: dict[str, Any] = {}
             if cls._run_input_model:
@@ -1148,8 +1148,8 @@ async def _run_instance(
     subject: dict[str, Any] | None = None,
     input: dict[str, Any] | None = None,
 ) -> Any:
-    async with step_session():
-        account_id = (await Account.get_for_run((input or {}).get(_ACCOUNT_INPUT_KEY))).id
+    async with step_session() as session:
+        account_id = (await Account.get_for_run(session, (input or {}).get(_ACCOUNT_INPUT_KEY))).id
     instance, run_kwargs = _bind_instance(cls, subject, input, account_id=account_id)
     instance._workflow_id = DBOS.workflow_id  # type: ignore[assignment]
     token = current_workflow.set(instance)

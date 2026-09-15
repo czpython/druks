@@ -259,7 +259,7 @@ def _websocket(headers: list[tuple[bytes, bytes]], *, app=None) -> WebSocket:
     )
 
 
-async def test_websocket_identity_resolves_and_cross_origin_is_refused(tmp_path):
+async def test_websocket_identity_resolves_and_cross_origin_is_refused(druks_db, tmp_path):
     settings = make_settings(tmp_path, identity={"mode": "header", "header": "X-Edge-Email"})
     connection = _websocket(
         [
@@ -270,7 +270,7 @@ async def test_websocket_identity_resolves_and_cross_origin_is_refused(tmp_path)
         app=SimpleNamespace(state=SimpleNamespace(settings=settings)),
     )
 
-    account = await require_operator(connection)
+    account = await require_operator(druks_db, connection)
     assert account.username == "operator@example.com"
     assert not is_same_origin(connection)
 
@@ -281,7 +281,7 @@ def test_tls_origin_matches_on_host_alone():
     )
 
 
-async def test_websocket_bearer_is_refused():
+async def test_websocket_bearer_is_refused(druks_db):
     connection = _websocket(
         [
             (b"host", b"druks.test"),
@@ -290,4 +290,4 @@ async def test_websocket_bearer_is_refused():
         ]
     )
     with pytest.raises(HTTPException, match="never a bearer token"):
-        await require_operator(connection)
+        await require_operator(druks_db, connection)

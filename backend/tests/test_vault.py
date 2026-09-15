@@ -39,7 +39,7 @@ async def test_one_row_per_audience_account_and_header_except_an_oauth_connectio
         await _static()
     await db_session().rollback()
 
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(druks_db, "op@example.com")
     for _ in range(2):
         db_session().add(
             VaultSecret(

@@ -168,7 +168,7 @@ async def test_lifecycle_event_stamps_the_declaring_app(druks_db):
     run = Run(
         id="wf-identity-1",
         kind=flow.kind,
-        account_id=(await Account.get_or_create("op@example.com")).id,
+        account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
     )
     druks_db.add(run)
     await druks_db.flush()

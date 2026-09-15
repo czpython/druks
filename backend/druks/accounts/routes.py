@@ -8,6 +8,7 @@ from druks.accounts.dependencies import (
 )
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.accounts.schemas import AccountResponse, IdentityResponse, PatResponse
+from druks.api.dependencies import SessionDep
 from druks.secrets.models import VaultSecret
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -38,26 +39,27 @@ async def get_identity(
     response_model_by_alias=True,
     dependencies=[Depends(current_account)],
 )
-async def list_accounts() -> list[Account]:
-    return await Account.list_all()
+async def list_accounts(session: SessionDep) -> list[Account]:
+    return await Account.list_all(session)
 
 
 @router.get("/personal-tokens", response_model=list[PatResponse], response_model_by_alias=True)
 async def list_pats(
-    account: Account = Depends(current_session_account),
+    session: SessionDep, account: Account = Depends(current_session_account)
 ) -> list[PersonalAccessToken]:
-    return await PersonalAccessToken.list_for_account(account.id)
+    return await PersonalAccessToken.list_for_account(session, account.id)
 
 
 @router.post("/personal-tokens")
 async def create_pat(
+    session: SessionDep,
     account: Account = Depends(current_session_account),
     name: str = Body(..., embed=True),
 ) -> dict[str, str]:
     name = name.strip()
     if name and len(name) <= PAT_NAME_LENGTH:
         # The only time the plaintext leaves Druks. Druks stores its hash.
-        _, token = await PersonalAccessToken.create(account_id=account.id, name=name)
+        _, token = await PersonalAccessToken.create(session, account_id=account.id, name=name)
         return {"token": token}
     raise HTTPException(
         status_code=422,
@@ -69,11 +71,11 @@ async def create_pat(
     "/personal-tokens/{pat_id}", response_model=PatResponse, response_model_by_alias=True
 )
 async def revoke_pat(
-    pat_id: str, account: Account = Depends(current_session_account)
+    pat_id: str, session: SessionDep, account: Account = Depends(current_session_account)
 ) -> PersonalAccessToken:
-    pat = await PersonalAccessToken.get(pat_id)
+    pat = await session.get(PersonalAccessToken, pat_id)
     if pat and pat.account_id == account.id:
-        await pat.revoke()
+        await pat.revoke(session)
         return pat
     # A foreign token gets the same 404 as a missing one.
     raise HTTPException(status_code=404, detail="No such token.")

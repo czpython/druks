@@ -7,6 +7,7 @@ from datetime import datetime
 
 from sqlalchemy import ForeignKey, Index, LargeBinary, String, select, text
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB, insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from druks.accounts.constants import (
@@ -20,7 +21,6 @@ from druks.accounts.constants import (
 )
 from druks.accounts.exceptions import AuthConfigurationError, InvalidPatError
 from druks.core.models import Uuid7Pk
-from druks.database import db_session
 from druks.models import Base
 from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
@@ -49,28 +49,27 @@ class Account(Base, Uuid7Pk):
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @classmethod
-    async def get(cls, account_id: str) -> "Account | None":
-        return await db_session().get(cls, account_id)
-
-    @classmethod
-    async def get_default(cls) -> "Account | None":
+    async def get_default(cls, session: AsyncSession) -> "Account | None":
         """The unattended account, or None before account setup."""
-        return await db_session().scalar(select(cls).where(cls.is_default))
+        return await session.scalar(select(cls).where(cls.is_default))
 
     @classmethod
-    async def get_for_run(cls, account_id: str | None) -> "Account":
+    async def get_for_run(cls, session: AsyncSession, account_id: str | None) -> "Account":
         """Resolve the supplied account or the default before a run starts."""
-        account = await cls.get(account_id) if account_id else await cls.get_default()
+        if account_id:
+            account = await session.get(cls, account_id)
+        else:
+            account = await cls.get_default(session)
         if not account:
             raise AuthConfigurationError("No run account is available. Complete account setup.")
         return account
 
     @classmethod
-    async def get_for_username(cls, username: str) -> "Account | None":
-        return await db_session().scalar(select(cls).where(cls.username == username))
+    async def get_for_username(cls, session: AsyncSession, username: str) -> "Account | None":
+        return await session.scalar(select(cls).where(cls.username == username))
 
     @classmethod
-    async def lookup(cls, authority: str, subject: str) -> "Account | None":
+    async def lookup(cls, session: AsyncSession, authority: str, subject: str) -> "Account | None":
         """The one account with a live grant for this provider user. A shared
         grant has no account, and two owning accounts match none."""
         owners = select(VaultSecret.account_id).where(
@@ -78,7 +77,7 @@ class Account(Base, Uuid7Pk):
             VaultSecret.identity["authority"].astext == authority,
             VaultSecret.identity["subject"].astext == subject,
         )
-        accounts = list(await db_session().scalars(select(cls).where(cls.id.in_(owners))))
+        accounts = list(await session.scalars(select(cls).where(cls.id.in_(owners))))
         if len(accounts) == 1:
             return accounts[0]
         if accounts:
@@ -86,13 +85,12 @@ class Account(Base, Uuid7Pk):
         return
 
     @classmethod
-    async def get_or_create(cls, username: str) -> "Account":
+    async def get_or_create(cls, session: AsyncSession, username: str) -> "Account":
         """Return the account, or create it. The first account becomes the default."""
-        account = await cls.get_for_username(username)
+        account = await cls.get_for_username(session, username)
         if account:
             return account
         installation = await InstallationSettings.get()
-        session = db_session()
         await session.execute(
             insert(cls)
             .values(
@@ -105,15 +103,15 @@ class Account(Base, Uuid7Pk):
         )
         return (await session.scalars(select(cls).where(cls.username == username))).one()
 
-    async def update_preferences(self, **fields: object) -> None:
+    async def update_preferences(self, session: AsyncSession, **fields: object) -> None:
         for field, value in fields.items():
             setattr(self, field, value)
-        await db_session().flush()
+        await session.flush()
 
     @classmethod
-    async def list_all(cls) -> list["Account"]:
+    async def list_all(cls, session: AsyncSession) -> list["Account"]:
         stmt = select(cls).order_by(cls.created_at, cls.id)
-        return list(await db_session().scalars(stmt))
+        return list(await session.scalars(stmt))
 
 
 def _hash_token(token: str) -> bytes:
@@ -159,21 +157,22 @@ class PersonalAccessToken(Base, Uuid7Pk):
         return "active"
 
     @classmethod
-    async def get(cls, pat_id: str) -> "PersonalAccessToken | None":
-        return await db_session().get(cls, pat_id)
+    async def get_for_prefix(
+        cls, session: AsyncSession, prefix: str
+    ) -> "PersonalAccessToken | None":
+        return await session.scalar(select(cls).where(cls.token_prefix == prefix))
 
     @classmethod
-    async def get_for_prefix(cls, prefix: str) -> "PersonalAccessToken | None":
-        return await db_session().scalar(select(cls).where(cls.token_prefix == prefix))
-
-    @classmethod
-    async def list_for_account(cls, account_id: str) -> list["PersonalAccessToken"]:
+    async def list_for_account(
+        cls, session: AsyncSession, account_id: str
+    ) -> list["PersonalAccessToken"]:
         stmt = select(cls).where(cls.account_id == account_id).order_by(cls.created_at.desc())
-        return list(await db_session().scalars(stmt))
+        return list(await session.scalars(stmt))
 
     @classmethod
     async def create(
         cls,
+        session: AsyncSession,
         *,
         account_id: str,
         name: str,
@@ -182,7 +181,7 @@ class PersonalAccessToken(Base, Uuid7Pk):
         """Mint a token for ``account_id`` and return (row, plaintext). The row
         keeps only the hash, so the plaintext shows once."""
         prefix = _new_prefix()
-        while await cls.get_for_prefix(prefix):
+        while await cls.get_for_prefix(session, prefix):
             prefix = _new_prefix()
         secret = base64.urlsafe_b64encode(secrets.token_bytes(PAT_SECRET_BYTES))
         token = f"{PAT_TOKEN_TAG}_{prefix}_{secret.rstrip(b'=').decode()}"
@@ -197,17 +196,16 @@ class PersonalAccessToken(Base, Uuid7Pk):
             expires_at=now + PAT_LIFETIME,
             allowed_tools=allowed_tools,
         )
-        session = db_session()
         session.add(row)
         await session.flush()
         return row, token
 
     @classmethod
-    async def authenticate(cls, credential: str) -> "PersonalAccessToken":
+    async def authenticate(cls, session: AsyncSession, credential: str) -> "PersonalAccessToken":
         """Resolve a bearer credential to its live row, or raise InvalidPatError.
         HTTP and MCP both authenticate here. last_used_at updates at most hourly."""
         prefix, _, _ = credential.removeprefix(f"{PAT_TOKEN_TAG}_").partition("_")
-        row = await cls.get_for_prefix(prefix)
+        row = await cls.get_for_prefix(session, prefix)
         if not row:
             raise InvalidPatError("Not a recognized personal access token.")
         if not hmac.compare_digest(_hash_token(credential), row.token_hash):
@@ -219,10 +217,10 @@ class PersonalAccessToken(Base, Uuid7Pk):
         now = Base.utc_now()
         if not row.last_used_at or now - row.last_used_at >= PAT_LAST_USED_RESOLUTION:
             row.last_used_at = now
-            await db_session().flush()
+            await session.flush()
         return row
 
-    async def revoke(self) -> None:
+    async def revoke(self, session: AsyncSession) -> None:
         # A repeat revoke keeps the first revocation time.
         self.revoked_at = self.revoked_at or Base.utc_now()
-        await db_session().flush()
+        await session.flush()

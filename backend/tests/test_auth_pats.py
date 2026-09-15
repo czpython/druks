@@ -29,13 +29,13 @@ def _bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def _mint(username: str = "agent@example.com") -> tuple[PersonalAccessToken, str]:
-    account = await Account.get_or_create(username)
-    return await PersonalAccessToken.create(account_id=account.id, name="agent")
+async def _mint(session, username: str = "agent@example.com") -> tuple[PersonalAccessToken, str]:
+    account = await Account.get_or_create(session, username)
+    return await PersonalAccessToken.create(session, account_id=account.id, name="agent")
 
 
 async def test_the_minted_token_shape_and_hash_are_pinned(druks_db):
-    pat, token = await _mint()
+    pat, token = await _mint(druks_db)
     prefix, _, secret = token.removeprefix(f"{PAT_TOKEN_TAG}_").partition("_")
     assert token.startswith(f"{PAT_TOKEN_TAG}_")
     assert len(prefix) == 12
@@ -50,7 +50,7 @@ async def test_the_minted_token_shape_and_hash_are_pinned(druks_db):
 
 
 async def test_a_prefix_collision_regenerates(druks_db, monkeypatch):
-    first, _ = await _mint()
+    first, _ = await _mint(druks_db)
     replay = iter(first.token_prefix)
     random_choice = secrets.choice
 
@@ -62,43 +62,45 @@ async def test_a_prefix_collision_regenerates(druks_db, monkeypatch):
             return random_choice(alphabet)
 
     monkeypatch.setattr(secrets, "choice", collide_once)
-    second, _ = await PersonalAccessToken.create(account_id=first.account_id, name="two")
+    second, _ = await PersonalAccessToken.create(druks_db, account_id=first.account_id, name="two")
     assert second.token_prefix != first.token_prefix
 
 
 async def test_authenticate_rejects_everything_but_the_live_token(druks_db):
-    pat, token = await _mint()
-    assert (await PersonalAccessToken.authenticate(token)).id == pat.id
+    pat, token = await _mint(druks_db)
+    assert (await PersonalAccessToken.authenticate(druks_db, token)).id == pat.id
     with pytest.raises(InvalidPatError):
-        await PersonalAccessToken.authenticate("not-even-shaped-right")
+        await PersonalAccessToken.authenticate(druks_db, "not-even-shaped-right")
     with pytest.raises(InvalidPatError):
-        await PersonalAccessToken.authenticate(f"{PAT_TOKEN_TAG}_{pat.token_prefix}_wrongsecret")
+        await PersonalAccessToken.authenticate(
+            druks_db, f"{PAT_TOKEN_TAG}_{pat.token_prefix}_wrongsecret"
+        )
 
     pat.expires_at = Base.utc_now() - timedelta(days=1)
     with pytest.raises(InvalidPatError, match=f"{pat.token_prefix} has expired"):
-        await PersonalAccessToken.authenticate(token)
+        await PersonalAccessToken.authenticate(druks_db, token)
 
     pat.expires_at = Base.utc_now() + timedelta(days=1)
-    await pat.revoke()
+    await pat.revoke(druks_db)
     with pytest.raises(InvalidPatError, match=f"{pat.token_prefix} was revoked"):
-        await PersonalAccessToken.authenticate(token)
+        await PersonalAccessToken.authenticate(druks_db, token)
 
 
 async def test_last_used_advances_at_most_hourly(druks_db):
-    pat, token = await _mint()
-    await PersonalAccessToken.authenticate(token)
+    pat, token = await _mint(druks_db)
+    await PersonalAccessToken.authenticate(druks_db, token)
     first_use = pat.last_used_at
     assert first_use
-    await PersonalAccessToken.authenticate(token)
+    await PersonalAccessToken.authenticate(druks_db, token)
     assert pat.last_used_at == first_use
     pat.last_used_at = first_use - timedelta(hours=2)
-    await PersonalAccessToken.authenticate(token)
+    await PersonalAccessToken.authenticate(druks_db, token)
     assert pat.last_used_at > first_use - timedelta(hours=2)
 
 
 async def test_a_bearer_pat_authenticates_gated_routes(tmp_path, druks_db):
     with _client(tmp_path) as client:
-        _, token = await _mint()
+        _, token = await _mint(druks_db)
         response = client.get("/api/auth/me", headers=_bearer(token))
         assert response.status_code == 200
         assert response.json()["account"]["username"] == "agent@example.com"
@@ -108,8 +110,9 @@ async def test_a_bearer_pat_authenticates_gated_routes(tmp_path, druks_db):
 
 async def test_a_tools_limited_token_is_refused_outside_its_tools(tmp_path, druks_db):
     with _client(tmp_path) as client:
-        account = await Account.get_or_create("agent@example.com")
+        account = await Account.get_or_create(druks_db, "agent@example.com")
         _, token = await PersonalAccessToken.create(
+            druks_db,
             account_id=account.id,
             name="sandbox",
             allowed_tools=["software_factory_get_ticket"],
@@ -149,7 +152,7 @@ async def test_any_scheme_case_reaches_authentication_and_fails_closed(tmp_path,
         )
         assert response.status_code == 401
         assert response.headers["WWW-Authenticate"].endswith('error="invalid_token"')
-    assert not await Account.get_for_username("op@example.com")
+    assert not await Account.get_for_username(druks_db, "op@example.com")
 
 
 def test_an_empty_authorization_header_never_slides_to_the_assertion(tmp_path, druks_db):
@@ -160,8 +163,8 @@ def test_an_empty_authorization_header_never_slides_to_the_assertion(tmp_path, d
 
 async def test_a_dead_token_401s_with_its_prefix_only(tmp_path, druks_db):
     with _client(tmp_path) as client:
-        pat, token = await _mint()
-        await pat.revoke()
+        pat, token = await _mint(druks_db)
+        await pat.revoke(druks_db)
         response = client.get("/api/auth/me", headers=_bearer(token))
         assert response.status_code == 401
         assert response.headers["WWW-Authenticate"] == 'Bearer realm="druks", error="invalid_token"'
@@ -172,7 +175,7 @@ async def test_a_dead_token_401s_with_its_prefix_only(tmp_path, druks_db):
 
 async def test_a_pat_cannot_manage_pats(tmp_path, druks_db):
     with _client(tmp_path) as client:
-        pat, token = await _mint()
+        pat, token = await _mint(druks_db)
         assert client.get("/api/auth/personal-tokens", headers=_bearer(token)).status_code == 401
         create = client.post(
             "/api/auth/personal-tokens", json={"name": "x"}, headers=_bearer(token)
@@ -190,7 +193,7 @@ async def test_a_pat_cannot_disconnect_a_provider(tmp_path, druks_db):
     # Disconnect destroys a capability a bearer could never create — the same
     # session-only rule as token management.
     with _client(tmp_path) as client:
-        _, token = await _mint("op@example.com")
+        _, token = await _mint(druks_db, "op@example.com")
         alone = client.delete("/api/providers/anthropic/connection", headers=_bearer(token))
         assert alone.status_code == 401
         beside = client.delete(
@@ -201,7 +204,7 @@ async def test_a_pat_cannot_disconnect_a_provider(tmp_path, druks_db):
 
 async def test_a_pat_reads_but_cannot_write_app_settings(tmp_path, druks_db):
     with _client(tmp_path) as client:
-        _, token = await _mint("op@example.com")
+        _, token = await _mint(druks_db, "op@example.com")
         headers = _bearer(token)
 
         read = client.get("/api/settings/apps", headers=headers)
@@ -217,7 +220,7 @@ async def test_a_pat_reads_but_cannot_write_app_settings(tmp_path, druks_db):
 
 async def test_a_pat_reads_but_cannot_write_service_identities(tmp_path, druks_db):
     with _client(tmp_path) as client:
-        _, token = await _mint("op@example.com")
+        _, token = await _mint(druks_db, "op@example.com")
         headers = _bearer(token)
 
         read = client.get("/api/services", headers=headers)
@@ -257,7 +260,7 @@ def test_the_operator_manages_the_token_lifecycle(tmp_path, druks_db):
 
 
 async def test_the_none_mode_operator_manages_tokens_too(tmp_path, druks_db):
-    await Account.get_or_create("op@example.com")
+    await Account.get_or_create(druks_db, "op@example.com")
     with _client(tmp_path, identity={"mode": "none"}) as client:
         created = client.post("/api/auth/personal-tokens", json={"name": "local"})
         assert created.status_code == 200
@@ -267,13 +270,13 @@ async def test_the_none_mode_operator_manages_tokens_too(tmp_path, druks_db):
 
 async def test_the_list_is_scoped_to_the_operator(tmp_path, druks_db):
     with _client(tmp_path) as client:
-        await _mint("other@example.com")
+        await _mint(druks_db, "other@example.com")
         assert client.get("/api/auth/personal-tokens", headers=OPERATOR).json() == []
 
 
 async def test_revoking_anothers_token_is_a_404(tmp_path, druks_db):
     with _client(tmp_path) as client:
-        pat, _ = await _mint("other@example.com")
+        pat, _ = await _mint(druks_db, "other@example.com")
         assert (
             client.delete(f"/api/auth/personal-tokens/{pat.id}", headers=OPERATOR).status_code
             == 404

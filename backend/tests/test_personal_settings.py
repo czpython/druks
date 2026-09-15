@@ -39,11 +39,13 @@ async def test_account_creation_copies_defaults_once(tmp_path, druks_db, monkeyp
         "druks.accounts.models.load_settings",
         lambda: make_settings(tmp_path, timezone="Europe/Madrid"),
     )
-    alice = await Account.get_or_create("alice@example.com")
+    alice = await Account.get_or_create(druks_db, "alice@example.com")
     assert (alice.timezone, alice.gate_park_destination_id) == ("Europe/Madrid", destination.id)
-    await alice.update_preferences(timezone="America/New_York", gate_park_destination_id=None)
+    await alice.update_preferences(
+        druks_db, timezone="America/New_York", gate_park_destination_id=None
+    )
     await installation.update(default_effort="low")
-    existing = await Account.get_or_create("alice@example.com")
+    existing = await Account.get_or_create(druks_db, "alice@example.com")
     assert existing.id == alice.id
     assert (existing.timezone, existing.gate_park_destination_id) == ("America/New_York", None)
     with header_client(tmp_path) as client:
@@ -76,9 +78,9 @@ async def test_personal_notifications_can_be_saved_and_cleared(tmp_path, druks_d
 
 @pytest.mark.parametrize("has_settings", [False, True])
 async def test_migrations_preserve_preferences_and_installation_execution(druks_db, has_settings):
-    alice = await Account.get_or_create("alice@example.com")
-    bob = await Account.get_or_create("bob@example.com")
-    charlie = await Account.get_or_create("charlie@example.com")
+    alice = await Account.get_or_create(druks_db, "alice@example.com")
+    bob = await Account.get_or_create(druks_db, "bob@example.com")
+    charlie = await Account.get_or_create(druks_db, "charlie@example.com")
     account_ids = (alice.id, bob.id, charlie.id)
     destination = await Destination.create(
         name="Personal gates", kind="slack_webhook", url="https://example.invalid/hook"
@@ -174,7 +176,7 @@ async def test_the_database_refuses_duplicate_installation_settings(druks_db):
 
 
 async def test_the_database_refuses_a_second_default_account(druks_db):
-    first = await Account.get_or_create("alice@example.com")
+    first = await Account.get_or_create(druks_db, "alice@example.com")
     assert first.is_default
     with pytest.raises(IntegrityError):
         async with druks_db.begin_nested():
@@ -183,11 +185,11 @@ async def test_the_database_refuses_a_second_default_account(druks_db):
 
 
 async def test_run_account_is_the_explicit_account_or_default(druks_db):
-    default = await Account.get_or_create("alice@example.com")
-    explicit = await Account.get_or_create("bob@example.com")
+    default = await Account.get_or_create(druks_db, "alice@example.com")
+    explicit = await Account.get_or_create(druks_db, "bob@example.com")
 
-    assert (await Account.get_for_run(None)).id == default.id
-    assert (await Account.get_for_run(explicit.id)).id == explicit.id
+    assert (await Account.get_for_run(druks_db, None)).id == default.id
+    assert (await Account.get_for_run(druks_db, explicit.id)).id == explicit.id
 
 
 async def test_before_setup_execution_refuses_to_create_a_run(druks_db):
@@ -198,7 +200,7 @@ async def test_before_setup_execution_refuses_to_create_a_run(druks_db):
 
 
 async def test_unattended_subscription_requires_a_connection(druks_db):
-    assert await Account.get_default() is None
+    assert await Account.get_default(druks_db) is None
     with pytest.raises(
         HarnessNotConnectedError, match="connect your Anthropic subscription"
     ) as error:
@@ -214,7 +216,7 @@ async def test_unattended_api_key_uses_installation_config_without_a_default_acc
     await VaultSecret.paste(Audience.provider("anthropic"), "test-api-key", pasted_by=account)
     installation = await InstallationSettings.get()
     await installation.update(default_billing="api_key", default_effort="low")
-    assert await Account.get_default() is None
+    assert await Account.get_default(druks_db) is None
 
     config = await get_config(CONFIG_PROBE.id, None)
 
@@ -227,8 +229,8 @@ async def test_accounts_share_execution_defaults_and_keep_their_own_subscription
     alice = await connect_anthropic_subscription("alice@example.com")
     bob = await connect_anthropic_subscription("bob@example.com")
     installation = await InstallationSettings.get()
-    personal = await Account.get(bob.account_id)
-    await personal.update_preferences(timezone="Europe/Madrid")
+    personal = await druks_db.get(Account, bob.account_id)
+    await personal.update_preferences(druks_db, timezone="Europe/Madrid")
     await installation.update(default_effort="low", default_timeout=600, fast_mode=True)
 
     for account_id, subscription in (
@@ -262,7 +264,7 @@ async def test_personal_api_is_scoped_and_does_not_retime_schedules(
             "/api/settings/personal", headers=alice, json={"timezone": "America/New_York"}
         )
         assert saved.status_code == 200
-        account = await Account.get_for_username("alice@example.com")
+        account = await Account.get_for_username(druks_db, "alice@example.com")
         assert account.timezone == "America/New_York"
         assert client.get("/api/settings/personal", headers=bob).json()["timezone"] == "UTC"
         assert "timezone" not in client.get("/api/settings", headers=alice).json()
@@ -292,14 +294,14 @@ async def test_invalid_edit_keeps_account_preferences(tmp_path, druks_db, field,
         response = client.patch("/api/settings/personal", json={field: value})
         assert response.status_code == 422
         assert client.patch("/api/settings/personal", json={}).status_code == 200
-    assert (await Account.get_default()).timezone == "UTC"
+    assert (await Account.get_default(druks_db)).timezone == "UTC"
 
 
 async def test_shared_agent_overrides_use_installation_settings_after_a_personal_edit(
     tmp_path, druks_db
 ):
-    account = await Account.get_or_create("bob@example.com")
-    await account.update_preferences(timezone="Europe/Madrid")
+    account = await Account.get_or_create(druks_db, "bob@example.com")
+    await account.update_preferences(druks_db, timezone="Europe/Madrid")
 
     with settings_client(tmp_path) as client:
         response = client.patch(

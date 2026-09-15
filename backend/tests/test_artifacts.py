@@ -14,7 +14,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 async def _seed_call(druks_db) -> AgentCall:
     druks_db.add(
-        Run(id="run-1", kind="build", account_id=(await Account.get_or_create("op@example.com")).id)
+        Run(
+            id="run-1",
+            kind="build",
+            account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
+        )
     )
     call = AgentCall(
         api_key_id=(await installation_key()).id,
@@ -88,7 +92,11 @@ async def test_get_latest_for_run_returns_the_newest_calls_artifact(druks_db, tm
     # The read side serves the run's latest artifact on the in-app review ask —
     # the second call's plan wins.
     druks_db.add(
-        Run(id="run-1", kind="build", account_id=(await Account.get_or_create("op@example.com")).id)
+        Run(
+            id="run-1",
+            kind="build",
+            account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
+        )
     )
     for call_id, title in (("call-1", "First plan"), ("call-2", "Revised plan")):
         druks_db.add(
@@ -118,7 +126,7 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     # An in-app ask stores no label/artifact — the read side derives both from
     # the run's latest artifact. A declared ask passes through untouched.
     run = Run(
-        account_id=(await Account.get_or_create("op@example.com")).id,
+        account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         id="run-1",
         kind="build",
         state=RunState.PARKED.value,
@@ -156,7 +164,7 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     }
 
     external = Run(
-        account_id=(await Account.get_or_create("op@example.com")).id,
+        account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         id="run-2",
         kind="build",
         state=RunState.PARKED.value,
@@ -185,7 +193,11 @@ async def test_get_artifact_returns_recorded_content(druks_db, tmp_path, monkeyp
     # call_dir resolves through load_settings().artifacts_dir, so point it at tmp.
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     druks_db.add(
-        Run(id="run-1", kind="build", account_id=(await Account.get_or_create("op@example.com")).id)
+        Run(
+            id="run-1",
+            kind="build",
+            account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
+        )
     )
     call = AgentCall(
         api_key_id=(await installation_key()).id,
@@ -224,7 +236,11 @@ async def test_get_artifact_404_when_content_gone(druks_db, tmp_path, monkeypatc
     # not a 500.
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     druks_db.add(
-        Run(id="run-1", kind="build", account_id=(await Account.get_or_create("op@example.com")).id)
+        Run(
+            id="run-1",
+            kind="build",
+            account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
+        )
     )
     druks_db.add(
         AgentCall(

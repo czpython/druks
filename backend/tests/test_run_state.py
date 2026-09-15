@@ -48,7 +48,7 @@ async def _rowless_run(session):
     run = Run(
         id=str(uuid7()),
         kind=Summarize.kind,
-        account_id=(await Account.get_or_create("op@example.com")).id,
+        account_id=(await Account.get_or_create(session, "op@example.com")).id,
     )
     session.add(run)
     await session.flush()

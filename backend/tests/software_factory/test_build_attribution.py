@@ -38,7 +38,7 @@ async def started(monkeypatch):
 async def test_tracker_webhook_starts_under_the_connected_account(
     druks_db, tmp_path, monkeypatch, started, source, tracker
 ):
-    owner = await Account.get_or_create("github-boss")
+    owner = await Account.get_or_create(druks_db, "github-boss")
     await VaultSecret.connect(
         "mcp:renamed_company_tracker",
         account_id=owner.id,
@@ -110,7 +110,7 @@ async def test_tracker_webhook_starts_under_the_connected_account(
 
 
 async def test_unconnected_assignee_uses_the_default_account(druks_db, started):
-    await Account.get_or_create("boss@company.test")
+    await Account.get_or_create(druks_db, "boss@company.test")
     await connect_service(
         "linear",
         identity={"actor": "druks", "workspace": "Company"},
@@ -137,7 +137,7 @@ async def test_unconnected_assignee_uses_the_default_account(druks_db, started):
 
 
 async def test_builtin_ticket_uses_its_account_id(druks_db, monkeypatch, started):
-    assignee = await Account.get_or_create("github-boss")
+    assignee = await Account.get_or_create(druks_db, "github-boss")
     project = await Project.create(name="Company")
     project_repo = await ProjectRepo.create(project_id=project.id, full_name="company/app")
     settings = SoftwareFactory.Settings(tracker="druks")

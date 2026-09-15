@@ -66,7 +66,7 @@ async def _committed(engine, work):
 
 
 async def _connect(payload: dict) -> str:
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(db_session(), "op@example.com")
     row = await VaultSecret.store(
         SecretKind.SUBSCRIPTION,
         Audience.provider("anthropic"),
@@ -139,7 +139,7 @@ async def test_payload_is_ciphertext_at_rest(engine):
         row = await VaultSecret.lookup(
             SecretKind.SUBSCRIPTION,
             Audience.provider("anthropic"),
-            (await Account.get_default()).id,
+            (await Account.get_default(db_session())).id,
         )
         return dict(row.secrets)["claudeAiOauth"]
 

@@ -43,8 +43,8 @@ class PatTokenVerifier(TokenVerifier):
         # Auth middleware runs before the request dependency binds a session;
         # authenticate stamps last_used_at.
         try:
-            async with session_scope():
-                pat = await PersonalAccessToken.authenticate(token)
+            async with session_scope() as session:
+                pat = await PersonalAccessToken.authenticate(session, token)
                 return AccessToken(
                     token=token,
                     client_id=pat.token_prefix,

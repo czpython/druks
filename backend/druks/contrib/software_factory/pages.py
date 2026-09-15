@@ -6,7 +6,7 @@ from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
 from druks.contrib.software_factory.enums import Priority, Status
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket, WorkItem
-from druks.db import Base
+from druks.db import Base, db_session
 
 PRIORITY_LABELS: dict[Priority, str] = {
     Priority.NONE: "No priority",
@@ -140,7 +140,7 @@ async def board(
         updated_since = Base.utc_now() - timedelta(days=30)
     projects = await Project.list_all()
     repos = await ProjectRepo.list_all()
-    accounts = await Account.list_all()
+    accounts = await Account.list_all(db_session())
     account_names = {account.id: account.username for account in accounts}
     tickets = await Ticket.list_matching(
         status=status,
@@ -241,7 +241,7 @@ async def ticket(identifier: str):
         )
 
     repos = await ProjectRepo.list_all()
-    accounts = await Account.list_all()
+    accounts = await Account.list_all(db_session())
     account_names = {account.id: account.username for account in accounts}
     thread = [
         ui.Card(

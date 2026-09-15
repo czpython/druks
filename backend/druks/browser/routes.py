@@ -102,8 +102,8 @@ async def login_window_socket(websocket: WebSocket, name: str) -> None:
         await websocket.close(code=1008)
         return
     try:
-        async with session_scope(websocket.app.state.engine):
-            await require_operator(websocket)
+        async with session_scope(websocket.app.state.engine) as session:
+            await require_operator(session, websocket)
         window = await LoginWindow.get_for_session(name)
     except (HTTPException, exceptions.BrowserApiError):
         await websocket.close(code=1008)

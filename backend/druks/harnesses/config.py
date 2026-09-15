@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from drukbox_sdk import Secret
 
 from druks.accounts.models import Account
+from druks.database import db_session
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.sandbox.models import SecretRef
 from druks.secrets.datastructures import Audience
@@ -91,7 +92,7 @@ async def get_config(agent_name: str, account_id: str | None) -> AgentConfig:
     if not agent:
         raise KeyError(f"no agent is registered as {agent_name!r}")
     if not account_id:
-        account = await Account.get_default()
+        account = await Account.get_default(db_session())
         account_id = account.id if account else None
     settings = await InstallationSettings.get()
     harness_name = (await SettingsOverride.agent_harness(agent_name, settings=settings)).value

@@ -28,7 +28,7 @@ def _data_dir(tmp_path, monkeypatch):
 
 @pytest.fixture
 async def account(druks_db):
-    return await Account.get_or_create("op@example.com")
+    return await Account.get_or_create(druks_db, "op@example.com")
 
 
 @pytest.fixture
@@ -481,7 +481,7 @@ async def test_get_usage_only_counts_the_callers_spend(druks_db, account):
     from druks.testing import seed_run
     from druks_field_notes.workflows import Summarize
 
-    other = await Account.get_or_create("other@example.com")
+    other = await Account.get_or_create(druks_db, "other@example.com")
     run = await seed_run(druks_db, kind=Summarize.kind, run_id="run-usage-other")
     druks_db.add(
         AgentCall(

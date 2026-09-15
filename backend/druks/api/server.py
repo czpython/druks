@@ -16,6 +16,7 @@ from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.routes import router as auth_router
 from druks.api.artifacts import router as artifacts_router
 from druks.api.dashboard import router as dashboard_router
+from druks.api.dependencies import request_session
 from druks.api.exceptions import AgentApiError
 from druks.api.runs import router as runs_router
 from druks.api.subjects import router as subjects_router
@@ -87,8 +88,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # A drifted none-mode install (more than one operator account) must
             # refuse at boot, not per request; the per-request resolver repeats
             # the check for drift that happens while running.
-            async with session_scope(app.state.engine):
-                await resolve_single_operator()
+            async with session_scope(app.state.engine) as session:
+                await resolve_single_operator(session)
         # DBOS runs embedded here: this process both serves HTTP and executes
         # durable workflows. Tests pre-populate app.state.settings and never
         # reach here — they drive DBOS through their own fixtures.
@@ -113,11 +114,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await close_client()
 
 
-async def _request_session() -> AsyncIterator[None]:
-    async with session_scope():
-        yield
-
-
 def _mcp_lifespan(app: FastAPI) -> AbstractAsyncContextManager[Mapping[str, Any] | None]:
     # FastAPI never runs a plain route's lifespan; the endpoint's builds its
     # session manager. Late-bound: the endpoint derives from the assembled
@@ -128,7 +124,7 @@ def _mcp_lifespan(app: FastAPI) -> AbstractAsyncContextManager[Mapping[str, Any]
 app = FastAPI(
     title="Druks",
     lifespan=combine_lifespans(lifespan, _mcp_lifespan),
-    dependencies=[Depends(_request_session)],
+    dependencies=[Depends(request_session)],
 )
 
 

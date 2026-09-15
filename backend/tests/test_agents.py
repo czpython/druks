@@ -103,7 +103,7 @@ async def current_run():
     from druks.workflows import Workflow, current_workflow
 
     workflow = Workflow()
-    workflow.account_id = (await Account.get_default()).id
+    workflow.account_id = (await Account.get_default(db_session())).id
     workflow._workflow_id = "wf-9"
     workflow.kind = "test"
     token = current_workflow.set(workflow)
@@ -149,7 +149,7 @@ async def test_run_refuses_unconnected_harness(druks_db, tmp_path, monkeypatch, 
         await VaultSecret.lookup(
             SecretKind.SUBSCRIPTION,
             Audience.provider("anthropic"),
-            (await Account.get_for_username("op@example.com")).id,
+            (await Account.get_for_username(druks_db, "op@example.com")).id,
         )
     ).revoke("user", session=db_session())
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})

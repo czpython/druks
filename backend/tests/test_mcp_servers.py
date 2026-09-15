@@ -639,12 +639,12 @@ def test_druks_needs_an_address_a_box_reaches(monkeypatch):
 async def test_delivery_mints_the_run_account_its_own_token(druks_db, monkeypatch):
     allowed_tools = ("software_factory_get_ticket",)
     workspace = _requiring_druks(monkeypatch, allowed_tools)
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(druks_db, "op@example.com")
 
     wire, refs = await workspace.get_mcp_delivery(None, account.id)
 
     row = await _druks_row(account.id)
-    minted = await PersonalAccessToken.authenticate(row.secrets["value"])
+    minted = await PersonalAccessToken.authenticate(druks_db, row.secrets["value"])
     assert (minted.account_id, minted.allowed_tools) == (account.id, list(allowed_tools))
     server = next(one for one in wire if one.name == DRUKS_SERVER_NAME)
     assert server.url == "https://druks.test/mcp"
@@ -656,34 +656,35 @@ async def test_delivery_mints_the_run_account_its_own_token(druks_db, monkeypatc
 
 async def test_a_later_run_reuses_the_token_and_a_retired_one_is_replaced(druks_db, monkeypatch):
     workspace = _requiring_druks(monkeypatch)
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(druks_db, "op@example.com")
     await workspace.get_mcp_delivery(None, account.id)
     first = (await _druks_row(account.id)).secrets["value"]
     # No tools: the token carries the account's whole API.
-    assert (await PersonalAccessToken.authenticate(first)).allowed_tools is None
+    assert (await PersonalAccessToken.authenticate(druks_db, first)).allowed_tools is None
 
     await workspace.get_mcp_delivery(None, account.id)
 
     assert (await _druks_row(account.id)).secrets["value"] == first
-    assert len(await PersonalAccessToken.list_for_account(account.id)) == 1
+    assert len(await PersonalAccessToken.list_for_account(druks_db, account.id)) == 1
 
-    await (await PersonalAccessToken.authenticate(first)).revoke()
+    await (await PersonalAccessToken.authenticate(druks_db, first)).revoke(druks_db)
     await workspace.get_mcp_delivery(None, account.id)
 
     assert (await _druks_row(account.id)).secrets["value"] != first
-    assert len(await PersonalAccessToken.list_for_account(account.id)) == 2
+    assert len(await PersonalAccessToken.list_for_account(druks_db, account.id)) == 2
 
 
 async def test_two_accounts_hold_their_own_tokens(druks_db, monkeypatch):
     workspace = _requiring_druks(monkeypatch)
-    first = await Account.get_or_create("first@example.com")
-    second = await Account.get_or_create("second@example.com")
+    first = await Account.get_or_create(druks_db, "first@example.com")
+    second = await Account.get_or_create(druks_db, "second@example.com")
 
     await workspace.get_mcp_delivery(None, first.id)
     await workspace.get_mcp_delivery(None, second.id)
 
     rows = [await _druks_row(first.id), await _druks_row(second.id)]
     holders = [
-        (await PersonalAccessToken.authenticate(row.secrets["value"])).account_id for row in rows
+        (await PersonalAccessToken.authenticate(druks_db, row.secrets["value"])).account_id
+        for row in rows
     ]
     assert holders == [first.id, second.id]

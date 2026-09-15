@@ -135,8 +135,8 @@ def test_provider_setup_uses_only_the_session_or_setup_resolver(api_routes):
             assert not _gated_by(route, current_session_or_setup), route.path
 
 
-async def test_provider_list_answers_before_an_account_exists(druks_client):
-    assert not await Account.list_all()
+async def test_provider_list_answers_before_an_account_exists(druks_db, druks_client):
+    assert not await Account.list_all(druks_db)
 
     response = await druks_client.get("/api/providers")
 
@@ -146,7 +146,7 @@ async def test_provider_list_answers_before_an_account_exists(druks_client):
     by_id = {item["id"]: item for item in body}
     assert by_id["anthropic"]["billingOptions"] == ["api_key", "subscription"]
     assert by_id["openai"]["billingOptions"] == ["api_key", "subscription"]
-    assert not await Account.list_all()
+    assert not await Account.list_all(druks_db)
 
 
 def test_capability_management_is_session_only(api_routes):

@@ -28,6 +28,7 @@ import druks.services.models  # noqa: F401
 import druks.skills.models  # noqa: F401
 import druks.user_settings.models  # noqa: F401
 from druks.accounts.models import Account
+from druks.api.dependencies import SessionDep
 from druks.apps.loader import import_app_models, iter_apps
 from druks.database import (
     _session_factory,
@@ -208,11 +209,11 @@ async def druks_db(_druks_schema: None) -> AsyncIterator[AsyncSession]:
         await engine.dispose()
 
 
-async def _operator_account():
+async def _operator_account(session: SessionDep):
     from druks.accounts.context import current_account_id
     from druks.accounts.models import Account
 
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(session, "op@example.com")
     current_account_id.set(account.id)
     return account
 
@@ -363,9 +364,9 @@ async def run_workflow(
     if subject:
         identity = subject.identity
     account = (
-        await Account.get_for_run(account_id)
+        await Account.get_for_run(db_session(), account_id)
         if account_id
-        else await Account.get_or_create("op@example.com")
+        else await Account.get_or_create(db_session(), "op@example.com")
     )
     instance, run_kwargs = _bind_instance(workflow_class, identity, input, account_id=account.id)
     body = getattr(workflow_class, workflow_class._body_method)
@@ -391,7 +392,7 @@ async def seed_run(
     if state == "parked" and not input_gate:
         raise ValueError("input_gate is required for a parked run")
     if not account_id:
-        account_id = (await Account.get_or_create("op@example.com")).id
+        account_id = (await Account.get_or_create(session, "op@example.com")).id
     run = Run(
         id=run_id or str(uuid7()),
         kind=kind,
@@ -464,7 +465,7 @@ async def seed_call(
         key = await VaultSecret.paste(
             Audience.provider(model.partition("/")[0]),
             "test-key",
-            pasted_by=await Account.get_for_run(run.account_id),
+            pasted_by=await Account.get_for_run(session, run.account_id),
         )
         api_key_id = key.id
     call = AgentCall(

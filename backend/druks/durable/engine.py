@@ -129,11 +129,11 @@ def step_session() -> AbstractAsyncContextManager[AsyncSession]:
 
 
 @asynccontextmanager
-async def bound_session() -> AsyncIterator[None]:
+async def bound_session() -> AsyncIterator[AsyncSession]:
     # The session this task already holds, else a step's own for the block: a
     # body starts a child run outside any step and holds none.
     if db_session.registry.has():
-        yield
+        yield db_session()
         return
-    async with step_session():
-        yield
+    async with step_session() as session:
+        yield session

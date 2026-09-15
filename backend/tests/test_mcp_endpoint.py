@@ -13,7 +13,6 @@ from druks.api.server import mcp_app
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket
 from druks.core.apis.exceptions import UnknownTicketError
-from druks.database import db_session
 from druks.durable.models import Artifact, Run
 from druks.mcp.exceptions import InvalidAgentToolError
 from druks.mcp.server import create_mcp_app
@@ -74,12 +73,12 @@ async def live(app):
 
 @pytest.fixture
 async def account(druks_db):
-    return await Account.get_or_create("op@example.com")
+    return await Account.get_or_create(druks_db, "op@example.com")
 
 
 @pytest.fixture
-async def pat_token(account):
-    _, token = await PersonalAccessToken.create(account_id=account.id, name="agent")
+async def pat_token(druks_db, account):
+    _, token = await PersonalAccessToken.create(druks_db, account_id=account.id, name="agent")
     return token
 
 
@@ -121,8 +120,8 @@ def _wire_size(structured: dict) -> int:
     return len(json.dumps(structured, separators=(",", ":"), default=str).encode())
 
 
-async def test_mcp_rejects_missing_and_dead_tokens(app, account):
-    row, token = await PersonalAccessToken.create(account_id=account.id, name="agent")
+async def test_mcp_rejects_missing_and_dead_tokens(druks_db, app, account):
+    row, token = await PersonalAccessToken.create(druks_db, account_id=account.id, name="agent")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://druks.test"
     ) as wire:
@@ -140,12 +139,12 @@ async def test_mcp_rejects_missing_and_dead_tokens(app, account):
 
         bearer = {**_WIRE_HEADERS, "Authorization": f"Bearer {token}"}
         row.expires_at = datetime.now(UTC) - timedelta(days=1)
-        await db_session().flush()
+        await druks_db.flush()
         expired = await wire.post("/mcp", json=_INIT, headers=bearer)
         assert expired.status_code == 401
 
         row.expires_at = datetime.now(UTC) + timedelta(days=1)
-        await row.revoke()
+        await row.revoke(druks_db)
         revoked = await wire.post("/mcp", json=_INIT, headers=bearer)
         assert revoked.status_code == 401
 
@@ -259,11 +258,12 @@ async def test_issues_ticket_tools_read_and_comment_as_the_pat_account(app, acco
     assert reread["comments"][0]["author"] == account.username
 
 
-async def test_a_ticket_token_reaches_only_its_tools(app, account):
+async def test_a_ticket_token_reaches_only_its_tools(druks_db, app, account):
     project = await Project.create(name="Acme")
     repo = await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
     ticket = await Ticket.create(project_repo=repo, title="Add an endpoint")
     _, token = await PersonalAccessToken.create(
+        druks_db,
         account_id=account.id,
         name="issues sandbox",
         allowed_tools=["software_factory_get_ticket"],
@@ -399,10 +399,10 @@ async def test_app_agent_route_derives_the_namespaced_tool(
 
 async def test_claims_resolve_the_calling_account(app, druks_db):
     # get_usage must answer as the token's account — the forwarded bearer.
-    mine = await Account.get_or_create("op@example.com")
-    theirs = await Account.get_or_create("peer@example.com")
-    _, my_token = await PersonalAccessToken.create(account_id=mine.id, name="mine")
-    _, their_token = await PersonalAccessToken.create(account_id=theirs.id, name="theirs")
+    mine = await Account.get_or_create(druks_db, "op@example.com")
+    theirs = await Account.get_or_create(druks_db, "peer@example.com")
+    _, my_token = await PersonalAccessToken.create(druks_db, account_id=mine.id, name="mine")
+    _, their_token = await PersonalAccessToken.create(druks_db, account_id=theirs.id, name="theirs")
     druks_db.add(
         UsageScrape(
             provider="openai",

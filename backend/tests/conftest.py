@@ -11,7 +11,7 @@ from druks.apps.loader import (
     register_workflow_package,
 )
 from druks.apps.registry import services
-from druks.database import create_engine_from_url
+from druks.database import create_engine_from_url, db_session
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
 from druks.harnesses.providers import AnthropicProvider
 from druks.models import Base
@@ -63,7 +63,7 @@ async def connect_service(slug: str, *, identity: dict, secrets: dict) -> VaultS
 
 
 async def installation_key() -> VaultSecret:
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(db_session(), "op@example.com")
     return await VaultSecret.paste(Audience.provider("anthropic"), "test-key", pasted_by=account)
 
 
@@ -220,7 +220,7 @@ def make_jwt(claims: dict) -> str:
 
 async def connect_provider(provider_cls, payload: dict, *, provider_email: str = "op@example.com"):
     """Seed the vault row a finished OAuth connect flow would leave for a subscription."""
-    account = await Account.get_or_create(provider_email)
+    account = await Account.get_or_create(db_session(), provider_email)
     _, expires_at = provider_cls._refresh_state(payload)
     return await VaultSecret.store(
         SecretKind.SUBSCRIPTION,

@@ -1,3 +1,5 @@
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from druks.accounts.models import PersonalAccessToken
 from druks.mcp.constants import BEARER_HEADER, DRUKS_SERVER_NAME
 from druks.mcp.exceptions import MissingEndpointError
@@ -17,14 +19,18 @@ def get_druks_mcp_server(*, allowed_tools: tuple[str, ...]) -> RequiredMcpServer
     raise MissingEndpointError(DRUKS_SERVER_NAME)
 
 
-async def get_druks_account_token(account_id: str, allowed_tools: tuple[str, ...]) -> VaultSecret:
+async def get_druks_account_token(
+    session: AsyncSession, account_id: str, allowed_tools: tuple[str, ...]
+) -> VaultSecret:
     """This account's token row, minted when a run of theirs first needs it."""
     audience = Audience.mcp(DRUKS_SERVER_NAME)
     row = await VaultSecret.lookup(SecretKind.STATIC, audience, account_id, BEARER_HEADER)
-    held = await PersonalAccessToken.get_for_prefix(row.identity["token_prefix"]) if row else None
-    if held and held.status == "active":
-        return row
+    if row:
+        held = await PersonalAccessToken.get_for_prefix(session, row.identity["token_prefix"])
+        if held and held.status == "active":
+            return row
     minted, token = await PersonalAccessToken.create(
+        session,
         account_id=account_id,
         name=f"{DRUKS_SERVER_NAME} MCP",
         allowed_tools=list(allowed_tools) or None,

@@ -244,7 +244,7 @@ async def test_refresh_without_a_login_stores_nothing(monkeypatch, druks_db):
 
 
 async def test_openai_refresh_reads_its_own_list_over_the_key(monkeypatch, druks_db):
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(druks_db, "op@example.com")
     await VaultSecret.paste(Audience.provider("openai"), "sk-openai", pasted_by=account)
     calls = _mock_get(monkeypatch, _resp(200, {"data": [{"id": "gpt-5.5"}, {"id": "whisper-1"}]}))
     await OpenAiProvider.refresh_catalog()
@@ -308,7 +308,7 @@ async def test_adding_a_directory_provider_creates_its_catalog(monkeypatch, druk
 
 
 async def test_added_catalogs_refresh_from_the_directory(monkeypatch, druks_db, druks_redis):
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(druks_db, "op@example.com")
     await VaultSecret.paste(Audience.provider("groq"), "gsk", pasted_by=account)
     await VaultSecret.paste(Audience.provider("anthropic"), "sk-ant", pasted_by=account)
     calls = _mock_get(monkeypatch, _resp(200, {"groq": _GROQ}))

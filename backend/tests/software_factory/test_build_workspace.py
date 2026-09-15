@@ -182,10 +182,10 @@ def _dispatched_by(monkeypatch: pytest.MonkeyPatch, username: str | None) -> Non
     monkeypatch.setattr("druks.workspaces.get_github_client", _client)
     account = SimpleNamespace(username=username) if username else None
 
-    async def _get_account(_id):
+    async def _get_account(_model, _id):
         return account
 
-    monkeypatch.setattr("druks.workspaces.Account", SimpleNamespace(get=_get_account))
+    monkeypatch.setattr("druks.workspaces.db_session", lambda: SimpleNamespace(get=_get_account))
 
 
 async def test_set_git_identity_stamps_the_workspace_repo(

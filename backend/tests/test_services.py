@@ -812,7 +812,7 @@ async def test_fresh_sign_in_with_matching_identity_resurrects_revoked_connectio
     await connect_service(
         keyed_acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(druks_db, "op@example.com")
     connection = await VaultSecret.connect(
         Audience.service(keyed_acme.slug),
         account_id=account.id,
@@ -865,7 +865,7 @@ async def test_matching_fresh_sign_in_lands_on_live_connection_and_evicts_cached
     await connect_service(
         keyed_acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(druks_db, "op@example.com")
     connection = await VaultSecret.connect(
         Audience.service(keyed_acme.slug),
         account_id=account.id,
@@ -911,7 +911,7 @@ async def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_liv
     await connect_service(
         keyed_acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(druks_db, "op@example.com")
     live = await VaultSecret.connect(
         Audience.service(keyed_acme.slug),
         account_id=account.id,
@@ -962,7 +962,7 @@ async def test_fresh_sign_in_without_the_declared_identity_fact_creates_a_new_co
     await connect_service(
         acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(druks_db, "op@example.com")
     revoked = await VaultSecret.connect(
         Audience.service(acme.slug),
         account_id=account.id,
@@ -1111,7 +1111,7 @@ async def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch
 
     monkeypatch.setattr("druks.services.routes.publish", record)
     monkeypatch.setattr("druks.services.oauth.publish", record)
-    me = await Account.get_or_create("op@example.com")
+    me = await Account.get_or_create(druks_db, "op@example.com")
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         row = await VaultSecret.connect(
             Audience.service("acme"),

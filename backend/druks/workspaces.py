@@ -182,8 +182,8 @@ class Workspace:
             if server.secret_id:
                 secret_id = server.secret_id
             else:
-                account = await Account.get_for_run(account_id)
-                row = await get_druks_account_token(account.id, server.allowed_tools)
+                account = await Account.get_for_run(db_session(), account_id)
+                row = await get_druks_account_token(db_session(), account.id, server.allowed_tools)
                 secret_id = row.id
             refs.append(
                 SecretRef(
@@ -209,7 +209,7 @@ class Workspace:
                     raise MissingTokenError(name)
             elif source:
                 if server["identity_mode"] == IdentityMode.PER_USER and not run_account:
-                    account = await Account.get_default()
+                    account = await Account.get_default(db_session())
                     run_account = account.id if account else None
                 grant_account = get_grant_account(server["identity_mode"], run_account)
                 secret = await oauth.get_connection(name, grant_account)
@@ -292,7 +292,7 @@ class RepoWorkspace(Workspace):
             f"git config user.email {shlex.quote(author_email)}",
             "rm -f .git/hooks/prepare-commit-msg",
         ]
-        if account_id and (account := await Account.get(account_id)):
+        if account_id and (account := await db_session().get(Account, account_id)):
             trailer = f"Co-Authored-By: {account.username} <{account.username}>"
             hook = (
                 "#!/bin/sh\n"

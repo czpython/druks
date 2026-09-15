@@ -320,7 +320,7 @@ async def test_credential_without_a_selection_reads_the_accounts_row(druks_db):
 
 
 async def test_credential_without_any_row_raises(druks_db):
-    account = await Account.get_or_create("a@example.com")
+    account = await Account.get_or_create(druks_db, "a@example.com")
     with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
         await AnthropicProvider.get_subscription(account.id)
 

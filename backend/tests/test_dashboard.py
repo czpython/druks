@@ -178,7 +178,7 @@ async def test_newest_success_replaces_failure_and_non_requests_are_absent(clien
 
 
 async def test_subjectless_orphans_and_other_accounts_stay_visible(client, druks_db):
-    other = await Account.get_or_create("another@example.invalid")
+    other = await Account.get_or_create(druks_db, "another@example.invalid")
     first = await seed_run(druks_db, kind=Summarize.kind, account_id=other.id)
     second = await seed_run(druks_db, kind=Summarize.kind, account_id=other.id)
     orphan = Run(

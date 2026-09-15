@@ -356,7 +356,7 @@ async def test_connect_records_reported_scopes_only(auth_server, druks_db, token
 async def test_reconnect_replaces_stale_identity_even_when_lookup_fails(
     auth_server, druks_db, status
 ):
-    account = await Account.get_or_create("owner@example.test")
+    account = await Account.get_or_create(druks_db, "owner@example.test")
     url = await oauth.begin_connect(
         _NAME, _SERVER_URL, _ENDPOINT, account_id=account.id, identity_mode=IdentityMode.PER_USER
     )
@@ -491,8 +491,8 @@ async def test_reconnect_after_disconnect_creates_a_new_grant(auth_server, druks
 
 
 async def test_two_shared_connects_converge_on_one_grant(auth_server, druks_db):
-    first = await Account.get_or_create("first@example.com")
-    second = await Account.get_or_create("second@example.com")
+    first = await Account.get_or_create(druks_db, "first@example.com")
+    second = await Account.get_or_create(druks_db, "second@example.com")
 
     for account in (first, second):
         url = await oauth.begin_connect(
@@ -511,8 +511,8 @@ async def test_two_shared_connects_converge_on_one_grant(auth_server, druks_db):
 
 
 async def test_two_per_user_connects_store_two_grants(auth_server, druks_db):
-    first = await Account.get_or_create("first@example.com")
-    second = await Account.get_or_create("second@example.com")
+    first = await Account.get_or_create(druks_db, "first@example.com")
+    second = await Account.get_or_create(druks_db, "second@example.com")
 
     for account in (first, second):
         url = await oauth.begin_connect(
@@ -531,8 +531,8 @@ async def test_two_per_user_connects_store_two_grants(auth_server, druks_db):
 
 
 async def test_a_later_connect_stores_under_the_claimed_mode(auth_server, druks_db):
-    first = await Account.get_or_create("first@example.com")
-    second = await Account.get_or_create("second@example.com")
+    first = await Account.get_or_create(druks_db, "first@example.com")
+    second = await Account.get_or_create(druks_db, "second@example.com")
     first_url = await oauth.begin_connect(
         _NAME,
         _SERVER_URL,
@@ -650,8 +650,8 @@ async def test_get_times_out_loudly_when_the_refresh_lock_never_frees(druks_db, 
 
 
 async def test_get_cache_and_refresh_lock_are_per_account(auth_server, druks_db):
-    first = await Account.get_or_create("first@example.com")
-    second = await Account.get_or_create("second@example.com")
+    first = await Account.get_or_create(druks_db, "first@example.com")
+    second = await Account.get_or_create(druks_db, "second@example.com")
     await _store_grant(account_id=first.id, identity_mode=IdentityMode.PER_USER)
     await _store_grant(account_id=second.id, identity_mode=IdentityMode.PER_USER)
     redis = get_client()
@@ -702,7 +702,7 @@ async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
 
 
 async def test_delivery_names_the_account_missing_its_per_user_grant(druks_db):
-    account = await Account.get_or_create("run@example.com")
+    account = await Account.get_or_create(druks_db, "run@example.com")
     server = await McpServer.create(name=_NAME, url=_SERVER_URL, token_source=TokenSource.OAUTH)
     server.identity_mode = IdentityMode.PER_USER
 
@@ -716,7 +716,7 @@ async def test_delivery_names_the_account_missing_its_per_user_grant(druks_db):
 
 
 async def test_delivery_without_a_run_account_uses_the_default_account(auth_server, druks_db):
-    default_account = await Account.get_or_create("default@example.com")
+    default_account = await Account.get_or_create(druks_db, "default@example.com")
     grant = await _store_grant(account_id=default_account.id, identity_mode=IdentityMode.PER_USER)
 
     ref = await _ref()
@@ -727,8 +727,8 @@ async def test_delivery_without_a_run_account_uses_the_default_account(auth_serv
 async def test_delivery_with_a_named_account_does_not_use_the_default_account(
     auth_server, druks_db
 ):
-    default_account = await Account.get_or_create("default@example.com")
-    named = await Account.get_or_create("named@example.com")
+    default_account = await Account.get_or_create(druks_db, "default@example.com")
+    named = await Account.get_or_create(druks_db, "named@example.com")
     await _store_grant(account_id=default_account.id, identity_mode=IdentityMode.PER_USER)
 
     with pytest.raises(MissingGrantError) as error:
@@ -740,8 +740,8 @@ async def test_delivery_with_a_named_account_does_not_use_the_default_account(
 async def test_the_ref_binds_the_accounts_own_grant(auth_server, druks_db):
     # The ref binds the grant row at creation: a held box keeps that account's
     # grant whatever account asks later.
-    first = await Account.get_or_create("first@example.com")
-    second = await Account.get_or_create("second@example.com")
+    first = await Account.get_or_create(druks_db, "first@example.com")
+    second = await Account.get_or_create(druks_db, "second@example.com")
     grant = await _store_grant(account_id=first.id, identity_mode=IdentityMode.PER_USER)
     await _store_grant(account_id=second.id, identity_mode=IdentityMode.PER_USER)
 
@@ -866,7 +866,7 @@ async def test_shared_disconnect_allows_per_user_reconnect(
     tmp_path, registry_state, auth_server, druks_db
 ):
     _register_oauth_server()
-    operator = await Account.get_or_create("op@example.com")
+    operator = await Account.get_or_create(druks_db, "op@example.com")
     settings = make_settings(tmp_path, urls={"endpoint": _ENDPOINT})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
@@ -931,8 +931,8 @@ async def test_connect_route_rejects_a_conflicting_identity_mode(tmp_path, druks
 
 
 async def test_api_has_token_is_scoped_to_the_requesting_account(tmp_path, druks_db):
-    connected = await Account.get_or_create("connected@example.com")
-    unconnected = await Account.get_or_create("unconnected@example.com")
+    connected = await Account.get_or_create(druks_db, "connected@example.com")
+    unconnected = await Account.get_or_create(druks_db, "unconnected@example.com")
     await _store_grant(account_id=connected.id, identity_mode=IdentityMode.PER_USER)
     settings = make_settings(
         tmp_path,
@@ -960,8 +960,8 @@ async def test_api_has_token_is_scoped_to_the_requesting_account(tmp_path, druks
 
 
 async def test_per_user_disconnect_preserves_other_accounts_grant_and_cache(tmp_path, druks_db):
-    disconnected = await Account.get_or_create("disconnect@example.com")
-    connected = await Account.get_or_create("connected@example.com")
+    disconnected = await Account.get_or_create(druks_db, "disconnect@example.com")
+    connected = await Account.get_or_create(druks_db, "connected@example.com")
     await _store_grant(account_id=disconnected.id, identity_mode=IdentityMode.PER_USER)
     await _store_grant(account_id=connected.id, identity_mode=IdentityMode.PER_USER)
     redis = get_client()
@@ -991,8 +991,8 @@ async def test_per_user_disconnect_preserves_other_accounts_grant_and_cache(tmp_
 
 
 async def test_removal_drops_every_grant_and_cached_token(tmp_path, druks_db):
-    first = await Account.get_or_create("first@example.com")
-    second = await Account.get_or_create("second@example.com")
+    first = await Account.get_or_create(druks_db, "first@example.com")
+    second = await Account.get_or_create(druks_db, "second@example.com")
     await _store_grant(account_id=first.id, identity_mode=IdentityMode.PER_USER)
     await _store_grant(account_id=second.id, identity_mode=IdentityMode.PER_USER)
     redis = get_client()

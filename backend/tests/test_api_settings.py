@@ -71,8 +71,8 @@ def test_patch_settings_judges_the_default_triple_together(tmp_path: Path):
         assert "does not run OpenAI" in claude.json()["detail"]
 
 
-async def test_accounts_report_the_default_without_a_fallback_setting(tmp_path: Path):
-    account = await Account.get_or_create("ops@example.com")
+async def test_accounts_report_the_default_without_a_fallback_setting(druks_db, tmp_path: Path):
+    account = await Account.get_or_create(druks_db, "ops@example.com")
     with settings_client(tmp_path) as client:
         assert {"id": account.id, "username": "ops@example.com", "isDefault": True} in client.get(
             "/api/auth/accounts"

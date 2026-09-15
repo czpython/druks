@@ -157,7 +157,7 @@ _IN_APP_ASK = {
 async def _parked_notification(druks_db, *, ask=None, run_state="parked"):
     ask = ask or _IN_APP_ASK
     run = Run(
-        account_id=(await Account.get_or_create("op@example.com")).id,
+        account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         id=str(uuid7()),
         kind="notifications.test",
         input_gate="review",
@@ -283,7 +283,7 @@ async def test_respond_runless_notification_not_answerable(tmp_path, druks_db, r
 
 async def test_respond_stale_round_409(tmp_path, druks_db, resume_spy):
     run = Run(
-        account_id=(await Account.get_or_create("op@example.com")).id,
+        account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         id=str(uuid7()),
         kind="notifications.test",
         input_gate="review",

@@ -198,8 +198,8 @@ async def test_bearer_pat_reads_sessions_but_cannot_mutate_them(tmp_path, druks_
         tmp_path,
         identity={"mode": "header", "header": "X-Edge-Email"},
     )
-    account = await Account.get_or_create("op@example.com")
-    _, token = await PersonalAccessToken.create(account_id=account.id, name="agent")
+    account = await Account.get_or_create(druks_db, "op@example.com")
+    _, token = await PersonalAccessToken.create(druks_db, account_id=account.id, name="agent")
     await db_session().commit()
     headers = {"Authorization": f"Bearer {token}"}
 

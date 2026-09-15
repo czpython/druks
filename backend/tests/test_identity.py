@@ -87,7 +87,7 @@ async def test_header_mode_requires_exactly_one_nonblank_assertion(tmp_path, dru
             headers=[(IDENTITY_HEADER, "a@example.com"), (IDENTITY_HEADER, "b@example.com")],
         )
         assert two.status_code == 401
-    assert not await Account.list_all()
+    assert not await Account.list_all(druks_db)
 
 
 async def test_an_asserted_email_open_enrolls_once_across_case_variants(tmp_path, druks_db):
@@ -101,24 +101,24 @@ async def test_an_asserted_email_open_enrolls_once_across_case_variants(tmp_path
 
         again = client.get("/api/auth/me", headers={IDENTITY_HEADER: "op@example.COM"})
         assert again.json()["account"]["id"] == body["account"]["id"]
-    assert len(await Account.list_all()) == 1
+    assert len(await Account.list_all(druks_db)) == 1
 
 
 async def test_get_or_create_losing_the_insert_race_still_converges(druks_db, monkeypatch):
-    existing = await Account.get_or_create("race@example.com")
+    existing = await Account.get_or_create(druks_db, "race@example.com")
 
     # The pre-read misses, so the insert hits ON CONFLICT DO NOTHING.
-    async def _miss(cls, username):
+    async def _miss(cls, session, username):
         return None
 
     monkeypatch.setattr(Account, "get_for_username", classmethod(_miss))
-    assert (await Account.get_or_create("Race@example.com")).id == existing.id
-    assert len(await Account.list_all()) == 1
+    assert (await Account.get_or_create(druks_db, "Race@example.com")).id == existing.id
+    assert len(await Account.list_all(druks_db)) == 1
 
 
 async def test_a_valid_pat_wins_over_a_conflicting_header(tmp_path, druks_db):
-    agent = await Account.get_or_create("agent@example.com")
-    _, token = await PersonalAccessToken.create(account_id=agent.id, name="agent")
+    agent = await Account.get_or_create(druks_db, "agent@example.com")
+    _, token = await PersonalAccessToken.create(druks_db, account_id=agent.id, name="agent")
     with header_client(tmp_path) as client:
         response = client.get(
             "/api/auth/me",
@@ -126,7 +126,7 @@ async def test_a_valid_pat_wins_over_a_conflicting_header(tmp_path, druks_db):
         )
         assert response.status_code == 200
         assert response.json()["account"]["username"] == "agent@example.com"
-    assert not await Account.get_for_username("op@example.com")
+    assert not await Account.get_for_username(druks_db, "op@example.com")
 
 
 async def test_onboarding_clears_once_the_account_has_a_connection(tmp_path, druks_db):
@@ -142,7 +142,7 @@ async def test_none_mode_ignores_a_present_identity_header(tmp_path, druks_db):
         body = client.get("/api/auth/me", headers={IDENTITY_HEADER: "intruder@example.com"}).json()
     assert body["authMode"] == "none"
     assert body["account"]["username"] == "op@example.com"
-    assert not await Account.get_for_username("intruder@example.com")
+    assert not await Account.get_for_username(druks_db, "intruder@example.com")
 
 
 def test_none_zero_reads_as_setup(tmp_path, druks_db):
@@ -181,13 +181,13 @@ async def test_onboarding_after_the_only_subscription_is_revoked(
 
 
 async def test_none_multi_refuses_requests_and_startup(tmp_path, druks_db):
-    await Account.get_or_create("one@example.com")
-    await Account.get_or_create("two@example.com")
+    await Account.get_or_create(druks_db, "one@example.com")
+    await Account.get_or_create(druks_db, "two@example.com")
     with _client(tmp_path) as client:
         assert client.get("/api/settings").status_code == 503
     # Startup runs the same check.
     with pytest.raises(AuthConfigurationError):
-        await resolve_single_operator()
+        await resolve_single_operator(druks_db)
 
 
 async def test_none_zero_setup_flow_creates_the_operator(tmp_path, monkeypatch, druks_db):
@@ -199,8 +199,8 @@ async def test_none_zero_setup_flow_creates_the_operator(tmp_path, monkeypatch, 
         body = client.get("/api/auth/me").json()
         assert body["account"]["username"] == "me@example.com"
         assert body["onboardingRequired"] is False
-    account = await Account.get_for_username("me@example.com")
-    assert (await Account.get_default()).id == account.id
+    account = await Account.get_for_username(druks_db, "me@example.com")
+    assert (await Account.get_default(druks_db)).id == account.id
     assert await VaultSecret.lookup(
         SecretKind.SUBSCRIPTION, Audience.provider("anthropic"), account.id
     )
@@ -218,7 +218,7 @@ async def test_a_pasted_key_is_the_providers_and_names_its_paster(tmp_path, druk
     assert response.json()["keyTail"] == "alue"
     assert response.json()["updatedBy"]["username"] == "operator@example.com"
     assert "api-key-value" not in response.text
-    account = await Account.get_for_username("operator@example.com")
+    account = await Account.get_for_username(druks_db, "operator@example.com")
     assert not await VaultSecret.lookup(
         SecretKind.SUBSCRIPTION, Audience.provider("anthropic"), account.id
     )
@@ -247,7 +247,9 @@ async def test_a_second_pasted_key_replaces_the_first(tmp_path, druks_db):
 
     [stored] = await VaultSecret.list_keys()
     assert stored.secrets["value"] == "key-two"
-    assert (await Account.get(stored.identity["pasted_by"])).username == "second@example.com"
+    assert (
+        await druks_db.get(Account, stored.identity["pasted_by"])
+    ).username == "second@example.com"
 
 
 async def test_api_key_connect_requires_a_declared_kind(tmp_path, druks_db, monkeypatch):
@@ -281,7 +283,7 @@ async def test_api_key_connect_refuses_setup_scope(tmp_path, druks_db):
         )
 
     assert response.status_code == 409
-    assert not await Account.list_all()
+    assert not await Account.list_all(druks_db)
     assert not await VaultSecret.list_subscriptions()
 
 
@@ -308,7 +310,7 @@ async def test_concurrent_setup_completions_with_one_email_converge(
             ).status_code
             == 200
         )
-    assert len(await Account.list_all()) == 1
+    assert len(await Account.list_all(druks_db)) == 1
     assert len(await VaultSecret.list_subscriptions()) == 2
 
 
@@ -331,8 +333,8 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
         assert completed.status_code == 200
         assert completed.json()["username"] == "a@example.com"
         assert client.get("/api/settings").status_code == 200
-    operator = await Account.get_for_username("a@example.com")
-    assert len(await Account.list_all()) == 1
+    operator = await Account.get_for_username(druks_db, "a@example.com")
+    assert len(await Account.list_all(druks_db)) == 1
     codex_connection = await VaultSecret.lookup(
         SecretKind.SUBSCRIPTION, Audience.provider("openai"), operator.id
     )
@@ -347,7 +349,7 @@ async def test_a_connect_survives_a_failed_catalog_refresh(tmp_path, monkeypatch
     with _client(tmp_path) as client:
         response = _connect(client, monkeypatch, email="me@example.com")
         assert response.status_code == 200
-    account = await Account.get_for_username("me@example.com")
+    account = await Account.get_for_username(druks_db, "me@example.com")
     assert await VaultSecret.lookup(
         SecretKind.SUBSCRIPTION, Audience.provider("anthropic"), account.id
     )
@@ -382,8 +384,8 @@ async def test_first_account_remains_default_after_other_connections(
             email="seat@corp.com",
             headers={IDENTITY_HEADER: "first@example.com"},
         )
-        first = await Account.get_for_username("first@example.com")
-        assert (await Account.get_default()).id == first.id
+        first = await Account.get_for_username(druks_db, "first@example.com")
+        assert (await Account.get_default(druks_db)).id == first.id
         _connect(
             client,
             monkeypatch,
@@ -391,7 +393,7 @@ async def test_first_account_remains_default_after_other_connections(
             email="other-seat@corp.com",
             headers={IDENTITY_HEADER: "second@example.com"},
         )
-    assert (await Account.get_default()).id == first.id
+    assert (await Account.get_default(druks_db)).id == first.id
 
 
 async def test_reconnect_records_provider_email_but_keeps_the_operator(
@@ -407,7 +409,7 @@ async def test_reconnect_records_provider_email_but_keeps_the_operator(
         )
         assert response.status_code == 200
         assert response.json()["username"] == "me@example.com"
-    account = await Account.get_for_username("me@example.com")
+    account = await Account.get_for_username(druks_db, "me@example.com")
     codex = await VaultSecret.lookup(
         SecretKind.SUBSCRIPTION, Audience.provider("openai"), account.id
     )
@@ -415,8 +417,8 @@ async def test_reconnect_records_provider_email_but_keeps_the_operator(
 
 
 async def test_connection_flow_rejects_a_bearer(tmp_path, druks_db):
-    agent = await Account.get_or_create("agent@example.com")
-    _, token = await PersonalAccessToken.create(account_id=agent.id, name="agent")
+    agent = await Account.get_or_create(druks_db, "agent@example.com")
+    _, token = await PersonalAccessToken.create(druks_db, account_id=agent.id, name="agent")
     with _client(tmp_path) as client:
         response = client.post(
             "/api/providers/anthropic/connection/start",

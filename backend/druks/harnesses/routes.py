@@ -2,10 +2,12 @@ import logging
 from contextlib import suppress
 
 from fastapi import APIRouter, Body, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.dependencies import current_session_account, current_session_or_setup
 from druks.accounts.models import Account
 from druks.accounts.schemas import AccountResponse
+from druks.api.dependencies import SessionDep
 from druks.database import db_session
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
@@ -56,12 +58,13 @@ async def list_subscriptions(
     response_model_by_alias=True,
     dependencies=[Depends(current_session_account)],
 )
-async def list_keys() -> list[ProviderKeyResponse]:
-    return [await _key_response(row) for row in await VaultSecret.list_keys()]
+async def list_keys(session: SessionDep) -> list[ProviderKeyResponse]:
+    return [await _key_response(session, row) for row in await VaultSecret.list_keys()]
 
 
-async def _key_response(row: VaultSecret) -> ProviderKeyResponse:
-    return ProviderKeyResponse.from_secret(row, await Account.get(row.identity["pasted_by"]))
+async def _key_response(session: AsyncSession, row: VaultSecret) -> ProviderKeyResponse:
+    pasted_by = await session.get(Account, row.identity["pasted_by"])
+    return ProviderKeyResponse.from_secret(row, pasted_by)
 
 
 @router.get(
@@ -109,6 +112,7 @@ async def start_connection(
     response_model_by_alias=True,
 )
 async def complete_connection(
+    session: SessionDep,
     provider_id: str,
     account: Account | None = Depends(current_session_or_setup),
     code: str = Body(..., embed=True),
@@ -130,7 +134,7 @@ async def complete_connection(
     else:
         # An unbound flow attaches to this request's account when one exists.
         # get_or_create is atomic, so concurrent completions of one email converge.
-        resolved = account or await Account.get_or_create(completed.provider_email)
+        resolved = account or await Account.get_or_create(session, completed.provider_email)
     await VaultSecret.store(
         SecretKind.SUBSCRIPTION,
         Audience.provider(provider.id),
@@ -160,6 +164,7 @@ async def complete_connection(
 )
 async def create_key(
     provider_id: str,
+    session: SessionDep,
     account: Account = Depends(current_session_account),
     key: str = Body(..., embed=True),
 ) -> ProviderKeyResponse:
@@ -171,14 +176,14 @@ async def create_key(
         if "api_key" in provider.billing_options:
             stored = await VaultSecret.paste(Audience.provider(provider.id), key, pasted_by=account)
             await provider.refresh_catalog()
-            return await _key_response(stored)
+            return await _key_response(session, stored)
         raise HTTPException(status_code=422, detail=f"{provider.label} does not accept API keys.")
     try:
         await directory.add_provider(provider_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}") from error
     return await _key_response(
-        await VaultSecret.paste(Audience.provider(provider_id), key, pasted_by=account)
+        session, await VaultSecret.paste(Audience.provider(provider_id), key, pasted_by=account)
     )
 
 

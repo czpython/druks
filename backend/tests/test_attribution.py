@@ -6,7 +6,7 @@ from druks_field_notes.workflows import Summarize
 
 
 async def test_run_projects_its_account(druks_db):
-    account = await Account.get_or_create("dev@example.com")
+    account = await Account.get_or_create(druks_db, "dev@example.com")
     await seed_run(druks_db, kind=Summarize.kind, run_id="run-attr-1", account_id=account.id)
     await druks_db.flush()
 
@@ -23,6 +23,6 @@ async def test_a_run_projects_the_default_account(druks_db):
 
     run = await druks_db.get(Run, "run-attr-2")
     await druks_db.refresh(run, ["agent_calls"])
-    assert run.account_id == (await Account.get_default()).id
+    assert run.account_id == (await Account.get_default(druks_db)).id
     response = RunResponse.from_run(run, input_request=None)
     assert response.account_username == "op@example.com"

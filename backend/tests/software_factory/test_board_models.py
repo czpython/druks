@@ -3,6 +3,7 @@ from druks.accounts.models import Account
 from druks.contrib.software_factory.enums import Status
 from druks.contrib.software_factory.exceptions import PrefixTakenError
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket, derive_prefix
+from druks.database import db_session
 
 
 async def _open_repo(*, name="Druks", full_name="acme/druks"):
@@ -34,7 +35,7 @@ async def test_ticket_identifiers_count_up_per_project():
 
 
 async def test_comments_read_back_oldest_first_with_their_author():
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(db_session(), "op@example.com")
     ticket = await Ticket.create(project_repo=await _open_repo(), title="quiet")
 
     await ticket.add_comment(author=account, body="first")
@@ -48,7 +49,7 @@ async def test_comments_read_back_oldest_first_with_their_author():
 
 
 async def test_list_matching_filters_by_status_assignee_creator_repo_and_project():
-    account = await Account.get_or_create("op@example.com")
+    account = await Account.get_or_create(db_session(), "op@example.com")
     here = await _open_repo(name="Filter", full_name="acme/filter")
     other = await _open_repo(name="Other", full_name="acme/other")
     mine = await Ticket.create(

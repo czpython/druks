@@ -47,7 +47,7 @@ def client(tmp_path: Path, druks_db, monkeypatch):
 @pytest.fixture
 async def account(druks_db):
     # The account configure_app_for_test signs requests in as.
-    return await Account.get_or_create("op@example.com")
+    return await Account.get_or_create(druks_db, "op@example.com")
 
 
 async def _connect_github() -> None:
@@ -189,7 +189,7 @@ def _tracker_stub(fake):
 
 
 async def test_software_factory_start_stamps_the_trigger_status_for_known_and_unknown_tickets(
-    client: TestClient, account: Account, monkeypatch
+    druks_db, client: TestClient, account: Account, monkeypatch
 ):
     # ENG-831 has a local work item, ENG-777 has never been seen — both take
     # the same tracker path; webhook intake, not the route, opens builds.
@@ -202,7 +202,7 @@ async def test_software_factory_start_stamps_the_trigger_status_for_known_and_un
         ticket_key="ENG-831",
         repo="acme/app",
     )
-    _, pat_token = await PersonalAccessToken.create(account_id=account.id, name="agent")
+    _, pat_token = await PersonalAccessToken.create(druks_db, account_id=account.id, name="agent")
     fake = _FakeTracker()
     monkeypatch.setattr(SoftwareFactory, "get_tracker", _tracker_stub(fake))
     starts = []

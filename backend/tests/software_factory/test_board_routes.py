@@ -84,11 +84,13 @@ async def test_ready_for_agent_publishes_one_transition(druks_client, monkeypatc
     assert events == [_ready("ACM-1", "Add an endpoint", "acme/acme-app")]
 
 
-async def test_an_edit_takes_what_it_is_given_and_leaves_the_rest(druks_client, monkeypatch):
+async def test_an_edit_takes_what_it_is_given_and_leaves_the_rest(
+    druks_db, druks_client, monkeypatch
+):
     events = _published(monkeypatch)
     here = await _open_repo(druks_client, project="Alpha", repo="acme/alpha")
     there = await _open_repo(druks_client, project="Beta", repo="acme/beta")
-    assignee = await Account.get_or_create("dev@example.com")
+    assignee = await Account.get_or_create(druks_db, "dev@example.com")
     ticket = await _open_ticket(druks_client, here["id"], title="old", assignee_id=assignee.id)
 
     async def edit(**fields):
@@ -105,8 +107,8 @@ async def test_an_edit_takes_what_it_is_given_and_leaves_the_rest(druks_client, 
     assert events == []
 
 
-async def test_a_comment_carries_the_calling_account(druks_client):
-    account = await Account.get_or_create("op@example.com")
+async def test_a_comment_carries_the_calling_account(druks_db, druks_client):
+    account = await Account.get_or_create(druks_db, "op@example.com")
     repo = await _open_repo(druks_client)
     ticket = await _open_ticket(druks_client, repo["id"])
 

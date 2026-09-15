@@ -70,7 +70,7 @@ async def test_a_valid_assertion_open_enrolls_its_subject(tmp_path, druks_db):
         assert response.json()["account"]["username"] == "op@example.com"
         other = client.get("/api/auth/me", headers={HEADER: _token(email="two@example.com")})
         assert other.status_code == 200
-    usernames = {account.username for account in await Account.list_all()}
+    usernames = {account.username for account in await Account.list_all(druks_db)}
     assert usernames == {"op@example.com", "two@example.com"}
 
 
@@ -90,7 +90,7 @@ async def test_identity_pointer_selects_the_account(tmp_path, druks_db, pointer,
 
     assert response.status_code == 200
     assert response.json()["account"]["username"] == "op@example.com"
-    assert [account.username for account in await Account.list_all()] == ["op@example.com"]
+    assert [account.username for account in await Account.list_all(druks_db)] == ["op@example.com"]
 
 
 @pytest.mark.parametrize(
@@ -111,7 +111,7 @@ async def test_an_unresolvable_pointer_rejects_without_enrolling(
     assert response.status_code == 401
     assert "op@example.com" not in response.json()["detail"]
     assert token.split(".")[1] not in response.json()["detail"]
-    assert not await Account.list_all()
+    assert not await Account.list_all(druks_db)
 
 
 @pytest.mark.parametrize(
@@ -135,7 +135,7 @@ async def test_a_bad_assertion_rejects_without_enrolling(tmp_path, druks_db, tok
         assert response.status_code == 401
         # Only the failure class reaches the caller — never token material.
         assert token.split(".")[1] not in response.json()["detail"]
-    assert not await Account.list_all()
+    assert not await Account.list_all(druks_db)
 
 
 def test_none_mode_multi_kid_document_serves_the_matching_key(tmp_path, druks_db):
@@ -144,8 +144,8 @@ def test_none_mode_multi_kid_document_serves_the_matching_key(tmp_path, druks_db
 
 
 async def test_bearer_precedence_survives_jwt_mode(tmp_path, druks_db):
-    agent = await Account.get_or_create("agent@example.com")
-    _, token = await PersonalAccessToken.create(account_id=agent.id, name="agent")
+    agent = await Account.get_or_create(druks_db, "agent@example.com")
+    _, token = await PersonalAccessToken.create(druks_db, account_id=agent.id, name="agent")
     with _jwt_client(tmp_path) as client:
         # A valid bearer wins over any assertion, even a garbage one.
         response = client.get(

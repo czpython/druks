@@ -529,7 +529,7 @@ class Ticket(Base):
             await self._emit_transitioned(status)
 
     async def _emit_transitioned(self, status: Status) -> None:
-        assignee = await Account.get(self.assignee_id) if self.assignee_id else None
+        assignee = await db_session().get(Account, self.assignee_id) if self.assignee_id else None
         await publish(
             "ticket.transitioned",
             payload={

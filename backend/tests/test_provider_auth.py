@@ -69,7 +69,9 @@ async def _seed_codex(*, provider_email="op@example.com", **kwargs) -> VaultSecr
 async def _payload(provider_id: str) -> dict:
     # Read past this session's identity map.
     row = await VaultSecret.lookup(
-        SecretKind.SUBSCRIPTION, Audience.provider(provider_id), (await Account.get_default()).id
+        SecretKind.SUBSCRIPTION,
+        Audience.provider(provider_id),
+        (await Account.get_default(db_session())).id,
     )
     await db_session().refresh(row)
     return row.secrets
@@ -450,9 +452,9 @@ async def test_connect_scopes_rows_by_provider_and_account(druks_db):
     assert len({claude_row.id, codex_row.id, other.id}) == 3
     assert claude_row.account_id == codex_row.account_id  # same person, one account
     assert other.account_id != claude_row.account_id
-    assert (await Account.get_for_username("a@example.com")).id == claude_row.account_id
+    assert (await Account.get_for_username(druks_db, "a@example.com")).id == claude_row.account_id
     # The first account adopted the execution fallback.
-    assert (await Account.get_default()).id == claude_row.account_id
+    assert (await Account.get_default(druks_db)).id == claude_row.account_id
 
 
 async def test_reconnect_updates_the_existing_credential_in_place(druks_db):
@@ -573,7 +575,7 @@ async def test_lookup_reads_only_the_accounts_own_subscription(druks_db):
 async def test_lookup_never_falls_through_to_another_account_or_the_key(druks_db):
     # Neither another account's subscription nor the installation's key stands in.
     await _seed_claude(provider_email="a@example.com")
-    unsubscribed = await Account.get_or_create("b@example.com")
+    unsubscribed = await Account.get_or_create(druks_db, "b@example.com")
     await VaultSecret.paste(Audience.provider("anthropic"), "sk-shared", pasted_by=unsubscribed)
 
     with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
@@ -583,8 +585,8 @@ async def test_lookup_never_falls_through_to_another_account_or_the_key(druks_db
 
 
 async def test_a_providers_key_is_one_row_replaced_by_the_next_paste(druks_db):
-    first = await Account.get_or_create("a@example.com")
-    second = await Account.get_or_create("b@example.com")
+    first = await Account.get_or_create(druks_db, "a@example.com")
+    second = await Account.get_or_create(druks_db, "b@example.com")
     assert await VaultSecret.lookup(SecretKind.STATIC, Audience.provider("anthropic")) is None
 
     await VaultSecret.paste(Audience.provider("anthropic"), "sk-one", pasted_by=first)
@@ -593,7 +595,7 @@ async def test_a_providers_key_is_one_row_replaced_by_the_next_paste(druks_db):
     [stored] = await VaultSecret.list_keys()
     assert stored.secrets["value"] == "sk-two"
     assert stored.secrets["value"][-4:] == "-two"
-    assert (await Account.get(stored.identity["pasted_by"])).username == "b@example.com"
+    assert (await druks_db.get(Account, stored.identity["pasted_by"])).username == "b@example.com"
 
 
 async def test_minimal_provider_reports_unsupported_usage(monkeypatch):

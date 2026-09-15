@@ -42,7 +42,7 @@ async def test_list_shows_only_the_requesting_accounts_login(tmp_path: Path, dru
 
 
 async def test_keys_list_the_installations_keys_for_every_account(tmp_path: Path, druks_db):
-    ops = await Account.get_or_create("ops@example.com")
+    ops = await Account.get_or_create(druks_db, "ops@example.com")
     stored = await VaultSecret.paste(Audience.provider("openai"), "sk-openai-4f2a", pasted_by=ops)
     with _build_client(tmp_path) as client:
         [key] = client.get("/api/providers/keys").json()
@@ -58,7 +58,7 @@ async def test_logins_report_the_provider_identity(tmp_path: Path, druks_db):
     await VaultSecret.store(
         SecretKind.SUBSCRIPTION,
         Audience.provider("anthropic"),
-        account_id=(await Account.get_or_create("op@example.com")).id,
+        account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         secrets={"claudeAiOauth": {"accessToken": "x"}},
         identity={"email": "seat@corp.com"},
         expires_at=None,
@@ -81,7 +81,7 @@ async def test_logins_read_an_expired_token_as_not_connected(tmp_path: Path, dru
     await VaultSecret.store(
         SecretKind.SUBSCRIPTION,
         Audience.provider("anthropic"),
-        account_id=(await Account.get_or_create("op@example.com")).id,
+        account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         secrets={"claudeAiOauth": {"accessToken": "x"}},
         identity={"email": "seat@corp.com"},
         expires_at=datetime.now(UTC) - timedelta(hours=1),
@@ -139,7 +139,7 @@ async def test_removing_the_key_leaves_every_subscription(tmp_path: Path, druks_
     await VaultSecret.paste(
         Audience.provider("anthropic"),
         "sk-shared",
-        pasted_by=await Account.get_or_create("ops@example.com"),
+        pasted_by=await Account.get_or_create(druks_db, "ops@example.com"),
     )
     mine_id = mine.id
     with _build_client(tmp_path) as client:

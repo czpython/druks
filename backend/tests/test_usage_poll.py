@@ -2,6 +2,7 @@ import gc
 import json
 
 import pytest
+from druks.database import db_session
 from druks.harnesses.datastructures import ParsedMetric, ParsedUsage
 from druks.harnesses.providers import AnthropicProvider, Provider
 from druks.usage.models import UsageScrape
@@ -58,7 +59,7 @@ async def _connection(email: str = "op@example.com"):
 
     from druks.accounts.models import Account
 
-    return SimpleNamespace(account_id=(await Account.get_or_create(email)).id)
+    return SimpleNamespace(account_id=(await Account.get_or_create(db_session(), email)).id)
 
 
 async def _poll(*providers) -> list[dict[str, object]]:
