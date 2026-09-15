@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, HTTPException, Path, status
 
+from druks.api.dependencies import SessionDep
 from druks.api.exceptions import (
     RunNotActive,
     RunNotFailed,
@@ -52,6 +53,7 @@ async def resume_run(run_id: Annotated[str, Path(alias="run")], body: ResumeRequ
     responses=agent_error_responses(RunNotFound("run-123"), RunNotActive("run-123")),
 )
 async def cancel_run(
+    session: SessionDep,
     run_id: Annotated[
         str, Path(alias="run", description="The active run, from list_open_subjects.")
     ],
@@ -80,6 +82,7 @@ async def cancel_run(
     await run.cancel(failure=reason)
     if subject:
         await Event.emit(
+            session,
             type=WorkflowEvent.CANCELLED,
             subject=subject,
             label=label,

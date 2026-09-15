@@ -693,6 +693,7 @@ class Artifact(Base, Uuid7Pk):
             if summary := event.get("summary"):
                 payload["summary"] = summary
             await Event.emit(
+                session,
                 type=event["topic"],
                 subject=await run.get_subject(),
                 label=run.subject_label,

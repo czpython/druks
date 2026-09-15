@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from druks.apps.loader import iter_apps, resolve_workflow_app
-from druks.database import db_session
 from druks.models import Base, StoredSubject
 from druks.signals import publish
 
@@ -86,16 +85,15 @@ class Event(Base):
     @classmethod
     async def emit(
         cls,
+        session: AsyncSession,
         *,
         type: str,
         subject: dict[str, Any] | None = None,
         label: str | None = None,
         payload: dict[str, Any] | None = None,
         app: str | None = None,
-        session: AsyncSession | None = None,
     ) -> None:
-        """Record in the supplied session or the current domain transaction."""
-        session = session or db_session()
+        """Record in the session's transaction."""
         subject = subject or {}
         session.add(
             cls(
@@ -111,9 +109,13 @@ class Event(Base):
 
     @classmethod
     async def announce(
-        cls, subject: "Subject | StoredSubject", topic: str, facts: dict[str, Any]
+        cls,
+        session: AsyncSession,
+        subject: "Subject | StoredSubject",
+        topic: str,
+        facts: dict[str, Any],
     ) -> None:
-        """Record a subject's domain fact and notify subscribers, in the current
+        """Record a subject's domain fact and notify subscribers, in the session's
         transaction. A failing subscriber rolls the domain change back with it."""
         # The durable package imports this module.
         from druks.durable.exceptions import WorkflowError
@@ -127,6 +129,11 @@ class Event(Base):
                 "package before importing it."
             ) from None
         await cls.emit(
-            type=topic, subject=subject.identity, label=subject.label, payload=facts, app=app
+            session,
+            type=topic,
+            subject=subject.identity,
+            label=subject.label,
+            payload=facts,
+            app=app,
         )
         await publish(topic, subject=subject.identity, **facts)
