@@ -13,7 +13,7 @@ from druks.testing import make_settings
 
 
 @pytest.fixture(params=["linear", "jira"])
-async def connected_tracker(request, monkeypatch):
+async def connected_tracker(request, monkeypatch, druks_db):
     await connect_service(
         request.param,
         identity={"base_url": "https://jira.test", "email": "operator@example.test"},
