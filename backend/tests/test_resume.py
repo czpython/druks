@@ -42,7 +42,7 @@ async def test_resume_sends_the_offered_control_as_the_action(druks_db, monkeypa
     monkeypatch.setattr(Run, "resume", fake_resume)
     await _park(druks_db)
 
-    await resume_run("r1", ResumeRequest(control="approve", answers={"q1": "a"}))
+    await resume_run(druks_db, "r1", ResumeRequest(control="approve", answers={"q1": "a"}))
     assert captured == {"id": "r1", "action": "approve", "answers": {"q1": "a"}, "note": ""}
 
 
@@ -59,6 +59,7 @@ async def test_resume_passes_free_text_answers_and_note_as_content(druks_db, mon
     await _park(druks_db)
 
     await resume_run(
+        druks_db,
         "r1",
         ResumeRequest(
             control="approve",
@@ -84,7 +85,7 @@ async def test_resume_rejects_an_unknown_control(druks_db, monkeypatch):
     await _park(druks_db)
 
     with pytest.raises(HTTPException) as exc:
-        await resume_run("r1", ResumeRequest(control="definitely-not-a-control"))
+        await resume_run(druks_db, "r1", ResumeRequest(control="definitely-not-a-control"))
     assert exc.value.status_code == 422
 
 
@@ -97,7 +98,9 @@ async def test_resume_rejects_an_answer_to_a_question_that_was_not_asked(druks_d
     await _park(druks_db)
 
     with pytest.raises(HTTPException) as exc:
-        await resume_run("r1", ResumeRequest(control="approve", answers={"q9": "whatever"}))
+        await resume_run(
+            druks_db, "r1", ResumeRequest(control="approve", answers={"q9": "whatever"})
+        )
     assert exc.value.status_code == 422
 
 
@@ -112,7 +115,7 @@ async def test_resume_rejects_request_changes_without_guidance(druks_db, monkeyp
     await _park(druks_db, context=context)
 
     with pytest.raises(HTTPException) as exc:
-        await resume_run("r1", ResumeRequest(control="request_changes", note="   "))
+        await resume_run(druks_db, "r1", ResumeRequest(control="request_changes", note="   "))
     assert exc.value.status_code == 422
     assert exc.value.detail == "request_changes needs an answer or a note to guide the re-plan"
 
@@ -126,7 +129,7 @@ async def test_resume_accepts_empty_request_changes_with_ask_context(druks_db, m
     monkeypatch.setattr(Run, "resume", fake_resume)
     await _park(druks_db, context="name the rollback boundary")
 
-    await resume_run("r1", ResumeRequest(control="request_changes", answers={}, note=""))
+    await resume_run(druks_db, "r1", ResumeRequest(control="request_changes", answers={}, note=""))
 
     assert captured == {
         "id": "r1",
@@ -145,7 +148,9 @@ async def test_resume_request_changes_with_a_note_passes(druks_db, monkeypatch):
     monkeypatch.setattr(Run, "resume", fake_resume)
     await _park(druks_db)
 
-    await resume_run("r1", ResumeRequest(control="request_changes", note="split the migration"))
+    await resume_run(
+        druks_db, "r1", ResumeRequest(control="request_changes", note="split the migration")
+    )
     assert captured == {
         "id": "r1",
         "action": "request_changes",
@@ -162,13 +167,13 @@ async def test_resume_rejects_a_blank_answer(druks_db, monkeypatch):
     await _park(druks_db)
 
     with pytest.raises(HTTPException) as exc:
-        await resume_run("r1", ResumeRequest(control="approve", answers={"q1": "   "}))
+        await resume_run(druks_db, "r1", ResumeRequest(control="approve", answers={"q1": "   "}))
     assert exc.value.status_code == 422
 
 
 async def test_resume_404_when_run_missing(druks_db):
     with pytest.raises(HTTPException) as exc:
-        await resume_run("nope", ResumeRequest(control="approve"))
+        await resume_run(druks_db, "nope", ResumeRequest(control="approve"))
     assert exc.value.status_code == 404
 
 
@@ -183,5 +188,5 @@ async def test_resume_409_when_run_not_parked(druks_db):
     await druks_db.flush()
     await seed_dbos_status(druks_db, "r2", "running")
     with pytest.raises(HTTPException) as exc:
-        await resume_run("r2", ResumeRequest(control="approve"))
+        await resume_run(druks_db, "r2", ResumeRequest(control="approve"))
     assert exc.value.status_code == 409

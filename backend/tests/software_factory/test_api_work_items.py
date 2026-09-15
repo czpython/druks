@@ -139,7 +139,7 @@ async def test_pending_gate_surfaces_input_request_on_the_run(druks_db):
     await seed_call(druks_db, run, "generate_plan")
     await seed_call(druks_db, run, "review_plan")
 
-    (entry,) = await list_subject_timeline(item.subject_type, str(item.id))
+    (entry,) = await list_subject_timeline(druks_db, item.subject_type, str(item.id))
     assert entry.input_request == {"next_action": "approve_plan", "label": "Approve plan"}
     assert entry.state == "parked"
     assert [call.agent for call in entry.agent_calls] == ["generate_plan", "review_plan"]
@@ -151,7 +151,7 @@ async def test_detail_surfaces_running_run_before_its_first_call(druks_db):
     item = await make_test_work_item(repo="ClawHaven/acme-app", title="x")
     await seed_build_run(druks_db, work_item_id=item.id, state="running")
 
-    (entry,) = await list_subject_timeline(item.subject_type, str(item.id))
+    (entry,) = await list_subject_timeline(druks_db, item.subject_type, str(item.id))
     assert entry.state == "running"
     assert entry.agent_calls == []  # surfaces even with no call yet
 
@@ -221,7 +221,7 @@ async def test_repeated_runs_on_one_subject_each_surface_separately(druks_db):
     for _ in range(3):
         await seed_build_run(druks_db, work_item_id=item.id, state="finished")
 
-    entries = await list_subject_timeline(item.subject_type, str(item.id))
+    entries = await list_subject_timeline(druks_db, item.subject_type, str(item.id))
     assert [entry.kind for entry in entries] == ["software_factory.build"] * 3
     assert len({entry.id for entry in entries}) == 3
 
@@ -235,7 +235,7 @@ async def test_timeline_shows_every_build_attempt(druks_db):
     await seed_call(druks_db, run1, "generate_plan", status="failed", last_error="boom")
     await seed_call(druks_db, run2, "generate_plan", status="failed")
 
-    entries = await list_subject_timeline(item.subject_type, str(item.id))
+    entries = await list_subject_timeline(druks_db, item.subject_type, str(item.id))
     assert len(entries) == 2
     assert all(e.agent_calls[0].agent == "generate_plan" for e in entries)
     assert any(e.failure == "boom" for e in entries)

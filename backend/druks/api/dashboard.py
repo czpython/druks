@@ -13,7 +13,6 @@ from druks.api.schemas import (
     DashboardSection,
 )
 from druks.apps.loader import iter_apps
-from druks.database import db_session
 from druks.durable.enums import RunState
 from druks.durable.models import Artifact, Run
 from druks.events.models import Event
@@ -24,7 +23,9 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
 @router.get("/overview", response_model=DashboardOverview)
-async def get_overview(response: Response, app: str | None = None) -> DashboardOverview:
+async def get_overview(
+    session: SessionDep, response: Response, app: str | None = None
+) -> DashboardOverview:
     response.headers["Cache-Control"] = "no-store"
     apps = {owner.name: owner for owner in iter_apps()}
     if app is not None:
@@ -107,7 +108,6 @@ async def get_overview(response: Response, app: str | None = None) -> DashboardO
         .label("last_finished_at"),
         func.max(Event.created_at).filter(Event.type == "workflow.failed").label("last_failed_at"),
     ).where(Event.app.in_(list(apps)), Event.type.in_(("workflow.finished", "workflow.failed")))
-    session = db_session()
     sections = {
         name: DashboardSection(total=0, rows=[]) for name in ("needs_you", "running", "failed")
     }

@@ -272,7 +272,7 @@ async def test_the_board_status_read_answers_for_every_id_it_is_given(druks_db):
     # a subject with no run at all included.
     live = await _seed_run(druks_db, subject_id="1", state="running")
 
-    statuses = await get_subject_statuses("thing", ["1", "2"])
+    statuses = await get_subject_statuses(druks_db, "thing", ["1", "2"])
 
     assert set(statuses) == {"1", "2"}
     assert statuses["1"].run == live.id
@@ -320,7 +320,7 @@ async def test_the_board_and_its_stream_hand_the_caller_to_list_summaries(druks_
     CALLERS.clear()
     token = current_account_id.set("acct-7")
     try:
-        await endpoints["/inbox"]()
+        await endpoints["/inbox"](druks_db)
         response = await endpoints["/inbox/stream"](engine=druks_db.bind)
     finally:
         current_account_id.reset(token)

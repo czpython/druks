@@ -8,6 +8,7 @@ from conftest import connect_anthropic_subscription, make_test_note, seed_note_r
 from druks.accounts.models import Account
 from druks.api import runs
 from druks.api.exceptions import RunNotActive, RunNotFailed, RunNotFound, SubjectBusy
+from druks.database import db_session
 from druks.durable.engine import run_queue
 from druks.durable.enums import WorkflowEvent
 from druks.durable.exceptions import AgentCallNotFound
@@ -107,7 +108,7 @@ async def test_get_gate_returns_the_ask_and_parked_at(druks_db):
     question = {"id": "q1", "prompt": "Which db?", "options": [{"id": "pg", "label": "Postgres"}]}
     run = await _park(druks_db, item, ask=_in_app_ask([question]))
 
-    view = await services.get_gate(run.id)
+    view = await services.get_gate(db_session(), run.id)
 
     assert view.run == run.id
     assert view.gate == "review"
@@ -121,6 +122,7 @@ async def test_get_gate_serves_the_artifact(druks_db):
     run = await _park(druks_db, item)
     call = await seed_call(druks_db, run, "generate_plan")
     await Artifact.record(
+        druks_db,
         call_dir=call.call_dir,
         call_id=call.id,
         kind="markdown",
@@ -129,7 +131,7 @@ async def test_get_gate_serves_the_artifact(druks_db):
         event={},
     )
 
-    view = await services.get_gate(run.id)
+    view = await services.get_gate(db_session(), run.id)
 
     assert view.artifact is not None
     assert view.artifact.call_id == call.id
@@ -139,12 +141,12 @@ async def test_get_gate_serves_the_artifact(druks_db):
 
 async def test_get_gate_refuses_when_not_parked_or_external(druks_db):
     with pytest.raises(RunNotFound):
-        await services.get_gate("no-such-run")
+        await services.get_gate(db_session(), "no-such-run")
 
     item = await make_test_note()
     running = await seed_note_run(druks_db, note=item, state="running")
     with pytest.raises(exceptions.GateNotOpen):
-        await services.get_gate(running.id)
+        await services.get_gate(db_session(), running.id)
 
     external_item = await make_test_note()
     external = await _park(
@@ -153,7 +155,7 @@ async def test_get_gate_refuses_when_not_parked_or_external(druks_db):
         ask={"presentation": "external", "label": "Answer on the ticket"},
     )
     with pytest.raises(exceptions.GateNotAnswerable):
-        await services.get_gate(external.id)
+        await services.get_gate(db_session(), external.id)
 
 
 # The answered and already-answered happy paths are pinned at both doors —
@@ -225,9 +227,9 @@ async def test_agent_call_get_returns_the_call_or_raises(druks_db):
     run = await seed_note_run(druks_db)
     call = await seed_call(druks_db, run, "summarize")
 
-    assert (await AgentCall.get(call.id)).id == call.id
+    assert (await AgentCall.get(druks_db, call.id)).id == call.id
     with pytest.raises(AgentCallNotFound) as error:
-        await AgentCall.get("missing")
+        await AgentCall.get(druks_db, "missing")
     assert str(error.value) == "No agent call missing."
 
 
@@ -241,6 +243,7 @@ async def test_get_agent_call_serves_bounded_tails(druks_db):
     (call_dir / "stderr.log").write_bytes(b"e" * 10240)
     await finish_agent_run(call, last_error="boom " * 100)
     await Artifact.record(
+        druks_db,
         call_dir=call_dir,
         call_id=call.id,
         kind="markdown",
@@ -249,7 +252,7 @@ async def test_get_agent_call_serves_bounded_tails(druks_db):
         event={},
     )
 
-    detail = await services.get_agent_call(call.id)
+    detail = await services.get_agent_call(druks_db, call.id)
 
     assert detail.run == call.run_id
     assert detail.call.id == call.id
@@ -260,7 +263,7 @@ async def test_get_agent_call_serves_bounded_tails(druks_db):
     assert detail.artifact.content == "a" * 4096
 
     with pytest.raises(AgentCallNotFound):
-        await services.get_agent_call("no-such-call")
+        await services.get_agent_call(druks_db, "no-such-call")
 
 
 async def test_get_agent_call_without_files_reads_empty(druks_db):
@@ -268,7 +271,7 @@ async def test_get_agent_call_without_files_reads_empty(druks_db):
 
     call = await seed_note_agent_run()
 
-    detail = await services.get_agent_call(call.id)
+    detail = await services.get_agent_call(druks_db, call.id)
 
     assert detail.transcript == ""
     assert detail.stderr == ""
@@ -283,7 +286,7 @@ async def test_artifact_content_omits_an_unknown_call(druks_db):
         path="artifact.md",
     )
 
-    assert await services._artifact_content(artifact) is None
+    assert await services._artifact_content(druks_db, artifact) is None
 
 
 # ---- cancel ---------------------------------------------------------------
@@ -293,22 +296,22 @@ async def test_cancel_run_paths(druks_db):
     item = await make_test_note()
     run = await seed_note_run(druks_db, note=item, state="running")
 
-    result = await runs.cancel_run(run.id, reason="stuck")
+    result = await runs.cancel_run(db_session(), run.id, reason="stuck")
     assert result.result == "cancelled"
     druks_db.expunge_all()
-    assert (await Run.get(run.id)).state == "cancelled"
-    assert (await Run.get(run.id)).failure == "stuck"
+    assert (await druks_db.get(Run, run.id)).state == "cancelled"
+    assert (await druks_db.get(Run, run.id)).failure == "stuck"
 
-    again = await runs.cancel_run(run.id, reason="stuck")
+    again = await runs.cancel_run(db_session(), run.id, reason="stuck")
     assert again.result == "already_cancelled"
 
     finished_item = await make_test_note()
     finished = await seed_note_run(druks_db, note=finished_item, state="finished")
     with pytest.raises(RunNotActive):
-        await runs.cancel_run(finished.id, reason="late")
+        await runs.cancel_run(db_session(), finished.id, reason="late")
 
     with pytest.raises(RunNotFound):
-        await runs.cancel_run("no-such-run", reason="x")
+        await runs.cancel_run(db_session(), "no-such-run", reason="x")
 
 
 async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):
@@ -346,7 +349,7 @@ async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):
     list_steps.assert_awaited_once_with(run.id)
     fork.assert_awaited_once_with(run.id, 8, queue_name=run_queue.name)
     druks_db.expunge_all()
-    retried = await Run.get(retried_run_id)
+    retried = await druks_db.get(Run, retried_run_id)
     assert retried.kind == run.kind
     assert retried.account_id == run.account_id
     assert retried.state == "scheduled"
@@ -383,7 +386,7 @@ async def test_retry_run_refuses_a_non_failed_run(druks_db, monkeypatch):
     monkeypatch.setattr(Run, "retry", retry)
 
     with pytest.raises(RunNotFailed) as error:
-        await runs.retry_run(run.id)
+        await runs.retry_run(druks_db, run.id)
 
     assert error.value.code == "RUN_NOT_FAILED"
     assert error.value.retryable is False
@@ -398,7 +401,7 @@ async def test_retry_run_refuses_a_busy_subject(druks_db, monkeypatch):
     monkeypatch.setattr(Run, "retry", retry)
 
     with pytest.raises(SubjectBusy) as error:
-        await runs.retry_run(failed.id)
+        await runs.retry_run(druks_db, failed.id)
 
     assert str(error.value) == f"The subject already has active run {active.id}."
     assert error.value.retryable is True
@@ -410,7 +413,7 @@ async def test_retry_run_retries_a_failed_run(druks_db, monkeypatch):
     retry = mock.AsyncMock(return_value="retried-run")
     monkeypatch.setattr(Run, "retry", retry)
 
-    result = await runs.retry_run(run.id)
+    result = await runs.retry_run(druks_db, run.id)
 
     assert result.run == "retried-run"
     retry.assert_awaited_once_with()
@@ -418,7 +421,7 @@ async def test_retry_run_retries_a_failed_run(druks_db, monkeypatch):
 
 async def test_retry_run_refuses_a_missing_run(druks_db):
     with pytest.raises(RunNotFound) as error:
-        await runs.retry_run("no-such-run")
+        await runs.retry_run(druks_db, "no-such-run")
 
     assert error.value.code == "RUN_NOT_FOUND"
     assert error.value.retryable is False

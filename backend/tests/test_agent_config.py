@@ -113,7 +113,7 @@ async def test_call_keeps_its_billing_reference_after_disconnect(druks_db, billi
         assert call.api_key_id == key.id
         assert (await _key()).id == key.id
 
-    assert (await AgentCall.get(call.id)).id == call.id
+    assert (await AgentCall.get(druks_db, call.id)).id == call.id
 
 
 @pytest.mark.parametrize("both", [False, True])

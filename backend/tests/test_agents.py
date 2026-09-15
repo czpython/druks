@@ -257,7 +257,7 @@ async def test_running_call_visible_then_finished(
     during: dict[str, object] = {}
 
     async def _run_agent(*, call_id, config, **_kwargs):
-        row = await AgentCall.get(call_id)
+        row = await AgentCall.get(db_session(), call_id)
         assert row.subscription_id == (config.subscription.id if config.subscription else None)
         assert row.api_key_id == (config.api_key.id if config.api_key else None)
         during["status"] = row.status
@@ -270,7 +270,7 @@ async def test_running_call_visible_then_finished(
     await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
 
     assert during == {"status": "running", "host": "host-test"}
-    [call] = await AgentCall.list_for_run("wf-9")
+    [call] = await AgentCall.list_for_run(db_session(), "wf-9")
     assert call.status == "succeeded"
     assert call.sandbox_host_id == "host-test"
     assert call.finished_at is not None
@@ -291,7 +291,7 @@ async def test_provisioning_failure_records_no_call(druks_db, tmp_path, monkeypa
     with pytest.raises(RuntimeError, match="no capacity"):
         await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
 
-    assert await AgentCall.list_for_run("wf-9") == []
+    assert await AgentCall.list_for_run(db_session(), "wf-9") == []
 
 
 async def test_crash_after_start_fails_the_call(druks_db, tmp_path, monkeypatch, current_run):
@@ -308,7 +308,7 @@ async def test_crash_after_start_fails_the_call(druks_db, tmp_path, monkeypatch,
     with pytest.raises(RuntimeError, match="kaboom"):
         await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
 
-    [call] = await AgentCall.list_for_run("wf-9")
+    [call] = await AgentCall.list_for_run(db_session(), "wf-9")
     assert call.status == "failed"
     assert "kaboom" in call.last_error
 
@@ -341,7 +341,7 @@ async def test_file_hydration_failure_fails_the_agent_call(
     with pytest.raises(SandboxDownloadError, match=message):
         await FILE_AGENT._run(db_session(), workflow_id="wf-9")
 
-    [call] = await AgentCall.list_for_run("wf-9")
+    [call] = await AgentCall.list_for_run(db_session(), "wf-9")
     assert call.status == "failed"
     assert message in call.last_error
     assert list((tmp_path / "files").iterdir()) == []
@@ -390,7 +390,7 @@ async def test_file_output_reaches_the_next_agents_input(
     assert consumed == DummyOutput(ok=True)
     assert prompt_contexts[1]["image"].endswith(f"/{produced.image.id}/{produced.image.name}")
     sandbox.upload_file.assert_awaited_once()
-    calls = await AgentCall.list_for_run("wf-9")
+    calls = await AgentCall.list_for_run(db_session(), "wf-9")
     assert [call.status for call in calls] == ["succeeded", "succeeded"]
     artifact = (await db_session().scalars(select(agents.Artifact))).one()
     content = (tmp_path / "run-wf-9" / artifact.agent_call_id / artifact.path).read_text()
@@ -418,7 +418,7 @@ async def test_a_carried_failure_is_raised_with_its_code(
         await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
 
     assert excinfo.value is overloaded
-    [call] = await AgentCall.list_for_run("wf-9")
+    [call] = await AgentCall.list_for_run(db_session(), "wf-9")
     assert call.status == "failed"
     assert call.failure_code == "overloaded"
     assert call.last_error == (
@@ -454,7 +454,7 @@ async def test_body_level_overload_retries_as_separate_durable_attempts(
     assert [awaited.args[0] for awaited in sleep.await_args_list] == [285.0, 945.0]
     assert [options["name"] for options in checkpoints] == ["test.agent.dummy"] * 3
     assert current_run._reap_run.await_count == 2
-    calls = await AgentCall.list_for_run("wf-9")
+    calls = await AgentCall.list_for_run(db_session(), "wf-9")
     assert len(calls) == 3
     assert sum(call.status == "failed" for call in calls) == 2
     assert sum(call.status == "succeeded" for call in calls) == 1
@@ -484,7 +484,7 @@ async def test_body_level_first_byte_retries_immediately_then_reraises(
     assert excinfo.value.code == "first_byte"
     assert [awaited.args[0] for awaited in sleep.await_args_list] == [0.0, 0.0]
     current_run._reap_run.assert_not_awaited()
-    calls = await AgentCall.list_for_run("wf-9")
+    calls = await AgentCall.list_for_run(db_session(), "wf-9")
     assert len(calls) == 3
     assert all(call.status == "failed" for call in calls)
 
@@ -505,7 +505,7 @@ async def test_body_level_invalid_output_retries_once_then_reraises(
     assert sandbox.run_agent.await_count == 2
     sleep.assert_awaited_once_with(0.0)
     current_run._reap_run.assert_not_awaited()
-    calls = await AgentCall.list_for_run("wf-9")
+    calls = await AgentCall.list_for_run(db_session(), "wf-9")
     assert len(calls) == 2
     assert all(call.status == "failed" for call in calls)
 
@@ -572,7 +572,7 @@ async def test_body_level_quota_waits_for_the_reset_once(
         "test.agent.dummy.retry_wait",
         "test.agent.dummy",
     ]
-    calls = await AgentCall.list_for_run("wf-9")
+    calls = await AgentCall.list_for_run(db_session(), "wf-9")
     assert len(calls) == 2
     assert all(call.failure_code == "rate_limited" for call in calls)
 
@@ -622,7 +622,7 @@ async def test_body_level_quota_reset_over_six_hours_reraises_without_sleeping(
     sleep.assert_not_awaited()
     jitter.assert_not_called()
     current_run._reap_run.assert_not_awaited()
-    [call] = await AgentCall.list_for_run("wf-9")
+    [call] = await AgentCall.list_for_run(db_session(), "wf-9")
     assert call.failure_code == "usage_limit"
 
 
@@ -651,7 +651,7 @@ async def test_body_level_never_retry_errors_run_once(
     sleep.assert_not_awaited()
     current_run._reap_run.assert_not_awaited()
     sandbox.run_agent.assert_awaited_once()
-    assert len(await AgentCall.list_for_run("wf-9")) == 1
+    assert len(await AgentCall.list_for_run(db_session(), "wf-9")) == 1
 
 
 async def test_in_step_transient_retry_uses_asyncio_sleep(monkeypatch, current_run):
@@ -903,7 +903,7 @@ async def test_api_key_billing_hands_claude_a_placeholder(
     assert keys == [f"wf-9:dummy:anthropic.{pasted.updated_at:%Y%m%dT%H%M%S}"]
     config = sandbox.run_agent.await_args.kwargs["config"]
     assert (config.billing, config.subscription) == ("api_key", None)
-    [call] = await AgentCall.list_for_run("wf-9")
+    [call] = await AgentCall.list_for_run(db_session(), "wf-9")
     assert (call.subscription_id, call.api_key.audience_name) == (None, "anthropic")
     row = {column.key: getattr(call, column.key) for column in AgentCall.__table__.columns}
     assert key not in json.dumps(row, default=str)
@@ -975,7 +975,7 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
         api_key_id=(await installation_key()).id,
     )
 
-    by_id = {call.id: call for call in await AgentCall.list_for_run("wf-9")}
+    by_id = {call.id: call for call in await AgentCall.list_for_run(db_session(), "wf-9")}
     assert by_id["a"].status == "abandoned"
     assert by_id["a"].finished_at is not None
     assert by_id["b"].status == "running"
@@ -1027,4 +1027,4 @@ async def test_event_requires_an_artifact(druks_db, tmp_path, monkeypatch, curre
     with pytest.raises(WorkflowError, match="without an artifact"):
         await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
 
-    assert (await AgentCall.list_for_run("wf-9"))[0].status == "failed"
+    assert (await AgentCall.list_for_run(db_session(), "wf-9"))[0].status == "failed"

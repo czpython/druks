@@ -73,7 +73,7 @@ class Subject:
         workflow's runs when a subject has several kinds in flight."""
         from druks.durable.reads import get_subject_status
 
-        return await get_subject_status(self.subject_type, self.id, workflow=workflow)
+        return await get_subject_status(db_session(), self.subject_type, self.id, workflow=workflow)
 
     @classmethod
     async def get_statuses(cls, subject_ids: Sequence[str]) -> "dict[str, SubjectStatus]":
@@ -81,13 +81,13 @@ class Subject:
         board, so a page listing subjects does not ask once per row."""
         from druks.durable.reads import get_subject_statuses
 
-        return await get_subject_statuses(cls.subject_type, list(subject_ids))
+        return await get_subject_statuses(db_session(), cls.subject_type, list(subject_ids))
 
     async def get_phase(self) -> str | None:
         """The step it is on right now ("provisioning_vm"), while something is running."""
         from druks.durable.reads import get_subject_phase
 
-        return await get_subject_phase(self.subject_type, self.id)
+        return await get_subject_phase(db_session(), self.subject_type, self.id)
 
     @classmethod
     async def list_open(cls, *, limit: int = 50) -> list[Self]:

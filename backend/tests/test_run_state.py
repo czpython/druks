@@ -30,7 +30,7 @@ async def _item_and_run(druks_db, state, **kwargs):
 async def test_session_get_derives_state(druks_db):
     _, run = await _item_and_run(druks_db, "finished")
     druks_db.expunge_all()
-    assert (await Run.get(run.id)).state == RunState.FINISHED.value
+    assert (await ambient_session().get(Run, run.id)).state == RunState.FINISHED.value
 
 
 async def test_pending_splits_on_the_gate(druks_db):
@@ -38,8 +38,8 @@ async def test_pending_splits_on_the_gate(druks_db):
     _, parked = await _item_and_run(druks_db, "parked", input_gate="review_work")
     _, live = await _item_and_run(druks_db, "running")
     druks_db.expunge_all()
-    assert (await Run.get(parked.id)).state == RunState.PARKED.value
-    assert (await Run.get(live.id)).state == RunState.RUNNING.value
+    assert (await ambient_session().get(Run, parked.id)).state == RunState.PARKED.value
+    assert (await ambient_session().get(Run, live.id)).state == RunState.RUNNING.value
 
 
 async def _rowless_run(session):
@@ -60,7 +60,7 @@ async def test_fresh_run_without_a_dbos_row_reads_scheduled(druks_db):
     # brand-new run legitimately has no workflow_status row and reads scheduled.
     run = await _rowless_run(druks_db)
     druks_db.expunge_all()
-    assert (await Run.get(run.id)).state == RunState.SCHEDULED.value
+    assert (await ambient_session().get(Run, run.id)).state == RunState.SCHEDULED.value
 
 
 async def test_run_without_a_dbos_row_past_grace_reads_orphaned(druks_db):
@@ -71,7 +71,7 @@ async def test_run_without_a_dbos_row_past_grace_reads_orphaned(druks_db):
     run.created_at = Base.utc_now() - timedelta(minutes=10)
     await druks_db.flush()
     druks_db.expunge_all()
-    assert (await Run.get(run.id)).state == RunState.ORPHANED.value
+    assert (await ambient_session().get(Run, run.id)).state == RunState.ORPHANED.value
 
 
 async def test_unknown_dbos_status_reads_running(druks_db):
@@ -83,7 +83,7 @@ async def test_unknown_dbos_status_reads_running(druks_db):
         .values(status="SOME_FUTURE_STATUS")
     )
     druks_db.expunge_all()
-    assert (await Run.get(run.id)).state == RunState.RUNNING.value
+    assert (await ambient_session().get(Run, run.id)).state == RunState.RUNNING.value
 
 
 @pytest.mark.parametrize(
@@ -102,7 +102,7 @@ async def test_statuses_the_seed_map_never_writes(druks_db, status, state):
         .values(status=status)
     )
     druks_db.expunge_all()
-    assert (await Run.get(run.id)).state == state.value
+    assert (await ambient_session().get(Run, run.id)).state == state.value
 
 
 async def test_queries_filter_on_derived_state(druks_db):
@@ -130,7 +130,7 @@ async def test_updated_at_folds_in_the_dbos_write(druks_db):
         .values(updated_at=later_ms)
     )
     druks_db.expunge_all()
-    row = await Run.get(run.id)
+    row = await ambient_session().get(Run, run.id)
     assert row.updated_at == datetime(2031, 1, 2, 3, 4, 5, tzinfo=UTC)
     assert row.updated_at > row.created_at
 
@@ -170,7 +170,7 @@ async def test_facts_and_event_land_before_a_raising_subscriber(druks_db, _inlin
         )
 
     ambient_session().expunge_all()
-    row = await Run.get(run.id)
+    row = await ambient_session().get(Run, run.id)
     assert row.input_gate == "review_work"
     events = list(
         (
@@ -194,7 +194,7 @@ async def test_lifecycle_subscribers_get_the_payload_before_dbos_commits(druks_d
 
     @subscribe(WorkflowEvent.FINISHED, run=run.id)
     async def _reads_the_payload(**payload: object) -> None:
-        seen.append(((await Run.get(run.id)).state, payload))
+        seen.append(((await ambient_session().get(Run, run.id)).state, payload))
 
     await _emit_run_event(
         run.id,
@@ -226,7 +226,7 @@ async def test_cancellation_passes_through_untouched(druks_db, _inline_steps):
         )
 
     ambient_session().expunge_all()
-    assert not (await Run.get(run.id)).failure
+    assert not (await ambient_session().get(Run, run.id)).failure
     rows = (
         await ambient_session().execute(select(Event).filter_by(subject_id=str(item.id)))
     ).scalars()
@@ -258,7 +258,7 @@ async def test_failure_writes_the_reason_and_reraises(druks_db, _inline_steps):
         )
 
     ambient_session().expunge_all()
-    row = await Run.get(run.id)
+    row = await ambient_session().get(Run, run.id)
     assert row.failure == "closed at review"
     # A bare FatalError carries no distinguishing code — only its message.
     assert row.failure_code == ""
@@ -289,7 +289,7 @@ async def test_gate_timeout_stamps_its_failure_code(druks_db, _inline_steps):
         )
 
     ambient_session().expunge_all()
-    assert (await Run.get(run.id)).failure_code == "gate_timeout"
+    assert (await ambient_session().get(Run, run.id)).failure_code == "gate_timeout"
 
 
 async def test_unattended_execution_without_subscription_records_not_connected(
@@ -304,7 +304,7 @@ async def test_unattended_execution_without_subscription_records_not_connected(
         await _execute_run(run.id, run.kind, {"type": "note", "id": item.id}, run.account_id, body)
 
     ambient_session().expunge_all()
-    assert (await Run.get(run.id)).failure_code == "not_connected"
+    assert (await ambient_session().get(Run, run.id)).failure_code == "not_connected"
 
 
 @pytest.mark.asyncio
@@ -322,7 +322,7 @@ async def test_a_harness_failure_stamps_its_code(druks_db, _inline_steps):
         )
 
     ambient_session().expunge_all()
-    assert (await Run.get(run.id)).failure_code == "overloaded"
+    assert (await ambient_session().get(Run, run.id)).failure_code == "overloaded"
 
 
 @pytest.mark.asyncio
@@ -343,7 +343,7 @@ async def test_an_exhausted_provisioning_failure_stamps_its_code(druks_db, _inli
         )
 
     ambient_session().expunge_all()
-    assert (await Run.get(run.id)).failure_code == "sandbox_provisioning"
+    assert (await ambient_session().get(Run, run.id)).failure_code == "sandbox_provisioning"
 
 
 @pytest.mark.asyncio
@@ -363,7 +363,7 @@ async def test_a_foreign_code_never_becomes_the_failure_code(druks_db, _inline_s
         )
 
     ambient_session().expunge_all()
-    assert (await Run.get(run.id)).failure_code == ""
+    assert (await ambient_session().get(Run, run.id)).failure_code == ""
 
 
 @pytest.mark.asyncio
