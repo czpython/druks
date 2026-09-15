@@ -1,11 +1,11 @@
 from typing import Any
 
-from druks.database import db_session
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from druks.durable.enums import RunState
 from druks.durable.models import Run
 from druks.notifications.exceptions import (
     AlreadyAcknowledgedError,
-    CorruptCorrelationError,
     InvalidChoiceError,
     StaleRoundError,
     UnknownTokenError,
@@ -45,8 +45,10 @@ def validate_in_app_answer(
     return {"action": control, "answers": answers, "note": note}
 
 
-async def respond_to_notification(token: str, choice: dict[str, Any]) -> None:
-    notification = await Notification.get_for_token(token)
+async def respond_to_notification(
+    session: AsyncSession, token: str, choice: dict[str, Any]
+) -> None:
+    notification = await Notification.get_for_token(session, token)
     if not notification:
         raise UnknownTokenError()
     if notification.is_acknowledged:
@@ -54,12 +56,9 @@ async def respond_to_notification(token: str, choice: dict[str, Any]) -> None:
     if not notification.run_id:
         # A run-less notification routes no reply.
         raise InvalidChoiceError("this notification does not take an answer")
-    run = await Run.get(notification.run_id)
-    if not run:
-        raise CorruptCorrelationError(notification.id, notification.run_id)
     # The notification snapshots the round it was sent for; the answer must
-    # land on the run's live round — refresh so the comparison reads fresh.
-    await db_session().refresh(run)
+    # land on the run's live round, so the read goes past the identity map.
+    run = await session.get(Run, notification.run_id, populate_existing=True)
     if run.state != RunState.PARKED.value or run.input_requested_at != notification.run_parked_at:
         raise StaleRoundError()
     ask = await run.get_ask()
@@ -73,7 +72,7 @@ async def respond_to_notification(token: str, choice: dict[str, Any]) -> None:
         ask, choice["control"], choice.get("answers", {}), choice.get("note", "")
     )
     await run.resume(**resume_payload)
-    if not await notification.mark_acknowledged():
+    if not await notification.mark_acknowledged(session):
         # A concurrent responder won the claim; this send already collapsed on
         # the DBOS round key.
         raise AlreadyAcknowledgedError()

@@ -86,12 +86,12 @@ async def check_agent_configs(session: AsyncSession, settings: InstallationSetti
 
 
 async def _settings_changes(
-    body: UpdateSettingsRequest | UpdatePersonalSettingsRequest,
+    session: AsyncSession, body: UpdateSettingsRequest | UpdatePersonalSettingsRequest
 ) -> dict[str, object]:
     fields = body.model_dump(exclude_unset=True, exclude_none=True)
     if "gate_park_destination_id" in body.model_fields_set:
         destination_id = body.gate_park_destination_id
-        if destination_id and not await Destination.get(destination_id):
+        if destination_id and not await session.get(Destination, destination_id):
             raise HTTPException(status_code=422, detail=f"Unknown destination {destination_id!r}")
         fields["gate_park_destination_id"] = destination_id
     return fields
@@ -99,7 +99,7 @@ async def _settings_changes(
 
 @router.patch("", response_model=SettingsResponse, response_model_by_alias=True)
 async def update_settings(session: SessionDep, body: UpdateSettingsRequest) -> InstallationSettings:
-    fields = await _settings_changes(body)
+    fields = await _settings_changes(session, body)
     settings = await InstallationSettings.get()
     if fields:
         await settings.update(**fields)
@@ -114,7 +114,7 @@ async def update_personal_settings(
     session: SessionDep,
     account: Account = Depends(current_account),
 ) -> Account:
-    fields = await _settings_changes(body)
+    fields = await _settings_changes(session, body)
     if fields:
         await account.update_preferences(session, **fields)
     return account
