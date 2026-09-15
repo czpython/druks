@@ -745,7 +745,7 @@ export interface WorkflowSettingField {
   default: unknown
   /** An enum field's allowed values; null for every other kind. */
   choices: string[] | null
-  choiceDetails: Record<string, { label: string; help: string }>
+  choiceDetails: Record<string, { label: string; help: string; group?: string }>
   /** The heading this field groups under; empty for an ungrouped one. */
   section: string
   /** The sibling field this one is shown for, and the values of it that show this one.
@@ -777,8 +777,8 @@ export interface AppSettings {
   settings: WorkflowSettingField[]
 }
 
-/** The live choices of an app's settings: field name to (stored value, label) pairs. */
-export type AppSettingChoices = Record<string, [string, string][]>
+/** The live choices of an app's settings, keyed by field name. */
+export type AppSettingChoices = Record<string, { value: string; label: string; group?: string }[]>
 
 export interface AppsSettingsResponse {
   allowedEfforts: string[]

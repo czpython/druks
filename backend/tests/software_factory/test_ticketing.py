@@ -107,8 +107,8 @@ async def test_linear_lists_each_status_name_once_with_its_type(monkeypatch):
     monkeypatch.setattr(LinearClient, "list_workflow_states", list_workflow_states)
 
     assert await list_tracker_status_choices() == [
-        ("In Review", "In Review (started)"),
-        ("Done", "Done (completed)"),
+        {"value": "Done", "label": "Done", "group": "completed"},
+        {"value": "In Review", "label": "In Review", "group": "started"},
     ]
 
 
@@ -118,16 +118,19 @@ async def test_jira_lists_each_status_name_once_with_its_category(monkeypatch):
 
     async def list_statuses(self):
         return [
-            {"name": "Waiting CR", "statusCategory": {"name": "In Progress"}},
-            {"name": "Done", "statusCategory": {"name": "Done"}},
-            {"name": "Done", "statusCategory": {"name": "Done"}},
+            {"name": "Done", "statusCategory": {"name": "Done", "key": "done"}},
+            {"name": "Done", "statusCategory": {"name": "Done", "key": "done"}},
+            {
+                "name": "Waiting CR",
+                "statusCategory": {"name": "In Progress", "key": "indeterminate"},
+            },
         ]
 
     monkeypatch.setattr(JiraClient, "list_statuses", list_statuses)
 
     assert await list_tracker_status_choices() == [
-        ("Waiting CR", "Waiting CR (in progress)"),
-        ("Done", "Done (done)"),
+        {"value": "Waiting CR", "label": "Waiting CR", "group": "In Progress"},
+        {"value": "Done", "label": "Done", "group": "Done"},
     ]
 
 

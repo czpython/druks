@@ -49,7 +49,7 @@ async def check_tracker_identity() -> CheckResult:
     )
 
 
-async def list_tracker_status_choices() -> list[tuple[str, str]]:
+async def list_tracker_status_choices() -> list[dict[str, str]]:
     """The statuses of the selected tracker. Empty when no connected tracker lists them."""
     tracker = await SoftwareFactory.get_tracker()
     if not tracker:

@@ -11,14 +11,14 @@ from .exceptions import SettingsDeclarationError
 @dataclass(frozen=True)
 class Choices:
     """Live choices for a ``str`` setting, declared as ``Annotated[str, Choices(source)]``.
-    ``source`` returns ``(stored value, label)`` pairs."""
+    ``source`` returns dicts with ``value``, ``label``, and an optional ``group``."""
 
-    source: Callable[[], Awaitable[list[tuple[str, str]]]]
+    source: Callable[[], Awaitable[list[dict[str, str]]]]
 
     async def accepts(self, value: str) -> bool:
         # Empty is the select's blank choice, and a source that lists nothing cannot verify.
         listed = await self.source()
-        return not value or not listed or value in {stored for stored, _ in listed}
+        return not value or not listed or value in {choice["value"] for choice in listed}
 
 
 # The annotation picks the wire kind, and the frontend picks the input control from it.

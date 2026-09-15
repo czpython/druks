@@ -491,7 +491,7 @@ async def check_apps(settings: Settings) -> list[CheckResult]:
                     problems = app_settings.clean()
                     for name, listed in (await list_live_choices(settings_model)).items():
                         value = getattr(app_settings, name)
-                        if value not in dict(listed):
+                        if value not in {choice["value"] for choice in listed}:
                             problems[name] = f"{value!r} is not one of the listed choices"
                     detail = "; ".join(
                         f"{settings_model.model_fields[field].title or field}: {message}"

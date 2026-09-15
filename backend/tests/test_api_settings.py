@@ -369,7 +369,11 @@ def test_live_choices_load_only_through_the_app_choices_read(tmp_path: Path):
 
     assert (notebook["type"], notebook["choices"]) == ("str", None)
     assert choices.json() == {
-        "notebook": [["", ""], ["field", "Field notebook"], ["lab", "Lab notebook"]]
+        "notebook": [
+            {"value": "", "label": ""},
+            {"value": "field", "label": "Field notebook", "group": "Notebooks"},
+            {"value": "lab", "label": "Lab notebook", "group": "Notebooks"},
+        ]
     }
     assert unknown.status_code == 404
 
