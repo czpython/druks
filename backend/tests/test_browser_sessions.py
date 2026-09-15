@@ -58,11 +58,12 @@ async def test_declared_sessions_list_without_a_row_and_the_pane_read_writes_not
     assert entry["payloadFormat"] is None
     assert entry["createdAt"] is None
     assert entry["site"] == "acme.example"
-    assert not await StoredBrowserSession.list_all()
+    assert not await StoredBrowserSession.list_all(db_session())
 
 
 async def test_leftover_rows_list_as_undeclared_and_refuse_the_login_window(client, night_watch):
     await StoredBrowserSession.get_or_create(
+        db_session(),
         name="gone_ext.old",
         payload_format=BrowserSessionPayloadFormat.PROFILE_DIR,
         site="gone.example",
@@ -77,7 +78,7 @@ async def test_leftover_rows_list_as_undeclared_and_refuse_the_login_window(clie
 
     assert client.post("/api/browser-sessions/gone_ext.old/login-window").status_code == 404
     assert client.delete("/api/browser-sessions/gone_ext.old").status_code == 204
-    assert not await StoredBrowserSession.list_all()
+    assert not await StoredBrowserSession.list_all(db_session())
 
 
 async def test_anonymous_sessions_list_as_anonymous_and_refuse_login_and_state(
@@ -98,7 +99,7 @@ async def test_anonymous_sessions_list_as_anonymous_and_refuse_login_and_state(
         "/api/browser-sessions/critic.target/state?payloadFormat=storage_state", content=b"x"
     )
     assert uploaded.status_code == 409
-    assert not await StoredBrowserSession.list_all()
+    assert not await StoredBrowserSession.list_all(db_session())
 
 
 async def test_opening_the_login_window_materializes_the_declared_row(
@@ -111,7 +112,7 @@ async def test_opening_the_login_window_materializes_the_declared_row(
 
     assert opened.status_code == 204
     assert FakeLoginWindow.opened == ["night_watch.acme"]
-    row = await StoredBrowserSession.get_for_name("night_watch.acme")
+    row = await StoredBrowserSession.get_for_name(db_session(), "night_watch.acme")
     assert row.status == BrowserSessionStatus.NEEDS_LOGIN.value
     assert row.site == "acme.example"
 
@@ -133,7 +134,7 @@ async def test_import_materializes_the_row_survives_restart_and_delete_removes_i
     assert listed["night_watch.acme"]["payloadFormat"] == BrowserSessionPayloadFormat.STORAGE_STATE
     assert listed["night_watch.acme"]["lastRefreshedAt"]
 
-    row = await StoredBrowserSession.get_for_name("night_watch.acme")
+    row = await StoredBrowserSession.get_for_name(db_session(), "night_watch.acme")
     stored = (
         await db_session().execute(
             text("SELECT payload FROM browser_sessions WHERE id = :id"),
@@ -154,7 +155,7 @@ async def test_import_materializes_the_row_survives_restart_and_delete_removes_i
             row.payload.decrypt()
 
     db_session().expunge_all()
-    restarted = await StoredBrowserSession.get_for_name("night_watch.acme")
+    restarted = await StoredBrowserSession.get_for_name(db_session(), "night_watch.acme")
     assert restarted.payload.decrypt() == payload
 
     undeclared = client.put(
@@ -164,7 +165,7 @@ async def test_import_materializes_the_row_survives_restart_and_delete_removes_i
 
     deleted = client.delete("/api/browser-sessions/night_watch.acme")
     assert deleted.status_code == 204
-    assert not await StoredBrowserSession.list_all()
+    assert not await StoredBrowserSession.list_all(db_session())
 
 
 def test_upload_rejects_payloads_above_the_cap(client, night_watch, monkeypatch):

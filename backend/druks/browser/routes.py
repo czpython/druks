@@ -9,6 +9,7 @@ from druks.accounts.dependencies import (
     require_operator,
 )
 from druks.accounts.models import Account
+from druks.api.dependencies import SessionDep
 from druks.apps.registry import browser_sessions
 from druks.browser import exceptions
 from druks.browser.constants import MAX_PAYLOAD_BYTES, PAYLOAD_WARNING_BYTES
@@ -24,8 +25,8 @@ router = APIRouter(prefix="/api/browser-sessions", tags=["browser-sessions"])
 
 
 @router.get("", response_model=list[BrowserSessionResponse])
-async def list_browser_sessions(account: Account = Depends(current_account)):
-    rows = {row.name: row for row in await StoredBrowserSession.list_all()}
+async def list_browser_sessions(session: SessionDep, account: Account = Depends(current_account)):
+    rows = {row.name: row for row in await StoredBrowserSession.list_all(session)}
     sessions = []
     for declaration in browser_sessions.all():
         try:
@@ -116,11 +117,12 @@ async def login_window_socket(websocket: WebSocket, name: str) -> None:
 
 @router.post("/{name}/login-window/save", status_code=204)
 async def save_login_window(
+    session: SessionDep,
     name: str,
     account: Account = Depends(current_session_account),
 ) -> None:
     window = await LoginWindow.get_for_session(name)
-    await window.save()
+    await window.save(session)
 
 
 @router.post("/{name}/login-window/cancel", status_code=204)
@@ -134,10 +136,11 @@ async def cancel_login_window(
 
 @router.delete("/{name}", status_code=204)
 async def delete_browser_session(
+    session: SessionDep,
     name: str,
     account: Account = Depends(current_session_account),
 ) -> None:
-    if row := await StoredBrowserSession.get_for_name(name):
+    if row := await StoredBrowserSession.get_for_name(session, name):
         await row.delete()
         return
     raise exceptions.BrowserSessionUnknownError(name)

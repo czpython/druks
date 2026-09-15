@@ -82,6 +82,7 @@ def window_runtime(tmp_path, monkeypatch):
 
 async def create_session(name: str = "acme-main") -> StoredBrowserSession:
     return await StoredBrowserSession.get_or_create(
+        db_session(),
         name=name,
         payload_format=BrowserSessionPayloadFormat.STORAGE_STATE,
         site="acme.example",
@@ -190,11 +191,11 @@ async def test_storage_state_reconnect_saves_a_profile(window_runtime):
         "version": 1,
     }
 
-    saved = await (await LoginWindow.get_for_session(session.name)).save()
+    saved = await (await LoginWindow.get_for_session(session.name)).save(db_session())
 
     assert saved.payload_format == BrowserSessionPayloadFormat.PROFILE_DIR
     db_session().expunge_all()
-    stored = await StoredBrowserSession.get_for_name(session.name)
+    stored = await StoredBrowserSession.get_for_name(db_session(), session.name)
     assert stored.status == BrowserSessionStatus.READY.value
     assert stored.payload.decrypt() == b"fresh-profile"
     assert client.released == [browser.id]
@@ -209,7 +210,7 @@ async def test_failed_export_closes_the_window(window_runtime):
     client.browsers[0].export_exit_code = 1
 
     with pytest.raises(BrowserExportError):
-        await (await LoginWindow.get_for_session(session.name)).save()
+        await (await LoginWindow.get_for_session(session.name)).save(db_session())
 
     assert client.released == [client.browsers[0].id]
     with pytest.raises(BrowserLoginWindowGoneError):
