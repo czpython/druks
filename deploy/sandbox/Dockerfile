@@ -38,7 +38,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # vendor repositories; pin the image and CLI packages while allowing apt fixes.
 # hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git gnupg \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates curl git gnupg \
     && install -d -m 0755 /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
         | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
