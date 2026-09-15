@@ -112,7 +112,7 @@ async def test_rotation_persists_new_payload_across_sessions(engine):
         row = await db_session().get(VaultSecret, connection_id)
         data = dict(row.secrets)
         data["claudeAiOauth"]["accessToken"] = "new"
-        await row.update_secrets(db_session(), data, expires_at=None)
+        await row.update_secrets(data, expires_at=None)
 
     await _committed(engine, rotate_in_place)
 

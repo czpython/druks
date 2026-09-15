@@ -57,9 +57,9 @@ class Destination(Base, Uuid7Pk):
         await session.flush()
         return destination
 
-    async def delete(self, session: AsyncSession) -> None:
-        await session.delete(self)
-        await session.flush()
+    async def delete(self) -> None:
+        await self.session.delete(self)
+        await self.session.flush()
 
 
 class Notification(Base, Uuid7Pk):
@@ -145,22 +145,22 @@ class Notification(Base, Uuid7Pk):
     def is_acknowledged(self) -> bool:
         return self.state == NotificationState.ACKNOWLEDGED
 
-    async def mark_delivered(self, session: AsyncSession) -> None:
+    async def mark_delivered(self) -> None:
         self.state = NotificationState.DELIVERED.value
         self.delivered_at = Base.utc_now()
         self.updated_at = Base.utc_now()
-        await session.flush()
+        await self.session.flush()
 
-    async def mark_failed(self, session: AsyncSession, reason: str) -> None:
+    async def mark_failed(self, reason: str) -> None:
         self.state = NotificationState.FAILED.value
         self.last_error = reason
         self.updated_at = Base.utc_now()
-        await session.flush()
+        await self.session.flush()
 
-    async def mark_acknowledged(self, session: AsyncSession) -> bool:
+    async def mark_acknowledged(self) -> bool:
         # Atomic claim: exactly one concurrent responder wins the transition
         # (the loser's duplicate send already collapsed on the DBOS round key).
-        claimed = await session.execute(
+        claimed = await self.session.execute(
             update(Notification)
             .where(
                 Notification.id == self.id,
@@ -168,5 +168,5 @@ class Notification(Base, Uuid7Pk):
             )
             .values(state=NotificationState.ACKNOWLEDGED.value, updated_at=Base.utc_now())
         )
-        await session.refresh(self)
+        await self.session.refresh(self)
         return claimed.rowcount == 1

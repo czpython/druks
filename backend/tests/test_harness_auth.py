@@ -329,7 +329,7 @@ async def test_credential_for_a_deleted_row_raises(druks_db):
     await _seed_claude(provider_email="a@example.com")  # the surviving fallback
     gone = await _seed_claude(provider_email="b@example.com")
     gone_id = gone.id
-    await gone.revoke(db_session(), "user")
+    await gone.revoke("user")
     # A disconnect between selection and push fails the call — it must never
     # fall through to another account's payload.
     with pytest.raises(HarnessNotConnectedError, match="removed"):

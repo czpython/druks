@@ -234,7 +234,6 @@ class VaultSecret(Base, Uuid7Pk):
 
     async def reconnect(
         self,
-        session: AsyncSession,
         *,
         refresh_token: str,
         scopes: list[str] | None,
@@ -257,7 +256,7 @@ class VaultSecret(Base, Uuid7Pk):
         self.updated_at = Base.utc_now()
         self.revoked_at = None
         self.revoked_reason = ""
-        await session.flush()
+        await self.session.flush()
 
     @classmethod
     async def list_connections(
@@ -318,18 +317,18 @@ class VaultSecret(Base, Uuid7Pk):
             )
         )
 
-    async def get_refresh_token(self, session: AsyncSession) -> str:
-        if fresh := await VaultSecret.reload(session, self.id):
+    async def get_refresh_token(self) -> str:
+        if fresh := await VaultSecret.reload(self.session, self.id):
             return fresh.secrets["refresh_token"]
         # The services package imports the vault.
         from druks.services.exceptions import OauthRefreshError
 
         raise OauthRefreshError(self.audience_name, "the connection was revoked mid-refresh")
 
-    async def update_refresh_token(self, session: AsyncSession, rotated: str) -> None:
+    async def update_refresh_token(self, rotated: str) -> None:
         # The provider already invalidated the old token. A later rollback of the
         # enclosing transaction must not lose the new one, so this commits on its own.
-        async with get_session(session.bind) as own:
+        async with get_session(self.session.bind) as own:
             fresh = await own.get(VaultSecret, self.id)
             stored = (
                 await own.execute(
@@ -342,7 +341,7 @@ class VaultSecret(Base, Uuid7Pk):
         if stored:
             # Expire, never assign: the enclosing commit must not rewrite secrets
             # over a revoke that lands between the two commits.
-            session.expire(self, ["secrets"])
+            self.session.expire(self, ["secrets"])
             return
         from druks.services.exceptions import OauthRefreshError
 
@@ -357,22 +356,20 @@ class VaultSecret(Base, Uuid7Pk):
     def is_live(self) -> bool:
         return not self.revoked_at
 
-    async def update_secrets(
-        self, session: AsyncSession, secrets: dict[str, Any], *, expires_at: datetime | None
-    ) -> None:
+    async def update_secrets(self, secrets: dict[str, Any], *, expires_at: datetime | None) -> None:
         """A rotation's write, on the live row only, so an earlier revoke keeps
         its cleared secrets."""
-        await session.execute(
+        await self.session.execute(
             update(type(self))
             .where(type(self).id == self.id, type(self).revoked_at.is_(None))
             .values(secrets=secrets, expires_at=expires_at, last_refreshed_at=Base.utc_now())
         )
-        await session.refresh(self)
+        await self.session.refresh(self)
 
-    async def revoke(self, session: AsyncSession, reason: str = "") -> None:
+    async def revoke(self, reason: str = "") -> None:
         """A repeat revoke keeps the first stamp."""
         now = Base.utc_now()
-        await session.execute(
+        await self.session.execute(
             update(VaultSecret)
             .where(VaultSecret.id == self.id, VaultSecret.revoked_at.is_(None))
             .values(revoked_at=now, revoked_reason=reason, secrets={})
@@ -381,9 +378,7 @@ class VaultSecret(Base, Uuid7Pk):
         self.revoked_reason = self.revoked_reason or reason
         self.secrets = {}
 
-    async def issue_token(
-        self, session: AsyncSession, resource: str, *, host_id: str = ""
-    ) -> tuple[str, datetime | None]:
+    async def issue_token(self, resource: str, *, host_id: str = "") -> tuple[str, datetime | None]:
         """The token a box fetches, and its expiry. A rotation skips the refresh
         request for ``host_id``, the box that asks."""
         if not self.is_live:
@@ -400,12 +395,14 @@ class VaultSecret(Base, Uuid7Pk):
             if self.audience.startswith("mcp:"):
                 from druks.mcp import oauth
 
-                return await oauth.get_access_token(session, self.audience_name, self.account_id)
+                return await oauth.get_access_token(
+                    self.session, self.audience_name, self.account_id
+                )
             client = await services.get(self.audience_name).get_oauth_client()
-            return await client.get_access_token(session, connection=self)
+            return await client.get_access_token(self.session, connection=self)
         from druks.harnesses.providers import get_provider
 
         token = await get_provider(self.audience_name).issue_token(
-            session, self.id, except_host_id=host_id
+            self.session, self.id, except_host_id=host_id
         )
         return token.access_token, token.expires_at

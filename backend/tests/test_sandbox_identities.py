@@ -397,7 +397,7 @@ async def test_the_issuer_answers_503_for_a_disconnected_mcp_grant(druks_db, tmp
     )
     identity, bearer, entry = await _mcp_identity()
     assert entry["issuer"]["refresh"] == "1h"
-    await grant.revoke(db_session(), "user")
+    await grant.revoke("user")
 
     response = await _fetch(tmp_path, identity.id, bearer, "mcp_linear_token")
 

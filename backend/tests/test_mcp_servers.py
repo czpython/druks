@@ -94,7 +94,7 @@ async def test_create_lists_and_deletes(druks_db):
     assert by_name.id == server.id
     assert "linear" in {s.name for s in await McpServer.list_all(druks_db)}
 
-    await server.delete(druks_db)
+    await server.delete()
     assert not await McpServer.get_for_name(druks_db, "linear")
 
 
@@ -149,7 +149,7 @@ async def test_delivery_names_the_variable_and_binds_the_static_row(druks_db):
     [ref] = refs.values()
     assert ref.key == ("mcp_linear_token", row.id, "", "mcp.linear.app")
     assert _TOKEN not in repr(linear) + repr(refs)
-    assert await row.issue_token(druks_db, "") == (_TOKEN, None)
+    assert await row.issue_token("") == (_TOKEN, None)
 
 
 async def test_required_server_delivers_beside_the_registry(druks_db):
@@ -293,7 +293,7 @@ async def test_declared_headers_deliver_inline_and_secret_values_are_entries(dru
         "mcp.grafana.com",
         "X-Api-Key",
     )
-    assert await row.issue_token(druks_db, "") == ("grafana-api-secret", None)
+    assert await row.issue_token("") == ("grafana-api-secret", None)
 
 
 async def test_two_secret_headers_bind_two_entries_beside_the_bearer(druks_db):
@@ -313,9 +313,9 @@ async def test_two_secret_headers_bind_two_entries_beside_the_bearer(druks_db):
     assert set(refs) == {"mcp_acme_token", "mcp_acme_header_0", "mcp_acme_header_1"}
     org = await druks_db.get(VaultSecret, refs["mcp_acme_header_1"].secret_id)
     assert org.header == "X-Org"
-    assert await org.issue_token(druks_db, "") == ("org-secret", None)
+    assert await org.issue_token("") == ("org-secret", None)
     key = await druks_db.get(VaultSecret, refs["mcp_acme_header_0"].secret_id)
-    assert await key.issue_token(druks_db, "") == ("key-secret", None)
+    assert await key.issue_token("") == ("key-secret", None)
 
 
 async def test_two_header_server_emits_both_headers_in_each_harness_config(druks_db):
@@ -680,7 +680,7 @@ async def test_a_later_run_reuses_the_token_and_a_retired_one_is_replaced(druks_
     assert (await _druks_row(account.id)).secrets["value"] == first
     assert len(await PersonalAccessToken.list_for_account(druks_db, account.id)) == 1
 
-    await (await PersonalAccessToken.authenticate(druks_db, first)).revoke(druks_db)
+    await (await PersonalAccessToken.authenticate(druks_db, first)).revoke()
     await workspace.get_mcp_delivery(None, account.id)
 
     assert (await _druks_row(account.id)).secrets["value"] != first

@@ -79,7 +79,7 @@ async def test_endpoints_list_and_get_omit_the_token(tmp_path, druks_db):
     failed = await Notification.create(
         druks_db, destination_id=destination.id, reason="gate.parked", body="bad", subject=_SUBJECT
     )
-    await failed.mark_failed(druks_db, "DeliveryError: HTTPStatusError")
+    await failed.mark_failed("DeliveryError: HTTPStatusError")
     tokens.append(failed.correlation_token)
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:

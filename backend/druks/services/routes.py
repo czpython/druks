@@ -63,7 +63,7 @@ async def connect_service(
         # revoke every live one; the consents stay on record.
         client = OauthClient(provider=slug)
         for connection in await VaultSecret.list_connections(session, Audience.service(slug)):
-            await client.disconnect(connection, reason="client_replaced", session=session)
+            await client.disconnect(connection, reason="client_replaced")
     return ServiceResponse.from_row(service, row)
 
 
@@ -144,7 +144,7 @@ async def oauth_callback(
     reconsent = bool(row)
     if row:
         await row.reconnect(
-            session, refresh_token=tokens["refresh_token"], scopes=granted, identity=identity
+            refresh_token=tokens["refresh_token"], scopes=granted, identity=identity
         )
         # A token cached before this consent must not serve the new one.
         await OauthClient(provider=provider).evict_access_token(row.id)
@@ -187,4 +187,4 @@ async def disconnect_connection(session: SessionDep, connection_id: str) -> None
     if row.revoked_at:
         # Revoking is idempotent — the second delete finds the state true.
         return
-    await OauthClient(provider=row.audience_name).disconnect(row, reason="user", session=session)
+    await OauthClient(provider=row.audience_name).disconnect(row, reason="user")

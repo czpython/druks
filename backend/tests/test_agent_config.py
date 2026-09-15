@@ -97,8 +97,8 @@ async def test_call_keeps_its_billing_reference_after_disconnect(druks_db, billi
     )
 
     if billing == "subscription":
-        await subscription.revoke(db_session(), "user")
-        await subscription.update_secrets(db_session(), {"late_refresh": "secret"}, expires_at=None)
+        await subscription.revoke("user")
+        await subscription.update_secrets({"late_refresh": "secret"}, expires_at=None)
         assert not dict(subscription.secrets)
         assert not subscription.is_live
         assert await type(subscription).reload(db_session(), subscription.id) is None
@@ -106,7 +106,7 @@ async def test_call_keeps_its_billing_reference_after_disconnect(druks_db, billi
         connected = await connect_anthropic_subscription("a@example.com")
         assert connected.id == subscription.id
     else:
-        await key.revoke(db_session(), "user")
+        await key.revoke("user")
         await db_session().refresh(key)
         assert dict(key.secrets) == {}
         assert await VaultSecret.lookup(druks_db, SecretKind.STATIC, key.audience) is None

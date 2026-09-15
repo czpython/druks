@@ -4,11 +4,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from sqlalchemy import DateTime, Integer, cast, select
-from sqlalchemy.ext.asyncio import AsyncAttrs
+from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession, async_object_session
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 from druks.core.utils.time import ensure_utc
+from druks.exceptions import DetachedRowError
 
 if TYPE_CHECKING:
     from druks.durable.schemas import SubjectStatus, SubjectSummary
@@ -35,6 +36,13 @@ class Base(AsyncAttrs, DeclarativeBase):
     # guarantees aware values on read (writes are unaffected). Mapping it here
     # means models declare ``Mapped[datetime]`` with no per-column type.
     type_annotation_map = {datetime: _UtcDateTime()}
+
+    @property
+    def session(self) -> AsyncSession:
+        """The session this row is loaded in; a mutation writes through it."""
+        if session := async_object_session(self):
+            return session
+        raise DetachedRowError(type(self).__name__)
 
     @staticmethod
     def utc_now() -> datetime:

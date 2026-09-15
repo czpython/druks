@@ -57,9 +57,7 @@ class Connection:
         return token
 
     async def disconnect(self) -> None:
-        await OauthClient(provider=self.service.slug).disconnect(
-            self.row, reason="user", session=db_session()
-        )
+        await OauthClient(provider=self.service.slug).disconnect(self.row, reason="user")
 
 
 class ScopedService:

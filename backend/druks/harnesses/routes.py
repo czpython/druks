@@ -201,11 +201,11 @@ async def remove_key(session: SessionDep, provider_id: str) -> None:
     if stored := await VaultSecret.lookup(
         session, SecretKind.STATIC, Audience.provider(provider_id)
     ):
-        await stored.revoke(session, "user")
+        await stored.revoke("user")
     if is_registered(provider_id):
         return
     if catalog := await session.get(ProviderCatalog, provider_id):
-        await catalog.delete(session)
+        await catalog.delete()
         return
     raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}")
 
@@ -218,4 +218,4 @@ async def disconnect(
     if subscription := await VaultSecret.lookup(
         session, SecretKind.SUBSCRIPTION, Audience.provider(provider.id), account.id
     ):
-        await subscription.revoke(session, "user")
+        await subscription.revoke("user")

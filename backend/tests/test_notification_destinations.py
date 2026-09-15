@@ -104,7 +104,7 @@ async def test_create_get_list_delete_round_trip(druks_db):
     ]
     assert beta.is_enabled is True
 
-    await beta.delete(druks_db)
+    await beta.delete()
     assert await Destination.get_for_name(druks_db, "beta") is None
     assert [destination.name for destination in await Destination.list_all(druks_db)] == ["alpha"]
 
