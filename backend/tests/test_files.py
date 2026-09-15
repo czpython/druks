@@ -56,6 +56,7 @@ async def _hydrate_file(
     host.download = AsyncMock(side_effect=download)
     call = await _survey_call(session)
     await Workspace(host=host).save_files(
+        session,
         workspace_files,
         app="field_notes",
         agent_call_id=call.id,
@@ -214,6 +215,7 @@ async def test_hydration_leaves_no_canonical_bytes_when_a_later_pull_fails(
     call = await _survey_call(druks_db)
     with pytest.raises(SandboxDownloadError, match="missing"):
         await Workspace(host=host).save_files(
+            druks_db,
             workspace_files,
             app="field_notes",
             agent_call_id=call.id,
@@ -229,7 +231,9 @@ async def test_prepared_context_uploads_into_the_call_directory(druks_db, tmp_pa
     host = MagicMock(ssh_username="root")
     host.upload_file = AsyncMock()
 
-    context = await Workspace(host=host).prepare_context({"source": file}, agent_call_id="call-2")
+    context = await Workspace(host=host).prepare_context(
+        druks_db, {"source": file}, agent_call_id="call-2"
+    )
 
     assert context == {"source": f"/root/work/.druks-files/call-2/{file.id}/home.png"}
     host.upload_file.assert_awaited_once_with(
@@ -246,7 +250,9 @@ async def test_prepare_context_refuses_a_deleted_file(druks_db, tmp_path, monkey
     host.upload_file = AsyncMock()
 
     with pytest.raises(FileUnavailableError, match="deleted or missing"):
-        await Workspace(host=host).prepare_context({"source": file}, agent_call_id="call-2")
+        await Workspace(host=host).prepare_context(
+            druks_db, {"source": file}, agent_call_id="call-2"
+        )
 
     host.upload_file.assert_not_awaited()
 

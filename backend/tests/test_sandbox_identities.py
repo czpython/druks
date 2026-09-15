@@ -337,7 +337,7 @@ async def test_the_issuer_answers_503_when_github_refuses(druks_db, tmp_path, mo
 async def _mcp_identity() -> tuple[SandboxIdentity, str, dict]:
     # The one ref a box of a plain workspace binds for the enabled servers.
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
-    [ref] = (await Workspace.get_mcp_delivery(None, None))[1]
+    [ref] = (await Workspace.get_mcp_delivery(db_session(), None, None))[1]
     identity, entries = await SandboxIdentity.create(
         db_session(), run_id="run-1", scoped_to="workflow", secret_refs=[ref]
     )

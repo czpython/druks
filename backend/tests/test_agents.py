@@ -208,7 +208,7 @@ async def test_runner_comes_from_workflow_workspace_factory(
     _patch_ephemeral(monkeypatch, MagicMock())  # the box; the factory below ignores it
     workspace = MagicMock()
     workspace.host_id = "host-test"
-    workspace.prepare_context = AsyncMock(side_effect=lambda context, **_: context)
+    workspace.prepare_context = AsyncMock(side_effect=lambda _session, context, **_: context)
     workspace.run_agent = AsyncMock(return_value=make_agent_result({"ok": True}, agent="dummy"))
 
     async def _get_workspace(sandbox):
