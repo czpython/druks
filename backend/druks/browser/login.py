@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 import asyncssh
 from fastapi import WebSocket
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.browser import exceptions
 from druks.browser.constants import (
@@ -101,18 +102,18 @@ class LoginWindow:
                 await asyncio.gather(*directions, return_exceptions=True)
                 screen_writer.close()
 
-    async def save(self) -> StoredBrowserSession:
+    async def save(self, session: AsyncSession) -> StoredBrowserSession:
         """Store what the operator logged into as the session's payload, then
         tear the window down. A login always captures a profile, so a session
         imported as storage_state becomes a profile here."""
-        session = await StoredBrowserSession.get_for_name(self.session_name)
-        if session:
+        row = await StoredBrowserSession.get_for_name(session, self.session_name)
+        if row:
             try:
                 async with sandbox_client.attach(host_id=self.host_id) as browser:
-                    payload = await _export(browser, session.name)
-                session.payload_format = BrowserSessionPayloadFormat.PROFILE_DIR.value
-                await session.store_payload(payload)
-                return session
+                    payload = await _export(browser, row.name)
+                row.payload_format = BrowserSessionPayloadFormat.PROFILE_DIR.value
+                await row.store_payload(payload)
+                return row
             finally:
                 await self._close()
         raise exceptions.BrowserSessionUnknownError(self.session_name)

@@ -1,6 +1,7 @@
 from druks.browser.constants import SESSION_SIGNED_OUT_SIGNAL
 from druks.browser.enums import BrowserSessionStatus
 from druks.browser.models import StoredBrowserSession
+from druks.database import db_session
 from druks.signals import subscribe
 
 
@@ -10,6 +11,6 @@ async def signed_out_session_goes_stale(*, session_name: str, **_: object) -> No
     # session goes stale — the pane shows it and refuses borrows until a re-login.
     # An anonymous session has no login to go stale: the run still fails, the
     # row stays anonymous.
-    row = await StoredBrowserSession.get_for_name(session_name)
+    row = await StoredBrowserSession.get_for_name(db_session(), session_name)
     if row.status != BrowserSessionStatus.ANONYMOUS.value:
         await row.mark_stale()
