@@ -49,7 +49,7 @@ function WorkItemRowView({
         <div className="work-item-references">
           <TicketCell ticketKey={wi.ticketKey} ticketUrl={wi.links.ticket} />
           <RepoCell repo={wi.repo} project={wi.projectName} />
-          <PRCell prNumber={wi.prNumber} prUrl={wi.links.pr} />
+          {wi.prNumber != null && <PRCell prNumber={wi.prNumber} prUrl={wi.links.pr} />}
         </div>
       </div>
       <div className="work-item-state">
