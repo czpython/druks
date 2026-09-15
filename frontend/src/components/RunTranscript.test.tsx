@@ -37,7 +37,9 @@ describe('RunTranscript', () => {
       .mockReturnValueOnce(secondResponse.promise)
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<RunTranscript basePath="/api/software_factory/transcripts/call-1" isLive={false} />)
+    render(
+      <RunTranscript app="software_factory" basePath="/api/software_factory/transcripts/call-1" isLive={false} />,
+    )
 
     expect(await screen.findByText('first row')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -57,7 +59,7 @@ describe('RunTranscript', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<RunTranscript basePath="/api/software_factory/transcripts/call-2" isLive />)
+    render(<RunTranscript app="software_factory" basePath="/api/software_factory/transcripts/call-2" isLive />)
 
     expect(await screen.findByText('initial row')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledTimes(1)

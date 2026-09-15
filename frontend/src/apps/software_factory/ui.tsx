@@ -1,6 +1,7 @@
 import { registerAppUI, targetQuery } from '../registry'
 import { SOFTWARE_FACTORY } from './api'
 import { activityLabel } from './activity'
+import { harnessResult } from './harnessResult'
 import { parseLeadingId } from './slug'
 import { AgentCallPage } from './AgentCallPage'
 import { BoardPage } from './BoardPage'
@@ -16,6 +17,7 @@ registerAppUI({
   home: `/${SOFTWARE_FACTORY}`,
   navigationFor: softwareFactoryNavigation,
   activityLabel,
+  harnessResult,
   parentPath: (location) => {
     const workItem = /^(\/software_factory\/work-items\/[^/]+)/.exec(location)?.[1]
     return workItem && (location.startsWith(`${workItem}/agent-calls/`) ? workItem : `/${SOFTWARE_FACTORY}`)
