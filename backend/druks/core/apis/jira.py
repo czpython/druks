@@ -45,6 +45,15 @@ class JiraClient:
             return {}
         return response.json()
 
+    async def get_issue_status(self, key: str) -> str:
+        try:
+            issue = await self._request("GET", f"/rest/api/3/issue/{key}?fields=status")
+        except JiraAPIError as error:
+            if error.status_code == 404:
+                raise UnknownTicketError(key, "Jira") from error
+            raise
+        return issue["fields"]["status"]["name"]
+
     async def transition_issue(self, key: str, status_name: str) -> None:
         # Jira moves status only via transitions: find the one whose target is
         # the requested status, then execute it.

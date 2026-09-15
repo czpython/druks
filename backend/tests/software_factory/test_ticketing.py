@@ -500,9 +500,14 @@ async def test_ticket_state_closes_on_failure(monkeypatch):
 
 class _FakeJiraClient:
     base_url = "https://jira.test"
+    status = "In Progress"
 
     def __init__(self) -> None:
         self.calls: list = []
+
+    async def get_issue_status(self, key):
+        self.calls.append(("get_issue_status", key))
+        return self.status
 
     async def transition_issue(self, key, status_name):
         self.calls.append(("transition_issue", key, status_name))
@@ -511,8 +516,7 @@ class _FakeJiraClient:
         self.calls.append("aclose")
 
 
-async def test_jira_set_status_uses_transition():
-    fake = _FakeJiraClient()
+def _jira(fake: _FakeJiraClient) -> Jira:
     provider = Jira(
         base_url="https://jira.test",
         email="a@b.com",
@@ -521,12 +525,27 @@ async def test_jira_set_status_uses_transition():
         client=object(),
     )
     provider._client = fake  # the unit seam is the API client, not HTTP
+    return provider
+
+
+async def test_jira_set_status_transitions_when_the_status_differs():
+    fake = _FakeJiraClient()
+    provider = _jira(fake)
     await provider.set_status("PROJ-7", TicketStatus.DONE)
     await provider.set_status("PROJ-7", TicketStatus.TRIGGER)
     assert fake.calls == [
+        ("get_issue_status", "PROJ-7"),
         ("transition_issue", "PROJ-7", "Done"),
+        ("get_issue_status", "PROJ-7"),
         ("transition_issue", "PROJ-7", "To Agent"),
     ]
+
+
+async def test_jira_set_status_leaves_a_ticket_already_at_the_status_untouched():
+    fake = _FakeJiraClient()
+    fake.status = "Done"
+    await _jira(fake).set_status("PROJ-7", TicketStatus.DONE)
+    assert fake.calls == [("get_issue_status", "PROJ-7")]
 
 
 def test_jira_declares_known_exceptions():
@@ -566,20 +585,37 @@ async def test_jira_client_executes_the_transition_to_the_status():
     ]
 
 
-async def test_jira_client_translates_a_transitions_404_to_unknown_ticket():
+async def test_jira_client_reads_the_issue_status():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/rest/api/3/issue/PROJ-7"
+        assert request.url.params["fields"] == "status"
+        return httpx.Response(200, json={"fields": {"status": {"name": "In Progress"}}})
+
+    assert await _jira_client(handler).get_issue_status("PROJ-7") == "In Progress"
+
+
+_JIRA_ISSUE_CALLS = [
+    lambda client: client.get_issue_status("PROJ-9"),
+    lambda client: client.transition_issue("PROJ-9", "Ready for Agent"),
+]
+
+
+@pytest.mark.parametrize("call", _JIRA_ISSUE_CALLS)
+async def test_jira_client_translates_a_404_to_unknown_ticket(call):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"errorMessages": ["Issue does not exist"]})
 
     with pytest.raises(UnknownTicketError, match="PROJ-9 doesn't exist in Jira"):
-        await _jira_client(handler).transition_issue("PROJ-9", "Ready for Agent")
+        await call(_jira_client(handler))
 
 
-async def test_jira_client_keeps_other_failures_as_api_errors():
+@pytest.mark.parametrize("call", _JIRA_ISSUE_CALLS)
+async def test_jira_client_keeps_other_failures_as_api_errors(call):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(502, text="bad gateway")
 
     with pytest.raises(JiraAPIError, match="-> 502"):
-        await _jira_client(handler).transition_issue("PROJ-9", "Ready for Agent")
+        await call(_jira_client(handler))
 
 
 async def test_jira_client_still_errors_without_a_matching_transition():

@@ -32,7 +32,10 @@ class Jira(Tracker):
         name = self._status_names.get(status)
         if not name:
             raise ValueError(f"Jira has no configured status name for {status}")
-        await self._client.transition_issue(key, name)
+        # Jira runs a self-transition as a real change: a history entry, watcher
+        # notifications, and automation triggers. A ticket already at the status stays untouched.
+        if await self._client.get_issue_status(key) != name:
+            await self._client.transition_issue(key, name)
 
     async def list_status_choices(self) -> list[tuple[str, str]]:
         # Team-managed projects can repeat a status name. The first one labels it.
