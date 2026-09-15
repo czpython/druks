@@ -426,7 +426,6 @@ async def complete_connect(session: AsyncSession, *, state: str, code: str) -> s
     connection = await get_connection(session, name, account_id)
     if connection:
         await connection.reconnect(
-            session,
             refresh_token=tokens["refresh_token"],
             scopes=scopes,
             identity=identity,
@@ -463,9 +462,7 @@ async def disconnect(
     # The grant's secrets carry its client, so one revoke ends both.
     connection = await get_connection(session, name, account_id)
     if connection:
-        await OauthClient(provider=Audience.mcp(name)).disconnect(
-            connection, reason=reason, session=session
-        )
+        await OauthClient(provider=Audience.mcp(name)).disconnect(connection, reason=reason)
 
 
 async def get_access_token(

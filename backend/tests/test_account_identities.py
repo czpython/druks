@@ -58,5 +58,5 @@ async def test_conflicting_owners_prevent_attribution(druks_db, caplog):
     assert not await Account.lookup(druks_db, AUTHORITY, "user-1")
     assert "multiple accounts" in caplog.text
 
-    await second.revoke(db_session(), "user")
+    await second.revoke("user")
     assert await Account.lookup(druks_db, AUTHORITY, "user-1") is owner

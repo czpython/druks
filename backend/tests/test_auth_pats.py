@@ -81,7 +81,7 @@ async def test_authenticate_rejects_everything_but_the_live_token(druks_db):
         await PersonalAccessToken.authenticate(druks_db, token)
 
     pat.expires_at = Base.utc_now() + timedelta(days=1)
-    await pat.revoke(druks_db)
+    await pat.revoke()
     with pytest.raises(InvalidPatError, match=f"{pat.token_prefix} was revoked"):
         await PersonalAccessToken.authenticate(druks_db, token)
 
@@ -164,7 +164,7 @@ def test_an_empty_authorization_header_never_slides_to_the_assertion(tmp_path, d
 async def test_a_dead_token_401s_with_its_prefix_only(tmp_path, druks_db):
     with _client(tmp_path) as client:
         pat, token = await _mint(druks_db)
-        await pat.revoke(druks_db)
+        await pat.revoke()
         response = client.get("/api/auth/me", headers=_bearer(token))
         assert response.status_code == 401
         assert response.headers["WWW-Authenticate"] == 'Bearer realm="druks", error="invalid_token"'

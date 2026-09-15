@@ -172,7 +172,7 @@ async def remove_mcp_server(session: SessionDep, name: str) -> None:
     # Revoke before the server row goes — the registration lookup needs it.
     for connection in await oauth.list_connections(session, name):
         await oauth.disconnect(session, name, connection.account_id, reason="server_removed")
-    await server.delete(session)
+    await server.delete()
 
 
 @router.post("/{name}/connect", response_model=ConnectMcpServerResponse)

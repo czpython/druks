@@ -207,7 +207,7 @@ class OauthClient:
         try:
             data = {
                 "grant_type": "refresh_token",
-                "refresh_token": await connection.get_refresh_token(session),
+                "refresh_token": await connection.get_refresh_token(),
                 **self.extra_token_params,
             }
             if requested:
@@ -230,7 +230,8 @@ class OauthClient:
                     # succeed. The revoke commits on its own: the caller's step
                     # session rolls back when this error propagates.
                     async with get_session(session.bind) as own:
-                        await self.disconnect(connection, reason="invalid_grant", session=own)
+                        revoked = await own.get(VaultSecret, connection.id)
+                        await self.disconnect(revoked, reason="invalid_grant")
                         await own.commit()
                     raise OauthRefreshError(
                         self.provider,
@@ -251,7 +252,7 @@ class OauthClient:
                     self.provider, "the token endpoint returned no access token"
                 )
             if tokens.get("refresh_token"):
-                await connection.update_refresh_token(session, tokens["refresh_token"])
+                await connection.update_refresh_token(tokens["refresh_token"])
             if requested and tokens.get("scope") and set(tokens["scope"].split()) != set(requested):
                 # The provider ignored the narrowing. The sandbox must never hold this token.
                 raise OauthRefreshError(
@@ -277,12 +278,10 @@ class OauthClient:
         async for key in redis.scan_iter(match=f"{self.provider}:access_token:{connection_id}*"):
             await redis.delete(key)
 
-    async def disconnect(
-        self, connection: VaultSecret, *, reason: str, session: AsyncSession
-    ) -> None:
-        """Revoke the grant in ``session``, evict its cached access token, and
-        publish ``oauth.disconnected``."""
-        await connection.revoke(session, reason)
+    async def disconnect(self, connection: VaultSecret, *, reason: str) -> None:
+        """Revoke the grant, evict its cached access token, and publish
+        ``oauth.disconnected``."""
+        await connection.revoke(reason)
         await self.evict_access_token(connection.id)
         await publish(
             "oauth.disconnected",

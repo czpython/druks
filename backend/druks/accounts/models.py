@@ -103,10 +103,10 @@ class Account(Base, Uuid7Pk):
         )
         return (await session.scalars(select(cls).where(cls.username == username))).one()
 
-    async def update_preferences(self, session: AsyncSession, **fields: object) -> None:
+    async def update_preferences(self, **fields: object) -> None:
         for field, value in fields.items():
             setattr(self, field, value)
-        await session.flush()
+        await self.session.flush()
 
     @classmethod
     async def list_all(cls, session: AsyncSession) -> list["Account"]:
@@ -220,7 +220,7 @@ class PersonalAccessToken(Base, Uuid7Pk):
             await session.flush()
         return row
 
-    async def revoke(self, session: AsyncSession) -> None:
+    async def revoke(self) -> None:
         # A repeat revoke keeps the first revocation time.
         self.revoked_at = self.revoked_at or Base.utc_now()
-        await session.flush()
+        await self.session.flush()

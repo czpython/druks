@@ -41,9 +41,7 @@ async def test_account_creation_copies_defaults_once(tmp_path, druks_db, monkeyp
     )
     alice = await Account.get_or_create(druks_db, "alice@example.com")
     assert (alice.timezone, alice.gate_park_destination_id) == ("Europe/Madrid", destination.id)
-    await alice.update_preferences(
-        druks_db, timezone="America/New_York", gate_park_destination_id=None
-    )
+    await alice.update_preferences(timezone="America/New_York", gate_park_destination_id=None)
     await installation.update(default_effort="low")
     existing = await Account.get_or_create(druks_db, "alice@example.com")
     assert existing.id == alice.id
@@ -232,7 +230,7 @@ async def test_accounts_share_execution_defaults_and_keep_their_own_subscription
     bob = await connect_anthropic_subscription("bob@example.com")
     installation = await InstallationSettings.get()
     personal = await druks_db.get(Account, bob.account_id)
-    await personal.update_preferences(druks_db, timezone="Europe/Madrid")
+    await personal.update_preferences(timezone="Europe/Madrid")
     await installation.update(default_effort="low", default_timeout=600, fast_mode=True)
 
     for account_id, subscription in (
@@ -303,7 +301,7 @@ async def test_shared_agent_overrides_use_installation_settings_after_a_personal
     tmp_path, druks_db
 ):
     account = await Account.get_or_create(druks_db, "bob@example.com")
-    await account.update_preferences(druks_db, timezone="Europe/Madrid")
+    await account.update_preferences(timezone="Europe/Madrid")
 
     with settings_client(tmp_path) as client:
         response = client.patch(

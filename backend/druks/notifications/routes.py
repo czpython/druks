@@ -65,7 +65,7 @@ async def delete_destination(session: SessionDep, destination_id: str) -> None:
     destination = await session.get(Destination, destination_id)
     if not destination:
         raise HTTPException(status_code=404, detail=f"Destination {destination_id!r} not found")
-    await destination.delete(session)
+    await destination.delete()
 
 
 @router.get("", response_model=list[NotificationResponse])

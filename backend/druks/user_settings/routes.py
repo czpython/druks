@@ -116,7 +116,7 @@ async def update_personal_settings(
 ) -> Account:
     fields = await _settings_changes(session, body)
     if fields:
-        await account.update_preferences(session, **fields)
+        await account.update_preferences(**fields)
     return account
 
 

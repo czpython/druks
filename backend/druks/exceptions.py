@@ -11,6 +11,13 @@ class DruksError(Exception):
         return copyreg.__newobj__, (type(self),), {"args": self.args, **vars(self)}
 
 
+class DetachedRowError(DruksError):
+    """A row was used outside the session that loaded it."""
+
+    def __init__(self, model: str) -> None:
+        super().__init__(f"A {model} row is not loaded in a session. Read it where it is used.")
+
+
 class SessionNotBoundError(DruksError):
     """``db_session()`` ran on a task that holds no session."""
 

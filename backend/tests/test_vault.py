@@ -29,7 +29,7 @@ async def _static(audience: str = "mcp:linear", **fields) -> VaultSecret:
 async def test_a_pasted_value_issues_itself_with_no_expiry(druks_db):
     row = await _static()
 
-    assert await row.issue_token(druks_db, "") == ("lin_secret", None)
+    assert await row.issue_token("") == ("lin_secret", None)
     assert (
         await VaultSecret.lookup(
             db_session(), SecretKind.STATIC, "mcp:linear", header="Authorization"
@@ -62,8 +62,8 @@ async def test_one_row_per_audience_account_and_header_except_an_oauth_connectio
 async def test_a_revoked_secret_keeps_its_facts_and_loses_its_secrets(druks_db):
     row = await _static(identity={"slug": "linear"})
 
-    await row.revoke(db_session(), "user")
-    await row.revoke(db_session(), "server_removed")
+    await row.revoke("user")
+    await row.revoke("server_removed")
 
     assert row.revoked_at and row.revoked_reason == "user"
     assert dict(row.secrets) == {}
@@ -95,10 +95,10 @@ async def test_a_revoked_secret_issues_nothing(druks_db, kind):
     row = VaultSecret(kind=kind, audience="mcp:linear", secrets={"value": "x"})
     db_session().add(row)
     await db_session().flush()
-    await row.revoke(db_session(), "user")
+    await row.revoke("user")
 
     with pytest.raises(SecretRevokedError, match="mcp:linear"):
-        await row.issue_token(druks_db, "")
+        await row.issue_token("")
 
 
 async def test_a_service_grant_issues_through_the_services_client(druks_db, monkeypatch):
@@ -119,7 +119,7 @@ async def test_a_service_grant_issues_through_the_services_client(druks_db, monk
 
     monkeypatch.setattr(services, "get", lambda slug: Acme if slug == "acme" else None)
 
-    assert await row.issue_token(druks_db, "") == ("tok", expiry)
+    assert await row.issue_token("") == ("tok", expiry)
 
 
 async def test_an_mcp_grant_issues_through_the_servers_client(druks_db, monkeypatch):
@@ -133,4 +133,4 @@ async def test_an_mcp_grant_issues_through_the_servers_client(druks_db, monkeypa
 
     monkeypatch.setattr(oauth, "get_access_token", get_access_token)
 
-    assert await row.issue_token(druks_db, "") == ("tok", None)
+    assert await row.issue_token("") == ("tok", None)

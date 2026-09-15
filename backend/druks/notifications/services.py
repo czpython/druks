@@ -72,7 +72,7 @@ async def respond_to_notification(
         ask, choice["control"], choice.get("answers", {}), choice.get("note", "")
     )
     await run.resume(**resume_payload)
-    if not await notification.mark_acknowledged(session):
+    if not await notification.mark_acknowledged():
         # A concurrent responder won the claim; this send already collapsed on
         # the DBOS round key.
         raise AlreadyAcknowledgedError()

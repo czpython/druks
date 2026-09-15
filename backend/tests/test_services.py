@@ -556,7 +556,7 @@ async def test_with_scopes_declares_the_union_and_reads_connections(declared_ser
     assert not await NightWatch.acme.get("missing")
 
     # The handle serves live connections only; the revoked row survives.
-    await row.revoke(db_session(), "user")
+    await row.revoke("user")
     assert not await NightWatch.acme.list_for_account(None)
     assert not await NightWatch.acme.get(row.id)
     assert (await db_session().get(VaultSecret, row.id)).identity == {"email": "night@acme.test"}
@@ -823,7 +823,7 @@ async def test_fresh_sign_in_with_matching_identity_resurrects_revoked_connectio
         identity={"sub": "account-1"},
     )
     connection_id = connection.id
-    await connection.revoke(db_session(), "user")
+    await connection.revoke("user")
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
@@ -936,7 +936,7 @@ async def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_liv
         identity={"sub": "account-1"},
     )
     revoked_id = revoked.id
-    await revoked.revoke(db_session(), "user")
+    await revoked.revoke("user")
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
@@ -980,7 +980,7 @@ async def test_fresh_sign_in_without_the_declared_identity_fact_creates_a_new_co
         identity={"sub": "account-1"},
     )
     revoked_id = revoked.id
-    await revoked.revoke(db_session(), "user")
+    await revoked.revoke("user")
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:

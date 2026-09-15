@@ -144,7 +144,7 @@ async def test_mcp_rejects_missing_and_dead_tokens(druks_db, app, account):
         assert expired.status_code == 401
 
         row.expires_at = datetime.now(UTC) + timedelta(days=1)
-        await row.revoke(druks_db)
+        await row.revoke()
         revoked = await wire.post("/mcp", json=_INIT, headers=bearer)
         assert revoked.status_code == 401
 

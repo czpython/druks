@@ -168,7 +168,7 @@ async def test_signed_click_routes_through_respond(tmp_path, druks_db, resume_sp
 
 async def test_dead_round_click_is_acknowledged_without_resume(tmp_path, druks_db, resume_spy):
     run, notification = await _parked_notification(druks_db)
-    await notification.mark_acknowledged(druks_db)
+    await notification.mark_acknowledged()
     with _client(tmp_path) as client:
         body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
         acknowledged = client.post(

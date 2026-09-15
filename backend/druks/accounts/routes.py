@@ -79,7 +79,7 @@ async def revoke_pat(
 ) -> PersonalAccessToken:
     pat = await session.get(PersonalAccessToken, pat_id)
     if pat and pat.account_id == account.id:
-        await pat.revoke(session)
+        await pat.revoke()
         return pat
     # A foreign token gets the same 404 as a missing one.
     raise HTTPException(status_code=404, detail="No such token.")

@@ -38,6 +38,6 @@ class ProviderCatalog(Base):
         await session.flush()
         return row
 
-    async def delete(self, session: AsyncSession) -> None:
-        await session.delete(self)
-        await session.flush()
+    async def delete(self) -> None:
+        await self.session.delete(self)
+        await self.session.flush()

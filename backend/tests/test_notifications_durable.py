@@ -402,7 +402,7 @@ async def _set_gate_park_pointer(rt, destination_id):
     db_session.registry.set(session)
     try:
         account = await Account.get_default(db_session())
-        await account.update_preferences(db_session(), gate_park_destination_id=destination_id)
+        await account.update_preferences(gate_park_destination_id=destination_id)
         await session.commit()
     finally:
         await db_session.remove()
@@ -522,7 +522,7 @@ async def test_deleted_designated_destination_notifies_nothing(rt, deliver_spy):
     await _set_gate_park_pointer(rt, destination.id)
 
     async def delete_destination():
-        await (await db_session().get(Destination, destination.id)).delete(db_session())
+        await (await db_session().get(Destination, destination.id)).delete()
 
     await _seed(rt, delete_destination)
 
@@ -744,7 +744,7 @@ async def test_gate_notifications_use_the_selected_personal_preferences(
         default = await Account.get_default(db_session())
         explicit = await Account.get_or_create(db_session(), "explicit@example.com")
         account = default if unattended else explicit
-        await account.update_preferences(db_session(), gate_park_destination_id=destination.id)
+        await account.update_preferences(gate_park_destination_id=destination.id)
         subject = NotificationProbe(id=9020 if unattended else 9021)
         db_session.add(subject)
         return account.id, subject

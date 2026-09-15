@@ -54,7 +54,7 @@ async def send_notification(notification_id: str) -> None:
             idempotency_key=notification_id,
         )
         async with step_session() as session:
-            await (await session.get(Notification, notification_id)).mark_delivered(session)
+            await (await session.get(Notification, notification_id)).mark_delivered()
 
     try:
         await DBOS.run_step_async(
@@ -65,9 +65,7 @@ async def send_notification(notification_id: str) -> None:
 
         async def _mark_failed() -> None:
             async with step_session() as session:
-                await (await session.get(Notification, notification_id)).mark_failed(
-                    session, reason
-                )
+                await (await session.get(Notification, notification_id)).mark_failed(reason)
 
         # Terminal: record the failure and return normally — re-raising would
         # put the workflow into perpetual DBOS recovery for a dead endpoint.
