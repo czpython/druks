@@ -1335,6 +1335,12 @@ review: Literal["human", "automatic"] = Field(
 )
 ```
 
+For checks that require I/O, override `async App.get_settings_problems(*, fields=None)`.
+Call `await super().get_settings_problems(fields=fields)` to include `Settings.clean()` errors.
+Save passes the edited field names. Doctor passes `None` to check all settings.
+Return errors keyed by the settings field. Save rejects these errors, and
+doctor reports them. The normal settings read does not call this method.
+
 A `str` field can take its choices from a live source, such as a connected
 service. Declare it as `Annotated[str, Choices(source)]`, with `Choices` from
 `druks.apps`. The source is an async function that returns `(stored value, label)`

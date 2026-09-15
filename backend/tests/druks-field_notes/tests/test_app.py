@@ -34,6 +34,16 @@ def test_settings_require_a_sync_token_for_public_visibility():
     assert FieldNotes.Settings(visibility="public", sync_token="sk-sync-token").clean() == {}
 
 
+async def test_app_settings_problems_include_the_settings_clean_contract():
+    await FieldNotes.override_setting("visibility", "public")
+    assert await FieldNotes.get_settings_problems() == {
+        "sync_token": "Required when visibility is public."
+    }
+
+    await FieldNotes.override_setting("sync_token", "sk-sync-token")
+    assert await FieldNotes.get_settings_problems() == {}
+
+
 def test_the_signing_key_declares_the_multiline_secret_presentation():
     # The platform keeps the newlines of a pasted PEM key, so the stored value is the paste.
     field = FieldNotes.Settings.model_fields["sync_signing_key"]

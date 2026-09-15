@@ -486,7 +486,7 @@ async def check_apps(settings: Settings) -> list[CheckResult]:
         for app in iter_apps():
             if settings_model := app.settings_model:
                 try:
-                    problems = (await app.settings()).clean()
+                    problems = await app.get_settings_problems()
                     detail = "; ".join(
                         f"{settings_model.model_fields[field].title or field}: {message}"
                         for field, message in problems.items()

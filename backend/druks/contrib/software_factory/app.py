@@ -142,6 +142,44 @@ class SoftwareFactory(App):
     checks = [check_tracker_identity, check_review_identity]
 
     @classmethod
+    async def get_settings_problems(cls, *, fields: set[str] | None = None) -> dict[str, str]:
+        problems = await super().get_settings_problems(fields=fields)
+        status_fields = (
+            "trigger_status",
+            "in_progress_status",
+            "in_review_status",
+            "done_status",
+            "resting_status",
+        )
+        # Save a tracker selection before its status choices can be loaded.
+        if fields is not None and not fields.intersection(status_fields):
+            return problems
+        settings = await cls.settings()
+        if settings.tracker not in ("linear", "jira"):
+            return problems
+        tracker = await cls.get_tracker()
+        if not tracker:
+            return problems
+        async with tracker:
+            try:
+                choices = await tracker.list_status_choices()
+            except tracker.known_exceptions:
+                problems["tracker"] = (
+                    "Could not read tracker statuses. Check the connection and retry."
+                )
+                return problems
+        names = {name for name, _ in choices}
+        for field in status_fields:
+            name = getattr(settings, field)
+            if not name and field in ("in_review_status", "resting_status"):
+                continue
+            if name not in names:
+                problems[field] = (
+                    f"No tracker status matches {name!r}. Select a status from the tracker."
+                )
+        return problems
+
+    @classmethod
     async def get_tracker(cls, source: str | None = None) -> Tracker | None:
         """The selected tracker, or None without one. A ``source`` returns the tracker
         only when that source is the selected tracker."""

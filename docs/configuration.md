@@ -354,6 +354,10 @@ and Jira share five status settings: trigger, in progress, in review, done, and
 resting. When the selected tracker is connected, the settings page lists its
 statuses. After you change the tracker, save the settings to list the statuses of
 the new tracker. An empty in review or resting status leaves the ticket where it is.
+Saving status fields and doctor check the configured names against the connected tracker.
+Save a tracker selection first, then choose and save its status names.
+Names must match exactly, including case. A failed status lookup reports a
+connection problem. It does not mark the configured names as invalid.
 
 Select **druks** to use the ticket board on this appliance. That choice needs no
 credentials. The status settings stay hidden. The trigger status is

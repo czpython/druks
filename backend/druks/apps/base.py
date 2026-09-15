@@ -163,6 +163,11 @@ class App:
         return model.model_validate(values)
 
     @classmethod
+    async def get_settings_problems(cls, *, fields: set[str] | None = None) -> dict[str, str]:
+        """Field errors for save and doctor. ``fields`` names edits; None checks all settings."""
+        return (await cls.settings()).clean()
+
+    @classmethod
     async def override_setting(cls, field: str, value: Any) -> None:
         """An operator's override for one declared setting; ``None`` clears it back
         to the declared default. Raises ``ValueError`` so the API layer can 422 it."""
