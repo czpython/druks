@@ -8,6 +8,7 @@ from dbos import DBOS
 from sqlalchemy import CheckConstraint, ForeignKey, Index, Select, String, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship, selectinload
 
 from druks.accounts.models import Account
@@ -338,13 +339,16 @@ class Run(Base):
         # actions; url is an optional gate-author-declared view-link.
         return {"body": ask["label"], "actions": None, "deep_link": ask.get("url")}
 
-    async def create_park_notification(self, destination_id: str, subject: dict[str, Any]) -> str:
+    async def create_park_notification(
+        self, session: AsyncSession, destination_id: str, subject: dict[str, Any]
+    ) -> str:
         # Create the notification for the round this run just parked on — the
         # caller supplies the run's subject and enqueues delivery. run_id +
         # run_parked_at snapshot the round so a click on an old button can be
         # refused once the run re-parks.
         rendered = await self.get_rendered_ask()
         notification = await Notification.create(
+            session,
             destination_id=destination_id,
             reason="gate.parked",
             body=rendered["body"],

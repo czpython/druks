@@ -233,7 +233,9 @@ async def _seed(rt, seeder):
 
 async def _seed_destination(rt, name):
     async def create():
-        return await Destination.create(name=name, kind="slack_webhook", url=_WEBHOOK_URL)
+        return await Destination.create(
+            db_session(), name=name, kind="slack_webhook", url=_WEBHOOK_URL
+        )
 
     return await _seed(rt, create)
 
@@ -242,8 +244,9 @@ async def _deliver(rt, *, to, subject=None, reason="r", body="b", actions=None):
     # The create-seam path a producer uses (the gate-park producer's shape):
     # persist the row committed, then enqueue the outbox — no notify() hatch.
     async def create():
-        destination = await Destination.get_for_name(to)
+        destination = await Destination.get_for_name(db_session(), to)
         notification = await Notification.create(
+            db_session(),
             destination_id=destination.id,
             reason=reason,
             body=body,
@@ -372,6 +375,7 @@ async def test_create_seam_plus_direct_enqueue_delivers(rt, deliver_spy):
 
     async def create():
         return await Notification.create(
+            db_session(),
             destination_id=destination.id,
             reason="r",
             body="b",
@@ -518,7 +522,7 @@ async def test_deleted_designated_destination_notifies_nothing(rt, deliver_spy):
     await _set_gate_park_pointer(rt, destination.id)
 
     async def delete_destination():
-        await (await Destination.get(destination.id)).delete()
+        await (await db_session().get(Destination, destination.id)).delete(db_session())
 
     await _seed(rt, delete_destination)
 
@@ -664,7 +668,7 @@ async def _respond_in_own_session(rt, token, choice):
     session = get_session(rt.engine)
     db_session.registry.set(session)
     try:
-        await respond_to_notification(token, choice)
+        await respond_to_notification(session, token, choice)
         await session.commit()
         return "ok"
     except NotificationError as error:
