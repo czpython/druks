@@ -9,6 +9,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 from druks.core.utils.time import ensure_utc
+from druks.database import db_session
 
 if TYPE_CHECKING:
     from druks.durable.schemas import SubjectStatus, SubjectSummary
@@ -65,9 +66,8 @@ class StoredSubject(Base):
         raise ValueError(f"unsaved {type(self).__name__} has no identity — flush it first")
 
     def get_label(self) -> str:
-        """The one line this subject shows itself as. Override with a stable handle —
-        a ticket key, a PR number — never a mutable title: events snapshot it, and
-        the log should not disagree with itself."""
+        """The stable work key, such as a ticket key or PR number. Events record
+        the descriptive title from get_summary() beside this key."""
         return f"{self.subject_type.replace('_', ' ')} {self.id}"
 
     @property
@@ -79,14 +79,13 @@ class StoredSubject(Base):
         # The event log is built on this module's Base.
         from druks.events.models import Event
 
-        await Event.announce(self, topic, facts)
+        await Event.announce(db_session(), self, topic, facts)
 
     @classmethod
     async def get_for_subject_id(cls, subject_id: str) -> Self | None:
         """The row this subject id names. A subject id is free text and reaches the
         read-side straight off a URL, so an id this table could never hold is a miss
         rather than an error."""
-        from druks.database import db_session
 
         try:
             key = int(subject_id)
@@ -137,7 +136,6 @@ class StoredSubject(Base):
         """The rows whose newest run hasn't handed off — still going, or failed
         and wanting the operator. What an app's active view lists."""
         # Cycle: the durable read side is built on this module's Base.
-        from druks.database import db_session
         from druks.durable.models import Run
 
         # The durable layer keys subjects by string, so the open ids come back as

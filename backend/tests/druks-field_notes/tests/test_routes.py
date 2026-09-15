@@ -42,6 +42,7 @@ async def test_repository_board_and_detail_read_the_subject(druks_client):
     assert detail.json()["summary"] == {
         "id": str(repository.id),
         "label": "acme/widgets",
+        "title": None,
         "repo": "acme/widgets",
         "gist": None,
     }

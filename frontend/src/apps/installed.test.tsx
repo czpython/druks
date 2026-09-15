@@ -99,7 +99,7 @@ it('uses the declared decision page and preserves encoded subject and request id
   expect(ui.subjectPath!({ type: 'file', id: '7' }, { run: 'run-one' })).toBe('/decision_app/file/7?run=run-one')
   const activity = eventLine({
     id: 'event:1', seq: 1, at: target.parkedAt, topic: 'workflow.parked', app: 'decision_app',
-    subjectType: 'file', subjectId: '7', run: target.run, parkedAt: target.parkedAt,
+    subjectType: 'file', subjectId: '7', payload: { run: target.run, input_requested_at: target.parkedAt },
   })
   const destination = new URL(activity.path!, 'https://example.invalid')
   expect(destination.pathname).toBe('/decision_app/review/7')

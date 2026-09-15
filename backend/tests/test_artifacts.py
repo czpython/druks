@@ -36,6 +36,7 @@ async def _seed_call(druks_db) -> AgentCall:
 async def test_record_writes_content_and_descriptor(druks_db, tmp_path):
     await _seed_call(druks_db)
     await Artifact.record(
+        druks_db,
         call_dir=tmp_path,
         call_id="call-1",
         kind="markdown",
@@ -58,6 +59,7 @@ async def test_record_is_idempotent_per_call(druks_db, tmp_path):
     await _seed_call(druks_db)
     for _ in range(2):
         await Artifact.record(
+            druks_db,
             call_dir=tmp_path,
             call_id="call-1",
             kind="markdown",
@@ -74,6 +76,7 @@ async def test_record_is_idempotent_per_call(druks_db, tmp_path):
 async def test_artifact_cascades_with_its_call(druks_db, tmp_path):
     call = await _seed_call(druks_db)
     await Artifact.record(
+        druks_db,
         call_dir=tmp_path,
         call_id="call-1",
         kind="markdown",
@@ -111,6 +114,7 @@ async def test_get_latest_for_run_returns_the_newest_calls_artifact(druks_db, tm
         )
         await druks_db.flush()
         await Artifact.record(
+            druks_db,
             call_dir=tmp_path / call_id,
             call_id=call_id,
             kind="markdown",
@@ -145,6 +149,7 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     )
     await druks_db.flush()
     await Artifact.record(
+        druks_db,
         call_dir=tmp_path,
         call_id="call-1",
         kind="markdown",
@@ -210,6 +215,7 @@ async def test_get_artifact_returns_recorded_content(druks_db, tmp_path, monkeyp
     druks_db.add(call)
     await druks_db.flush()
     await Artifact.record(
+        druks_db,
         call_dir=call.call_dir,
         call_id="call-1",
         kind="markdown",

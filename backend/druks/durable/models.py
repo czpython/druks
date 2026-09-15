@@ -17,8 +17,8 @@ from druks.core.models import Uuid7Pk
 from druks.database import db_session, get_session
 from druks.durable.dbos_state import (
     state_expression,
+    subject_attribute_expression,
     subject_filter,
-    subject_label_expression,
     updated_at_expression,
     workflow_status,
 )
@@ -73,7 +73,12 @@ class Run(Base):
     state: Mapped[str] = column_property(state_expression(id, input_gate, created_at))
     # How the subject showed itself when this run started — read with the row, so
     # every event the run writes names it without a second lookup.
-    subject_label: Mapped[str | None] = column_property(subject_label_expression(id))
+    subject_label: Mapped[str | None] = column_property(
+        subject_attribute_expression(id, "subject_label")
+    )
+    subject_title: Mapped[str | None] = column_property(
+        subject_attribute_expression(id, "subject_title")
+    )
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     account: Mapped[Account] = relationship(lazy="joined", foreign_keys=[account_id])
     # The run's agent calls in execution order. Never lazy-loaded: the reads
@@ -379,16 +384,16 @@ class Run(Base):
             idempotency_key=f"{self.input_gate}:{self.input_requested_at}",
         )
 
-    async def get_subject(self) -> dict[str, str] | None:
+    async def get_subject(self, session: AsyncSession) -> dict[str, str] | None:
         # Stamped at start; a subjectless cron has none.
-        attributes = await db_session().scalar(
+        attributes = await session.scalar(
             select(workflow_status.c.attributes).where(workflow_status.c.workflow_uuid == self.id)
         )
         if attributes:
             return {"type": attributes["subject_type"], "id": attributes["subject_id"]}
         return
 
-    async def cancel(self, *, failure: str | None = None) -> None:
+    async def cancel(self, session: AsyncSession, *, failure: str | None = None) -> None:
         # Clear the ask (so nothing tries to answer it) and keep the operator's
         # reason, then cancel the DBOS workflow — that writes the CANCELLED
         # status state derives from, dequeues it, and frees the subject's dedup
@@ -398,11 +403,11 @@ class Run(Base):
         self.input_gate = None
         self.input_request = None
         self.failure = failure
-        await db_session().flush()
+        await session.flush()
         await DBOS.cancel_workflow_async(self.id)
         # The body raises DBOSWorkflowCancelledError and re-raises without
         # emitting, so the canceller announces the terminal state itself.
-        subject = await self.get_subject()
+        subject = await self.get_subject(session)
         if subject:
             await publish(
                 WorkflowEvent.CANCELLED,
@@ -429,7 +434,7 @@ class Run(Base):
             kind=self.kind,
             account_id=self.account_id,
         )
-        subject = await self.get_subject()
+        subject = await self.get_subject(db_session())
         if subject:
             await publish(
                 WorkflowEvent.RETRIED,
@@ -663,6 +668,7 @@ class Artifact(Base, Uuid7Pk):
     @classmethod
     async def record(
         cls,
+        session: AsyncSession,
         *,
         call_dir: Path,
         call_id: str,
@@ -677,7 +683,6 @@ class Artifact(Base, Uuid7Pk):
         name = f"artifact.{'md' if kind == 'markdown' else 'txt'}"
         call_dir.mkdir(parents=True, exist_ok=True)
         (call_dir / name).write_text(content)
-        session = db_session()
         artifact_id = await session.scalar(
             pg_insert(cls)
             .values(agent_call_id=call_id, kind=kind, title=title, path=name)
@@ -685,7 +690,7 @@ class Artifact(Base, Uuid7Pk):
             .returning(cls.id)
         )
         if artifact_id and event:
-            call = await AgentCall.get(call_id)
+            call = await session.get(AgentCall, call_id)
             run = call.run
             payload = {
                 "run": run.id,
@@ -696,9 +701,11 @@ class Artifact(Base, Uuid7Pk):
             if summary := event.get("summary"):
                 payload["summary"] = summary
             await Event.emit(
+                session,
                 type=event["topic"],
-                subject=await run.get_subject(),
+                subject=await run.get_subject(session),
                 label=run.subject_label,
+                title=run.subject_title,
                 app=workflows.get(run.kind).app,
                 payload=payload,
             )

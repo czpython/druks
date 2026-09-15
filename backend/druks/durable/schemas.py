@@ -145,6 +145,7 @@ class SubjectSummary(Schema):
 
     id: SubjectId
     label: SubjectLabel
+    title: str | None = None
 
 
 class SubjectStatus(Schema):

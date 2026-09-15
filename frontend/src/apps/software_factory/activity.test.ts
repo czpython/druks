@@ -17,17 +17,17 @@ describe('Factory Activity', () => {
     ['workflow.cancelled', 'software_factory.build', 'Build cancelled'],
   ])('formats %s through the app registry', (topic, workflow, label) => {
     expect(eventLine({ id: 'event:1', seq: 1, at: '2026-09-09T12:00:00Z',
-      topic, app: 'software_factory', workflow }).label).toBe(label)
+      topic, app: 'software_factory', payload: { kind: workflow } }).label).toBe(label)
   })
 
   it('uses the gate and request to name decisions', () => {
-    const event = { topic: 'workflow.parked', workflow: 'software_factory.build' }
-    expect(activityLabel({ ...event, gate: 'review' })).toBe('Plan review requested')
-    expect(activityLabel({ ...event, gate: 'review_work' })).toBe('Implementation review requested')
-    expect(activityLabel({ ...event, gate: 'review', inputRequest: {
+    const event = { topic: 'workflow.parked', payload: { kind: 'software_factory.build' } }
+    expect(activityLabel({ ...event, payload: { ...event.payload, gate: 'review' } })).toBe('Plan review requested')
+    expect(activityLabel({ ...event, payload: { ...event.payload, gate: 'review_work' } })).toBe('Implementation review requested')
+    expect(activityLabel({ ...event, payload: { ...event.payload, gate: 'review', input_request: {
       presentation: 'in_app', questions: [{ id: 'q', prompt: 'Which source?', options: [] }],
-    } })).toBe('Clarification requested')
-    expect(activityLabel({ ...event, topic: 'workflow.running', gate: 'review' })).toBe('Response received')
+    } } })).toBe('Clarification requested')
+    expect(activityLabel({ ...event, topic: 'workflow.running', payload: { ...event.payload, gate: 'review' } })).toBe('Response received')
     expect(activityLabel({ ...event, topic: 'workflow.running' })).toBeUndefined()
   })
 })

@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, HTTPException, Path, status
 
+from druks.api.dependencies import SessionDep
 from druks.api.exceptions import (
     RunNotActive,
     RunNotFailed,
@@ -52,6 +53,7 @@ async def resume_run(run_id: Annotated[str, Path(alias="run")], body: ResumeRequ
     responses=agent_error_responses(RunNotFound("run-123"), RunNotActive("run-123")),
 )
 async def cancel_run(
+    session: SessionDep,
     run_id: Annotated[
         str, Path(alias="run", description="The active run, from list_open_subjects.")
     ],
@@ -67,22 +69,24 @@ async def cancel_run(
 ) -> CancelRunResponse:
     """Cancel an active run, recording the reason as its failure; a repeat
     cancel reports already_cancelled."""
-    run = await Run.get(run_id)
+    run = await session.get(Run, run_id)
     if not run:
         raise RunNotFound(run_id)
     if run.state == RunState.CANCELLED.value:
         return CancelRunResponse(run=run.id, result="already_cancelled")
     if not run.is_active:
         raise RunNotActive(run_id)
-    subject = await run.get_subject()
+    subject = await run.get_subject(session)
     # cancel() flushes the run and expires this computed column, so read it first.
-    label = run.subject_label
-    await run.cancel(failure=reason)
+    label, title = run.subject_label, run.subject_title
+    await run.cancel(session, failure=reason)
     if subject:
         await Event.emit(
+            session,
             type=WorkflowEvent.CANCELLED,
             subject=subject,
             label=label,
+            title=title,
             payload={"run": run.id, "kind": run.kind, "failure": reason},
             app=workflows.get(run.kind).app,
         )
@@ -101,19 +105,20 @@ async def cancel_run(
     ),
 )
 async def retry_run(
+    session: SessionDep,
     run_id: Annotated[
         str, Path(alias="run", description="The failed run, from list_open_subjects.")
     ],
 ) -> RetryRunResponse:
     """Rerun a failed run from the step that killed it, reusing every
     completed step."""
-    run = await Run.get(run_id)
+    run = await session.get(Run, run_id)
     if not run:
         raise RunNotFound(run_id)
     if run.state != RunState.FAILED.value:
         raise RunNotFailed(run_id)
 
-    subject = await run.get_subject()
+    subject = await run.get_subject(session)
     if subject:
         latest = await Run.get_latest_for_subject(subject["type"], subject["id"])
         if latest and latest.is_active:

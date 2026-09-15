@@ -88,7 +88,7 @@ async def test_workflow_cancel_takes_its_own_kind_and_passes_over_idle_subjects(
     await _subject_run(druks_db, subject=subject, kind=Profile.kind, state="running", order=1)
     cancelled = []
 
-    async def cancel(self, *, failure=None):
+    async def cancel(self, session, *, failure=None):
         cancelled.append(self.id)
 
     monkeypatch.setattr(Run, "cancel", cancel)

@@ -64,6 +64,7 @@ export interface DashboardSchedules {
 export interface SubjectSummary {
   id: string
   label: string
+  title?: string | null
 }
 
 export interface SubjectStatus {
@@ -820,22 +821,23 @@ export interface FeedItem {
   // ("merged"). The words are this client's — see lib/feed.
   topic: string
   app?: string | null
-  // The workflow identity, such as "software_factory.build".
-  workflow?: string | null
   subjectType?: string | null
   subjectId?: string | null
-  // How the subject showed itself ("ENG-767"), snapshotted at write. Absent
-  // exactly when the subject is.
   subjectLabel?: string | null
-  run?: string | null
-  gate?: string | null
-  parkedAt?: string | null
-  inputRequest?: InputRequest | null
-  result?: Record<string, unknown> | null
-  summary?: string | null
-  failure?: string | null
-  reason?: string | null
-  artifactId?: string | null
+  payload: {
+    [fact: string]: unknown
+    title?: string | null
+    kind?: string | null
+    run?: string | null
+    gate?: string | null
+    input_requested_at?: string | null
+    input_request?: InputRequest | null
+    result?: Record<string, unknown> | null
+    summary?: string | null
+    failure?: string | null
+    reason?: string | null
+    artifact_id?: string | null
+  }
 }
 
 export interface FeedResponse {

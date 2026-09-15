@@ -162,7 +162,7 @@ async def test_history_snapshot_precedes_a_commit_after_its_read(
     stream = await open_stream(after=first.stream_cursor)
     try:
         items, _ = await read_batch(stream)
-        assert [item["summary"] for item in items] == ["New finding"]
+        assert [item["payload"]["summary"] for item in items] == ["New finding"]
     finally:
         await stream.aclose()
 

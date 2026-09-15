@@ -17,7 +17,7 @@ from druks.notifications.models import Destination, Notification
 from druks.notifications.outbox import notifications_queue, send_notification
 from druks.notifications.services import respond_to_notification
 from druks.testing import configure_app_for_test, init_db, make_settings
-from druks.workflows import Gate, OperatorReply, Run, Workflow
+from druks.workflows import Gate, OperatorReply, Run, SubjectSummary, Workflow
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 from sqlalchemy import NullPool, create_engine, select, text
@@ -52,6 +52,9 @@ class _Question(BaseModel):
 
 class NotificationProbe(StoredSubject):
     __tablename__ = "test_notification_probes"
+
+    def get_summary(self) -> SubjectSummary:
+        return SubjectSummary.model_validate(self)
 
 
 # What the in-app reviews resumed with — the respond round-trip asserts the
@@ -615,7 +618,7 @@ async def test_replayed_park_notifies_once(rt, deliver_spy):
     db_session.registry.set(session)
     try:
         run = await session.get(Run, workflow_id)
-        await run.cancel()
+        await run.cancel(session)
         await session.commit()
     finally:
         await db_session.remove()

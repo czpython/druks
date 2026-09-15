@@ -149,7 +149,9 @@ and only runs while the owner page is visible.
 
 ## Activity
 
-Activity at `/events` keeps its filters and selection in the URL. History and the
+Activity at `/events` keeps its filters and selection in the URL. Event facts
+come from `payload` with their stored names, such as `input_requested_at` and
+`artifact_id`. Search matches the recorded work key or title. History and the
 live stream use the same filters. `/api/events/topics` returns app-owned topic
 choices. A type choice applies both its app and topic. Day filters use the
 operator timezone. The detail panel reads `/api/events/{seq}/destinations` to

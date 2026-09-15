@@ -19,7 +19,7 @@ from druks.models import StoredSubject
 from druks.signals import subscribe
 from druks.testing import init_db
 from druks.user_settings.models import InstallationSettings
-from druks.workflows import Gate, OperatorReply, Subject, Workflow, step, task
+from druks.workflows import Gate, OperatorReply, Subject, SubjectSummary, Workflow, step, task
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from pydantic import BaseModel
@@ -77,6 +77,9 @@ class Widget(StoredSubject):
 
     def get_label(self) -> str:
         return f"W-{self.id}"
+
+    def get_summary(self) -> SubjectSummary:
+        return SubjectSummary.model_validate(self)
 
 
 class Gadget(Subject):
@@ -495,6 +498,7 @@ async def test_attribution_rides_the_run_and_survives_resume(rt):
         "subject_type": "widget",
         "subject_id": "878787",
         "subject_label": "W-878787",
+        "subject_title": None,
     }
     assert parked.account_id == account_id
     assert f"acct-before:{account_id}" in SINK
@@ -727,6 +731,7 @@ async def test_subject_gate_parks_unchanged(rt):
         "subject_type": "widget",
         "subject_id": "636363",
         "subject_label": "W-636363",
+        "subject_title": None,
     }
 
     await parked.resume(action="go")
@@ -1404,18 +1409,19 @@ async def test_announcements_survive_subscriber_retry_and_workflow_replay(rt):
 
 async def test_admission_commits_before_the_request_and_deduplicates(rt):
     class AdmissionFlow(Workflow):
-        subject = Widget
+        subject = Note
 
         async def run_multistep(self) -> None:
             await DBOS.recv_async("finish")
 
-    subject = Widget(id=750750)
+    subject_id = ""
     workflow_id = ""
     try:
         with pytest.raises(ValueError, match="Roll back the request"):
             async with session_scope(rt.engine):
                 request_session = db_session()
-                await request_session.execute(select(Widget).where(Widget.id == 750750))
+                subject = await Note.create(body="An uncommitted observation")
+                subject_id = str(subject.id)
                 workflow_id = await AdmissionFlow.start(subject=subject)
                 assert await AdmissionFlow.start(subject=subject) == workflow_id
                 assert db_session() is request_session
@@ -1424,18 +1430,24 @@ async def test_admission_commits_before_the_request_and_deduplicates(rt):
                 async with get_session(rt.engine) as reader:
                     events = list(
                         await reader.scalars(
-                            select(Event).filter_by(type="workflow.scheduled", subject_id="750750")
+                            select(Event).filter_by(
+                                type="workflow.scheduled", subject_id=subject_id
+                            )
                         )
                     )
                 assert len(events) == 1
-                assert events[0].payload == {"run": workflow_id, "kind": AdmissionFlow.kind}
-                assert events[0].subject_label == "W-750750"
+                assert events[0].payload == {
+                    "run": workflow_id,
+                    "kind": AdmissionFlow.kind,
+                    "title": "An uncommitted observation",
+                }
+                assert events[0].subject_label == subject.label
                 raise ValueError("Roll back the request")
 
         async with get_session(rt.engine) as reader:
             events = list(
                 await reader.scalars(
-                    select(Event).filter_by(type="workflow.scheduled", subject_id="750750")
+                    select(Event).filter_by(type="workflow.scheduled", subject_id=subject_id)
                 )
             )
         assert len(events) == 1
@@ -1543,6 +1555,8 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
     approved_id = await Summarize.dispatch(note=approved_note)
     await _wait_for(rt.engine, approved_id, lambda run: run.is_parked)
     async with session_scope(rt.engine):
+        current_note = await Note.get(approved_note.id)
+        current_note.body = "Renamed pump observation"
         await OperatorReply.answer(approved_note, action="request_changes", note="Name the pump.")
     await _wait_for(rt.engine, approved_id, lambda run: len(calls) == 2 and run.is_parked)
     async with session_scope(rt.engine):
@@ -1559,7 +1573,13 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
 
     assert completed == [approved_id, approved_id]
     async with session_scope(rt.engine):
-        assert (await Note.get(approved_note.id)).gist == "The pump ran hot."
+        current_note = await Note.get(approved_note.id)
+        assert current_note.gist == "The pump ran hot."
+        next_id = await Summarize.dispatch(note=current_note)
+    await _wait_for(rt.engine, next_id, lambda run: run.state == RunState.FAILED)
+    async with session_scope(rt.engine):
+        await db_session().delete(await Note.get(approved_note.id))
+        await db_session().flush()
         activity = list(
             await db_session().scalars(Event.get_history(app="field_notes").order_by(Event.id))
         )
@@ -1575,3 +1595,15 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
         "note.gist_approved",
     ]
     assert kinds[failed_id] == ["workflow.scheduled", "workflow.failed"]
+    assert [event.type for event in activity if event.payload.get("run") == next_id] == [
+        "workflow.scheduled",
+        "workflow.failed",
+    ]
+    titles = {
+        approved_id: "The pump ran hot.",
+        failed_id: "The reading is unclear.",
+        next_id: "Renamed pump observation",
+    }
+    for event in activity:
+        if event.payload.get("run") in titles:
+            assert event.payload["title"] == titles[event.payload["run"]]
