@@ -341,7 +341,9 @@ async def _mcp_identity() -> tuple[SandboxIdentity, str, dict]:
 async def test_an_mcp_ref_binds_a_custom_entry_and_the_issuer_answers_the_stored_token(
     druks_db, tmp_path
 ):
-    await McpServer.create(name="linear", url="https://mcp.linear.app/mcp", token="lin_secret")
+    await McpServer.create(
+        druks_db, name="linear", url="https://mcp.linear.app/mcp", token="lin_secret"
+    )
     identity, bearer, entry = await _mcp_identity()
 
     response = await _fetch(tmp_path, identity.id, bearer, "mcp_linear_token")
@@ -367,6 +369,7 @@ async def test_an_mcp_ref_binds_a_custom_entry_and_the_issuer_answers_the_stored
 
 async def test_a_secret_header_entry_fills_its_own_header_with_no_prefix(druks_db, tmp_path):
     await McpServer.create(
+        druks_db,
         name="grafana",
         url="https://mcp.grafana.com/mcp",
         token_source="",
@@ -386,7 +389,7 @@ async def test_a_secret_header_entry_fills_its_own_header_with_no_prefix(druks_d
 
 async def test_the_issuer_answers_503_for_a_disconnected_mcp_grant(druks_db, tmp_path):
     server = await McpServer.create(
-        name="linear", url="https://mcp.linear.app/mcp", token_source="oauth"
+        druks_db, name="linear", url="https://mcp.linear.app/mcp", token_source="oauth"
     )
     server.identity_mode = IdentityMode.SHARED
     grant = await VaultSecret.connect(

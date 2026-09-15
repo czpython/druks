@@ -194,7 +194,7 @@ class Workspace:
                 )
             )
         run_account = account_id
-        for server in await mcp_models.McpServer.list_enabled():
+        for server in await mcp_models.McpServer.list_enabled(db_session()):
             name = server["name"]
             if name in required_names:
                 continue
@@ -212,7 +212,7 @@ class Workspace:
                     account = await Account.get_default(db_session())
                     run_account = account.id if account else None
                 grant_account = get_grant_account(server["identity_mode"], run_account)
-                secret = await oauth.get_connection(name, grant_account)
+                secret = await oauth.get_connection(db_session(), name, grant_account)
                 if not secret:
                     raise MissingGrantError(name, grant_account)
             if source:

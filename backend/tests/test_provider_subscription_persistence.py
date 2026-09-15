@@ -190,7 +190,7 @@ async def test_invalid_grant_refresh_revokes_past_the_callers_rollback(engine, m
     try:
         connection = await db_session().get(VaultSecret, connection_id)
         with pytest.raises(OauthRefreshError, match="sign in again"):
-            await client.get_access_token(connection=connection)
+            await client.get_access_token(db_session(), connection=connection)
         await session.rollback()
     finally:
         await db_session.remove()

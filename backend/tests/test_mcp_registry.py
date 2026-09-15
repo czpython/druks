@@ -339,7 +339,7 @@ async def test_add_from_registry_writes_the_row_and_redacts_the_secret(
     # The row: url from the registry (never the client), values split by the
     # spec's secrecy — the plain one on the row, the secret one a vault row
     # under its header, ciphertext at rest and redacted in repr.
-    row = await McpServer.get_for_name("observer")
+    row = await McpServer.get_for_name(druks_db, "observer")
     assert row.url == "https://mcp.acme.com/mcp"
     assert row.headers == {"X-Region": "eu"}
     [secret] = await VaultSecret.list_tokens(druks_db, Audience.mcp("observer"))
@@ -395,7 +395,7 @@ async def test_add_from_registry_oauth_candidate_ships_dark_and_connects(
         assert begun[0][3]
         assert begun[0][4] == IdentityMode.PER_USER
 
-    row = await McpServer.get_for_name("grafana")
+    row = await McpServer.get_for_name(druks_db, "grafana")
     assert row.headers == {"X-Grafana-URL": "https://acme.grafana.net"}
 
 
@@ -428,7 +428,7 @@ async def test_add_from_registry_rejects_missing_required_and_unknown_headers(
             assert unknown.status_code == 422
             assert "X-Bogus" in unknown.json()["detail"]
 
-        assert not await McpServer.get_for_name("observer")
+        assert not await McpServer.get_for_name(druks_db, "observer")
 
 
 def test_add_from_registry_rejects_an_entry_without_an_http_remote(tmp_path, monkeypatch, druks_db):
@@ -456,5 +456,5 @@ async def test_removing_a_connected_row_drops_its_grant(tmp_path, monkeypatch, d
         assert client.delete("/api/mcp-servers/grafana").status_code == 204
 
     # An orphan grant would revive as this name's credential on re-add.
-    assert not await McpServer.get_for_name("grafana")
+    assert not await McpServer.get_for_name(druks_db, "grafana")
     assert not await VaultSecret.list_connections(druks_db, Audience.mcp("grafana"))

@@ -108,7 +108,7 @@ async def test_a_service_grant_issues_through_the_services_client(druks_db, monk
     expiry = datetime.now(UTC) + timedelta(hours=1)
 
     class Client:
-        async def get_access_token(self, *, connection):
+        async def get_access_token(self, session, *, connection):
             assert connection is row
             return "tok", expiry
 
@@ -127,7 +127,7 @@ async def test_an_mcp_grant_issues_through_the_servers_client(druks_db, monkeypa
         db_session(), "mcp:linear", account_id=None, refresh_token="rt", scopes=[]
     )
 
-    async def get_access_token(name, account_id):
+    async def get_access_token(session, name, account_id):
         assert (name, account_id) == ("linear", None)
         return "tok", None
 
