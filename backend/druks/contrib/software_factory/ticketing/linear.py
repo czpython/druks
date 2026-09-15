@@ -32,12 +32,20 @@ class Linear(Tracker):
         # the id Linear wants.
         await self._client.update_issue_status(key, name)
 
-    async def list_status_choices(self) -> list[tuple[str, str]]:
-        # Teams can share a state name. The first team's state type labels it.
-        labels: dict[str, str] = {}
+    async def list_status_choices(self) -> list[dict[str, str]]:
+        choices = {}
         for state in await self._client.list_workflow_states():
-            labels.setdefault(state["name"], f"{state['name']} ({state['type']})")
-        return list(labels.items())
+            choices.setdefault(
+                state["name"],
+                {
+                    "value": state["name"],
+                    "label": state["name"],
+                    "group": state["type"],
+                },
+            )
+        return sorted(
+            choices.values(), key=lambda choice: (choice["group"], choice["label"].casefold())
+        )
 
     async def aclose(self) -> None:
         await self._client.aclose()

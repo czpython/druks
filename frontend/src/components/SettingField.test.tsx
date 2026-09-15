@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SettingField } from './SettingField'
@@ -6,6 +6,30 @@ import { SettingField } from './SettingField'
 afterEach(cleanup)
 
 describe('SettingField', () => {
+  it('groups and searches live choices without changing the selected value', () => {
+    const onChange = vi.fn()
+    render(<SettingField
+      label="Trigger status" type="choices" value="Ready" onChange={onChange}
+      choices={['Ready', 'Working', 'Complete']}
+      choiceDetails={{
+        Ready: { label: 'Ready', help: '', group: 'To do' },
+        Working: { label: 'Working', help: '', group: 'In progress' },
+        Complete: { label: 'Complete', help: '', group: 'Done' },
+      }}
+    />)
+    expect(screen.getByRole('group', { name: 'In progress' })).toBeTruthy()
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search Trigger status' }), { target: { value: 'progress' } })
+    expect(screen.getByRole('option', { name: 'Working' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: 'Complete' })).toBeNull()
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('Ready')
+    expect(onChange).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'missing' } })
+    expect(screen.getByRole('status').textContent).toContain('No choices match')
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } })
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Complete' } })
+    expect(onChange).toHaveBeenCalledWith('Complete')
+  })
+
   it('renders a textarea for a multiline field regardless of type', () => {
     // multiline is declared independent of type on the wire — a pasted long
     // description, not only a pasted secret, can carry newlines.

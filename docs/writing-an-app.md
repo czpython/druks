@@ -1343,15 +1343,20 @@ doctor reports them. The normal settings read does not call this method.
 
 A `str` field can take its choices from a live source, such as a connected
 service. Declare it as `Annotated[str, Choices(source)]`, with `Choices` from
-`druks.apps`. The source is an async function that returns `(stored value, label)`
-pairs. Druks calls each source once when someone opens the settings page of the
-app, and shows those fields as a select. The select starts with an empty choice
-and keeps a stored value that the source no longer lists. When the source returns
-no pairs, the field stays a text box:
+`druks.apps`. The async source returns dicts with `value` and `label` strings.
+An optional `group` string puts choices under a group heading. Druks calls each
+source once per choices request and shows these fields as searchable selects.
+The select starts with an empty choice. It marks a stored or edited value that
+the source no longer lists under **Unavailable choices**. When the source returns
+no choices, the field stays a text box. Save a source setting first to refresh
+its dependent choices.
 
 ```python
-async def list_board_choices() -> list[tuple[str, str]]:
-    return [("ops", "Operations board"), ("dev", "Development board")]
+async def list_board_choices() -> list[dict[str, str]]:
+    return [
+        {"value": "ops", "label": "Operations board", "group": "Boards"},
+        {"value": "dev", "label": "Development board", "group": "Boards"},
+    ]
 
 
 class Settings(AppSettings):

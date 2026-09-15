@@ -107,8 +107,8 @@ async def test_linear_lists_each_status_name_once_with_its_type(monkeypatch):
     monkeypatch.setattr(LinearClient, "list_workflow_states", list_workflow_states)
 
     assert await list_tracker_status_choices() == [
-        ("In Review", "In Review (started)"),
-        ("Done", "Done (completed)"),
+        {"value": "Done", "label": "Done", "group": "completed"},
+        {"value": "In Review", "label": "In Review", "group": "started"},
     ]
 
 
@@ -116,19 +116,62 @@ async def test_jira_lists_each_status_name_once_with_its_category(monkeypatch):
     await _connect_jira()
     _pin_software_factory_settings(monkeypatch, tracker="jira")
 
-    async def list_statuses(self):
+    async def list_statuses(self, *, project_key):
+        assert project_key == ""
         return [
-            {"name": "Waiting CR", "statusCategory": {"name": "In Progress"}},
-            {"name": "Done", "statusCategory": {"name": "Done"}},
-            {"name": "Done", "statusCategory": {"name": "Done"}},
+            {
+                "name": "Waiting CR",
+                "statusCategory": {"name": "In Progress", "key": "indeterminate"},
+            },
+            {"name": "Done", "statusCategory": {"name": "Done", "key": "done"}},
+            {"name": "Done", "statusCategory": {"name": "Done", "key": "done"}},
         ]
 
     monkeypatch.setattr(JiraClient, "list_statuses", list_statuses)
 
     assert await list_tracker_status_choices() == [
-        ("Waiting CR", "Waiting CR (in progress)"),
-        ("Done", "Done (done)"),
+        {"value": "Waiting CR", "label": "Waiting CR", "group": "In Progress"},
+        {"value": "Done", "label": "Done", "group": "Done"},
     ]
+
+
+@pytest.mark.parametrize("project", ["", "OPS"])
+async def test_jira_status_choices_scope_flatten_sort_and_deduplicate(project):
+    statuses = [
+        {"name": "Done", "statusCategory": {"name": "Done", "key": "done"}},
+        {"name": "Ready", "statusCategory": {"name": "To Do", "key": "new"}},
+        {"name": "Backlog", "statusCategory": {"name": "To Do", "key": "new"}},
+    ]
+    requests = []
+
+    def handler(request):
+        requests.append(request.url.path)
+        payload = [{"statuses": statuses}, {"statuses": statuses[:1]}] if project else statuses
+        return httpx.Response(200, json=payload)
+
+    async with Jira(
+        base_url="https://jira.test",
+        email="op@example.test",
+        api_token="token",
+        status_names={},
+        status_project=project,
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    ) as tracker:
+        choices = await tracker.list_status_choices()
+
+    assert requests == [
+        f"/rest/api/3/project/{project}/statuses" if project else "/rest/api/3/status"
+    ]
+    assert [choice["value"] for choice in choices] == ["Backlog", "Ready", "Done"]
+    assert [choice["group"] for choice in choices] == ["To Do", "To Do", "Done"]
+
+
+async def test_jira_settings_scope_only_the_status_list(monkeypatch):
+    await _connect_jira()
+    _pin_software_factory_settings(monkeypatch, tracker="jira", jira_status_project=" OPS ")
+    tracker = await SoftwareFactory.get_tracker()
+    assert tracker._status_project == "OPS"
+    assert tracker._status_names[TicketStatus.TRIGGER] == "Ready for Agent"
 
 
 async def test_status_choices_are_empty_without_a_connected_tracker_that_answers(monkeypatch):

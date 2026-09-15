@@ -8,6 +8,7 @@ import type {
   ProviderSubscription,
   InstallationSettings,
   WorkflowSettingField,
+  AppSettingChoices,
 } from '../api/types'
 
 export const SETTINGS_FIELDS = {
@@ -111,19 +112,23 @@ export const defaultsOf = (settings: InstallationSettings): Defaults => ({
 /** A field with live choices renders as a select that keeps its stored and edited values. */
 export function withLiveChoices(
   field: WorkflowSettingField,
-  choices: [string, string][] | undefined,
+  choices: AppSettingChoices[string] | undefined,
   edit: unknown,
 ): WorkflowSettingField {
   if (!choices?.length) return field
-  const pairs = [...choices]
+  const options = [...choices]
   for (const value of [field.value ?? '', edit ?? field.value ?? ''].map(String)) {
-    if (!pairs.some(([choice]) => choice === value)) pairs.push([value, value])
+    if (!options.some((choice) => choice.value === value)) options.push({
+      value,
+      label: `${value} (${value === String(field.value ?? '') ? 'current' : 'edited'} value, not found in available choices)`,
+      group: 'Unavailable choices',
+    })
   }
   return {
     ...field,
-    type: 'enum',
-    choices: pairs.map(([value]) => value),
-    choiceDetails: Object.fromEntries(pairs.map(([value, label]) => [value, { label, help: field.help }])),
+    type: 'choices',
+    choices: options.map(({ value }) => value),
+    choiceDetails: Object.fromEntries(options.map(({ value, label, group }) => [value, { label, group, help: field.help }])),
   }
 }
 

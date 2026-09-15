@@ -23,9 +23,12 @@ def check_summary_api_key() -> CheckResult:
     )
 
 
-async def list_notebook_choices() -> list[tuple[str, str]]:
+async def list_notebook_choices() -> list[dict[str, str]]:
     """The notebooks a note can go into. A real app reads them from its service."""
-    return [("field", "Field notebook"), ("lab", "Lab notebook")]
+    return [
+        {"value": "field", "label": "Field notebook", "group": "Notebooks"},
+        {"value": "lab", "label": "Lab notebook", "group": "Notebooks"},
+    ]
 
 
 class FieldNotes(App):

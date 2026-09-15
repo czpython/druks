@@ -11,9 +11,9 @@ from .exceptions import SettingsDeclarationError
 @dataclass(frozen=True)
 class Choices:
     """Live choices for a ``str`` setting, declared as ``Annotated[str, Choices(source)]``.
-    ``source`` returns ``(stored value, label)`` pairs."""
+    ``source`` returns dicts with ``value``, ``label``, and an optional ``group``."""
 
-    source: Callable[[], Awaitable[list[tuple[str, str]]]]
+    source: Callable[[], Awaitable[list[dict[str, str]]]]
 
 
 # The annotation picks the wire kind, and the frontend picks the input control from it.
@@ -60,7 +60,7 @@ def _nests_choices(annotation: object) -> bool:
     return any(isinstance(arg, Choices) or _nests_choices(arg) for arg in get_args(annotation))
 
 
-def field_choice_source(field: FieldInfo) -> Callable[[], Awaitable[list[tuple[str, str]]]] | None:
+def field_choice_source(field: FieldInfo) -> Callable[[], Awaitable[list[dict[str, str]]]] | None:
     return next((item.source for item in field.metadata if isinstance(item, Choices)), None)
 
 

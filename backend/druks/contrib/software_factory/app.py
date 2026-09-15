@@ -49,7 +49,7 @@ async def check_tracker_identity() -> CheckResult:
     )
 
 
-async def list_tracker_status_choices() -> list[tuple[str, str]]:
+async def list_tracker_status_choices() -> list[dict[str, str]]:
     """The statuses of the selected tracker. Empty when no connected tracker lists them."""
     tracker = await SoftwareFactory.get_tracker()
     if not tracker:
@@ -90,6 +90,13 @@ class SoftwareFactory(App):
             default="linear",
             title="Tracker",
             description="Which ticket tracker this installation uses.",
+        )
+        jira_status_project: str = Field(
+            default="",
+            title="Jira status project",
+            description="Optional project key for status choices. Save it to refresh the list. "
+            "This does not restrict ticket intake.",
+            json_schema_extra={"visible_when": {"tracker": ["jira"]}},
         )
         trigger_status: Annotated[str, Choices(list_tracker_status_choices)] = Field(
             default="Ready for Agent",
@@ -168,7 +175,7 @@ class SoftwareFactory(App):
                     "Could not read tracker statuses. Check the connection and retry."
                 )
                 return problems
-        names = {name for name, _ in choices}
+        names = {choice["value"] for choice in choices}
         for field in status_fields:
             name = getattr(settings, field)
             if not name and field in ("in_review_status", "resting_status"):
@@ -206,6 +213,7 @@ class SoftwareFactory(App):
                     email=row.identity["email"],
                     api_token=row.secrets["api_token"],
                     status_names=status_names,
+                    status_project=settings.jira_status_project.strip(),
                 )
         except ServiceNotConnectedError:
             return

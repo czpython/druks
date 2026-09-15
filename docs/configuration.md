@@ -359,6 +359,13 @@ Save a tracker selection first, then choose and save its status names.
 Names must match exactly, including case. A failed status lookup reports a
 connection problem. It does not mark the configured names as invalid.
 
+For Jira, **Jira status project** limits the choices to the workflows in one
+project. Enter a project key and save it to refresh the choices. Leave it empty
+for site-wide choices. The picker groups statuses by category and supports
+search. It marks a saved value that is absent from the list under
+**Unavailable choices**. This filter does not restrict ticket intake and does
+not guarantee that a transition is available from a ticket's current status.
+
 Select **druks** to use the ticket board on this appliance. That choice needs no
 credentials. The status settings stay hidden. The trigger status is
 Ready for Agent, and it is not a setting.

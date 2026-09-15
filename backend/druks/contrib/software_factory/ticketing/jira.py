@@ -20,6 +20,7 @@ class Jira(Tracker):
         email: str,
         api_token: str,
         status_names: dict[TicketStatus, str],
+        status_project: str = "",
         client: Any | None = None,
     ) -> None:
         self._client = JiraClient(
@@ -27,6 +28,7 @@ class Jira(Tracker):
         )
         # An empty name leaves that status unmapped.
         self._status_names = {status: name for status, name in status_names.items() if name}
+        self._status_project = status_project
 
     async def set_status(self, key: str, status: TicketStatus) -> None:
         name = self._status_names.get(status)
@@ -34,13 +36,27 @@ class Jira(Tracker):
             raise ValueError(f"Jira has no configured status name for {status}")
         await self._client.transition_issue(key, name)
 
-    async def list_status_choices(self) -> list[tuple[str, str]]:
-        # Team-managed projects can repeat a status name. The first one labels it.
-        labels: dict[str, str] = {}
-        for status in await self._client.list_statuses():
-            category = status["statusCategory"]["name"].lower()
-            labels.setdefault(status["name"], f"{status['name']} ({category})")
-        return list(labels.items())
+    async def list_status_choices(self) -> list[dict[str, str]]:
+        statuses = await self._client.list_statuses(project_key=self._status_project)
+        category_order = {"new": 0, "indeterminate": 1, "done": 2}
+        statuses.sort(
+            key=lambda status: (
+                category_order.get(status["statusCategory"]["key"], 3),
+                status["name"].casefold(),
+                status["name"],
+            )
+        )
+        choices = {}
+        for status in statuses:
+            choices.setdefault(
+                status["name"],
+                {
+                    "value": status["name"],
+                    "label": status["name"],
+                    "group": status["statusCategory"]["name"],
+                },
+            )
+        return list(choices.values())
 
     async def aclose(self) -> None:
         await self._client.aclose()
