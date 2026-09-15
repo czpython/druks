@@ -3,6 +3,123 @@
 All notable changes to Druks. Versions follow [semantic versioning](https://semver.org);
 while Druks is pre-1.0, a minor bump may break compatibility.
 
+## [0.6.0] — 2026-09-15
+
+### Added
+
+- **Software Factory has its own ticket board.** A project holds tickets, and a
+  ticket holds markdown comments. Drag a card to change its status. The ticket page
+  saves as you type and selects the repository for the pull request. Select `druks`
+  as the tracker, and Ready for Agent starts a build. The build reads and comments
+  on its ticket through the installation's own MCP server. Its token belongs to the
+  run's account, so an agent comment shows the name of that person.
+- **The Activity feed replaces the Events page.** Activity records queued runs,
+  requests and their answers, and operator cancels. It also records saved results
+  and the facts that apps announce. Search by work label, filter by app, type, and
+  date, and load older rows. A row opens the saved result and links to the work. New
+  rows wait while you read. An app adds its own rows: `AgentOutput.to_event()` names
+  the topic of a saved result, and `Subject.announce()` records a domain fact.
+- **A live transcript shows when the agent is thinking.** One "Thinking…" line
+  shows the estimated token count until output arrives.
+- **An agent call can take its own output contract.** Pass `contract=OutputType`
+  when the output fields depend on the input. The agent declaration stays the same.
+- **An app can run its own CLI with the settings of an agent.** `Agent.get_config()`
+  returns the harness, model, effort, billing, and secret entries of that agent.
+- **An app setting can offer live choices.** Declare
+  `Annotated[str, Choices(source)]`, and the settings page shows the values of the
+  source as a select. `choice_details` labels each value of a `Literal` setting.
+  `visible_when` takes one shape, `{field: [values]}`.
+- **Druks runs on Python 3.14.** CI tests Python 3.11 and 3.14.
+
+### Changed
+
+- **The dashboard is a command center.** A sidebar lists the work of every app, with
+  search and phone navigation. The Dashboard shows the requests for you first, then
+  failures, then running work, with exact totals. A request opens the app page that
+  `ui.page(..., subject=...)` declares for that subject type. Schedules have a page
+  below Usage, where you change a cadence or pause a schedule.
+- **Settings are full pages.** Each page has a stable link, and search finds every
+  field. Unsaved edits ask you to save, discard, or stay. App settings open from the
+  gear next to the app name. Connections has tabs for services, accounts, revoked
+  grants, and browser profiles. An account row shows the provider identity and the
+  granted scopes of its MCP grant.
+- **Execution defaults are shared, and preferences are personal.** Settings → Agents
+  holds the execution defaults for every account. Preferences holds your timezone.
+  One default account runs unattended work, and every run has an account. The
+  upgrade keeps the account that 0.5.0 used for unattended runs. The top-level
+  `timezone` in `druks.toml` sets the schedule timezone, `UTC` by default. These
+  migrations have no downgrade, so back up the database before you upgrade.
+- **Credentials stay out of the sandbox.** A sandbox holds a placeholder for each
+  credential, and the Drukbox secrets proxy puts the value into each request. This
+  covers API keys, Claude and Codex subscriptions, GitHub tokens, and MCP
+  credentials. Druks keeps every secret in one encrypted vault and gives a token
+  only to a live sandbox. A Drukbox on another server fetches its secrets from
+  `[sandbox].issuer_url`. To upgrade, follow "The secrets exchange and the secrets
+  proxy" in `docs/deployment.md`.
+- **One directory holds the harness configuration.** `DRUKS_HARNESS_CONFIG_ROOT`
+  replaces the separate Claude and Codex configuration directories. The default is
+  `~/.config/druks/harnesses`, with `claude/` and `codex/` in it. Copy your files
+  there, then run the installer again.
+- **An agent id includes the app name.** The id of an app's agent is
+  `<app>.<attribute>`, so two apps can use the same attribute name. A migration
+  moves the overrides of the bundled apps. For any other app, set the agent
+  overrides again in the settings of that app.
+- **Reviews are part of Software Factory.** The review app is gone, and a migration
+  moves its runs, events, and settings. `POST /api/software_factory/reviews` starts
+  a review, and its MCP tool is `software_factory_review`. The Dashboard shows
+  running and failed reviews in place of the review page.
+- **Software Factory works more closely with pull requests.** It fills the pull
+  request template of the repository and replaces only its plan block on each
+  revision. A mention of the review handle in an inline review comment or a thread
+  reply requests a review. An existing GitHub App must turn on the Pull request
+  review comments event. A review gets the GitHub MCP server under the review
+  identity. The reviewer can post its verdict and inline comments with it.
+- **Software Factory reads statuses and assignees from the tracker.** Linear and
+  Jira share five status settings: trigger, in progress, in review, done, and
+  resting. Each setting lists the statuses of the connected tracker. A status that
+  you set in 0.5.0 does not carry over, so select it again. A build runs as the
+  Druks account whose tracker connection is the assignee. This works when the
+  tracker hides the assignee email.
+- **`RepoWorkspace` clones the repository.** A workflow on a repository declares
+  `workspace_class = RepoWorkspace`, and Druks clones the subject's repository
+  before every agent call. Override `get_repo()` when the subject keeps the
+  repository in another field.
+- **A database read needs a bound session.** `db_session()` raises outside a
+  request, a step, or another platform-bound session. It no longer opens a session
+  that nothing closes. In a workflow body, read inside a `@step`. `dispatch()` binds
+  its own session. A test request starts with no session, as in production.
+- **`AgentOutput.get_artifact()` is now `to_artifact()`.** Rename your override.
+  Druks does not call a method with the old name.
+- **Usage and subscriptions stay current.** Druks polls each subscription every five
+  minutes, also when no Usage page is open. The interval grows to one hour while the
+  quota does not change. Manage shows when a subscription last refreshed its token.
+  A subscription that the provider revokes stays on the Providers page with the
+  reason, the date, and Reconnect.
+- **JWT identity uses a JSON Pointer.** `identity.jwt_identity_claim` selects a value
+  such as `/traits/email`. The default is `/email`. Before you upgrade, change a bare
+  claim name such as `email` to `/email`. A bare name fails validation.
+
+### Removed
+
+- **`App.record_event()`.** Record Activity with `to_event()` on a saved result or
+  with `announce()`.
+- **`SubjectActivity`, `App.get_subject_activity()`, and `set_run_phase`.** A subject
+  page shows the sandbox phase of its run while the sandbox starts.
+- **API-key agents on Models.dev providers.** A key for a provider from the
+  Models.dev directory still saves, but an agent on that provider refuses to run. No
+  proven transport carries its placeholder through the secrets proxy. OpenCode and
+  Pi run on Anthropic and OpenAI keys.
+
+### Fixed
+
+- **A service connection that the provider revokes offers Reconnect.** Druks
+  disconnects it when a token refresh gets `invalid_grant`. Before, the connection
+  stayed live, and each scheduled run failed on it.
+- **A step error that DBOS replays keeps its type and message.** Before, some Druks
+  errors came back as a `TypeError` or with a doubled message.
+- **A run that dies before its cleanup frees its sandbox within one hour**, not at
+  the end of the lease.
+
 ## [0.5.0] — 2026-09-05
 
 ### Added
