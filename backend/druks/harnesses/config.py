@@ -96,10 +96,12 @@ async def get_config(session: AsyncSession, agent_name: str, account_id: str | N
     if not account_id:
         account = await Account.get_default(session)
         account_id = account.id if account else None
-    settings = await InstallationSettings.get()
-    harness_name = (await SettingsOverride.agent_harness(agent_name, settings=settings)).value
-    model = (await SettingsOverride.agent_model(agent_name, settings=settings)).value
-    billing = (await SettingsOverride.agent_billing(agent_name, settings=settings)).value
+    settings = await InstallationSettings.get(session)
+    harness_name = (
+        await SettingsOverride.agent_harness(session, agent_name, settings=settings)
+    ).value
+    model = (await SettingsOverride.agent_model(session, agent_name, settings=settings)).value
+    billing = (await SettingsOverride.agent_billing(session, agent_name, settings=settings)).value
     harness_class = await check_config(session, harness_name, model, billing)
     provider_id = model.partition("/")[0]
     subscription = None
@@ -121,7 +123,7 @@ async def get_config(session: AsyncSession, agent_name: str, account_id: str | N
         identity = provider.get_identity(subscription)
         secret_refs = harness_class.get_secret_refs(subscription)
     timeout = (
-        await SettingsOverride.agent_timeout(agent_name, agent.timeout, settings=settings)
+        await SettingsOverride.agent_timeout(session, agent_name, agent.timeout, settings=settings)
     ).value
     return AgentConfig(
         harness_class=harness_class,
@@ -132,7 +134,7 @@ async def get_config(session: AsyncSession, agent_name: str, account_id: str | N
         secret_refs=secret_refs,
         identity=identity,
         billing=billing,
-        effort=(await SettingsOverride.agent_effort(agent_name, settings=settings)).value,
+        effort=(await SettingsOverride.agent_effort(session, agent_name, settings=settings)).value,
         # Capped so a single call always fits inside a fresh sandbox lease.
         timeout=min(timeout, MAX_AGENT_TIMEOUT_SECONDS),
         fast_mode=settings.fast_mode,

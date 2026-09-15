@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
 from pydantic import BaseModel, Field, SecretStr
 
+from druks.database import db_session
 from druks.models import StoredSubject
 from druks.ui.exceptions import PageContractError, PageReadError, PageRouteError
 from druks.user_settings.models import SettingsOverride
@@ -153,6 +154,7 @@ class App:
             raise TypeError(f"app {cls.name!r} declares no Settings")
         values = {
             name: await SettingsOverride.app_setting(
+                db_session(),
                 cls.name,
                 name,
                 field.default,
@@ -173,6 +175,7 @@ class App:
             value = coerce_setting_value(model, field, value)
             validate_setting_override(model, (await cls.settings()).model_dump(), field, value)
         await SettingsOverride.set_app_setting(
+            db_session(),
             cls.name,
             field,
             value,

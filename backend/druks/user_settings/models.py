@@ -4,11 +4,11 @@ from typing import Any
 from sqlalchemy import CheckConstraint, ForeignKey, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import String
 from sqlalchemy_encrypted_field import EncryptedTextField
 
-from druks.database import db_session
 from druks.models import Base
 
 from .constants import (
@@ -40,9 +40,8 @@ class InstallationSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @classmethod
-    async def get(cls) -> "InstallationSettings":
+    async def get(cls, session: AsyncSession) -> "InstallationSettings":
         """Read or create the installation settings."""
-        session = db_session()
         query = select(cls).where(cls.id == 1)
         if row := await session.scalar(query):
             return row
@@ -55,7 +54,7 @@ class InstallationSettings(Base):
         for field, value in fields.items():
             setattr(self, field, value)
         self.updated_at = Base.utc_now()
-        await db_session().flush()
+        await self.session.flush()
 
 
 class SettingsOverride(Base):
@@ -66,13 +65,12 @@ class SettingsOverride(Base):
     secret_value = EncryptedTextField(default="")
 
     @classmethod
-    async def read(cls, key: str) -> Any | None:
-        row = await db_session().get(cls, key)
+    async def read(cls, session: AsyncSession, key: str) -> Any | None:
+        row = await session.get(cls, key)
         return row.value if row else None
 
     @classmethod
-    async def write(cls, key: str, value: Any) -> None:
-        session = db_session()
+    async def write(cls, session: AsyncSession, key: str, value: Any) -> None:
         row = await session.get(cls, key)
         if value is None:
             if row:
@@ -84,54 +82,67 @@ class SettingsOverride(Base):
         await session.flush()
 
     @classmethod
-    async def agent_harness(cls, name: str, *, settings: InstallationSettings) -> ResolvedChoice:
-        override = await cls.read(f"agent_harness:{name}")
+    async def agent_harness(
+        cls, session: AsyncSession, name: str, *, settings: InstallationSettings
+    ) -> ResolvedChoice:
+        override = await cls.read(session, f"agent_harness:{name}")
         if override:
             return ResolvedChoice(override, "agent")
         return ResolvedChoice(settings.default_harness, "default")
 
     @classmethod
-    async def set_agent_harness(cls, name: str, harness: str | None) -> None:
-        await cls.write(f"agent_harness:{name}", harness)
+    async def set_agent_harness(cls, session: AsyncSession, name: str, harness: str | None) -> None:
+        await cls.write(session, f"agent_harness:{name}", harness)
 
     @classmethod
-    async def agent_model(cls, name: str, *, settings: InstallationSettings) -> ResolvedChoice:
-        override = await cls.read(f"agent_model:{name}")
+    async def agent_model(
+        cls, session: AsyncSession, name: str, *, settings: InstallationSettings
+    ) -> ResolvedChoice:
+        override = await cls.read(session, f"agent_model:{name}")
         if override:
             return ResolvedChoice(override, "agent")
         return ResolvedChoice(settings.default_model, "default")
 
     @classmethod
-    async def set_agent_model(cls, name: str, model: str | None) -> None:
-        await cls.write(f"agent_model:{name}", model)
+    async def set_agent_model(cls, session: AsyncSession, name: str, model: str | None) -> None:
+        await cls.write(session, f"agent_model:{name}", model)
 
     @classmethod
-    async def agent_billing(cls, name: str, *, settings: InstallationSettings) -> ResolvedChoice:
-        override = await cls.read(f"agent_billing:{name}")
+    async def agent_billing(
+        cls, session: AsyncSession, name: str, *, settings: InstallationSettings
+    ) -> ResolvedChoice:
+        override = await cls.read(session, f"agent_billing:{name}")
         if override:
             return ResolvedChoice(override, "agent")
         return ResolvedChoice(settings.default_billing, "default")
 
     @classmethod
-    async def set_agent_billing(cls, name: str, billing: str | None) -> None:
-        await cls.write(f"agent_billing:{name}", billing)
+    async def set_agent_billing(cls, session: AsyncSession, name: str, billing: str | None) -> None:
+        await cls.write(session, f"agent_billing:{name}", billing)
 
     @classmethod
-    async def agent_effort(cls, name: str, *, settings: InstallationSettings) -> ResolvedChoice:
-        override = await cls.read(f"agent_effort:{name}")
+    async def agent_effort(
+        cls, session: AsyncSession, name: str, *, settings: InstallationSettings
+    ) -> ResolvedChoice:
+        override = await cls.read(session, f"agent_effort:{name}")
         if override:
             return ResolvedChoice(override, "agent")
         return ResolvedChoice(settings.default_effort, "default")
 
     @classmethod
-    async def set_agent_effort(cls, name: str, value: str | None) -> None:
-        await cls.write(f"agent_effort:{name}", value)
+    async def set_agent_effort(cls, session: AsyncSession, name: str, value: str | None) -> None:
+        await cls.write(session, f"agent_effort:{name}", value)
 
     @classmethod
     async def agent_timeout(
-        cls, name: str, declared: int | None, *, settings: InstallationSettings
+        cls,
+        session: AsyncSession,
+        name: str,
+        declared: int | None,
+        *,
+        settings: InstallationSettings,
     ) -> ResolvedTimeout:
-        override = await cls.read(f"agent_timeout:{name}")
+        override = await cls.read(session, f"agent_timeout:{name}")
         if override:
             return ResolvedTimeout(override, "agent")
         if declared:
@@ -139,32 +150,39 @@ class SettingsOverride(Base):
         return ResolvedTimeout(settings.default_timeout, "default")
 
     @classmethod
-    async def set_agent_timeout(cls, name: str, value: int | None) -> None:
-        await cls.write(f"agent_timeout:{name}", value)
+    async def set_agent_timeout(cls, session: AsyncSession, name: str, value: int | None) -> None:
+        await cls.write(session, f"agent_timeout:{name}", value)
 
     @classmethod
-    async def workflow_setting(cls, kind: str, field: str, default: Any) -> Any:
-        value = await cls.read(f"workflow:{kind}:{field}")
+    async def workflow_setting(
+        cls, session: AsyncSession, kind: str, field: str, default: Any
+    ) -> Any:
+        value = await cls.read(session, f"workflow:{kind}:{field}")
         return default if value is None else value
 
     @classmethod
-    async def set_workflow_setting(cls, kind: str, field: str, value: Any) -> None:
-        await cls.write(f"workflow:{kind}:{field}", value)
+    async def set_workflow_setting(
+        cls, session: AsyncSession, kind: str, field: str, value: Any
+    ) -> None:
+        await cls.write(session, f"workflow:{kind}:{field}", value)
 
     @classmethod
-    async def app_setting(cls, app: str, field: str, default: Any, *, is_secret: bool) -> Any:
-        row = await db_session().get(cls, f"app:{app}:{field}")
+    async def app_setting(
+        cls, session: AsyncSession, app: str, field: str, default: Any, *, is_secret: bool
+    ) -> Any:
+        row = await session.get(cls, f"app:{app}:{field}")
         if is_secret:
             return row.secret_value.decrypt() if row and row.secret_value else default
         return row.value if row else default
 
     @classmethod
-    async def set_app_setting(cls, app: str, field: str, value: Any, *, is_secret: bool) -> None:
+    async def set_app_setting(
+        cls, session: AsyncSession, app: str, field: str, value: Any, *, is_secret: bool
+    ) -> None:
         key = f"app:{app}:{field}"
         if value is None or not is_secret:
-            await cls.write(key, value)
+            await cls.write(session, key, value)
             return
-        session = db_session()
         row = await session.get(cls, key)
         if row:
             row.value = None

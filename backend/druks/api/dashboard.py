@@ -4,6 +4,7 @@ from operator import attrgetter
 from fastapi import APIRouter, HTTPException, Response
 from sqlalchemy import case, func, select
 
+from druks.api.dependencies import SessionDep
 from druks.api.schemas import (
     DashboardOverview,
     DashboardRun,
@@ -126,7 +127,7 @@ async def get_overview(response: Response, app: str | None = None) -> DashboardO
 
 
 @router.get("/schedules", response_model=DashboardSchedules)
-async def list_current_schedules(response: Response) -> DashboardSchedules:
+async def list_current_schedules(session: SessionDep, response: Response) -> DashboardSchedules:
     """Configured cadence, not scheduler health."""
     response.headers["Cache-Control"] = "no-store"
     timezone = load_settings().timezone
@@ -135,9 +136,9 @@ async def list_current_schedules(response: Response) -> DashboardSchedules:
             DashboardSchedule(
                 app=owner.name,
                 kind=workflow.kind,
-                cron=await workflow.get_schedule(),
+                cron=await workflow.get_schedule(session),
                 default_cron=workflow.every,
-                enabled=await workflow.has_enabled_schedule(),
+                enabled=await workflow.has_enabled_schedule(session),
                 timezone=timezone,
             )
             for owner in iter_apps()

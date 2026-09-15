@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, SecretStr, field_validator
 
 
 async def test_get_lazy_creates_row_with_the_shipped_defaults(druks_db):
-    row = await InstallationSettings.get()
+    row = await InstallationSettings.get(druks_db)
     await druks_db.commit()
     assert (row.default_harness, row.default_model, row.default_billing) == (
         "claude",
@@ -26,10 +26,10 @@ async def test_get_lazy_creates_row_with_the_shipped_defaults(druks_db):
 
 
 async def test_update_persists_the_defaults(druks_db):
-    row = await InstallationSettings.get()
+    row = await InstallationSettings.get(druks_db)
     await row.update(default_harness="codex", fast_mode=True)
     await druks_db.commit()
-    row = await InstallationSettings.get()
+    row = await InstallationSettings.get(druks_db)
     assert (row.default_harness, row.fast_mode) == ("codex", True)
 
 

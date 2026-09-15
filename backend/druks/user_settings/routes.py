@@ -46,13 +46,14 @@ async def list_harnesses() -> tuple[type[Harness], ...]:
 
 
 @agents_router.get("", response_model=AgentsResponse, response_model_by_alias=True)
-async def list_agents() -> AgentsResponse:
-    settings = await InstallationSettings.get()
+async def list_agents(session: SessionDep) -> AgentsResponse:
+    settings = await InstallationSettings.get(session)
     projected = [
         AgentsAppResponse(
             name=app.name,
             agents=[
-                await reads.get_agent_setting(agent, settings=settings) for agent in app.agents()
+                await reads.get_agent_setting(session, agent, settings=settings)
+                for agent in app.agents()
             ],
         )
         for app in iter_apps()
@@ -61,8 +62,8 @@ async def list_agents() -> AgentsResponse:
 
 
 @router.get("", response_model=SettingsResponse, response_model_by_alias=True)
-async def get_settings() -> InstallationSettings:
-    return await InstallationSettings.get()
+async def get_settings(session: SessionDep) -> InstallationSettings:
+    return await InstallationSettings.get(session)
 
 
 @router.get("/personal", response_model=PersonalSettingsResponse, response_model_by_alias=True)
@@ -79,9 +80,9 @@ async def check_agent_configs(session: AsyncSession, settings: InstallationSetti
     for agent in agents.all():
         await check_config(
             session,
-            (await SettingsOverride.agent_harness(agent.id, settings=settings)).value,
-            (await SettingsOverride.agent_model(agent.id, settings=settings)).value,
-            (await SettingsOverride.agent_billing(agent.id, settings=settings)).value,
+            (await SettingsOverride.agent_harness(session, agent.id, settings=settings)).value,
+            (await SettingsOverride.agent_model(session, agent.id, settings=settings)).value,
+            (await SettingsOverride.agent_billing(session, agent.id, settings=settings)).value,
         )
 
 
@@ -100,7 +101,7 @@ async def _settings_changes(
 @router.patch("", response_model=SettingsResponse, response_model_by_alias=True)
 async def update_settings(session: SessionDep, body: UpdateSettingsRequest) -> InstallationSettings:
     fields = await _settings_changes(session, body)
-    settings = await InstallationSettings.get()
+    settings = await InstallationSettings.get(session)
     if fields:
         await settings.update(**fields)
         if any(field in fields for field in _EXECUTION_DEFAULTS):
@@ -121,9 +122,11 @@ async def update_personal_settings(
 
 
 @router.get("/apps", response_model=AppsSettingsResponse, response_model_by_alias=True)
-async def get_app_settings() -> AppsSettingsResponse:
-    settings = await InstallationSettings.get()
-    projected = [await reads.get_app_settings(app, settings=settings) for app in iter_apps()]
+async def get_app_settings(session: SessionDep) -> AppsSettingsResponse:
+    settings = await InstallationSettings.get(session)
+    projected = [
+        await reads.get_app_settings(session, app, settings=settings) for app in iter_apps()
+    ]
     return AppsSettingsResponse(
         allowed_efforts=list(ALLOWED_EFFORTS),
         apps=[out for out in projected if out.agents or out.workflows or out.settings],
@@ -150,25 +153,25 @@ async def update_app_settings(
     session: SessionDep, body: AppsSettingsUpdate
 ) -> AppsSettingsResponse:
     for name, harness in body.agent_harnesses.items():
-        await SettingsOverride.set_agent_harness(name, harness)
+        await SettingsOverride.set_agent_harness(session, name, harness)
     for name, model in body.agent_models.items():
-        await SettingsOverride.set_agent_model(name, model)
+        await SettingsOverride.set_agent_model(session, name, model)
     for name, billing in body.agent_billings.items():
-        await SettingsOverride.set_agent_billing(name, billing)
+        await SettingsOverride.set_agent_billing(session, name, billing)
     # A cell set alone must still fit the two it inherits, so the check reads
     # the stored triple; a rejection rolls the writes back.
     for name in {*body.agent_harnesses, *body.agent_models, *body.agent_billings}:
         if name not in agents:
             raise HTTPException(status_code=422, detail=f"Unknown agent {name!r}")
     if body.agent_harnesses or body.agent_models or body.agent_billings:
-        installation = await InstallationSettings.get()
+        installation = await InstallationSettings.get(session)
         await check_agent_configs(session, installation)
 
     for name, effort in body.agent_efforts.items():
-        await SettingsOverride.set_agent_effort(name, effort)
+        await SettingsOverride.set_agent_effort(session, name, effort)
 
     for name, timeout in body.agent_timeouts.items():
-        await SettingsOverride.set_agent_timeout(name, timeout)
+        await SettingsOverride.set_agent_timeout(session, name, timeout)
 
     changed_apps = []
     try:
@@ -205,6 +208,6 @@ async def update_app_settings(
     ):
         # Repoint the DBOS crons now, not at the next launch; the reconcile reads
         # the just-written overrides off this request's session.
-        await apply_schedules()
+        await apply_schedules(session)
 
-    return await get_app_settings()
+    return await get_app_settings(session)

@@ -574,7 +574,7 @@ async def test_claude_api_key_stays_on_the_server(
     """Under api_key billing the VM is created with the key as a Drukbox entry and
     holds a placeholder. The key reaches no invocation, VM file, artifact, or result."""
     key = (await installation_key()).secrets["value"]
-    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "api_key")
+    await SettingsOverride.set_agent_billing(druks_db, CONFIG_PROBE.id, "api_key")
     config = await get_config(druks_db, CONFIG_PROBE.id, None)
     result_event = {
         "type": "result",
@@ -632,7 +632,7 @@ async def test_claude_subscription_token_stays_on_the_server(
             }
         },
     )
-    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "subscription")
+    await SettingsOverride.set_agent_billing(druks_db, CONFIG_PROBE.id, "subscription")
     config = await get_config(druks_db, CONFIG_PROBE.id, None)
     result_event = {
         "type": "result",
@@ -688,9 +688,9 @@ async def test_codex_subscription_token_stays_on_the_server(
         "account_id": "acc-1",
     }
     await connect_provider(OpenAiProvider, {"OPENAI_API_KEY": None, "tokens": tokens})
-    await SettingsOverride.set_agent_harness(CONFIG_PROBE.id, "codex")
-    await SettingsOverride.set_agent_model(CONFIG_PROBE.id, "openai/gpt-5.5")
-    await SettingsOverride.set_agent_billing(CONFIG_PROBE.id, "subscription")
+    await SettingsOverride.set_agent_harness(druks_db, CONFIG_PROBE.id, "codex")
+    await SettingsOverride.set_agent_model(druks_db, CONFIG_PROBE.id, "openai/gpt-5.5")
+    await SettingsOverride.set_agent_billing(druks_db, CONFIG_PROBE.id, "subscription")
     config = await get_config(druks_db, CONFIG_PROBE.id, None)
     # Codex leaves its result in the box; the fake download pulls nothing, so
     # the file is in place before the run.
