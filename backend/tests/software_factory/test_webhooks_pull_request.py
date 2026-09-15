@@ -81,7 +81,7 @@ async def _fresh_run(run_id):
     from druks.database import db_session
 
     db_session().expunge_all()
-    return await Run.get(run_id)
+    return await db_session().get(Run, run_id)
 
 
 @pytest.mark.asyncio
@@ -116,7 +116,8 @@ async def test_merge_ships_but_leaves_a_running_build_to_converge(druks_db, tmp_
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
-    assert (await Run.get(run_id)).state == "running"  # not cancelled from under druks
+    # Not cancelled from under druks.
+    assert (await _fresh_run(run_id)).state == "running"
     assert await _milestone_count(work_item_id, "merged") == 1
 
 

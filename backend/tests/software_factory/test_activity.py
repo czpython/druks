@@ -91,12 +91,13 @@ async def test_review_result_belongs_to_the_identity_only_pull_request(druks_db,
     )
     for _ in range(2):
         await Artifact.record(
+            druks_db,
             call_id=call.id,
             call_dir=tmp_path,
             event=report.to_event(),
             **report.to_artifact(),
         )
-    artifact = await Artifact.get_for_call(call.id)
+    artifact = await Artifact.get_for_call(druks_db, call.id)
     content = (tmp_path / artifact.path).read_text()
     assert "request_changes" in content
     assert "The write can lose data." in content

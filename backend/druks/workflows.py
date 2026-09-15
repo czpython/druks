@@ -290,7 +290,7 @@ class Gate(BaseModel):
                 f"{cls.__name__}.answer() takes the subject whose run is parked on it, "
                 f"not {type(subject).__name__}"
             )
-        runs = await Run.list_for_subject(subject.subject_type, str(subject.id))
+        runs = await Run.list_for_subject(db_session(), subject.subject_type, str(subject.id))
         parked = next((run for run in runs if run.is_parked and run.input_gate == cls.name), None)
         if parked:
             await parked.resume(**reply)
@@ -378,7 +378,7 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
     # The operator's settings select the destination for the recorded request.
     async def _create() -> str | None:
         async with step_session() as session:
-            run = await Run.get(workflow_id)
+            run = await session.get(Run, workflow_id)
             account = await Account.get_for_run(session, run.account_id)
             destination_id = account.gate_park_destination_id
             if destination_id:
@@ -556,7 +556,7 @@ async def _emit_run_event(
     # own arguments, so a replay stamps the same routing every time.
     async def _transition() -> dict[str, Any] | None:
         async with step_session() as session:
-            run = await Run.get(workflow_id)
+            run = await session.get(Run, workflow_id)
             # Read before the flush: flushing the update unloads the row's
             # computed columns, and reading one back would be implicit IO.
             label = run.subject_label
@@ -809,7 +809,7 @@ class Workflow:
 
         async def record() -> None:
             async with step_session() as session:
-                run = await Run.get(self.workflow_id)
+                run = await session.get(Run, self.workflow_id)
                 await Event.emit(
                     session,
                     type=topic,
@@ -997,7 +997,9 @@ class Workflow:
     @classmethod
     async def cancel(cls, subject: Subject | StoredSubject, *, failure: str | None = None) -> None:
         cls._validate_subject(subject)
-        runs = await Run.list_for_subject(subject.subject_type, str(subject.id), kind=cls.kind)
+        runs = await Run.list_for_subject(
+            db_session(), subject.subject_type, str(subject.id), kind=cls.kind
+        )
         run = next((run for run in runs if run.is_active), None)
         if run:
             await run.cancel(failure=failure)

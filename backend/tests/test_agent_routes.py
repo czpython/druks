@@ -10,6 +10,7 @@ from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Build, PullRequestReview
 from druks.core.apis.exceptions import LinearAPIError, UnknownTicketError
+from druks.database import db_session
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
 from druks.durable.reads import read_transcript_chunk
@@ -496,7 +497,9 @@ async def test_get_gate_then_answer_roundtrip(client: TestClient, druks_db, resu
     view = client.get(f"/api/gates/{run.id}")
     assert view.status_code == 200
     data = view.json()
-    assert data == (await services.get_gate(run.id)).model_dump(mode="json", by_alias=True)
+    assert data == (await services.get_gate(db_session(), run.id)).model_dump(
+        mode="json", by_alias=True
+    )
 
     answered = client.post(
         f"/api/gates/{run.id}/answer",
@@ -512,7 +515,7 @@ async def test_answer_gate_keys_empty_request_changes_on_ask_context(
 ):
     critique_note = await Note.create(body="critique-backed gate")
     critique_run = await _park(druks_db, critique_note, context="name the rollback boundary")
-    critique_gate = await services.get_gate(critique_run.id)
+    critique_gate = await services.get_gate(db_session(), critique_run.id)
     critique_parked_at = critique_gate.model_dump(mode="json", by_alias=True)["parkedAt"]
 
     answered = client.post(
@@ -542,7 +545,7 @@ async def test_answer_gate_keys_empty_request_changes_on_ask_context(
 
     contextless_note = await Note.create(body="contextless gate")
     contextless_run = await _park(druks_db, contextless_note)
-    contextless_parked_at = (await services.get_gate(contextless_run.id)).model_dump(
+    contextless_parked_at = (await services.get_gate(db_session(), contextless_run.id)).model_dump(
         mode="json", by_alias=True
     )["parkedAt"]
 

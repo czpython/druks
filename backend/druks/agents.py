@@ -392,6 +392,6 @@ class Agent:
 
         if artifact:
             await Artifact.record(
-                call_dir=artifact_dir / call_id, call_id=call_id, event=event, **artifact
+                session, call_dir=artifact_dir / call_id, call_id=call_id, event=event, **artifact
             )
         return output.to_result()

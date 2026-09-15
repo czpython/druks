@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
+from druks.api.dependencies import SessionDep
 from druks.api.schemas import OpenSubjectResponse, OpenSubjectsResponse, OpenWorkflowResponse
-from druks.database import db_session
 from druks.durable.enums import RunState
 from druks.durable.models import Run
 
@@ -17,11 +17,11 @@ router = APIRouter(prefix="/api", tags=["agent"])
     response_model=OpenSubjectsResponse,
     response_model_by_alias=True,
 )
-async def list_open_subjects() -> OpenSubjectsResponse:
+async def list_open_subjects(session: SessionDep) -> OpenSubjectsResponse:
     """Every subject with open work — each nesting its open workflows, the
     newest run of one kind that is scheduled, running, parked, or failed.
     At most 50 workflows."""
-    rows = (await db_session().execute(Run.get_open_subjects().limit(_WORKFLOW_ROWS))).all()
+    rows = (await session.execute(Run.get_open_subjects().limit(_WORKFLOW_ROWS))).all()
     grouped = {}
     for row in rows:
         grouped.setdefault(row.subject_type, {}).setdefault(row.subject_id, []).append(row)

@@ -30,8 +30,8 @@ _ARTIFACT_CHUNK_BYTES = 4 * 1024
 _HISTORY_POINTS = 8
 
 
-async def get_gate(run_id: str) -> schemas.GateResponse:
-    run = await Run.get(run_id)
+async def get_gate(session: AsyncSession, run_id: str) -> schemas.GateResponse:
+    run = await session.get(Run, run_id)
     if not run:
         raise RunNotFound(run_id)
     if run.state != RunState.PARKED.value:
@@ -44,7 +44,9 @@ async def get_gate(run_id: str) -> schemas.GateResponse:
         gate=run.input_gate,  # type: ignore[arg-type]
         parked_at=run.input_requested_at,  # type: ignore[arg-type]
         ask=await run.get_ask(),
-        artifact=await _artifact_content(await Artifact.get_latest_for_run(run.id)),
+        artifact=await _artifact_content(
+            session, await Artifact.get_latest_for_run(session, run.id)
+        ),
     )
 
 
@@ -80,8 +82,8 @@ async def answer_gate(
     return schemas.GateAnswerResponse(run=run.id, parked_at=parked_at, result="answered")
 
 
-async def get_agent_call(call_id: str) -> schemas.AgentCallDetailResponse:
-    call = await AgentCall.get(call_id)
+async def get_agent_call(session: AsyncSession, call_id: str) -> schemas.AgentCallDetailResponse:
+    call = await AgentCall.get(session, call_id)
     layout = call.artifact_layout
     return schemas.AgentCallDetailResponse(
         run=call.run_id,
@@ -90,15 +92,17 @@ async def get_agent_call(call_id: str) -> schemas.AgentCallDetailResponse:
             layout.transcript, offset=-_TRANSCRIPT_TAIL_BYTES, limit=_TRANSCRIPT_TAIL_BYTES
         ).text,
         stderr=read_slice(layout.stderr, offset=-_STDERR_TAIL_BYTES, limit=_STDERR_TAIL_BYTES).text,
-        artifact=await _artifact_content(await Artifact.get_for_call(call.id)),
+        artifact=await _artifact_content(session, await Artifact.get_for_call(session, call.id)),
     )
 
 
-async def _artifact_content(artifact: Artifact | None) -> schemas.ArtifactContent | None:
+async def _artifact_content(
+    session: AsyncSession, artifact: Artifact | None
+) -> schemas.ArtifactContent | None:
     if not artifact:
         return
     try:
-        call = await AgentCall.get(artifact.agent_call_id)
+        call = await AgentCall.get(session, artifact.agent_call_id)
     except AgentCallNotFound:
         return
     path = call.get_file_path(artifact.path)

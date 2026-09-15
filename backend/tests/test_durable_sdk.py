@@ -1456,8 +1456,8 @@ async def test_failed_retry_attempts_keep_separate_terminal_records(rt):
     try:
         first_id = await FailingAttempt.start(subject=Widget(id=7))
         await _wait_for(rt.engine, first_id, lambda run: run.state == RunState.FAILED)
-        async with session_scope(rt.engine):
-            first_run = await Run.get(first_id)
+        async with session_scope(rt.engine) as session:
+            first_run = await session.get(Run, first_id)
             retry_id = await first_run.retry()
         await _wait_for(rt.engine, retry_id, lambda run: run.state == RunState.FAILED)
 

@@ -14,7 +14,7 @@ async def _running_call(druks_db):
 
 
 async def test_an_unfinished_call_reads_running_while_its_run_is_active(druks_db):
-    call = await AgentCall.get((await _running_call(druks_db)).id)
+    call = await AgentCall.get(druks_db, (await _running_call(druks_db)).id)
     assert call.live_status == AgentCallStatus.RUNNING
 
 
@@ -25,7 +25,7 @@ async def test_an_unfinished_call_reads_abandoned_once_its_run_is_terminal(druks
         .where(workflow_status.c.workflow_uuid == call.run_id)
         .values(status="ERROR")
     )
-    call = await AgentCall.get(call.id)
+    await druks_db.refresh(call)
     assert call.live_status == AgentCallStatus.ABANDONED
 
 
