@@ -13,7 +13,7 @@ from druks import agents
 from druks.accounts.models import Account
 from druks.apps import App
 from druks.apps.registry import agents as agent_registry
-from druks.database import db_session
+from druks.db import db_session
 from druks.durable.models import AgentCall
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness

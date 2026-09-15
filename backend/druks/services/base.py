@@ -8,7 +8,7 @@ from druks.apps.base import NAME_RE
 from druks.apps.loader import iter_apps
 from druks.apps.registry import services
 from druks.apps.settings import field_kind, field_multiline
-from druks.database import db_session
+from druks.db import db_session
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret

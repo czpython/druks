@@ -27,7 +27,7 @@ def _stub_config_fetch(monkeypatch):
 
 
 async def _milestone_count(work_item_id, milestone):
-    from druks.database import db_session
+    from druks.db import db_session
 
     return await db_session().scalar(
         select(func.count())
@@ -63,7 +63,7 @@ async def _fire_closed(*, repo, pr_number, branch, tmp_path, merged=True, at=_RE
 async def _park_work_item(*, repo, pr_number, branch, state="parked", input_gate="review_work"):
     """A work item with a build run paused on the operator (review_work) — the
     haunting case. Returns (work_item_id, run_id)."""
-    from druks.database import db_session
+    from druks.db import db_session
 
     item = await make_test_work_item(repo=repo, title="Externally merged")
     await item.update(pr_number=pr_number, branch=branch)
@@ -78,7 +78,7 @@ async def _park_work_item(*, repo, pr_number, branch, state="parked", input_gate
 
 async def _fresh_run(run_id):
     # Workflow.cancel() never writes state — re-select before reading the derived one.
-    from druks.database import db_session
+    from druks.db import db_session
 
     db_session().expunge_all()
     return await db_session().get(Run, run_id)
@@ -212,7 +212,7 @@ async def test_a_remerge_after_redispatch_records_a_fresh_verdict(druks_db, tmp_
     """A new build takes the item over and drops the prior round's verdict, so
     the next merge is stored on its own terms instead of being read as a
     redelivery of the last one."""
-    from druks.database import db_session as ds
+    from druks.db import db_session as ds
 
     repo, pr_number, branch = "ClawHaven/acme-app", 77, "agent/eng-9"
     work_item_id, _ = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
@@ -382,7 +382,7 @@ async def test_stale_close_after_redispatch_spares_the_new_run(druks_db, tmp_pat
     """A delayed pr.closed for a superseded attempt's PR must not touch the new
     run: the new attempt claimed the item, so the stale close no longer resolves
     it."""
-    from druks.database import db_session as ds
+    from druks.db import db_session as ds
 
     repo, pr_a, branch_a = "ClawHaven/acme-app", 61, "agent/eng-old"
     item = await make_test_work_item(repo=repo, title="Re-dispatched")

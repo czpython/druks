@@ -3,7 +3,7 @@ from pathlib import Path
 from conftest import settings_client
 from druks.accounts.models import Account
 from druks.contrib.software_factory.app import SoftwareFactory
-from druks.database import db_session
+from druks.db import db_session
 from druks.user_settings.models import SettingsOverride
 from druks_field_notes.app import FieldNotes
 from fastapi.testclient import TestClient

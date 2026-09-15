@@ -8,7 +8,7 @@ from druks.browser import routes
 from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
 from druks.browser.models import StoredBrowserSession
 from druks.browser.sessions import BrowserSession
-from druks.database import db_session
+from druks.db import db_session
 from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 from sqlalchemy import text

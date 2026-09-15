@@ -3,7 +3,7 @@ import shlex
 from pathlib import Path
 
 from drukbox_sdk import Secret
-from druks.database import db_session
+from druks.db import db_session
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings

@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from druks.database import db_session
+from druks.db import db_session
 from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import (
     HarnessError,

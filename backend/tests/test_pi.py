@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from drukbox_sdk import Secret
-from druks.database import db_session
+from druks.db import db_session
 from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import (
     HarnessAuthError,

@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import connect_anthropic_subscription, connect_provider
 from druks.accounts.models import Account
-from druks.database import db_session
+from druks.db import db_session
 from druks.harnesses.datastructures import ParsedMetric, ParsedUsage
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.secrets.datastructures import Audience

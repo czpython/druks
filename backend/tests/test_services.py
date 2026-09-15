@@ -12,7 +12,7 @@ from druks.accounts.models import Account
 from druks.core.apis.github import GitHubClient, get_github_client
 from druks.core.services import Github
 from druks.core.webhooks.github import GitHubEvents
-from druks.database import db_session
+from druks.db import db_session
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.services.exceptions import ServiceNotConnectedError

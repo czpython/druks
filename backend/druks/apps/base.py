@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 from pydantic import BaseModel, Field, SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.database import db_session
+from druks.db import db_session
 from druks.models import StoredSubject
 from druks.ui.exceptions import PageContractError, PageReadError, PageRouteError
 from druks.user_settings.models import SettingsOverride

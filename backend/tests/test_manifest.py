@@ -1,7 +1,7 @@
 import json
 from unittest import mock
 
-from druks.database import db_session
+from druks.db import db_session
 from druks.durable.reads import get_agent_call_files
 from druks.harnesses.artifacts import persist_manifest
 from druks.harnesses.base import Harness

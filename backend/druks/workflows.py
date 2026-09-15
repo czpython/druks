@@ -37,7 +37,8 @@ from druks.apps.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
-from druks.database import db_session, get_session
+from druks.database import get_session
+from druks.db import db_session
 from druks.durable.activity import set_run_phase
 from druks.durable.datastructures import Subject
 from druks.durable.engine import (

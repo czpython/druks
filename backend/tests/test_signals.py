@@ -1,6 +1,6 @@
 import pytest
 from druks.apps.exceptions import SubscriberDeclarationError
-from druks.database import db_session
+from druks.db import db_session
 from druks.signals import publish, subscribe
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize

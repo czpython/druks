@@ -4,7 +4,8 @@ import httpx
 import psycopg
 import pytest
 from druks.accounts.models import Account
-from druks.database import configure_session, db_session, get_session
+from druks.database import configure_session, get_session
+from druks.db import db_session
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret

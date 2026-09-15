@@ -1,18 +1,12 @@
-import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_scoped_session,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy_encrypted_field import configure
 
-from druks.exceptions import SessionNotBoundError
+from druks.db import db_session
 from druks.settings import load_settings
 
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
@@ -133,28 +127,8 @@ def get_session(engine) -> AsyncSession:
     return AsyncSession(engine, autoflush=True, expire_on_commit=False)
 
 
-def _session_scope() -> object | None:
-    try:
-        return asyncio.current_task()
-    except RuntimeError:
-        return
-
-
-_session_factory = async_sessionmaker(class_=AsyncSession, autoflush=True, expire_on_commit=False)
-db_session: async_scoped_session = async_scoped_session(_session_factory, scopefunc=_session_scope)
-
-
-def _unbound_session() -> AsyncSession:
-    raise SessionNotBoundError
-
-
-# A request, a step, and session_scope bind the session they own and close.
-# A read outside those fails instead of opening a session nothing closes.
-db_session.registry.createfunc = _unbound_session
-
-
 def configure_session(engine) -> None:
-    _session_factory.configure(bind=engine)
+    db_session.session_factory.configure(bind=engine)
 
 
 @asynccontextmanager
@@ -167,7 +141,7 @@ async def session_scope(engine=None) -> AsyncIterator[AsyncSession]:
     # A block nested in a request (a websocket handler's operator check) and
     # the test client on the caller's task find their own session back after.
     previous = db_session() if db_session.registry.has() else None
-    session = get_session(engine) if engine else _session_factory()
+    session = get_session(engine) if engine else db_session.session_factory()
     db_session.registry.set(session)
     try:
         yield session

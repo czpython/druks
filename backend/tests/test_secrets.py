@@ -2,7 +2,7 @@ import base64
 import os
 
 import pytest
-from druks.database import db_session
+from druks.db import db_session
 from druks.mcp.constants import BEARER_HEADER
 from druks.mcp.models import McpServer
 from druks.secrets.datastructures import Audience

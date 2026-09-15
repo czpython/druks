@@ -8,7 +8,7 @@ from conftest import (
     seed_note_run,
 )
 from druks.core.tasks import refresh_usage
-from druks.database import db_session
+from druks.db import db_session
 from druks.harnesses.datastructures import ParsedMetric, ParsedUsage
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.models import Base

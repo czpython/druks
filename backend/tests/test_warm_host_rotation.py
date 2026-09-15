@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import druks.workflows as sdk
 import pytest
 from drukbox_sdk import Secret
-from druks.database import db_session
+from druks.db import db_session
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.workflows import Workflow
 

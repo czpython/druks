@@ -1,6 +1,6 @@
 import pytest
 from conftest import installation_key
-from druks.database import db_session
+from druks.db import db_session
 from druks.durable.models import AgentCall, Artifact
 from druks.events.models import Event
 from druks.testing import seed_run

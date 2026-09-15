@@ -4,7 +4,7 @@ from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.models import Project, ProjectRepo
 from druks.contrib.software_factory.policy import RepoPolicy, VerificationProfile
 from druks.contrib.software_factory.workflows import Profile
-from druks.database import db_session
+from druks.db import db_session
 from druks.durable.engine import configure_engine
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.skills.datastructures import InstalledSkill

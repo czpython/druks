@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
-from druks.database import db_session
+from druks.db import db_session
 from druks.events.models import Event
 from druks.models import snake_name
 
@@ -96,7 +96,7 @@ class Subject:
         the subject is identity alone; a subject with rows of its own lists them with
         ``StoredSubject.list_open``."""
         # Cycle: the durable read side is built on this package's models.
-        from druks.database import db_session
+        from druks.db import db_session
         from druks.durable.models import Run
 
         open_ids = await db_session().scalars(Run.open_subject_ids(cls.subject_type).limit(limit))

@@ -52,6 +52,9 @@ For app-surface changes, inspect the proof app at
   `druks.signals`, `druks.db`, `druks.schemas`, `druks.prompts`, `druks.durable`,
   `druks.apps`, `druks.ui`, and `druks.webhooks`. A reference to `druks.build` or another app in these modules
   inverts the platform.
+- Internal code takes `session: AsyncSession` as a required parameter. Only
+  author code and the seams that bind the registry read `druks.db.db_session()`;
+  ruff's banned-api names the seams in `pyproject.toml`.
 - Derive liveness from run state. Do not mirror it in a column. Store an external
   outcome after its owner announces it. Do not infer that outcome from run
   lifecycle. A merge can occur after Druks stops the related run.
