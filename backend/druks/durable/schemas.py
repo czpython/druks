@@ -94,6 +94,7 @@ class RunResponse(Schema):
     # The durable kind ("software_factory.build"); ``label`` is its display name ("Build").
     kind: str
     label: str
+    retry_from: str | None = None
     state: RunState
     failure: str | None = None
     gate: str | None = None
@@ -116,6 +117,7 @@ class RunResponse(Schema):
             id=run.id,
             kind=run.kind,
             label=get_display_label(run.kind),
+            retry_from=run.retry_from,
             state=RunState(run.state),
             failure=run.failure_message(),
             gate=run.input_gate,

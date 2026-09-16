@@ -130,7 +130,7 @@ function SubjectDetail({
             key={run.id}
             app={app}
             run={run}
-            defaultOpen={index === 0}
+            newest={index === 0}
             selected={run.id === selectedRun}
             expected={run.id === selectedRun ? parkedAt : undefined}
           />
@@ -143,19 +143,19 @@ function SubjectDetail({
 function RunBlock({
   app,
   run,
-  defaultOpen,
+  newest,
   selected,
   expected,
 }: {
   app: string
   run: RunSummary
-  defaultOpen: boolean
+  newest: boolean
   selected: boolean
   expected?: string
 }) {
   const ask = run.state === 'parked' ? run.inputRequest : null
   const call = run.agentCalls.at(-1)
-  const [open, setOpen] = useState(defaultOpen || selected)
+  const [open, setOpen] = useState(newest || selected)
   const block = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (selected) {
@@ -176,7 +176,7 @@ function RunBlock({
         <span className="dim">{run.state}</span>
         <span className="dim">{relTimeFromIso(run.updatedAt)}</span>
         {isActiveRun(run) && <CancelRun runId={run.id} />}
-        {run.state === 'failed' && <RetryRun runId={run.id} />}
+        {run.state === 'failed' && newest && <RetryRun runId={run.id} />}
       </div>
       {ask?.presentation !== 'external' && (expected || ask?.presentation === 'in_app') && (
         <GateControls run={run.id} expected={expected} />

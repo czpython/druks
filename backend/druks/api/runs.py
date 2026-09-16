@@ -7,6 +7,7 @@ from druks.api.exceptions import (
     RunNotActive,
     RunNotFailed,
     RunNotFound,
+    RunNotLatest,
     SubjectBusy,
     agent_error_responses,
 )
@@ -105,7 +106,10 @@ async def cancel_run(
     response_model=RetryRunResponse,
     response_model_by_alias=True,
     responses=agent_error_responses(
-        RunNotFound("run-123"), RunNotFailed("run-123"), SubjectBusy("run-456")
+        RunNotFound("run-123"),
+        RunNotFailed("run-123"),
+        SubjectBusy("run-456"),
+        RunNotLatest("run-123", "run-456"),
     ),
 )
 async def retry_run(
@@ -125,7 +129,9 @@ async def retry_run(
     subject = await run.get_subject()
     if subject:
         latest = await Run.get_latest_for_subject(session, subject["type"], subject["id"])
-        if latest and latest.is_active:
+        if latest.is_active:
             raise SubjectBusy(latest.id)
+        if latest.id != run.id:
+            raise RunNotLatest(run_id, latest.id)
 
     return RetryRunResponse(run=await run.retry())

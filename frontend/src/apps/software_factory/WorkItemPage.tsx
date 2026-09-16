@@ -1,6 +1,7 @@
 import { Page } from '@druks/ui'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo, useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import { Link, useLocation } from 'wouter'
 
 import { useSSE } from '../../api/sse'
@@ -20,6 +21,8 @@ import { RunTranscript } from '../../components/RunTranscript'
 import { FilePane } from './AgentCallPage'
 import { computeElapsed, dur, formatTokenCount, httpUrl, relTime, secondsSince } from '../../lib/format'
 import { phaseLine } from '../../lib/phase'
+import { retryChains } from './retryChains'
+import type { RetryChain } from './retryChains'
 import { parkedLine, runSubLine, statusLine } from './statusLine'
 import { agentCallPath, workItemPath } from './slug'
 import { useRawLocation } from '../../lib/useRawLocation'
@@ -325,13 +328,12 @@ function TimelinePanel({
         <span className="ins-panel-right mono">{runs.length} runs</span>
       </div>
       <div className="ins-timeline">
-        {runs
-          .slice()
+        {retryChains(runs)
           .reverse()
-          .map((run) => (
-            <RunRow
-              key={run.id}
-              run={run}
+          .map((chain) => (
+            <ChainRow
+              key={chain[0].id}
+              chain={chain}
               phase={phase}
               selection={selection}
               onSelect={onSelect}
@@ -342,73 +344,159 @@ function TimelinePanel({
   )
 }
 
-function RunRow({
+function selectOnKey(onSelect: () => void) {
+  return (event: KeyboardEvent) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      onSelect()
+    }
+  }
+}
+
+// One build: the run that started it, then each retry as a segment under it.
+function ChainRow({
+  chain,
+  phase,
+  selection,
+  onSelect,
+}: {
+  chain: RetryChain
+  phase?: string | null
+  selection: Selection | null
+  onSelect: (id: string) => void
+}) {
+  const first = chain[0]
+  const newest = chain.at(-1) ?? first
+  const metrics = chain.map(runMetrics)
+  const elapsed = metrics.reduce((sum, m) => sum + m.elapsed, 0)
+  const cost = metrics.reduce((sum, m) => sum + m.cost, 0)
+  // A single call duplicates the run's own row (same label, same ledger) —
+  // fold it into the parent instead of showing both.
+  const collapseCalls = chain.length === 1 && first.agentCalls.length <= 1
+  const headSelected =
+    selection?.run.id === newest.id && (collapseCalls || selection.call == null)
+  return (
+    <div className={`wic-run ${chain.length > 1 ? 'wic-run-chain' : ''}`}>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={`Select ${newest.label} run ${newest.id}`}
+        className={`wic-op ${headSelected ? 'wic-op-selected' : ''} ${isRunning(newest) ? 'wic-op-running' : ''}`}
+        onClick={() => onSelect(newest.id)}
+        onKeyDown={selectOnKey(() => onSelect(newest.id))}
+      >
+        <div className="wic-op-spine">
+          <span className={`wic-op-node wic-node-${newest.state}`}>
+            {STATE_GLYPH[newest.state] ?? '·'}
+          </span>
+        </div>
+        <div className="wic-op-main">
+          <div className="wic-op-row1">
+            <span className="wic-op-kind">{first.label}</span>
+            <span className="wic-op-owner" title="Who requested this run.">
+              {first.accountUsername}
+            </span>
+          </div>
+          {collapseCalls && <RunStatus run={first} phase={phase} collapsed />}
+        </div>
+        <div className="wic-op-ledger">
+          <span className="wic-op-dur">{elapsed > 0 ? dur(elapsed) : '–'}</span>
+          <span className="wic-op-cost">{cost > 0 ? '$' + cost.toFixed(2) : '–'}</span>
+        </div>
+      </div>
+      {!collapseCalls &&
+        chain.map((run, index) => (
+          <RunSegment
+            key={run.id}
+            run={run}
+            retry={index}
+            phase={phase}
+            selection={selection}
+            onSelect={onSelect}
+          />
+        ))}
+    </div>
+  )
+}
+
+// One run's part of its build: its steps, closed by how the run stands. A retry
+// opens with a divider that carries its own ledger; ``retry`` is 0 for the run
+// that started the build.
+function RunSegment({
   run,
+  retry,
   phase,
   selection,
   onSelect,
 }: {
   run: RunSummary
+  retry: number
   phase?: string | null
   selection: Selection | null
   onSelect: (id: string) => void
 }) {
   const metrics = runMetrics(run)
-  const selectedHere = selection?.run.id === run.id
-  // A single call duplicates the run's own row (same label, same ledger) —
-  // fold it into the parent instead of showing both.
-  const collapseCalls = run.agentCalls.length <= 1
-  const subtitle = runSubLine(run, phase, collapseCalls)
+  const selectRun = () => onSelect(run.id)
+  const runSelected = selection?.run.id === run.id && selection.call == null
   return (
-    <div className="wic-run">
+    <>
+      {retry > 0 && (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label={`Select retry ${retry} run ${run.id}`}
+          className={`wic-call wic-retry ${runSelected ? 'wic-call-selected' : ''}`}
+          onClick={selectRun}
+          onKeyDown={selectOnKey(selectRun)}
+        >
+          <span className="wic-call-glyph">↻</span>
+          <span className="wic-call-label">retry {retry}</span>
+          <span className="wic-call-ledger">
+            <span className="wic-op-dur">{metrics.elapsed > 0 ? dur(metrics.elapsed) : '–'}</span>
+            <span className="wic-op-cost">
+              {metrics.cost > 0 ? '$' + metrics.cost.toFixed(2) : '–'}
+            </span>
+          </span>
+        </div>
+      )}
+      {run.agentCalls.map((call) => (
+        <CallRow
+          key={call.id}
+          call={call}
+          selected={selection?.call?.id === call.id}
+          onSelect={() => onSelect(call.id)}
+        />
+      ))}
       <div
         role="button"
         tabIndex={0}
-        aria-label={`Select ${run.label} run ${run.id}`}
-        className={`wic-op ${selectedHere && (collapseCalls || selection?.call == null) ? 'wic-op-selected' : ''} ${isRunning(run) ? 'wic-op-running' : ''}`}
-        onClick={() => onSelect(run.id)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            onSelect(run.id)
-          }
-        }}
+        aria-label={`Select run ${run.id}`}
+        className="wic-call wic-status"
+        onClick={selectRun}
+        onKeyDown={selectOnKey(selectRun)}
       >
-        <div className="wic-op-spine">
-          <span className={`wic-op-node wic-node-${run.state}`}>
-            {STATE_GLYPH[run.state] ?? '·'}
-          </span>
-        </div>
-        <div className="wic-op-main">
-          <div className="wic-op-row1">
-            <span className="wic-op-kind">{run.label}</span>
-            <span className="wic-op-owner" title="Who requested this run.">
-              {run.accountUsername}
-            </span>
-          </div>
-          <span className={`wic-op-sub wic-sub-${run.state}`}>
-            <span className="wic-op-sub-dot" />
-            {subtitle}
-            {!isRunning(run) && <span> · {relTime(secondsSince(run.updatedAt))}</span>}
-          </span>
-        </div>
-        <div className="wic-op-ledger">
-          <span className="wic-op-dur">{metrics.elapsed > 0 ? dur(metrics.elapsed) : '–'}</span>
-          <span className="wic-op-cost">
-            {metrics.cost > 0 ? '$' + metrics.cost.toFixed(2) : '–'}
-          </span>
-        </div>
+        <RunStatus run={run} phase={phase} collapsed={false} />
       </div>
-      {!collapseCalls &&
-        run.agentCalls.map((call) => (
-          <CallRow
-            key={call.id}
-            call={call}
-            selected={selectedHere && selection?.call?.id === call.id}
-            onSelect={() => onSelect(call.id)}
-          />
-        ))}
-    </div>
+    </>
+  )
+}
+
+// What the run is doing, or how it ended.
+function RunStatus({
+  run,
+  phase,
+  collapsed,
+}: {
+  run: RunSummary
+  phase?: string | null
+  collapsed: boolean
+}) {
+  return (
+    <span className={`wic-op-sub wic-sub-${run.state}`}>
+      <span className="wic-op-sub-dot" />
+      {runSubLine(run, phase, collapsed)}
+      {!isRunning(run) && <span> · {relTime(secondsSince(run.updatedAt))}</span>}
+    </span>
   )
 }
 
@@ -429,12 +517,7 @@ function CallRow({
       tabIndex={0}
       aria-label={`Select ${call.label} call ${call.id}`}
       onClick={onSelect}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          onSelect()
-        }
-      }}
+      onKeyDown={selectOnKey(onSelect)}
     >
       <span className={`wic-call-glyph wic-g-${call.status}`}>
         {CALL_GLYPH[call.status] ?? '·'}

@@ -146,6 +146,8 @@ export interface RunSummary {
   // The durable kind ("software_factory.build"); label is its backend display name ("Build").
   kind: string
   label: string
+  // The run this one was retried from; null for a run that was started.
+  retryFrom: string | null
   state: RunState
   failure?: string | null
   gate: string | null

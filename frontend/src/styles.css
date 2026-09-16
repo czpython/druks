@@ -1527,6 +1527,13 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .wic-g-abandoned { color: var(--wic-cancelled); }
 .wic-call-label { font-size: 12px; color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wic-call-ledger { display: flex; gap: 10px; white-space: nowrap; }
+.wic-retry { margin-top: 4px; border-top: 1px solid var(--border); }
+.wic-retry .wic-call-glyph, .wic-retry .wic-call-label { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+.wic-status { padding-bottom: 8px; }
+.wic-status .wic-op-sub { grid-column: 2; }
+/* The build's rail runs down through its retries, under the header's node. */
+.wic-run-chain { position: relative; }
+.wic-run-chain::before { content: ''; position: absolute; top: 26px; bottom: 12px; left: 27px; width: 1px; background: var(--border); transform: translateX(-0.5px); }
 
 .pj-head {
   display: flex; align-items: baseline; gap: 12px;

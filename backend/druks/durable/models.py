@@ -16,6 +16,7 @@ from druks.apps.registry import workflows
 from druks.core.models import Uuid7Pk
 from druks.database import get_session
 from druks.durable.dbos_state import (
+    retry_from_expression,
     state_expression,
     subject_attribute_expression,
     subject_filter,
@@ -79,6 +80,7 @@ class Run(Base):
     subject_title: Mapped[str | None] = column_property(
         subject_attribute_expression(id, "subject_title")
     )
+    retry_from: Mapped[str | None] = column_property(retry_from_expression(id))
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     account: Mapped[Account] = relationship(lazy="joined", foreign_keys=[account_id])
     # The run's agent calls in execution order. Never lazy-loaded: the reads

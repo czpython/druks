@@ -72,6 +72,7 @@ function run(overrides: Partial<RunSummary> = {}): RunSummary {
     id: 'r1',
     kind: 'software_factory.build',
     label: 'Build',
+    retryFrom: null,
     state: 'running',
     accountUsername: 'system',
     createdAt: '2026-07-26T00:00:00Z',

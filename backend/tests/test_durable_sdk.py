@@ -1468,7 +1468,9 @@ async def test_failed_retry_attempts_keep_separate_terminal_records(rt):
 
         assert retry_id != first_id
         async with get_session(rt.engine) as reader:
+            retried = await reader.get(Run, retry_id)
             events = list(await reader.scalars(select(Event).filter_by(type="workflow.failed")))
+        assert retried.retry_from == first_id
         failures = [event for event in events if event.payload["run"] in {first_id, retry_id}]
         assert len(failures) == 2
         assert {event.payload["run"] for event in failures} == {first_id, retry_id}

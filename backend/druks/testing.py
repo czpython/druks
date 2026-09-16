@@ -406,7 +406,9 @@ async def seed_run(
             "title": subject.get_summary().title,
         }
     await seed_dbos_status(session, run.id, state, subject=identity)
-    await session.refresh(run, ["state", "updated_at", "subject_key", "subject_title"])
+    await session.refresh(
+        run, ["state", "updated_at", "subject_key", "subject_title", "retry_from"]
+    )
     return run
 
 

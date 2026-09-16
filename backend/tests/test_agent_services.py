@@ -13,7 +13,13 @@ from conftest import (
 )
 from druks.accounts.models import Account
 from druks.api import runs
-from druks.api.exceptions import RunNotActive, RunNotFailed, RunNotFound, SubjectBusy
+from druks.api.exceptions import (
+    RunNotActive,
+    RunNotFailed,
+    RunNotFound,
+    RunNotLatest,
+    SubjectBusy,
+)
 from druks.db import db_session
 from druks.durable.engine import run_queue
 from druks.durable.enums import WorkflowEvent
@@ -408,6 +414,19 @@ async def test_retry_run_refuses_a_busy_subject(druks_db, monkeypatch):
 
     assert str(error.value) == f"The subject already has active run {active.id}."
     assert error.value.retryable is True
+    retry.assert_not_awaited()
+
+
+async def test_retry_run_refuses_a_run_that_is_not_the_latest(druks_db, monkeypatch):
+    item = await make_test_note()
+    older = await seed_note_run(druks_db, note=item, state="failed")
+    await seed_note_run(druks_db, note=item, state="failed")
+    retry = mock.AsyncMock()
+    monkeypatch.setattr(Run, "retry", retry)
+
+    with pytest.raises(RunNotLatest):
+        await runs.retry_run(druks_db, older.id)
+
     retry.assert_not_awaited()
 
 

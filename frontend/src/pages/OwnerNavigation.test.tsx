@@ -30,6 +30,7 @@ const run = (id: string): RunSummary => ({
   id,
   kind: 'notes.summarize',
   label: id,
+  retryFrom: null,
   state: 'parked',
   gate: 'review',
   inputRequest: { presentation: 'in_app', controls: ['approve'] },

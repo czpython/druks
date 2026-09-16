@@ -26,6 +26,7 @@ workflow_status = sa.Table(
     sa.Column("status", sa.String),
     sa.Column("updated_at", sa.BigInteger),
     sa.Column("attributes", JSONB),
+    sa.Column("forked_from", sa.String),
 )
 
 
@@ -92,6 +93,16 @@ def subject_attribute_expression(run_id: sa.ColumnElement, name: str) -> sa.Colu
     """The subject attribute recorded when this run started."""
     return (
         sa.select(workflow_status.c.attributes[name].as_string())
+        .where(workflow_status.c.workflow_uuid == run_id)
+        .correlate_except(workflow_status)
+        .scalar_subquery()
+    )
+
+
+def retry_from_expression(run_id: sa.ColumnElement) -> sa.ColumnElement:
+    """The run this one was retried from; DBOS records it when it forks."""
+    return (
+        sa.select(workflow_status.c.forked_from)
         .where(workflow_status.c.workflow_uuid == run_id)
         .correlate_except(workflow_status)
         .scalar_subquery()
