@@ -358,8 +358,12 @@ class Build(Workflow):
         if delivery.status == "needs_clarification":
             raise FatalError(f"implementation needs clarification: {delivery.summary}")
         if self.journal.implementation_revision == 1:
-            # The first delivery also opened the branch and the draft PR.
-            await self.announce("pr.opened", pr_number=delivery.pr_number, branch=delivery.branch)
+            await self.announce(
+                "pr.opened",
+                repo=(await self.subject).repo,
+                pr_number=delivery.pr_number,
+                branch=delivery.branch,
+            )
         return delivery
 
     @step

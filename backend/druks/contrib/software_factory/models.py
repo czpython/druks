@@ -323,7 +323,7 @@ class WorkItem(StoredSubject):
         self.updated_at = Base.utc_now()
         await db_session().flush()
         if resolution in (Resolution.MERGED, Resolution.CLOSED):
-            await self.announce(resolution)
+            await self.announce(resolution, repo=self.repo, pr_number=self.pr_number)
         if resolution == Resolution.MERGED:
             # A merge strands a build that is parked on review. A running build finishes
             # by itself, because its merge step finds the PR closed.
