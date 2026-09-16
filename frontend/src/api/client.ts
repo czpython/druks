@@ -10,6 +10,7 @@ import type {
   FeedResponse,
   FeedDestinations,
   EventFilters,
+  EventTopic,
   FileSummary,
   AppSettingChoices,
   AppsSettingsResponse,
@@ -276,8 +277,8 @@ export const api = {
     const query = eventQuery(params)
     return getJSON<FeedResponse>(`/api/events${query ? `?${query}` : ''}`)
   },
-  listEventKinds: (app?: string) =>
-    getJSON<string[]>(`/api/events/kinds${app ? `?app=${encodeURIComponent(app)}` : ''}`),
+  listEventTopics: (app?: string) =>
+    getJSON<EventTopic[]>(`/api/events/topics${app ? `?app=${encodeURIComponent(app)}` : ''}`),
   getEventDestinations: (seq: number) =>
     getJSON<FeedDestinations>(`/api/events/${seq}/destinations`),
   getSettings: () => getJSON<InstallationSettings>('/api/settings'),

@@ -31,16 +31,16 @@ async def test_feed_carries_what_a_row_is_worded_from(druks_db, druks_client):
     await druks_db.flush()
 
     items = (await druks_client.get("/api/events")).json()["items"]
-    by_kind = {row["kind"]: row for row in items}
+    by_topic = {row["topic"]: row for row in items}
 
-    started = by_kind["workflow.scheduled"]
+    started = by_topic["workflow.scheduled"]
     assert (started["app"], started["workflow"]) == ("field_notes", Summarize.kind)
     assert (started["subjectType"], started["subjectId"]) == ("note", str(note.id))
     # A note declares no label of its own, so it shows itself by identity.
     assert started["subjectLabel"] == f"note {note.id}"
 
     # A milestone has no workflow behind it.
-    assert by_kind["summarized"]["workflow"] is None
+    assert by_topic["summarized"]["workflow"] is None
 
 
 async def test_every_subject_shows_itself(druks_db, druks_client):
@@ -87,5 +87,5 @@ async def test_feed_paginates_same_second_events_without_loss_or_repeat(druks_db
 
     seqs = [item["seq"] for item in collected]
     assert len(seqs) == len(set(seqs)), "no event repeats across pages"
-    assert {f"evt-{i}" for i in range(5)} <= {item["kind"] for item in collected}
+    assert {f"evt-{i}" for i in range(5)} <= {item["topic"] for item in collected}
     assert seqs == sorted(seqs, reverse=True), "strictly descending by seq"

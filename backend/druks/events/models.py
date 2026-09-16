@@ -42,7 +42,7 @@ class Event(Base):
         *,
         app: str | None = None,
         search: str | None = None,
-        kind: str | None = None,
+        topic: str | None = None,
         from_at: datetime | None = None,
         until: datetime | None = None,
     ) -> Select[tuple["Event"]]:
@@ -74,8 +74,8 @@ class Event(Base):
             statement = statement.where(
                 cls.subject_label.icontains(search.strip(), autoescape=True)
             )
-        if kind:
-            statement = statement.where(cls.type == kind)
+        if topic:
+            statement = statement.where(cls.type == topic)
         if from_at:
             statement = statement.where(cls.created_at >= from_at)
         if until:

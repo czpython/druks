@@ -1,3 +1,4 @@
+import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -5,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from conftest import installation_key
+from druks.contrib.software_factory.models import Project, WorkItem
 from druks.db import db_session
 from druks.durable.models import AgentCall, Artifact
 from druks.events import routes
@@ -63,25 +65,67 @@ async def test_filters_match_literally_and_bound_dates(druks_client, history):
     combined = {
         "q": "  aCmE%_  ",
         "app": "field_notes",
-        "kind": "summary.ready",
+        "topic": "summary.ready",
         "from": "2026-09-09T00:00:00Z",
         "until": "2026-09-09T01:00:00Z",
     }
     assert await read(combined) == [one]
     assert await read({"q": "aCmE%_"}) == [two, one]
     assert await read({"q": "ACME/WIDGET"}) == [widget]
-    assert await read({"kind": "summary.ready"}) == [unlabelled, two, one]
+    assert await read({"topic": "summary.ready"}) == [unlabelled, two, one]
     assert await read({"from": "2026-09-09T01:00:00Z"}) == [widget, factory, two]
     assert await read({"q": "   "}) == [unlabelled, widget, factory, two, one]
 
 
-async def test_kinds_list_every_eligible_type_in_the_app_scope(druks_client, history):
-    async def kinds(params):
-        return (await druks_client.get("/api/events/kinds", params=params)).json()
+async def test_topics_list_every_eligible_type_in_the_app_scope(druks_client, history):
+    async def topics(params):
+        return (await druks_client.get("/api/events/topics", params=params)).json()
 
-    assert await kinds({}) == ["later.kind", "plan.prepared", "summary.ready"]
-    assert await kinds({"app": "field_notes"}) == ["later.kind", "summary.ready"]
-    assert await kinds({"app": "not_installed"}) == []
+    assert await topics({}) == [
+        {"app": "field_notes", "topic": "later.kind"},
+        {"app": "field_notes", "topic": "summary.ready"},
+        {"app": "software_factory", "topic": "plan.prepared"},
+    ]
+    assert await topics({"app": "field_notes"}) == [
+        {"app": "field_notes", "topic": "later.kind"},
+        {"app": "field_notes", "topic": "summary.ready"},
+    ]
+    assert await topics({"app": "not_installed"}) == []
+
+
+@pytest.mark.parametrize("owner", ["field_notes", "software_factory"])
+async def test_same_topic_keeps_its_owner_in_history_and_stream(
+    druks_db, druks_client, monkeypatch, owner
+):
+    note = await Note.create(body="Combine these observations")
+    project = await Project.create(name="Activity")
+    item = await WorkItem.create(
+        project_id=project.id, title="Combine notes", ticket_key="ACT-1", repo="acme/notes"
+    )
+    await note.announce("merged")
+    await item.announce("merged")
+    choices = (await druks_client.get("/api/events/topics")).json()
+    assert choices == [
+        {"app": "field_notes", "topic": "merged"},
+        {"app": "software_factory", "topic": "merged"},
+    ]
+    rows = (await druks_client.get("/api/events", params={"app": owner, "topic": "merged"})).json()[
+        "items"
+    ]
+    assert [(row["app"], row["topic"]) for row in rows] == [(owner, "merged")]
+    assert "kind" not in rows[0]
+
+    @asynccontextmanager
+    async def scope(_engine):
+        yield druks_db
+
+    monkeypatch.setattr(routes, "session_scope", scope)
+    monkeypatch.setattr(routes.asyncio, "sleep", AsyncMock())
+    request = SimpleNamespace(headers={}, is_disconnected=AsyncMock(side_effect=[False, True]))
+    response = await routes.stream_feed(request=request, engine=None, app=owner, topic="merged")
+    messages = [message async for message in response.body_iterator]
+    streamed = [json.loads(message.splitlines()[1].removeprefix("data: ")) for message in messages]
+    assert streamed == rows
 
 
 @pytest.mark.parametrize(
@@ -146,8 +190,10 @@ async def test_activity_keeps_decisions_failures_and_stops(druks_db, druks_clien
         "workflow.parked",
         "workflow.scheduled",
     ]
-    assert [item["kind"] for item in items] == kinds
-    assert (await druks_client.get("/api/events/kinds")).json() == sorted(kinds)
+    assert [item["topic"] for item in items] == kinds
+    assert (await druks_client.get("/api/events/topics")).json() == [
+        {"app": "field_notes", "topic": topic} for topic in sorted(kinds)
+    ]
     cancelled, failed, receipt = items[:3]
     assert (receipt["gate"], receipt["parkedAt"]) == ("review", "2026-09-09T01:00:00Z")
     assert (failed["failure"], cancelled["failure"]) == ("Timed out", "Stopped")
@@ -270,7 +316,7 @@ async def test_stream_catches_up_in_pages_then_sends_new_rows_once(
     sqlalchemy_event.listen(engine, "before_cursor_execute", record)
     try:
         response = await routes.stream_feed(
-            request=request, engine=None, app="field_notes", kind="summary.ready", after=after
+            request=request, engine=None, app="field_notes", topic="summary.ready", after=after
         )
         messages = [message async for message in response.body_iterator]
     finally:

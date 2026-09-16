@@ -7,11 +7,14 @@ from druks.events.feed import FeedDestinations
 from druks.events.models import Event
 
 
-async def list_kinds(session: AsyncSession, app: str | None) -> list[str]:
+async def list_topics(session: AsyncSession, app: str | None) -> list[dict[str, str]]:
     statement = (
-        Event.get_history(app=app).with_only_columns(Event.type).distinct().order_by(Event.type)
+        Event.get_history(app=app)
+        .with_only_columns(Event.app, Event.type)
+        .distinct()
+        .order_by(Event.app, Event.type)
     )
-    return list(await session.scalars(statement))
+    return [{"app": owner, "topic": topic} for owner, topic in await session.execute(statement)]
 
 
 async def get_destinations(session: AsyncSession, event: Event) -> FeedDestinations:

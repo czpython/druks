@@ -47,14 +47,14 @@ async def list_feed(
     session: SessionDep,
     app: Annotated[str | None, Query()] = None,
     search: Annotated[str | None, Query(alias="q")] = None,
-    kind: Annotated[str | None, Query()] = None,
+    topic: Annotated[str | None, Query()] = None,
     from_at: Annotated[AwareDatetime | None, Query(alias="from")] = None,
     until: Annotated[AwareDatetime | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
     before: Annotated[str | None, Query()] = None,
 ) -> FeedResponse:
     _check_range(from_at, until)
-    history = Event.get_history(app=app, search=search, kind=kind, from_at=from_at, until=until)
+    history = Event.get_history(app=app, search=search, topic=topic, from_at=from_at, until=until)
     cursor = _parse_cursor(before)
     if cursor:
         history = history.where(Event.id < cursor)
@@ -63,11 +63,11 @@ async def list_feed(
     return FeedResponse.model_validate({"items": events[:limit], "next_cursor": next_cursor})
 
 
-@router.get("/kinds", response_model=list[str])
-async def list_feed_kinds(
+@router.get("/topics")
+async def list_feed_topics(
     session: SessionDep, app: Annotated[str | None, Query()] = None
-) -> list[str]:
-    return await reads.list_kinds(session, app)
+) -> list[dict[str, str]]:
+    return await reads.list_topics(session, app)
 
 
 @router.get("/{seq}/destinations", response_model=FeedDestinations, response_model_by_alias=True)
@@ -86,13 +86,13 @@ async def stream_feed(
     engine: EngineDep,
     app: Annotated[str | None, Query()] = None,
     search: Annotated[str | None, Query(alias="q")] = None,
-    kind: Annotated[str | None, Query()] = None,
+    topic: Annotated[str | None, Query()] = None,
     from_at: Annotated[AwareDatetime | None, Query(alias="from")] = None,
     until: Annotated[AwareDatetime | None, Query()] = None,
     after: Annotated[str | None, Query()] = None,
 ) -> StreamingResponse:
     _check_range(from_at, until)
-    history = Event.get_history(app=app, search=search, kind=kind, from_at=from_at, until=until)
+    history = Event.get_history(app=app, search=search, topic=topic, from_at=from_at, until=until)
     last_seq = _parse_cursor(request.headers.get("last-event-id") or after)
 
     async def feed_stream():
