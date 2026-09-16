@@ -273,6 +273,17 @@ class FindingOutput(AgentOutput):
     line: int | None
     start_line: int | None
 
+    def to_sections(self) -> list[str]:
+        sections = [f"## {self.summary}", self.evidence]
+        if self.path:
+            location = self.path
+            if self.line:
+                location = f"{self.path}:{self.line}"
+            if self.line and self.start_line:
+                location = f"{self.path}:{self.start_line}-{self.line}"
+            sections.append(f"Source: `{location}`")
+        return sections
+
 
 class ReviewReport(AgentOutput):
     decision: Literal["approve", "request_changes", "comment"]
@@ -283,14 +294,7 @@ class ReviewReport(AgentOutput):
     def to_artifact(self) -> dict[str, str]:
         sections = [f"Decision: {self.decision}", self.summary]
         for finding in self.findings:
-            sections.extend([f"## {finding.summary}", finding.evidence])
-            if finding.path:
-                location = finding.path
-                if finding.line:
-                    location = f"{finding.path}:{finding.line}"
-                if finding.line and finding.start_line:
-                    location = f"{finding.path}:{finding.start_line}-{finding.line}"
-                sections.append(f"Source: `{location}`")
+            sections.extend(finding.to_sections())
         return {"kind": "markdown", "title": "Review", "content": "\n\n".join(sections)}
 
     def to_event(self) -> dict[str, str]:
@@ -316,3 +320,20 @@ class EvaluationOutput(AgentOutput):
     findings: list[FindingOutput]
     checks: list[EvalCheckOutput]
     acceptance_results: list[AcceptanceResultOutput]
+
+    def to_artifact(self) -> dict[str, str]:
+        # A blocked verdict says the checks could not decide, not that the work has
+        # a blocker, so the headline names the checks that failed or did not run.
+        if self.verdict == EvaluationVerdict.BLOCKED:
+            sections = ["Verification blocked"]
+            sections.extend(
+                f"- {check.name}: {check.evidence}"
+                for check in self.checks
+                if check.status != "pass"
+            )
+        else:
+            sections = [f"Verdict: {self.verdict}"]
+        sections.append(self.body)
+        for finding in self.findings:
+            sections.extend(finding.to_sections())
+        return {"kind": "markdown", "title": "Evaluation", "content": "\n\n".join(sections)}

@@ -427,29 +427,6 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 .stream-row-done .stream-glyph { color: var(--outcome-merged); }
 .stream-row-unknown { color: var(--text-mid); }
 
-.stream-row-harness-result {
-  padding: 8px 22px;
-  border-left: 2px solid var(--border);
-  margin: 4px 0;
-}
-.stream-row-harness-result.stream-row-result-error {
-  border-left-color: var(--bucket-dead);
-}
-.stream-row-harness-head {
-  display: flex; align-items: baseline; gap: 10px;
-  margin-bottom: 4px;
-}
-.stream-harness-verdict {
-  font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
-  color: var(--text);
-}
-.stream-row-result-error .stream-harness-verdict { color: var(--bucket-dead); }
-.stream-harness-counts { font-size: 11px; }
-.stream-row-harness-body {
-  color: var(--text);
-  white-space: pre-wrap; word-break: break-word;
-  line-height: 1.5;
-}
 .stream-row-raw {
   color: var(--text);
   white-space: pre-wrap; word-break: break-word;

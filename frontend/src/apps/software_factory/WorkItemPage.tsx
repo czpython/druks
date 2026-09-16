@@ -17,6 +17,7 @@ import { queryGate } from '../../components/QueryGate'
 import { CancelRun, RetryRun } from '../../components/RunControls'
 import { GateControls } from '../../druksui/GateControls'
 import { RunTranscript } from '../../components/RunTranscript'
+import { FilePane } from './AgentCallPage'
 import { computeElapsed, dur, formatTokenCount, relTime, secondsSince } from '../../lib/format'
 import { phaseLine } from '../../lib/phase'
 import { parkedLine, runSubLine, statusLine } from './statusLine'
@@ -500,26 +501,46 @@ function RunInspector({
   const review =
     run.state === 'parked' && run.inputRequest?.presentation === 'in_app' ? run.inputRequest : null
   const isNewestCall = call == null || call.id === run.agentCalls.at(-1)?.id
-  const [tab, setTab] = useState<'review' | 'transcript'>(
-    expected || (review && isNewestCall) ? 'review' : 'transcript',
-  )
+  // A finished call's saved result (an evaluation's verdict, a plan) is what the
+  // operator came for; the transcript is how it got there.
+  const files = useQuery({
+    queryKey: ['agent-call-files', call?.id],
+    queryFn: () => buildApi.transcriptFiles(call!.id),
+    enabled: call != null && call.status !== 'running',
+  })
+  const artifact = files.data?.artifact ?? null
+  const [picked, setPicked] = useState<'review' | 'result' | 'transcript' | null>(null)
+  const tab =
+    picked ?? (expected || (review && isNewestCall) ? 'review' : artifact ? 'result' : 'transcript')
   const showReview = (expected || review) && tab === 'review'
+  const showResult = artifact && call && tab === 'result'
   return (
     <>
       <RunHeader data={data} run={run} call={call} />
-      {(expected || review) && (
+      {(expected || review || artifact) && (
         <div className="ins-tabs">
-          <button
-            type="button"
-            className={`ins-tab ${tab === 'review' ? 'ins-tab-active' : ''}`}
-            onClick={() => setTab('review')}
-          >
-            <span className="ins-tab-dot" /> review
-          </button>
+          {(expected || review) && (
+            <button
+              type="button"
+              className={`ins-tab ${tab === 'review' ? 'ins-tab-active' : ''}`}
+              onClick={() => setPicked('review')}
+            >
+              <span className="ins-tab-dot" /> review
+            </button>
+          )}
+          {artifact && (
+            <button
+              type="button"
+              className={`ins-tab ${tab === 'result' ? 'ins-tab-active' : ''}`}
+              onClick={() => setPicked('result')}
+            >
+              {artifact.title.toLowerCase()}
+            </button>
+          )}
           <button
             type="button"
             className={`ins-tab ${tab === 'transcript' ? 'ins-tab-active' : ''}`}
-            onClick={() => setTab('transcript')}
+            onClick={() => setPicked('transcript')}
           >
             transcript
           </button>
@@ -529,6 +550,11 @@ function RunInspector({
         <RunFailure run={run} />
         {showReview ? (
           <GateControls run={run.id} expected={expected} />
+        ) : showResult ? (
+          <FilePane
+            url={buildApi.transcriptFile(call.id, artifact.name)}
+            markdown={artifact.kind === 'markdown'}
+          />
         ) : (
           <>
             {!review && <RunNeedsInput run={run} prUrl={data.summary.links.pr} />}

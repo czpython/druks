@@ -222,7 +222,7 @@ function TokensStat({ call }: { call: AgentCallSummary }) {
   )
 }
 
-function FilePane({ url, markdown = false }: { url: string | null; markdown?: boolean }) {
+export function FilePane({ url, markdown = false }: { url: string | null; markdown?: boolean }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['file', url],
     queryFn: async () => {

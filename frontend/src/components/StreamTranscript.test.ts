@@ -81,54 +81,6 @@ describe('parseStream noise suppression', () => {
     })
   })
 
-  it('renders a verdict-shaped codex final result like claude harness results', () => {
-    const text = [
-      line({
-        type: 'item.completed',
-        item: {
-          type: 'agent_message',
-          text: '{"verdict":"request_changes","body":"Two findings.","findings":[{},{}]}',
-        },
-      }),
-      line({
-        type: 'item.completed',
-        item: { type: 'agent_message', text: '{"plan_markdown":"# plan","questions":[]}' },
-      }),
-    ].join('\n')
-
-    const rows = parseStream(text, true)
-
-    // The verdict result surfaces; the structural payload still drops.
-    expect(rows.map((r) => r.kind)).toEqual(['harness_result'])
-    expect(rows[0]).toMatchObject({
-      kind: 'harness_result',
-      verdict: 'request_changes',
-      findingsCount: 2,
-      isError: true,
-    })
-  })
-
-  it('falls back to status for implement results that have no verdict', () => {
-    const text = line({
-      type: 'item.completed',
-      item: {
-        type: 'agent_message',
-        text: '{"status":"success","summary":"Implemented the fix.","acceptance_results":[{},{}]}',
-      },
-    })
-
-    const rows = parseStream(text, true)
-
-    expect(rows.map((r) => r.kind)).toEqual(['harness_result'])
-    expect(rows[0]).toMatchObject({
-      kind: 'harness_result',
-      verdict: 'success',
-      body: 'Implemented the fix.',
-      acCount: 2,
-      isError: false,
-    })
-  })
-
   it('renders codex mcp_tool_call as a named tool call with its result text', () => {
     // Real shape from a prod generate_plan transcript.
     const text = [

@@ -97,22 +97,6 @@ type Row =
   | { kind: 'tool_use'; name: string; arg: string }
   | { kind: 'tool_result'; text: string; isError: boolean }
   | { kind: 'result'; durationMs: number | null; costUsd: number | null; tokens: number }
-  // ``harness_result`` is the structured payload a harness emits as its
-  // final output — evaluator verdicts, plan-review decisions, code-review
-  // findings. These land in the transcript as bare JSON lines (no
-  // stream-envelope ``type`` field) and used to render as truncated
-  // "▸ event" unknown rows; now we surface the verdict + body + counts
-  // so the operator can read what actually happened without leaving the
-  // transcript view.
-  | {
-      kind: 'harness_result'
-      verdict: string
-      body: string
-      findingsCount: number | null
-      checksCount: number | null
-      acCount: number | null
-      isError: boolean
-    }
   | { kind: 'unknown'; label: string; detail: string }
   | { kind: 'raw'; line: string }
 
@@ -309,16 +293,6 @@ function rowsForEvent(event: Record<string, unknown>, raw: string): Row[] {
   if (eventType === 'response_item') {
     return sessionResponseItemRows(event.payload)
   }
-  // Harness result payload (no stream envelope) — e.g. the evaluator's
-  // {verdict, body, findings, checks, acceptance_results} or the plan
-  // reviewer's {decision, body}. Detect by the presence of ``verdict``
-  // or ``decision`` and the absence of a ``type`` field. Render as a
-  // structured row so the operator can read the body inline instead of
-  // staring at a truncated JSON ellipsis.
-  if (!eventType) {
-    const harness = harnessResultRow(event)
-    if (harness !== null) return [harness]
-  }
   return [
     {
       kind: 'unknown',
@@ -392,39 +366,6 @@ function sessionResponseItemRows(payload: unknown): Row[] {
   return []
 }
 
-
-function harnessResultRow(event: Record<string, unknown>): Row | null {
-  // verdict/decision (review, triage) with status as the implement-result
-  // fallback — its schema has status+summary, no verdict field.
-  const verdict = stringOr(event.verdict ?? event.decision ?? event.status, '').trim()
-  const body = stringOr(event.body ?? event.summary, '').trim()
-  if (!verdict && !body) return null
-  const findingsCount = Array.isArray(event.findings) ? event.findings.length : null
-  const checksCount = Array.isArray(event.checks) ? event.checks.length : null
-  const acCount = Array.isArray(event.acceptance_results)
-    ? event.acceptance_results.length
-    : null
-  // Treat fail / blocked / request_changes verdicts as error-coloured —
-  // the operator should see those land prominently when they scan the
-  // transcript.
-  const lower = verdict.toLowerCase()
-  const isError =
-    lower === 'fail' ||
-    lower === 'failed' ||
-    lower === 'blocked' ||
-    lower === 'request_changes' ||
-    lower === 'file_followup'
-  return {
-    kind: 'harness_result',
-    verdict,
-    body,
-    findingsCount,
-    checksCount,
-    acCount,
-    isError,
-  }
-}
-
 /** Translate a Codex ``item.completed`` payload into renderable rows. */
 function codexItemRows(item: unknown): Row[] {
   if (typeof item !== 'object' || item === null) return []
@@ -433,21 +374,16 @@ function codexItemRows(item: unknown): Row[] {
   if (itemType === 'agent_message') {
     // With --output-schema, every codex agent_message is a JSON object —
     // the final structured result (interim ones are prompt-suppressed
-    // noise; legacy transcripts still carry them). Verdict-shaped results
-    // render as the same highlighted row claude's results get; the rest
-    // (plan markdown, scope briefs) are structural payloads shown in their
-    // own views, so they drop. Prose renders as text — today's codex can't
-    // emit it, but it's the upgrade path if the CLI ever enforces
-    // final-only.
+    // noise; legacy transcripts still carry them). It is the call's saved
+    // output, shown in its own view, so it drops. Prose renders as text —
+    // today's codex can't emit it, but it's the upgrade path if the CLI
+    // ever enforces final-only.
     const text = stringOr(obj.text, '').trim()
     if (!text) return []
     if (text.startsWith('{')) {
       try {
         const parsed: unknown = JSON.parse(text)
-        if (typeof parsed === 'object' && parsed !== null) {
-          const row = harnessResultRow(parsed as Record<string, unknown>)
-          return row ? [row] : []
-        }
+        if (typeof parsed === 'object' && parsed !== null) return []
       } catch {
         // not JSON after all — fall through to prose
       }
@@ -727,41 +663,6 @@ function StreamRow({ row }: { row: Row }) {
       return (
         <div className="stream-row stream-row-done mono">
           <span className="stream-glyph">✓</span> done · {parts.join(' · ')}
-        </div>
-      )
-    }
-    case 'harness_result': {
-      // Counts row — only show segments that exist on this payload
-      // shape so a plan-review row (decision + body only) doesn't
-      // render misleading "0 findings · 0 checks · 0 AC".
-      const counts: string[] = []
-      if (row.findingsCount !== null) {
-        counts.push(`${row.findingsCount} finding${row.findingsCount === 1 ? '' : 's'}`)
-      }
-      if (row.checksCount !== null) {
-        counts.push(`${row.checksCount} check${row.checksCount === 1 ? '' : 's'}`)
-      }
-      if (row.acCount !== null) {
-        counts.push(`${row.acCount} AC`)
-      }
-      return (
-        <div
-          className={`stream-row stream-row-harness-result mono${
-            row.isError ? ' stream-row-result-error' : ''
-          }`}
-        >
-          <div className="stream-row-harness-head">
-            <span className="stream-glyph">⊕</span>{' '}
-            {row.verdict && (
-              <span className="stream-harness-verdict mono">{row.verdict}</span>
-            )}
-            {counts.length > 0 && (
-              <span className="stream-harness-counts mono dim">
-                {counts.join(' · ')}
-              </span>
-            )}
-          </div>
-          {row.body && <div className="stream-row-harness-body">{row.body}</div>}
         </div>
       )
     }
