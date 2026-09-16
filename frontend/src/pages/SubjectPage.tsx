@@ -14,7 +14,7 @@ import { CancelRun, RetryRun } from '../components/RunControls'
 import { GateControls } from '../druksui/GateControls'
 import { RunTranscript } from '../components/RunTranscript'
 import { StatusGlyph } from '../components/StatusGlyph'
-import { relTimeFromIso } from '../lib/format'
+import { httpUrl, relTimeFromIso } from '../lib/format'
 import { phaseLine } from '../lib/phase'
 import { summaryEntries } from '../lib/summary'
 
@@ -178,7 +178,7 @@ function RunBlock({
         {isActiveRun(run) && <CancelRun runId={run.id} />}
         {run.state === 'failed' && <RetryRun runId={run.id} />}
       </div>
-      {(expected || ask?.presentation === 'in_app') && (
+      {ask?.presentation !== 'external' && (expected || ask?.presentation === 'in_app') && (
         <GateControls run={run.id} expected={expected} />
       )}
       {ask?.presentation === 'external' && (
@@ -187,9 +187,15 @@ function RunBlock({
             <span>◆</span> needs you
           </div>
           <div className="ins-needs-body">
-            {run.gate
-              ? `Waiting on ${run.gate.replaceAll('_', ' ')}.`
-              : 'This run is waiting on you.'}
+            {ask.label ?? 'This run needs your input.'}
+            {httpUrl(ask.url) && (
+              <>
+                {' '}
+                <a className="ins-link" href={httpUrl(ask.url)} target="_blank" rel="noreferrer">
+                  Open request ↗
+                </a>
+              </>
+            )}
           </div>
         </div>
       )}

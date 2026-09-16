@@ -313,7 +313,11 @@ class Build(Workflow):
         if self._policy.implementation_approval_gate() == "none":
             return await self._approved_work()
         decision = await ReviewWork.wait(
-            input_request={"presentation": "external", "label": "Review implementation"}
+            input_request={
+                "presentation": "external",
+                "label": f"Review implementation on GitHub: PR #{self.pr_number}",
+                "url": f"https://github.com/{(await self.subject).repo}/pull/{self.pr_number}",
+            }
         )
         if decision.action == "approve":
             return await self._approved_work()

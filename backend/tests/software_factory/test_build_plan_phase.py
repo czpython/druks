@@ -571,6 +571,8 @@ async def test_operator_rounds_after_the_critique_never_rerun_the_reviewer(monke
 
 async def test_review_work_ask_renders_a_notification_body(monkeypatch):
     workflow = _flow()
+    workflow.subject = SimpleNamespace(repo="org/repo")
+    workflow.journal = SimpleNamespace(implementations=[SimpleNamespace(pr_number=42)])
     input_requests: list[dict] = []
 
     async def fake_wait(*, input_request):
@@ -587,6 +589,8 @@ async def test_review_work_ask_renders_a_notification_body(monkeypatch):
 
     run = Run(input_request=input_requests[0])
     assert (await run.get_rendered_ask())["body"]
+    assert input_requests[0]["url"] == "https://github.com/org/repo/pull/42"
+    assert input_requests[0]["label"] == "Review implementation on GitHub: PR #42"
 
 
 async def test_needs_clarification_delivery_stops_the_run(monkeypatch):

@@ -18,7 +18,7 @@ import { CancelRun, RetryRun } from '../../components/RunControls'
 import { GateControls } from '../../druksui/GateControls'
 import { RunTranscript } from '../../components/RunTranscript'
 import { FilePane } from './AgentCallPage'
-import { computeElapsed, dur, formatTokenCount, relTime, secondsSince } from '../../lib/format'
+import { computeElapsed, dur, formatTokenCount, httpUrl, relTime, secondsSince } from '../../lib/format'
 import { phaseLine } from '../../lib/phase'
 import { parkedLine, runSubLine, statusLine } from './statusLine'
 import { agentCallPath, workItemPath } from './slug'
@@ -493,13 +493,11 @@ function RunInspector({
   call: AgentCallSummary | null
   expected?: string
 }) {
-  // An in-app review is the whole ask — it replaces the transcript instead of
-  // stacking above it; the tabs flip between them. External asks keep their
-  // one-line banner over the transcript. The ask is run-level, so it only
-  // fronts the newest call; picking an earlier call is a request for that
-  // call's transcript.
+  // The ask belongs to the run. Selecting an earlier call opens its transcript.
   const review =
     run.state === 'parked' && run.inputRequest?.presentation === 'in_app' ? run.inputRequest : null
+  const external = run.state === 'parked' && run.inputRequest?.presentation === 'external'
+  const requestedReview = expected && !external
   const isNewestCall = call == null || call.id === run.agentCalls.at(-1)?.id
   // A finished call's saved result (an evaluation's verdict, a plan) is what the
   // operator came for; the transcript is how it got there.
@@ -511,15 +509,15 @@ function RunInspector({
   const artifact = files.data?.artifact ?? null
   const [picked, setPicked] = useState<'review' | 'result' | 'transcript' | null>(null)
   const tab =
-    picked ?? (expected || (review && isNewestCall) ? 'review' : artifact ? 'result' : 'transcript')
-  const showReview = (expected || review) && tab === 'review'
+    picked ?? (requestedReview || (review && isNewestCall) ? 'review' : artifact ? 'result' : 'transcript')
+  const showReview = (requestedReview || review) && tab === 'review'
   const showResult = artifact && call && tab === 'result'
   return (
     <>
       <RunHeader data={data} run={run} call={call} />
-      {(expected || review || artifact) && (
+      {(requestedReview || review || artifact) && (
         <div className="ins-tabs">
-          {(expected || review) && (
+          {(requestedReview || review) && (
             <button
               type="button"
               className={`ins-tab ${tab === 'review' ? 'ins-tab-active' : ''}`}
@@ -548,6 +546,7 @@ function RunInspector({
       )}
       <div className="ins-step-body">
         <RunFailure run={run} />
+        <RunNeedsInput run={run} prUrl={data.summary.links.pr} />
         {showReview ? (
           <GateControls run={run.id} expected={expected} />
         ) : showResult ? (
@@ -556,10 +555,7 @@ function RunInspector({
             markdown={artifact.kind === 'markdown'}
           />
         ) : (
-          <>
-            {!review && <RunNeedsInput run={run} prUrl={data.summary.links.pr} />}
-            <TranscriptBody data={data} run={run} call={call} />
-          </>
+          <TranscriptBody data={data} run={run} call={call} />
         )}
       </div>
     </>
@@ -629,18 +625,19 @@ function RunFailure({ run }: { run: RunSummary }) {
 function RunNeedsInput({ run, prUrl }: { run: RunSummary; prUrl?: string | null }) {
   const ask = run.state === 'parked' ? run.inputRequest : null
   if (ask?.presentation !== 'external') return null
+  const source = httpUrl(ask.url ?? prUrl)
   return (
     <div className="ins-needs">
       <div className="ins-needs-k">
         <span>◆</span> needs you
       </div>
       <div className="ins-needs-body">
-        {parkedLine(run.gate) ?? 'This run is waiting on you.'}
-        {prUrl && (
+        {ask.label ?? parkedLine(run.gate) ?? 'This run is waiting on you.'}
+        {source && (
           <>
             {' '}
-            <a className="ins-link" href={prUrl} target="_blank" rel="noreferrer">
-              open PR ↗
+            <a className="ins-link" href={source} target="_blank" rel="noreferrer">
+              Open review ↗
             </a>
           </>
         )}

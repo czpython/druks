@@ -198,3 +198,8 @@ export function updatedAtSortKey(item: { updatedAt: string }): number {
   const parsed = Date.parse(item.updatedAt)
   return Number.isFinite(parsed) ? parsed : 0
 }
+
+/** The URL when it is HTTP(S). Request URLs are workflow data, so a link takes no other scheme. */
+export function httpUrl(url: string | null | undefined): string | undefined {
+  return url && /^https?:\/\//i.test(url) ? url : undefined
+}

@@ -94,6 +94,51 @@ afterEach(() => {
 })
 
 describe('owner navigation', () => {
+  it.each(['subject', 'work'] as const)(
+    'opens an external request from an Activity link in the %s owner',
+    async (page) => {
+      const timeline: RunSummary[] = [{
+        ...run('external'),
+        inputRequest: {
+          presentation: 'external',
+          label: 'Review implementation on GitHub: PR #42',
+          url: 'https://github.com/org/repo/pull/42',
+        },
+      }]
+      vi.mocked(subjectApi.read).mockResolvedValue({ ...subject, timeline })
+      vi.mocked(buildApi.workItem).mockResolvedValue({ ...item, timeline })
+      mount(page, `${page === 'subject' ? '/notes/note/7' : '/software_factory/work-items/7'}?run=external&parkedAt=round`)
+
+      expect(await screen.findByText(/Review implementation on GitHub: PR #42/)).toBeTruthy()
+      expect(screen.getByRole('link', { name: /Open (request|review)/ }).getAttribute('href')).toBe('https://github.com/org/repo/pull/42')
+      expect(screen.queryByTestId('gate')).toBeNull()
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+    },
+  )
+
+  it('uses the work item PR for a retained external ask without a URL', async () => {
+    vi.mocked(buildApi.workItem).mockResolvedValue({
+      ...item,
+      summary: { ...item.summary, links: { ...item.summary.links, pr: 'https://github.com/org/repo/pull/42' } },
+      timeline: [{ ...run('external'), inputRequest: { presentation: 'external' } }],
+    })
+    mount('work', '/software_factory/work-items/7?run=external&parkedAt=round')
+    expect((await screen.findByRole('link', { name: /Open review/ })).getAttribute('href')).toBe('https://github.com/org/repo/pull/42')
+    expect(screen.queryByTestId('gate')).toBeNull()
+  })
+
+  it('does not link an external request to a script URL', async () => {
+    vi.mocked(subjectApi.read).mockResolvedValue({
+      ...subject,
+      timeline: [{ ...run('external'), inputRequest: { presentation: 'external', label: 'External review', url: 'javascript:alert(1)' } }],
+    })
+    mount('subject', '/notes/note/7?run=external&parkedAt=round')
+    await screen.findByText(/External review/)
+    expect(screen.queryByRole('link', { name: /Open request/ })).toBeNull()
+    expect(screen.queryByTestId('gate')).toBeNull()
+  })
+
   it.each(['failed', 'cancelled'] as const)(
     'offers retry only for a failed run: %s',
     async (state) => {

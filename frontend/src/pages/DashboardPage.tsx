@@ -6,7 +6,7 @@ import { api } from '../api/client'
 import type { DashboardRun, DashboardSection } from '../api/types'
 import { appLabel, getAppUI } from '../apps/registry'
 import { Page } from '../components/Page'
-import { relTimeFromIso } from '../lib/format'
+import { httpUrl, relTimeFromIso } from '../lib/format'
 import { useFormatters } from '../lib/preferences'
 import '../dashboard.css'
 
@@ -99,7 +99,7 @@ function WorkCard({ row, isPending, isFirst }: { row: DashboardRun; isPending: b
   const target = { run: row.run, parkedAt: isPending ? row.parkedAt! : undefined }
   const owner = subject ? getAppUI(row.app)?.subjectPath?.(subject, target) : undefined
   const isExternal = isPending && row.presentation === 'external'
-  const externalUrl = isExternal && row.requestUrl && /^https?:\/\//i.test(row.requestUrl) ? row.requestUrl : undefined
+  const externalUrl = isExternal ? httpUrl(row.requestUrl) : undefined
   const destination = isExternal ? externalUrl : owner
   const label = row.subjectKey || row.kind
   const request = row.requestLabel || (row.presentation === 'in_app'
