@@ -619,6 +619,8 @@ async def _log_run_event(
         facts["input_request"] = run.input_request
     if run.failure:
         facts["failure"] = run.failure
+    if run.failure_code:
+        facts["failure_code"] = run.failure_code
     if isinstance(result, BaseModel):
         facts["result"] = result.model_dump(mode="json")
     elif isinstance(result, dict):

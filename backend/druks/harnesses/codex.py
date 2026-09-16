@@ -33,6 +33,7 @@ from .exceptions import (
     HarnessError,
     HarnessOverloadedError,
     HarnessRateLimitError,
+    HarnessSpendLimitError,
     HarnessUsageLimitError,
 )
 from .providers import OPENAI_AUTH_CLAIM, OpenAiProvider
@@ -305,6 +306,7 @@ class CodexHarness(Harness):
     # The CLI's terminal {"type":"error"} event carries prose, not status
     # shapes: stream drops after its internal retries, usage windows, 429s.
     failure_markers = {
+        "spend cap": HarnessSpendLimitError,
         "usage limit": HarnessUsageLimitError,
         "rate limit": HarnessRateLimitError,
         "429": HarnessRateLimitError,

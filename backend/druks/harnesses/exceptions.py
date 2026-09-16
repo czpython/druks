@@ -47,6 +47,10 @@ class HarnessUsageLimitError(HarnessError):
     retry = Retry.QUOTA
 
 
+class HarnessSpendLimitError(HarnessError):
+    code = "spend_limit"
+
+
 class HarnessAuthError(HarnessError):
     code = "auth"
 
