@@ -27,6 +27,14 @@ updates:
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
 
+  - package-ecosystem: npm
+    directory: /deploy/sandbox
+    schedule:
+      interval: daily
+    groups:
+      sandbox-harnesses:
+        dependency-type: production
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

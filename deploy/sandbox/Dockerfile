@@ -27,11 +27,6 @@ FROM ${BASE} AS toolchain
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG CLAUDE_CODE_VERSION=2.1.273
-ARG CODEX_VERSION=0.144.1
-ARG OPENCODE_VERSION=1.18.25
-ARG PI_VERSION=0.84.4
-ARG PI_MCP_ADAPTER_VERSION=2.31.0
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Package revisions differ across the base image's architectures and external
@@ -52,14 +47,14 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends nodejs gh \
     && rm -rf /var/lib/apt/lists/*
 
-# pi loads the adapter extension from this absolute path, so a moved npm
-# global root has to fail the build rather than every run.
-RUN npm install -g \
-    "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-    "@openai/codex@${CODEX_VERSION}" \
-    "opencode-ai@${OPENCODE_VERSION}" \
-    "@earendil-works/pi-coding-agent@${PI_VERSION}" \
-    "pi-mcp-adapter@${PI_MCP_ADAPTER_VERSION}" \
+COPY package.json /tmp/harnesses.json
+
+# Dependabot watches package.json. pi loads the adapter extension from this
+# absolute path, so a moved npm global root has to fail the build rather than
+# every run.
+RUN node -p "Object.entries(require('/tmp/harnesses.json').dependencies).map(([name, version]) => name + '@' + version).join(' ')" \
+    | xargs npm install -g \
+    && rm /tmp/harnesses.json \
     && test -f /usr/lib/node_modules/pi-mcp-adapter/index.ts
 
 RUN useradd --create-home --shell /bin/bash druks

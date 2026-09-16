@@ -60,7 +60,11 @@ jobs:
       - name: The agent toolchain is on PATH
         run: >
           docker run --rm --entrypoint sh druks-sandbox-sbx:pr
-          -ec 'for tool in git node gh claude codex; do command -v "$tool"; done'
+          -ec 'for tool in git node gh claude codex opencode pi; do command -v "$tool"; done'
+      - name: The harness packages start
+        run: >
+          docker run --rm --entrypoint sh druks-sandbox-sbx:pr
+          -ec 'for tool in claude codex opencode pi; do "$tool" --version; done'
       - name: An env-free boot leaves sshd running as PID 1
         run: |
           docker run -d --name sbx-boot druks-sandbox-sbx:pr
