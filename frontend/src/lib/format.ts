@@ -17,21 +17,13 @@ export function timeAway(iso: string): string {
   return `${span(-ahead)} ago`
 }
 
-const _absFormatterCache = new Map<string, Intl.DateTimeFormat>()
-function _absFormatter(timeZone: string): Intl.DateTimeFormat {
-  let formatter = _absFormatterCache.get(timeZone)
+const _formatters = new Map<string, Intl.DateTimeFormat>()
+function _formatter(locale: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = `${locale} ${JSON.stringify(options)}`
+  let formatter = _formatters.get(key)
   if (!formatter) {
-    formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    })
-    _absFormatterCache.set(timeZone, formatter)
+    formatter = new Intl.DateTimeFormat(locale, options)
+    _formatters.set(key, formatter)
   }
   return formatter
 }
@@ -42,28 +34,29 @@ export function absTime(iso: string, timeZone: string = 'UTC'): string {
   // en-CA gives YYYY-MM-DD, hour12=false gives 24h. The output is
   // "YYYY-MM-DD, HH:MM:SS"; swap the comma for a space to keep the
   // historical "YYYY-MM-DD HH:MM:SS" shape callers and tooltips expect.
-  return _absFormatter(timeZone).format(d).replace(', ', ' ')
+  return _formatter('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(d).replace(', ', ' ')
+}
+
+/** The calendar day an instant falls on in a zone, as "26 October 2026". */
+export function absDay(iso: string, timeZone: string = 'UTC'): string {
+  return _formatter('en-GB', { timeZone, day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(iso))
+}
+
+/** The wall-clock minute of an instant in a zone, as "02:30". */
+export function clockTime(iso: string, timeZone: string = 'UTC'): string {
+  return _formatter('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso))
 }
 
 const _MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-const _partsFormatterCache = new Map<string, Intl.DateTimeFormat>()
-function _partsFormatter(timeZone: string): Intl.DateTimeFormat {
-  let formatter = _partsFormatterCache.get(timeZone)
-  if (!formatter) {
-    formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    })
-    _partsFormatterCache.set(timeZone, formatter)
-  }
-  return formatter
-}
 
 interface _DateParts {
   year: number
@@ -74,7 +67,15 @@ interface _DateParts {
 }
 
 export function zonedParts(d: Date, timeZone: string): _DateParts {
-  const parts = _partsFormatter(timeZone).formatToParts(d)
+  const parts = _formatter('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d)
   const out: Record<string, number> = {}
   for (const part of parts) {
     if (part.type === 'literal') continue

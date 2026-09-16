@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { api } from '../api/client'
-import { absTime, absTimeCompact } from './format'
+import { absDay, absTime, absTimeCompact, clockTime } from './format'
 
 interface PreferencesContextValue {
   timezone: string
@@ -49,6 +49,8 @@ export function useFormatters() {
       timezone,
       absTime: (iso: string) => absTime(iso, timezone),
       absTimeCompact: (iso: string) => absTimeCompact(iso, timezone),
+      absDay: (iso: string) => absDay(iso, timezone),
+      clockTime: (iso: string) => clockTime(iso, timezone),
     }),
     [timezone],
   )
