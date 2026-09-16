@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { CircleDot, CircleX, FileCheck2 } from 'lucide-react'
 
 import { activityDay, activityTypeLabel, eventLine } from './feed'
 // Software Factory's own registration, not a stand-in: its subjectPath is what makes a row navigate.
@@ -34,7 +35,7 @@ describe('eventLine', () => {
     const line = eventLine(event({ topic: 'merged', app: 'software_factory' }))
 
     expect(line.label).toBe('Pull request merged')
-    expect(line.bucket).toBe('event-kind-audit')
+    expect(line.tone).toBe('positive')
   })
 
   it('names the subject as it showed itself, and links where the app says', () => {
@@ -115,8 +116,48 @@ it('uses shared type words and registered Factory topic labels', () => {
 })
 
 it('labels each topic through its recorded app', () => {
-  registerAppUI({ name: 'publishing', routes: [], activityLabel: ({ topic }) => topic === 'merged' ? 'Notes combined' : undefined })
+  registerAppUI({ name: 'publishing', routes: [], activity: ({ topic }) => ({ label: topic === 'merged' ? 'Notes combined' : undefined }) })
   expect(activityTypeLabel({ app: 'software_factory', topic: 'merged' })).toBe('Pull request merged')
   expect(activityTypeLabel({ app: 'publishing', topic: 'merged' })).toBe('Notes combined')
   expect(activityTypeLabel({ app: 'unregistered', topic: 'merged' })).toBe('Merged')
+})
+
+it('uses another app formatter for the same topic', () => {
+  registerAppUI({ name: 'publishing', routes: [],
+    activity: ({ payload }) => ({ label: 'Notes combined', context: String(payload?.summary), icon: FileCheck2, tone: 'positive' }),
+  })
+  const line = eventLine(event({ app: 'publishing', topic: 'merged', subjectKey: 'NOTE-7',
+    payload: { title: 'Recorded note title', summary: 'Three notes combined.' } }))
+  expect(line).toMatchObject({ key: 'NOTE-7', title: 'Recorded note title', label: 'Notes combined',
+    context: 'Three notes combined.', icon: FileCheck2, tone: 'positive' })
+  expect(activityTypeLabel({ app: 'publishing', topic: 'merged' })).toBe('Notes combined')
+})
+
+it('keeps generic facts useful without inventing missing context or a destination', () => {
+  const line = eventLine(event({ app: 'unregistered', topic: 'gist.prepared',
+    payload: { summary: 'The pump ran hot.' } }))
+  expect(line).toMatchObject({ label: 'Gist prepared', context: 'The pump ran hot.', icon: CircleDot, tone: 'neutral' })
+  expect(line.title).toBeUndefined()
+  expect(line.path).toBeUndefined()
+  expect(eventLine(event({ topic: 'unknown.topic', payload: {} })).context).toBeUndefined()
+})
+
+it('explains a shared spend-limit failure from its recorded code', () => {
+  const line = eventLine(event({ app: 'field_notes', topic: 'workflow.failed',
+    payload: { failure_code: 'spend_limit', failure: 'codex exited with 1. Original text.' } }))
+  expect(line.context).toBe('Spend limit reached')
+  expect(line.guidance).toBe('Ask the account owner to raise the spend limit before continuing.')
+  expect(line.icon).toBe(CircleX)
+  expect(line.tone).toBe('negative')
+})
+
+it.each([undefined, 'unrecognized'])('bounds the original failure when its code is %s', (failureCode) => {
+  const failure = `The source document is missing.\n${'More detail. '.repeat(30)}`
+  const recorded = event({ topic: 'workflow.failed', payload: { failure_code: failureCode, failure } })
+  const line = eventLine(recorded)
+  expect(line.context).toHaveLength(180)
+  expect(line.context).toMatch(/^The source document is missing\. More detail/)
+  expect(line.context).toMatch(/…$/)
+  expect(line.guidance).toBeUndefined()
+  expect(recorded.payload.failure).toBe(failure)
 })

@@ -1,8 +1,8 @@
+import { CircleDot, CircleX, Clock3, MessageCircleQuestion, MessageSquareReply, Square, type LucideIcon } from 'lucide-react'
 import type { EventTopic, FeedItem } from '../api/types'
-import { getAppUI } from '../apps/registry'
+import { getAppUI, type Tone } from '../apps/registry'
 import { zonedParts } from './format'
 
-// What a workflow doing something is called when its app gives no label of its own.
 const LIFECYCLE_VERBS: Record<string, string> = {
   'workflow.scheduled': 'queued',
   'workflow.running': 'response received',
@@ -11,25 +11,47 @@ const LIFECYCLE_VERBS: Record<string, string> = {
   'workflow.cancelled': 'cancelled',
 }
 
+const LIFECYCLE_ICONS: Record<string, LucideIcon> = {
+  'workflow.scheduled': Clock3,
+  'workflow.running': MessageSquareReply,
+  'workflow.parked': MessageCircleQuestion,
+  'workflow.failed': CircleX,
+  'workflow.cancelled': Square,
+}
+
 export interface EventLine {
-  // What happened, in words: "Build queued", "Pull request merged".
   label: string
-  // Who it happened to, as it showed itself. Empty for a row about nothing in
-  // particular.
   key: string
-  // Where the row navigates, when the app has a page for its subject.
+  title?: string
+  context?: string
+  guidance?: string
+  icon: LucideIcon
+  tone: Tone
   path?: string
-  // The row's class for its topic, so a failed run stands out.
-  bucket: string
 }
 
 export function eventLine(event: FeedItem): EventLine {
+  const own = (event.app && getAppUI(event.app)?.activity?.(event)) || {}
+  const failure = event.topic === 'workflow.failed' ? failureWords(event.payload) : undefined
   return {
-    label: (event.app && getAppUI(event.app)?.activityLabel?.(event)) || label(event),
+    label: own.label || label(event),
     key: event.subjectKey ?? '',
+    title: event.payload.title || undefined,
+    context: failure ? failure.context : own.context || event.payload.summary || event.payload.reason || undefined,
+    guidance: failure?.guidance,
+    icon: own.icon ?? LIFECYCLE_ICONS[event.topic] ?? CircleDot,
+    tone: failure ? 'negative' : own.tone ?? (event.topic === 'workflow.parked' ? 'attention' : 'neutral'),
     path: subjectPath(event),
-    bucket: isLifecycle(event) ? `event-kind-${event.topic.slice('workflow.'.length)}` : 'event-kind-audit',
   }
+}
+
+// Shared code words a failed run; the original message stays in the payload.
+function failureWords(payload: FeedItem['payload']): { context?: string; guidance?: string } {
+  if (payload.failure_code === 'spend_limit') {
+    return { context: 'Spend limit reached', guidance: 'Ask the account owner to raise the spend limit before continuing.' }
+  }
+  const failure = payload.failure?.replace(/\s+/g, ' ').trim()
+  return { context: failure && (failure.length > 180 ? `${failure.slice(0, 179)}…` : failure) }
 }
 
 function label(event: FeedItem): string {
@@ -52,10 +74,6 @@ function subjectPath(event: FeedItem): string | undefined {
   return undefined
 }
 
-function isLifecycle(event: FeedItem): boolean {
-  return event.topic in LIFECYCLE_VERBS
-}
-
 function localName(workflow: string | null | undefined): string {
   return workflow ? (workflow.split('.').pop() ?? '') : ''
 }
@@ -68,7 +86,7 @@ function words(identifier: string): string {
 /** Type filters name an exact topic without inventing a workflow or gate. */
 export function activityTypeLabel({ app, topic }: EventTopic): string {
   if (LIFECYCLE_VERBS[topic]) return words(LIFECYCLE_VERBS[topic])
-  return getAppUI(app)?.activityLabel?.({ topic }) || words(topic)
+  return getAppUI(app)?.activity?.({ topic })?.label || words(topic)
 }
 
 /** Convert a calendar day to its start, or the next day's start, in UTC. */

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import type { LucideIcon } from 'lucide-react'
 
 import type { AppsSettingsResponse, FeedItem } from '../api/types'
 
@@ -9,6 +10,17 @@ export interface AppRoute {
 }
 
 export type ActivityEvent = Pick<FeedItem, 'topic'> & Partial<Pick<FeedItem, 'payload'>>
+
+export type Tone = 'neutral' | 'positive' | 'negative' | 'attention'
+
+/** The words, icon, and tone an app gives an Activity row. Everything absent falls
+ * back to the shared defaults. A filter choice asks with a topic and no payload. */
+export interface ActivityPresentation {
+  label?: string
+  context?: string
+  icon?: LucideIcon
+  tone?: Tone
+}
 
 export interface AppUI {
   name: string
@@ -25,7 +37,7 @@ export interface AppUI {
   // Where a feed row about one of this app's subjects navigates. The shell knows
   // an app has subjects, never where its pages put them.
   subjectPath?: (subject: { type: string; id: string }, target?: SubjectTarget) => string | undefined
-  activityLabel?: (event: ActivityEvent) => string | undefined
+  activity?: (event: ActivityEvent) => ActivityPresentation
   parentPath?: (location: string) => string | undefined
 }
 
