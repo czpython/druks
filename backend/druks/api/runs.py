@@ -80,15 +80,18 @@ async def cancel_run(
         raise RunNotActive(run_id)
     subject = await run.get_subject()
     # cancel() flushes the run and expires this computed column, so read it first.
-    label = run.subject_label
+    key, title = run.subject_key, run.subject_title
     await run.cancel(failure=reason)
     if subject:
         await Event.emit(
             session,
             type=WorkflowEvent.CANCELLED,
             subject=subject,
-            label=label,
-            payload={"run": run.id, "kind": run.kind, "failure": reason},
+            key=key,
+            title=title,
+            run=run.id,
+            kind=run.kind,
+            facts={"failure": reason},
             app=workflows.get(run.kind).app,
         )
     return CancelRunResponse(run=run.id, result="cancelled")

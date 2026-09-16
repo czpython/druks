@@ -73,7 +73,7 @@ class Repository(StoredSubject):
         self.gist = gist
         await db_session().flush()
 
-    def get_label(self) -> str:
+    def get_key(self) -> str:
         return self.repo
 
     def get_summary(self) -> RepositorySummary:

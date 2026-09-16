@@ -52,7 +52,7 @@ async def test_output_persistence_keeps_one_event_per_call(druks_db, output_call
     assert len(artifacts) == len(events) == 2
     assert {event.app for event in events} == {"field_notes"}
     assert {event.subject_id for event in events} == {str(note.id)}
-    assert {event.subject_label for event in events} == {note.label}
+    assert {event.subject_key for event in events} == {note.key}
     for call, artifact, event in zip(calls, artifacts, events, strict=True):
         assert event.type == "review.completed"
         assert event.payload == {

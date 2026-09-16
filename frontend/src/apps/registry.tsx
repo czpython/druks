@@ -8,7 +8,7 @@ export interface AppRoute {
   render: (params: Record<string, string>) => ReactNode
 }
 
-export type ActivityEvent = Pick<FeedItem, 'topic' | 'workflow' | 'gate' | 'inputRequest'>
+export type ActivityEvent = Pick<FeedItem, 'topic'> & Partial<Pick<FeedItem, 'payload'>>
 
 export interface AppUI {
   name: string

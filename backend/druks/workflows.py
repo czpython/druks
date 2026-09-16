@@ -560,7 +560,7 @@ async def _emit_run_event(
             run = await session.get(Run, workflow_id)
             # Read before the flush: flushing the update unloads the row's
             # computed columns, and reading one back would be implicit IO.
-            label = run.subject_label
+            key, title = run.subject_key, run.subject_title
             gate = run.input_gate if state == RunState.RUNNING and result else None
             if facts:
                 for field, value in facts.items():
@@ -572,7 +572,7 @@ async def _emit_run_event(
                     "kind": run.kind,
                     "subject": subject,
                     "payload": await _log_run_event(
-                        session, run, state, subject, label, result, gate
+                        session, run, state, subject, key, title, result, gate
                     ),
                 }
 
@@ -601,7 +601,8 @@ async def _log_run_event(
     run: Run,
     state: RunState,
     subject: dict[str, Any],
-    label: str | None,
+    key: str | None,
+    title: str | None,
     result: Any = None,
     gate: str | None = None,
 ) -> dict[str, Any]:
@@ -609,28 +610,31 @@ async def _log_run_event(
     # just-written row so gate and failure ride the transition that set them.
     # The result rides the finished event so reactions read the outcome off the
     # payload instead of artifacts.
-    payload: dict[str, Any] = {"run": run.id, "kind": run.kind}
+    facts: dict[str, Any] = {}
     if gate or run.input_gate:
-        payload["gate"] = gate or run.input_gate
+        facts["gate"] = gate or run.input_gate
     if gate or state == RunState.PARKED:
-        payload["input_requested_at"] = run.input_requested_at.isoformat()
+        facts["input_requested_at"] = run.input_requested_at.isoformat()
     if state == RunState.PARKED:
-        payload["input_request"] = run.input_request
+        facts["input_request"] = run.input_request
     if run.failure:
-        payload["failure"] = run.failure
+        facts["failure"] = run.failure
     if isinstance(result, BaseModel):
-        payload["result"] = result.model_dump(mode="json")
+        facts["result"] = result.model_dump(mode="json")
     elif isinstance(result, dict):
-        payload["result"] = result
+        facts["result"] = result
     await Event.emit(
         session,
         type=WorkflowEvent.for_state(state),
         subject=subject,
-        label=label,
-        payload=payload,
+        key=key,
+        title=title,
+        run=run.id,
+        kind=run.kind,
+        facts=facts,
         app=workflows.get(run.kind).app,
     )
-    return payload
+    return {"run": run.id, "kind": run.kind, **facts}
 
 
 async def _broadcast_fatal(exc: FatalError) -> None:
@@ -815,8 +819,11 @@ class Workflow:
                     session,
                     type=topic,
                     subject=self._subject,
-                    label=run.subject_label,
-                    payload={**facts, "run": self.workflow_id, "kind": self.kind},
+                    key=run.subject_key,
+                    title=run.subject_title,
+                    run=self.workflow_id,
+                    kind=self.kind,
+                    facts=facts,
                     app=self.app,
                 )
 
@@ -1056,7 +1063,8 @@ class Workflow:
                 attributes = {
                     "subject_type": subject.subject_type,
                     "subject_id": str(subject.id),
-                    "subject_label": subject.label,
+                    "subject_key": subject.key,
+                    "subject_title": subject.get_summary().title,
                 }
             subject_record = subject.identity if subject else None
             with (
@@ -1078,8 +1086,10 @@ class Workflow:
                             session,
                             type=WorkflowEvent.SCHEDULED,
                             subject=subject.identity,
-                            label=subject.label,
-                            payload={"run": workflow_id, "kind": cls.kind},
+                            key=attributes["subject_key"],
+                            title=attributes["subject_title"],
+                            run=workflow_id,
+                            kind=cls.kind,
                             app=cls.app,
                         )
                         await session.commit()

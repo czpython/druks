@@ -27,7 +27,7 @@ async def test_identity_subject_uses_its_registered_app(druks_db, monkeypatch):
     assert event.app == "reports"
     assert event.subject_type == "report"
     assert event.subject_id == report.id
-    assert event.subject_label == report.label
+    assert event.subject_key == report.key
     assert event.payload == {"url": "https://example.com/report/7"}
     assert received == [(report, "https://example.com/report/7")]
 
@@ -45,7 +45,7 @@ async def test_stored_subject_announces_with_its_app(druks_db):
     event = (await druks_db.scalars(select(Event).filter_by(type="note.revised"))).one()
     assert event.app == "field_notes"
     assert event.subject_id == str(note.id)
-    assert event.subject_label == note.label
+    assert event.subject_key == note.key
     assert event.payload == {"revision": 2}
 
 

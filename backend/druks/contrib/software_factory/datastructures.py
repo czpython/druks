@@ -38,7 +38,7 @@ class PullRequest(Subject):
     def get_summary(self) -> ReviewSummary:
         return ReviewSummary(
             id=self.id,
-            label=self.label,
+            key=self.key,
             repo=self.repo,
             pr_number=self.number,
             pull_request_url=self.url,

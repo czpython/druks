@@ -15,7 +15,7 @@ from druks.harnesses.exceptions import HarnessNotConnectedError
 from druks.models import Base
 from druks.signals import subscribe
 from druks.testing import seed_run
-from druks.workflows import Workflow, WorkflowEvent, _emit_run_event, _execute_run
+from druks.workflows import Workflow, WorkflowError, WorkflowEvent, _emit_run_event, _execute_run
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from sqlalchemy import select, update
@@ -390,13 +390,17 @@ async def test_announce_carries_the_runs_routing(druks_db):
     assert checkpoints == ["test.announced", "test.announced:propagate"]
     event = (await ambient_session().scalars(select(Event).filter_by(type="test.announced"))).one()
     assert event.app == "field_notes"
-    assert event.subject_label == note.label
+    assert event.subject_key == note.key
     assert event.payload == {"pr_number": 12, "run": run.id, "kind": workflow.kind}
+    with (
+        mock.patch("druks.workflows.DBOS.run_step_async", side_effect=run_inline),
+        pytest.raises(WorkflowError, match="title"),
+    ):
+        await workflow.announce("test.announced", title="Forged title")
 
 
 @pytest.mark.asyncio
 async def test_announce_refuses_inside_a_step():
-    from druks.durable.exceptions import WorkflowError
     from druks.workflows import _in_step
 
     workflow = Workflow()

@@ -35,7 +35,7 @@ def test_a_pull_requests_identity_is_its_handle():
 
     assert pull_request.identity == {"type": "pull_request", "id": "acme/app#7"}
     assert (pull_request.repo, pull_request.number) == ("acme/app", 7)
-    assert pull_request.label == "acme/app#7"
+    assert pull_request.key == "acme/app#7"
 
 
 @pytest.mark.parametrize("subject_id", ["acme/app", "acme/app#", "acme/app#0", "app#7", "#7"])

@@ -4,7 +4,13 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
-from conftest import connect_anthropic_subscription, make_test_note, seed_note_run
+from conftest import (
+    connect_anthropic_subscription,
+    finish_agent_run,
+    make_test_note,
+    seed_note_agent_run,
+    seed_note_run,
+)
 from druks.accounts.models import Account
 from druks.api import runs
 from druks.api.exceptions import RunNotActive, RunNotFailed, RunNotFound, SubjectBusy
@@ -15,8 +21,9 @@ from druks.durable.exceptions import AgentCallNotFound
 from druks.durable.models import AgentCall, Artifact, Run
 from druks.durable.reads import read_slice
 from druks.mcp.gateway import exceptions, services
-from druks.testing import seed_call, seed_dbos_status
+from druks.testing import seed_call, seed_dbos_status, seed_run
 from druks.usage.models import UsageScrape
+from druks_field_notes.workflows import Summarize
 
 pytestmark = pytest.mark.usefixtures("_data_dir")
 
@@ -234,8 +241,6 @@ async def test_agent_call_get_returns_the_call_or_raises(druks_db):
 
 
 async def test_get_agent_call_serves_bounded_tails(druks_db):
-    from conftest import finish_agent_run, seed_note_agent_run
-
     call = await seed_note_agent_run()
     call_dir = call.call_dir
     call_dir.mkdir(parents=True, exist_ok=True)
@@ -267,8 +272,6 @@ async def test_get_agent_call_serves_bounded_tails(druks_db):
 
 
 async def test_get_agent_call_without_files_reads_empty(druks_db):
-    from conftest import seed_note_agent_run
-
     call = await seed_note_agent_run()
 
     detail = await services.get_agent_call(druks_db, call.id)
@@ -431,10 +434,6 @@ async def test_retry_run_refuses_a_missing_run(druks_db):
 
 
 async def test_get_usage_is_a_bounded_pure_read(druks_db, account):
-    from druks.durable.models import AgentCall
-    from druks.testing import seed_run
-    from druks_field_notes.workflows import Summarize
-
     now = datetime.now(UTC)
     run = await seed_run(druks_db, kind=Summarize.kind, run_id="run-usage")
     for index in range(30):
@@ -492,10 +491,6 @@ async def test_get_usage_is_a_bounded_pure_read(druks_db, account):
 
 
 async def test_get_usage_only_counts_the_callers_spend(druks_db, account):
-    from druks.durable.models import AgentCall
-    from druks.testing import seed_run
-    from druks_field_notes.workflows import Summarize
-
     other = await Account.get_or_create(druks_db, "other@example.com")
     run = await seed_run(druks_db, kind=Summarize.kind, run_id="run-usage-other")
     druks_db.add(

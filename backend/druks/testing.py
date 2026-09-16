@@ -27,6 +27,7 @@ import druks.redis
 import druks.services.models  # noqa: F401
 import druks.skills.models  # noqa: F401
 import druks.user_settings.models  # noqa: F401
+from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.apps.loader import import_app_models, iter_apps
@@ -206,9 +207,6 @@ async def druks_db(_druks_schema: None) -> AsyncIterator[AsyncSession]:
 
 
 async def _operator_account(session: SessionDep):
-    from druks.accounts.context import current_account_id
-    from druks.accounts.models import Account
-
     account = await Account.get_or_create(session, "op@example.com")
     current_account_id.set(account.id)
     return account
@@ -332,7 +330,7 @@ def druks_without_remote_config(monkeypatch) -> None:
     templates and app config to its declared defaults — no repo credentials."""
 
     async def _missing(**_kwargs):
-        return None
+        return
 
     monkeypatch.setattr("druks.prompts.resolver.fetch_file", _missing)
     monkeypatch.setattr("druks.apps.config.fetch_file", _missing)
@@ -402,9 +400,13 @@ async def seed_run(
     await session.refresh(run, ["account"])
     identity = None
     if subject:
-        identity = {**subject.identity, "label": subject.label}
+        identity = {
+            **subject.identity,
+            "key": subject.key,
+            "title": subject.get_summary().title,
+        }
     await seed_dbos_status(session, run.id, state, subject=identity)
-    await session.refresh(run, ["state", "updated_at"])
+    await session.refresh(run, ["state", "updated_at", "subject_key", "subject_title"])
     return run
 
 
@@ -430,9 +432,10 @@ async def seed_dbos_status(
         attributes = {
             "subject_type": subject["type"],
             "subject_id": str(subject["id"]),
-            # start() always stamps a label; an identity dict without one labels
-            # itself by its id — Subject.label's own rule.
-            "subject_label": subject.get("label") or str(subject["id"]),
+            # start() always stamps a key; an identity dict without one is named
+            # by its id, Subject.key's own rule.
+            "subject_key": subject.get("key") or str(subject["id"]),
+            "subject_title": subject.get("title"),
         }
     await session.execute(
         workflow_status.insert().values(

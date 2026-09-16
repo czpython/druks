@@ -29,7 +29,7 @@ async def test_operator_stop_records_its_reason_and_exact_run_once(druks_client,
     assert events[0].payload == {"run": run.id, "kind": Summarize.kind, "failure": "Wrong source"}
     assert events[0].app == "field_notes"
     assert events[0].subject_id == str(note.id)
-    assert events[0].subject_label == note.label
+    assert events[0].subject_key == note.key
 
 
 async def test_subjectless_operator_stop_records_nothing(druks_client, druks_db):

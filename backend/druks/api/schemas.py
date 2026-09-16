@@ -41,7 +41,7 @@ class OpenWorkflowResponse(Schema):
 class OpenSubjectResponse(Schema):
     subject_type: str
     subject_id: str
-    subject_label: str
+    subject_key: str
     workflows: list[OpenWorkflowResponse]
 
 
@@ -56,7 +56,7 @@ class DashboardRun(Schema):
     state: RunState
     subject_type: str | None
     subject_id: str | None
-    subject_label: str | None
+    subject_key: str | None
     updated_at: datetime
     parked_at: datetime | None
     request_label: str | None

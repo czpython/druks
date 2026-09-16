@@ -213,7 +213,7 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
           <div className="activity-filters">
             <label className="activity-search">
               <Search size={17} aria-hidden="true" />
-              <input type="search" aria-label="Search work labels" placeholder="Search work labels…"
+              <input type="search" aria-label="Search work" placeholder="Search work…"
                 value={searchText} onChange={(event) => setSearchText(event.target.value)} />
             </label>
             <select aria-label="App" value={filters.app ?? ''}
@@ -291,9 +291,9 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
                   onClick={() => updateParams('selected', String(event.seq))}>
                   <CircleDot size={16} className="activity-row-glyph" aria-hidden="true" />
                   <span className="activity-row-body"><strong>{line.label}</strong>{' '}
-                    <span>{line.subject || 'No work label recorded'}</span>{' '}
-                    {(event.summary || event.reason || event.failure) &&
-                      <span className="activity-context">{event.summary || event.reason || event.failure}</span>}
+                    <span>{line.key || 'No work recorded'}</span>{' '}
+                    {(event.payload.summary || event.payload.reason || event.payload.failure) &&
+                      <span className="activity-context">{event.payload.summary || event.payload.reason || event.payload.failure}</span>}
                   </span>
                   <time dateTime={event.at} title={`${absTime(event.at)} ${timezone}`}>{absTimeCompact(event.at)}</time>
                   <ChevronRight size={15} aria-hidden="true" />
@@ -330,31 +330,31 @@ function ActivityDetail({ event }: { event: FeedItem }) {
   })
   const available = destinations.data
   const artifact = useQuery({
-    queryKey: ['artifact', event.artifactId],
-    queryFn: () => api.artifact(event.artifactId!),
-    enabled: Boolean(event.artifactId),
+    queryKey: ['artifact', event.payload.artifact_id],
+    queryFn: () => api.artifact(event.payload.artifact_id!),
+    enabled: Boolean(event.payload.artifact_id),
     staleTime: Infinity,
     retry: false,
   })
-  const request = event.inputRequest
+  const request = event.payload.input_request
   const externalRequest = request?.presentation === 'external' && /^https?:\/\//i.test(request.url ?? '')
     ? request.url : undefined
   const workPath = available?.isSubjectAvailable ? line.path : undefined
-  const runPath = event.run && available?.isRunAvailable && workPath && event.app && event.subjectType && event.subjectId
-    ? getAppUI(event.app)?.subjectPath?.({ type: event.subjectType, id: event.subjectId }, { run: event.run }) : undefined
+  const runPath = event.payload.run && available?.isRunAvailable && workPath && event.app && event.subjectType && event.subjectId
+    ? getAppUI(event.app)?.subjectPath?.({ type: event.subjectType, id: event.subjectId }, { run: event.payload.run }) : undefined
 
   return <>
     <h2 ref={title} tabIndex={-1}>{line.label}</h2>
-    <p className="activity-work-label">{line.subject || 'No work label recorded'}</p>
-    {event.artifactId ? <section className="activity-result" aria-label="Saved result">
+    <p className="activity-work-label">{line.key || 'No work recorded'}</p>
+    {event.payload.artifact_id ? <section className="activity-result" aria-label="Saved result">
       {available && !available.isArtifactAvailable ? <p role="status">This saved result is no longer available.</p> :
         artifact.isError ? <p role="alert">Could not load the saved result.{' '}
           <button type="button" onClick={() => void artifact.refetch()}>Retry result</button></p> :
           artifact.isPending ? <p role="status">Loading saved result…</p> :
             <><h3>{artifact.data.title}</h3>{artifact.data.kind === 'markdown'
               ? <Markdown source={artifact.data.content} /> : <pre>{artifact.data.content}</pre>}</>}
-    </section> : event.summary && <p className="activity-prose">{event.summary}</p>}
-    {(event.reason || event.failure) && <p className="activity-prose">{event.reason || event.failure}</p>}
+    </section> : event.payload.summary && <p className="activity-prose">{event.payload.summary}</p>}
+    {(event.payload.reason || event.payload.failure) && <p className="activity-prose">{event.payload.reason || event.payload.failure}</p>}
     {request && <section className="activity-request" aria-label="Recorded request">
       <h3>Input was requested</h3>
       {request.label && <p>{request.label}</p>}
@@ -364,8 +364,8 @@ function ActivityDetail({ event }: { event: FeedItem }) {
       </div>)}
       <p className="activity-muted">This is the recorded request. Open the work to check its current state.</p>
     </section>}
-    {event.result && <section aria-label="Recorded response">
-      <h3>Response received</h3><pre>{JSON.stringify(event.result, null, 2)}</pre>
+    {event.payload.result && <section aria-label="Recorded response">
+      <h3>Response received</h3><pre>{JSON.stringify(event.payload.result, null, 2)}</pre>
     </section>}
     <div className="activity-destinations">
       {externalRequest ?
@@ -373,7 +373,7 @@ function ActivityDetail({ event }: { event: FeedItem }) {
         workPath ? <Link className="activity-primary" href={workPath}>Open work<ArrowUpRight size={16} aria-hidden="true" /></Link> :
           available && <p className="activity-muted">Work destination unavailable.</p>}
       {runPath && runPath !== (externalRequest || workPath) && <Link href={runPath}>Open run<ArrowUpRight size={16} aria-hidden="true" /></Link>}
-      {event.run && available && !available.isRunAvailable && <p className="activity-muted">This run is no longer available.</p>}
+      {event.payload.run && available && !available.isRunAvailable && <p className="activity-muted">This run is no longer available.</p>}
       {destinations.isError && <p role="alert">Could not check these destinations.{' '}
         <button type="button" onClick={() => void destinations.refetch()}>Retry destinations</button></p>}
     </div>
@@ -382,10 +382,10 @@ function ActivityDetail({ event }: { event: FeedItem }) {
       <time dateTime={event.at}>{absTime(event.at)} {timezone}</time>
       <details><summary>Recorded references</summary><dl>
         <dt>Activity type</dt><dd>{event.topic}</dd>
-        {event.run && <><dt>Run</dt><dd>{event.run}</dd></>}
-        {event.gate && <><dt>Gate</dt><dd>{event.gate}</dd></>}
-        {event.parkedAt && <><dt>Request round</dt><dd>{event.parkedAt}</dd></>}
-        {event.artifactId && <><dt>Artifact</dt><dd>{event.artifactId}</dd></>}
+        {event.payload.run && <><dt>Run</dt><dd>{event.payload.run}</dd></>}
+        {event.payload.gate && <><dt>Gate</dt><dd>{event.payload.gate}</dd></>}
+        {event.payload.input_requested_at && <><dt>Request round</dt><dd>{event.payload.input_requested_at}</dd></>}
+        {event.payload.artifact_id && <><dt>Artifact</dt><dd>{event.payload.artifact_id}</dd></>}
       </dl></details>
     </footer>
   </>

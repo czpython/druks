@@ -256,7 +256,7 @@ async def test_preview_bounds_text_and_preserves_request_identity(client, druks_
     assert row["run"] == run.id
     assert row["parkedAt"] == "2026-01-01T00:00:00Z"
     assert row["requestLabel"] == "r" * 240
-    assert len(row["subjectLabel"]) <= 240
+    assert len(row["subjectKey"]) <= 240
     assert row["artifactTitle"] == "a" * 240
     assert row["failure"] == "f" * 2048
     assert "private" not in str(row)

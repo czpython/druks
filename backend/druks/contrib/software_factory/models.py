@@ -144,7 +144,7 @@ class ProjectRepo(StoredSubject):
         stmt = select(cls).where(cls.id == repo_id, cls.project_id == project_id).limit(1)
         return (await db_session().scalars(stmt)).first()
 
-    def get_label(self) -> str:
+    def get_key(self) -> str:
         return self.full_name
 
     def get_summary(self) -> "ProjectRepoSummary":
@@ -252,7 +252,7 @@ class WorkItem(StoredSubject):
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
-    def get_label(self) -> str:
+    def get_key(self) -> str:
         return self.ticket_key
 
     def get_summary(self) -> WorkItemSummary:
@@ -280,7 +280,7 @@ class WorkItem(StoredSubject):
     ) -> "WorkItem":
         session = db_session()
         item = cls(
-            project_id=project_id,
+            project=await session.get(Project, project_id),
             source=source,
             title=title,
             ticket_key=ticket_key,

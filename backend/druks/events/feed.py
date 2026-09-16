@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Any
 
-from pydantic import AliasPath, ConfigDict, Field, computed_field
+from pydantic import ConfigDict, Field, computed_field
 
 from druks.schemas import Schema
 
@@ -16,26 +17,10 @@ class FeedItem(Schema):
     # milestone an app recorded ("merged"). The words are the client's.
     topic: str = Field(validation_alias="type")
     app: str | None = None
-    # The durable kind of the workflow a lifecycle row is about ("software_factory.build").
-    workflow: str | None = Field(default=None, validation_alias=AliasPath("payload", "kind"))
     subject_type: str | None = None
     subject_id: str | None = None
-    subject_label: str | None = None
-    run: str | None = Field(default=None, validation_alias=AliasPath("payload", "run"))
-    gate: str | None = Field(default=None, validation_alias=AliasPath("payload", "gate"))
-    parked_at: datetime | None = Field(
-        default=None, validation_alias=AliasPath("payload", "input_requested_at")
-    )
-    input_request: dict | None = Field(
-        default=None, validation_alias=AliasPath("payload", "input_request")
-    )
-    result: dict | None = Field(default=None, validation_alias=AliasPath("payload", "result"))
-    summary: str | None = Field(default=None, validation_alias=AliasPath("payload", "summary"))
-    failure: str | None = Field(default=None, validation_alias=AliasPath("payload", "failure"))
-    reason: str | None = Field(default=None, validation_alias=AliasPath("payload", "reason"))
-    artifact_id: str | None = Field(
-        default=None, validation_alias=AliasPath("payload", "artifact_id")
-    )
+    subject_key: str | None = None
+    payload: dict[str, Any]
 
     @computed_field
     @property

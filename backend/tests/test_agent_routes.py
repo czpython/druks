@@ -364,7 +364,7 @@ async def test_list_open_subjects_returns_newest_open_work_and_latest_calls(
     newest.created_at = older.created_at + timedelta(days=1)
     await seed_call(druks_db, newest, "first")
     latest_call = await seed_call(druks_db, newest, "latest")
-    subject_label = "long label kept whole " + "l" * 512
+    subject_key = "long label kept whole " + "l" * 512
     await druks_db.execute(
         workflow_status.update()
         .where(workflow_status.c.workflow_uuid == newest.id)
@@ -372,7 +372,7 @@ async def test_list_open_subjects_returns_newest_open_work_and_latest_calls(
             attributes={
                 "subject_type": failed_note.subject_type,
                 "subject_id": str(failed_note.id),
-                "subject_label": subject_label,
+                "subject_key": subject_key,
             }
         )
     )
@@ -390,7 +390,7 @@ async def test_list_open_subjects_returns_newest_open_work_and_latest_calls(
     assert subjects[str(failed_note.id)] == {
         "subjectType": failed_note.subject_type,
         "subjectId": str(failed_note.id),
-        "subjectLabel": subject_label,
+        "subjectKey": subject_key,
         "workflows": [
             {
                 "app": "field_notes",
@@ -416,7 +416,7 @@ async def test_list_open_subjects_keeps_type_and_kind_partitions(client: TestCli
             attributes={
                 "subject_type": "ticket",
                 "subject_id": str(typed_note.id),
-                "subject_label": "T-1",
+                "subject_key": "T-1",
             }
         )
     )

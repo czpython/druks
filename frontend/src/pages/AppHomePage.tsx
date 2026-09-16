@@ -67,7 +67,7 @@ function SubjectBoard({ app, subjectType }: { app: string; subjectType: string }
           onClick={() => navigate(`/${app}/${subjectType}/${row.summary.id}`)}
         >
           <StatusGlyph state={row.status.state} />
-          <span className="row-title">{row.summary.label}</span>
+          <span className="row-title">{row.summary.key}</span>
           <span className="subject-row-meta mono dim">
             {summaryEntries(row.summary)
               .map(([key, value]) => `${key} ${value}`)

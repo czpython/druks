@@ -301,7 +301,12 @@ Two rules:
 Announce a domain fact from the workflow body:
 
 ```python
-await self.announce("pr.opened", pr_number=delivery.pr_number, branch=delivery.branch)
+await self.announce(
+    "pr.opened",
+    repo=item.repo,
+    pr_number=delivery.pr_number,
+    branch=delivery.branch,
+)
 ```
 
 Druks records the event in one checkpoint. It notifies subscribers in a second
@@ -329,7 +334,7 @@ class Report(StoredSubject):
 
 `Subject` and `StoredSubject` both supply `announce()`. Druks gets the owner from
 the registered app package. The call records the subject identity, its current
-label, and the supplied facts. It then notifies subscribers in the same
+key, its optional summary title, and the supplied facts. It then notifies subscribers in the same
 transaction as the domain change. A rollback removes the change and its event.
 The app must prevent duplicate domain changes on webhook redelivery.
 
@@ -767,7 +772,7 @@ from druks.workflows import SubjectSummary
 class Repository(StoredSubject):
     __tablename__ = "night_watch_repositories"
 
-    def get_label(self) -> str:
+    def get_key(self) -> str:
         return self.full_name
 
     def get_summary(self) -> SubjectSummary:
@@ -779,8 +784,9 @@ class Repository(StoredSubject):
 ```
 
 Select the rows for the board. Druks supplies the other behavior. Each subject
-already supplies its ID and `label`. The label is its one-line description. If
-the board requires more fields, add a custom summary:
+already supplies its ID and `key`. The key is its stable work key. The
+summary has an optional descriptive `title`; a subject without one leaves it absent.
+For a title or more fields, add a custom summary:
 
 ```python
 from druks.workflows import SubjectSummary
@@ -896,10 +902,24 @@ Druks records these workflow facts without app calls:
 An external owner can announce an outcome after the run stops. Record that
 outcome when the owner reports it. Do not infer it from the run state.
 
-Each Activity row stores the subject label at the time of the event. Search
-matches that recorded label. The dashboard supplies readable labels. For
-example, it shows `gist.prepared` as "Gist prepared". Keep UI wording out of the
-event identity.
+Each Activity row keeps its recorded work key and optional descriptive title.
+`start()` reads only the title from the supplied subject's `get_summary()`. It
+stores the title beside the key in the workflow attributes. Admission,
+transitions, workflow announcements, output artifacts, and operator cancellation
+use that run's recorded title. A rename during the run applies to the next run.
+A subject announcement reads its own summary when it records the event.
+
+Druks records `payload.title`, `payload.run`, and `payload.kind`. An announcement
+that names one of them raises `WorkflowError`. A missing title leaves the key available.
+A later rename or deletion does not change history. Search matches a literal,
+case-insensitive part of the recorded key or title. It does not search current
+subjects, failure text, or artifacts.
+
+The feed exposes one `payload` dictionary with the stored fact names, including
+app-owned facts. The envelope supplies `id`, `seq`, `at`, `topic`, `app`,
+`subjectType`, `subjectId`, and `subjectKey`. The dashboard supplies readable
+activity labels. For example, it shows `gist.prepared` as "Gist prepared". Keep
+UI wording out of the event identity.
 
 A gate request and its reply retain the same run, gate, and request-time
 identity. A result retains its artifact identity. These references describe the

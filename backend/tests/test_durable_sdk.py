@@ -76,7 +76,7 @@ STEP_RETRY_ATTEMPTS = 0
 class Widget(StoredSubject):
     __tablename__ = "test_widgets"
 
-    def get_label(self) -> str:
+    def get_key(self) -> str:
         return f"W-{self.id}"
 
 
@@ -495,7 +495,8 @@ async def test_attribution_rides_the_run_and_survives_resume(rt):
     assert attributes == {
         "subject_type": "widget",
         "subject_id": "878787",
-        "subject_label": "W-878787",
+        "subject_key": "W-878787",
+        "subject_title": None,
     }
     assert parked.account_id == account_id
     assert f"acct-before:{account_id}" in SINK
@@ -727,7 +728,8 @@ async def test_subject_gate_parks_unchanged(rt):
     assert attributes == {
         "subject_type": "widget",
         "subject_id": "636363",
-        "subject_label": "W-636363",
+        "subject_key": "W-636363",
+        "subject_title": None,
     }
 
     await parked.resume(action="go")
@@ -921,7 +923,7 @@ async def test_body_dispatches_a_sibling_through_its_policy(rt):
         dispatched.removeprefix("dispatched:"),
         lambda row: row.state == RunState.FINISHED,
     )
-    assert run.subject_label == "W-616161"
+    assert run.subject_key == "W-616161"
 
 
 async def test_enqueue_inside_a_step_fails_the_run(rt):
@@ -1013,7 +1015,7 @@ async def test_scheduled_tick_fires_dispatch_not_run(rt):
             break
         await asyncio.sleep(0.1)
     assert run.state == RunState.FINISHED
-    assert run.subject_label == "W-313131"  # about its subject, not subjectless
+    assert run.subject_key == "W-313131"  # about its subject, not subjectless
 
 
 async def test_scheduled_dispatch_must_be_nullary(rt):
@@ -1306,7 +1308,7 @@ async def test_run_events_carry_subject(rt):
     assert {e.subject_type for e in events} == {"widget"}
     # The label was stamped into the run's attributes at start and snapshotted
     # onto each transition — the identity itself stays the bare key.
-    assert {e.subject_label for e in events} == {"W-4242"}
+    assert {e.subject_key for e in events} == {"W-4242"}
     assert all(e.payload["run"] == wfid for e in events)
 
 
@@ -1432,7 +1434,7 @@ async def test_admission_commits_before_the_request_and_deduplicates(rt):
                     )
                 assert len(events) == 1
                 assert events[0].payload == {"run": workflow_id, "kind": AdmissionFlow.kind}
-                assert events[0].subject_label == "W-750750"
+                assert events[0].subject_key == "W-750750"
                 raise ValueError("Roll back the request")
 
         async with get_session(rt.engine) as reader:

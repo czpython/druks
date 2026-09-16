@@ -7,7 +7,7 @@ from druks_field_notes.workflows import Summarize
 class Crate(StoredSubject):
     __tablename__ = "faketest_crates"
 
-    def get_label(self) -> str:
+    def get_key(self) -> str:
         return f"CRATE-{self.id}"
 
 
@@ -21,12 +21,13 @@ async def test_feed_carries_what_a_row_is_worded_from(druks_db, druks_client):
         druks_db,
         type="workflow.scheduled",
         subject=note.identity,
-        label=note.label,
+        key=note.key,
         app="field_notes",
-        payload={"kind": Summarize.kind, "run": "wf1"},
+        kind=Summarize.kind,
+        run="wf1",
     )
     await Event.emit(
-        druks_db, type="summarized", subject=note.identity, label=note.label, app="field_notes"
+        druks_db, type="summarized", subject=note.identity, key=note.key, app="field_notes"
     )
     await druks_db.flush()
 
@@ -34,13 +35,13 @@ async def test_feed_carries_what_a_row_is_worded_from(druks_db, druks_client):
     by_topic = {row["topic"]: row for row in items}
 
     started = by_topic["workflow.scheduled"]
-    assert (started["app"], started["workflow"]) == ("field_notes", Summarize.kind)
+    assert (started["app"], started["payload"]["kind"]) == ("field_notes", Summarize.kind)
     assert (started["subjectType"], started["subjectId"]) == ("note", str(note.id))
     # A note declares no label of its own, so it shows itself by identity.
-    assert started["subjectLabel"] == f"note {note.id}"
+    assert started["subjectKey"] == f"note {note.id}"
 
     # A milestone has no workflow behind it.
-    assert by_topic["summarized"]["workflow"] is None
+    assert "kind" not in by_topic["summarized"]["payload"]
 
 
 async def test_every_subject_shows_itself(druks_db, druks_client):
@@ -55,7 +56,7 @@ async def test_every_subject_shows_itself(druks_db, druks_client):
             druks_db,
             type="stocked",
             subject=subject.identity,
-            label=subject.label,
+            key=subject.key,
             app="field_notes",
         )
     await druks_db.delete(crate)
@@ -64,8 +65,8 @@ async def test_every_subject_shows_itself(druks_db, druks_client):
     items = (await druks_client.get("/api/events", params={"app": "field_notes"})).json()["items"]
     by_type = {row["subjectType"]: row for row in items}
 
-    assert by_type["crate"]["subjectLabel"] == "CRATE-7"
-    assert by_type["pallet"]["subjectLabel"] == "pallet 7"
+    assert by_type["crate"]["subjectKey"] == "CRATE-7"
+    assert by_type["pallet"]["subjectKey"] == "pallet 7"
 
 
 async def test_feed_paginates_same_second_events_without_loss_or_repeat(druks_db, druks_client):

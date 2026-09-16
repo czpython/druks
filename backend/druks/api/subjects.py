@@ -48,7 +48,7 @@ async def list_open_subjects(session: SessionDep) -> OpenSubjectsResponse:
                 OpenSubjectResponse(
                     subject_type=subject_type,
                     subject_id=subject_id,
-                    subject_label=newest.subject_label,
+                    subject_key=newest.subject_key,
                     workflows=workflows,
                 )
             )

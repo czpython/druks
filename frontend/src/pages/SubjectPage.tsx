@@ -111,7 +111,7 @@ function SubjectDetail({
   return (
     <Page scroll="internal" className="ins page-subject" header={crumb}>
       <Facts className="subject-facts">
-        <Fact k={label}>{data.summary.label}</Fact>
+        <Fact k={label}>{data.summary.key}</Fact>
         {summaryEntries(data.summary).map(([key, value]) => (
           <Fact key={key} k={key}>
             {value}

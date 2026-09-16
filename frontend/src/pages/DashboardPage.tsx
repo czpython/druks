@@ -101,7 +101,7 @@ function WorkCard({ row, isPending, isFirst }: { row: DashboardRun; isPending: b
   const isExternal = isPending && row.presentation === 'external'
   const externalUrl = isExternal && row.requestUrl && /^https?:\/\//i.test(row.requestUrl) ? row.requestUrl : undefined
   const destination = isExternal ? externalUrl : owner
-  const label = row.subjectLabel || row.kind
+  const label = row.subjectKey || row.kind
   const request = row.requestLabel || (row.presentation === 'in_app'
     ? (row.artifactTitle ? `Review: ${row.artifactTitle}` : 'Review')
     : 'Input requested')
@@ -147,7 +147,7 @@ function StatusRow({ name, section, lastAt }: {
       <div>
         <strong>{section.total ? labels[name].total : labels[name].empty}</strong>
         {section.total > 0 && <p>
-          {previews.map((row) => row.subjectLabel || row.kind).join(' · ')}
+          {previews.map((row) => row.subjectKey || row.kind).join(' · ')}
           {section.total > previews.length && ` and ${section.total - previews.length} more`}
         </p>}
         {section.total === 0 && lastAt && <p>

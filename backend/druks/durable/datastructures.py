@@ -35,7 +35,7 @@ class Subject:
         return {"type": self.subject_type, "id": self.id}
 
     @property
-    def label(self) -> str:
+    def key(self) -> str:
         # An identity-only subject is already named by its id — "owner/repo#7" is
         # the handle, not a surrogate key.
         return self.id
@@ -51,11 +51,11 @@ class Subject:
         return cls(id=subject_id)
 
     def get_summary(self) -> "SubjectSummary":
-        """The header its board and page show it under — the app's own fields;
-        the read side composes it with the platform's status and timeline."""
-        raise NotImplementedError(
-            f"a workflow declares {type(self).__name__}, so it needs a get_summary()"
-        )
+        """The header its board and page show it under: the id and label. Override it
+        to add the app's own fields and a descriptive ``title``."""
+        from druks.durable.schemas import SubjectSummary
+
+        return SubjectSummary.model_validate(self)
 
     @classmethod
     async def list_summaries(cls, account_id: str | None) -> "Sequence[SubjectSummary]":

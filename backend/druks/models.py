@@ -72,15 +72,14 @@ class StoredSubject(Base):
             return {"type": self.subject_type, "id": self.id}
         raise ValueError(f"unsaved {type(self).__name__} has no identity — flush it first")
 
-    def get_label(self) -> str:
-        """The one line this subject shows itself as. Override with a stable handle —
-        a ticket key, a PR number — never a mutable title: events snapshot it, and
-        the log should not disagree with itself."""
+    def get_key(self) -> str:
+        """The stable work key, such as a ticket key or PR number. Events record
+        the descriptive title from get_summary() beside this key."""
         return f"{self.subject_type.replace('_', ' ')} {self.id}"
 
     @property
-    def label(self) -> str:
-        return self.get_label()
+    def key(self) -> str:
+        return self.get_key()
 
     async def announce(self, topic: str, **facts: Any) -> None:
         """Record and deliver a domain fact in the current transaction."""
@@ -104,11 +103,12 @@ class StoredSubject(Base):
         return await db_session().get(cls, key)
 
     def get_summary(self) -> "SubjectSummary":
-        """The header its board and page show it under — the app's own fields;
-        the read side composes it with the platform's status and timeline."""
-        raise NotImplementedError(
-            f"a workflow declares {type(self).__name__}, so it needs a get_summary()"
-        )
+        """The header its board and page show it under: the id and label. Override it
+        to add the app's own fields and a descriptive ``title``."""
+        # Cycle: the durable read side is built on this module's Base.
+        from druks.durable.schemas import SubjectSummary
+
+        return SubjectSummary.model_validate(self)
 
     @classmethod
     async def list_summaries(cls, account_id: str | None) -> "Sequence[SubjectSummary]":

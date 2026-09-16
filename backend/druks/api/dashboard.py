@@ -89,7 +89,7 @@ async def get_overview(
             ranked_runs.c.state,
             ranked_runs.c.subject_type,
             ranked_runs.c.subject_id,
-            func.left(ranked_runs.c.subject_label, 240).label("subject_label"),
+            func.left(ranked_runs.c.subject_key, 240).label("subject_key"),
             ranked_runs.c.updated_at,
             ranked_runs.c.input_requested_at.label("parked_at"),
             ranked_runs.c.request_label,

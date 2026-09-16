@@ -17,8 +17,8 @@ from druks.core.models import Uuid7Pk
 from druks.database import get_session
 from druks.durable.dbos_state import (
     state_expression,
+    subject_attribute_expression,
     subject_filter,
-    subject_label_expression,
     updated_at_expression,
     workflow_status,
 )
@@ -73,7 +73,12 @@ class Run(Base):
     state: Mapped[str] = column_property(state_expression(id, input_gate, created_at))
     # How the subject showed itself when this run started — read with the row, so
     # every event the run writes names it without a second lookup.
-    subject_label: Mapped[str | None] = column_property(subject_label_expression(id))
+    subject_key: Mapped[str | None] = column_property(
+        subject_attribute_expression(id, "subject_key")
+    )
+    subject_title: Mapped[str | None] = column_property(
+        subject_attribute_expression(id, "subject_title")
+    )
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     account: Mapped[Account] = relationship(lazy="joined", foreign_keys=[account_id])
     # The run's agent calls in execution order. Never lazy-loaded: the reads
@@ -247,11 +252,11 @@ class Run(Base):
         attributes = workflow_status.c.attributes
         subject_type = attributes["subject_type"].as_string().label("subject_type")
         subject_id = attributes["subject_id"].as_string().label("subject_id")
-        subject_label = attributes["subject_label"].as_string().label("subject_label")
+        subject_key = attributes["subject_key"].as_string().label("subject_key")
         driving = select(
             subject_type,
             subject_id,
-            subject_label,
+            subject_key,
             cls.id.label("run_id"),
             cls.kind,
             cls.failure,
@@ -684,21 +689,19 @@ class Artifact(Base, Uuid7Pk):
         if artifact_id and event:
             call = await AgentCall.get(session, call_id)
             run = call.run
-            payload = {
-                "run": run.id,
-                "kind": run.kind,
-                "agent_call_id": call.id,
-                "artifact_id": artifact_id,
-            }
+            facts = {"agent_call_id": call.id, "artifact_id": artifact_id}
             if summary := event.get("summary"):
-                payload["summary"] = summary
+                facts["summary"] = summary
             await Event.emit(
                 session,
                 type=event["topic"],
                 subject=await run.get_subject(),
-                label=run.subject_label,
+                key=run.subject_key,
+                title=run.subject_title,
+                run=run.id,
+                kind=run.kind,
+                facts=facts,
                 app=workflows.get(run.kind).app,
-                payload=payload,
             )
         await session.flush()
 

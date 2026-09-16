@@ -134,7 +134,7 @@ SubjectId = Annotated[str, BeforeValidator(str)]
 
 # The one line a board row and a detail page show a subject as; blank is
 # rejected rather than rendered.
-SubjectLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+SubjectKey = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class SubjectSummary(Schema):
@@ -144,7 +144,8 @@ class SubjectSummary(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     id: SubjectId
-    label: SubjectLabel
+    key: SubjectKey
+    title: str | None = None
 
 
 class SubjectStatus(Schema):

@@ -14,7 +14,7 @@ vi.mock('../api/client', () => ({ api: { dashboardOverview: vi.fn(), getPersonal
 
 const pending: DashboardRun = {
   app: 'notes', run: 'run-one', kind: 'summarize', state: 'parked',
-  subjectType: 'note', subjectId: '7', subjectLabel: 'One long subject',
+  subjectType: 'note', subjectId: '7', subjectKey: 'One long subject',
   updatedAt: '2026-09-01T00:00:00Z', parkedAt: '2026-09-01T12:34:56.123456Z',
   requestLabel: 'Review this note', artifactTitle: null, presentation: 'in_app',
   requestUrl: null, failure: null,
@@ -28,7 +28,7 @@ const href = (link: HTMLElement) => new URL(link.getAttribute('href')!, window.l
 
 function section(total: number, state: DashboardRun['state']): DashboardSection {
   return { total, rows: Array.from({ length: Math.min(total, 4) }, (_, index) => ({
-    ...pending, run: `${state}-${index}`, state, subjectLabel: `${state} subject ${index}`,
+    ...pending, run: `${state}-${index}`, state, subjectKey: `${state} subject ${index}`,
     failure: state === 'failed' ? `Failure context ${index}` : null,
   })) }
 }
@@ -145,15 +145,15 @@ describe('Dashboard', () => {
   })
 
   it('keeps long context without an active action when a destination is missing or unsafe', async () => {
-    const subjectLabel = 'A long subject '.repeat(16)
+    const subjectKey = 'A long subject '.repeat(16)
     const failure = 'The remote service did not accept the request. '.repeat(40)
     overview.mockResolvedValue({ ...empty, needsYou: { total: 3, rows: [
-      { ...pending, app: 'no_route', subjectLabel },
+      { ...pending, app: 'no_route', subjectKey },
       { ...pending, run: 'unsafe', presentation: 'external', requestUrl: 'javascript:alert(1)' },
       { ...pending, run: 'missing', presentation: 'external', requestUrl: null },
     ] } })
     const client = mount(['notes', 'no_route'])
-    await screen.findByText(subjectLabel.trim())
+    await screen.findByText(subjectKey.trim())
     expect(screen.queryByRole('link')).toBeNull()
     expect(screen.getAllByText('Review destination unavailable')).toHaveLength(3)
     overview.mockResolvedValue({ ...empty, failed: { total: 2, rows: [
@@ -169,7 +169,7 @@ describe('Dashboard', () => {
 
   it('uses a workflow label for subjectless running work and an exact owner link when available', async () => {
     overview.mockResolvedValue({ ...empty, running: { total: 2, rows: [
-      { ...pending, run: 'subjectless', state: 'running', subjectLabel: null, subjectType: null, subjectId: null },
+      { ...pending, run: 'subjectless', state: 'running', subjectKey: null, subjectType: null, subjectId: null },
       { ...pending, run: 'running', state: 'running' },
     ] } })
     mount()
@@ -239,7 +239,7 @@ describe('Dashboard', () => {
     const client = mount()
     const links = await screen.findAllByRole('link', { name: 'Review' })
     links[1]!.focus()
-    const after = [...before.rows.slice(1), { ...pending, run: 'next', subjectLabel: 'Next request' }]
+    const after = [...before.rows.slice(1), { ...pending, run: 'next', subjectKey: 'Next request' }]
     overview.mockResolvedValue({ ...empty, needsYou: { total: 4, rows: after } })
     await act(() => client.invalidateQueries({ queryKey: ['dashboard', 'overview'] }))
     await screen.findByText('Next request')

@@ -50,7 +50,7 @@ const status: SubjectResponse['status'] = {
   accountUsername: 'operator',
 }
 const subject: SubjectResponse = {
-  summary: { id: '7', label: 'A note' },
+  summary: { id: '7', key: 'A note' },
   status,
   timeline: [run('older'), run('newer')],
 }
@@ -58,7 +58,7 @@ const item: WorkItemDetail = {
   ...subject,
   summary: {
     id: '7',
-    label: 'A task',
+    key: 'A task',
     title: 'A task',
     source: 'linear',
     repo: 'org/repo',

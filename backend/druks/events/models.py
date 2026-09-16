@@ -49,7 +49,7 @@ class Event(Base):
     subject_type: Mapped[str | None] = mapped_column(default=None)
     # How the subject showed itself when the event was written — the feed labels
     # rows without ever loading a subject. Absent exactly when the subject is.
-    subject_label: Mapped[str | None] = mapped_column(default=None)
+    subject_key: Mapped[str | None] = mapped_column(default=None)
     app: Mapped[str | None] = mapped_column(default=None)
     # Append-only, so creation time is the event time. No updated_at.
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -66,7 +66,7 @@ class Event(Base):
         until: datetime | None = None,
     ) -> Select[tuple["Event"]]:
         """The recorded Activity that matches these filters, as a query. Search reads the
-        recorded subject label literally; from is inclusive and until is exclusive."""
+        recorded key and title literally; from is inclusive and until is exclusive."""
         # The durable package imports this module.
         from druks.durable.enums import WorkflowEvent
 
@@ -91,7 +91,10 @@ class Event(Base):
             statement = statement.where(cls.app == app)
         if search and search.strip():
             statement = statement.where(
-                cls.subject_label.icontains(search.strip(), autoescape=True)
+                or_(
+                    cls.subject_key.icontains(search.strip(), autoescape=True),
+                    cls.payload["title"].as_string().icontains(search.strip(), autoescape=True),
+                )
             )
         if topic:
             statement = statement.where(cls.type == topic)
@@ -127,20 +130,30 @@ class Event(Base):
         *,
         type: str,
         subject: dict[str, Any] | None = None,
-        label: str | None = None,
-        payload: dict[str, Any] | None = None,
+        key: str | None = None,
+        title: str | None = None,
+        run: str | None = None,
+        kind: str | None = None,
+        facts: dict[str, Any] | None = None,
         app: str | None = None,
     ) -> None:
-        """Record in the session's transaction."""
+        """Record the work identity, the run, and the announced facts in this transaction."""
+        # The durable package imports this module.
+        from druks.durable.exceptions import WorkflowError
+
         subject = subject or {}
+        facts = facts or {}
+        recorded = {"run": run, "kind": kind, "title": title}
+        if taken := recorded.keys() & facts.keys():
+            raise WorkflowError(f"{type} facts {sorted(taken)} belong to Druks. Rename them.")
         session.add(
             cls(
                 type=type,
                 subject_type=subject.get("type"),
                 subject_id=str(subject["id"]) if "id" in subject else None,
-                subject_label=label or None,
+                subject_key=key or None,
                 app=app,
-                payload=payload or {},
+                payload={**facts, **{name: value for name, value in recorded.items() if value}},
             )
         )
         await session.flush()
@@ -170,8 +183,9 @@ class Event(Base):
             session,
             type=topic,
             subject=subject.identity,
-            label=subject.label,
-            payload=facts,
+            key=subject.key,
+            title=subject.get_summary().title,
+            facts=facts,
             app=app,
         )
         await publish(topic, subject=subject.identity, **facts)
