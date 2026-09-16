@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 from conftest import connect_service
-from druks.apps.settings import field_choice_source, field_choices, field_visibility
+from druks.apps.settings import field_choices, field_live_choices, field_visibility
 from druks.contrib.software_factory.app import (
     SoftwareFactory,
     check_tracker_identity,
@@ -267,7 +267,7 @@ def test_status_settings_show_for_linear_and_jira_with_the_selected_tracker_stat
     assert field_choices(fields["tracker"]) == ["none", "linear", "jira", "druks"]
     for status in ("trigger", "in_progress", "in_review", "done", "resting"):
         assert field_visibility(fields[f"{status}_status"]) == ("tracker", ["linear", "jira"])
-        assert field_choice_source(fields[f"{status}_status"]) is list_tracker_status_choices
+        assert field_live_choices(fields[f"{status}_status"]).source is list_tracker_status_choices
 
 
 async def test_tracker_builds_the_board_without_credentials(monkeypatch):

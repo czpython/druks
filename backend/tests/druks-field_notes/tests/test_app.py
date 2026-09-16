@@ -1,4 +1,5 @@
 import pytest
+from conftest import settings_client
 from druks.apps.settings import field_kind, field_multiline
 from druks_field_notes.app import FieldNotes
 from druks_field_notes.models import Note
@@ -32,6 +33,15 @@ def test_settings_require_a_sync_token_for_public_visibility():
         "sync_token": "Required when visibility is public."
     }
     assert FieldNotes.Settings(visibility="public", sync_token="sk-sync-token").clean() == {}
+
+
+def test_saving_a_notebook_the_source_does_not_list_is_rejected(tmp_path):
+    with settings_client(tmp_path) as client:
+        response = client.patch(
+            "/api/settings/apps", json={"appSettings": {"field_notes": {"notebook": "kitchen"}}}
+        )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "notebook: 'kitchen' is not one of the listed choices"
 
 
 def test_the_signing_key_declares_the_multiline_secret_presentation():

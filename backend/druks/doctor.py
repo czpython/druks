@@ -34,6 +34,7 @@ from .secrets.enums import SecretKind
 from .secrets.models import VaultSecret
 from .services import Service, ServiceNotConnectedError
 from .settings import Settings, load_settings
+from .user_settings.reads import list_live_choices
 from .webhooks.base import Webhook
 from .workflows import Workflow, _Task
 
@@ -486,7 +487,12 @@ async def check_apps(settings: Settings) -> list[CheckResult]:
         for app in iter_apps():
             if settings_model := app.settings_model:
                 try:
-                    problems = (await app.settings()).clean()
+                    app_settings = await app.settings()
+                    problems = app_settings.clean()
+                    for name, listed in (await list_live_choices(settings_model)).items():
+                        value = getattr(app_settings, name)
+                        if value not in dict(listed):
+                            problems[name] = f"{value!r} is not one of the listed choices"
                     detail = "; ".join(
                         f"{settings_model.model_fields[field].title or field}: {message}"
                         for field, message in problems.items()

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.apps.settings import field_choice_source, field_kind
+from druks.apps.settings import field_kind, field_live_choices
 
 from .models import InstallationSettings, SettingsOverride
 from .schemas import (
@@ -53,9 +53,9 @@ async def list_live_choices(model: type[BaseModel]) -> dict[str, list[tuple[str,
     """The live choices of each field that has any, keyed by field name, after an empty
     choice. Fields that share a source share one call."""
     sources = {
-        name: source
+        name: live.source
         for name, field in model.model_fields.items()
-        if (source := field_choice_source(field))
+        if (live := field_live_choices(field))
     }
     results = {source: await source() for source in set(sources.values())}
     return {

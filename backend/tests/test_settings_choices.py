@@ -82,6 +82,13 @@ async def test_live_choices_call_each_source_once_and_skip_empty_fields():
     assert len(SOURCE_CALLS) == 1
 
 
+async def test_choices_accept_listed_values_the_blank_choice_and_unverifiable_ones():
+    assert await Choices(_statuses).accepts("todo")
+    assert await Choices(_statuses).accepts("")
+    assert not await Choices(_statuses).accepts("Todo")
+    assert await Choices(_no_statuses).accepts("anything")
+
+
 @pytest.mark.parametrize(
     "annotation", [Annotated[int, Choices(_statuses)], Annotated[str, Choices(_statuses)] | None]
 )

@@ -15,6 +15,11 @@ class Choices:
 
     source: Callable[[], Awaitable[list[tuple[str, str]]]]
 
+    async def accepts(self, value: str) -> bool:
+        # Empty is the select's blank choice, and a source that lists nothing cannot verify.
+        listed = await self.source()
+        return not value or not listed or value in {stored for stored, _ in listed}
+
 
 # The annotation picks the wire kind, and the frontend picks the input control from it.
 _SCALAR_KINDS: dict[type, str] = {bool: "bool", int: "int", str: "str"}
@@ -60,8 +65,8 @@ def _nests_choices(annotation: object) -> bool:
     return any(isinstance(arg, Choices) or _nests_choices(arg) for arg in get_args(annotation))
 
 
-def field_choice_source(field: FieldInfo) -> Callable[[], Awaitable[list[tuple[str, str]]]] | None:
-    return next((item.source for item in field.metadata if isinstance(item, Choices)), None)
+def field_live_choices(field: FieldInfo) -> Choices | None:
+    return next((item for item in field.metadata if isinstance(item, Choices)), None)
 
 
 def field_section(field: FieldInfo) -> str:
@@ -119,8 +124,8 @@ def validate_settings_declaration(model: type[BaseModel]) -> None:
     # A bad declaration fails when the app loads, not at the first save from the settings page.
     for name, field in model.model_fields.items():
         validate_field_choice_details(field)
-        source = field_choice_source(field)
-        if (source and field.annotation is not str) or _nests_choices(field.annotation):
+        live = field_live_choices(field)
+        if (live and field.annotation is not str) or _nests_choices(field.annotation):
             raise SettingsDeclarationError(
                 f"settings field {name!r}: Choices applies only to a str field. "
                 "Declare it as Annotated[str, Choices(source)]."

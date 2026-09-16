@@ -22,6 +22,7 @@ from .schemas import Operation
 from .settings import (
     coerce_setting_value,
     field_kind,
+    field_live_choices,
     validate_setting_override,
     validate_settings_declaration,
 )
@@ -175,6 +176,9 @@ class App:
         if value is not None:
             value = coerce_setting_value(model, field, value)
             validate_setting_override(model, (await cls.settings()).model_dump(), field, value)
+            live = field_live_choices(model.model_fields[field])
+            if live and not await live.accepts(value):
+                raise ValueError(f"{field}: {value!r} is not one of the listed choices")
         await SettingsOverride.set_app_setting(
             db_session(),
             cls.name,
