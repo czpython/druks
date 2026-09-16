@@ -23,6 +23,7 @@ _OP_TEMPLATES = [
 # The kwargs the workflow passes at each template's agent call site.
 _CALL_KWARGS = {
     "generate_plan.md": {"answered_questions": [], "operator_note": "", "reviewer_notes": ""},
+    "evaluate_implementation.md": {"can_rework": True},
 }
 
 
@@ -143,6 +144,7 @@ async def test_evaluation_prompt_renders_code_review_lens_only_when_enabled():
         prompt = await render_prompt(
             "software_factory/build/evaluate_implementation.md",
             build=_build(review_code=review_code),
+            can_rework=True,
             verification="VERIFICATION-BLOCK",
             workspace=_workspace(),
         )
@@ -152,33 +154,30 @@ async def test_evaluation_prompt_renders_code_review_lens_only_when_enabled():
     assert len(headings[True] - headings[False]) == 1
 
 
-async def test_approve_mode_posts_verdict_reviews():
-    prompt = await render_prompt(
-        "software_factory/build/evaluate_implementation.md",
-        build=_build(),
-        verification="VERIFICATION-BLOCK",
-        workspace=_workspace(),
-    )
-
-    assert "an **approving** verdict → `APPROVE`" in prompt
-    assert "Submit every review as a `COMMENT` event" not in prompt
-
-
-async def test_comment_mode_swaps_the_review_event_mapping():
-    # The operator authored the PR, and GitHub refuses an author's APPROVE /
-    # REQUEST_CHANGES — the prompt swaps the event mapping for comment-mode.
+@pytest.mark.parametrize("review_mode", ["approve", "comment"])
+@pytest.mark.parametrize("can_rework", [True, False])
+async def test_review_events_match_the_handoff_policy(review_mode, can_rework):
     build = _build()
-    build.review_mode = "comment"
-
+    build.review_mode = review_mode
     prompt = await render_prompt(
         "software_factory/build/evaluate_implementation.md",
         build=build,
+        can_rework=can_rework,
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
     )
-
-    assert "Submit every review as a `COMMENT` event" in prompt
-    assert "an **approving** verdict → `APPROVE`" not in prompt
+    events = {}
+    for line in prompt.splitlines():
+        if line.startswith(("| pass |", "| fail |", "| blocked |")):
+            verdict, event = (cell.strip() for cell in line.strip("|").split("|"))
+            events[verdict] = event
+    assert events == {
+        "pass": "APPROVE" if review_mode == "approve" else "COMMENT",
+        "fail": "none"
+        if can_rework
+        else ("REQUEST_CHANGES" if review_mode == "approve" else "COMMENT"),
+        "blocked": "COMMENT",
+    }
 
 
 def test_build_prompt_context_covers_template_attrs():

@@ -299,10 +299,11 @@ class Build(Workflow):
     async def _implement_phase(self) -> None:
         while True:
             await self.implement()
-            evaluation = await SoftwareFactory.evaluate_implementation()
-            if evaluation.verdict == EvaluationVerdict.FAIL and (
+            can_rework = (
                 self.journal.implementation_revision < self._settings.max_implementation_revisions
-            ):
+            )
+            evaluation = await SoftwareFactory.evaluate_implementation(can_rework=can_rework)
+            if evaluation.verdict == EvaluationVerdict.FAIL and can_rework:
                 continue
             if await self._work_gate():
                 return

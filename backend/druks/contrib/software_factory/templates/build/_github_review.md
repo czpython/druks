@@ -1,29 +1,23 @@
-## Submit your review on the PR — REQUIRED (GitHub MCP)
+## Publish the human handoff on GitHub
 
-A `github` MCP server is connected. After you decide, you **must** also submit
-your review on this PR ({{ build.repo }} #{{ build.pr_number }})
-through it — every time, not optionally. This is in addition to the JSON you
-return: the JSON drives the build; the GitHub review is what the human sees on
-the PR.
+Use the final synthesized verdict to select the event below. `none` means the build
+will rework automatically: return the full JSON result without posting a review,
+inline comments, or a separate PR comment. Druks keeps that decision in the run.
 
-{% if build.review_mode == "approve" %}
-- Review event from your verdict: an **approving** verdict → `APPROVE`; a
-  **changes-requested / failing** verdict → `REQUEST_CHANGES`; a **blocked /
-  could-not-evaluate** verdict → skip the GitHub review. When you approve *with
-  required changes*, post `APPROVE` and put the required changes in the body.
-{% else %}
-- Submit every review as a `COMMENT` event — you share the identity that authored
-  this PR, and GitHub refuses `APPROVE` and `REQUEST_CHANGES` from a pull
-  request's author. Open the body by stating your verdict plainly ("Verdict:
-  approve" / "Verdict: request changes"); a **blocked / could-not-evaluate**
-  verdict → skip the GitHub review. When you approve *with required changes*,
-  state the verdict and put the required changes in the body.
-{% endif %}
-- Use your review body as the GitHub review body; attach each finding that maps
-  to a file and line as an inline review comment on that line.
-- Do not request reviewers on the PR — druks requests the assignee's review
-  itself at the moments that await a human.
+| Verdict | GitHub review event |
+| --- | --- |
+| pass | {{ "APPROVE" if build.review_mode == "approve" else "COMMENT" }} |
+| fail | {{ "none" if can_rework else ("REQUEST_CHANGES" if build.review_mode == "approve" else "COMMENT") }} |
+| blocked | COMMENT |
 
-A genuine github MCP error is the only acceptable reason to skip a step — never
-your own choice — and it must never change, delay, or replace the JSON verdict
-you return.
+For every other event, submit one review on {{ build.repo }} #{{ build.pr_number }}
+through the connected `github` MCP server. State the verdict at the start of the
+body. A blocked review explains what the operator must supply or fix; it does not
+request code changes that the implementer cannot make.
+
+Use `body` as the verification section and include the code-review section when
+that lens is enabled. Attach findings with valid diff locations as inline comments.
+Do not request reviewers: Druks requests the assignee when it parks for review.
+
+A GitHub MCP error must be reported in the result. It must not change the verdict
+or replace the JSON result that drives the build.
