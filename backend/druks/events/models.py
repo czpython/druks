@@ -1,10 +1,11 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Index, Select, and_, or_, select
+from sqlalchemy import ColumnElement, Index, Select, Text, and_, cast, func, not_, or_, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import UserDefinedType
 
 from druks.apps.loader import iter_apps, resolve_workflow_app
 from druks.models import Base, StoredSubject
@@ -14,15 +15,33 @@ if TYPE_CHECKING:
     from druks.durable.datastructures import Subject
 
 
+class TransactionId(UserDefinedType[int]):
+    cache_ok = True
+
+    def get_col_spec(self, **kwargs: Any) -> str:
+        return "xid8"
+
+
+class Snapshot(UserDefinedType[str]):
+    cache_ok = True
+
+    def get_col_spec(self, **kwargs: Any) -> str:
+        return "pg_snapshot"
+
+
 class Event(Base):
     """Recorded workflow and domain facts, keyed to their subject."""
 
     __tablename__ = "events"
     # Newest-per-subject is the history/dashboard rollup; the feed orders on the
     # monotonic pk.
-    __table_args__ = (Index("events_subject_idx", "subject_type", "subject_id", "created_at"),)
+    __table_args__ = (
+        Index("events_subject_idx", "subject_type", "subject_id", "created_at"),
+        Index("events_xid_idx", "xid"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    xid: Mapped[int] = mapped_column(TransactionId(), server_default=text("pg_current_xact_id()"))
     type: Mapped[str]
     subject_id: Mapped[str | None] = mapped_column(default=None)
     # What the event is about (a work item, a signal), supplied by the caller.
@@ -81,6 +100,25 @@ class Event(Base):
         if until:
             statement = statement.where(cls.created_at < until)
         return statement
+
+    @classmethod
+    async def get_cursor(cls, session: AsyncSession, cursor: str | None = None) -> str:
+        """The snapshot a live stream continues from: ``cursor`` once Postgres accepts
+        it, or the current snapshot."""
+        return await session.scalar(
+            select(func.coalesce(cast(cursor, Snapshot()), func.pg_current_snapshot()).cast(Text))
+        )
+
+    @classmethod
+    def committed_after(cls, cursor: str) -> ColumnElement[bool]:
+        """The rows the snapshot ``cursor`` did not see, including the ones whose
+        transaction was still running when it was taken."""
+        snapshot = cast(cursor, Snapshot())
+        # Everything below xmin is visible, so the index range starts there.
+        return and_(
+            cls.xid >= func.pg_snapshot_xmin(snapshot),
+            not_(func.pg_visible_in_snapshot(cls.xid, snapshot)),
+        )
 
     @classmethod
     async def emit(

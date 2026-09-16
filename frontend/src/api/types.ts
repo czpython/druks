@@ -840,6 +840,8 @@ export interface FeedItem {
 
 export interface FeedResponse {
   items: FeedItem[]
+  // The snapshot the live stream continues from.
+  cursor: string
   nextCursor: string | null
 }
 

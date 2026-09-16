@@ -228,7 +228,7 @@ async function sendOperation(method: string, path: string, body: unknown): Promi
   }
 }
 
-export function eventQuery(params: EventFilters & { limit?: number; before?: string; after?: string }): string {
+export function eventQuery(params: EventFilters & { limit?: number; before?: string; cursor?: string }): string {
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
     if (value) query.set(key, String(value))

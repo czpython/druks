@@ -75,8 +75,12 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
   const [isPaused, setIsPaused] = useState(false)
   const [connection, setConnection] = useState('Connecting')
   const [isReadingHistory, setIsReadingHistory] = useState(false)
-  const [streamStart, setStreamStart] = useState<number | null>(null)
-  if (streamStart === null && history.data) setStreamStart(events[0]?.seq ?? 0)
+  const [streamStart, setStreamStart] = useState<string | null>(null)
+  const [cursor, setCursor] = useState<string | null>(null)
+  if (streamStart === null && history.data) {
+    setStreamStart(history.data.pages[0]!.cursor)
+    setCursor(history.data.pages[0]!.cursor)
+  }
   const feed = useRef<HTMLDivElement>(null)
   const rowList = useRef<HTMLOListElement>(null)
   const rows = useRef(new Map<number, HTMLButtonElement>())
@@ -86,7 +90,8 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
   if (previousScope !== scope) {
     setPreviousScope(scope)
     setPending([])
-    setStreamStart(history.data ? (events[0]?.seq ?? 0) : null)
+    setStreamStart(history.data?.pages[0]?.cursor ?? null)
+    setCursor(history.data?.pages[0]?.cursor ?? null)
     setConnection('Connecting')
     setIsReadingHistory(false)
   }
@@ -126,18 +131,18 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
       if (items.length > ROW_LIMIT) {
         // Rows past the limit leave the page. The cursor restarts after the kept rows, so Load older reaches them.
         const kept = items.slice(0, ROW_LIMIT)
-        return { pages: [{ items: kept, nextCursor: String(kept.at(-1)!.seq) }], pageParams: [undefined] }
+        return { pages: [{ ...first, items: kept, nextCursor: String(kept.at(-1)!.seq) }], pageParams: [undefined] }
       }
       return { ...data, pages: [{ ...first, items }, ...data.pages.slice(1)] }
     })
   }
 
-  // The stream rejects a zero cursor. Without a cursor, it sends the newest rows again, and the feed dedupes them.
-  useSSE(`/api/events/stream?${eventQuery({ ...filters, after: streamStart ? String(streamStart) : undefined })}`, {
+  useSSE(`/api/events/stream?${eventQuery({ ...filters, cursor: streamStart ?? undefined })}`, {
     enabled: streamStart !== null && !isPaused,
     onOpen: () => setConnection('Live'),
     onError: () => setConnection('Reconnecting'),
     handlers: {
+      'batch-end': (raw) => setCursor((raw as { cursor: string }).cursor),
       message: (raw) => {
         const event = raw as FeedItem
         if (events.some((row) => row.id === event.id) || pending.some((row) => row.id === event.id)) return
@@ -196,7 +201,7 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
               <button type="button" aria-label={isPaused ? 'Resume updates' : 'Pause updates'}
                 title="Pause affects feed updates only" onClick={() => {
                   if (isPaused) {
-                    setStreamStart(Math.max(events[0]?.seq ?? 0, ...pending.map((event) => event.seq)))
+                    setStreamStart(cursor)
                     setConnection('Connecting')
                   }
                   setIsPaused(!isPaused)
