@@ -2370,12 +2370,30 @@ export function McpServersPane() {
   }
 
   async function remove(name: string) {
-    if (!window.confirm(`Remove ${name} from every sandbox?`)) return
     setBusy(true)
     setError(null)
     try {
-      await api.removeMcpServer(name)
-      await refresh()
+      const connections = await api.mcpServerConnections(name)
+      const usernames = connections.map((connection) => connection.accountUsername)
+      const accounts = usernames.filter((username) => username !== null)
+      const effects = [`Remove ${name} from every sandbox?`]
+      if (accounts.length) {
+        const noun = accounts.length === 1 ? 'account' : 'accounts'
+        const named = accounts.slice(0, 5).join(', ')
+        const unnamed = accounts.length - 5
+        const names = unnamed > 0 ? `${named} and ${unnamed} more` : named
+        effects.push(`This disconnects ${accounts.length} connected ${noun}: ${names}.`)
+      }
+      if (usernames.includes(null)) {
+        effects.push('This revokes the shared connection used by all accounts.')
+      }
+      if (connections.length) {
+        effects.push('After you add the server again, affected accounts must reconnect.')
+      }
+      if (window.confirm(effects.join('\n\n'))) {
+        await api.removeMcpServer(name)
+        await refresh()
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

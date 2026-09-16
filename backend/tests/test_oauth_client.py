@@ -134,11 +134,9 @@ async def test_get_losing_the_lock_polls_for_the_winners_token(token_endpoint):
     redis = get_client()
     await redis.set(_lock_key(connection), "1")
 
-    async def _winner_finishes():
-        await redis.set(_token_key(connection), "at-winner")
-        await redis.delete(_lock_key(connection))
-
-    winner = asyncio.create_task(_winner_finishes())
+    # The winner holds its lock: a lock freed between the loser's cache miss
+    # and its lock attempt would elect the loser instead.
+    winner = asyncio.create_task(redis.set(_token_key(connection), "at-winner"))
     token, _ = await _client().get_access_token(db_session(), connection=connection)
     await winner
 

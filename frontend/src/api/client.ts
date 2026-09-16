@@ -31,6 +31,7 @@ import type {
   McpRegistryCandidate,
   PageSnapshot,
   McpServer,
+  McpServerConnection,
   Service,
   Provider,
   ProviderCatalog,
@@ -378,6 +379,8 @@ export const api = {
     postJSON<McpServer>('/api/mcp-servers/registry', body),
   setMcpServerEnabled: (name: string, isEnabled: boolean) =>
     patchJSON<McpServer>(`/api/mcp-servers/${encodeURIComponent(name)}`, { is_enabled: isEnabled }),
+  mcpServerConnections: (name: string) =>
+    getJSON<McpServerConnection[]>(`/api/mcp-servers/${encodeURIComponent(name)}/connections`),
   removeMcpServer: (name: string) => deleteRequest(`/api/mcp-servers/${encodeURIComponent(name)}`),
   // OAuth servers: connect returns the consent URL to open; the grant lands via
   // the provider's redirect to druks' callback, never through this client.

@@ -992,3 +992,8 @@ export interface McpServer {
   // configured without revealing it.
   hasToken: boolean
 }
+
+export interface McpServerConnection {
+  // Null identifies the shared connection every account uses.
+  accountUsername: string | null
+}

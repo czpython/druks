@@ -1036,6 +1036,11 @@ async def test_removal_drops_every_grant_and_cached_token(tmp_path, druks_db):
     await close_client()
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        connections = client.get(f"/api/mcp-servers/{_NAME}/connections").json()
+        assert {connection["accountUsername"] for connection in connections} == {
+            first.username,
+            second.username,
+        }
         assert client.delete(f"/api/mcp-servers/{_NAME}").status_code == 204
 
     assert not await McpServer.get_for_name(druks_db, _NAME)

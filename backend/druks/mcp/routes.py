@@ -23,8 +23,10 @@ from druks.mcp.schemas import (
     CreateMcpServerRequest,
     InstallMcpServerRequest,
     McpRegistryCandidateResponse,
+    McpServerConnectionResponse,
     McpServerResponse,
 )
+from druks.secrets.models import VaultSecret
 
 router = APIRouter(prefix="/api/mcp-servers", tags=["mcp-servers"])
 
@@ -156,6 +158,13 @@ async def set_mcp_server_enabled(
     if not await McpServer.set_enabled(session, name, is_enabled):
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} not found")
     return await _response(session, name)
+
+
+@router.get("/{name}/connections", response_model=list[McpServerConnectionResponse])
+async def list_mcp_server_connections(session: SessionDep, name: str) -> list[VaultSecret]:
+    if not await McpServer.get_for_name(session, name):
+        raise HTTPException(status_code=404, detail=f"MCP server {name!r} not found")
+    return await oauth.list_connections(session, name)
 
 
 @router.delete("/{name}", status_code=204)

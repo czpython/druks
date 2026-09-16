@@ -453,6 +453,8 @@ async def test_removing_a_connected_row_drops_its_grant(tmp_path, monkeypatch, d
             druks_db, Audience.mcp("grafana"), account_id=None, refresh_token="rt", scopes=[]
         )
 
+        connections = client.get("/api/mcp-servers/grafana/connections").json()
+        assert connections == [{"accountUsername": None}]
         assert client.delete("/api/mcp-servers/grafana").status_code == 204
 
     # An orphan grant would revive as this name's credential on re-add.

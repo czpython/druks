@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import AliasPath, BaseModel, ConfigDict, Field, StringConstraints
 
 from druks.schemas import Schema
 
@@ -18,6 +18,15 @@ class McpServerResponse(Schema):
     builtin: bool
     # Whether the server can authenticate at delivery — never the token itself.
     has_token: bool
+
+
+class McpServerConnectionResponse(Schema):
+    model_config = ConfigDict(from_attributes=True)
+
+    # Null identifies the shared connection every account uses.
+    account_username: str | None = Field(
+        default=None, validation_alias=AliasPath("account", "username")
+    )
 
 
 class ConnectMcpServerResponse(Schema):
