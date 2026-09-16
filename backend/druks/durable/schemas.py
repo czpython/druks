@@ -91,6 +91,9 @@ class AgentCallFiles(Schema):
 
 class RunResponse(Schema):
     id: str
+    retry_from: str | None = None
+    retry_step: int | None = None
+    retry_reused_steps: int | None = None
     # The durable kind ("software_factory.build"); ``label`` is its display name ("Build").
     kind: str
     label: str
@@ -114,6 +117,9 @@ class RunResponse(Schema):
     ) -> "RunResponse":
         return cls(
             id=run.id,
+            retry_from=run.retry_from,
+            retry_step=run.retry_step,
+            retry_reused_steps=run.retry_reused_steps,
             kind=run.kind,
             label=get_display_label(run.kind),
             state=RunState(run.state),

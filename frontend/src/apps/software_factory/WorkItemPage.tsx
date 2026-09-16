@@ -1,3 +1,4 @@
+import { RunRetry } from '../../components/RunRetry'
 import { Page } from '@druks/ui'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo, useState } from 'react'
@@ -517,6 +518,7 @@ function RunInspector({
   return (
     <>
       <RunHeader data={data} run={run} call={call} />
+      <RunRetry run={run} />
       {(expected || review || artifact) && (
         <div className="ins-tabs">
           {(expected || review) && (

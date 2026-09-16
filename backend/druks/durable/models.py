@@ -49,6 +49,9 @@ class Run(Base):
     # The DBOS workflow id, minted at start() so row and run share one identity.
     id: Mapped[str] = mapped_column(String, primary_key=True)
     kind: Mapped[str]
+    retry_from: Mapped[str | None] = mapped_column(default=None)
+    retry_step: Mapped[int | None] = mapped_column(default=None)
+    retry_reused_steps: Mapped[int | None] = mapped_column(default=None)
     # The parked gate's recv topic — which gate, e.g. "review_plan"; presence ⇒
     # PARKED. The DBOS routing key, set automatically from the Gate class.
     input_gate: Mapped[str | None] = mapped_column(default=None)
@@ -114,17 +117,42 @@ class Run(Base):
             return self.agent_calls[-1].last_error
 
     @classmethod
-    async def create_row(cls, engine, *, workflow_id: str, kind: str, account_id: str) -> None:
+    async def create_row(
+        cls,
+        engine,
+        *,
+        workflow_id: str,
+        kind: str,
+        account_id: str,
+        retry_from: str | None = None,
+        retry_step: int | None = None,
+        retry_reused_steps: int | None = None,
+    ) -> None:
         # Own committed transaction (not the caller's request txn) so the row
         # exists before the running workflow's first lifecycle event. Idempotent:
         # a scheduled run creates its row inside the (replayable) body, and a
         # start that races its own retry must not double-insert.
         async with get_session(engine) as session:
-            await session.execute(
-                pg_insert(cls)
-                .values(id=workflow_id, kind=kind, account_id=account_id)
-                .on_conflict_do_nothing()
+            insert = pg_insert(cls).values(
+                id=workflow_id,
+                kind=kind,
+                account_id=account_id,
+                retry_from=retry_from,
+                retry_step=retry_step,
+                retry_reused_steps=retry_reused_steps,
             )
+            if retry_from:
+                insert = insert.on_conflict_do_update(
+                    index_elements=[cls.id],
+                    set_={
+                        "retry_from": retry_from,
+                        "retry_step": retry_step,
+                        "retry_reused_steps": retry_reused_steps,
+                    },
+                )
+            else:
+                insert = insert.on_conflict_do_nothing()
+            await session.execute(insert)
             await session.commit()
 
     @classmethod
@@ -428,6 +456,11 @@ class Run(Base):
             workflow_id=workflow_id,
             kind=self.kind,
             account_id=self.account_id,
+            retry_from=self.id,
+            retry_step=start_step,
+            retry_reused_steps=sum(
+                step["function_id"] < start_step and not step["error"] for step in steps
+            ),
         )
         subject = await self.get_subject()
         if subject:

@@ -143,6 +143,9 @@ export interface ArtifactContent {
 // One run on the subject's timeline, with its agent calls in execution order.
 export interface RunSummary {
   id: string
+  retryFrom?: string | null
+  retryStep?: number | null
+  retryReusedSteps?: number | null
   // The durable kind ("software_factory.build"); label is its backend display name ("Build").
   kind: string
   label: string

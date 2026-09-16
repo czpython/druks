@@ -1,3 +1,4 @@
+import { RunRetry } from '../components/RunRetry'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'wouter'
@@ -178,6 +179,7 @@ function RunBlock({
         {isActiveRun(run) && <CancelRun runId={run.id} />}
         {run.state === 'failed' && <RetryRun runId={run.id} />}
       </div>
+      <RunRetry run={run} />
       {(expected || ask?.presentation === 'in_app') && (
         <GateControls run={run.id} expected={expected} />
       )}

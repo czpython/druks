@@ -83,6 +83,13 @@ Druks does not promise to preserve a live external agent process through a
 worker crash. Agent execution is a durable operation around a process in a
 sandbox. Recovery follows the operation boundary in this section.
 
+Retry creates a new run at the last failed checkpoint. If no failed checkpoint
+was recorded, it starts at checkpoint 1. The run page shows the restart point,
+the count of successful checkpoints reused before that point, and a link to
+the source run. Agent calls, transcripts, tokens, and costs stay with the run
+that produced them. A retry can therefore have no new agent calls while it
+reuses completed work.
+
 ## When Druks fits
 
 Druks is for apps whose work crosses process lifetimes. This work can include
