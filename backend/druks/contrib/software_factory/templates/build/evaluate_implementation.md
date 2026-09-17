@@ -202,15 +202,15 @@ resolved it), still open (re-list it), or dismissed by the operator. Never silen
 finding that vanishes between rounds without a stated resolution is how known defects ship.
 
 By round 5 (the cap), the bar is identical: regression OR unaddressed prior blocker only.
-Everything else ships with review notes + follow-up recommendations.
+Everything else ships as a finding in the review.
 
 Why the strictness: the system has already spent multiple rounds inspecting this diff. If an
 issue mattered enough to block, it should have been caught at round 1 or 2 when the evaluator
 first saw the surface. Continuing to block on freshly-observed issues turns the agent into a
 perfectionism loop — the failure pattern this rule exists to prevent. The acceptable outcome at
-round 3+ is "we shipped a PR with a real but operator-recoverable bug, captured as a follow-up."
+round 3+ is "we shipped a PR with a real but operator-recoverable bug, named in the review."
 The unacceptable outcome is "we burned 5 rounds finding new bugs the AC didn't enumerate."
-When in doubt, ship + file.
+When in doubt, ship and name the issue in a finding.
 
 Comment form rules apply to every review note that requests a code change, whether it surfaces
 as a per-criterion result, a check note, or a line comment on the diff. Describe the constraint,
@@ -262,8 +262,8 @@ maintain and extend by someone who did not write it?
   END TO END — the whole file, not only the changed hunks — before writing any finding.
 - **Findings need concrete reasons.** "I would have done this differently" is not a finding.
   Every finding requires a reason tied to correctness, maintainability, or security.
-- **Be honest about severity.** When the diff is genuinely clean, report no findings. Padding a
-  follow-up with low findings to appear thorough is noise that costs operator attention.
+- **Be honest about severity.** When the diff is genuinely clean, report no findings. Padding the
+  report with low findings to appear thorough is noise that costs operator attention.
 
 ### Boundaries
 
@@ -271,8 +271,6 @@ maintain and extend by someone who did not write it?
 - Do not flag issues in code the implementer did not change. You are reviewing the diff, not
   auditing the codebase.
 - Report to the parent reviewer only. Do not post to GitHub and do not create tracker work.
-- Low-severity findings alone do not justify a ticket. Only medium or high findings can cause
-  the parent to file follow-up work.
 
 ### What this repo asks of its reviewers
 
@@ -336,18 +334,10 @@ lens did not already list to `findings` at `high` severity and name it in `body`
 verdict then becomes `fail`. Keep the verification lens's `acceptance_results` and its own
 findings in every case.
 
-A regression in `findings` is not follow-up work. If any advisory finding is medium or high, file
-exactly one follow-up sub-issue on the same tracker as the parent ticket, as a child of that
-ticket, with a concise verb-first title and one section per finding: severity, what is wrong, why
-it matters, what good would look like, and the file path and anchor line when available. Advisory
-findings that are all low file no issue. The sub-issue is separate work for later and never loops
-the current implementer; whoever picks it up decides the mechanism. This PR is an unmerged
-proposal — never cite its approach as precedent or prescribe extending it.
-
-Name the follow-up sub-issue in the GitHub review when you filed one.
+Every other code-review finding is advisory. It stays in `review_notes` and never loops the
+current implementer.
 {% else %}
-Set `review_notes` to the empty string. Do not add a code-review section to the GitHub review
-and do not file follow-up work.
+Set `review_notes` to the empty string. Do not add a code-review section to the GitHub review.
 {% endif %}
 
 Return exactly one final JSON result with `verdict`, `body`, `review_notes`, `findings`,
