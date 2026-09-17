@@ -77,7 +77,7 @@ The PR body carries the plan block — the plan document reviewers review the di
 - `<!-- End of the Druks plan. -->`
 
 {% if build.pr_number %}
-After a successful push, dismiss the PR's existing reviews (`gh` is authenticated) — but only a review whose requests your new commits actually addressed. A review asking for changes your diff did not touch still describes the code as it stands: leave it standing and name it in known_risks instead. A dismissal failure must never block your delivery — note it in known_risks and move on.
+After a successful push, dismiss the PR's existing reviews (`gh` is authenticated) — but only a review whose requests your new commits actually addressed. A review asking for changes your diff did not touch still describes the code as it stands: leave it standing and name it in known_risks instead. Resolve review threads the same way: only a thread whose request your new commits fully addressed. Leave every other thread open — one that the triage declined or answered with a question is the reviewer's to close. A dismissal or resolution failure must never block your delivery — note it in known_risks and move on.
 
 Then, on every implementation revision, republish the plan block so a later plan revision can never leave it stale. In the current PR body, replace only the text between the two plan block comments with the block regenerated from the current plan and acceptance criteria. Keep everything outside those comments as it is: a person may have filled it in. Like the review dismissal, a body-republish failure must never block your delivery — record it in known_risks and move on, because the successful push is the deliverable.
 {% else %}
