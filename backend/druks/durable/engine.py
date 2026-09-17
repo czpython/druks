@@ -51,6 +51,10 @@ def init_dbos() -> None:
         "system_database_url": url,
         "dbos_system_schema": DBOS_SYSTEM_SCHEMA,
         "log_level": settings.log_level,
+        # One constant application version. DBOS recovers only the runs whose version
+        # matches the process, and its default hashes workflow source: any edit to a
+        # workflow would strand every parked run, because one host cannot drain them.
+        "enable_patching": True,
     }
     DBOS(config=config)
     _initialized = True
