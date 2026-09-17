@@ -19,8 +19,25 @@ the PR.
   verdict → skip the GitHub review. When you approve *with required changes*,
   state the verdict and put the required changes in the body.
 {% endif %}
-- Use your review body as the GitHub review body; attach each finding that maps
-  to a file and line as an inline review comment on that line.
+{% if build.journal.evaluations %}
+- This PR already carries your review of an earlier revision, and the reader has
+  seen it. Write this review as what changed since that one, not as a full report:
+  - the verdict, and one or two sentences on what this revision changed;
+  - each acceptance criterion whose result changed — when none did, one line that
+    says they all still pass, or names the ones that still fail;
+  - the checks on the head SHA, in one line;
+  - the findings that are new this round and the findings still open, one line
+    each.
+  Leave out the evidence for criteria whose result did not change, resolved
+  findings, the round history, and every code-review finding you already posted.
+  Attach an inline review comment only for a finding that is new this round.
+  `body` and `review_notes` in your JSON stay complete — only the GitHub review
+  is short.
+{% else %}
+- Use `body` as the GitHub review body{% if build.review_code %}, then append a
+  `## Code review` heading and `review_notes`{% endif %}; attach each finding that
+  maps to a file and line as an inline review comment on that line.
+{% endif %}
 - Do not request reviewers on the PR — druks requests the assignee's review
   itself at the moments that await a human.
 

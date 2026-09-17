@@ -344,9 +344,7 @@ findings that are all low file no issue. The sub-issue is separate work for late
 the current implementer; whoever picks it up decides the mechanism. This PR is an unmerged
 proposal — never cite its approach as precedent or prescribe extending it.
 
-For the single GitHub review, use `body` as the verification section, then append a
-`## Code review` heading and `review_notes`. Name the follow-up sub-issue there when you filed
-one.
+Name the follow-up sub-issue in the GitHub review when you filed one.
 {% else %}
 Set `review_notes` to the empty string. Do not add a code-review section to the GitHub review
 and do not file follow-up work.
