@@ -56,18 +56,6 @@ software-delivery behavior belong to the app, not to Druks.
 - **Understand recovery:** Read [concepts and guarantees](concepts.md).
 - **Build an app:** Start with [writing an app](writing-an-app.md).
 - **Give it screens:** Read the [Druks UI contract](druks-ui.md).
+- **Talk to an agent:** Open [Chat](chat.md).
 - **Run a production stack:** Follow the [deployment runbook](deployment.md).
 - **Diagnose a failure:** Use [troubleshooting](troubleshooting.md).
-
-## What Druks is not
-
-Druks is not a model SDK or a sandbox provider. It does not preserve a live
-agent process through a crash. It does not resume at an arbitrary Python line.
-It does not guarantee exactly-once external side effects.
-
-Drukbox provisions
-hosts. Model providers and harness subscriptions remain separate. Your app owns
-its domain policy.
-
-Druks is under active development. Breaking changes can occur before version
-1.0. `main` and `latest` are edge builds, not stable releases.

@@ -137,8 +137,8 @@ caches, and the sandbox provisioning gate.
 
 | TOML key | Purpose |
 | --- | --- |
-| `urls.endpoint` | Browser-visible dashboard base URL. MCP OAuth callbacks and this appliance's own `/mcp` address come from it |
-| `urls.webhook_host` | Public webhook hostname used by `druks doctor` for its ingress probe |
+| `urls.endpoint` | Browser-visible dashboard URL and MCP OAuth callback base. It is also the `/mcp` base when `urls.webhook_host` is empty |
+| `urls.webhook_host` | Public webhook hostname and the HTTPS host for this installation's `/mcp` endpoint |
 | `identity.mode` | `none` (default, no authentication, single operator), `header` (edge-asserted identity), or `jwt` (validated edge-signed assertion) |
 | `identity.header` | The trusted identity header. The shipped Caddy edge also uses it. Header and JWT modes have no default and require it |
 | `identity.jwks_url` | `jwt` mode: where the edge publishes its signing keys |
@@ -375,8 +375,9 @@ build whose tracker is **druks** asks for that server. You paste nothing and
 connect nothing. Druks mints the token of the account the run belongs to, and it
 allows only the five ticket tools. A comment the agent writes then carries that
 person's name. The token appears in that person's API tokens. Druks mints another
-once they retire it. The server's address comes from `urls.endpoint`. Set it to
-an address the sandboxes reach. The agent reads a ticket with
+once they retire it. The server uses this installation's
+[/mcp address](#public-urls-and-access-control). The box must reach that address.
+The agent reads a ticket with
 `software_factory_get_ticket` and posts with `software_factory_add_comment`.
 
 Webhook URLs remain `/_external/linear/events/` and

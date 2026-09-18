@@ -58,7 +58,7 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8001',
-        changeOrigin: true,
+        ws: true,
       },
       // Match /app/ exactly so shared routes under /apps/ stay in Vite.
       '/app/': {

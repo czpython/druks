@@ -170,8 +170,32 @@ SSO gate.
 Webhook URLs become
 `https://druks.example.com/_external/<provider>/events/`. Agents connect at
 `https://druks.example.com/mcp`
-([Connect your agent](connect-your-agent.md)). Leave
-`[urls].webhook_host` blank to bring your own ingress instead.
+([Connect your agent](connect-your-agent.md)).
+
+### External public ingress
+
+If another proxy owns public ports 80 and 443, set `[urls].webhook_host` to
+that proxy's public hostname. Druks uses this value for webhook and MCP URLs.
+The setup command also writes it to the generated Caddy environment.
+
+Keep the bundled Caddy's public listener on loopback with a service override:
+
+```yaml
+services:
+  caddy:
+    environment:
+      DRUKS_WEBHOOK_HOST: "http://127.0.0.1:8081"
+      DRUKS_WEBHOOK_BIND_HOST: "127.0.0.1"
+```
+
+Include this override after the shipped Compose files on every Compose command.
+Do not erase the application hostname or edit the generated `.env` value.
+The application and Caddy require different values for this deployment shape.
+
+The external proxy must route `/mcp` to the Druks web listener without SSO.
+It must preserve the bearer header and strip the trusted identity header.
+The MCP route authenticates its own bearer. The dashboard routes remain
+behind the identity edge.
 
 ## The secrets exchange and the secrets proxy
 

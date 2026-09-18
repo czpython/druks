@@ -86,22 +86,63 @@ async def check_config(
 
 
 async def get_config(session: AsyncSession, agent_name: str, account_id: str | None) -> AgentConfig:
-    """Resolve shared execution settings and the supplied or default account's credential.
-    A missing credential raises."""
+    """Resolve an agent's shared execution settings and the supplied or default account's
+    credential. A missing credential raises."""
     from druks.apps.registry import agents  # cycle: apps → agents → this module
 
     agent = agents.get(agent_name)
     if not agent:
         raise KeyError(f"no agent is registered as {agent_name!r}")
+    settings = await InstallationSettings.get_or_create(session)
+    harness = await SettingsOverride.agent_harness(session, agent_name, settings=settings)
+    model = await SettingsOverride.agent_model(session, agent_name, settings=settings)
+    billing = await SettingsOverride.agent_billing(session, agent_name, settings=settings)
+    effort = await SettingsOverride.agent_effort(session, agent_name, settings=settings)
+    timeout = await SettingsOverride.agent_timeout(
+        session, agent_name, agent.timeout, settings=settings
+    )
+    return await _build_config(
+        session,
+        account_id,
+        harness_name=harness.value,
+        model=model.value,
+        billing=billing.value,
+        effort=effort.value,
+        timeout=timeout.value,
+        fast_mode=settings.fast_mode,
+    )
+
+
+async def get_default_config(session: AsyncSession, account_id: str | None) -> AgentConfig:
+    """Resolve the installation's execution defaults and the supplied or default account's
+    credential. A missing credential raises."""
+    settings = await InstallationSettings.get_or_create(session)
+    return await _build_config(
+        session,
+        account_id,
+        harness_name=settings.default_harness,
+        model=settings.default_model,
+        billing=settings.default_billing,
+        effort=settings.default_effort,
+        timeout=settings.default_timeout,
+        fast_mode=settings.fast_mode,
+    )
+
+
+async def _build_config(
+    session: AsyncSession,
+    account_id: str | None,
+    *,
+    harness_name: str,
+    model: str,
+    billing: str,
+    effort: str,
+    timeout: int,
+    fast_mode: bool,
+) -> AgentConfig:
     if not account_id:
         account = await Account.get_default(session)
         account_id = account.id if account else None
-    settings = await InstallationSettings.get_or_create(session)
-    harness_name = (
-        await SettingsOverride.agent_harness(session, agent_name, settings=settings)
-    ).value
-    model = (await SettingsOverride.agent_model(session, agent_name, settings=settings)).value
-    billing = (await SettingsOverride.agent_billing(session, agent_name, settings=settings)).value
     harness_class = await check_config(session, harness_name, model, billing)
     provider_id = model.partition("/")[0]
     subscription = None
@@ -122,9 +163,6 @@ async def get_config(session: AsyncSession, agent_name: str, account_id: str | N
         subscription = await provider.get_subscription(session, account_id)
         identity = provider.get_identity(subscription)
         secret_refs = harness_class.get_secret_refs(subscription)
-    timeout = (
-        await SettingsOverride.agent_timeout(session, agent_name, agent.timeout, settings=settings)
-    ).value
     return AgentConfig(
         harness_class=harness_class,
         model=model,
@@ -134,8 +172,8 @@ async def get_config(session: AsyncSession, agent_name: str, account_id: str | N
         secret_refs=secret_refs,
         identity=identity,
         billing=billing,
-        effort=(await SettingsOverride.agent_effort(session, agent_name, settings=settings)).value,
+        effort=effort,
         # Capped so a single call always fits inside a fresh sandbox lease.
         timeout=min(timeout, MAX_AGENT_TIMEOUT_SECONDS),
-        fast_mode=settings.fast_mode,
+        fast_mode=fast_mode,
     )

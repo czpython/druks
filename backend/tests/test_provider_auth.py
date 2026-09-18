@@ -639,6 +639,7 @@ async def _bound_identity(
     await seed_run(db_session(), kind=Summarize.kind, run_id=run_id)
     identity, _ = await SandboxIdentity.create(
         db_session(),
+        account_id=(await Account.get_for_run(db_session(), None)).id,
         run_id=run_id,
         scoped_to="workflow",
         secret_refs=[SecretRef(name=name, secret_id=subscription.id, host=host)],
@@ -764,6 +765,7 @@ async def test_a_rotation_requests_a_refresh_for_every_other_live_bound_identity
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-unbound")
     await SandboxIdentity.create(
         db_session(),
+        account_id=(await Account.get_for_run(db_session(), None)).id,
         run_id="run-unbound",
         scoped_to="workflow",
         secret_refs=[SecretRef(name="anthropic", secret_id=connection.id)],

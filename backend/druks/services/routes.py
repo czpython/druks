@@ -106,7 +106,11 @@ async def connect_oauth_service(
     return RedirectResponse(url)
 
 
-@oauth_router.get("/callback", response_class=HTMLResponse)
+@oauth_router.get(
+    "/callback",
+    response_class=HTMLResponse,
+    dependencies=[Depends(current_session_account)],
+)
 async def oauth_callback(
     session: SessionDep, state: str = "", code: str = "", error: str = ""
 ) -> Response:

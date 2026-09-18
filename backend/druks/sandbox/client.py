@@ -293,6 +293,14 @@ class Client:
             if isinstance(answer, BaseException):
                 logger.warning("refresh of %s on box %s failed: %s", service, host_id, answer)
 
+    async def set_expiry(self, *, host_id: str, expires_at: datetime) -> None:
+        """Set the box lease. The SDK raises if the box does not exist."""
+        api = self._api()
+        try:
+            await api.renew_host(host_id, expires_at=expires_at)
+        finally:
+            await api.aclose()
+
     async def release(self, *, host_id: str) -> None:
         """Terminate the VM; never raises. The identity dies first, so the
         denial never waits on the VM."""

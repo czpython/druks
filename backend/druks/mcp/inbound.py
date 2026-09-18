@@ -12,7 +12,9 @@ from druks.settings import load_settings
 
 def get_druks_mcp_server(*, allowed_tools: tuple[str, ...]) -> RequiredMcpServer:
     """Druks' own `/mcp` as a workspace requires it, at the address a box reaches."""
-    if endpoint := load_settings().urls.endpoint.rstrip("/"):
+    urls = load_settings().urls
+    endpoint = f"https://{urls.webhook_host}" if urls.webhook_host else urls.endpoint
+    if endpoint := endpoint.rstrip("/"):
         return RequiredMcpServer(
             name=DRUKS_SERVER_NAME, url=f"{endpoint}/mcp", allowed_tools=allowed_tools
         )
@@ -20,10 +22,14 @@ def get_druks_mcp_server(*, allowed_tools: tuple[str, ...]) -> RequiredMcpServer
 
 
 async def get_druks_account_token(
-    session: AsyncSession, account_id: str, allowed_tools: tuple[str, ...]
+    session: AsyncSession,
+    account_id: str,
+    allowed_tools: tuple[str, ...],
+    *,
+    name: str = DRUKS_SERVER_NAME,
 ) -> VaultSecret:
-    """This account's token row, minted when a run of theirs first needs it."""
-    audience = Audience.mcp(DRUKS_SERVER_NAME)
+    """Get this account's key with this name, or mint it on first use."""
+    audience = Audience.mcp(name)
     row = await VaultSecret.lookup(session, SecretKind.STATIC, audience, account_id, BEARER_HEADER)
     if row:
         held = await PersonalAccessToken.get_for_prefix(session, row.identity["token_prefix"])
@@ -32,7 +38,7 @@ async def get_druks_account_token(
     minted, token = await PersonalAccessToken.create(
         session,
         account_id=account_id,
-        name=f"{DRUKS_SERVER_NAME} MCP",
+        name=f"{name} MCP",
         allowed_tools=list(allowed_tools) or None,
     )
     return await VaultSecret.store(

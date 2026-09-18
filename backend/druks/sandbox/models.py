@@ -58,15 +58,18 @@ class SecretRef(Base):
 
 
 class SandboxIdentity(Base, Uuid7Pk):
-    """One box at the issuer. The bearer rides only in the box's issuer
-    headers. The row keeps its hash, the run, and the secrets the box holds."""
+    """One account's box at the issuer, with an optional run.
+
+    The row stores the bearer hash. Only the box's issuer headers hold the bearer.
+    """
 
     __tablename__ = "sandbox_identities"
 
-    run_id: Mapped[str] = mapped_column(ForeignKey("durable_runs.id", ondelete="CASCADE"))
-    run: Mapped["Run"] = relationship(lazy="raise")
-    # What the box serves in its run: ``workflow`` for the warm box, the agent
-    # id for an ephemeral one. A replay finds the box through it.
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
+    run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("durable_runs.id", ondelete="CASCADE"), default=None
+    )
+    run: Mapped["Run | None"] = relationship(lazy="raise")
     scoped_to: Mapped[str]
     # Bound once Drukbox returns the box. One box holds one identity.
     host_id: Mapped[str | None] = mapped_column(unique=True)
@@ -80,13 +83,20 @@ class SandboxIdentity(Base, Uuid7Pk):
 
     @classmethod
     async def create(
-        cls, session: AsyncSession, *, run_id: str, scoped_to: str, secret_refs: list[SecretRef]
+        cls,
+        session: AsyncSession,
+        *,
+        account_id: str,
+        run_id: str | None,
+        scoped_to: str,
+        secret_refs: list[SecretRef],
     ) -> tuple["SandboxIdentity", dict[str, Issuer]]:
         """The committed identity and the issuer entries for its box. Committed
         before the box exists: Drukbox fetches an issuer during provisioning."""
         bearer = token_urlsafe(32)
         now = Base.utc_now()
         identity = cls(
+            account_id=account_id,
             run_id=run_id,
             scoped_to=scoped_to,
             secret_refs=[
@@ -130,13 +140,23 @@ class SandboxIdentity(Base, Uuid7Pk):
 
     @classmethod
     async def lookup(
-        cls, session: AsyncSession, run_id: str, scoped_to: str, secret_refs: list[SecretRef]
+        cls,
+        session: AsyncSession,
+        *,
+        account_id: str,
+        run_id: str | None,
+        scoped_to: str,
+        secret_refs: list[SecretRef] | None = None,
     ) -> "SandboxIdentity | None":
-        """The live identity bound to the box scoped to a workflow or an agent,
-        with these secrets. A replay finds the box a crashed process left."""
+        """Find a live box for this account, run, and scope.
+
+        Omit secret_refs to accept the box's current secrets.
+        """
         rows = await session.scalars(
             select(cls)
+            .options(selectinload(cls.run))
             .where(
+                cls.account_id == account_id,
                 cls.run_id == run_id,
                 cls.scoped_to == scoped_to,
                 cls.host_id.is_not(None),
@@ -144,9 +164,15 @@ class SandboxIdentity(Base, Uuid7Pk):
             )
             .order_by(cls.id.desc())
         )
-        wanted = {ref.key for ref in secret_refs}
+        wanted = {ref.key for ref in secret_refs} if secret_refs is not None else None
         return next(
-            (row for row in rows if row.is_live and {r.key for r in row.secret_refs} == wanted),
+            (
+                row
+                for row in rows
+                if row.is_live
+                and (not row.run or row.run.is_active)
+                and (wanted is None or {ref.key for ref in row.secret_refs} == wanted)
+            ),
             None,
         )
 
@@ -154,8 +180,10 @@ class SandboxIdentity(Base, Uuid7Pk):
     async def authenticate(
         cls, session: AsyncSession, identity_id: str, bearer: str, name: str
     ) -> "SandboxIdentity":
-        """The live identity of an active run that a fetch presents, holding the
-        secret it names, read fresh. Else IdentityDenied."""
+        """Authenticate a live identity and its named secret.
+
+        A run-bound identity also requires an active run.
+        """
         identity = await session.scalar(
             select(cls)
             .options(selectinload(cls.run), selectinload(cls.secret_refs))
@@ -166,7 +194,7 @@ class SandboxIdentity(Base, Uuid7Pk):
             identity
             and hmac.compare_digest(hashlib.sha256(bearer.encode()).digest(), identity.token_hash)
             and identity.is_live
-            and identity.run.is_active
+            and (not identity.run or identity.run.is_active)
         ):
             identity.get_secret_ref(name)
             return identity
@@ -199,12 +227,13 @@ class SandboxIdentity(Base, Uuid7Pk):
             select(cls)
             .options(selectinload(cls.run))
             .where(
+                cls.run_id.is_not(None),
                 cls.host_id.is_not(None),
                 cls.revoked_at.is_(None),
                 cls.expires_at > Base.utc_now(),
             )
         )
-        return [identity for identity in rows if not identity.run.is_active]
+        return [identity for identity in rows if identity.run and not identity.run.is_active]
 
     @classmethod
     async def revoke_for_host(cls, engine, host_id: str) -> None:

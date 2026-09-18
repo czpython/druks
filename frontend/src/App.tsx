@@ -8,7 +8,7 @@ import {
   type RefObject,
 } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, CalendarDays, ChartNoAxesCombined, LayoutGrid, Search, Settings } from 'lucide-react'
+import { Activity, CalendarDays, ChartNoAxesCombined, LayoutGrid, MessageSquare, Search, Settings } from 'lucide-react'
 import { Link, Route, Router, Switch, useLocation, type RouterProps } from 'wouter'
 import { navigate as browserNavigate, useLocationProperty } from 'wouter/use-browser-location'
 
@@ -24,6 +24,7 @@ import { SettingsPages } from './components/SettingsPages'
 import { Sidebar } from './components/Sidebar'
 import { EventsPage } from './pages/EventsPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { ChatPage } from './pages/ChatPage'
 import { LoginWindowPage } from './pages/LoginWindowPage'
 import { UsagePage } from './pages/UsagePage'
 import { SchedulesPage } from './pages/SchedulesPage'
@@ -281,7 +282,8 @@ function AppShell({
   const visibleApps = registered.filter((name) =>
     appLabel(name).toLowerCase().includes(search.toLowerCase().trim()),
   )
-  const title = SHELL_PAGES[location] ?? (app ? appLabel(app) : 'Druks')
+  const isChat = location === '/chat' || location.startsWith('/chat/')
+  const title = isChat ? 'Chat' : SHELL_PAGES[location] ?? (app ? appLabel(app) : 'Druks')
 
   return (
     <div className="command-center" hidden={hidden}>
@@ -298,6 +300,10 @@ function AppShell({
             >
               <LayoutGrid size={17} aria-hidden="true" />
               Dashboard
+            </Link>
+            <Link href="/chat" className="sidebar-link" aria-current={isChat ? 'page' : undefined}>
+              <MessageSquare size={17} aria-hidden="true" />
+              Chat
             </Link>
             <Link
               href="/events"
@@ -446,6 +452,9 @@ function AppShell({
           </Route>
           <Route path="/usage">
             <UsagePage />
+          </Route>
+          <Route path="/chat/:id?">
+            {(params) => <ChatPage id={params.id} />}
           </Route>
           <Route path="/schedules">
             <SchedulesPage

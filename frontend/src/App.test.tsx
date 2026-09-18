@@ -112,14 +112,14 @@ describe('command center navigation', () => {
     await screen.findByRole('heading', { name: 'Schedule list' })
     const navigation = screen.getByRole('navigation', { name: 'Work' })
     expect(within(navigation).getAllByRole('link').map((link) => link.textContent)).toEqual([
-      'Dashboard', 'Activity', 'Usage', 'Schedules',
+      'Dashboard', 'Chat', 'Activity', 'Usage', 'Schedules',
     ])
     expect(within(navigation).getByRole('link', { name: 'Schedules' }).getAttribute('aria-current')).toBe('page')
     fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
     const drawer = screen.getByRole('dialog', { name: 'Druks navigation' })
     const phoneNavigation = within(drawer).getByRole('navigation', { name: 'Work' })
     expect(within(phoneNavigation).getAllByRole('link').map((link) => link.textContent)).toEqual([
-      'Dashboard', 'Activity', 'Usage', 'Schedules',
+      'Dashboard', 'Chat', 'Activity', 'Usage', 'Schedules',
     ])
     fireEvent.click(within(drawer).getByRole('link', { name: 'Schedules' }))
     await waitFor(() => expect(drawer.hasAttribute('open')).toBe(false))

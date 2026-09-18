@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import druks.workflows as sdk
 import pytest
 from drukbox_sdk import Secret
+from druks.accounts.models import Account
 from druks.db import db_session
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.workflows import Workflow
@@ -188,13 +189,18 @@ async def test_a_replay_finds_the_warm_box_through_its_identity(
     )
     secrets = [SecretRef(name="anthropic", secret_id=subscription.id)]
     identity, _ = await SandboxIdentity.create(
-        db_session(), run_id="wf-1", scoped_to="workflow", secret_refs=secrets
+        db_session(),
+        account_id=(await Account.get_for_run(db_session(), None)).id,
+        run_id="wf-1",
+        scoped_to="workflow",
+        secret_refs=secrets,
     )
     await identity.bind("host-crashed")
     client = _FakeSandboxClient(lease=timedelta(hours=2))
     monkeypatch.setattr(sdk, "sandbox_client", client)
     flow = _warm_workflow()
     config = SimpleNamespace(secrets={}, secret_refs=secrets, secrets_id=subscription.id)
+    flow.account_id = identity.account_id
 
     assert await flow._lease_host(db_session(), config) == "host-crashed"
 

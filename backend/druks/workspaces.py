@@ -85,7 +85,12 @@ class Workspace:
         return prepared
 
     async def save_files(
-        self, session: AsyncSession, files: list[File], *, app: str, agent_call_id: str
+        self,
+        session: AsyncSession,
+        files: list[File],
+        *,
+        app: str,
+        agent_call_id: str | None = None,
     ) -> None:
         storage = get_file_storage()
         staged: list[tuple[File, FileRecord, Path]] = []
@@ -107,7 +112,7 @@ class Workspace:
             raise
 
     async def _pull_output_file(
-        self, file: File, *, app: str, agent_call_id: str
+        self, file: File, *, app: str, agent_call_id: str | None
     ) -> tuple[FileRecord, Path]:
         reported = file.path
         name = PurePosixPath(reported).name

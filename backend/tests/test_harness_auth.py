@@ -222,7 +222,11 @@ async def test_a_codex_subscription_binds_a_custom_entry_on_chatgpt(druks_db):
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
 
     identity, entries = await SandboxIdentity.create(
-        db_session(), run_id="run-1", scoped_to="workflow", secret_refs=[ref]
+        db_session(),
+        account_id=(await Account.get_for_run(db_session(), None)).id,
+        run_id="run-1",
+        scoped_to="workflow",
+        secret_refs=[ref],
     )
     entry = entries["codex_subscription_token"].entry()
 

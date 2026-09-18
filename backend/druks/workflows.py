@@ -895,7 +895,11 @@ class Workflow:
             and refs
             and (
                 identity := await SandboxIdentity.lookup(
-                    session, self._workflow_id, "workflow", refs
+                    session,
+                    account_id=self.account_id,
+                    run_id=self._workflow_id,
+                    scoped_to="workflow",
+                    secret_refs=refs,
                 )
             )
         ):
@@ -922,7 +926,11 @@ class Workflow:
             identity, entries, key = None, {}, config.secrets_id
             if refs:
                 identity, entries = await SandboxIdentity.create(
-                    session, run_id=self._workflow_id, scoped_to="workflow", secret_refs=refs
+                    session,
+                    account_id=self.account_id,
+                    run_id=self._workflow_id,
+                    scoped_to="workflow",
+                    secret_refs=refs,
                 )
                 key = identity.id
             self._host = await sandbox_client.provision(

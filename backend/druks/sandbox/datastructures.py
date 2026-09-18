@@ -28,32 +28,28 @@ class Profile(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
 
 
-if TYPE_CHECKING:
-    from .host import Host
-
-
 @dataclass(frozen=True)
 class Sandbox:
-    # Path of the setup script inside the declaring app's package, by
-    # convention under ``sandboxes/``. The owning module is stamped when the
-    # declaration is assigned on a workflow class.
+    # Path of the setup script inside its package, by convention under
+    # ``sandboxes/``. An app's sandbox finds the package through the workflow
+    # class it is assigned on, which stamps the owning module. A sandbox that no
+    # workflow declares, such as Chat's, names its package.
     setup: str
+    package: str = ""
     module: str = field(init=False, compare=False, default="")
 
     def __set_name__(self, owner: type, attr: str) -> None:
         object.__setattr__(self, "module", owner.__module__)
 
     def read_setup_script(self) -> bytes:
-        if not self.module:
+        if not self.module and not self.package:
             raise SetupScriptError(
                 f"sandbox setup {self.setup!r} is not declared on a workflow class"
             )
-        app = loader.get_app(loader.resolve_workflow_app(self.module))
-        spec = importlib.util.find_spec(app.package)
+        package = self.package or loader.get_app(loader.resolve_workflow_app(self.module)).package
+        spec = importlib.util.find_spec(package)
         if not spec or not spec.submodule_search_locations:
-            raise SetupScriptError(
-                f"sandbox setup {self.setup!r} cannot find app package {app.package!r}"
-            )
+            raise SetupScriptError(f"sandbox setup {self.setup!r} cannot find package {package!r}")
         path = Path(spec.submodule_search_locations[0]) / self.setup
         try:
             return path.read_bytes()
