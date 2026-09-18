@@ -58,7 +58,13 @@ async def _runner(
     if host_id:
         vm = sandbox_client.attach(host_id=host_id)
     elif (refs := [*config.secret_refs, *await workflow.get_secret_refs(session)]) and (
-        identity := await SandboxIdentity.lookup(session, workflow_id, step, refs)
+        identity := await SandboxIdentity.lookup(
+            session,
+            account_id=workflow.account_id,
+            run_id=workflow_id,
+            scoped_to=step,
+            secret_refs=refs,
+        )
     ):
         # A crashed attempt left its box behind. Its identity finds it again.
         vm = sandbox_client.resume(host_id=identity.host_id)
@@ -72,7 +78,11 @@ async def _runner(
         identity, entries, key = None, {}, config.secrets_id
         if refs:
             identity, entries = await SandboxIdentity.create(
-                session, run_id=workflow_id, scoped_to=step, secret_refs=refs
+                session,
+                account_id=workflow.account_id,
+                run_id=workflow_id,
+                scoped_to=step,
+                secret_refs=refs,
             )
             key = identity.id
         vm = sandbox_client.ephemeral(

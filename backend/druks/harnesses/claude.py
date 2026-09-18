@@ -38,6 +38,9 @@ class ClaudeHarness(Harness):
     billing_options = frozenset({"subscription", "api_key"})
     default_model = "anthropic/claude-opus-4-7"
     command = "claude"
+    adapter_command = "/opt/druks-chat/node_modules/.bin/claude-agent-acp"
+    no_ask_mode = "bypassPermissions"
+    session_files = ".claude/projects"
 
     # The CLI dies with the raw API error in the result text ("API Error: 529
     # {…overloaded_error…}"), so "api error: 5" covers 529 and every 5xx; 429
@@ -93,7 +96,7 @@ class ClaudeHarness(Harness):
             "--json-schema",
             json.dumps(schema),
             "--permission-mode",
-            "bypassPermissions",
+            self.no_ask_mode,
             "--debug-file",
             in_vm_debug,
             "--disallowedTools",
@@ -117,7 +120,7 @@ class ClaudeHarness(Harness):
             f"touch {run_dir_q}/.start && "
             f"{claude_cmdline}; "
             "ec=$?; "
-            f"sf=$(find $HOME/.claude/projects -name '*.jsonl' -type f "
+            f"sf=$(find $HOME/{self.session_files} -name '*.jsonl' -type f "
             f"-newer {run_dir_q}/.start 2>/dev/null | head -1); "
             f'if [ -n "$sf" ]; then cp "$sf" {session_q}; fi; '
             "exit $ec"

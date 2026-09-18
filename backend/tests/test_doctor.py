@@ -8,6 +8,7 @@ import httpx
 import pytest
 from conftest import connect_service
 from druks import doctor
+from druks.chat.sandbox import CHAT_SANDBOX
 from druks.db import db_session
 from druks.sandbox.exceptions import TemplateNotFound
 from druks.secrets.models import VaultSecret
@@ -206,7 +207,7 @@ async def test_declared_sandboxes_pass_when_none_are_declared(
 ) -> None:
     request_templates = AsyncMock()
     monkeypatch.setattr(doctor, "prepare_sandbox_templates", request_templates)
-    monkeypatch.setattr(doctor, "get_declared_sandboxes", lambda: {})
+    monkeypatch.setattr(doctor, "get_declared_sandboxes", lambda *extra: {})
     settings = make_settings(tmp_path, sandbox={"service_url": "http://drukbox"})
 
     result = await doctor.check_declared_sandboxes(settings)
@@ -216,7 +217,7 @@ async def test_declared_sandboxes_pass_when_none_are_declared(
         ok=True,
         detail="no declared sandboxes",
     )
-    request_templates.assert_awaited_once_with()
+    request_templates.assert_awaited_once_with(CHAT_SANDBOX)
 
 
 @pytest.mark.parametrize(
@@ -238,7 +239,7 @@ async def test_declared_sandboxes_report_template_status(
     request_templates = AsyncMock()
     lookup = AsyncMock(return_value=SimpleNamespace(status=status))
     monkeypatch.setattr(doctor, "prepare_sandbox_templates", request_templates)
-    monkeypatch.setattr(doctor, "get_declared_sandboxes", lambda: declared)
+    monkeypatch.setattr(doctor, "get_declared_sandboxes", lambda *extra: declared)
     monkeypatch.setattr(
         doctor,
         "sandbox_client",
@@ -248,7 +249,7 @@ async def test_declared_sandboxes_report_template_status(
 
     results = await doctor.check_declared_sandboxes(settings)
 
-    request_templates.assert_awaited_once_with()
+    request_templates.assert_awaited_once_with(CHAT_SANDBOX)
     lookup.assert_awaited_once_with(setup_script_hash="requirements-1")
     assert len(results) == 1
     assert results[0].ok is ok
@@ -266,7 +267,7 @@ async def test_declared_sandboxes_report_missing_template(
     monkeypatch.setattr(
         doctor,
         "get_declared_sandboxes",
-        lambda: {"requirements-1": SimpleNamespace(setup="sandboxes/setup.sh")},
+        lambda *extra: {"requirements-1": SimpleNamespace(setup="sandboxes/setup.sh")},
     )
     monkeypatch.setattr(
         doctor,

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,7 @@ from drukbox_sdk.exceptions import (
     SandboxUnavailableError,
     SandboxValidationError,
 )
+from druks.accounts.models import Account
 from druks.db import db_session
 from druks.harnesses.exceptions import HarnessSandboxProvisioningError, Retry
 from druks.harnesses.providers import AnthropicProvider
@@ -94,6 +95,7 @@ class _FakeAPI:
     created_secrets: list[dict[str, Secret] | None] = field(default_factory=list)
     created_expires_at: list[datetime | None] = field(default_factory=list)
     deleted_ids: list[str] = field(default_factory=list)
+    renewed: list[tuple[str, datetime | None]] = field(default_factory=list)
     get_host_responses: list[SandboxHostRecord] = field(default_factory=list)
     create_record: SandboxHostRecord | None = None
     create_raises: Exception | None = None
@@ -133,6 +135,15 @@ class _FakeAPI:
         self.deleted_ids.append(host_id)
         if self.delete_raises is not None:
             raise self.delete_raises
+
+    async def renew_host(
+        self,
+        host_id: str,
+        *,
+        expires_at: datetime | None = None,
+    ) -> SandboxHostRecord:
+        self.renewed.append((host_id, expires_at))
+        return _record(host_id=host_id)
 
 
 def _record(
@@ -472,11 +483,11 @@ async def test_acquire_uploads_helper_and_closes_ssh_without_releasing(
     remaining = (expires_at - datetime.now(UTC)).total_seconds()
     assert 0 < remaining <= SANDBOX_HOST_LEASE_SECONDS
 
-    # One upload per acquire; the default SSH user is exedev.
     fake = patched_real_sandbox[0]
     assert any(u.remote.endswith("/druks-sandbox") for u in fake.uploads), (
         "expected druks-sandbox helper upload"
     )
+    assert any(upload.remote.endswith("/druks-chat-bridge.mjs") for upload in fake.uploads)
     # acquire closes the SSH connection on exit but does NOT release
     # the provider host.
     assert fake.aclose_calls == 1
@@ -770,6 +781,7 @@ async def _identity() -> SandboxIdentity:
     )
     identity, _ = await SandboxIdentity.create(
         db_session(),
+        account_id=(await Account.get_for_run(db_session(), None)).id,
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],
@@ -904,6 +916,27 @@ async def test_a_gone_box_loses_its_identity_and_the_retry_provisions_anew(
     await db_session().refresh(identity)
     assert not identity.is_live
     assert (
-        await SandboxIdentity.lookup(db_session(), "run-1", "workflow", identity.secret_refs)
+        await SandboxIdentity.lookup(
+            db_session(),
+            account_id=(await Account.get_for_run(db_session(), None)).id,
+            run_id="run-1",
+            scoped_to="workflow",
+            secret_refs=identity.secret_refs,
+        )
         is None
     )
+
+
+async def test_set_expiry_forwards_expires_at_to_sdk_renew(
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """Chat renews its box on each turn: the expiry goes to the SDK renew
+    unchanged, and the VM stays up."""
+    api = _FakeAPI(create_record=None)
+    patched_sandbox_api.append(api)
+    expires_at = datetime.now(UTC) + timedelta(seconds=90)
+
+    await sandbox_client.set_expiry(host_id="host-xyz", expires_at=expires_at)
+
+    assert api.renewed == [("host-xyz", expires_at)]
+    assert api.deleted_ids == []

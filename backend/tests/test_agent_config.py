@@ -17,7 +17,7 @@ from druks.db import db_session
 from druks.durable.models import AgentCall
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
-from druks.harnesses.config import check_config, get_config
+from druks.harnesses.config import check_config, get_config, get_default_config
 from druks.harnesses.exceptions import AgentConfigError, HarnessNotConnectedError
 from druks.harnesses.models import ProviderCatalog
 from druks.harnesses.opencode import OpenCodeHarness
@@ -309,8 +309,10 @@ async def test_effort_timeout_and_fast_mode_follow_the_defaults_and_overrides(dr
     probe = await get_config(druks_db, CONFIG_PROBE.id, None)
     declared = await get_config(druks_db, DECLARED.id, None)
     oversized = await get_config(druks_db, OVERSIZED.id, None)
+    defaults = await get_default_config(druks_db, None)
 
     assert (probe.effort, probe.timeout, probe.fast_mode) == ("low", 600, True)
+    assert (defaults.effort, defaults.timeout, defaults.fast_mode) == ("low", 600, True)
     assert (declared.effort, declared.timeout) == ("medium", 900)
     # Capped so a single call always fits inside a fresh sandbox lease.
     assert oversized.timeout == MAX_AGENT_TIMEOUT_SECONDS

@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from conftest import connect_provider
+from druks.accounts.models import Account
 from druks.core import tasks
 from druks.db import db_session
 from druks.durable.engine import _step_engine
@@ -18,6 +19,7 @@ async def _identity(run_id: str, *, state: str = "running", host_id: str = "") -
     )
     identity, _ = await SandboxIdentity.create(
         db_session(),
+        account_id=(await Account.get_for_run(db_session(), None)).id,
         run_id=run_id,
         scoped_to="workflow",
         secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],

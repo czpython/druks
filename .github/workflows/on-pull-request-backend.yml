@@ -63,3 +63,10 @@ jobs:
       # it installs the way an author's would, so druks never depends on it.
       - run: uv pip install -e backend/tests/druks-field_notes
       - run: uv run pytest backend/
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - run: npm install --prefix "$RUNNER_TEMP/chat-sdk" --no-audit --no-fund @agentclientprotocol/sdk@1.4.0
+      - run: node --test backend/tests/chat/bridge.test.mjs
+        env:
+          CHAT_TEST_SDK: ${{ runner.temp }}/chat-sdk/node_modules/@agentclientprotocol/sdk/dist/acp.js

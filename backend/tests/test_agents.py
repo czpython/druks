@@ -992,6 +992,7 @@ async def test_a_replay_resumes_the_ephemeral_box_through_its_identity(
     )
     identity, _ = await SandboxIdentity.create(
         db_session(),
+        account_id=(await Account.get_for_run(db_session(), None)).id,
         run_id="wf-9",
         scoped_to="dummy",
         secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],

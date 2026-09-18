@@ -13,6 +13,14 @@ def get_helper_script_path(ssh_username: str) -> str:
     return f"{get_remote_home(ssh_username)}/druks-sandbox"
 
 
+def get_chat_bridge_path(ssh_username: str) -> str:
+    return f"{get_remote_home(ssh_username)}/druks-chat-bridge.mjs"
+
+
+def get_chat_conversation_root(ssh_username: str, conversation_id: str) -> str:
+    return f"{get_work_root(ssh_username)}/chat/{conversation_id}"
+
+
 def get_work_root(ssh_username: str) -> str:
     return f"{get_remote_home(ssh_username)}/work"
 

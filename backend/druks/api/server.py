@@ -24,6 +24,7 @@ from druks.apps.loader import iter_apps, load
 from druks.apps.routes import router as apps_router
 from druks.browser.exceptions import BrowserApiError
 from druks.browser.routes import router as browser_sessions_router
+from druks.chat.routes import router as chat_router
 from druks.core.templates import render_page
 from druks.database import (
     configure_session,
@@ -281,6 +282,7 @@ app.include_router(subjects_router, dependencies=_identity_gate)
 app.include_router(gateway_router, dependencies=_identity_gate)
 app.include_router(artifacts_router, dependencies=_identity_gate)
 app.include_router(files_router, dependencies=_identity_gate)
+app.include_router(chat_router)
 load(app)
 
 # Tools derive from every route tagged "agent", so the endpoint composes

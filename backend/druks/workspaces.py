@@ -21,7 +21,7 @@ from druks.files.models import FileRecord
 from druks.files.storage import get_file_storage
 from druks.mcp import models as mcp_models
 from druks.mcp import oauth
-from druks.mcp.constants import TOKEN_ENV_PREFIX
+from druks.mcp.constants import DRUKS_SERVER_NAME, TOKEN_ENV_PREFIX
 from druks.mcp.enums import IdentityMode, TokenSource
 from druks.mcp.exceptions import MissingGrantError, MissingTokenError
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
@@ -31,6 +31,7 @@ from druks.sandbox.datastructures import AgentResult, McpServer, RequiredMcpServ
 from druks.sandbox.exceptions import ExecFailed
 from druks.sandbox.layout import get_repo_root, get_work_root
 from druks.sandbox.models import SecretRef
+from druks.secrets.datastructures import Audience
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Host
@@ -85,7 +86,12 @@ class Workspace:
         return prepared
 
     async def save_files(
-        self, session: AsyncSession, files: list[File], *, app: str, agent_call_id: str
+        self,
+        session: AsyncSession,
+        files: list[File],
+        *,
+        app: str,
+        agent_call_id: str | None = None,
     ) -> None:
         storage = get_file_storage()
         staged: list[tuple[File, FileRecord, Path]] = []
@@ -107,7 +113,7 @@ class Workspace:
             raise
 
     async def _pull_output_file(
-        self, file: File, *, app: str, agent_call_id: str
+        self, file: File, *, app: str, agent_call_id: str | None
     ) -> tuple[FileRecord, Path]:
         reported = file.path
         name = PurePosixPath(reported).name
@@ -193,7 +199,12 @@ class Workspace:
                 secret_id = server.secret_id
             else:
                 account = await Account.get_for_run(session, account_id)
-                row = await get_druks_account_token(session, account.id, server.allowed_tools)
+                row = await get_druks_account_token(
+                    session,
+                    account.id,
+                    server.allowed_tools,
+                    audience=Audience.mcp(DRUKS_SERVER_NAME),
+                )
                 secret_id = row.id
             refs.append(
                 SecretRef(

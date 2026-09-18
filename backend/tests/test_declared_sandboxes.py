@@ -78,7 +78,7 @@ async def test_prepare_sandbox_templates_requests_each_declaration(monkeypatch):
     monkeypatch.setattr(
         templates,
         "get_declared_sandboxes",
-        lambda: {sandbox.setup_script_hash: sandbox},
+        lambda *extra: {sandbox.setup_script_hash: sandbox},
     )
     monkeypatch.setattr(
         templates,
@@ -110,7 +110,7 @@ async def test_prepare_templates_labels_each_app_and_script(monkeypatch):
     monkeypatch.setattr(
         templates,
         "get_declared_sandboxes",
-        lambda: {sandbox.setup_script_hash: sandbox for sandbox in sandboxes},
+        lambda *extra: {sandbox.setup_script_hash: sandbox for sandbox in sandboxes},
     )
     monkeypatch.setattr(
         templates, "sandbox_client", SimpleNamespace(create_template=create_template)

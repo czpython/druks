@@ -17,6 +17,7 @@ from druks.mcp.exceptions import (
     InvalidServerNameError,
     MissingEndpointError,
     MissingTokenError,
+    ReservedServerNameError,
 )
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.inbound import get_druks_mcp_server
@@ -120,6 +121,13 @@ async def test_create_rejects_names_that_break_env_or_config(druks_db):
     for bad in ("linear-app", "1linear", "Linear", "linear.app", "linear app"):
         with pytest.raises(InvalidServerNameError, match="Invalid MCP server name"):
             await McpServer.create(druks_db, name=bad, url=_LINEAR_URL, token=_TOKEN)
+
+
+async def test_create_refuses_the_name_this_appliance_delivers_under(druks_db):
+    """This appliance's own /mcp owns that config key. A row claiming it would
+    collide in the VM's config, so the operator hears about it at creation."""
+    with pytest.raises(ReservedServerNameError, match="reserved"):
+        await McpServer.create(druks_db, name=DRUKS_SERVER_NAME, url=_LINEAR_URL, token=_TOKEN)
 
 
 async def test_valid_name_derives_shell_safe_env_var(druks_db):
@@ -435,13 +443,14 @@ async def test_routes_crud_and_token_stays_backend_side(tmp_path, druks_db):
         assert not any(s["name"] == "linear" for s in (await client.get("/api/mcp-servers")).json())
 
 
-async def test_routes_reject_invalid_name(tmp_path, druks_db):
+@pytest.mark.parametrize("name", ["linear-app", "druks"])
+async def test_routes_reject_invalid_name(tmp_path, druks_db, name):
     async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         created = await client.post(
-            "/api/mcp-servers", json={"name": "linear-app", "url": _LINEAR_URL, "token": _TOKEN}
+            "/api/mcp-servers", json={"name": name, "url": _LINEAR_URL, "token": _TOKEN}
         )
         assert created.status_code == 422
-        assert "Invalid MCP server name" in created.text
+        assert "MCP server name" in created.text
 
 
 async def test_routes_reject_creating_a_tokenless_custom_server(tmp_path, druks_db):
@@ -628,7 +637,9 @@ async def test_catalog_enabled_false_ships_the_entry_dark(tmp_path, registry_sta
 def _requiring_druks(monkeypatch, allowed_tools=()) -> type[Workspace]:
     monkeypatch.setattr(
         "druks.mcp.inbound.load_settings",
-        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="https://druks.test/")),
+        lambda: SimpleNamespace(
+            urls=SimpleNamespace(endpoint="https://druks.test/", webhook_host="")
+        ),
     )
     return _requiring(get_druks_mcp_server(allowed_tools=allowed_tools))
 
@@ -642,7 +653,7 @@ async def _druks_row(account_id: str) -> VaultSecret:
 def test_druks_needs_an_address_a_box_reaches(monkeypatch):
     monkeypatch.setattr(
         "druks.mcp.inbound.load_settings",
-        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="")),
+        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="", webhook_host="")),
     )
 
     with pytest.raises(MissingEndpointError):

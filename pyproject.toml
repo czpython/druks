@@ -41,6 +41,7 @@ dependencies = [
     "apprise>=1.9",
     "cryptography>=48.0.1",
     "fastmcp>=4.0.2,<5",
+    "agent-client-protocol==0.12.1",
     "sqlalchemy-encrypted-field==1.0.2",
     "jsonpointer>=3.1.1",
     "authlib>=1.7.2",

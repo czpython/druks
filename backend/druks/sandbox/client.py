@@ -23,7 +23,7 @@ from druks.settings import load_settings
 from .constants import SANDBOX_HOST_LEASE_SECONDS
 from .exceptions import HostGone, SandboxError, TemplateNotFound
 from .host import Host
-from .layout import get_helper_script_path
+from .layout import get_chat_bridge_path, get_helper_script_path
 from .models import SandboxIdentity
 
 logger = logging.getLogger(__name__)
@@ -293,6 +293,14 @@ class Client:
             if isinstance(answer, BaseException):
                 logger.warning("refresh of %s on box %s failed: %s", service, host_id, answer)
 
+    async def set_expiry(self, *, host_id: str, expires_at: datetime) -> None:
+        """Set the box lease. The SDK raises if the box does not exist."""
+        api = self._api()
+        try:
+            await api.renew_host(host_id, expires_at=expires_at)
+        finally:
+            await api.aclose()
+
     async def release(self, *, host_id: str) -> None:
         """Terminate the VM; never raises. The identity dies first, so the
         denial never waits on the VM."""
@@ -335,6 +343,10 @@ async def _upload_helper_script(host: Host) -> None:
         remote=helper_path,
     )
     await host.exec(["chmod", "755", helper_path], timeout=10.0)
+    await host.upload_file(
+        local=Path(__file__).parents[1] / "chat" / "bridge.mjs",
+        remote=get_chat_bridge_path(host.ssh_username),
+    )
 
 
 sandbox_client = Client()

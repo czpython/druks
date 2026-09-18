@@ -109,7 +109,9 @@ async def _required_servers(monkeypatch: pytest.MonkeyPatch, tracker: str):
     )
     monkeypatch.setattr(
         "druks.mcp.inbound.load_settings",
-        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="https://druks.test")),
+        lambda: SimpleNamespace(
+            urls=SimpleNamespace(endpoint="https://druks.test", webhook_host="")
+        ),
     )
     settings = SoftwareFactory.Settings(tracker=tracker)
     monkeypatch.setattr(SoftwareFactory, "settings", AsyncMock(return_value=settings))

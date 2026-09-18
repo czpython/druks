@@ -36,24 +36,23 @@ class _FileColumn(TypeDecorator[File]):
         )
         return type_coerce(metadata, self)
 
-    def process_bind_param(self, value: File | None, dialect: Any) -> str:
-        if type(value) is not File or not value.id:
-            raise ValueError("FileField takes a hydrated File")
-        return value.id
+    def process_bind_param(self, value: File | None, dialect: Any) -> str | None:
+        if value:
+            if type(value) is not File or not value.id:
+                raise ValueError("FileField takes a hydrated File")
+            return value.id
 
-    def process_result_value(self, value: Any, dialect: Any) -> File:
-        fields = json.loads(value)
-        return File(
-            id=fields["id"],
-            name=fields["name"],
-            size=fields["size"],
-            content_type=fields["content_type"],
-        )
+    def process_result_value(self, value: Any, dialect: Any) -> File | None:
+        if value:
+            fields = json.loads(value)
+            return File(
+                id=fields["id"],
+                name=fields["name"],
+                size=fields["size"],
+                content_type=fields["content_type"],
+            )
 
 
 def FileField() -> Mapped[File]:
-    return mapped_column(
-        _FileColumn(),
-        ForeignKey("files.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
+    # The annotation decides nullability: Mapped[File | None] makes the column optional.
+    return mapped_column(_FileColumn(), ForeignKey("files.id", ondelete="RESTRICT"))

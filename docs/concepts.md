@@ -79,9 +79,10 @@ boundaries. This has several consequences:
 - A workflow structure change can affect active runs. Treat the change as a
   deployment compatibility decision.
 
-Druks does not promise to preserve a live external agent process through a
-worker crash. Agent execution is a durable operation around a process in a
-sandbox. Recovery follows the operation boundary in this section.
+Workflow recovery does not preserve a live external agent process through a
+worker crash. Agent execution in a workflow is a durable operation around a
+process in a sandbox. Recovery follows the operation boundary in this section.
+[Chat](chat.md#execution-and-recovery) has a separate live-session lifecycle.
 
 ## When Druks fits
 
@@ -211,8 +212,9 @@ call. Store durable state in an external system such as Git, not only on the VM.
 
 A sandbox never holds a subscription token. Druks gives each sandbox that
 fetches one an identity at its issuer, before Drukbox provisions it. The
-identity names the run and the workflow or agent the sandbox is scoped to. It
-keeps a hash of a random bearer and one secret ref per secret the sandbox
+identity names the account and its scope. A workflow identity also names its
+run. A Chat identity has no run and expires with its lease. The identity keeps
+a hash of a random bearer and one secret ref per secret the sandbox
 holds: the Drukbox name, the vault row, and the resource. The row can be the
 GitHub App key, a pasted token, or a provider subscription. A replay after a
 crash finds the sandbox through the run's live identity with the same scope.

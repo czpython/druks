@@ -12,8 +12,8 @@ from .exceptions import TemplateNotFound, TemplateUnavailable
 _TEMPLATE_POLL_SECONDS = 5
 
 
-def get_declared_sandboxes() -> dict[str, Sandbox]:
-    declared = {}
+def get_declared_sandboxes(*sandboxes: Sandbox) -> dict[str, Sandbox]:
+    declared = {sandbox.setup_script_hash: sandbox for sandbox in sandboxes}
     for app in loader.iter_apps():
         for workflow in app.workflows():
             if sandbox := workflow.sandbox:
@@ -21,10 +21,10 @@ def get_declared_sandboxes() -> dict[str, Sandbox]:
     return declared
 
 
-async def prepare_sandbox_templates() -> None:
+async def prepare_sandbox_templates(*sandboxes: Sandbox) -> None:
     base_image = load_settings().sandbox.image
-    for sandbox in get_declared_sandboxes().values():
-        app_name = loader.resolve_workflow_app(sandbox.module)
+    for sandbox in get_declared_sandboxes(*sandboxes).values():
+        app_name = sandbox.package or loader.resolve_workflow_app(sandbox.module)
         label = f"{app_name}-{PurePosixPath(sandbox.setup).stem}".replace("_", "-")
         await sandbox_client.create_template(
             setup_script=sandbox.read_setup_script().decode("utf-8"),

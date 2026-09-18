@@ -26,9 +26,11 @@
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "use-stick-to-bottom": "1.1.6",
     "wouter": "^3.11.0"
   },
   "devDependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
     "@eslint/js": "^10.0.1",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",

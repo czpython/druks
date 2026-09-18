@@ -1,11 +1,12 @@
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.context import current_account_id
+from druks.accounts.dependencies import current_session_account
 from druks.api.dependencies import SessionDep
 from druks.apps.registry import mcp_servers
 from druks.core.templates import render_page
@@ -15,6 +16,7 @@ from druks.mcp.exceptions import (
     InvalidServerNameError,
     OauthConnectError,
     RegistryUnavailableError,
+    ReservedServerNameError,
 )
 from druks.mcp.helpers import get_grant_account
 from druks.mcp.models import McpServer
@@ -79,7 +81,7 @@ async def add_mcp_server(session: SessionDep, body: CreateMcpServerRequest) -> M
         )
     try:
         await McpServer.create(session, name=body.name, url=body.url, token=body.token)
-    except InvalidServerNameError as error:
+    except (InvalidServerNameError, ReservedServerNameError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return await _response(session, body.name)
 
@@ -146,7 +148,7 @@ async def install_mcp_server(
             secret_headers={h: v for h, v in filled.items() if h in secret},
             is_enabled=is_enabled,
         )
-    except InvalidServerNameError as error:
+    except (InvalidServerNameError, ReservedServerNameError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return await _response(session, body.name)
 
@@ -221,7 +223,11 @@ async def connect_mcp_server(
     return ConnectMcpServerResponse(authorization_url=authorization_url)
 
 
-@router.get("/oauth/callback", response_class=HTMLResponse)
+@router.get(
+    "/oauth/callback",
+    response_class=HTMLResponse,
+    dependencies=[Depends(current_session_account)],
+)
 async def oauth_callback(
     session: SessionDep, state: str = "", code: str = "", error: str = ""
 ) -> HTMLResponse:

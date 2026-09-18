@@ -114,6 +114,7 @@ def _no_durable_dispatch(request):
         mock.patch("druks.agents.set_run_phase", _phase_noop),
         mock.patch("druks.durable.reads.get_run_phase", _phase_noop),
         mock.patch("dbos.DBOS.cancel_workflow_async", _dbos_cancel),
+        mock.patch("dbos.DBOS.start_workflow_async", _noop),
     ):
         yield
 
