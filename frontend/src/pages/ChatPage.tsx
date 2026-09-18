@@ -8,7 +8,7 @@ import { Link, useLocation } from 'wouter'
 import { ApiError, UnauthorizedError } from '../api/client'
 import { chatApi } from '../chat/api'
 import {
-  conversationReducer, initialConversation, savedReplyRows,
+  conversationReducer, conversationTitle, initialConversation, savedReplyRows,
   type Conversation, type ConversationAction, type ConversationSummary, type ReplyRow,
 } from '../chat/state'
 import { Markdown } from '../components/Markdown'
@@ -59,7 +59,7 @@ export function ChatPage({ id }: { id?: string }) {
               className="chat-list-item"
               aria-current={conversation.id === conversationId ? 'page' : undefined}
             >
-              <span className="chat-list-title">{conversation.title ?? 'New conversation'}</span>
+              <span className="chat-list-title">{conversationTitle(conversation)}</span>
               <time dateTime={conversation.createdAt} title={format.absTime(conversation.createdAt)}>
                 {format.clockTime(conversation.createdAt)}
               </time>
@@ -128,7 +128,8 @@ function ConversationThread({ id, draft, onDraft, onCreated }: {
       dispatch(action)
       if (action.type === 'snapshot') {
         const summary: ConversationSummary = {
-          id: action.id, title: action.title, source: action.source, createdAt: action.createdAt,
+          id: action.id, title: action.title, source: action.source, userId: action.userId,
+          userName: action.userName, createdAt: action.createdAt,
           messageCount: action.messageCount, activeMessageId: action.activeMessageId,
         }
         queryClient.setQueryData<ConversationSummary[]>(conversationListKey, (current = []) =>
@@ -224,33 +225,37 @@ function ConversationThread({ id, draft, onDraft, onCreated }: {
   const conversation = state.conversation
   const messages = conversation?.messages ?? []
   const replies = new Map(messages.filter((message) => message.role === 'assistant').map((message) => [message.replyTo, message]))
-  const firstPending = messages.find((message) => message.role === 'user' && (message.state === 'pending' || message.state === 'delivered'))
+  const userMessages = messages.filter((message) => message.role === 'user')
+  // A WhatsApp turn can answer several messages, and its newest delivered message names it.
+  const unansweredMessage = userMessages.findLast((message) => message.state === 'delivered')
+    ?? userMessages.find((message) => message.state === 'pending')
 
   return <section className="chat-thread" aria-label="Conversation">
     <header className="chat-thread-head">
       <Link href="/chat" className="chat-back chat-button" aria-label="Back to conversations"><ArrowLeft size={18} /></Link>
-      <h2>{conversation?.title ?? (id && !conversation ? 'Conversation' : 'New conversation')}</h2>
+      <h2>{conversation ? conversationTitle(conversation) : id ? 'Conversation' : 'New conversation'}</h2>
       {id && connection === 'reconnecting' && <span className="chat-connection" role="status">Reconnecting…</span>}
     </header>
     <div className="chat-messages" ref={scrollRef} role="log" aria-label="Messages" aria-live="polite">
       <div className="chat-messages-content" ref={contentRef}>
         {!id && <p className="chat-start">Send a message to start a conversation.</p>}
         {id && !conversation && connection === 'opening' && <p className="chat-notice" role="status">Loading conversation…</p>}
-        {messages.filter((message) => message.role === 'user').map((message) => {
+        {userMessages.map((message) => {
           const reply = message.state === 'replied' || (message.state === 'cancelled' && message.deliveredAt)
             ? replies.get(message.id) : undefined
           const rows = reply ? savedReplyRows(reply) : state.turns[message.id]?.rows ?? []
-          const isQueued = message.state === 'pending' && firstPending?.id !== message.id
-          const isWaiting = firstPending?.id === message.id && rows.length === 0 && !state.error
+          const isQueued = message.state === 'pending' && unansweredMessage?.id !== message.id
+          const isWaiting = unansweredMessage?.id === message.id && rows.length === 0 && !state.error
           return <article className="chat-turn" key={message.id} aria-label="Message and reply">
-            <div className="chat-user">
-              <div className="chat-message-meta">You <time dateTime={message.createdAt} title={format.absTime(message.createdAt)}>{format.clockTime(message.createdAt)}</time></div>
+            <div className={message.isInternal ? 'chat-user is-internal' : 'chat-user'}>
+              <div className="chat-message-meta">{message.isInternal ? 'Druks' : 'You'} <time dateTime={message.createdAt} title={format.absTime(message.createdAt)}>{format.clockTime(message.createdAt)}</time></div>
               <div className="chat-user-body">{message.body}</div>
+              {message.file && <a href={message.file.url} target="_blank" rel="noreferrer">{message.file.name}</a>}
               {isQueued && <span className="chat-queued">Queued</span>}
             </div>
             <div className="chat-reply">
               <Reply rows={rows} />
-              {isWaiting && <p className="chat-waiting" role="status"><span className="chat-activity-dot" />{conversation?.activeMessageId === message.id ? 'Agent is replying…' : 'Connecting…'}</p>}
+              {isWaiting && <p className="chat-waiting" role="status"><span className="chat-activity-dot" />{message.state === 'delivered' ? 'Agent is replying…' : 'Connecting…'}</p>}
               {(message.state === 'interrupted' || message.state === 'cancelled') && <div className="chat-interrupted" role="status">
                 <strong>{message.state === 'cancelled' ? 'Cancelled' : 'Interrupted'}</strong>
                 <p>{message.state === 'cancelled' ? 'You stopped this turn.' : 'This turn stopped before it finished.'}</p>
@@ -287,7 +292,7 @@ function ConversationThread({ id, draft, onDraft, onCreated }: {
           }}
         />
         <div className="chat-composer-actions">
-          {firstPending && !state.error && <button type="button" className="chat-button" onClick={() => void stop(firstPending.id)} disabled={stopping}>{stopping ? 'Stopping…' : 'Stop'}</button>}
+          {unansweredMessage && !state.error && <button type="button" className="chat-button" onClick={() => void stop(unansweredMessage.id)} disabled={stopping}>{stopping ? 'Stopping…' : 'Stop'}</button>}
           <button type="submit" className="chat-button primary" disabled={!draft.trim() || sending || (Boolean(id) && !conversation)}>{sending ? 'Sending…' : 'Send'}</button>
         </div>
       </div>

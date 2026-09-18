@@ -173,10 +173,14 @@ async def oauth_callback(
     return render_page("service_oauth_callback.html", slug=provider)
 
 
-@oauth_router.get("/connections", dependencies=[Depends(current_session_account)])
-async def list_connections(session: SessionDep) -> list[ConnectionResponse]:
-    rows = await VaultSecret.list_owned_by(session, current_account_id.get())
-    return [ConnectionResponse.from_secret(row) for row in rows]
+@oauth_router.get(
+    "/connections",
+    dependencies=[Depends(current_session_account)],
+    response_model=list[ConnectionResponse],
+    response_model_by_alias=True,
+)
+async def list_connections(session: SessionDep) -> list[VaultSecret]:
+    return await VaultSecret.list_owned_by(session, current_account_id.get())
 
 
 @oauth_router.delete(

@@ -1,5 +1,3 @@
-# The settings read side: resolve declared defaults through the override store
-# into the wire shapes. Schemas stay pure projections.
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -17,13 +15,21 @@ from .schemas import (
 )
 
 if TYPE_CHECKING:
-    from druks.agents import Agent
+    from druks.agents import Agent, Bot
     from druks.apps import App
     from druks.workflows import Workflow
 
 
+async def list_agent_settings(
+    session: AsyncSession, app: "type[App]", *, settings: InstallationSettings
+) -> list[AgentSettingResponse]:
+    """The rows of the app's Agents tab: its agents, and then its Bot."""
+    declared = [*app.agents(), app.bot] if app.bot else app.agents()
+    return [await get_agent_setting(session, agent, settings=settings) for agent in declared]
+
+
 async def get_agent_setting(
-    session: AsyncSession, agent: "Agent", *, settings: InstallationSettings
+    session: AsyncSession, agent: "Agent | Bot", *, settings: InstallationSettings
 ) -> AgentSettingResponse:
     harness = await SettingsOverride.agent_harness(session, agent.id, settings=settings)
     model = await SettingsOverride.agent_model(session, agent.id, settings=settings)
@@ -136,9 +142,8 @@ async def get_app_settings(
         description=app.description,
         icon=app.icon,
         builtin=app.builtin,
-        agents=[
-            await get_agent_setting(session, agent, settings=settings) for agent in app.agents()
-        ],
+        bot=app.bot.id if app.bot else None,
+        agents=await list_agent_settings(session, app, settings=settings),
         # Surface only the workflows with operator knobs: tunable settings or a
         # schedule to retune.
         workflows=[

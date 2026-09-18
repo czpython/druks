@@ -210,3 +210,12 @@
 .settings-pane .svc-facts > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-size: 14px; }
 .settings-pane .set-btn.danger { color: var(--outcome-failed); border-color: color-mix(in oklch, var(--outcome-failed) 50%, var(--border)); background: transparent; }
 .settings-pane .set-btn.danger:hover:not(:disabled) { background: color-mix(in oklch, var(--outcome-failed) 12%, var(--surface)); }
+
+.settings-pane .set-pane + .set-pane { margin-top: 48px; }
+.channel-connections { display: flex; flex-direction: column; gap: 8px; }
+.channel-connection { display: flex; flex-direction: column; gap: 14px; padding: 14px; }
+.channel-connection-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 18px; }
+.channel-qr { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.channel-qr img { width: 240px; max-width: 100%; height: auto; border-radius: 6px; }
+.channel-qr figcaption, .channel-admin-code { margin: 0; color: var(--text-mid); font-size: 13px; }
+.channel-admin-code code { font: 15px var(--font-mono); color: var(--text); }

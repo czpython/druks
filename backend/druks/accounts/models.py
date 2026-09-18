@@ -19,8 +19,9 @@ from druks.accounts.constants import (
     PAT_SECRET_BYTES,
     PAT_TOKEN_TAG,
 )
+from druks.accounts.enums import AccountKind
 from druks.accounts.exceptions import AuthConfigurationError, InvalidPatError
-from druks.core.models import Uuid7Pk
+from druks.core.models import Uuid7Pk, uuid7_str
 from druks.models import Base
 from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
@@ -41,6 +42,9 @@ class Account(Base, Uuid7Pk):
     # A lookup or a duplicate check needs no normalization. The username stays
     # as the provider gave it.
     username: Mapped[str] = mapped_column(CITEXT, unique=True)
+    kind: Mapped[str] = mapped_column(
+        default=AccountKind.OPERATOR, server_default=text("'operator'")
+    )
     is_default: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     timezone: Mapped[str] = mapped_column(String, default="UTC")
     gate_park_destination_id: Mapped[str | None] = mapped_column(
@@ -63,6 +67,17 @@ class Account(Base, Uuid7Pk):
         if not account:
             raise AuthConfigurationError("No run account is available. Complete account setup.")
         return account
+
+    @classmethod
+    async def get_secrets_owner(
+        cls, session: AsyncSession, account_id: str | None
+    ) -> "Account | None":
+        """The account whose secrets an agent acts with: the given operator, or else the
+        default account. A bot or bot admin account holds no secrets."""
+        account = await session.get(cls, account_id) if account_id else None
+        if account and account.kind == AccountKind.OPERATOR:
+            return account
+        return await cls.get_default(session)
 
     @classmethod
     async def get_for_username(cls, session: AsyncSession, username: str) -> "Account | None":
@@ -103,14 +118,28 @@ class Account(Base, Uuid7Pk):
         )
         return (await session.scalars(select(cls).where(cls.username == username))).one()
 
+    @classmethod
+    async def create_for_bot(cls, session: AsyncSession, kind: AccountKind) -> "Account":
+        """The bot or bot admin account of a Bot's channel connection, such as a linked
+        number. It never signs in and never becomes the default."""
+        account = cls(
+            username=f"{kind}:{uuid7_str()}",
+            kind=kind,
+            timezone=load_settings().timezone,
+        )
+        session.add(account)
+        await session.flush()
+        return account
+
     async def update_preferences(self, **fields: object) -> None:
         for field, value in fields.items():
             setattr(self, field, value)
         await self.session.flush()
 
     @classmethod
-    async def list_all(cls, session: AsyncSession) -> list["Account"]:
-        stmt = select(cls).order_by(cls.created_at, cls.id)
+    async def list_operators(cls, session: AsyncSession) -> list["Account"]:
+        """The accounts that sign in. Bot and bot admin accounts never do."""
+        stmt = select(cls).where(cls.kind == AccountKind.OPERATOR).order_by(cls.created_at, cls.id)
         return list(await session.scalars(stmt))
 
 

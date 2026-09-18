@@ -2,10 +2,12 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from druks.chat.models import Conversation
 from druks.durable.enums import RunState
 from druks.durable.models import Run
 from druks.notifications.exceptions import (
     AlreadyAcknowledgedError,
+    AnswerNotAllowedError,
     InvalidChoiceError,
     StaleRoundError,
     UnknownTokenError,
@@ -13,13 +15,25 @@ from druks.notifications.exceptions import (
 from druks.notifications.models import Notification
 
 
-def validate_in_app_answer(
-    ask: dict[str, Any], control: str, answers: dict[str, str], note: str
+async def validate_in_app_answer(
+    session: AsyncSession,
+    run: Run,
+    *,
+    account_id: str | None,
+    control: str,
+    answers: dict[str, str],
+    note: str,
 ) -> dict[str, Any]:
-    # The in-app answer contract, shared by the runs resume route and the
-    # notification respond rail. The control must be one the ask offered — the
-    # vocabulary is workflow-owned, never read from the client, so a spoofed
+    # The in-app answer contract, shared by the runs resume route, the answer_gate
+    # tool, and the notification respond rail. A question that a chat on an app's
+    # channel asked is its admin's alone. The control must be one the ask offered —
+    # the vocabulary is workflow-owned, never read from the client, so a spoofed
     # control can't drive control flow.
+    if run.conversation_id:
+        conversation = await session.get(Conversation, run.conversation_id)
+        if not conversation.is_answerable_by(account_id):
+            raise AnswerNotAllowedError()
+    ask = await run.get_ask()
     if control not in ask.get("controls", []):
         raise InvalidChoiceError(f"unknown control {control!r}")
     if (
@@ -68,8 +82,14 @@ async def respond_to_notification(
         # and an ask that doesn't declare in_app isn't answerable either
         # (the same declared-key read get_ask itself dispatches on).
         raise InvalidChoiceError("this notification is informational; answer on its source")
-    resume_payload = validate_in_app_answer(
-        ask, choice["control"], choice.get("answers", {}), choice.get("note", "")
+    # A notification button names no account.
+    resume_payload = await validate_in_app_answer(
+        session,
+        run,
+        account_id=None,
+        control=choice["control"],
+        answers=choice.get("answers", {}),
+        note=choice.get("note", ""),
     )
     await run.resume(**resume_payload)
     if not await notification.mark_acknowledged():

@@ -27,6 +27,11 @@ SESSION_ONLY_API_ROUTES = {
     ("GET", "/api/chat/conversations/{conversation_id}"),
     ("POST", "/api/chat/conversations/{conversation_id}/messages"),
     ("POST", "/api/chat/conversations/{conversation_id}/cancel"),
+    ("GET", "/api/chat/services/waha/sessions"),
+    ("POST", "/api/chat/services/waha/sessions"),
+    ("GET", "/api/chat/services/waha/sessions/{session_id}/qr"),
+    ("DELETE", "/api/chat/services/waha/sessions/{session_id}"),
+    ("POST", "/api/chat/connections/{connection_id}/admin-code"),
     ("PUT", "/api/browser-sessions/{name}/state"),
     ("POST", "/api/browser-sessions/{name}/login-window"),
     ("POST", "/api/browser-sessions/{name}/login-window/save"),
@@ -55,6 +60,14 @@ SESSION_ONLY_API_ROUTES = {
 # Session-gated routes that also sit behind their router's identity gate —
 # the route-level session dependency is the stricter of the two.
 DUAL_GATED_API_PATHS = {
+    "/api/chat/conversations",
+    "/api/chat/conversations/{conversation_id}",
+    "/api/chat/conversations/{conversation_id}/messages",
+    "/api/chat/conversations/{conversation_id}/cancel",
+    "/api/chat/services/waha/sessions",
+    "/api/chat/services/waha/sessions/{session_id}/qr",
+    "/api/chat/services/waha/sessions/{session_id}",
+    "/api/chat/connections/{connection_id}/admin-code",
     "/api/settings/apps",
     "/api/services/{slug}",
     "/api/oauth/{slug}/connect",
@@ -147,7 +160,7 @@ def test_provider_setup_uses_only_the_session_or_setup_resolver(api_routes):
 
 
 async def test_provider_list_answers_before_an_account_exists(druks_db, druks_client):
-    assert not await Account.list_all(druks_db)
+    assert not await Account.list_operators(druks_db)
 
     response = await druks_client.get("/api/providers")
 
@@ -157,7 +170,7 @@ async def test_provider_list_answers_before_an_account_exists(druks_db, druks_cl
     by_id = {item["id"]: item for item in body}
     assert by_id["anthropic"]["billingOptions"] == ["api_key", "subscription"]
     assert by_id["openai"]["billingOptions"] == ["api_key", "subscription"]
-    assert not await Account.list_all(druks_db)
+    assert not await Account.list_operators(druks_db)
 
 
 def test_capability_management_is_session_only(api_routes):

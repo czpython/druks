@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 from druks.accounts.models import Account, PersonalAccessToken
-from druks.chat import routes, service
+from druks.chat import service, sockets
 from druks.chat.bridge import Bridge
 from druks.chat.constants import CHAT_KEY_NAME
 from druks.chat.enums import ConversationSource, MessageRole, MessageState
@@ -18,11 +18,13 @@ from druks.database import get_session
 from druks.files.datastructures import File
 from druks.files.models import FileRecord
 from druks.harnesses.claude import ClaudeHarness
+from druks.mcp.enums import Toolkit
 from druks.mcp.inbound import get_druks_account_token, get_druks_mcp_server
 from druks.models import Base
 from druks.redis import get_client
 from druks.sandbox.exceptions import IdentityDenied
 from druks.sandbox.models import SandboxIdentity, SecretRef
+from druks.settings import Urls
 from druks.testing import asgi_client, configure_app_for_test, make_settings
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy import delete
@@ -32,12 +34,13 @@ from sqlalchemy import delete
 async def conversation(druks_db, monkeypatch):
     monkeypatch.setattr(
         "druks.mcp.inbound.load_settings",
-        lambda: SimpleNamespace(
-            urls=SimpleNamespace(webhook_host="hooks.example.com", endpoint="")
-        ),
+        lambda: SimpleNamespace(urls=Urls(webhook_host="hooks.example.com", endpoint="")),
     )
     account = await Account.get_or_create(druks_db, "owner@example.com")
-    return await Conversation.create(druks_db, account_id=account.id, body="Find the issue")
+    conversation = await Conversation.create(druks_db, account_id=account.id, body="Find the issue")
+    # Delivery reads a saved conversation, which comes with its account.
+    await druks_db.refresh(conversation, ["account"])
+    return conversation
 
 
 async def list_messages(session, conversation):
@@ -61,15 +64,10 @@ async def sandbox(druks_db, conversation, monkeypatch):
     )
     monkeypatch.setattr(service, "get_sandbox", AsyncMock(return_value=(host, identity)))
     monkeypatch.setattr(service, "get_running_sandbox", AsyncMock(return_value=host))
-    monkeypatch.setattr(
-        service,
-        "get_default_config",
-        AsyncMock(
-            return_value=SimpleNamespace(
-                harness_class=ClaudeHarness, model_id="claude-opus-4-7", effort="", fast_mode=False
-            )
-        ),
+    config = SimpleNamespace(
+        harness_class=ClaudeHarness, model_id="claude-opus-4-7", effort="", fast_mode=False
     )
+    monkeypatch.setattr(service, "get_agent", AsyncMock(return_value=(config, "", Toolkit.ALL)))
     monkeypatch.setattr(service, "sandbox_client", SimpleNamespace(set_expiry=AsyncMock()))
     return host, identity
 
@@ -98,7 +96,7 @@ def test_mcp_address_uses_the_public_host_or_endpoint(monkeypatch, webhook_host,
     monkeypatch.setattr(
         "druks.mcp.inbound.load_settings",
         lambda: SimpleNamespace(
-            urls=SimpleNamespace(webhook_host=webhook_host, endpoint="http://127.0.0.1:8000/")
+            urls=Urls(webhook_host=webhook_host, endpoint="http://127.0.0.1:8000/")
         ),
     )
     assert get_druks_mcp_server(allowed_tools=()).url == expected
@@ -177,13 +175,19 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
         druks_db, account_id=conversation.account_id, body="another conversation"
     )
     config = SimpleNamespace(secret_refs=[], secrets={})
-    first_host, _identity = await service.get_sandbox(druks_db, conversation.account_id, config)
-    second_host, _identity = await service.get_sandbox(druks_db, second.account_id, config)
+    first_host, _identity = await service.get_sandbox(
+        druks_db, conversation.account_id, config, Toolkit.ALL
+    )
+    second_host, _identity = await service.get_sandbox(
+        druks_db, second.account_id, config, Toolkit.ALL
+    )
     login = await get_druks_account_token(druks_db, conversation.account_id, (), name="login")
     moved = SimpleNamespace(
         secret_refs=[SecretRef(name="claude_token", secret_id=login.id)], secrets={}
     )
-    moved_host, _identity = await service.get_sandbox(druks_db, second.account_id, moved)
+    moved_host, _identity = await service.get_sandbox(
+        druks_db, second.account_id, moved, Toolkit.ALL
+    )
 
     assert first_host.id == second_host.id
     assert moved_host.id != first_host.id
@@ -421,7 +425,7 @@ async def test_each_open_page_receives_the_same_live_event(druks_db, conversatio
         socket = SimpleNamespace(app=api, send_json=send_json)
         tasks.append(
             asyncio.create_task(
-                routes.stream_conversation(socket, conversation.id, conversation.account_id)
+                sockets.stream_conversation(socket, conversation.id, conversation.account_id)
             )
         )
         await asyncio.wait_for(ready.wait(), 2)
@@ -536,7 +540,7 @@ async def test_websocket_rejects_wrong_origin_or_owner(
         receive=AsyncMock(),
         send=send,
     )
-    await routes.conversation_socket(websocket, conversation.id)
+    await sockets.conversation_socket(websocket, conversation.id)
     assert sent == [{"type": "websocket.close", "code": 1008, "reason": ""}]
 
 
@@ -586,7 +590,7 @@ async def test_stop_during_startup_keeps_the_sandbox_and_sends_only_the_next_mes
     sandbox_requests = 0
     prompts = []
 
-    async def get_sandbox(session, account_id, config):
+    async def get_sandbox(session, account_id, config, allowed_tools):
         nonlocal sandbox_requests
         sandbox_requests += 1
         await session.commit()

@@ -60,6 +60,7 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     "newSession: async p => { cwd=p.cwd; sessionId=randomUUID();",
     " if (p._meta.harness !== 'options') throw Error('meta');",
     " if (p.mcpServers[0].headers[0].value !== 'Bearer placeholder') throw Error('token');",
+    " fs.writeFileSync(path.join(cwd, 'setup.json'), JSON.stringify(p.mcpServers[0].headers));",
     " return {sessionId, configOptions: [{id: 'model'}, {id: 'effort'}, {id: 'fast'}]}; },",
     "loadSession: async p => { cwd=p.cwd; sessionId=p.sessionId; memory=fs.readFileSync(transcript(), 'utf8');",
     " await client.sessionUpdate({sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'replay'}}}); return {configOptions: [{id: 'model'}, {id: 'effort'}, {id: 'fast'}]}; },",
@@ -111,11 +112,15 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     method: "start", conversationId: conversation, archivePath: "", command: adapter,
     sessionFiles: ".claude/projects", mode: "bypassPermissions", model: "claude-opus-4-7", meta: { harness: "options" },
     effort: "high", fastMode: true, bearerVariable: "MCP_DRUKS_TOKEN", mcpUrl: "https://hooks.example.com/mcp",
+    headers: [],
   });
   const status = conversation => request(port, { method: "status", conversationId: conversation });
   const first = await launch(home);
   assert.equal((await request(port, start(id(1)))).ok, true);
-  assert.equal((await request(port, start(id(2)))).ok, true);
+  const conversationHeader = { name: "X-Druks-Conversation", value: id(2) };
+  assert.equal((await request(port, { ...start(id(2)), headers: [conversationHeader] })).ok, true);
+  const headers = JSON.parse(await fs.readFile(path.join(home, "work", "chat", id(2), "setup.json"), "utf8"));
+  assert.deepEqual(headers[1], conversationHeader);
   assert.equal((await request(port, { ...start(id(1)), model: "claude-sonnet-5", effort: "low", fastMode: false })).ok, true);
   const settings = await fs.readFile(path.join(home, "work", "chat", id(1), "config.log"), "utf8");
   // The session opens on its model through _meta; the model option only switches it.
@@ -126,6 +131,8 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
   const saved = await until(() => status(id(1)), result => result.status === "replied");
   await request(port, { method: "prompt", conversationId: id(2), messageId: message(2), body: "private-two" });
   await until(() => status(id(2)), result => result.status === "replied");
+  await request(port, { method: "prompt", conversationId: id(2), messageId: message(7), body: "wait", timeout: 0.2 });
+  await until(() => status(id(2)), result => result.status === "interrupted");
 
   await request(port, { method: "prompt", conversationId: id(1), messageId: message(3), body: "wait" });
   await until(() => status(id(1)), result => result.status === "running");

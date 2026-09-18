@@ -32,14 +32,14 @@ async def create_github_app(request: Request) -> HTMLResponse:
             detail="Set urls.endpoint to the base URL the operator's browser reaches druks "
             "at, to create the GitHub App.",
         )
-    webhook_base = (
-        f"https://{settings.urls.webhook_host}" if settings.urls.webhook_host else endpoint
-    )
     manifest = {
         **Github.manifest,
         "url": endpoint,
         "redirect_url": f"{endpoint}/api/core/github/manifest/callback",
-        "hook_attributes": {"url": f"{webhook_base}/_external/github/events/", "active": True},
+        "hook_attributes": {
+            "url": f"{settings.urls.webhook_base}/_external/github/events/",
+            "active": True,
+        },
     }
     return render_page("github_manifest.html", manifest_json=json.dumps(manifest))
 

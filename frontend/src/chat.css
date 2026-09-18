@@ -86,6 +86,7 @@
 .chat-user { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .chat-message-meta { display: flex; gap: 12px; color: var(--text-mid); font-size: 13px; }
 .chat-user-body { max-width: min(75%, 65ch); padding: 12px 16px; background: var(--surface-2); border: 1px solid var(--border-loud); border-radius: 8px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-user.is-internal .chat-user-body { background: transparent; border-style: dashed; color: var(--text-mid); }
 .chat-queued { font-size: 12px; color: var(--text-mid); border: 1px solid var(--border-loud); border-radius: 5px; padding: 3px 8px; }
 .chat-reply { display: flex; flex-direction: column; gap: 16px; margin-top: 22px; min-width: 0; line-height: 1.6; }
 .chat-reply:empty { display: none; }

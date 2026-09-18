@@ -15,6 +15,11 @@ class InvalidChoiceError(NotificationError):
     pass
 
 
+class AnswerNotAllowedError(NotificationError):
+    def __init__(self):
+        super().__init__("Only the admin of the number that started this run can answer it.")
+
+
 class AlreadyAcknowledgedError(NotificationError):
     def __init__(self):
         super().__init__("This notification was already acknowledged.")

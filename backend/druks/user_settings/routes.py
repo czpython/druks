@@ -5,7 +5,7 @@ from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.apps.loader import get_app, iter_apps
-from druks.apps.registry import agents, workflows
+from druks.apps.registry import agents, bots, workflows
 from druks.durable.engine import apply_schedules
 from druks.harnesses.base import Harness
 from druks.harnesses.config import check_config
@@ -52,10 +52,7 @@ async def list_agents(session: SessionDep) -> AgentsResponse:
     projected = [
         AgentsAppResponse(
             name=app.name,
-            agents=[
-                await reads.get_agent_setting(session, agent, settings=settings)
-                for agent in app.agents()
-            ],
+            agents=await reads.list_agent_settings(session, app, settings=settings),
         )
         for app in iter_apps()
     ]
@@ -78,7 +75,7 @@ async def check_agent_configs(session: AsyncSession, settings: InstallationSetti
     await check_config(
         session, settings.default_harness, settings.default_model, settings.default_billing
     )
-    for agent in agents.all():
+    for agent in (*agents.all(), *bots.all()):
         harness = await SettingsOverride.agent_harness(session, agent.id, settings=settings)
         model = await SettingsOverride.agent_model(session, agent.id, settings=settings)
         billing = await SettingsOverride.agent_billing(session, agent.id, settings=settings)

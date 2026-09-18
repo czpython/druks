@@ -1,8 +1,5 @@
-# The inbound /mcp endpoint ("server" stays reserved for the registry rows).
-# Its tools are derived from the routes tagged "agent": the route is an
-# operation's single declaration — schema, docstring, operation_id — and a
-# tagged app route joins the surface the same way.
 import inspect
+from collections import defaultdict
 from collections.abc import Generator
 
 import httpx2
@@ -12,13 +9,17 @@ from fastmcp import FastMCP
 from fastmcp.server.auth import AccessToken, TokenVerifier
 from fastmcp.server.dependencies import get_http_request
 from fastmcp.server.http import StarletteWithLifespan
+from fastmcp.server.middleware import AuthMiddleware
 from fastmcp.server.providers.openapi import MCPType, OpenAPIProvider, OpenAPITool, RouteMap
+from fastmcp.utilities.authorization import AuthContext
 from fastmcp.utilities.openapi import HTTPRoute
 from mcp.types import ToolAnnotations
 
 from druks.accounts.exceptions import InvalidPatError
 from druks.accounts.models import PersonalAccessToken
+from druks.apps.exceptions import AppBotError
 from druks.apps.loader import iter_apps
+from druks.apps.registry import bots
 from druks.database import session_scope
 from druks.mcp.exceptions import InvalidAgentToolError
 
@@ -49,7 +50,11 @@ class PatTokenVerifier(TokenVerifier):
                     token=token,
                     client_id=pat.token_prefix,
                     scopes=[],
-                    claims={"account_id": pat.account_id, "pat_id": pat.id},
+                    claims={
+                        "account_id": pat.account_id,
+                        "pat_id": pat.id,
+                        "allowed_tools": pat.allowed_tools,
+                    },
                 )
         except InvalidPatError:
             return
@@ -71,6 +76,9 @@ class CallerPat(httpx2.Auth):
         yield request
 
 
+_TOOL_TAGS = frozenset({"agent", "bot"})
+
+
 def _validate_agent_tools(api: FastAPI) -> None:
     # The provider logs component-fn errors instead of raising, so derived tools
     # cannot refuse boot; validate the routes before derivation. Inclusion is
@@ -79,8 +87,13 @@ def _validate_agent_tools(api: FastAPI) -> None:
     # two demands the author owns — an explicit operation_id and a non-empty
     # docstring; the app prefix is the framework's to derive, not the
     # author's to repeat (see _namespace_agent_operations).
+    mounted_tags: set[str] = set()
+    bot_operations: defaultdict[str, set[str]] = defaultdict(set)
     for route in iter_route_contexts(api.routes):
-        if not isinstance(route.original_route, APIRoute) or "agent" not in route.tags:
+        if not isinstance(route.original_route, APIRoute):
+            continue
+        mounted_tags.update(route.tags)
+        if not _TOOL_TAGS & set(route.tags):
             continue
 
         where = f"{'/'.join(sorted(route.methods or ()))} {route.path}"
@@ -88,9 +101,22 @@ def _validate_agent_tools(api: FastAPI) -> None:
             raise InvalidAgentToolError(where, "an explicit operation_id is required")
         if not inspect.getdoc(route.endpoint):
             raise InvalidAgentToolError(where, "a non-empty endpoint docstring is required")
+        if "bot" in route.tags:
+            for tag in route.tags:
+                bot_operations[tag].add(route.operation_id)
+    # The loader tags every route of an app with its name, so a Bot's app is mounted
+    # exactly when its name is among the tags.
+    for bot in bots.all():
+        unknown_tools = sorted({*bot.user_tools, *bot.admin_tools} - bot_operations[bot.app])
+        if bot.app in mounted_tags and unknown_tools:
+            raise AppBotError(
+                f"Bot {bot.id} names {', '.join(unknown_tools)}, but no route of app {bot.app!r} "
+                "tagged bot declares that operation_id. Tag the route with bot, or remove "
+                "the name."
+            )
 
 
-def _agent_tool_name(operation_id: str, tags: list[str], app_names: set[str]) -> str:
+def get_tool_name(operation_id: str, tags: list[str], app_names: set[str]) -> str:
     # An app-owned agent operation's tool is f"{app}_{operation_id}", so the
     # author never repeats the prefix. The loader tags every app route with its
     # app's name, so among an agent operation's tags the one naming an
@@ -118,12 +144,12 @@ def _namespace_agent_operations(spec: dict, app_names: set[str]) -> None:
     }
     for path, operations in spec.get("paths", {}).items():
         for operation in operations.values():
-            if not isinstance(operation, dict) or "agent" not in operation.get("tags", []):
+            if not isinstance(operation, dict) or not _TOOL_TAGS & set(operation.get("tags", [])):
                 continue
             operation_id = operation.get("operationId")
             if not operation_id:
                 continue
-            derived = _agent_tool_name(operation_id, operation["tags"], app_names)
+            derived = get_tool_name(operation_id, operation["tags"], app_names)
             if derived != operation_id:
                 if derived in existing_ids:
                     raise InvalidAgentToolError(
@@ -148,9 +174,9 @@ def _install_agent_namespacing(api: FastAPI) -> None:
     # The identity gate holds a tools-limited token to these routes, found by
     # the endpoint a request matched.
     api.state.agent_tools = {
-        route.endpoint: _agent_tool_name(route.operation_id, list(route.tags), app_names)
+        route.endpoint: get_tool_name(route.operation_id, list(route.tags), app_names)
         for route in iter_route_contexts(api.routes)
-        if isinstance(route.original_route, APIRoute) and "agent" in route.tags
+        if isinstance(route.original_route, APIRoute) and _TOOL_TAGS & set(route.tags)
     }
     generate = api.openapi
 
@@ -172,6 +198,15 @@ def _annotate(route: HTTPRoute, component: object) -> None:
         )
 
 
+def _is_visible(context: AuthContext) -> bool:
+    # A limited key lists and calls only the tools it names. Any other key gets the
+    # Druks toolkit: the agent tools, never a tool only a Bot calls.
+    allowed = context.token.claims["allowed_tools"]
+    if allowed is not None:
+        return context.component.name in allowed
+    return "agent" in context.component.tags
+
+
 def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
     _validate_agent_tools(api)
     _install_agent_namespacing(api)
@@ -188,6 +223,7 @@ def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
         client=client,
         route_maps=[
             RouteMap(tags={"agent"}, mcp_type=MCPType.TOOL),
+            RouteMap(tags={"bot"}, mcp_type=MCPType.TOOL),
             RouteMap(mcp_type=MCPType.EXCLUDE),
         ],
         mcp_component_fn=_annotate,
@@ -197,6 +233,7 @@ def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
         providers=[provider],
         instructions=_INSTRUCTIONS,
         auth=PatTokenVerifier(),
+        middleware=[AuthMiddleware(auth=_is_visible)],
     )
     # Derivation primed app.openapi()'s cache mid-assembly; drop it.
     api.openapi_schema = None

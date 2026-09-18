@@ -21,9 +21,9 @@ class Socket {
   receive(action: ConversationAction) { act(() => this.onmessage?.({ data: JSON.stringify(action) })) }
 }
 
-const message: Message = { id: '10', role: 'user', body: 'Check the active runs', state: 'delivered', replyTo: null, toolCalls: [], createdAt: '2026-09-18T10:24:00Z', deliveredAt: '2026-09-18T10:24:01Z' }
+const message: Message = { id: '10', role: 'user', body: 'Check the active runs', state: 'delivered', replyTo: null, toolCalls: [], isInternal: false, file: null, createdAt: '2026-09-18T10:24:00Z', deliveredAt: '2026-09-18T10:24:01Z' }
 const conversation: Conversation = {
-  id: '01995a3c-0000-7000-8000-000000000001', title: message.body, source: 'web', createdAt: message.createdAt,
+  id: '01995a3c-0000-7000-8000-000000000001', title: message.body, source: 'web', userId: null, userName: '', createdAt: message.createdAt,
   messageCount: 1, activeMessageId: '10', messages: [message],
 }
 
@@ -112,6 +112,22 @@ describe('Chat page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
     await waitFor(() => expect(chatApi.stop).toHaveBeenCalledExactlyOnceWith(conversation.id, message.id))
     expect(screen.getByText('Agent is replying')).toBeTruthy()
+  })
+
+  it('names a batched WhatsApp turn by its newest delivered message', async () => {
+    vi.mocked(chatApi.get).mockResolvedValue({ ...conversation, source: 'whatsapp', messages: [
+      message,
+      { ...message, id: '11', body: 'And the failures' },
+      { ...message, id: '12', body: 'Later question', state: 'pending', deliveredAt: null },
+    ] })
+    mount()
+    await connected()
+    const turns = screen.getAllByRole('article')
+    expect(within(turns[0]!).queryByRole('status')).toBeNull()
+    expect(within(turns[1]!).getByRole('status').textContent).toBe('Agent is replying…')
+    expect(within(turns[2]!).getByText('Queued')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(chatApi.stop).toHaveBeenCalledExactlyOnceWith(conversation.id, '11'))
   })
 
   it('shows connection progress at the next reply without infrastructure copy', async () => {

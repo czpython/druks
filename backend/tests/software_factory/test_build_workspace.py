@@ -18,6 +18,7 @@ from druks.core.services import Github
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox.host import Host
 from druks.sandbox.layout import get_related_root, get_repo_root
+from druks.settings import Urls
 from druks.workspaces import RepoWorkspace
 
 
@@ -109,9 +110,7 @@ async def _required_servers(monkeypatch: pytest.MonkeyPatch, tracker: str):
     )
     monkeypatch.setattr(
         "druks.mcp.inbound.load_settings",
-        lambda: SimpleNamespace(
-            urls=SimpleNamespace(endpoint="https://druks.test", webhook_host="")
-        ),
+        lambda: SimpleNamespace(urls=Urls(endpoint="https://druks.test", webhook_host="")),
     )
     settings = SoftwareFactory.Settings(tracker=tracker)
     monkeypatch.setattr(SoftwareFactory, "settings", AsyncMock(return_value=settings))

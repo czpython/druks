@@ -398,6 +398,30 @@ has no account, so it does not match. If no account or more than one account
 matches, the build uses the default account. A **druks** ticket build uses the
 account of the ticket assignee.
 
+## WhatsApp
+
+**Waha** is the service identity that Druks reaches WhatsApp through.
+[WAHA](https://github.com/devlikeapro/waha) is an open source WhatsApp HTTP API
+that you run beside Druks. Connect it
+from **Settings → Connections → Services** with WAHA's address and a key. Druks
+uses this key only to create and delete a linked number's session and its
+session key. That is WAHA's admin key when you run WAHA yourself. Every other
+call uses the session key of the number. Druks checks neither value when you
+save the card, so a wrong key shows up when you link a number.
+
+Run WAHA with the NOWEB or GOWS engine: Druks takes each reply's message ID from
+WAHA before it sends the reply. Druks refuses a number that links on another
+engine. WAHA must reach this webhook URL:
+
+Webhook URL:
+`https://<webhook-host>/_external/waha/events/`
+
+Set `urls.webhook_host`, or `urls.endpoint`, before you link a number. Druks
+writes the URL, the session's webhook secret, and the chats to ignore (status
+updates, groups, channels, and broadcasts) into each session's config. Each
+event carries an HMAC SHA-512 signature, and Druks refuses an event without a
+valid one. See [Chat](chat.md#whatsapp) for linking numbers.
+
 ## Harnesses
 
 Druks registers two subscription providers, `anthropic` and `openai`. Each

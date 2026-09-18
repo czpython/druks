@@ -13,7 +13,7 @@ from druks.durable.schemas import AgentCallResponse
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.harnesses.providers import get_providers
 from druks.mcp.gateway import exceptions, schemas
-from druks.notifications.exceptions import InvalidChoiceError
+from druks.notifications.exceptions import AnswerNotAllowedError, InvalidChoiceError
 from druks.notifications.services import validate_in_app_answer
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
@@ -53,6 +53,7 @@ async def get_gate(session: AsyncSession, run_id: str) -> schemas.GateResponse:
 async def answer_gate(
     session: AsyncSession,
     run_id: str,
+    account_id: str | None,
     *,
     parked_at: datetime,
     control: str,
@@ -75,7 +76,11 @@ async def answer_gate(
     if not ask or ask.get("presentation") != "in_app":
         raise exceptions.GateNotAnswerable(run_id)
     try:
-        payload = validate_in_app_answer(await run.get_ask(), control, answers, note)
+        payload = await validate_in_app_answer(
+            session, run, account_id=account_id, control=control, answers=answers, note=note
+        )
+    except AnswerNotAllowedError as error:
+        raise exceptions.GateAnswerNotAllowed(str(error)) from error
     except InvalidChoiceError as error:
         raise exceptions.InvalidGateAnswer(str(error)) from error
     await run.resume(**payload)

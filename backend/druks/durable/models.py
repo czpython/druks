@@ -83,6 +83,17 @@ class Run(Base):
     retry_from: Mapped[str | None] = column_property(retry_from_expression(id))
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     account: Mapped[Account] = relationship(lazy="joined", foreign_keys=[account_id])
+    # The chat conversation whose tool call started the run. Druks tells it how a
+    # run that waited for an answer ends. This key closes a cycle through files and
+    # agent calls, so create_all adds it after the tables.
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "chat_conversations.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="durable_runs_conversation_id_fkey",
+        )
+    )
     # The run's agent calls in execution order. Never lazy-loaded: the reads
     # that hand a row to the status or timeline eager-load them in one query.
     agent_calls: Mapped[list["AgentCall"]] = relationship(
@@ -116,7 +127,15 @@ class Run(Base):
             return self.agent_calls[-1].last_error
 
     @classmethod
-    async def create_row(cls, engine, *, workflow_id: str, kind: str, account_id: str) -> None:
+    async def create_row(
+        cls,
+        engine,
+        *,
+        workflow_id: str,
+        kind: str,
+        account_id: str,
+        conversation_id: str | None = None,
+    ) -> None:
         # Own committed transaction (not the caller's request txn) so the row
         # exists before the running workflow's first lifecycle event. Idempotent:
         # a scheduled run creates its row inside the (replayable) body, and a
@@ -124,7 +143,12 @@ class Run(Base):
         async with get_session(engine) as session:
             await session.execute(
                 pg_insert(cls)
-                .values(id=workflow_id, kind=kind, account_id=account_id)
+                .values(
+                    id=workflow_id,
+                    kind=kind,
+                    account_id=account_id,
+                    conversation_id=conversation_id,
+                )
                 .on_conflict_do_nothing()
             )
             await session.commit()
@@ -431,7 +455,17 @@ class Run(Base):
             workflow_id=workflow_id,
             kind=self.kind,
             account_id=self.account_id,
+            conversation_id=self.conversation_id,
         )
+        if self.input_requested_at:
+            # The fork reuses the steps that parked, so its row takes their fact from here.
+            async with get_session(_step_engine()) as session:
+                await session.execute(
+                    update(Run)
+                    .where(Run.id == workflow_id, Run.input_requested_at.is_(None))
+                    .values(input_requested_at=self.input_requested_at)
+                )
+                await session.commit()
         subject = await self.get_subject()
         if subject:
             await publish(

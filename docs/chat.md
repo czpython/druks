@@ -5,10 +5,12 @@ icon: "messages-square"
 ---
 
 Chat lets you talk to an agent that acts on Druks as your account.
-A conversation is a live agent session, not a workflow. Chat has no DBOS
-workflow, gate, or park. Chat does not add entries to Activity.
+A conversation is a live agent session, not a workflow. Chat has no Druks run,
+gate, or park. Chat does not add entries to Activity.
 
-Only the creator can read a conversation or receive its live events.
+Only the creator can read a conversation or receive its live events. Operators
+do not see the chats of an app's WhatsApp numbers: the people who hold the
+number's phone read them there.
 Chat uses Claude in this release. It runs on the installation's execution
 defaults: harness, model, billing, effort, and fast mode, as set in
 [installation settings](configuration.md#personal-and-installation-settings).
@@ -67,8 +69,10 @@ messages. **Latest message** returns to the bottom.
 ## Agent access
 
 The agent uses the installation's `/mcp` endpoint as the conversation's owner.
-Its Chat key permits every Druks MCP tool. Builds keep a separate key with
-their restricted tool list.
+An operator's Chat key permits every tool of the Druks toolkit: the routes tagged
+`agent`. Builds keep a separate key with their restricted tool list. A key with a
+tool list lists and calls only those tools. The agents of a WhatsApp number have
+such keys: see [WhatsApp](#whatsapp).
 
 The agent can change Druks through those tools. Chat has no permission dialog
 or proposal mode. The adapter runs in bypass mode and cannot call
@@ -127,3 +131,104 @@ the session files from the last completed turn.
 Nothing renews an idle sandbox. It expires with its lease. The next message
 gets a new sandbox and reloads the saved session files. Each turn renews the
 sandbox lease and its identity expiry. The lease is 150 minutes.
+
+## WhatsApp
+
+WhatsApp is a source for Chat. A person writes to a linked number, and Druks
+saves the message in that person's conversation. The agent answers through its
+MCP tools, and Druks sends the reply back to WhatsApp. A workflow never sees a
+message. Druks reaches WhatsApp through [WAHA](https://github.com/devlikeapro/waha),
+an open source WhatsApp HTTP API. Connect WAHA first: see
+[WhatsApp](configuration.md#whatsapp).
+
+### Link a number
+
+A linked number is a connection. Its owner account holds the WAHA session, the
+session's key, and the webhook secret. There are two kinds:
+
+- **An app's number.** In the app's settings, open **Channels** and select
+  **Add number**. The tab shows only when the app declares a
+  [Bot](writing-an-app.md#answer-whatsapp-with-a-bot). Druks creates a bot
+  account and a bot admin account for the number. These accounts never sign in.
+- **Your own number.** Open **Settings → Connections → Accounts** and select
+  **Link your number**. Only your chat with yourself reaches your agent, with
+  the whole Druks toolkit. Druks ignores messages from anyone else to that
+  number.
+
+Druks creates the WAHA session and its key, saves the connection, and then
+writes the session's config. Scan the QR code from **Linked devices** in
+WhatsApp on the phone. The number is live when WAHA reports that the session
+works. When WhatsApp unlinks the device, the number shows **Disconnected** and
+its QR code again. Druks refuses a number that another live connection holds. **Remove**
+deletes the WAHA session and its key, and ends the pauses of the number's chats.
+The connection and its chats stay as history, and each new link is a new
+connection.
+
+### Who writes
+
+Each person who writes to a number has one conversation. Druks sends each
+message to a conversation by its sender:
+
+| Sender | Owner | Prompt | Tools |
+| --- | --- | --- | --- |
+| The number's admin | The number's bot admin account | Druks's admin prompt | The Bot's `admin_tools`, `answer_gate`, `chat_resume_conversation` |
+| Anyone else | The number's bot account | The Bot's `prompt` | The Bot's `user_tools` |
+
+The agents of a number have no shell, file, or web tools. Their harness, model,
+billing, effort, and timeout come from the Bot's row in the app's
+**Settings → Agents**. A turn that runs past the timeout stops, and Druks marks
+it `interrupted`. A bot or bot admin account holds no credential of its own, so its
+agents and runs bill the default account.
+
+All pending messages of a WhatsApp conversation go into one turn. Druks saves
+media as a Druks file on its message. Druks drops a repeated message by its
+WhatsApp ID. Druks writes to a person only to answer them, one reply for each
+turn. It never starts a chat and never sends in bulk. Before it sends a reply,
+Druks takes a new message ID from WAHA and records it. WAHA's copy of the sent
+message then carries a known ID, even when the copy arrives before the send
+returns.
+
+Druks also adds **internal messages** to a conversation. Each one comes from a
+fixed template. An internal message starts a turn like any message, and it
+never goes to WhatsApp. Druks talks to agents, and agents talk to people.
+
+### Admins
+
+Each app number has an admin from the moment it links: the person who holds its
+phone. They talk to the admin's agent in the phone's chat with itself, **Message
+yourself** in WhatsApp. This needs no setup and no second phone. WhatsApp does
+not ring for a message that an account sends to itself, so the phone shows
+Druks's questions in that chat without a sound.
+
+To get the questions on another phone, which rings, select **Add admin** on the
+number. This opens a one-time code that expires after 10 minutes. Druks then
+sends the number's questions to the person who sends exactly that code from
+their own WhatsApp, and the admin's agent greets them. A number has one such
+person. Both chats belong to the number's bot admin account, which never signs
+in. The only text that Druks reads in a message is an open admin code.
+
+### Confirmation
+
+A run records the conversation whose tool call started it. When such a run
+parks with an in-app question, Druks adds an internal message to the admin's
+conversation. The message holds the request, the person it is about, the run ID,
+and when the run started to wait. The admin's agent asks the admin, and answers
+with `answer_gate`. When two questions are open, the run ID tells them apart.
+
+Only the number's admin can answer a question that came from the number's
+chats. The dashboard, `answer_gate`, and notification buttons all refuse
+everyone else, operators included.
+
+When a run that waited ends, Druks adds an internal message with its result or
+its failure to the conversation that started it. The Bot then tells the person.
+A cancelled run adds nothing.
+
+### Taking over
+
+A message that someone types on the number's phone pauses that chat. Druks
+saves the typed text as an internal message. Messages that arrive during a pause
+start no turn: they go into the chat's next turn. Druks tells the admin about the
+pause. The pause ends when the phone stays quiet in that chat for 4 hours, and
+each typed message starts the 4 hours again. To end it sooner, the admin tells
+their agent, which calls `chat_resume_conversation`. The pause is a DBOS
+workflow that the typed message names, and a chat has at most one open pause.

@@ -52,3 +52,8 @@ class AppRouteConflict(AppLoadError):
 class AppSubjectContractError(AppLoadError):
     """A declared subject fails the read-side contract: no ``list_summaries()``
     implementation, or it names the reserved ``transcripts`` segment."""
+
+
+class AppBotError(AppLoadError):
+    """An app's Bot declaration is wrong: an attribute other than ``bot``, or a tool
+    name that no route tagged ``bot`` in the app declares."""

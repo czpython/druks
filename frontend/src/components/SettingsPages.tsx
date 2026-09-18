@@ -18,6 +18,7 @@ import { harnessColors } from '../lib/harnessColors'
 import { Page } from './Page'
 import { Sidebar } from './Sidebar'
 import { BrowserProfilesPane } from './BrowserProfilesPane'
+import { WhatsAppNumbersPane } from './WhatsAppNumbersPane'
 import {
   AgentAccessPane,
   AgentsPane,
@@ -182,15 +183,16 @@ export function SettingsPages({
   ]
   const dirty = dirtyPages.includes(section)
   const app = appName ? apps.find((entry) => entry.name === appName) : undefined
-  const appTab = location.endsWith('/agents') ? 'agents' : 'options'
+  const appTab = ['agents', 'channels'].find((tab) => location.endsWith(`/${tab}`)) ?? 'options'
   const validAppPage =
     !appName ||
     location === `/apps/${appName}/settings` ||
-    Boolean(app?.agents.length && location === `/apps/${appName}/settings/agents`)
+    Boolean(app?.agents.length && location === `/apps/${appName}/settings/agents`) ||
+    Boolean(app?.bot && location === `/apps/${appName}/settings/channels`)
   const hasOptions = Boolean(
     app && (app.settings.length || app.workflows.some((workflow) => workflow.fields.length)),
   )
-  const paneSection = app?.agents.length && !hasOptions ? 'agents' : appTab
+  const paneSection = app?.agents.length && !hasOptions && appTab === 'options' ? 'agents' : appTab
   const executionPage = section === 'agents' || Boolean(appName && paneSection === 'agents')
   const Content = appName ? 'section' : 'main'
   const title =
@@ -544,20 +546,30 @@ export function SettingsPages({
           {appName && app && (
             <>
               <p className="app-settings-description">{app.description}</p>
-              {hasOptions && app.agents.length > 0 && (
+              {(app.bot || (hasOptions && app.agents.length > 0)) && (
                 <nav className="settings-tabs" aria-label="App settings sections">
-                  <Link
-                    href={`/apps/${app.name}/settings`}
-                    aria-current={paneSection === 'options' ? 'page' : undefined}
-                  >
-                    Options
-                  </Link>
+                  {hasOptions && (
+                    <Link
+                      href={`/apps/${app.name}/settings`}
+                      aria-current={paneSection === 'options' ? 'page' : undefined}
+                    >
+                      Options
+                    </Link>
+                  )}
                   <Link
                     href={`/apps/${app.name}/settings/agents`}
                     aria-current={paneSection === 'agents' ? 'page' : undefined}
                   >
                     Agents
                   </Link>
+                  {app.bot && (
+                    <Link
+                      href={`/apps/${app.name}/settings/channels`}
+                      aria-current={paneSection === 'channels' ? 'page' : undefined}
+                    >
+                      Channels
+                    </Link>
+                  )}
                 </nav>
               )}
             </>
@@ -696,6 +708,7 @@ export function SettingsPages({
                   </div>
                   <div hidden={connectionsTab !== 'accounts'}>
                     <ConnectionsPane />
+                    <WhatsAppNumbersPane />
                   </div>
                   <div hidden={connectionsTab !== 'browser'}>
                     <BrowserProfilesPane />
@@ -708,11 +721,13 @@ export function SettingsPages({
               {page === 'mcp' && <McpServersPane />}
               {page === 'skills' && <SkillsPane />}
               {page === 'api-tokens' && <AgentAccessPane />}
+              {app?.bot && validAppPage && paneSection === 'channels' &&
+                page === `apps/${app.name}` && <WhatsAppNumbersPane app={app.name} />}
               {apps
                 .filter(
                   (entry) =>
                     validAppPage && appName === entry.name && page === `apps/${entry.name}` &&
-                    (paneSection !== 'agents' || executionReady),
+                    (paneSection === 'options' || (paneSection === 'agents' && executionReady)),
                 )
                 .map((entry) => (
                   <div key={entry.name} className="app-settings-layout">

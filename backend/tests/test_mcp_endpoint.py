@@ -8,16 +8,24 @@ import httpx
 import httpx2
 import pytest
 from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed_note_run
+from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.server import mcp_app
+from druks.chat.channels.whatsapp.constants import WAHA_AUDIENCE
+from druks.chat.constants import CONVERSATION_HEADER
+from druks.chat.enums import ConversationSource
+from druks.chat.models import Conversation
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket
 from druks.core.apis.exceptions import UnknownTicketError
 from druks.durable.models import Artifact, Run
 from druks.mcp.exceptions import InvalidAgentToolError
 from druks.mcp.server import create_mcp_app
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.testing import asgi_client, configure_app_for_test, make_settings
 from druks.usage.models import UsageScrape
+from druks_field_notes.models import Note
 from fastapi import APIRouter, FastAPI
 from fastmcp.client import Client
 from fastmcp.client.transports import StreamableHttpTransport
@@ -93,7 +101,9 @@ def resume_spy(monkeypatch):
     return calls
 
 
-def _client(app, token: str, *, mode: Literal["auto", "legacy"] = "auto") -> Client:
+def _client(
+    app, token: str, *, mode: Literal["auto", "legacy"] = "auto", headers: dict | None = None
+) -> Client:
     def factory(**kwargs):
         kwargs.pop("verify", None)  # meaningless for the in-process transport
         return httpx2.AsyncClient(
@@ -101,7 +111,7 @@ def _client(app, token: str, *, mode: Literal["auto", "legacy"] = "auto") -> Cli
         )
 
     transport = StreamableHttpTransport(
-        "http://druks.test/mcp", auth=token, httpx_client_factory=factory
+        "http://druks.test/mcp", headers=headers, auth=token, httpx_client_factory=factory
     )
     return Client(transport, mode=mode)
 
@@ -270,14 +280,47 @@ async def test_a_ticket_token_reaches_only_its_tools(druks_db, app, account):
     )
 
     async with live(app), _client(app, token) as client:
+        names = {tool.name for tool in await client.list_tools()}
         fetched = await client.call_tool(
             "software_factory_get_ticket", {"identifier": ticket.identifier}
         )
         refused = await client.call_tool("get_usage", {}, raise_on_error=False)
 
+    assert names == {"software_factory_get_ticket"}
     assert fetched.structured_content["title"] == "Add an endpoint"
     assert refused.is_error
-    assert "limited to these tools" in refused.content[0].text
+
+
+async def test_a_bot_key_calls_its_tool_for_the_person_in_its_conversation(
+    druks_db, app, pat_token
+):
+    owner = await Account.create_for_bot(druks_db, AccountKind.BOT)
+    connection = await VaultSecret.store(
+        druks_db, SecretKind.SESSION, WAHA_AUDIENCE, secrets={"key": "one"}, account_id=owner.id
+    )
+    conversation = await Conversation.get_or_create_for_user(
+        druks_db,
+        connection,
+        owner.id,
+        source=ConversationSource.WHATSAPP,
+        user_id="41700000001@c.us",
+        user_name="Ana",
+        user_phone="",
+    )
+    _, token = await PersonalAccessToken.create(
+        druks_db, account_id=owner.id, name="bot", allowed_tools=["field_notes_jot_note"]
+    )
+
+    headers = {CONVERSATION_HEADER: conversation.id}
+    async with live(app), _client(app, token, headers=headers) as client:
+        names = {tool.name for tool in await client.list_tools()}
+        jotted = await client.call_tool("field_notes_jot_note", {"body": "The gate sticks."})
+    async with live(app), _client(app, pat_token) as client:
+        toolkit = {tool.name for tool in await client.list_tools()}
+
+    assert names == {"field_notes_jot_note"}
+    assert (await Note.get(jotted.structured_content["id"])).body == "Ana: The gate sticks."
+    assert "field_notes_jot_note" not in toolkit
 
 
 @pytest.mark.parametrize(

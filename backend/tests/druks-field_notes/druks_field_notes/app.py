@@ -1,7 +1,7 @@
 import os
 from typing import Annotated, Literal
 
-from druks.agents import Agent
+from druks.agents import Agent, Bot
 from druks.apps import App, AppSettings, Choices, Secret
 from druks.doctor import CheckResult
 from pydantic import Field, SecretStr, field_validator
@@ -101,6 +101,8 @@ class FieldNotes(App):
         prompt="field_notes/survey.md",
         contract=GistOutput,
     )
+    # Answers the app's WhatsApp numbers with the routes tagged bot.
+    bot = Bot(prompt="field_notes/bot.md", user_tools=("jot_note",))
 
     # `druks doctor` reports this precondition beside the platform checks.
     checks = [check_summary_api_key]

@@ -153,6 +153,7 @@ const appSettings: AppsSettingsResponse = {
       description: 'Software Factory settings',
       icon: 'factory',
       builtin: false,
+      bot: null,
       agents: [coder],
       workflows: [],
       settings: [
@@ -193,6 +194,7 @@ const appSettings: AppsSettingsResponse = {
       description: 'Review settings',
       icon: 'git-pull-request',
       builtin: false,
+      bot: null,
       agents: [],
       workflows: [],
       settings: [
@@ -233,6 +235,7 @@ const appSettings: AppsSettingsResponse = {
       description: 'Field notes settings',
       icon: 'box',
       builtin: false,
+      bot: null,
       agents: [],
       workflows: [],
       settings: [
@@ -400,9 +403,13 @@ function stubFetch(
         return new Response('[]', { status: 200 })
       }
       if (
-        ['/api/services', '/api/oauth/connections', '/api/skills', '/api/mcp-servers'].includes(
-          path,
-        )
+        [
+          '/api/services',
+          '/api/oauth/connections',
+          '/api/skills',
+          '/api/mcp-servers',
+          '/api/chat/services/waha/sessions',
+        ].includes(path)
       ) {
         return new Response('[]', { status: 200 })
       }
@@ -1073,6 +1080,32 @@ describe('canonical app settings', () => {
     expect(screen.queryByText('No settings page matches this address.')).toBeNull()
     await act(async () => resolveSettings(appSettings))
     await screen.findByLabelText('Notebook')
+  })
+
+  it('shows the Channels tab only for an app with a Bot', async () => {
+    const helpdesk = {
+      ...appSettings.apps[2]!,
+      name: 'helpdesk',
+      description: 'Helpdesk settings',
+      bot: 'helpdesk.bot',
+      agents: [{ ...coder, name: 'helpdesk.bot', label: 'bot' }],
+      settings: [],
+    }
+    stubFetch(true, undefined, { ...appSettings, apps: [...appSettings.apps, helpdesk] })
+    renderSettings('/apps/software_factory/settings')
+    const factoryTabs = await screen.findByRole('navigation', { name: 'App settings sections' })
+    expect(within(factoryTabs).queryByRole('link', { name: 'Channels' })).toBeNull()
+    cleanup()
+
+    renderSettings('/apps/helpdesk/settings')
+    const helpdeskTabs = await screen.findByRole('navigation', { name: 'App settings sections' })
+    expect(within(helpdeskTabs).getAllByRole('link').map((link) => link.textContent)).toEqual([
+      'Agents',
+      'Channels',
+    ])
+    fireEvent.click(within(helpdeskTabs).getByRole('link', { name: 'Channels' }))
+    expect(await screen.findByRole('heading', { name: 'WhatsApp numbers' })).toBeTruthy()
+    expect(window.location.pathname).toBe('/apps/helpdesk/settings/channels')
   })
 
   it('does not create settings destinations for apps without controls', async () => {

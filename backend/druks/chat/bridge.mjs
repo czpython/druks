@@ -146,7 +146,7 @@ class Conversation {
       if (!bearer) throw new Error("The Druks MCP placeholder is missing.");
       const setup = {
         cwd: this.root,
-        mcpServers: [{ name: "druks", type: "http", url: request.mcpUrl, headers: [{ name: "Authorization", value: "Bearer " + bearer }] }],
+        mcpServers: [{ name: "druks", type: "http", url: request.mcpUrl, headers: [{ name: "Authorization", value: "Bearer " + bearer }, ...request.headers] }],
         _meta: request.meta,
       };
       const session = this.state.sessionId
@@ -197,15 +197,23 @@ class Conversation {
     const connection = this.connection;
     // The detached process owns the turn, not the requesting SSH channel.
     void (async () => {
+      let timedOut = false;
+      // Past its time limit the turn stops, and Druks saves no reply for it.
+      const timer = request.timeout && setTimeout(() => {
+        timedOut = true;
+        connection.cancel({ sessionId: this.state.sessionId }).catch(console.error);
+      }, request.timeout * 1000);
       try {
         const result = await connection.prompt({ sessionId: this.state.sessionId, prompt: [{ type: "text", text: request.body }] });
         await this.archive();
         this.state.stopReason = result.stopReason;
-        this.state.status = this.state.stopReason === "cancelled" ? "cancelled" : "replied";
+        if (timedOut) this.state.status = "interrupted";
+        else this.state.status = this.state.stopReason === "cancelled" ? "cancelled" : "replied";
       } catch (error) {
         console.error(error);
         this.state.status = this.state.stopReason === "cancelled" ? "cancelled" : "interrupted";
       } finally {
+        clearTimeout(timer);
         this.save();
       }
     })();

@@ -88,9 +88,9 @@ async def check_config(
 async def get_config(session: AsyncSession, agent_name: str, account_id: str | None) -> AgentConfig:
     """Resolve an agent's shared execution settings and the supplied or default account's
     credential. A missing credential raises."""
-    from druks.apps.registry import agents  # cycle: apps → agents → this module
+    from druks.apps.registry import agents, bots  # cycle: apps → agents → this module
 
-    agent = agents.get(agent_name)
+    agent = agents.get(agent_name) or bots.get(agent_name)
     if not agent:
         raise KeyError(f"no agent is registered as {agent_name!r}")
     settings = await InstallationSettings.get_or_create(session)
@@ -140,9 +140,8 @@ async def _build_config(
     timeout: int,
     fast_mode: bool,
 ) -> AgentConfig:
-    if not account_id:
-        account = await Account.get_default(session)
-        account_id = account.id if account else None
+    account = await Account.get_secrets_owner(session, account_id)
+    account_id = account.id if account else None
     harness_class = await check_config(session, harness_name, model, billing)
     provider_id = model.partition("/")[0]
     subscription = None

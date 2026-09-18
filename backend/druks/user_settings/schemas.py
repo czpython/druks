@@ -155,6 +155,8 @@ class AppSettingsResponse(Schema):
     icon: str
     # The agents of a built-in app show under the Druks tab.
     builtin: bool
+    # The id of the app's Bot, which answers people on its channels.
+    bot: str | None
     agents: list[AgentSettingResponse]
     workflows: list[WorkflowSettingsResponse]
     settings: list[SettingsFieldResponse]

@@ -6,6 +6,7 @@ class SecretKind(StrEnum):
     OAUTH = "oauth"
     APP_KEY = "app_key"
     SUBSCRIPTION = "subscription"
+    SESSION = "session"
 
 
 class IdentityStatus(StrEnum):

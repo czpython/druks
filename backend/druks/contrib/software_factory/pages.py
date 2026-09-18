@@ -140,7 +140,7 @@ async def board(
         updated_since = Base.utc_now() - timedelta(days=30)
     projects = await Project.list_all()
     repos = await ProjectRepo.list_all()
-    accounts = await Account.list_all(db_session())
+    accounts = await Account.list_operators(db_session())
     account_names = {account.id: account.username for account in accounts}
     tickets = await Ticket.list_matching(
         status=status,
@@ -241,7 +241,7 @@ async def ticket(identifier: str):
         )
 
     repos = await ProjectRepo.list_all()
-    accounts = await Account.list_all(db_session())
+    accounts = await Account.list_operators(db_session())
     account_names = {account.id: account.username for account in accounts}
     thread = [
         ui.Card(

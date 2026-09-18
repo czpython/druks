@@ -21,7 +21,7 @@ from druks.files.storage import get_file_storage
 from druks.mcp import models as mcp_models
 from druks.mcp import oauth
 from druks.mcp.constants import TOKEN_ENV_PREFIX
-from druks.mcp.enums import IdentityMode, TokenSource
+from druks.mcp.enums import TokenSource, Toolkit
 from druks.mcp.exceptions import MissingGrantError, MissingTokenError
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
 from druks.mcp.inbound import get_druks_account_token
@@ -197,7 +197,9 @@ class Workspace:
                 secret_id = server.secret_id
             else:
                 account = await Account.get_for_run(session, account_id)
-                row = await get_druks_account_token(session, account.id, server.allowed_tools)
+                row = await get_druks_account_token(
+                    session, account.id, server.allowed_tools or Toolkit.ALL
+                )
                 secret_id = row.id
             refs.append(
                 SecretRef(
@@ -207,7 +209,8 @@ class Workspace:
                     host=urlsplit(server.url).hostname,
                 )
             )
-        run_account = account_id
+        owner = await Account.get_secrets_owner(session, account_id)
+        run_account = owner.id if owner else None
         for server in await mcp_models.McpServer.list_enabled(session):
             name = server["name"]
             if name in required_names:
@@ -222,9 +225,6 @@ class Workspace:
                 if not secret:
                     raise MissingTokenError(name)
             elif source:
-                if server["identity_mode"] == IdentityMode.PER_USER and not run_account:
-                    account = await Account.get_default(session)
-                    run_account = account.id if account else None
                 grant_account = get_grant_account(server["identity_mode"], run_account)
                 secret = await oauth.get_connection(session, name, grant_account)
                 if not secret:

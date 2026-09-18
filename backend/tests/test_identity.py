@@ -86,7 +86,7 @@ async def test_header_mode_requires_exactly_one_nonblank_assertion(tmp_path, dru
             headers=[(IDENTITY_HEADER, "a@example.com"), (IDENTITY_HEADER, "b@example.com")],
         )
         assert two.status_code == 401
-    assert not await Account.list_all(druks_db)
+    assert not await Account.list_operators(druks_db)
 
 
 async def test_an_asserted_email_open_enrolls_once_across_case_variants(tmp_path, druks_db):
@@ -100,7 +100,7 @@ async def test_an_asserted_email_open_enrolls_once_across_case_variants(tmp_path
 
         again = client.get("/api/auth/me", headers={IDENTITY_HEADER: "op@example.COM"})
         assert again.json()["account"]["id"] == body["account"]["id"]
-    assert len(await Account.list_all(druks_db)) == 1
+    assert len(await Account.list_operators(druks_db)) == 1
 
 
 async def test_get_or_create_losing_the_insert_race_still_converges(druks_db, monkeypatch):
@@ -112,7 +112,7 @@ async def test_get_or_create_losing_the_insert_race_still_converges(druks_db, mo
 
     monkeypatch.setattr(Account, "get_for_username", classmethod(_miss))
     assert (await Account.get_or_create(druks_db, "Race@example.com")).id == existing.id
-    assert len(await Account.list_all(druks_db)) == 1
+    assert len(await Account.list_operators(druks_db)) == 1
 
 
 async def test_a_valid_pat_wins_over_a_conflicting_header(tmp_path, druks_db):
@@ -282,7 +282,7 @@ async def test_api_key_connect_refuses_setup_scope(tmp_path, druks_db):
         )
 
     assert response.status_code == 409
-    assert not await Account.list_all(druks_db)
+    assert not await Account.list_operators(druks_db)
     assert not await VaultSecret.list_subscriptions(druks_db)
 
 
@@ -309,7 +309,7 @@ async def test_concurrent_setup_completions_with_one_email_converge(
             ).status_code
             == 200
         )
-    assert len(await Account.list_all(druks_db)) == 1
+    assert len(await Account.list_operators(druks_db)) == 1
     assert len(await VaultSecret.list_subscriptions(druks_db)) == 2
 
 
@@ -333,7 +333,7 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
         assert completed.json()["username"] == "a@example.com"
         assert client.get("/api/settings").status_code == 200
     operator = await Account.get_for_username(druks_db, "a@example.com")
-    assert len(await Account.list_all(druks_db)) == 1
+    assert len(await Account.list_operators(druks_db)) == 1
     codex_connection = await VaultSecret.lookup(
         druks_db, SecretKind.SUBSCRIPTION, Audience.provider("openai"), operator.id
     )

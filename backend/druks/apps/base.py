@@ -30,7 +30,7 @@ from .settings import (
 if TYPE_CHECKING:
     from fastapi import APIRouter
 
-    from druks.agents import Agent
+    from druks.agents import Agent, Bot
     from druks.doctor import CheckResult
     from druks.durable.datastructures import Subject
     from druks.ui.page import PageRoute
@@ -114,6 +114,8 @@ class App:
     # belong to the app itself rather than one of its workflows. Mirrors a
     # workflow's ``Settings``.
     settings_model: ClassVar[type[AppSettings] | None] = None
+    # What the app answers people with in chat. Declare it as ``bot = Bot(...)``.
+    bot: "ClassVar[Bot | None]" = None
     # The checks this app contributes to ``druks doctor`` — one per precondition
     # beyond resolved-settings coherence (for example, whether its provider is reachable).
     # ``druks doctor`` runs each through the same ``CheckResult`` report as its core

@@ -634,6 +634,18 @@ export interface Connection {
   revokedReason: string
 }
 
+/** A linked WhatsApp number: one WAHA session. ``admin`` is the name of the person who
+ * sent its admin code. */
+export interface WahaSession {
+  id: string
+  number: string | null
+  name: string | null
+  admin: string | null
+  identityStatus: 'resolved' | 'unavailable' | 'failed' | null
+  revokedAt: string | null
+  revokedReason: string
+}
+
 /** One declared service: the appliance's own registered app at an external
  * provider. Facts are identity only — stored secrets never leave the backend. */
 export interface Service {
@@ -773,6 +785,8 @@ export interface AppSettings {
   icon: string
   /** Platform apps are excluded from the installed app roster. */
   builtin: boolean
+  /** The id of the app's Bot, which answers its WhatsApp numbers. */
+  bot: string | null
   agents: AgentSetting[]
   workflows: WorkflowSettings[]
   /** The app's own settings (not tied to a workflow). */

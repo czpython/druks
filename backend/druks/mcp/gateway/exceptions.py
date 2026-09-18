@@ -32,6 +32,11 @@ class InvalidGateAnswer(AgentApiError):
     code = "INVALID_GATE_ANSWER"
 
 
+class GateAnswerNotAllowed(AgentApiError):
+    status_code = 403
+    code = "GATE_ANSWER_NOT_ALLOWED"
+
+
 class AgentCallNotFound(AgentApiError):
     status_code = 404
     code = "AGENT_CALL_NOT_FOUND"

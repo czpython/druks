@@ -110,9 +110,15 @@ class Urls(BaseModel):
     # The dashboard base URL. OAuth connect callbacks build on it; empty
     # disables connecting OAuth MCP servers, loudly.
     endpoint: str = ""
-    # The public webhook hostname Caddy serves. Druks reads it only for the
-    # doctor's ingress probe.
+    # The public webhook hostname Caddy serves.
     webhook_host: str = ""
+
+    @property
+    def webhook_base(self) -> str:
+        """The base URL that providers and sandboxes reach: the webhook host, else the endpoint."""
+        if self.webhook_host:
+            return f"https://{self.webhook_host}"
+        return self.endpoint.rstrip("/")
 
 
 class Secrets(BaseModel):

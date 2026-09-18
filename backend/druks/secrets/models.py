@@ -18,11 +18,12 @@ if TYPE_CHECKING:
 
 
 class VaultSecret(Base, Uuid7Pk):
-    """A pasted value, an OAuth connection, a GitHub App key, or a subscription."""
+    """A pasted value, an OAuth connection, a GitHub App key, a subscription, or the
+    WAHA session of a linked WhatsApp number."""
 
     __tablename__ = "vault"
     __table_args__ = (
-        # An account can hold many OAuth connections at one audience.
+        # An account can hold many OAuth connections and linked sessions at one audience.
         Index(
             "ix_vault_one_per_audience",
             "kind",
@@ -30,7 +31,7 @@ class VaultSecret(Base, Uuid7Pk):
             "account_id",
             "header",
             unique=True,
-            postgresql_where=text("kind <> 'oauth'"),
+            postgresql_where=text("kind NOT IN ('oauth', 'session')"),
             postgresql_nulls_not_distinct=True,
         ),
     )

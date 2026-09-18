@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path
 
+from druks.accounts.context import current_account_id
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
@@ -42,6 +43,7 @@ async def get_gate(
     response_model_by_alias=True,
     responses=agent_error_responses(
         gate_errors.InvalidGateAnswer("unknown control 'merge'"),
+        gate_errors.GateAnswerNotAllowed("Only the number's admin can answer this run."),
         RunNotFound("run-123"),
         gate_errors.GateRoundStale("run-123"),
         gate_errors.GateNotOpen("run-123"),
@@ -60,6 +62,7 @@ async def answer_gate(
     return await services.answer_gate(
         session,
         run,
+        current_account_id.get(),
         parked_at=body.parked_at,
         control=body.control,
         answers=body.answers,

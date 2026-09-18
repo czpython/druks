@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field, create_model
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_utils import uuid7
 
-from druks.accounts.context import current_account_id
+from druks.accounts.context import current_account_id, current_conversation_id
 from druks.accounts.models import Account
 from druks.apps.loader import resolve_workflow_app
 from druks.apps.registry import workflows
@@ -37,6 +37,8 @@ from druks.apps.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
+from druks.chat.bots.service import ask_admin
+from druks.chat.service import deliver, report_failure, report_result
 from druks.database import get_session
 from druks.db import db_session
 from druks.durable.activity import set_run_phase
@@ -119,8 +121,9 @@ _in_step: ContextVar[bool] = ContextVar("_in_step", default=False)
 task_queue = Queue("druks_tasks")
 
 # Reserved so _entry's arity and old checkpoints stay untouched; a body
-# parameter may not claim it.
+# parameter may not claim either.
 _ACCOUNT_INPUT_KEY = "__account_id__"
+_CONVERSATION_INPUT_KEY = "__conversation_id__"
 
 
 def _resolve_body_method(cls: type["Workflow"]) -> str:
@@ -361,6 +364,8 @@ async def _park(
     if workflow._subject:
         # Every subjected park notifies the designated destination — no author opt-in.
         await _notify_designated_destination(workflow.workflow_id, workflow._subject)
+    if workflow.conversation_id:
+        await _post_to_chat(workflow.workflow_id, "chat.ask_admin", ask_admin)
     payload = await DBOS.recv_async(gate.name, timeout_seconds=ttl_seconds)
     if payload is None:
         raise GateTimeout(gate.name)
@@ -393,6 +398,19 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
     # The step memoized the row (one per parked round); this body-level enqueue
     # is DBOS's deterministic child-start, so a replayed park never double-sends.
     await notifications_queue.enqueue_async(send_notification, notification_id)
+
+
+async def _post_to_chat(workflow_id: str, name: str, post: Callable) -> None:
+    # A run that a chat's tool call started talks back through chat: post() adds an
+    # internal message, and the conversation's agent takes it from there.
+    async def _post() -> str | None:
+        async with step_session() as session:
+            return await post(session, await session.get(Run, workflow_id))
+
+    conversation_id = await DBOS.run_step_async(StepOptions(name=name, **_IO_RETRIES), _post)
+    if conversation_id:
+        # Body level, like the notification enqueue: a replay never starts it twice.
+        await DBOS.start_workflow_async(deliver, conversation_id)
 
 
 def step(method: Callable | None = None, *, name: str | None = None, retries: int = 0) -> Callable:
@@ -664,18 +682,29 @@ async def _execute_run(
     subject: dict[str, Any] | None,
     account_id: str,
     body: Callable,
+    *,
+    conversation_id: str | None = None,
 ) -> Any:
-    # Ensure the row (idempotent, so a scheduled run with no start() makes it
+    # Create the row (idempotent, so a scheduled run with no start() makes it
     # here), then run the body between its running and finished/failed events.
     # Every failure re-raises so DBOS records the terminal ERROR derived state
     # reads; an operator cancel already carries its own reason and terminal
     # status, so it passes through untouched.
-    await Run.create_row(_step_engine(), workflow_id=workflow_id, kind=kind, account_id=account_id)
+    await Run.create_row(
+        _step_engine(),
+        workflow_id=workflow_id,
+        kind=kind,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
     await _emit_run_event(workflow_id, RunState.RUNNING, subject=subject)
 
     async def record_failed(exc: BaseException, code: str) -> None:
         facts = {**_GATE_CLEARED, "failure": str(exc), "failure_code": code}
         await _emit_run_event(workflow_id, RunState.FAILED, subject=subject, facts=facts)
+        if conversation_id:
+            post = partial(report_failure, failure=str(exc))
+            await _post_to_chat(workflow_id, "chat.report_failure", post)
 
     try:
         result = await body()
@@ -692,6 +721,9 @@ async def _execute_run(
         await record_failed(exc, "")
         raise
     await _emit_run_event(workflow_id, RunState.FINISHED, subject=subject, result=result)
+    if conversation_id:
+        post = partial(report_result, result=result)
+        await _post_to_chat(workflow_id, "chat.report_result", post)
     return result
 
 
@@ -803,6 +835,8 @@ class Workflow:
         self.input: BaseModel | None = None
         # The dispatcher binds the authenticated or default account before execution.
         self.account_id: str
+        # The chat conversation whose tool call started the run, if one did.
+        self.conversation_id: str | None = None
         self.journal = self.journal_class()
         # The run's warm VM, provisioned lazily and reaped at segment boundaries;
         # its lease expiry decides when it must rotate.
@@ -1050,6 +1084,9 @@ class Workflow:
             elif input:
                 raise WorkflowError(f"{cls.__name__}.{cls._body_method}() takes no input")
             wire[_ACCOUNT_INPUT_KEY] = account_id
+            conversation_id = current_conversation_id.get()
+            if conversation_id:
+                wire[_CONVERSATION_INPUT_KEY] = conversation_id
             workflow_id = str(uuid7())
             # A subject has at most one active run per workflow kind, enforced by
             # DBOS queue deduplication: the slot is claimed atomically at enqueue,
@@ -1087,7 +1124,11 @@ class Workflow:
                 # The body also creates its row (idempotently) — this one just makes it
                 # visible before an executor picks the workflow up.
                 await Run.create_row(
-                    _step_engine(), workflow_id=workflow_id, kind=cls.kind, account_id=account_id
+                    _step_engine(),
+                    workflow_id=workflow_id,
+                    kind=cls.kind,
+                    account_id=account_id,
+                    conversation_id=conversation_id,
                 )
                 if subject:
                     # Its own transaction lets readers see the admission before the caller commits.
@@ -1167,6 +1208,7 @@ def _bind_instance(
     input = dict(input or {})
     input.pop(_ACCOUNT_INPUT_KEY, None)
     instance.account_id = account_id
+    instance.conversation_id = input.pop(_CONVERSATION_INPUT_KEY, None)
     # The body's input re-validates from its wire dict; a cron fires with no
     # input, so a scheduled workflow must default every parameter. The validated
     # bundle also lands on the instance for templates / derived properties.
@@ -1195,6 +1237,7 @@ async def _run_instance(
             subject,
             instance.account_id,
             lambda: getattr(instance, cls._body_method)(**run_kwargs),
+            conversation_id=instance.conversation_id,
         )
     finally:
         current_workflow.reset(token)

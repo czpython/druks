@@ -51,7 +51,8 @@ For app-surface changes, inspect the proof app at
   `druks.workflows`, `druks.workspaces`, `druks.agents`, `druks.events`,
   `druks.signals`, `druks.db`, `druks.schemas`, `druks.prompts`, `druks.durable`,
   `druks.apps`, `druks.ui`, and `druks.webhooks`. A reference to `druks.build` or another app in these modules
-  inverts the platform.
+  inverts the platform. The builtin apps `core` and `chat` are platform code, so
+  these modules can import them.
 - Internal code takes `session: AsyncSession` as a required parameter. Only
   author code and the seams that bind the registry read `druks.db.db_session()`;
   ruff's banned-api names the seams in `pyproject.toml`.

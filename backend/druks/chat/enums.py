@@ -3,6 +3,7 @@ from enum import StrEnum
 
 class ConversationSource(StrEnum):
     WEB = "web"
+    WHATSAPP = "whatsapp"
 
 
 class MessageRole(StrEnum):

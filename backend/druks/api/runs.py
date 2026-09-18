@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, HTTPException, Path, status
 
+from druks.accounts.context import current_account_id
 from druks.api.dependencies import SessionDep
 from druks.api.exceptions import (
     RunNotActive,
@@ -16,7 +17,7 @@ from druks.apps.registry import workflows
 from druks.durable.enums import RunState, WorkflowEvent
 from druks.durable.models import Run
 from druks.events.models import Event
-from druks.notifications.exceptions import InvalidChoiceError
+from druks.notifications.exceptions import AnswerNotAllowedError, InvalidChoiceError
 from druks.notifications.services import validate_in_app_answer
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -31,11 +32,19 @@ async def resume_run(
     run = await session.get(Run, run_id)
     if not run:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found")
-    ask = run.input_request
-    if run.state != RunState.PARKED.value or not ask:
+    if run.state != RunState.PARKED.value or not run.input_request:
         raise HTTPException(status.HTTP_409_CONFLICT, "run is not waiting on an in-app decision")
     try:
-        resume_payload = validate_in_app_answer(ask, body.control, body.answers, body.note)
+        resume_payload = await validate_in_app_answer(
+            session,
+            run,
+            account_id=current_account_id.get(),
+            control=body.control,
+            answers=body.answers,
+            note=body.note,
+        )
+    except AnswerNotAllowedError as error:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
     except InvalidChoiceError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
     await run.resume(**resume_payload)

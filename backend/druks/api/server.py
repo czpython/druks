@@ -24,7 +24,8 @@ from druks.apps.loader import iter_apps, load
 from druks.apps.routes import router as apps_router
 from druks.browser.exceptions import BrowserApiError
 from druks.browser.routes import router as browser_sessions_router
-from druks.chat.routes import router as chat_router
+from druks.chat.channels.whatsapp.exceptions import WahaError, WhatsAppLinkError
+from druks.chat.sockets import router as chat_sockets_router
 from druks.core.templates import render_page
 from druks.database import (
     configure_session,
@@ -188,6 +189,16 @@ async def _oauth_page_error_handler(request: Request, exc: OauthPageError) -> HT
     return render_page("service_oauth_error.html", message=str(exc), status_code=exc.status_code)
 
 
+@app.exception_handler(WhatsAppLinkError)
+async def _whatsapp_link_handler(request: Request, exc: WhatsAppLinkError) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"error": "HTTP_409", "detail": str(exc)})
+
+
+@app.exception_handler(WahaError)
+async def _waha_error_handler(request: Request, exc: WahaError) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"error": "HTTP_502", "detail": str(exc)})
+
+
 @app.exception_handler(CatalogError)
 async def _catalog_error_handler(request: Request, exc: CatalogError) -> JSONResponse:
     detail = f"The provider directory is unreachable: {exc.tag}."
@@ -282,7 +293,7 @@ app.include_router(subjects_router, dependencies=_identity_gate)
 app.include_router(gateway_router, dependencies=_identity_gate)
 app.include_router(artifacts_router, dependencies=_identity_gate)
 app.include_router(files_router, dependencies=_identity_gate)
-app.include_router(chat_router)
+app.include_router(chat_sockets_router)
 load(app)
 
 # Tools derive from every route tagged "agent", so the endpoint composes

@@ -74,6 +74,7 @@ druks = "druks.testing"
 # walks each one's package for capabilities. Adding an app is one entry, not
 # edits across the platform wiring.
 [project.entry-points."druks.apps"]
+chat = "druks.chat.app:Chat"
 core = "druks.core.app:Core"
 software_factory = "druks.contrib.software_factory.app:SoftwareFactory"
 usage = "druks.usage.app:Usage"
@@ -128,6 +129,7 @@ ignore = ["SIM108"]
 "backend/druks/browser/subscribers.py" = ["TID251"]
 "backend/druks/core/tasks.py" = ["TID251"]
 "backend/druks/core/webhooks/slack.py" = ["TID251"]
+"backend/druks/chat/channels/whatsapp/webhooks.py" = ["TID251"]
 "backend/druks/contrib/**" = ["TID251"]
 "backend/tests/**" = ["TID251"]
 

@@ -1,5 +1,6 @@
 from typing import Annotated
 
+from druks.agents import BotUser
 from fastapi import APIRouter, Body, HTTPException, status
 
 from druks_field_notes.models import Note
@@ -19,6 +20,13 @@ async def list_notes() -> list[NoteSummary]:
 async def write_note(body: Annotated[str, Body(embed=True)]) -> dict[str, int]:
     note = await Note.create(body=body)
     await Summarize.dispatch(note=note)
+    return {"id": note.id}
+
+
+@router.post("/jotted", tags=["bot"], operation_id="jot_note")
+async def jot_note(body: Annotated[str, Body(embed=True)], user: BotUser) -> dict[str, int]:
+    """Save a note for the person writing, under their name."""
+    note = await Note.create(body=f"{user.name}: {body}")
     return {"id": note.id}
 
 

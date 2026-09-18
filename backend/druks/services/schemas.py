@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ConfigDict, Field
+
 from druks.schemas import Schema
 
 if TYPE_CHECKING:
@@ -19,29 +21,17 @@ class ServiceFieldSpec(Schema):
 
 
 class ConnectionResponse(Schema):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
-    provider: str
+    provider: str = Field(validation_alias="audience_name")
     scopes: list[str] | None
     identity: dict[str, Any]
     identity_status: str | None
     identity_error: str | None
-    connected_at: datetime
+    connected_at: datetime = Field(validation_alias="updated_at")
     revoked_at: datetime | None
     revoked_reason: str
-
-    @classmethod
-    def from_secret(cls, row: "VaultSecret") -> "ConnectionResponse":
-        return cls(
-            id=row.id,
-            provider=row.audience_name,
-            scopes=row.scopes,
-            identity=row.identity,
-            identity_status=row.identity_status,
-            identity_error=row.identity_error,
-            connected_at=row.updated_at,
-            revoked_at=row.revoked_at,
-            revoked_reason=row.revoked_reason,
-        )
 
 
 class ServiceResponse(Schema):
@@ -78,5 +68,5 @@ class ServiceResponse(Schema):
             is_oauth=bool(service.token_endpoint),
             required_scopes=list(service.required_scopes()),
             used_by=[declaration.label for declaration in service.declarations()],
-            connections=[ConnectionResponse.from_secret(c) for c in connections or []],
+            connections=connections or [],
         )

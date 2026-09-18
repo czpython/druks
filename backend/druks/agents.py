@@ -10,7 +10,9 @@ from dbos import DBOS, StepOptions
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.apps.registry import agents
+from druks.apps.exceptions import AppBotError
+from druks.apps.registry import agents, bots
+from druks.chat.bots.dependencies import BotUser
 from druks.db import db_session
 from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, step_session
@@ -36,7 +38,7 @@ if TYPE_CHECKING:
     from druks.workflows import Workflow
     from druks.workspaces import Workspace
 
-__all__ = ["Agent", "AgentOutput"]
+__all__ = ["Agent", "AgentOutput", "Bot", "BotUser"]
 
 _QUOTA_FALLBACK_WAIT_SECONDS = 30 * 60
 _QUOTA_MAX_WAIT_SECONDS = 6 * 60 * 60
@@ -405,3 +407,32 @@ class Agent:
                 session, call_dir=artifact_dir / call_id, call_id=call_id, event=event, **artifact
             )
         return output.to_result()
+
+
+@dataclass(frozen=True)
+class Bot:
+    """What an app answers people with in chat: the app's ``bot`` attribute. A person
+    who writes gets ``prompt`` and ``user_tools``. A channel's admin gets Druks's admin
+    prompt and ``admin_tools``. Each tool names the ``operation_id`` of an app route
+    tagged ``bot``. Settings treat the Bot like an agent, under the id ``<app>.bot``."""
+
+    prompt: str
+    user_tools: tuple[str, ...] = ()
+    admin_tools: tuple[str, ...] = ()
+    name: str | None = None
+    description: str = ""
+    # The longest a turn may run, in seconds. None inherits the default.
+    timeout: int | None = None
+    id: str = field(default="", init=False, compare=False)
+    app: str = field(default="", init=False, compare=False)
+
+    def __set_name__(self, owner: type, attribute: str) -> None:
+        if attribute == "bot":
+            object.__setattr__(self, "id", f"{owner.name}.bot")
+            object.__setattr__(self, "app", owner.name)
+            bots.register(self)
+            return
+        raise AppBotError(
+            f"app {owner.name!r} declares a Bot as {attribute!r}. An app has one Bot, "
+            "and Druks reads it from the bot attribute. Name the attribute bot."
+        )

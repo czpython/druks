@@ -43,6 +43,7 @@ import type {
   InstallationSettings,
   DashboardOverview,
   DashboardSchedules,
+  WahaSession,
 } from './types'
 
 // A 401 means the request's identity did not resolve: typed to branch on,
@@ -317,6 +318,24 @@ export const api = {
   listConnections: () => getJSON<Connection[]>('/api/oauth/connections'),
   disconnectConnection: (connectionId: string) =>
     deleteRequest(`/api/oauth/connections/${encodeURIComponent(connectionId)}`),
+  // Linked WhatsApp numbers: an app's with ``app``, else the caller's own number.
+  wahaSessions: (app?: string) =>
+    getJSON<WahaSession[]>(
+      `/api/chat/services/waha/sessions${app ? `?app=${encodeURIComponent(app)}` : ''}`,
+    ),
+  linkWahaSession: (app?: string) =>
+    postJSON<WahaSession>('/api/chat/services/waha/sessions', { app }),
+  wahaSessionQr: (id: string) =>
+    getJSON<{ mimetype: string; data: string }>(
+      `/api/chat/services/waha/sessions/${encodeURIComponent(id)}/qr`,
+    ),
+  removeWahaSession: (id: string) =>
+    deleteRequest(`/api/chat/services/waha/sessions/${encodeURIComponent(id)}`),
+  openBotAdminCode: (connectionId: string) =>
+    postJSON<{ code: string; expiresIn: number }>(
+      `/api/chat/connections/${encodeURIComponent(connectionId)}/admin-code`,
+      {},
+    ),
   browserSessions: () => getJSON<BrowserSession[]>('/api/browser-sessions'),
   deleteBrowserSession: (name: string) =>
     deleteRequest(`/api/browser-sessions/${encodeURIComponent(name)}`),

@@ -27,7 +27,7 @@ from druks.sandbox.models import SecretRef
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
-from druks.settings import PACKAGED_MCP_CATALOG
+from druks.settings import PACKAGED_MCP_CATALOG, Urls
 from druks.testing import asgi_client, configure_app_for_test, make_settings
 from druks.workspaces import Workspace
 
@@ -637,9 +637,7 @@ async def test_catalog_enabled_false_ships_the_entry_dark(tmp_path, registry_sta
 def _requiring_druks(monkeypatch, allowed_tools=()) -> type[Workspace]:
     monkeypatch.setattr(
         "druks.mcp.inbound.load_settings",
-        lambda: SimpleNamespace(
-            urls=SimpleNamespace(endpoint="https://druks.test/", webhook_host="")
-        ),
+        lambda: SimpleNamespace(urls=Urls(endpoint="https://druks.test/", webhook_host="")),
     )
     return _requiring(get_druks_mcp_server(allowed_tools=allowed_tools))
 
@@ -653,7 +651,7 @@ async def _druks_row(account_id: str) -> VaultSecret:
 def test_druks_needs_an_address_a_box_reaches(monkeypatch):
     monkeypatch.setattr(
         "druks.mcp.inbound.load_settings",
-        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="", webhook_host="")),
+        lambda: SimpleNamespace(urls=Urls(endpoint="", webhook_host="")),
     )
 
     with pytest.raises(MissingEndpointError):

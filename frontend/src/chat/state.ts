@@ -1,9 +1,13 @@
 import type { PlanEntry, SessionNotification, SessionUpdate, ToolCall } from '@agentclientprotocol/sdk'
 
+import type { FileSummary } from '../api/types'
+
 export interface ConversationSummary {
   id: string
   title: string | null
-  source: 'web'
+  source: 'web' | 'whatsapp'
+  userId: string | null
+  userName: string
   createdAt: string
   messageCount: number
   activeMessageId: string | null
@@ -18,6 +22,9 @@ export interface Message {
   createdAt: string
   deliveredAt: string | null
   toolCalls: Array<ToolCall & { textOffset: number }>
+  /** Druks wrote this message for the agent. The person on WhatsApp never sees it. */
+  isInternal: boolean
+  file: FileSummary | null
 }
 
 export interface Conversation extends ConversationSummary {
@@ -48,6 +55,11 @@ export type ConversationAction =
   | { type: 'saved'; message: Message }
 
 export const initialConversation: ConversationState = { conversation: null, turns: {}, error: null }
+
+// A WhatsApp conversation has no title, so the person's name stands in.
+export function conversationTitle(conversation: ConversationSummary): string {
+  return conversation.title ?? (conversation.userName || conversation.userId || 'New conversation')
+}
 
 export function replyRows(rows: ReplyRow[], update: SessionUpdate): ReplyRow[] {
   switch (update.sessionUpdate) {

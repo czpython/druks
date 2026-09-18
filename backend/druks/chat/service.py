@@ -7,17 +7,25 @@ from urllib.parse import urlsplit
 
 import asyncssh
 from dbos import DBOS, StepOptions
+from pydantic_core import to_json
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from druks.accounts.enums import AccountKind
+from druks.apps.loader import get_app
+from druks.apps.registry import services
 from druks.durable.engine import step_session
+from druks.durable.models import Run
 from druks.files.datastructures import File
 from druks.files.storage import get_file_storage
 from druks.harnesses.claude import ClaudeHarness
-from druks.harnesses.config import AgentConfig, get_default_config
+from druks.harnesses.config import AgentConfig, get_config, get_default_config
 from druks.locks import lock
+from druks.mcp.enums import AllowedTools, Toolkit
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.inbound import get_druks_account_token, get_druks_mcp_server
+from druks.mcp.server import get_tool_name
 from druks.models import Base
+from druks.prompts import render_prompt
 from druks.redis import get_client
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
@@ -28,8 +36,9 @@ from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
 from druks.workspaces import Workspace
 
+from .bots.constants import ADMIN_PROMPT, ADMIN_TOOLS
 from .bridge import Bridge
-from .constants import CHAT_KEY_NAME
+from .constants import CHAT_KEY_NAME, CONVERSATION_HEADER, FAILURE_MESSAGE, RESULT_MESSAGE
 from .enums import MessageRole, MessageState
 from .exceptions import ChatBridgeError, ChatHarnessError, ChatSandboxGone
 from .models import Conversation, Message
@@ -50,15 +59,33 @@ async def publish(conversation_id: str, event: dict) -> None:
         await transaction.execute()
 
 
+async def get_agent(
+    session: AsyncSession, conversation: Conversation
+) -> tuple[AgentConfig, str, AllowedTools]:
+    """How the conversation's agent runs: its settings, its system prompt, and the
+    tools its key allows."""
+    kind = conversation.account.kind
+    if kind == AccountKind.OPERATOR:
+        return await get_default_config(session, conversation.account_id), "", Toolkit.ALL
+    bot = get_app(conversation.connection.identity["app"]).bot
+    config = await get_config(session, bot.id, conversation.account_id)
+    if kind == AccountKind.BOT:
+        tools = tuple(get_tool_name(name, [bot.app], {bot.app}) for name in bot.user_tools)
+        return config, await render_prompt(bot.prompt), tools
+    tools = tuple(get_tool_name(name, [bot.app], {bot.app}) for name in bot.admin_tools)
+    return config, await render_prompt(ADMIN_PROMPT), (*tools, *ADMIN_TOOLS)
+
+
 async def get_sandbox(
-    session: AsyncSession, account_id: str, config: AgentConfig
+    session: AsyncSession,
+    account_id: str,
+    config: AgentConfig,
+    allowed_tools: AllowedTools,
 ) -> tuple[Host, SandboxIdentity]:
     """The account's sandbox for a new turn: a live sandbox that holds the Chat
     agent's current secrets, or a new one."""
     server = get_druks_mcp_server(allowed_tools=())
-    token = await get_druks_account_token(
-        session, account_id, server.allowed_tools, name=CHAT_KEY_NAME
-    )
+    token = await get_druks_account_token(session, account_id, allowed_tools, name=CHAT_KEY_NAME)
     refs = [
         *config.secret_refs,
         SecretRef(
@@ -141,22 +168,27 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
     async with lock(f"chat:{conversation.id}:delivery"):
         while message := await conversation.get_unanswered_message(session):
             if message.state == MessageState.PENDING:
+                if await conversation.is_held(session):
+                    return
                 await reset_live_stream(conversation.id)
-                config = await get_default_config(session, conversation.account_id)
+                config, prompt, tools = await get_agent(session, conversation)
                 if config.harness_class is not ClaudeHarness:
                     raise ChatHarnessError("Chat supports the Claude harness only.")
-                host, identity = await get_sandbox(session, conversation.account_id, config)
+                host, identity = await get_sandbox(session, conversation.account_id, config, tools)
                 try:
                     bridge = Bridge(host)
-                    if await send_turn(session, conversation, message, bridge, identity, config):
-                        await follow_turn(session, conversation, message, bridge)
+                    turn = await send_turn(
+                        session, conversation, message, bridge, identity, config, prompt
+                    )
+                    if turn:
+                        await follow_turn(session, conversation, turn, bridge)
                 finally:
                     await host.aclose()
                 continue
             try:
                 host = await get_running_sandbox(session, conversation.account_id)
             except ChatSandboxGone:
-                message.state = MessageState.INTERRUPTED
+                await conversation.end_turn(session, MessageState.INTERRUPTED)
                 await session.commit()
                 await reset_live_stream(conversation.id)
                 continue
@@ -175,8 +207,11 @@ async def send_turn(
     bridge: Bridge,
     identity: SandboxIdentity,
     config: AgentConfig,
-) -> bool:
-    """Start the conversation's agent and send the message. False when a Stop won first."""
+    prompt: str,
+) -> Message | None:
+    """Start the conversation's agent and send it the turn: the message, or every
+    pending message of a conversation on a channel. Returns the message that names the
+    turn, or None when a Stop or a pause came first."""
     host = bridge.host
     status = await bridge.request("status", conversationId=conversation.id)
     if status["status"] == "running":
@@ -189,6 +224,22 @@ async def send_turn(
             remote=archive_path,
         )
     server = get_druks_mcp_server(allowed_tools=())
+    headers = []
+    if conversation.connection:
+        headers = [{"name": CONVERSATION_HEADER, "value": conversation.id}]
+    meta = config.harness_class.get_acp_meta(config.model_id)
+    timeout = 0
+    if conversation.account.kind in (AccountKind.BOT, AccountKind.BOT_ADMIN):
+        # A Bot's agent works only through its tools: no shell, files, web, or settings files.
+        options = {
+            **meta["claudeCode"]["options"],
+            "systemPrompt": prompt,
+            "tools": [],
+            "settingSources": [],
+            "strictMcpConfig": True,
+        }
+        meta = {**meta, "claudeCode": {**meta["claudeCode"], "options": options}}
+        timeout = config.timeout
     await bridge.request(
         "start",
         conversationId=conversation.id,
@@ -196,24 +247,36 @@ async def send_turn(
         command=config.harness_class.adapter_command,
         mode=config.harness_class.no_ask_mode,
         sessionFiles=config.harness_class.session_files,
-        meta=config.harness_class.get_acp_meta(config.model_id),
+        meta=meta,
         model=config.model_id,
         effort=config.effort,
         fastMode=config.fast_mode,
         mcpUrl=server.url,
         bearerVariable=get_bearer_token_env_var(server.name),
+        headers=headers,
     )
     expires_at = Base.utc_now() + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
     await sandbox_client.set_expiry(host_id=host.id, expires_at=expires_at)
     identity.expires_at = expires_at
-    is_delivered = await message.mark_delivered(session)
+    messages = [message]
+    if conversation.connection:
+        # The sandbox can take seconds to start, and a person can take the chat over meanwhile.
+        if await conversation.is_held(session):
+            return
+        messages = await conversation.list_pending_messages(session)
+    delivered_messages = [pending for pending in messages if await pending.mark_delivered(session)]
     await session.commit()
-    if is_delivered:
+    if delivered_messages:
         await bridge.request(
-            "prompt", conversationId=conversation.id, messageId=message.id, body=message.body
+            "prompt",
+            conversationId=conversation.id,
+            messageId=delivered_messages[-1].id,
+            body="\n\n".join(pending.body for pending in delivered_messages),
+            timeout=timeout,
         )
         await publish(conversation.id, {"type": "messages"})
-    return is_delivered
+        return delivered_messages[-1]
+    return
 
 
 async def follow_turn(
@@ -224,7 +287,7 @@ async def follow_turn(
     while True:
         status = await bridge.request("status", conversationId=conversation.id)
         if status["messageId"] != message.id or status["status"] in ("missing", "interrupted"):
-            message.state = MessageState.INTERRUPTED
+            await conversation.end_turn(session, MessageState.INTERRUPTED)
             await session.commit()
             await reset_live_stream(conversation.id)
             return
@@ -258,10 +321,12 @@ async def finish_turn(
     bridge: Bridge,
     status: dict,
 ) -> None:
-    """Save the reply and the agent's session files, and name a new conversation."""
+    """Save the reply and the agent's session files, send a channel's reply to its
+    person, and name a new web conversation."""
     body, tool_calls = await bridge.reply(conversation.id, message.id)
-    message.state = MessageState(status["status"])
-    await conversation.create_message(
+    state = MessageState(status["status"])
+    await conversation.end_turn(session, state)
+    reply = await conversation.create_message(
         session, body, role=MessageRole.ASSISTANT, reply_to=message, tool_calls=tool_calls
     )
     if status["archivePath"]:
@@ -270,8 +335,32 @@ async def finish_turn(
         await conversation.set_session_file(session, session_file)
     await session.commit()
     await reset_live_stream(conversation.id)
-    if not conversation.title:
+    if conversation.connection:
+        # A person who took the chat over during the turn answers it instead.
+        if state == MessageState.REPLIED and body and not await conversation.is_held(session):
+            channel = services.get(conversation.connection.audience_name)
+            await channel.send_reply(session, conversation, reply)
+    elif not conversation.title:
         await name_conversation(session, conversation, bridge.host, message, body)
+
+
+async def report_result(session: AsyncSession, run: Run, *, result) -> str | None:
+    body = RESULT_MESSAGE.format(run=run.id, result=to_json(result, fallback=str).decode())
+    return await report_outcome(session, run, body)
+
+
+async def report_failure(session: AsyncSession, run: Run, *, failure: str) -> str | None:
+    return await report_outcome(session, run, FAILURE_MESSAGE.format(run=run.id, failure=failure))
+
+
+async def report_outcome(session: AsyncSession, run: Run, body: str) -> str | None:
+    """Report how a run ended to the chat that started it, once the run waited for an
+    answer. Returns that conversation."""
+    if run.input_requested_at:
+        conversation = await session.get(Conversation, run.conversation_id)
+        await conversation.create_message(session, body, is_internal=True)
+        return conversation.id
+    return
 
 
 async def name_conversation(

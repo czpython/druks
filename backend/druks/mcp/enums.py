@@ -1,4 +1,5 @@
-from enum import StrEnum
+from enum import Enum, StrEnum
+from typing import Literal
 
 
 class IdentityMode(StrEnum):
@@ -9,3 +10,13 @@ class IdentityMode(StrEnum):
 class TokenSource(StrEnum):
     STATIC = "static"
     OAUTH = "oauth"
+
+
+class Toolkit(Enum):
+    """What a Druks key allows when it has no tool list: the whole API."""
+
+    ALL = "all"
+
+
+# The tools a Druks key allows. An empty tuple allows no tool.
+AllowedTools = tuple[str, ...] | Literal[Toolkit.ALL]

@@ -16,7 +16,7 @@ AUTHOR_SURFACE = {
         "ServiceNotConnectedError",
     },
     "druks.sandbox": {"Sandbox"},
-    "druks.agents": {"Agent", "AgentOutput"},
+    "druks.agents": {"Agent", "AgentOutput", "Bot", "BotUser"},
     "druks.workflows": {
         "AgentCall",
         "AgentCallResponse",

@@ -176,11 +176,12 @@ async def test_get_gate_refuses_when_not_parked_or_external(druks_db):
 # taxonomy arms those tests don't reach.
 
 
-async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
+async def test_answer_gate_error_taxonomy(druks_db, resume_spy, account):
     with pytest.raises(RunNotFound):
         await services.answer_gate(
             druks_db,
             "no-such-run",
+            account.id,
             parked_at=datetime.now(UTC),
             control="approve",
             answers={},
@@ -193,6 +194,7 @@ async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
         await services.answer_gate(
             druks_db,
             finished.id,
+            account.id,
             parked_at=datetime.now(UTC),
             control="approve",
             answers={},
@@ -205,6 +207,7 @@ async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
         await services.answer_gate(
             druks_db,
             run.id,
+            account.id,
             parked_at=run.input_requested_at - timedelta(seconds=5),
             control="approve",
             answers={},
@@ -212,7 +215,13 @@ async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
         )
     with pytest.raises(exceptions.InvalidGateAnswer):
         await services.answer_gate(
-            druks_db, run.id, parked_at=run.input_requested_at, control="merge", answers={}, note=""
+            druks_db,
+            run.id,
+            account.id,
+            parked_at=run.input_requested_at,
+            control="merge",
+            answers={},
+            note="",
         )
 
     external_item = await make_test_note()
@@ -225,6 +234,7 @@ async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
         await services.answer_gate(
             druks_db,
             external.id,
+            account.id,
             parked_at=external.input_requested_at,
             control="approve",
             answers={},
