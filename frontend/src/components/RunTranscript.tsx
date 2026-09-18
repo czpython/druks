@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { useSSE } from '../api/sse'
+import type { TranscriptChunk } from '../api/types'
 import { StreamTranscript } from './StreamTranscript'
 
 const TRANSCRIPT_CHUNK_LIMIT = 256 * 1024
@@ -81,6 +82,7 @@ export function RunTranscript({
       <RunTranscriptLive
         key={transcriptKey}
         eventsUrl={`${basePath}/stream?stream=${stream}&offset=${initial.nextOffset}`}
+        offset={initial.nextOffset}
         initialText={initial.text}
       />
     )
@@ -100,9 +102,11 @@ export function RunTranscript({
 
 function RunTranscriptLive({
   eventsUrl,
+  offset,
   initialText,
 }: {
   eventsUrl: string
+  offset: number
   initialText: string
 }) {
   const [text, setText] = useState(initialText)
@@ -110,22 +114,23 @@ function RunTranscriptLive({
 
   // Gate ``enabled`` on ``!complete`` so useSSE closes the EventSource on
   // ``agent_call.finished`` — otherwise a native EventSource auto-reconnects to the
-  // offset-pinned URL and replays the whole file, duplicating the transcript.
+  // offset-pinned URL and replays the whole file every few seconds.
   useSSE(eventsUrl, {
     enabled: !complete,
     handlers: useMemo(
       () => ({
         'transcript.chunk': (payload) => {
-          if (typeof payload === 'object' && payload !== null && 'text' in payload) {
-            const chunk = payload as { text: string }
-            setText((prev) => prev + chunk.text)
-          }
+          const chunk = payload as TranscriptChunk
+          // Each new connection, for example after the tab was hidden, replays the
+          // log from ``offset``. A chunk that starts at ``offset`` replaces the text
+          // that an earlier connection showed.
+          setText((prev) => (chunk.offset === offset ? initialText : prev) + chunk.text)
         },
         'agent_call.finished': () => {
           setComplete(true)
         },
       }),
-      [],
+      [offset, initialText],
     ),
   })
 

@@ -1,4 +1,4 @@
-import { act, render } from '@testing-library/react'
+import { act, cleanup, render } from '@testing-library/react'
 import { useEffect, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -66,6 +66,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  cleanup()
   vi.unstubAllGlobals()
 })
 
@@ -170,6 +171,28 @@ describe('useSSE', () => {
 
     expect(initial).not.toHaveBeenCalled()
     expect(updated).toHaveBeenCalledWith({ ok: true })
+  })
+
+  it('closes the stream while the tab is hidden and reopens it when shown', () => {
+    let visibility: DocumentVisibilityState = 'visible'
+    const visibilityState = vi
+      .spyOn(document, 'visibilityState', 'get')
+      .mockImplementation(() => visibility)
+    render(<Harness url="/api/x" handlers={{ 'foo.updated': vi.fn() }} />)
+
+    visibility = 'hidden'
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    expect(FakeEventSource.instances[0]?.closed).toBe(true)
+
+    visibility = 'visible'
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    expect(FakeEventSource.instances).toHaveLength(2)
+    expect(FakeEventSource.instances[1]?.closed).toBe(false)
+    visibilityState.mockRestore()
   })
 
   it('does nothing when disabled', () => {

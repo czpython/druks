@@ -72,9 +72,17 @@ describe('RunTranscript', () => {
 
     act(() => {
       const handlers = useSSEMock.mock.calls.at(-1)?.[1].handlers
-      handlers?.['transcript.chunk']?.({ text: 'streamed row\n' })
+      handlers?.['transcript.chunk']?.({ offset: 12, text: 'streamed row\n' })
     })
     expect(await screen.findByText('streamed row')).toBeTruthy()
+
+    // A reopened stream replays from the pinned offset and replaces the rows it streamed.
+    act(() => {
+      const handlers = useSSEMock.mock.calls.at(-1)?.[1].handlers
+      handlers?.['transcript.chunk']?.({ offset: 12, text: 'streamed row\nlater row\n' })
+    })
+    expect(await screen.findByText('later row')).toBeTruthy()
+    expect(screen.getAllByText('streamed row')).toHaveLength(1)
 
     act(() => {
       const handlers = useSSEMock.mock.calls.at(-1)?.[1].handlers

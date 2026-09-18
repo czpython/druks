@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 
 import { UnauthorizedError, identityApi } from './client'
 
@@ -24,7 +24,7 @@ export interface UseSSEOptions {
 /**
  * Subscribe to an SSE endpoint with named-event handlers.
  *
- * The connection lifecycle depends only on `url` and `enabled`. Caller-supplied
+ * The connection depends only on `url`, `enabled`, and tab visibility. Caller-supplied
  * `handlers`, `onError`, and `onOpen` may change on every render without restarting the
  * EventSource — the latest versions are read through a ref. This matters because
  * EventSource reconnects are expensive and re-trigger the backend's "first tick
@@ -44,8 +44,13 @@ export function useSSE(url: string, { handlers, onError, onOpen, enabled = true 
     onOpenRef.current = onOpen
   }, [onError, onOpen])
 
+  // Over HTTP/1.1, a browser opens a maximum of six connections to a host for all
+  // of its tabs, and each open stream holds one. A hidden tab closes its streams,
+  // so tabs in the background cannot block the tab in front.
+  const visible = useSyncExternalStore(subscribeToVisibility, () => document.visibilityState === 'visible')
+
   useEffect(() => {
-    if (!enabled || !url) return undefined
+    if (!enabled || !visible || !url) return undefined
 
     const source = new EventSource(url)
     const eventTypes = Object.keys(handlersRef.current)
@@ -95,5 +100,10 @@ export function useSSE(url: string, { handlers, onError, onOpen, enabled = true 
       source.removeEventListener('open', openListener)
       source.close()
     }
-  }, [url, enabled])
+  }, [url, enabled, visible])
+}
+
+function subscribeToVisibility(onChange: () => void) {
+  document.addEventListener('visibilitychange', onChange)
+  return () => document.removeEventListener('visibilitychange', onChange)
 }
