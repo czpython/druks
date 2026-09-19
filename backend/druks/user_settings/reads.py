@@ -143,6 +143,7 @@ async def get_app_settings(
         icon=app.icon,
         builtin=app.builtin,
         bot=app.bot.id if app.bot else None,
+        bot_access=app.bot.access if app.bot else None,
         agents=await list_agent_settings(session, app, settings=settings),
         # Surface only the workflows with operator knobs: tunable settings or a
         # schedule to retune.

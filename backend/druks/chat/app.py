@@ -1,4 +1,7 @@
+from druks.agents import Bot
 from druks.apps import App
+
+from .enums import BotAccess
 
 
 class Chat(App):
@@ -9,3 +12,4 @@ class Chat(App):
     icon = "messages-square"
     description = "Live agent conversations."
     builtin = True
+    bot = Bot(prompt="chat/bot.md", access=BotAccess.PAIRED)

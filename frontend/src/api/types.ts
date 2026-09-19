@@ -641,6 +641,7 @@ export interface WahaSession {
   number: string | null
   name: string | null
   admin: string | null
+  isPhoneConnected: boolean
   identityStatus: 'resolved' | 'unavailable' | 'failed' | null
   revokedAt: string | null
   revokedReason: string
@@ -787,6 +788,7 @@ export interface AppSettings {
   builtin: boolean
   /** The id of the app's Bot, which answers its WhatsApp numbers. */
   bot: string | null
+  botAccess: 'open' | 'paired' | null
   agents: AgentSetting[]
   workflows: WorkflowSettings[]
   /** The app's own settings (not tied to a workflow). */

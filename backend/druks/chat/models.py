@@ -100,13 +100,17 @@ class Conversation(Base, Uuid7Pk):
     @property
     def admin_account_id(self) -> str | None:
         """The admin account of the app number that the conversation arrives on."""
-        if self.connection and self.connection.account.kind == AccountKind.BOT:
+        if (
+            self.account.kind in (AccountKind.BOT, AccountKind.BOT_ADMIN)
+            and self.connection
+            and self.connection.account.kind == AccountKind.BOT
+        ):
             return self.connection.identity["admin"]["account_id"]
         return
 
     def is_answerable_by(self, account_id: str | None) -> bool:
         """Whether the account may answer a question that the conversation's run asks.
-        On an app number, only the number's admin may."""
+        On a number with open access, only the number's admin may."""
         if admin_account_id := self.admin_account_id:
             return account_id == admin_account_id
         return True

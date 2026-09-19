@@ -1,3 +1,4 @@
+import json
 import secrets
 
 from dbos import DBOS, Queue, SetEnqueueOptions, SetWorkflowAttributes, SetWorkflowID, StepOptions
@@ -5,40 +6,62 @@ from pydantic_core import to_json
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
-from druks.chat.enums import PauseSignal
+from druks.apps.loader import get_app
+from druks.chat.enums import BotAccess, PauseSignal
 from druks.chat.models import Conversation
 from druks.chat.service import deliver
 from druks.durable.engine import step_session
 from druks.durable.models import Run
 from druks.redis import get_client
+from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 
 from .constants import (
     ADMIN_ADDED_MESSAGE,
     ADMIN_CODE_TTL_SECONDS,
+    OPERATOR_PAIRED_MESSAGE,
     PAUSE_SECONDS,
     PAUSE_TOPIC,
     PAUSED_MESSAGE,
-    PHONE_MESSAGE,
     QUESTION_MESSAGE,
+    TAKEN_OVER_MESSAGE,
 )
 
 # A pause holds a chat for hours, so it has its own queue, apart from runs.
 pause_queue = Queue("druks_chat_pauses")
 
 
-async def open_admin_code(connection: VaultSecret) -> str:
-    """A one-time code. Druks sends the number's questions to the person who sends it."""
+async def get_bot_connection(session: AsyncSession, connection_id: str) -> VaultSecret | None:
+    """A live connection owned by a bot account."""
+    connection = await session.get(VaultSecret, connection_id)
+    if (
+        connection
+        and connection.kind == SecretKind.SESSION
+        and connection.is_live
+        and connection.account.kind == AccountKind.BOT
+    ):
+        return connection
+    return
+
+
+async def create_admin_code(connection: VaultSecret, account_id: str) -> str:
+    """A one-time phone proof code, owned by the signed-in operator."""
     code = f"{secrets.randbelow(10**8):08d}"
-    await get_client().set(f"chat:{connection.id}:admin-code", code, ex=ADMIN_CODE_TTL_SECONDS)
+    await get_client().set(
+        f"chat:{connection.id}:admin-code",
+        json.dumps({"code": code, "account_id": account_id}),
+        ex=ADMIN_CODE_TTL_SECONDS,
+    )
     return code
 
 
-async def close_admin_code(connection: VaultSecret, text: str) -> bool:
-    """Whether the text is the number's open admin code. A match closes the code."""
+async def redeem_admin_code(connection: VaultSecret, text: str) -> str | None:
+    """Consume a matching code and return its operator account id."""
     key = f"chat:{connection.id}:admin-code"
-    code = await get_client().get(key)
-    return bool(code and text.strip() == code.decode() and await get_client().delete(key))
+    if value := await get_client().get(key):
+        proof = json.loads(value)
+        if text.strip() == proof["code"] and await get_client().delete(key):
+            return proof["account_id"]
 
 
 async def add_admin(session: AsyncSession, connection: VaultSecret, user: dict) -> Conversation:
@@ -92,6 +115,27 @@ async def route_message(
         if is_from_phone and is_self_chat:
             return await Conversation.get_or_create_for_user(session, connection, owner.id, **user)
         return
+    bot = get_app(connection.identity["app"]).bot
+    if bot.access == BotAccess.PAIRED:
+        if is_from_phone:
+            return
+        if account_id := await redeem_admin_code(connection, body):
+            connection.identity = {
+                **connection.identity,
+                "operators": {**connection.identity["operators"], user["user_id"]: account_id},
+            }
+            conversation = await Conversation.get_or_create_for_user(
+                session, connection, account_id, **user
+            )
+            await conversation.create_message(session, OPERATOR_PAIRED_MESSAGE, is_internal=True)
+            await session.commit()
+            await DBOS.start_workflow_async(deliver, conversation.id)
+            return
+        if account_id := connection.identity["operators"].get(user["user_id"]):
+            return await Conversation.get_or_create_for_user(
+                session, connection, account_id, **user
+            )
+        return
     admin = connection.identity["admin"]
     if is_from_phone:
         if is_self_chat:
@@ -103,7 +147,7 @@ async def route_message(
         if user["user_id"] != admin.get("user_id"):
             await take_over(session, connection, user, body, key)
         return
-    if await close_admin_code(connection, body):
+    if await redeem_admin_code(connection, body):
         conversation = await add_admin(session, connection, user)
         await session.commit()
         await DBOS.start_workflow_async(deliver, conversation.id)
@@ -124,7 +168,7 @@ async def take_over(
     conversation = await Conversation.get_or_create_for_user(
         session, connection, connection.account_id, **user
     )
-    body = PHONE_MESSAGE.format(body=body)
+    body = TAKEN_OVER_MESSAGE.format(body=body)
     await conversation.create_message(session, body, is_internal=True, source_id=key)
     await session.commit()
     if pause_id := await conversation.get_pause_id(session):

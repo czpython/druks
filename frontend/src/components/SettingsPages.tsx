@@ -708,7 +708,6 @@ export function SettingsPages({
                   </div>
                   <div hidden={connectionsTab !== 'accounts'}>
                     <ConnectionsPane />
-                    <WhatsAppNumbersPane />
                   </div>
                   <div hidden={connectionsTab !== 'browser'}>
                     <BrowserProfilesPane />
@@ -722,7 +721,10 @@ export function SettingsPages({
               {page === 'skills' && <SkillsPane />}
               {page === 'api-tokens' && <AgentAccessPane />}
               {app?.bot && validAppPage && paneSection === 'channels' &&
-                page === `apps/${app.name}` && <WhatsAppNumbersPane app={app.name} />}
+                page === `apps/${app.name}` && <>
+                  <WhatsAppNumbersPane app={app} />
+                  {app.botAccess === 'paired' && <WhatsAppNumbersPane />}
+                </>}
               {apps
                 .filter(
                   (entry) =>

@@ -540,8 +540,10 @@ class Helpdesk(App):
     )
 ```
 
-- `prompt` names a template, like an agent's prompt. Druks renders it with no
-  context and gives it to the agent as its system prompt.
+- `prompt` names a template, like an agent's prompt. Druks renders it with
+  `source`, the conversation's source (`web` or `whatsapp`), and gives it to the
+  agent as its system prompt. Druks adds one paragraph at the end. It explains
+  the `[Internal: …]` messages that Druks writes to the agent.
 - `user_tools` are the tools of each person who writes to the number.
 - `admin_tools` are the tools of the number's admin. The admin also gets
   Druks's admin prompt, `answer_gate`, and `chat_resume_conversation`.
@@ -559,8 +561,9 @@ agent. Tag a route with both `agent` and `bot` to put it in both.
 A bot tool takes the person who writes as `user: BotUser`:
 
 ```python
-from fastapi import APIRouter
-from pydantic import BaseModel
+from typing import Annotated
+
+from fastapi import APIRouter, Body
 
 from druks.agents import BotUser
 
@@ -569,14 +572,10 @@ from .workflows import GrantAccess
 router = APIRouter(prefix="/access")
 
 
-class AccessRequest(BaseModel):
-    system: str
-
-
 @router.post("", tags=["bot"], operation_id="request_access")
-async def request_access(body: AccessRequest, user: BotUser) -> str:
+async def request_access(system: Annotated[str, Body(embed=True)], user: BotUser) -> str:
     """Ask an admin to approve access to a system for the person writing."""
-    return await GrantAccess.dispatch(system=body.system, user_id=user.id)
+    return await GrantAccess.dispatch(system=system, user_id=user.id)
 ```
 
 | Field | Value |

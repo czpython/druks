@@ -154,6 +154,7 @@ const appSettings: AppsSettingsResponse = {
       icon: 'factory',
       builtin: false,
       bot: null,
+      botAccess: null,
       agents: [coder],
       workflows: [],
       settings: [
@@ -195,6 +196,7 @@ const appSettings: AppsSettingsResponse = {
       icon: 'git-pull-request',
       builtin: false,
       bot: null,
+      botAccess: null,
       agents: [],
       workflows: [],
       settings: [
@@ -236,6 +238,7 @@ const appSettings: AppsSettingsResponse = {
       icon: 'box',
       builtin: false,
       bot: null,
+      botAccess: null,
       agents: [],
       workflows: [],
       settings: [
@@ -1088,6 +1091,7 @@ describe('canonical app settings', () => {
       name: 'helpdesk',
       description: 'Helpdesk settings',
       bot: 'helpdesk.bot',
+      botAccess: 'open' as const,
       agents: [{ ...coder, name: 'helpdesk.bot', label: 'bot' }],
       settings: [],
     }

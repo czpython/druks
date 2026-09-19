@@ -336,6 +336,8 @@ export const api = {
       `/api/chat/connections/${encodeURIComponent(connectionId)}/admin-code`,
       {},
     ),
+  disconnectBotPhone: (connectionId: string) =>
+    deleteRequest(`/api/chat/connections/${encodeURIComponent(connectionId)}/phone`),
   browserSessions: () => getJSON<BrowserSession[]>('/api/browser-sessions'),
   deleteBrowserSession: (name: string) =>
     deleteRequest(`/api/browser-sessions/${encodeURIComponent(name)}`),

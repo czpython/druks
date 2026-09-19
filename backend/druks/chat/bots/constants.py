@@ -9,16 +9,20 @@ PAUSE_TOPIC = "pause"
 
 # Druks writes each internal message from one of these templates.
 ADMIN_ADDED_MESSAGE = (
-    "Druks: This person sent the admin code, so Druks sends them this number's questions "
-    "from now on. Greet them and say what you can do for them."
+    "[Internal: This person sent the admin code, so Druks sends them this number's "
+    "questions from now on. Greet them and say what you can do for them.]"
+)
+OPERATOR_PAIRED_MESSAGE = (
+    "[Internal: This person connected their phone to their Druks account. "
+    "Greet them and say what you can do for them.]"
 )
 QUESTION_MESSAGE = (
-    "Druks: Run {run} waits for a decision since {parked_at}. It is about {user_name} "
-    "({user_id}). The request:\n{request}"
+    "[Internal: Run {run} waits for a decision since {parked_at}. It is about {user_name} "
+    "({user_id}). The request:\n{request}]"
 )
 PAUSED_MESSAGE = (
-    "Druks: Someone answers {user_name} ({user_id}) from the number's phone. The bot "
+    "[Internal: Someone answers {user_name} ({user_id}) from the number's phone. The bot "
     "stays quiet in that chat until the phone is quiet for {hours} hours, or until you "
-    "resume conversation {conversation}."
+    "resume conversation {conversation}.]"
 )
-PHONE_MESSAGE = "Druks: The number's phone sent this message in the chat:\n{body}"
+TAKEN_OVER_MESSAGE = "[Internal: The number's phone sent this message in the chat:\n{body}]"
