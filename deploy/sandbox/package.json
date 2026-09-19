@@ -5,7 +5,7 @@
     "@anthropic-ai/claude-code": "2.1.273",
     "@earendil-works/pi-coding-agent": "0.85.1",
     "@openai/codex": "0.154.0",
-    "opencode-ai": "1.18.30",
-    "pi-mcp-adapter": "2.33.0"
+    "opencode-ai": "1.18.31",
+    "pi-mcp-adapter": "2.34.0"
   }
 }
