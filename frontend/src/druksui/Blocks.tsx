@@ -104,6 +104,7 @@ function BlockContent({ block }: { block: Block }) {
           description={block.description}
           fields={block.fields}
           action={block.action}
+          extraActions={block.extraActions ?? []}
           submit={block.submit ?? 'button'}
           layout={block.layout ?? 'stack'}
         />
@@ -152,6 +153,8 @@ function BlockContent({ block }: { block: Block }) {
           columns={block.columns}
           rows={block.rows}
           emptyText={block.emptyText}
+          select={block.select ?? ''}
+          actions={block.actions ?? []}
         />
       )
     case 'list':
@@ -179,6 +182,7 @@ function BlockContent({ block }: { block: Block }) {
         <div className={`dui-callout dui-callout-${block.tone}`} role="note">
           {block.title && <div className="dui-callout-title">{block.title}</div>}
           <div className="dui-callout-text">{block.text}</div>
+          <Controls controls={block.controls ?? []} />
         </div>
       )
     case 'empty_state':
@@ -435,7 +439,7 @@ export function Controls({ controls }: { controls: (Action | Link)[] }) {
         control.block === 'action' ? (
           <ActionButton key={index} action={control} />
         ) : (
-          <LinkControl key={index} link={control} />
+          <LinkControl key={index} link={control} className="dui-action" />
         ),
       )}
     </div>

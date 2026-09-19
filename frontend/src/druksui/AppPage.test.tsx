@@ -150,6 +150,29 @@ describe('a declared page', () => {
     expect(screen.getByText('a jotted observation')).toBeTruthy()
   })
 
+  it('draws a page control link as a button', async () => {
+    const { container } = renderAt('/field_notes', 'notes', {
+      ...NOTES,
+      controls: [
+        {
+          block: 'link',
+          label: 'Open in X composer',
+          page: '',
+          arguments: {},
+          url: 'https://x.com/intent/tweet',
+          subject: null,
+        },
+      ],
+    })
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Open in X composer' })).toBeTruthy(),
+    )
+    const control = container.querySelector('.dui-page-head a.dui-action')
+    expect(control?.textContent).toBe('Open in X composer')
+    expect(control?.getAttribute('href')).toBe('https://x.com/intent/tweet')
+  })
+
   it('reads a detail page at its own location', async () => {
     renderAt('/field_notes/notes/7', 'note', {
       title: 'Note 7',

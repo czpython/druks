@@ -20,6 +20,7 @@ export function Form({
   description,
   fields,
   action,
+  extraActions = [],
   submit = 'button',
   layout = 'stack',
 }: {
@@ -27,12 +28,14 @@ export function Form({
   description: string
   fields: Field[]
   action: Action
+  extraActions?: Action[]
   submit?: 'button' | 'change'
   layout?: 'stack' | 'prose' | 'row'
 }) {
   const fieldState = useFieldState(fields)
   const live = submit === 'change'
   const run = useAction(action, fields, live ? undefined : fieldState.clear)
+  const [otherErrors, setOtherErrors] = useState<Record<string, string>>({})
   // An edit since the last send: a blur with none sends nothing.
   const edited = useRef(false)
   const immediate = new Set(
@@ -60,7 +63,7 @@ export function Form({
       <Fields
         fields={fields}
         values={fieldState.values}
-        errors={run.fieldErrors}
+        errors={{ ...otherErrors, ...run.fieldErrors }}
         resets={fieldState.resets}
         onChange={(name, value) => {
           fieldState.change(name, value)
@@ -94,6 +97,16 @@ export function Form({
               {action.label}
             </button>
           )}
+          {extraActions.map((extra) => (
+            <ExtraFormAction
+              key={`${extra.operation}:${extra.label}`}
+              action={extra}
+              values={fieldState.values}
+              fields={fields}
+              onClear={live ? undefined : fieldState.clear}
+              onFieldErrors={setOtherErrors}
+            />
+          ))}
         </div>
       )}
       <p className="dui-action-note" role="status">
@@ -103,23 +116,23 @@ export function Form({
   )
 }
 
-/** A control that calls one of the app's operations on its own. */
-export function ActionButton({ action }: { action: Action }) {
-  const { operations } = useContext(PagesContext)
-  const known = operations.some((one) => one.id === action.operation)
-  if (!known) {
-    return (
-      <span className="dui-action dui-action-broken" title={`no operation named ${action.operation}`}>
-        {action.label}
-      </span>
-    )
-  }
-  if (action.fields.length) return <FieldAction action={action} />
-  return <ImmediateAction action={action} />
-}
-
-function ImmediateAction({ action }: { action: Action }) {
-  const run = useAction(action)
+function ExtraFormAction({
+  action,
+  values,
+  fields,
+  onClear,
+  onFieldErrors,
+}: {
+  action: Action
+  values: Payload
+  fields: Field[]
+  onClear?: () => void
+  onFieldErrors: (errors: Record<string, string>) => void
+}) {
+  const run = useAction(action, fields, onClear)
+  useEffect(() => {
+    onFieldErrors(run.fieldErrors)
+  }, [onFieldErrors, run.fieldErrors])
 
   return (
     <>
@@ -131,7 +144,71 @@ function ImmediateAction({ action }: { action: Action }) {
           className={`dui-action dui-action-${action.tone}`}
           disabled={run.blocked}
           aria-busy={run.pending}
-          onClick={() => void run.call({})}
+          onClick={() => void run.call(values)}
+        >
+          {action.label}
+        </button>
+      )}
+      {run.problem && (
+        <div className="dui-form-error" role="alert">
+          {run.problem}
+        </div>
+      )}
+    </>
+  )
+}
+
+function handedOffUrl(result: unknown): string | null {
+  if (!result || typeof result !== 'object' || !('url' in result)) return null
+  const url = Reflect.get(result, 'url')
+  return typeof url === 'string' && /^https?:\/\//.test(url) ? url : null
+}
+
+/** A control that calls one of the app's operations on its own. */
+export function ActionButton({
+  action,
+  values = {},
+  disabled = false,
+}: {
+  action: Action
+  values?: Record<string, unknown>
+  disabled?: boolean
+}) {
+  const { operations } = useContext(PagesContext)
+  const known = operations.some((one) => one.id === action.operation)
+  if (!known) {
+    return (
+      <span className="dui-action dui-action-broken" title={`no operation named ${action.operation}`}>
+        {action.label}
+      </span>
+    )
+  }
+  if (action.fields.length) return <FieldAction action={action} values={values} disabled={disabled} />
+  return <ImmediateAction action={action} values={values} disabled={disabled} />
+}
+
+function ImmediateAction({
+  action,
+  values,
+  disabled,
+}: {
+  action: Action
+  values: Record<string, unknown>
+  disabled: boolean
+}) {
+  const run = useAction(action)
+
+  return (
+    <>
+      {run.confirming ? (
+        <Confirm action={action} run={run} />
+      ) : (
+        <button
+          type="button"
+          className={`dui-action dui-action-${action.tone}`}
+          disabled={run.blocked || disabled}
+          aria-busy={run.pending}
+          onClick={() => void run.call(values)}
         >
           {action.label}
         </button>
@@ -148,7 +225,15 @@ function ImmediateAction({ action }: { action: Action }) {
   )
 }
 
-function FieldAction({ action }: { action: Action }) {
+function FieldAction({
+  action,
+  values,
+  disabled,
+}: {
+  action: Action
+  values: Record<string, unknown>
+  disabled: boolean
+}) {
   const [open, setOpen] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
@@ -196,6 +281,7 @@ function FieldAction({ action }: { action: Action }) {
         ref={trigger}
         type="button"
         className={`dui-action dui-action-${action.tone} dui-dialog-trigger`}
+        disabled={disabled}
         onClick={() => setOpen(true)}
       >
         {action.label}
@@ -239,7 +325,7 @@ function FieldAction({ action }: { action: Action }) {
           className="dui-form"
           onSubmit={(event) => {
             event.preventDefault()
-            void run.call(fieldState.values)
+            void run.call({ ...values, ...fieldState.values })
           }}
         >
           <Fields
@@ -370,6 +456,7 @@ export function useAction(action: Action, fields: Field[] = [], clear?: () => vo
     setSaved(false)
     setProblem('')
     setFieldErrors({})
+    let result: unknown
     try {
       const { payload, failures } = await store(values)
       if (Object.keys(failures).length) {
@@ -383,7 +470,7 @@ export function useAction(action: Action, fields: Field[] = [], clear?: () => vo
         setPending(false)
         return
       }
-      await api.callOperation(target.method, path, body)
+      result = await api.callOperation(target.method, path, body)
     } catch (error) {
       // A validation error names where it came from; the ones naming a field
       // this form shows go to that field, and everything else is the form's.
@@ -396,7 +483,7 @@ export function useAction(action: Action, fields: Field[] = [], clear?: () => vo
     setSaved(true)
     setPending(false)
     try {
-      await finish()
+      await finish(result)
       clear?.()
       setNote(`${action.label} — done`)
       setSaved(false)
@@ -439,7 +526,12 @@ export function useAction(action: Action, fields: Field[] = [], clear?: () => vo
     return { payload, failures }
   }
 
-  async function finish() {
+  async function finish(result?: unknown) {
+    const outbound = handedOffUrl(result)
+    if (outbound) {
+      window.location.assign(outbound)
+      return
+    }
     if (action.link) {
       // An app page moves inside the shell; anywhere else is the browser's own
       // navigation, which pushState refuses across origins.

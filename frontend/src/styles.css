@@ -1900,6 +1900,8 @@ body[data-palette="mono"] .dui-page {
 
 .dui-section { margin-top: 32px; }
 .dui-section-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.dui-section-head .dui-links,
+.dui-page-head .dui-links { margin-top: 0; }
 .dui-section-title { font-size: 20px; line-height: 28px; color: var(--text); margin: 0; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
 .dui-decision { max-width: 76ch; padding: 20px; border: 1px solid color-mix(in oklch, var(--decision-request-revision) 30%, var(--border)); border-radius: var(--dui-radius-large); background: color-mix(in oklch, var(--decision-request-revision) 6%, var(--surface)); }
 .dui-decision .dui-section-title { font-size: 18px; line-height: 26px; }
@@ -1939,6 +1941,19 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 .dui-callout { border: 1px solid var(--border-loud); border-radius: var(--dui-radius-surface); padding: 14px 16px; font-size: 14px; line-height: 20px; max-width: 76ch; }
 .dui-callout-title { font-weight: 600; color: var(--text); margin-bottom: 3px; }
 .dui-callout-text { color: var(--text-mid); overflow-wrap: anywhere; }
+.dui-callout .dui-links { margin-top: 12px; }
+:is(.dui-callout, .dui-card, .dui-section-head, .dui-page-head) .dui-links .dui-link {
+  min-height: var(--dui-control-height);
+  padding: 0 14px;
+  border: 1px solid var(--border-loud);
+  border-radius: var(--dui-radius-control);
+  background: var(--surface-2);
+}
+:is(.dui-callout, .dui-card, .dui-section-head, .dui-page-head) .dui-links .dui-link:hover {
+  text-decoration: none;
+  background: var(--surface-3);
+  color: var(--text);
+}
 
 .dui-callout-info { --dui-callout-tone: var(--bucket-run); }
 .dui-callout-success { --dui-callout-tone: var(--outcome-merged); }
@@ -1958,11 +1973,12 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 .dui-link { min-height: 32px; display: inline-flex; align-items: center; font-size: 13px; font-weight: 500; color: var(--text-mid); text-decoration: none; text-underline-offset: 3px; touch-action: manipulation; }
 .dui-link:hover { color: var(--bucket-run); text-decoration: underline; }
 .dui-link-broken { color: var(--text-faint); text-decoration: line-through; cursor: help; }
+.dui-link-external { width: 0.85em; height: 0.85em; flex: none; margin-left: 0.15em; opacity: 0.75; }
 
 .dui-unknown { font-size: 12px; color: var(--outcome-failed); border: 1px solid color-mix(in oklch, var(--outcome-failed) 30%, transparent); border-radius: 6px; padding: 9px 12px; margin: 10px 0; }
 
 @media (max-width: 720px) {
-  .dui-page-head, .dui-section-head { align-items: flex-start; flex-direction: column; }
+  .dui-page-head, .dui-section-head, .dui-table-head { align-items: flex-start; flex-direction: column; }
   .dui-title { font-size: 24px; line-height: 32px; }
   .dui-tabs { overflow-x: auto; }
 }
@@ -1970,6 +1986,8 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 .dui-block-title { font-size: 16px; line-height: 24px; color: var(--text); margin: 20px 0 8px; font-weight: 600; letter-spacing: -0.005em; text-wrap: balance; }
 
 .dui-status { display: inline-flex; align-items: center; gap: 7px; color: var(--text-mid); font-size: 13px; line-height: 18px; white-space: nowrap; }
+a.dui-status { text-decoration: none; }
+a.dui-status:hover { text-decoration: underline; }
 .dui-status::before { content: ''; width: 7px; height: 7px; flex: none; border-radius: 50%; background: currentColor; }
 .dui-status-active { color: var(--bucket-run); }
 .dui-status-active::before { animation: pulse 1.6s ease-in-out infinite; }
@@ -2027,13 +2045,37 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 .dui-fact-label { font-size: 13px; line-height: 18px; }
 .dui-fact-value { margin: 0; font-size: 14px; line-height: 20px; }
 
+.dui-table-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.dui-table-head .dui-block-title { margin: 0; }
+.dui-table-head .dui-links { margin-top: 0; }
+.dui-table-block:has(.dui-table-head) { display: flex; flex-direction: column; gap: 12px; }
 .dui-table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--dui-radius-large); background: var(--surface); scrollbar-color: var(--border-loud) transparent; }
 .dui-table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 20px; font-variant-numeric: tabular-nums; }
 .dui-table thead th { text-align: left; font-size: 12px; line-height: 16px; color: var(--text-dim); padding: 14px 16px; border-bottom: 1px solid var(--border); background: color-mix(in oklch, var(--surface-2) 45%, var(--surface)); font-weight: 500; white-space: nowrap; }
 .dui-table :is(td, tbody th) { text-align: left; font-weight: 400; vertical-align: middle; padding: 16px; border-bottom: 1px solid var(--border-soft); transition: background-color 160ms ease; }
 .dui-table tbody tr:last-child > * { border-bottom: none; }
 .dui-table tbody tr:hover > * { background: var(--surface-2); }
+.dui-table tbody tr[data-selected='true'] > * { background: color-mix(in oklch, var(--dui-primary) 8%, var(--surface)); }
+.dui-table .dui-table-select { width: 1%; padding-right: 0; }
 .dui-table [data-align='end'] { text-align: right; }
+/* Prose wraps so a long cell cannot shove the rest of the row off-screen.
+   Status, counts, times, and actions stay one line. */
+.dui-table td { white-space: normal; overflow-wrap: anywhere; }
+.dui-table td :is(.dui-links, .dui-action, .dui-status, .dui-number, .mono) { white-space: nowrap; }
+.dui-table td:has(.dui-links) { width: 1%; }
+.dui-table tbody th > :is(.dui-value, .dui-link) { max-width: 40ch; min-width: 0; }
+.dui-table tbody th .dui-link {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dui-table tbody th .dui-value-desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
 .dui-table tr > :last-child { padding-right: 16px; }
 .dui-table-empty { font-size: 13px; line-height: 18px; padding: 24px 0; }
@@ -2100,7 +2142,6 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
      longer decides how far the table scrolls. */
   .dui-table .mono { white-space: nowrap; }
 }
-.dui-table-caption { text-align: left; caption-side: top; margin: 20px 0 10px; padding: 0; }
 .dui-chart-mark { stroke: none; }
 
 .dui-form { margin: 16px 0; max-width: 520px; }
@@ -2237,6 +2278,7 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 @keyframes dui-spin { to { transform: rotate(360deg); } }
 
 .dui-action { display: inline-flex; min-height: var(--dui-control-height); align-items: center; justify-content: center; padding: 0 14px; border: 1px solid var(--border-loud); border-radius: var(--dui-radius-control); background: var(--surface-2); color: var(--text-mid); font-size: 14px; line-height: 20px; font-weight: 500; font-family: inherit; touch-action: manipulation; transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
+a.dui-action { text-decoration: none; color: var(--text-mid); }
 .dui-action:hover:not(:disabled) { background: var(--surface-3); color: var(--text); border-color: var(--text-faint); }
 .dui-action:active:not(:disabled) { background: var(--surface); }
 .dui-action:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -2247,6 +2289,7 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 .dui-action-danger:hover:not(:disabled) { border-color: color-mix(in oklch, var(--outcome-failed) 64%, var(--border)); background: color-mix(in oklch, var(--outcome-failed) 15%, var(--surface)); color: var(--outcome-failed); }
 .dui-action-broken { color: var(--text-faint); text-decoration: line-through; cursor: help; }
 .dui-table :is(.dui-action, .dui-link) { min-height: 32px; }
+.dui-table .dui-links { margin-top: 0; }
 
 .dui-value { display: inline-flex; flex-direction: column; gap: 2px; }
 .dui-value-desc { font-size: 12px; line-height: 16px; }

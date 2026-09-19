@@ -187,30 +187,37 @@ class Action(PageBlock):
 
 class Form(PageBlock):
     """Inputs and the action that submits them. The shell sends the action's
-    arguments and the field values as one object. ``submit="change"`` sends
-    on blur for text and on change for a select, with no button."""
+    arguments and the field values as one object. ``extra_actions`` are more
+    buttons that send the same fields. ``submit="change"`` sends on blur for
+    text and on change for a select, with no button."""
 
     block: Literal["form"] = "form"
     title: str = ""
     description: str = ""
     fields: list[FormField] = Field(default_factory=list)
     action: Action
+    extra_actions: list[Action] = Field(default_factory=list)
     submit: Literal["button", "change"] = "button"
     layout: Literal["stack", "prose", "row"] = "stack"
 
     def iter_actions(self) -> "Iterable[Action]":
         yield self.action
+        yield from self.extra_actions
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         self.action.check_placement(followed=followed, regions=regions, region=region)
+        for extra in self.extra_actions:
+            extra.check_placement(followed=followed, regions=regions, region=region)
 
     @model_validator(mode="after")
     def _one_name_for_each_value(self) -> "Form":
-        if self.action.fields:
+        if self.action.fields or any(extra.fields for extra in self.extra_actions):
             raise ValueError(
                 f"form {self.title!r} has fields on its action. Put all form fields on the form."
             )
-        if self.submit == "change" and self.action.confirm:
+        if self.submit == "change" and (
+            self.action.confirm or any(extra.confirm for extra in self.extra_actions)
+        ):
             raise ValueError(
                 f"form {self.title!r} submits on change and also asks to confirm. "
                 "A confirm is a press; give the form a button, or drop confirm."
@@ -220,6 +227,12 @@ class Form(PageBlock):
             fields=self.fields,
             arguments=self.action.arguments,
         )
+        for extra in self.extra_actions:
+            _check_field_names(
+                owner=f"form {self.title!r} action {extra.label!r}",
+                fields=self.fields,
+                arguments=extra.arguments,
+            )
         return self
 
 
@@ -252,12 +265,22 @@ class Quote(PageBlock):
 
 class Callout(PageBlock):
     """A short message the reader should not miss. The tone selects the
-    presentation; the app writes the words."""
+    presentation; the app writes the words. ``controls`` are the next step
+    the message points at, the same slot EmptyState uses."""
 
     block: Literal["callout"] = "callout"
     tone: Literal["info", "success", "warning", "danger"] = "info"
     title: str = ""
     text: str
+    controls: list[Action | Link] = Field(default_factory=list)
+
+    def iter_actions(self) -> "Iterable[Action]":
+        for control in self.controls:
+            yield from control.iter_actions()
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        for control in self.controls:
+            control.check_placement(followed=followed, regions=regions, region=region)
 
     def __init__(self, text: str, **data):
         super().__init__(text=text, **data)
@@ -332,11 +355,12 @@ class NumberValue(Schema):
 
 class StatusValue(Schema):
     """Where something stands. The app writes the word; the tone selects the
-    presentation."""
+    presentation. ``link`` is how a fact or a cell reaches the thing it names."""
 
     value: Literal["status"] = "status"
     label: str
     tone: Literal["neutral", "active", "success", "warning", "danger"] = "neutral"
+    link: Link | None = None
 
     def __init__(self, label: str, **data):
         super().__init__(label=label, **data)
@@ -350,7 +374,35 @@ class TimeValue(Schema):
         super().__init__(when=when, **data)
 
 
-Value = Annotated[TextValue | NumberValue | StatusValue | TimeValue, Discriminator("value")]
+class ControlsValue(Schema):
+    """Actions and links in a cell, a fact, or a list item. The shell draws
+    them the way it draws a card's controls."""
+
+    def __init__(self, controls=(), **data):
+        super().__init__(controls=controls, **data)
+
+    value: Literal["controls"] = "controls"
+    controls: list[Action | Link] = Field(default_factory=list)
+
+
+Value = Annotated[
+    TextValue | NumberValue | StatusValue | TimeValue | ControlsValue,
+    Discriminator("value"),
+]
+
+
+def _iter_value_actions(value: Value) -> Iterable[Action]:
+    if isinstance(value, ControlsValue):
+        for control in value.controls:
+            yield from control.iter_actions()
+
+
+def _check_value_placement(
+    value: Value, *, followed: bool, regions: set[str], region: str = ""
+) -> None:
+    if isinstance(value, ControlsValue):
+        for control in value.controls:
+            control.check_placement(followed=followed, regions=regions, region=region)
 
 
 class TimelineItem(Schema):
@@ -509,6 +561,16 @@ class Metrics(PageBlock):
     def __init__(self, metrics=(), **data):
         super().__init__(metrics=metrics, **data)
 
+    def iter_actions(self) -> "Iterable[Action]":
+        for metric in self.metrics:
+            yield from _iter_value_actions(metric.value)
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        for metric in self.metrics:
+            _check_value_placement(
+                metric.value, followed=followed, regions=regions, region=region
+            )
+
 
 class Fact(Schema):
     label: str
@@ -528,6 +590,14 @@ class Facts(PageBlock):
     def __init__(self, facts=(), **data):
         super().__init__(facts=facts, **data)
 
+    def iter_actions(self) -> "Iterable[Action]":
+        for fact in self.facts:
+            yield from _iter_value_actions(fact.value)
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        for fact in self.facts:
+            _check_value_placement(fact.value, followed=followed, regions=regions, region=region)
+
 
 class TableColumn(Schema):
     label: str
@@ -540,6 +610,9 @@ class TableColumn(Schema):
 class TableRow(Schema):
     cells: list[Value] = Field(default_factory=list)
     detail: str = ""
+    # Identity the shell sends when this row is selected. Empty means the
+    # row cannot be selected.
+    key: str = ""
 
     def __init__(self, cells=(), **data):
         super().__init__(cells=cells, **data)
@@ -547,13 +620,17 @@ class TableRow(Schema):
 
 class Table(PageBlock):
     """Rows of values under named columns. Every row carries one cell for each
-    column; with no rows the shell shows ``empty_text``."""
+    column; with no rows the shell shows ``empty_text``. ``select`` names the
+    argument the selected keys fill, and ``actions`` are what run on that
+    list."""
 
     block: Literal["table"] = "table"
     title: str = ""
     columns: list[TableColumn] = Field(default_factory=list)
     rows: list[TableRow] = Field(default_factory=list)
     empty_text: str = ""
+    select: str = ""
+    actions: list[Action] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _rows_match_the_columns(self) -> "Table":
@@ -565,6 +642,61 @@ class Table(PageBlock):
             )
         return self
 
+    @model_validator(mode="after")
+    def _select_and_actions_go_together(self) -> "Table":
+        if self.actions and not self.select:
+            raise ValueError(
+                f"table {self.title!r} has actions and no select. Name the argument "
+                "the selected keys fill."
+            )
+        if self.select and not self.actions:
+            raise ValueError(
+                f"table {self.title!r} names select and has no actions. Give it "
+                "actions, or drop select."
+            )
+        if not self.select:
+            return self
+        missing = sum(1 for row in self.rows if not row.key)
+        if missing:
+            raise ValueError(
+                f"table {self.title!r} can select rows, and a row has no key. "
+                "Give each row a key."
+            )
+        keys = [row.key for row in self.rows]
+        repeated = sorted({key for key in keys if keys.count(key) > 1})
+        if repeated:
+            raise ValueError(
+                f"table {self.title!r} has two rows keyed {repeated}; the shell "
+                "would not know which one the operator picked. Give each row its "
+                "own key."
+            )
+        for action in self.actions:
+            if action.fields:
+                raise ValueError(
+                    f"table {self.title!r} action {action.label!r} collects fields. "
+                    "The selected rows are the submit."
+                )
+            if self.select in action.arguments:
+                raise ValueError(
+                    f"table {self.title!r} select {self.select!r} is already an "
+                    f"argument on action {action.label!r}. Send each value once."
+                )
+        return self
+
+    def iter_actions(self) -> "Iterable[Action]":
+        for action in self.actions:
+            yield from action.iter_actions()
+        for row in self.rows:
+            for cell in row.cells:
+                yield from _iter_value_actions(cell)
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        for action in self.actions:
+            action.check_placement(followed=followed, regions=regions, region=region)
+        for row in self.rows:
+            for cell in row.cells:
+                _check_value_placement(cell, followed=followed, regions=regions, region=region)
+
 
 class List(PageBlock):
     block: Literal["list"] = "list"
@@ -573,6 +705,14 @@ class List(PageBlock):
 
     def __init__(self, items=(), **data):
         super().__init__(items=items, **data)
+
+    def iter_actions(self) -> "Iterable[Action]":
+        for item in self.items:
+            yield from _iter_value_actions(item)
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        for item in self.items:
+            _check_value_placement(item, followed=followed, regions=regions, region=region)
 
 
 class Stack(BlockParent):
