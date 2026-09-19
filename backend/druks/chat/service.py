@@ -196,7 +196,7 @@ async def send_turn(
         command=config.harness_class.adapter_command,
         mode=config.harness_class.no_ask_mode,
         sessionFiles=config.harness_class.session_files,
-        meta=config.harness_class.adapter_meta,
+        meta=config.harness_class.get_acp_meta(config.model_id),
         model=config.model_id,
         effort=config.effort,
         fastMode=config.fast_mode,

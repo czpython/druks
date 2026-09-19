@@ -9,6 +9,7 @@ from druks.apps.registry import agents, workflows
 from druks.durable.engine import apply_schedules
 from druks.harnesses.base import Harness
 from druks.harnesses.config import check_config
+from druks.harnesses.exceptions import AgentConfigError
 from druks.harnesses.registry import get_harnesses
 from druks.notifications.models import Destination
 
@@ -78,12 +79,13 @@ async def check_agent_configs(session: AsyncSession, settings: InstallationSetti
         session, settings.default_harness, settings.default_model, settings.default_billing
     )
     for agent in agents.all():
-        await check_config(
-            session,
-            (await SettingsOverride.agent_harness(session, agent.id, settings=settings)).value,
-            (await SettingsOverride.agent_model(session, agent.id, settings=settings)).value,
-            (await SettingsOverride.agent_billing(session, agent.id, settings=settings)).value,
-        )
+        harness = await SettingsOverride.agent_harness(session, agent.id, settings=settings)
+        model = await SettingsOverride.agent_model(session, agent.id, settings=settings)
+        billing = await SettingsOverride.agent_billing(session, agent.id, settings=settings)
+        try:
+            await check_config(session, harness.value, model.value, billing.value)
+        except AgentConfigError as error:
+            raise AgentConfigError(f"{agent.id}: {error}") from error
 
 
 async def _settings_changes(

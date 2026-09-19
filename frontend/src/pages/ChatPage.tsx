@@ -287,7 +287,7 @@ function ConversationThread({ id, draft, onDraft, onCreated }: {
           }}
         />
         <div className="chat-composer-actions">
-          {firstPending && <button type="button" className="chat-button" onClick={() => void stop(firstPending.id)} disabled={stopping}>{stopping ? 'Stopping…' : 'Stop'}</button>}
+          {firstPending && !state.error && <button type="button" className="chat-button" onClick={() => void stop(firstPending.id)} disabled={stopping}>{stopping ? 'Stopping…' : 'Stop'}</button>}
           <button type="submit" className="chat-button primary" disabled={!draft.trim() || sending || (Boolean(id) && !conversation)}>{sending ? 'Sending…' : 'Send'}</button>
         </div>
       </div>

@@ -68,10 +68,16 @@ class Conversation {
     this.save();
   }
 
-  async configure(connection, request) {
+  async configure(connection, request, configOptions) {
     const sessionId = this.state.sessionId;
     await connection.setSessionMode({ sessionId, modeId: request.mode });
-    const { configOptions } = await connection.setSessionConfigOption({ sessionId, configId: "model", value: request.model });
+    // The session opened on its model through the adapter's _meta. The model option
+    // takes only the models the CLI lists, so it switches a live session and no more.
+    if (request.model !== this.state.model) {
+      ({ configOptions } = await connection.setSessionConfigOption({ sessionId, configId: "model", value: request.model }));
+      this.state.model = request.model;
+    }
+    this.configOptions = configOptions;
     // The adapter offers effort and fast mode only for models that support them.
     const offered = new Set(configOptions.map(option => option.id));
     if (request.effort && offered.has("effort")) {
@@ -85,7 +91,7 @@ class Conversation {
   async start(request) {
     if (this.starting) await this.starting;
     if (this.connection) {
-      await this.configure(this.connection, request);
+      await this.configure(this.connection, request, this.configOptions);
       return this.state;
     }
     this.starting = this.open(request);
@@ -143,12 +149,12 @@ class Conversation {
         mcpServers: [{ name: "druks", type: "http", url: request.mcpUrl, headers: [{ name: "Authorization", value: "Bearer " + bearer }] }],
         _meta: request.meta,
       };
-      if (this.state.sessionId) {
-        await connection.loadSession({ ...setup, sessionId: this.state.sessionId });
-      } else {
-        this.state.sessionId = (await connection.newSession(setup)).sessionId;
-      }
-      await this.configure(connection, request);
+      const session = this.state.sessionId
+        ? await connection.loadSession({ ...setup, sessionId: this.state.sessionId })
+        : await connection.newSession(setup);
+      this.state.sessionId ||= session.sessionId;
+      this.state.model = request.model;
+      await this.configure(connection, request, session.configOptions ?? []);
       this.connection = connection;
       this.projects = projects;
       this.state.status = "idle";

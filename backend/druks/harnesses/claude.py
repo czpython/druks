@@ -3,7 +3,7 @@ import json
 import logging
 import shlex
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,10 +41,13 @@ class ClaudeHarness(Harness):
     adapter_command = "/opt/druks-chat/node_modules/.bin/claude-agent-acp"
     no_ask_mode = "bypassPermissions"
     session_files = ".claude/projects"
-    # Chat has no asks: the adapter reads its session options from the ACP _meta.
-    adapter_meta: ClassVar[dict] = {
-        "claudeCode": {"options": {"disallowedTools": ["AskUserQuestion"]}}
-    }
+
+    @classmethod
+    def get_acp_meta(cls, model: str) -> dict:
+        """The session options the adapter reads from the ACP _meta. Chat has no asks,
+        and the model goes here because the adapter's model option takes only the
+        models its CLI lists."""
+        return {"claudeCode": {"options": {"disallowedTools": ["AskUserQuestion"], "model": model}}}
 
     # The CLI dies with the raw API error in the result text ("API Error: 529
     # {…overloaded_error…}"), so "api error: 5" covers 529 and every 5xx; 429

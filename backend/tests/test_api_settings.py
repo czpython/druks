@@ -119,7 +119,9 @@ def test_patch_settings_rejects_defaults_that_break_an_agent_override(tmp_path: 
         )
 
         assert response.status_code == 422
-        assert "does not run Anthropic" in response.json()["detail"]
+        assert response.json()["detail"] == (
+            "software_factory.generate_plan: codex does not run Anthropic models."
+        )
         assert client.get("/api/settings").json()["defaultHarness"] == "claude"
 
 
