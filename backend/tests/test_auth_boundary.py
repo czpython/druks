@@ -25,6 +25,7 @@ SESSION_ONLY_API_ROUTES = {
     ("GET", "/api/chat/conversations"),
     ("POST", "/api/chat/conversations"),
     ("GET", "/api/chat/conversations/{conversation_id}"),
+    ("PATCH", "/api/chat/conversations/{conversation_id}"),
     ("POST", "/api/chat/conversations/{conversation_id}/messages"),
     ("POST", "/api/chat/conversations/{conversation_id}/cancel"),
     ("GET", "/api/chat/services/waha/sessions"),

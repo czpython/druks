@@ -1,19 +1,21 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import type { ToolCall } from '@agentclientprotocol/sdk'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowLeft, Check, ChevronRight, Plus } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, Pin, Plus, Search, X } from 'lucide-react'
 import { useStickToBottom } from 'use-stick-to-bottom'
 import { Link, useLocation } from 'wouter'
 
-import { ApiError, UnauthorizedError } from '../api/client'
+import { api, ApiError, UnauthorizedError } from '../api/client'
+import { appLabel } from '../apps/registry'
 import { chatApi } from '../chat/api'
 import {
-  conversationReducer, conversationTitle, initialConversation, savedReplyRows,
+  compareConversations, conversationReducer, conversationTitle, initialConversation, savedReplyRows,
   type Conversation, type ConversationAction, type ConversationSummary, type ReplyRow,
 } from '../chat/state'
 import { Markdown } from '../components/Markdown'
 import { Page } from '../components/Page'
 import { useFormatters } from '../lib/preferences'
+import { zonedParts } from '../lib/format'
 import '../chat.css'
 
 const conversationListKey = ['chat', 'conversations']
@@ -21,15 +23,49 @@ const conversationIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 
 export function ChatPage({ id }: { id?: string }) {
   const [, navigate] = useLocation()
+  const queryClient = useQueryClient()
   const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [search, setSearch] = useState('')
+  const [now, setNow] = useState(() => new Date())
   const list = useQuery({ queryKey: conversationListKey, queryFn: chatApi.list, refetchInterval: 10_000 })
+  const pin = useMutation({
+    mutationFn: ({ id, isPinned }: { id: string; isPinned: boolean }) => chatApi.setPinned(id, isPinned),
+    onSuccess: (summary) => {
+      queryClient.setQueryData<ConversationSummary[]>(conversationListKey, (current = []) =>
+        current.map((conversation) => conversation.id === summary.id ? summary : conversation).sort(compareConversations),
+      )
+      void queryClient.invalidateQueries({ queryKey: conversationListKey })
+    },
+  })
   const format = useFormatters()
   const draftKey = id ?? 'new'
   const conversationId = id && id !== 'new' ? id : undefined
-  const groups = new Map<string, ConversationSummary[]>()
-  for (const conversation of list.data ?? []) {
-    const day = format.absDay(conversation.createdAt)
-    groups.set(day, [...groups.get(day) ?? [], conversation])
+  const today = zonedParts(now, format.timezone)
+  const todayDate = Date.UTC(today.year, today.month - 1, today.day)
+  const groups = new Map<string, ConversationSummary[]>([
+    ['Pinned', []], ['Today', []], ['Yesterday', []], ['Earlier', []],
+  ])
+  const matches = [...list.data ?? []]
+    .filter((conversation) => conversationTitle(conversation).toLowerCase().includes(search.trim().toLowerCase()))
+    .sort(compareConversations)
+  for (const conversation of matches) {
+    const day = zonedParts(new Date(conversation.lastMessageAt), format.timezone)
+    const daysAgo = (todayDate - Date.UTC(day.year, day.month - 1, day.day)) / 86_400_000
+    let group: string
+    if (conversation.isPinned) group = 'Pinned'
+    else if (daysAgo === 0) group = 'Today'
+    else if (daysAgo === 1) group = 'Yesterday'
+    else group = 'Earlier'
+    groups.get(group)!.push(conversation)
+  }
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 30_000)
+    return () => clearInterval(timer)
+  }, [])
+
+  function togglePinned(conversation: ConversationSummary) {
+    pin.mutate({ id: conversation.id, isPinned: !conversation.isPinned })
   }
 
   if (conversationId !== undefined && !conversationIdPattern.test(conversationId)) {
@@ -38,11 +74,19 @@ export function ChatPage({ id }: { id?: string }) {
 
   return (
     <Page className={`page-chat${id ? ' has-conversation' : ''}`} scroll="internal">
+      {pin.isError && <div className="chat-pin-error" role="alert">
+        <span>Could not save the pin.</span>
+        <button className="chat-button" onClick={() => pin.mutate(pin.variables)}>Try again</button>
+        <button className="chat-icon-button" aria-label="Dismiss pin error" onClick={() => pin.reset()}><X size={16} /></button>
+      </div>}
       <aside className="chat-list" aria-label="Conversations">
         <header className="chat-list-head">
-          <h1>Chat</h1>
-          <Link href="/chat/new" className="chat-button">
-            <Plus size={16} aria-hidden="true" /> New conversation
+          <label className="chat-search">
+            <Search size={15} aria-hidden="true" />
+            <input type="search" aria-label="Search conversations" placeholder="Search conversations" value={search} onChange={(event) => setSearch(event.target.value)} />
+          </label>
+          <Link href="/chat/new" className="chat-icon-button chat-new" aria-label="New conversation" title="New conversation">
+            <Plus size={19} aria-hidden="true" />
           </Link>
         </header>
         <div className="chat-list-body">
@@ -51,22 +95,25 @@ export function ChatPage({ id }: { id?: string }) {
             <p>Could not load conversations.</p>
             <button className="chat-button" onClick={() => void list.refetch()}>Try again</button>
           </div>}
-          {Array.from(groups, ([day, conversations]) => <section key={day} aria-label={day}>
+          {list.isSuccess && list.data.length === 0 && <p className="chat-notice">Your conversations will appear here.</p>}
+          {list.isSuccess && list.data.length > 0 && matches.length === 0 && <div className="chat-notice" role="status">
+            <p>No matching conversations.</p>
+            <button className="chat-button" onClick={() => setSearch('')}>Clear search</button>
+          </div>}
+          {Array.from(groups, ([day, conversations]) => conversations.length > 0 && <section key={day} aria-label={day}>
             <h2 className="chat-day">{day}</h2>
-            {conversations.map((conversation) => <Link
-              key={conversation.id}
-              href={`/chat/${conversation.id}`}
-              className="chat-list-item"
-              aria-current={conversation.id === conversationId ? 'page' : undefined}
-            >
-              <span className="chat-list-title">{conversationTitle(conversation)}</span>
-              <time dateTime={conversation.createdAt} title={format.absTime(conversation.createdAt)}>
-                {format.clockTime(conversation.createdAt)}
-              </time>
-              {conversation.activeMessageId
-                ? <span className="chat-list-status"><span className="chat-activity-dot" />Agent is replying</span>
-                : <span className="chat-list-status">{conversation.messageCount} {conversation.messageCount === 1 ? 'message' : 'messages'}</span>}
-            </Link>)}
+            {conversations.map((conversation) => <div className="chat-list-row" key={conversation.id} data-selected={conversation.id === conversationId}>
+              <Link href={`/chat/${conversation.id}`} className="chat-list-item" aria-current={conversation.id === conversationId ? 'page' : undefined}>
+                <span className="chat-list-title" title={conversationTitle(conversation)}>{conversationTitle(conversation)}</span>
+                <time dateTime={conversation.lastMessageAt} title={format.absTime(conversation.lastMessageAt)}>
+                  {format.absTimeCompact(conversation.lastMessageAt)}
+                </time>
+                {conversation.activeMessageId
+                  ? <span className="chat-list-status"><span className="chat-activity-dot" />Agent is replying</span>
+                  : <span className="chat-list-status">{conversation.messageCount} {conversation.messageCount === 1 ? 'message' : 'messages'}</span>}
+              </Link>
+              <PinButton conversation={conversation} onPin={togglePinned} disabled={pin.isPending} />
+            </div>)}
           </section>)}
         </div>
         <p className="chat-privacy">
@@ -77,6 +124,9 @@ export function ChatPage({ id }: { id?: string }) {
       <ConversationThread
         key={draftKey}
         id={conversationId}
+        summary={list.data?.find((conversation) => conversation.id === conversationId)}
+        onPin={togglePinned}
+        pinPending={pin.isPending}
         draft={drafts[draftKey] ?? ''}
         onDraft={(draft) => setDrafts((current) => ({ ...current, [draftKey]: draft }))}
         onCreated={(conversation, submitted) => {
@@ -91,8 +141,22 @@ export function ChatPage({ id }: { id?: string }) {
   )
 }
 
-function ConversationThread({ id, draft, onDraft, onCreated }: {
+function PinButton({ conversation, onPin, disabled }: {
+  conversation: ConversationSummary
+  onPin: (conversation: ConversationSummary) => void
+  disabled: boolean
+}) {
+  const label = `Pin ${conversationTitle(conversation)}`
+  return <button className="chat-icon-button chat-pin" aria-label={label} title={label} aria-pressed={conversation.isPinned} disabled={disabled} onClick={() => onPin(conversation)}>
+    <Pin size={16} aria-hidden="true" />
+  </button>
+}
+
+function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, onCreated }: {
   id?: string
+  summary?: ConversationSummary
+  onPin: (conversation: ConversationSummary) => void
+  pinPending: boolean
   draft: string
   onDraft: (draft: string) => void
   onCreated: (conversation: Conversation, submitted: string) => void
@@ -108,6 +172,7 @@ function ConversationThread({ id, draft, onDraft, onCreated }: {
   const draftRef = useRef(draft)
   const composer = useRef<HTMLTextAreaElement>(null)
   const format = useFormatters()
+  const apps = useQuery({ queryKey: ['apps'], queryFn: api.listApps, enabled: !id, staleTime: 60_000 })
   const { scrollRef, contentRef, isAtBottom, scrollToBottom } = useStickToBottom({ initial: 'instant', resize: 'instant' })
 
   useEffect(() => {
@@ -133,12 +198,11 @@ function ConversationThread({ id, draft, onDraft, onCreated }: {
         const summary: ConversationSummary = {
           id: action.id, title: action.title, source: action.source, userId: action.userId,
           userName: action.userName, createdAt: action.createdAt,
+          isPinned: action.isPinned, lastMessageAt: action.lastMessageAt,
           messageCount: action.messageCount, activeMessageId: action.activeMessageId,
         }
         queryClient.setQueryData<ConversationSummary[]>(conversationListKey, (current = []) =>
-          [...current.filter((item) => item.id !== summary.id), summary].sort((left, right) =>
-            Date.parse(right.createdAt) - Date.parse(left.createdAt) || right.id.localeCompare(left.id),
-          ),
+          [...current.filter((item) => item.id !== summary.id), summary].sort(compareConversations),
         )
       }
     }
@@ -229,19 +293,29 @@ function ConversationThread({ id, draft, onDraft, onCreated }: {
   const messages = conversation?.messages ?? []
   const replies = new Map(messages.filter((message) => message.role === 'assistant').map((message) => [message.replyTo, message]))
   const userMessages = messages.filter((message) => message.role === 'user')
+  const lastReply = messages.findLast((message) => message.role === 'assistant')
   // A WhatsApp turn can answer several messages, and its newest delivered message names it.
   const unansweredMessage = userMessages.findLast((message) => message.state === 'delivered')
     ?? userMessages.find((message) => message.state === 'pending')
 
-  return <section className="chat-thread" aria-label="Conversation">
+  return <section className={`chat-thread${id ? '' : ' is-new'}`} aria-label="Conversation">
     <header className="chat-thread-head">
       <Link href="/chat" className="chat-back chat-button" aria-label="Back to conversations"><ArrowLeft size={18} /></Link>
-      <h2>{conversation ? conversationTitle(conversation) : id ? 'Conversation' : 'New conversation'}</h2>
+      <div className="chat-thread-title">
+        {id && <h1>{conversation ? conversationTitle(conversation) : 'Conversation'}</h1>}
+        {conversation && <p>{conversation.messageCount} {conversation.messageCount === 1 ? 'message' : 'messages'}
+          {lastReply && <> <span aria-hidden="true">/</span> last reply <time dateTime={lastReply.createdAt} title={format.absTime(lastReply.createdAt)}>{format.absTimeCompact(lastReply.createdAt)}</time></>}
+        </p>}
+      </div>
       {id && connection === 'reconnecting' && <span className="chat-connection" role="status">Reconnecting…</span>}
+      {conversation && <PinButton conversation={summary ?? conversation} onPin={onPin} disabled={pinPending} />}
     </header>
-    <div className="chat-messages" ref={scrollRef} role="log" aria-label="Messages" aria-live="polite">
+    {!id && <div className="chat-intro">
+      <h1>What should Druks do?</h1>
+      <p>Ask about activity, usage, or schedules. Tell Druks what to do next.</p>
+    </div>}
+    <div className="chat-messages" ref={scrollRef} role="log" aria-label="Messages" aria-live="polite" hidden={!id}>
       <div className="chat-messages-content" ref={contentRef}>
-        {!id && <p className="chat-start">Send a message to start a conversation.</p>}
         {id && !conversation && connection === 'opening' && <p className="chat-notice" role="status">Loading conversation…</p>}
         {userMessages.map((message) => {
           const reply = message.state === 'replied' || (message.state === 'cancelled' && message.deliveredAt)
@@ -251,12 +325,15 @@ function ConversationThread({ id, draft, onDraft, onCreated }: {
           const isWaiting = unansweredMessage?.id === message.id && rows.length === 0 && !state.error
           return <article className="chat-turn" key={message.id} aria-label="Message and reply">
             <div className={message.isInternal ? 'chat-user is-internal' : 'chat-user'}>
-              <div className="chat-message-meta">{message.isInternal ? 'Druks' : 'You'} <time dateTime={message.createdAt} title={format.absTime(message.createdAt)}>{format.clockTime(message.createdAt)}</time></div>
+              <div className="chat-message-meta">{message.isInternal ? 'Druks' : 'You'} <time dateTime={message.createdAt} title={format.absTime(message.createdAt)}>{format.absTimeCompact(message.createdAt)}</time></div>
               <div className="chat-user-body">{message.body}</div>
               {message.file && <a href={message.file.url} target="_blank" rel="noreferrer">{message.file.name}</a>}
               {isQueued && <span className="chat-queued">Queued</span>}
             </div>
             <div className="chat-reply">
+              {(rows.length > 0 || isWaiting) && <div className="chat-message-meta chat-agent-meta">Agent
+                {reply && <time dateTime={reply.createdAt} title={format.absTime(reply.createdAt)}>{format.absTimeCompact(reply.createdAt)}</time>}
+              </div>}
               <Reply rows={rows} />
               {isWaiting && <p className="chat-waiting" role="status"><span className="chat-activity-dot" />{message.state === 'delivered' ? 'Agent is replying…' : 'Connecting…'}</p>}
               {(message.state === 'interrupted' || message.state === 'cancelled') && <div className="chat-interrupted" role="status">
@@ -283,8 +360,8 @@ function ConversationThread({ id, draft, onDraft, onCreated }: {
           ref={composer}
           aria-label="Message"
           aria-describedby="chat-send-help"
-          placeholder="Message Druks…"
-          rows={2}
+          placeholder={id ? 'Reply, or ask Druks to do something…' : 'Message Druks…'}
+          rows={1}
           value={draft}
           onChange={(event) => { draftRef.current = event.target.value; onDraft(event.target.value) }}
           onKeyDown={(event) => {
@@ -296,11 +373,17 @@ function ConversationThread({ id, draft, onDraft, onCreated }: {
         />
         <div className="chat-composer-actions">
           {unansweredMessage && !state.error && <button type="button" className="chat-button" onClick={() => void stop(unansweredMessage.id)} disabled={stopping}>{stopping ? 'Stopping…' : 'Stop'}</button>}
-          <button type="submit" className="chat-button primary" disabled={!draft.trim() || sending || (Boolean(id) && !conversation)}>{sending ? 'Sending…' : 'Send'}</button>
+          <button type="submit" className="chat-icon-button chat-send" aria-label={sending ? 'Sending…' : 'Send'} title="Send" disabled={!draft.trim() || sending || (Boolean(id) && !conversation)}><ArrowUp size={18} aria-hidden="true" /></button>
         </div>
       </div>
       <p id="chat-send-help">Enter to send · Shift + Enter for a new line</p>
     </form>
+    {!id && <div className="chat-starters">
+      {['What needs my attention?', 'What failed in the last 24 hours?', 'Compare usage this week with last week.'].map((prompt) => <button key={prompt} onClick={() => { onDraft(prompt); composer.current?.focus() }}>
+        <span>{prompt}</span><ArrowRight size={16} aria-hidden="true" />
+      </button>)}
+      {apps.isSuccess && <p className="chat-apps">{apps.data.length} installed {apps.data.length === 1 ? 'app' : 'apps'}{apps.data.length > 0 && <> · {apps.data.map((app) => appLabel(app.name)).join(', ')}</>}</p>}
+    </div>}
   </section>
 }
 
