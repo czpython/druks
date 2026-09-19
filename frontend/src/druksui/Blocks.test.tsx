@@ -157,9 +157,10 @@ describe('the display core', () => {
     ])
 
     expect(screen.getByText('Connect the Gmail app first')).toBeTruthy()
-    expect(screen.getByText('Settings → Connections → Services').getAttribute('href')).toBe(
-      '/settings/connections?tab=services',
-    )
+    const services = screen.getByRole('link', { name: 'Settings → Connections → Services' })
+    expect(services.getAttribute('href')).toBe('/settings/connections?tab=services')
+    expect(services.getAttribute('target')).toBeNull()
+    expect(services.getAttribute('aria-label')).toBeNull()
   })
 })
 

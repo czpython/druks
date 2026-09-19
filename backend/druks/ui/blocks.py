@@ -125,7 +125,13 @@ class Link(PageBlock):
 class Action(PageBlock):
     """A control that calls one of the app's own operations. ``operation`` is a
     route's ``operation_id``; the shell resolves it to a method and a URL, so
-    the author writes no URL."""
+    the author writes no URL.
+
+    After a successful send, the shell navigates when this action sets
+    ``link``, or when the operation answers ``{"url": "https://..."}`` — a
+    top-level string, absolute ``http`` or ``https`` only. A row or object
+    that happens to contain a ``url`` field is not a hand-off. ``refresh``
+    applies only when neither navigates."""
 
     block: Literal["action"] = "action"
     label: str
@@ -135,8 +141,6 @@ class Action(PageBlock):
     tone: Literal["default", "primary", "danger"] = "default"
     # Non-empty text asks the operator before the shell sends anything.
     confirm: str = ""
-    # What happens once the operation answers. A ``link`` navigates, and then
-    # ``refresh`` does not apply.
     refresh: Literal["none", "page", "region"] = "page"
     link: Link | None = None
 
@@ -330,7 +334,18 @@ class GateControls(PageBlock):
         )
 
 
-class TextValue(Schema):
+class Datum(Schema):
+    """What every value shares. ``iter_actions`` and ``check_placement`` are
+    no-ops unless a value holds controls."""
+
+    def iter_actions(self) -> Iterable[Action]:
+        return ()
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        return None
+
+
+class TextValue(Datum):
     """Words. ``link`` is how a table cell, a fact, or a list item reaches
     another page."""
 
@@ -343,7 +358,7 @@ class TextValue(Schema):
     link: Link | None = None
 
 
-class NumberValue(Schema):
+class NumberValue(Datum):
     value: Literal["number"] = "number"
     number: float = Field(allow_inf_nan=False)
     unit: str = ""
@@ -353,7 +368,7 @@ class NumberValue(Schema):
         super().__init__(number=number, **data)
 
 
-class StatusValue(Schema):
+class StatusValue(Datum):
     """Where something stands. The app writes the word; the tone selects the
     presentation. ``link`` is how a fact or a cell reaches the thing it names."""
 
@@ -366,7 +381,7 @@ class StatusValue(Schema):
         super().__init__(label=label, **data)
 
 
-class TimeValue(Schema):
+class TimeValue(Datum):
     value: Literal["time"] = "time"
     when: AwareDatetime
 
@@ -374,7 +389,7 @@ class TimeValue(Schema):
         super().__init__(when=when, **data)
 
 
-class ControlsValue(Schema):
+class ControlsValue(Datum):
     """Actions and links in a cell, a fact, or a list item. The shell draws
     them the way it draws a card's controls."""
 
@@ -384,25 +399,19 @@ class ControlsValue(Schema):
     value: Literal["controls"] = "controls"
     controls: list[Action | Link] = Field(default_factory=list)
 
+    def iter_actions(self) -> Iterable[Action]:
+        for control in self.controls:
+            yield from control.iter_actions()
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        for control in self.controls:
+            control.check_placement(followed=followed, regions=regions, region=region)
+
 
 Value = Annotated[
     TextValue | NumberValue | StatusValue | TimeValue | ControlsValue,
     Discriminator("value"),
 ]
-
-
-def _iter_value_actions(value: Value) -> Iterable[Action]:
-    if isinstance(value, ControlsValue):
-        for control in value.controls:
-            yield from control.iter_actions()
-
-
-def _check_value_placement(
-    value: Value, *, followed: bool, regions: set[str], region: str = ""
-) -> None:
-    if isinstance(value, ControlsValue):
-        for control in value.controls:
-            control.check_placement(followed=followed, regions=regions, region=region)
 
 
 class TimelineItem(Schema):
@@ -563,13 +572,11 @@ class Metrics(PageBlock):
 
     def iter_actions(self) -> "Iterable[Action]":
         for metric in self.metrics:
-            yield from _iter_value_actions(metric.value)
+            yield from metric.value.iter_actions()
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         for metric in self.metrics:
-            _check_value_placement(
-                metric.value, followed=followed, regions=regions, region=region
-            )
+            metric.value.check_placement(followed=followed, regions=regions, region=region)
 
 
 class Fact(Schema):
@@ -592,11 +599,11 @@ class Facts(PageBlock):
 
     def iter_actions(self) -> "Iterable[Action]":
         for fact in self.facts:
-            yield from _iter_value_actions(fact.value)
+            yield from fact.value.iter_actions()
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         for fact in self.facts:
-            _check_value_placement(fact.value, followed=followed, regions=regions, region=region)
+            fact.value.check_placement(followed=followed, regions=regions, region=region)
 
 
 class TableColumn(Schema):
@@ -610,8 +617,7 @@ class TableColumn(Schema):
 class TableRow(Schema):
     cells: list[Value] = Field(default_factory=list)
     detail: str = ""
-    # Identity the shell sends when this row is selected. Empty means the
-    # row cannot be selected.
+    # Identity the shell sends when this row is selected.
     key: str = ""
 
     def __init__(self, cells=(), **data):
@@ -688,14 +694,14 @@ class Table(PageBlock):
             yield from action.iter_actions()
         for row in self.rows:
             for cell in row.cells:
-                yield from _iter_value_actions(cell)
+                yield from cell.iter_actions()
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         for action in self.actions:
             action.check_placement(followed=followed, regions=regions, region=region)
         for row in self.rows:
             for cell in row.cells:
-                _check_value_placement(cell, followed=followed, regions=regions, region=region)
+                cell.check_placement(followed=followed, regions=regions, region=region)
 
 
 class List(PageBlock):
@@ -708,11 +714,11 @@ class List(PageBlock):
 
     def iter_actions(self) -> "Iterable[Action]":
         for item in self.items:
-            yield from _iter_value_actions(item)
+            yield from item.iter_actions()
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         for item in self.items:
-            _check_value_placement(item, followed=followed, regions=regions, region=region)
+            item.check_placement(followed=followed, regions=regions, region=region)
 
 
 class Stack(BlockParent):

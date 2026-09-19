@@ -352,7 +352,7 @@ describe('Table', () => {
   })
 
   it('names the table itself, so a reader can tell it from another', () => {
-    const { container } = renderBlocks([
+    renderBlocks([
       {
         block: 'table',
         title: 'Peers',
@@ -363,10 +363,6 @@ describe('Table', () => {
     ])
 
     expect(screen.getByRole('table', { name: 'Peers' })).toBeTruthy()
-    expect(container.querySelector('.dui-table-scroll caption')).toBeNull()
-    expect(
-      container.querySelector('.dui-table-scroll')?.contains(screen.getByRole('heading', { name: 'Peers' })),
-    ).toBe(false)
   })
 
   it('scrolls a wide table inside its own box, headers and all', () => {

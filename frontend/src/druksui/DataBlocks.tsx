@@ -1,6 +1,4 @@
-import { ArrowUpRight } from 'lucide-react'
-import { useContext, useEffect, useId, useRef, useState } from 'react'
-import { Link as RouteLink } from 'wouter'
+import { useEffect, useId, useRef, useState } from 'react'
 
 import type {
   Action,
@@ -15,8 +13,8 @@ import type {
 } from '../api/types'
 import { RelTime } from '../components/RelTime'
 import { ActionButton } from './Form'
+import { LinkControl } from './LinkControl'
 import { Image, Status } from './RunBlocks'
-import { hrefForLink, PagesContext } from './pages'
 
 // The plot's own coordinates; CSS gives it its real size.
 const PLOT_WIDTH = 300
@@ -38,15 +36,7 @@ export function Datum({ value }: { value: Value }) {
         </span>
       )
     case 'status':
-      return value.link ? (
-        <LinkControl
-          link={value.link}
-          label={value.label}
-          className={`dui-status dui-status-${value.tone}`}
-        />
-      ) : (
-        <Status status={value} />
-      )
+      return <Status status={value} />
     case 'time':
       return (
         <span className="mono dim" title={value.when}>
@@ -54,17 +44,7 @@ export function Datum({ value }: { value: Value }) {
         </span>
       )
     case 'controls':
-      return (
-        <span className="dui-links">
-          {value.controls.map((control, index) =>
-            control.block === 'action' ? (
-              <ActionButton key={index} action={control} />
-            ) : (
-              <LinkControl key={index} link={control} className="dui-action" />
-            ),
-          )}
-        </span>
-      )
+      return <Controls controls={value.controls} />
     default:
       return (
         <span className="dui-unknown mono" role="alert">
@@ -95,47 +75,22 @@ function TextDatum({
   return name
 }
 
-/** A control that navigates. It is a block of its own, or the link on a value,
-    which shows the value's own text. */
-export function LinkControl({
-  link,
-  label = link.label,
-  className = 'dui-link',
-}: {
-  link: Link
-  label?: string
-  className?: string
-}) {
-  const { app, pages } = useContext(PagesContext)
-  const href = hrefForLink(link, app, pages)
-  if (link.url) {
-    return (
-      <a
-        className={className}
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        title="Opens in a new tab"
-        aria-label={`${label} (opens in a new tab)`}
-      >
-        {label}
-        <ArrowUpRight className="dui-link-external" size={12} aria-hidden="true" />
-      </a>
-    )
-  }
-  if (href) {
-    return (
-      <RouteLink href={href} className={className}>
-        {label}
-      </RouteLink>
-    )
-  }
+export function Controls({ controls }: { controls: (Action | Link)[] }) {
+  if (controls.length === 0) return null
   return (
-    <span className={`${className} dui-link-broken`} title={`no page named ${link.page}`}>
-      {label}
-    </span>
+    <div className="dui-links">
+      {controls.map((control, index) =>
+        control.block === 'action' ? (
+          <ActionButton key={index} action={control} />
+        ) : (
+          <LinkControl key={index} link={control} />
+        ),
+      )}
+    </div>
   )
 }
+
+export { LinkControl }
 
 export function Chart({
   kind,
@@ -372,34 +327,29 @@ export function Table({
     })
   }
 
-  // Title stays outside the overflow box. A <caption> inside overflow-x:auto
-  // is taken out of flow — the heading jumps above the card and the rows
-  // clip to the header strip.
   return (
     <div className="dui-table-block">
-      {(title || selectable) && (
+      {selectable && (
         <div className="dui-table-head">
-          {title && (
-            <h3 className="dui-block-title" id={titleId}>
-              {title}
-            </h3>
-          )}
-          {selectable && (
-            <div className="dui-links">
-              {actions.map((action, index) => (
-                <ActionButton
-                  key={index}
-                  action={action}
-                  values={{ [select]: chosen }}
-                  disabled={chosen.length === 0}
-                />
-              ))}
-            </div>
-          )}
+          <div className="dui-links">
+            {actions.map((action, index) => (
+              <ActionButton
+                key={index}
+                action={action}
+                values={{ [select]: chosen }}
+                disabled={chosen.length === 0}
+              />
+            ))}
+          </div>
         </div>
       )}
       <div className="dui-table-scroll">
         <table className="dui-table" aria-labelledby={title ? titleId : undefined}>
+          {title && (
+            <caption className="dui-block-title dui-table-caption" id={titleId}>
+              {title}
+            </caption>
+          )}
           <thead>
             <tr>
               {selectable && (
@@ -470,8 +420,7 @@ function Row({
               className="dui-checkbox"
               type="checkbox"
               checked={selected}
-              disabled={!row.key}
-              onChange={(event) => row.key && onSelect(row.key, event.target.checked)}
+              onChange={(event) => onSelect(row.key, event.target.checked)}
               aria-label={`Select ${rowName(row)}`}
             />
           </td>

@@ -2058,26 +2058,9 @@ a.dui-status:hover { text-decoration: underline; }
 .dui-table tbody tr[data-selected='true'] > * { background: color-mix(in oklch, var(--dui-primary) 8%, var(--surface)); }
 .dui-table .dui-table-select { width: 1%; padding-right: 0; }
 .dui-table [data-align='end'] { text-align: right; }
-/* Prose wraps so a long cell cannot shove the rest of the row off-screen.
-   Status, counts, times, and actions stay one line. */
-.dui-table td { white-space: normal; overflow-wrap: anywhere; }
-.dui-table td :is(.dui-links, .dui-action, .dui-status, .dui-number, .mono) { white-space: nowrap; }
-.dui-table td:has(.dui-links) { width: 1%; }
-.dui-table tbody th > :is(.dui-value, .dui-link) { max-width: 40ch; min-width: 0; }
-.dui-table tbody th .dui-link {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.dui-table tbody th .dui-value-desc {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
 
 .dui-table tr > :last-child { padding-right: 16px; }
+.dui-table-caption { text-align: left; caption-side: top; margin: 20px 0 10px; padding: 0; }
 .dui-table-empty { font-size: 13px; line-height: 18px; padding: 24px 0; }
 .dui-table-empty:empty { display: none; }
 

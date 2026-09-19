@@ -902,6 +902,11 @@ An action cannot set both `fields` and `confirm`. When a page function builds
 this action, Druks refuses it. Each option asks the operator before the action
 runs.
 
+After a successful send, the shell navigates when this action sets `link`, or
+when the operation answers `{"url": "https://..."}` — a top-level string,
+absolute `http` or `https` only. A row or object that happens to contain a
+`url` field is not a hand-off. `refresh` applies only when neither navigates.
+
 ### Form
 
 ```python
@@ -932,9 +937,6 @@ Druks refuses the form when the page function builds it.
 
 `extra_actions` are more submit buttons on the same fields. Use them when the
 page exists to collect one value and then choose what to do with it.
-
-An operation may answer `{"url": "https://..."}`. The shell navigates there
-after a successful send, ahead of `action.link`. Only `http` and `https` count.
 
 ```json
 {
@@ -1280,9 +1282,9 @@ class Table:
 ```
 
 Every row must have one cell for each column. With no rows the shell shows
-`empty_text`, and nothing of its own. Prose in a cell wraps so a long sentence
-cannot shove the rest of the row off-screen. A table that is still wider than
-its box — many columns, not a long draft — scrolls inside its own container.
+`empty_text`, and nothing of its own. A wide table scrolls inside its own
+container, on a narrow screen as well: a stacked row would lose the header each
+cell belongs to.
 
 A row's `detail` is the sentence it has no room for — the failure behind a
 status, the reason behind a verdict. The shell keeps it folded and the reader
@@ -1291,8 +1293,9 @@ loads to find that out. It is text, not blocks.
 
 `select` and `actions` turn the table into a multi-select. `select` names the
 argument the selected `key`s fill — a list of strings. `actions` are what run
-on that list. They cannot collect fields: the selected rows are the submit. A
-row without a `key` cannot be selected, and two rows cannot share a key.
+on that list. They cannot collect fields: the selected rows are the submit. Two
+rows cannot share a key. The page cannot put a row without a key on a
+selectable table.
 
 ### List
 
@@ -1447,8 +1450,10 @@ class ControlsValue:
 ```
 
 Actions and links, in the same cell as a value. The shell draws them the way
-it draws a card's controls. Boot walks them so `refresh="region"` still needs
-a named Section, and an unknown operation still fails the page.
+it draws a card's controls. `check_placement` runs when the page function
+builds the `Page`, so `refresh="region"` still needs a named Section.
+`check_operation` runs on each page read, so an unknown operation still fails
+the page.
 
 ## Fields
 

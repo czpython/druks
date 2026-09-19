@@ -156,21 +156,21 @@ describe('a declared page', () => {
       controls: [
         {
           block: 'link',
-          label: 'Open in X composer',
+          label: 'Open composer',
           page: '',
           arguments: {},
-          url: 'https://x.com/intent/tweet',
+          url: 'https://example.com/compose',
           subject: null,
         },
       ],
     })
 
     await waitFor(() =>
-      expect(screen.getByRole('link', { name: 'Open in X composer' })).toBeTruthy(),
+      expect(screen.getByRole('link', { name: 'Open composer (opens in a new tab)' })).toBeTruthy(),
     )
-    const control = container.querySelector('.dui-page-head a.dui-action')
-    expect(control?.textContent).toBe('Open in X composer')
-    expect(control?.getAttribute('href')).toBe('https://x.com/intent/tweet')
+    const control = container.querySelector('.dui-page-head a.dui-link')
+    expect(control?.textContent).toBe('Open composer')
+    expect(control?.getAttribute('href')).toBe('https://example.com/compose')
   })
 
   it('reads a detail page at its own location', async () => {
