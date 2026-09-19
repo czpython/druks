@@ -301,6 +301,7 @@ async def test_manifest_page_submits_the_documented_app_to_github(
     }
     assert manifest["public"] is False
     assert manifest["default_permissions"]["contents"] == "write"
+    assert manifest["default_permissions"]["administration"] == "write"
     assert "pull_request_review" in manifest["default_events"]
 
 
