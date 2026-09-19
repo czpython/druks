@@ -246,6 +246,29 @@ describe('useSSE', () => {
     expect(onError).toHaveBeenCalledTimes(1)
   })
 
+  it('does not stack identity rechecks while one is in flight', async () => {
+    let resolve!: (value: Response) => void
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((yes) => {
+          resolve = yes
+        }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    render(<Harness url="/api/x" handlers={{ 'foo.updated': vi.fn() }} />)
+
+    act(() => {
+      FakeEventSource.instances[0]?.emitError()
+      FakeEventSource.instances[0]?.emitError()
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      resolve(new Response(JSON.stringify(LIVE_IDENTITY), { status: 200 }))
+      await Promise.resolve()
+    })
+  })
+
   it('rechecks identity on error and stays open while the account remains valid', async () => {
     const fetchMock = stubIdentity(JSON.stringify(LIVE_IDENTITY), 200)
     render(<Harness url="/api/x" handlers={{ 'foo.updated': vi.fn() }} />)

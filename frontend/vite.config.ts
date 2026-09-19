@@ -58,7 +58,21 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8001',
-        ws: true,
+        changeOrigin: true,
+        // EventSource holds this socket for as long as the tab is on the page.
+        // http-proxy's default timeouts close it; Chrome then reconnects without
+        // always releasing the old HTTP/1.1 slot, fills the origin's 6-socket
+        // cap, and every later fetch (Catch up, navigation) stalls.
+        timeout: 0,
+        proxyTimeout: 0,
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes, _req, res) => {
+            const type = proxyRes.headers['content-type']
+            if (typeof type === 'string' && type.includes('text/event-stream')) {
+              res.flushHeaders()
+            }
+          })
+        },
       },
       // Match /app/ exactly so shared routes under /apps/ stay in Vite.
       '/app/': {

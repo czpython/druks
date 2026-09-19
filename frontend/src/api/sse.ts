@@ -71,13 +71,18 @@ export function useSSE(url: string, { handlers, onError, onOpen, enabled = true 
       registered.push([eventType, listener])
     }
 
+    // One in-flight recheck: EventSource error storms (Vite proxy drop, then
+    // native reconnect) would otherwise stack /api/auth/me fetches until
+    // Chrome's 6-connection cap is full and the tab cannot send anything.
+    let identityCheck: Promise<void> | undefined
     const errorListener: EventListener = (event) => {
       onErrorRef.current?.(event)
+      if (identityCheck) return
       // An SSE error may be a dead identity: recheck /api/auth/me and close
       // only when identity cannot be resolved (the recheck's 401 broadcasts
       // to the IdentityBootstrap). While the same account remains valid the
       // EventSource keeps its automatic reconnect.
-      void identityApi
+      identityCheck = identityApi
         .me()
         .then((identity) => {
           if (!identity.account) source.close()
@@ -86,6 +91,9 @@ export function useSSE(url: string, { handlers, onError, onOpen, enabled = true 
           // Only a dead identity ends the stream; a transient recheck failure
           // leaves EventSource's automatic reconnect running.
           if (error instanceof UnauthorizedError) source.close()
+        })
+        .finally(() => {
+          identityCheck = undefined
         })
     }
     source.addEventListener('error', errorListener)
