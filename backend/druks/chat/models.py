@@ -91,6 +91,7 @@ class Conversation(Base, Uuid7Pk):
     user_name: Mapped[str] = mapped_column(default="", server_default=text("''"))
     user_phone: Mapped[str] = mapped_column(default="", server_default=text("''"))
     title: Mapped[str | None]
+    pinned: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     session_file: Mapped[File | None] = FileField()
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     messages: Mapped[list[Message]] = relationship(
@@ -204,7 +205,7 @@ class Conversation(Base, Uuid7Pk):
             await session.scalars(
                 select(cls)
                 .where(cls.account_id == account_id)
-                .order_by(cls.created_at.desc(), cls.id.desc())
+                .order_by(cls.last_message_at.desc(), cls.id.desc())
             )
         )
 
@@ -291,6 +292,21 @@ class Conversation(Base, Uuid7Pk):
 Conversation.message_count = column_property(
     select(func.count(Message.id))
     .where(Message.conversation_id == Conversation.id)
+    .correlate_except(Message)
+    .scalar_subquery()
+)
+Conversation.last_message_at = column_property(
+    func.coalesce(
+        select(func.max(Message.created_at))
+        .where(Message.conversation_id == Conversation.id)
+        .correlate_except(Message)
+        .scalar_subquery(),
+        Conversation.created_at,
+    )
+)
+Conversation.last_reply_at = column_property(
+    select(func.max(Message.created_at))
+    .where(Message.conversation_id == Conversation.id, Message.role == MessageRole.ASSISTANT)
     .correlate_except(Message)
     .scalar_subquery()
 )

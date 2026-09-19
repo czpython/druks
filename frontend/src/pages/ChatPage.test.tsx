@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Route, Router } from 'wouter'
 
 import { chatApi } from '../chat/api'
+import { api } from '../api/client'
 import type { Conversation, ConversationAction, Message } from '../chat/state'
+import { UserPreferencesProvider } from '../lib/preferences'
 import { ChatPage } from './ChatPage'
 
-vi.mock('../chat/api', () => ({ chatApi: { list: vi.fn(), get: vi.fn(), create: vi.fn(), send: vi.fn(), stop: vi.fn() } }))
+vi.mock('../chat/api', () => ({ chatApi: { list: vi.fn(), get: vi.fn(), create: vi.fn(), send: vi.fn(), stop: vi.fn(), pin: vi.fn() } }))
 
 class Socket {
   static instances: Socket[] = []
@@ -25,14 +27,19 @@ const message: Message = { id: '10', role: 'user', body: 'Check the active runs'
 const conversation: Conversation = {
   id: '01995a3c-0000-7000-8000-000000000001', title: message.body, source: 'web', userId: null, userName: '', createdAt: message.createdAt,
   messageCount: 1, activeMessageId: '10', messages: [message],
+  pinned: false, lastMessageAt: message.createdAt, lastReplyAt: null,
 }
 
-function mount(path = `/chat/${conversation.id}`) {
+function mount(path = `/chat/${conversation.id}`, timezone?: string) {
   window.history.replaceState(null, '', path)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<StrictMode><QueryClientProvider client={client}><Router>
+  const page = <Router>
     <Route path="/chat/:id?">{(params) => <ChatPage id={params.id} />}</Route>
-  </Router></QueryClientProvider></StrictMode>)
+  </Router>
+  if (timezone) vi.spyOn(api, 'getPersonalSettings').mockResolvedValue({ timezone, gateParkDestinationId: null })
+  render(<StrictMode><QueryClientProvider client={client}>
+    {timezone ? <UserPreferencesProvider>{page}</UserPreferencesProvider> : page}
+  </QueryClientProvider></StrictMode>)
   return client
 }
 
@@ -52,20 +59,138 @@ beforeEach(() => {
   vi.mocked(chatApi.send).mockResolvedValue({ ...message, id: '11', body: 'Then check failures', state: 'pending' })
   vi.mocked(chatApi.create).mockResolvedValue(conversation)
   vi.mocked(chatApi.stop).mockResolvedValue(undefined)
+  vi.mocked(chatApi.pin).mockImplementation(async (_id, pinned) => ({ ...conversation, pinned }))
+  vi.spyOn(api, 'listApps').mockResolvedValue([])
 })
 
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
   vi.clearAllMocks()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
 describe('Chat page', () => {
+  it('filters pinned and unpinned titles without replacing the thread or draft', async () => {
+    const pinned = { ...conversation, id: '01995a3c-0000-7000-8000-000000000003', title: 'DEPLOY notes', pinned: true }
+    vi.mocked(chatApi.list).mockResolvedValue([conversation, pinned])
+    mount()
+    await connected()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Keep this draft' } })
+    const search = screen.getByRole('searchbox', { name: 'Search conversations' })
+    fireEvent.change(search, { target: { value: ' deploy ' } })
+    const list = within(screen.getByRole('complementary', { name: 'Conversations' }))
+    expect(list.getByRole('link', { name: /DEPLOY notes/ })).toBeTruthy()
+    expect(list.queryByRole('link', { name: /Check the active runs/ })).toBeNull()
+    expect(screen.getByRole('heading', { name: conversation.title! })).toBeTruthy()
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('Keep this draft')
+    fireEvent.change(search, { target: { value: 'no title matches' } })
+    expect(screen.getByText('No matching conversations.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+    expect(list.getAllByRole('link')).toHaveLength(3)
+    expect(chatApi.create).not.toHaveBeenCalled()
+    expect(chatApi.send).not.toHaveBeenCalled()
+  })
+
+  it('pins from the header, survives a live snapshot, and unpins from the list', async () => {
+    vi.mocked(chatApi.pin).mockImplementation(async (_id, pinned) => {
+      const summary = { ...conversation, pinned }
+      vi.mocked(chatApi.list).mockResolvedValue([summary])
+      return summary
+    })
+    const client = mount()
+    const socket = await connected()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Keep the reply draft' } })
+    const thread = within(screen.getByRole('region', { name: 'Conversation' }))
+    fireEvent.click(thread.getByRole('button', { name: `Pin ${conversation.title}` }))
+    await waitFor(() => expect(thread.getByRole('button', { name: `Unpin ${conversation.title}` }).getAttribute('aria-pressed')).toBe('true'))
+    socket.receive({ type: 'snapshot', ...conversation, pinned: true, lastReplyAt: '2026-09-18T11:00:00Z', lastMessageAt: '2026-09-18T11:00:00Z' })
+    expect(client.getQueryData<Conversation[]>(['chat', 'conversations'])?.[0]?.pinned).toBe(true)
+    expect(screen.getByText('Pinned', { selector: 'h2' })).toBeTruthy()
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('Keep the reply draft')
+    const list = within(screen.getByRole('complementary', { name: 'Conversations' }))
+    fireEvent.click(list.getByRole('button', { name: `Unpin ${conversation.title}` }))
+    await waitFor(() => expect(screen.queryByText('Pinned', { selector: 'h2' })).toBeNull())
+    expect(chatApi.pin).toHaveBeenNthCalledWith(1, conversation.id, true)
+    expect(chatApi.pin).toHaveBeenNthCalledWith(2, conversation.id, false)
+    expect(window.location.pathname).toBe(`/chat/${conversation.id}`)
+  })
+
+  it('keeps a failed pin unchanged and retries the same action', async () => {
+    vi.mocked(chatApi.pin).mockRejectedValueOnce(new Error('Unavailable'))
+    mount()
+    await connected()
+    fireEvent.click(screen.getAllByRole('button', { name: `Pin ${conversation.title}` })[0]!)
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not save the pin.')
+    expect(screen.queryByRole('button', { name: `Unpin ${conversation.title}` })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(chatApi.pin).toHaveBeenCalledTimes(2))
+    expect(chatApi.pin).toHaveBeenLastCalledWith(conversation.id, true)
+  })
+
+  it('groups by the account calendar across daylight saving changes', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-25T23:30:00Z'))
+    vi.mocked(chatApi.list).mockResolvedValue([
+      { ...conversation, title: 'Today in Madrid', lastMessageAt: '2026-10-25T23:10:00Z' },
+      { ...conversation, id: '01995a3c-0000-7000-8000-000000000002', title: 'Yesterday in Madrid', lastMessageAt: '2026-10-24T22:30:00Z' },
+      { ...conversation, id: '01995a3c-0000-7000-8000-000000000003', title: 'Earlier in Madrid', lastMessageAt: '2026-10-24T21:30:00Z' },
+    ])
+    mount('/chat/new', 'Europe/Madrid')
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Today' }).textContent).toContain('Today in Madrid'))
+    expect(screen.getByRole('region', { name: 'Yesterday' }).textContent).toContain('Yesterday in Madrid')
+    expect(screen.getByRole('region', { name: 'Earlier' }).textContent).toContain('Earlier in Madrid')
+  })
+
+  it('moves an older conversation to Today when a new message arrives', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-19T12:00:00Z'))
+    mount()
+    const socket = await connected()
+    expect(screen.getByRole('region', { name: 'Yesterday' })).toBeTruthy()
+    socket.receive({ type: 'snapshot', ...conversation, lastMessageAt: '2026-09-19T11:59:00Z' })
+    expect(await screen.findByRole('region', { name: 'Today' })).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Yesterday' })).toBeNull()
+  })
+
+  it('offers starter prompts without sending or creating a conversation', async () => {
+    vi.mocked(chatApi.list).mockResolvedValue([])
+    mount('/chat/new')
+    expect(await screen.findByText('Your conversations will appear here.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'What needs my attention?' }))
+    const composer = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
+    expect(composer.value).toBe('What needs my attention?')
+    expect(document.activeElement).toBe(composer)
+    expect(chatApi.create).not.toHaveBeenCalled()
+    expect(chatApi.send).not.toHaveBeenCalled()
+    expect(screen.queryByText(/last reply/)).toBeNull()
+  })
+
+  it('finds an unnamed WhatsApp conversation by its displayed name', async () => {
+    vi.mocked(chatApi.list).mockResolvedValue([{ ...conversation, title: null, source: 'whatsapp', userName: 'Alex', pinned: true }])
+    mount('/chat/new')
+    expect(await screen.findByRole('link', { name: /Alex/ })).toBeTruthy()
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'alex' } })
+    expect(screen.getByRole('link', { name: /Alex/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Unpin Alex' })).toBeTruthy()
+  })
+
+  it('moves Today to Yesterday when the account calendar passes midnight', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-18T21:59:50Z'))
+    mount('/chat/new', 'Europe/Madrid')
+    await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+    expect(screen.getByRole('region', { name: 'Today' })).toBeTruthy()
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+    expect(screen.getByRole('region', { name: 'Yesterday' })).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Today' })).toBeNull()
+  })
+
   it('keeps conversations in date order after a live snapshot', async () => {
     vi.mocked(chatApi.list).mockResolvedValue([
       conversation,
-      { ...conversation, id: '01995a3c-0000-7000-8000-000000000002', title: 'Previous day', createdAt: '2026-09-17T16:00:00Z' },
+      { ...conversation, id: '01995a3c-0000-7000-8000-000000000002', title: 'Previous day', createdAt: '2026-09-17T16:00:00Z', lastMessageAt: '2026-09-17T16:00:00Z' },
     ])
     mount()
     const socket = await connected()
