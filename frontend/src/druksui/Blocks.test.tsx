@@ -24,7 +24,7 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 beforeEach(() => {
-  callOperation.mockResolvedValue()
+  callOperation.mockResolvedValue(undefined)
 })
 
 const PAGES: PageEntry[] = [
@@ -72,7 +72,13 @@ describe('the display core', () => {
     const { container } = renderBlocks([
       { block: 'text', text: 'a jotted observation' },
       { block: 'markdown', text: '**bold gist**' },
-      { block: 'callout', tone: 'warning', title: 'Stale', text: 'No answer for 2 days.' },
+      {
+        block: 'callout',
+        tone: 'warning',
+        title: 'Stale',
+        text: 'No answer for 2 days.',
+        controls: [],
+      },
       { block: 'divider' },
     ])
 
@@ -129,6 +135,33 @@ describe('the display core', () => {
     expect(screen.getByText('No notes yet')).toBeTruthy()
     expect(screen.getByText('Write a note').getAttribute('href')).toBe('/field_notes')
   })
+
+  it('renders a callout with its next-step control', () => {
+    renderBlocks([
+      {
+        block: 'callout',
+        tone: 'info',
+        title: 'Connect the Gmail app first',
+        text: 'Paste the Gmail OAuth client.',
+        controls: [
+          {
+            block: 'link',
+            label: 'Settings → Connections → Services',
+            page: '',
+            arguments: {},
+            url: '/settings/connections?tab=services',
+            subject: null,
+          },
+        ],
+      },
+    ])
+
+    expect(screen.getByText('Connect the Gmail app first')).toBeTruthy()
+    const services = screen.getByRole('link', { name: 'Settings → Connections → Services' })
+    expect(services.getAttribute('href')).toBe('/settings/connections?tab=services')
+    expect(services.getAttribute('target')).toBeNull()
+    expect(services.getAttribute('aria-label')).toBeNull()
+  })
 })
 
 describe('links', () => {
@@ -145,9 +178,10 @@ describe('links', () => {
       { block: 'link', label: 'Status', page: '', arguments: {}, url: 'https://example.com', subject: null },
     ])
 
-    const link = screen.getByText('Status')
+    const link = screen.getByRole('link', { name: 'Status (opens in a new tab)' })
     expect(link.getAttribute('href')).toBe('https://example.com')
     expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('title')).toBe('Opens in a new tab')
   })
 
   it('shows a link to an undeclared page as broken', () => {

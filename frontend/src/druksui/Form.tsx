@@ -20,6 +20,7 @@ export function Form({
   description,
   fields,
   action,
+  extraActions = [],
   submit = 'button',
   layout = 'stack',
 }: {
@@ -27,12 +28,13 @@ export function Form({
   description: string
   fields: Field[]
   action: Action
+  extraActions?: Action[]
   submit?: 'button' | 'change'
   layout?: 'stack' | 'prose' | 'row'
 }) {
   const fieldState = useFieldState(fields)
   const live = submit === 'change'
-  const run = useAction(action, fields, live ? undefined : fieldState.clear)
+  const run = useAction(fields, live ? undefined : fieldState.clear)
   // An edit since the last send: a blur with none sends nothing.
   const edited = useRef(false)
   const immediate = new Set(
@@ -41,9 +43,9 @@ export function Form({
       .map((field) => field.name),
   )
 
-  function commit(values: Payload) {
+  function commit(next: Action, values: Payload) {
     edited.current = false
-    void run.call(values)
+    void run.call(next, values)
   }
 
   return (
@@ -52,7 +54,7 @@ export function Form({
       onSubmit={(event) => {
         event.preventDefault()
         if (live) return
-        void run.call(fieldState.values)
+        void run.call(action, fieldState.values)
       }}
     >
       {title && <h3 className="dui-block-title">{title}</h3>}
@@ -65,12 +67,12 @@ export function Form({
         onChange={(name, value) => {
           fieldState.change(name, value)
           edited.current = true
-          if (live && immediate.has(name)) commit({ ...fieldState.values, [name]: value })
+          if (live && immediate.has(name)) commit(action, { ...fieldState.values, [name]: value })
         }}
         onBlur={
           live
             ? () => {
-                if (edited.current) commit(fieldState.values)
+                if (edited.current) commit(action, fieldState.values)
               }
             : undefined
         }
@@ -82,17 +84,31 @@ export function Form({
       )}
       {live ? null : (
         <div className="dui-form-submit">
-          {run.confirming ? (
-            <Confirm action={action} run={run} />
+          {run.confirming && run.asked ? (
+            <Confirm action={run.asked} run={run} />
           ) : (
-            <button
-              type="submit"
-              className={`dui-action dui-action-${action.tone}`}
-              disabled={run.blocked}
-              aria-busy={run.pending}
-            >
-              {action.label}
-            </button>
+            <>
+              <button
+                type="submit"
+                className={`dui-action dui-action-${action.tone}`}
+                disabled={run.blocked}
+                aria-busy={run.pending}
+              >
+                {action.label}
+              </button>
+              {extraActions.map((extra) => (
+                <button
+                  key={`${extra.operation}:${extra.label}`}
+                  type="button"
+                  className={`dui-action dui-action-${extra.tone}`}
+                  disabled={run.blocked}
+                  aria-busy={run.pending}
+                  onClick={() => void run.call(extra, fieldState.values)}
+                >
+                  {extra.label}
+                </button>
+              ))}
+            </>
           )}
         </div>
       )}
@@ -103,8 +119,22 @@ export function Form({
   )
 }
 
+function handedOffUrl(result: unknown): string | null {
+  if (!result || typeof result !== 'object' || !('url' in result)) return null
+  const url = Reflect.get(result, 'url')
+  return typeof url === 'string' && /^https?:\/\//.test(url) ? url : null
+}
+
 /** A control that calls one of the app's operations on its own. */
-export function ActionButton({ action }: { action: Action }) {
+export function ActionButton({
+  action,
+  values = {},
+  disabled = false,
+}: {
+  action: Action
+  values?: Record<string, unknown>
+  disabled?: boolean
+}) {
   const { operations } = useContext(PagesContext)
   const known = operations.some((one) => one.id === action.operation)
   if (!known) {
@@ -115,23 +145,31 @@ export function ActionButton({ action }: { action: Action }) {
     )
   }
   if (action.fields.length) return <FieldAction action={action} />
-  return <ImmediateAction action={action} />
+  return <ImmediateAction action={action} values={values} disabled={disabled} />
 }
 
-function ImmediateAction({ action }: { action: Action }) {
-  const run = useAction(action)
+function ImmediateAction({
+  action,
+  values,
+  disabled,
+}: {
+  action: Action
+  values: Record<string, unknown>
+  disabled: boolean
+}) {
+  const run = useAction()
 
   return (
     <>
       {run.confirming ? (
-        <Confirm action={action} run={run} />
+        <Confirm action={run.asked ?? action} run={run} />
       ) : (
         <button
           type="button"
           className={`dui-action dui-action-${action.tone}`}
-          disabled={run.blocked}
+          disabled={run.blocked || disabled}
           aria-busy={run.pending}
-          onClick={() => void run.call({})}
+          onClick={() => void run.call(action, values)}
         >
           {action.label}
         </button>
@@ -155,7 +193,7 @@ function FieldAction({ action }: { action: Action }) {
   const titleId = useId()
   const wasOpen = useRef(false)
   const fieldState = useFieldState(action.fields)
-  const run = useAction(action, action.fields, () => {
+  const run = useAction(action.fields, () => {
     fieldState.clear()
     setOpen(false)
   })
@@ -239,7 +277,7 @@ function FieldAction({ action }: { action: Action }) {
           className="dui-form"
           onSubmit={(event) => {
             event.preventDefault()
-            void run.call(fieldState.values)
+            void run.call(action, fieldState.values)
           }}
         >
           <Fields
@@ -325,15 +363,16 @@ function Confirm({ action, run }: { action: Action; run: ReturnType<typeof useAc
 
 // Everything an action does once someone presses it: ask first when it says to,
 // send the one payload, keep a second press out while it runs, and then stay,
-// refresh, or navigate.
+// refresh, or navigate. A form shares one run; `call` takes the action.
 // eslint-disable-next-line react-refresh/only-export-components -- drop zones run the same action hook
-export function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
+export function useAction(fields: Field[] = [], clear?: () => void) {
   const fieldNames = fields.map((one) => one.name)
   const secretNames = fields.filter((one) => one.field === 'secret').map((one) => one.name)
   const [pending, setPending] = useState(false)
   const [saved, setSaved] = useState(false)
   const [problem, setProblem] = useState('')
   const [note, setNote] = useFlashNote<string>()
+  const [current, setCurrent] = useState<Action | null>(null)
   // The payload an action is holding while it asks; null when it is not asking.
   const [asked, setAsked] = useState<Payload | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
@@ -344,32 +383,34 @@ export function useAction(action: Action, fields: Field[] = [], clear?: () => vo
   const [, navigate] = useLocation()
   const location = rawPath.slice(base.length)
 
-  async function call(values: Payload) {
+  async function call(next: Action, values: Payload) {
     if (pending || saved) return
-    if (action.confirm) {
+    setCurrent(next)
+    if (next.confirm) {
       setAsked(values)
       return
     }
-    await perform(values)
+    await perform(next, values)
   }
 
   async function confirm() {
-    if (pending || saved) return
+    if (pending || saved || !current) return
     const values = asked ?? {}
     setAsked(null)
-    await perform(values)
+    await perform(current, values)
   }
 
-  async function perform(values: Payload) {
-    const target = operations.find((one) => one.id === action.operation)
+  async function perform(next: Action, values: Payload) {
+    const target = operations.find((one) => one.id === next.operation)
     if (!target) {
-      setProblem(`this app declares no operation named ${action.operation}`)
+      setProblem(`this app declares no operation named ${next.operation}`)
       return
     }
     setPending(true)
     setSaved(false)
     setProblem('')
     setFieldErrors({})
+    let result: unknown
     try {
       const { payload, failures } = await store(values)
       if (Object.keys(failures).length) {
@@ -377,13 +418,13 @@ export function useAction(action: Action, fields: Field[] = [], clear?: () => vo
         setPending(false)
         return
       }
-      const { path, body, missing } = address(target, { ...action.arguments, ...payload })
+      const { path, body, missing } = address(target, { ...next.arguments, ...payload })
       if (missing.length) {
         setProblem(`this action carries no value for ${missing.join(', ')}`)
         setPending(false)
         return
       }
-      await api.callOperation(target.method, path, body)
+      result = await api.callOperation(target.method, path, body)
     } catch (error) {
       // A validation error names where it came from; the ones naming a field
       // this form shows go to that field, and everything else is the form's.
@@ -396,9 +437,9 @@ export function useAction(action: Action, fields: Field[] = [], clear?: () => vo
     setSaved(true)
     setPending(false)
     try {
-      await finish()
+      await finish(next, result)
       clear?.()
-      setNote(`${action.label} — done`)
+      setNote(`${next.label} — done`)
       setSaved(false)
     } catch (error) {
       setProblem(`saved, but the page did not refresh: ${message(error)}`)
@@ -439,21 +480,28 @@ export function useAction(action: Action, fields: Field[] = [], clear?: () => vo
     return { payload, failures }
   }
 
-  async function finish() {
-    if (action.link) {
+  // An operation may answer {url} with an absolute http(s) string. That is a
+  // hand-off declared on Action, not a column named url on a returned row.
+  async function finish(next: Action, result?: unknown) {
+    const outbound = handedOffUrl(result)
+    if (outbound) {
+      window.location.assign(outbound)
+      return
+    }
+    if (next.link) {
       // An app page moves inside the shell; anywhere else is the browser's own
       // navigation, which pushState refuses across origins.
-      const href = destination(action.link, pages)
-      if (!href) throw new Error(`this action links to no page named ${action.link.page}`)
-      if (action.link.url) window.location.assign(href)
+      const href = destination(next.link, pages)
+      if (!href) throw new Error(`this action links to no page named ${next.link.page}`)
+      if (next.link.url) window.location.assign(href)
       else navigate(href)
       return
     }
-    if (action.refresh === 'page') {
+    if (next.refresh === 'page') {
       await queryClient.invalidateQueries({ queryKey: ['page', app] })
       await queryClient.invalidateQueries({ queryKey: ['gate'] })
     }
-    if (action.refresh === 'region') await reregion()
+    if (next.refresh === 'region') await reregion()
   }
 
   // A region refresh reads the page again and swaps in only the region the
@@ -478,6 +526,7 @@ export function useAction(action: Action, fields: Field[] = [], clear?: () => vo
     confirm,
     back: () => setAsked(null),
     confirming: asked !== null,
+    asked: current,
   }
 }
 

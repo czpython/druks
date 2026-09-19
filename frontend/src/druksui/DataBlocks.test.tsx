@@ -1,11 +1,18 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
 
-import type { Block, PageEntry, Value } from '../api/types'
+import { api } from '../api/client'
+import type { Action, Block, Operation, PageEntry, Value } from '../api/types'
 import { Blocks } from './Blocks'
 import { PagesContext } from './pages'
+
+vi.mock('../api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/client')>()),
+  api: { callOperation: vi.fn(), readPage: vi.fn(), upload: vi.fn() },
+}))
 
 afterEach(cleanup)
 
@@ -20,14 +27,17 @@ const PAGES: PageEntry[] = [
   },
 ]
 
-function renderBlocks(blocks: Block[]) {
+function renderBlocks(blocks: Block[], operations: Operation[] = []) {
   const { hook } = memoryLocation({ path: '/field_notes' })
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <Router hook={hook}>
-      <PagesContext.Provider value={{ app: 'field_notes', pages: PAGES, operations: [] }}>
-        <Blocks blocks={blocks} />
-      </PagesContext.Provider>
-    </Router>,
+    <QueryClientProvider client={queryClient}>
+      <Router hook={hook}>
+        <PagesContext.Provider value={{ app: 'field_notes', pages: PAGES, operations }}>
+          <Blocks blocks={blocks} />
+        </PagesContext.Provider>
+      </Router>
+    </QueryClientProvider>,
   )
 }
 
@@ -92,6 +102,121 @@ describe('values', () => {
     ])
 
     expect(screen.getByText('peer-7').getAttribute('href')).toBe('/field_notes/notes/7')
+  })
+
+  it('follows a status out to the thing it names', () => {
+    renderBlocks([
+      {
+        block: 'facts',
+        title: '',
+        facts: [
+          {
+            label: 'Site',
+            value: {
+              value: 'status',
+              label: 'live',
+              tone: 'success',
+              link: {
+                block: 'link',
+                label: 'live',
+                page: '',
+                arguments: {},
+                url: 'https://ada.example',
+                subject: null,
+              },
+            },
+          },
+        ],
+      },
+    ])
+
+    const live = screen.getByRole('link', { name: 'live (opens in a new tab)' })
+    expect(live.getAttribute('href')).toBe('https://ada.example')
+    expect(live.className).toContain('dui-status-success')
+    expect(live.getAttribute('title')).toBe('Opens in a new tab')
+  })
+
+  it('holds actions in a table cell', () => {
+    const action: Action = {
+      block: 'action',
+      label: 'Post',
+      operation: 'write_note',
+      arguments: {},
+      fields: [],
+      tone: 'primary',
+      confirm: '',
+      refresh: 'page',
+      link: null,
+    }
+    renderBlocks(
+      [
+        {
+          block: 'table',
+          title: '',
+          columns: [
+            { label: 'Peer', align: 'start' },
+            { label: 'Do', align: 'start' },
+          ],
+          rows: [
+            {
+              cells: [TEXT, { value: 'controls', controls: [action] }],
+              detail: '',
+            },
+          ],
+          emptyText: '',
+        },
+      ],
+      [{ id: 'write_note', method: 'POST', path: '/api/field_notes/notes' }],
+    )
+
+    expect(screen.getByRole('button', { name: 'Post' })).toBeTruthy()
+  })
+
+  it('sends the selected row keys with a table action', async () => {
+    const callOperation = vi.mocked(api.callOperation)
+    callOperation.mockResolvedValue(undefined)
+    const action: Action = {
+      block: 'action',
+      label: 'Park',
+      operation: 'write_note',
+      arguments: {},
+      fields: [],
+      tone: 'danger',
+      confirm: '',
+      refresh: 'none',
+      link: null,
+    }
+    renderBlocks(
+      [
+        {
+          block: 'table',
+          title: 'Peers',
+          columns: [{ label: 'Peer', align: 'start' }],
+          rows: [
+            { cells: [TEXT], detail: '', key: '7' },
+            {
+              cells: [{ value: 'text', text: 'peer-9', description: '', link: null }],
+              detail: '',
+              key: '9',
+            },
+          ],
+          emptyText: '',
+          select: 'peer_ids',
+          actions: [action],
+        },
+      ],
+      [{ id: 'write_note', method: 'POST', path: '/api/field_notes/notes' }],
+    )
+
+    const park = screen.getByRole('button', { name: 'Park' })
+    expect((park as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select peer-7' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select peer-9' }))
+    expect((park as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(park)
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    expect(callOperation.mock.calls[0]?.[2]).toEqual({ peer_ids: ['7', '9'] })
   })
 
   it('follows a subject link out of a list item', () => {

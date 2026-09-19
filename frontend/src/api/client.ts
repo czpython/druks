@@ -218,7 +218,7 @@ export const subjectApi = {
     `/api/${app}/transcripts/${callId}/files/${encodeURIComponent(name)}`,
 }
 
-async function sendOperation(method: string, path: string, body: unknown): Promise<void> {
+async function sendOperation(method: string, path: string, body: unknown): Promise<unknown> {
   const response = await fetch(path, {
     method,
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -227,6 +227,13 @@ async function sendOperation(method: string, path: string, body: unknown): Promi
   })
   if (!response.ok) {
     await throwApiError(response, path)
+  }
+  const text = await response.text()
+  if (!text) return undefined
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
   }
 }
 
@@ -252,9 +259,9 @@ export const api = {
   // the exact question it answers; a run that re-parked rejects the stale one.
   getGate: (run: string) => getJSON<Gate>(`/api/gates/${run}`),
   // An action's own call. The shell fills the path from the payload and sends
-  // what is left as the body; the platform route keeps the identity gate. The
-  // answer is thrown away, so an operation that returns no content is a success
-  // like any other.
+  // what is left as the body; the platform route keeps the identity gate. An
+  // operation that returns no content is a success like any other. A JSON
+  // ``{url}`` that is http(s) is a hand-off: the shell navigates there.
   callOperation: (method: string, path: string, body: unknown) =>
     sendOperation(method, path, body),
   // An UploadField's file, stored under the app whose page holds the form. The

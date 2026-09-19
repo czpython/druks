@@ -39,7 +39,7 @@ const OPERATIONS: Operation[] = [
 ]
 
 beforeEach(() => {
-  callOperation.mockResolvedValue()
+  callOperation.mockResolvedValue(undefined)
 })
 afterEach(() => {
   cleanup()
@@ -124,7 +124,11 @@ function action(overrides: Partial<Action> = {}): Action {
 function form(
   fields: Field[],
   sends = action(),
-  extras: { submit?: 'button' | 'change'; layout?: 'stack' | 'prose' | 'row' } = {},
+  extras: {
+    submit?: 'button' | 'change'
+    layout?: 'stack' | 'prose' | 'row'
+    extraActions?: Action[]
+  } = {},
 ): Extract<Block, { block: 'form' }> {
   return {
     block: 'form',
@@ -357,7 +361,7 @@ describe('submitting a form', () => {
     let release = () => {}
     callOperation.mockReturnValueOnce(
       new Promise((resolve) => {
-        release = () => resolve()
+        release = () => resolve(undefined)
       }),
     )
     renderBlocks([action({ label: 'Write a note', fields: [BODY], refresh: 'none' })])
@@ -386,6 +390,81 @@ describe('submitting a form', () => {
       source: 'dashboard',
       body: 'Fan noise.',
     })
+  })
+
+  it('sends the same fields from an extra form action', async () => {
+    renderBlocks([
+      form([BODY], action({ refresh: 'none' }), {
+        extraActions: [
+          action({
+            label: 'Clear the gist',
+            operation: 'clear_gist',
+            arguments: { note_id: 7 },
+            refresh: 'none',
+          }),
+        ],
+      }),
+    ])
+
+    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'Fan noise.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the gist' }))
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes/7/gist', {
+      body: 'Fan noise.',
+    })
+    await waitFor(() => expect(screen.getByText('Clear the gist — done')).toBeTruthy())
+  })
+
+  it('clears a field error from an extra action when Save then succeeds', async () => {
+    callOperation.mockRejectedValueOnce(
+      new ApiError('validation', 422, [{ loc: ['body', 'body'], msg: 'Field required' }]),
+    )
+    renderBlocks([
+      form([BODY], action({ refresh: 'none' }), {
+        extraActions: [
+          action({
+            label: 'Clear the gist',
+            operation: 'clear_gist',
+            arguments: { note_id: 7 },
+            refresh: 'none',
+          }),
+        ],
+      }),
+    ])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the gist' }))
+    await waitFor(() => expect(screen.getByText('Field required')).toBeTruthy())
+
+    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'Fan noise.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(screen.queryByText('Field required')).toBeNull())
+    expect(screen.getByText('Save — done')).toBeTruthy()
+  })
+
+  it('does not send a second form action while the first is pending', async () => {
+    let release = () => {}
+    callOperation.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = () => resolve(undefined)
+      }),
+    )
+    renderBlocks([
+      form([BODY], action({ refresh: 'none' }), {
+        extraActions: [action({ label: 'Clear the gist', operation: 'clear_gist', refresh: 'none' })],
+      }),
+    ])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Clear the gist' }).hasAttribute('disabled')).toBe(
+        true,
+      ),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the gist' }))
+    release()
+    await waitFor(() => expect(callOperation).toHaveBeenCalledTimes(1))
   })
 
   it('sends a live form when a text field blurs, with no Save button', async () => {
@@ -568,7 +647,7 @@ describe('submitting a form', () => {
     let release = () => {}
     callOperation.mockReturnValueOnce(
       new Promise((resolve) => {
-        release = () => resolve()
+        release = () => resolve(undefined)
       }),
     )
     renderBlocks([form([BODY], action({ refresh: 'none' }))])
@@ -785,6 +864,17 @@ describe('what an action does next', () => {
     fireEvent.click(screen.getByText('Save'))
 
     await waitFor(() => expect(assign).toHaveBeenCalledWith('https://example.com'))
+  })
+
+  it('leaves the browser to navigate to a url the operation answers with', async () => {
+    const assign = vi.fn()
+    vi.stubGlobal('location', { ...window.location, assign })
+    callOperation.mockResolvedValueOnce({ url: 'https://example.com/compose' })
+    renderBlocks([form([BODY], action({ refresh: 'none' }))])
+
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('https://example.com/compose'))
   })
 
   it('says so rather than calling a path it cannot fill', async () => {

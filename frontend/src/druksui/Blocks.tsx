@@ -1,10 +1,19 @@
 import { createContext, useContext, useEffect, useId, useRef, useSyncExternalStore } from 'react'
 import { Link as RouteLink } from 'wouter'
 
-import type { Action, Block, CardBlock, Link } from '../api/types'
+import type { Action, Block, CardBlock } from '../api/types'
 import { Markdown } from '../components/Markdown'
 import { GateControls } from './GateControls'
-import { Chart, Facts, ImageGallery, LinkControl, List, Metrics, Table } from './DataBlocks'
+import {
+  Chart,
+  Controls,
+  Facts,
+  ImageGallery,
+  LinkControl,
+  List,
+  Metrics,
+  Table,
+} from './DataBlocks'
 import { ActionButton, Form, useAction } from './Form'
 import { Files, Image, Progress, Timeline } from './RunBlocks'
 import { hrefForLink, PagesContext, RegionContext } from './pages'
@@ -104,6 +113,7 @@ function BlockContent({ block }: { block: Block }) {
           description={block.description}
           fields={block.fields}
           action={block.action}
+          extraActions={block.extraActions ?? []}
           submit={block.submit ?? 'button'}
           layout={block.layout ?? 'stack'}
         />
@@ -152,6 +162,8 @@ function BlockContent({ block }: { block: Block }) {
           columns={block.columns}
           rows={block.rows}
           emptyText={block.emptyText}
+          select={block.select ?? ''}
+          actions={block.actions ?? []}
         />
       )
     case 'list':
@@ -179,6 +191,7 @@ function BlockContent({ block }: { block: Block }) {
         <div className={`dui-callout dui-callout-${block.tone}`} role="note">
           {block.title && <div className="dui-callout-title">{block.title}</div>}
           <div className="dui-callout-text">{block.text}</div>
+          <Controls controls={block.controls ?? []} />
         </div>
       )
     case 'empty_state':
@@ -363,7 +376,7 @@ function CardsDrop({
   block: Extract<Block, { block: 'cards' }>
   drop: Action
 }) {
-  const run = useAction(drop)
+  const run = useAction()
   const zone = useId()
   const drag = useCardsDrag()
   const hovering = drag?.over === zone
@@ -403,7 +416,7 @@ function CardsDrop({
             ...cardsDrag,
             over: zone,
             accept: (payload) => {
-              void run.call(payload)
+              void run.call(drop, payload)
             },
           })
         }}
@@ -427,17 +440,4 @@ function CardsDrop({
   )
 }
 
-export function Controls({ controls }: { controls: (Action | Link)[] }) {
-  if (controls.length === 0) return null
-  return (
-    <div className="dui-links">
-      {controls.map((control, index) =>
-        control.block === 'action' ? (
-          <ActionButton key={index} action={control} />
-        ) : (
-          <LinkControl key={index} link={control} />
-        ),
-      )}
-    </div>
-  )
-}
+export { Controls }

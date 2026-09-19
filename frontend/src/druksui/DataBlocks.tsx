@@ -1,7 +1,7 @@
-import { useContext, useState } from 'react'
-import { Link as RouteLink } from 'wouter'
+import { useEffect, useId, useRef, useState } from 'react'
 
 import type {
+  Action,
   ChartSeries,
   Fact,
   ImageBlock,
@@ -12,8 +12,9 @@ import type {
   Value,
 } from '../api/types'
 import { RelTime } from '../components/RelTime'
+import { ActionButton } from './Form'
+import { LinkControl } from './LinkControl'
 import { Image, Status } from './RunBlocks'
-import { hrefForLink, PagesContext } from './pages'
 
 // The plot's own coordinates; CSS gives it its real size.
 const PLOT_WIDTH = 300
@@ -42,6 +43,8 @@ export function Datum({ value }: { value: Value }) {
           <RelTime iso={value.when} />
         </span>
       )
+    case 'controls':
+      return <Controls controls={value.controls} />
     default:
       return (
         <span className="dui-unknown mono" role="alert">
@@ -72,31 +75,22 @@ function TextDatum({
   return name
 }
 
-/** A control that navigates. It is a block of its own, or the link on a value,
-    which shows the value's own text. */
-export function LinkControl({ link, label = link.label }: { link: Link; label?: string }) {
-  const { app, pages } = useContext(PagesContext)
-  const href = hrefForLink(link, app, pages)
-  if (link.url) {
-    return (
-      <a className="dui-link" href={href} target="_blank" rel="noreferrer">
-        {label}
-      </a>
-    )
-  }
-  if (href) {
-    return (
-      <RouteLink href={href} className="dui-link">
-        {label}
-      </RouteLink>
-    )
-  }
+export function Controls({ controls }: { controls: (Action | Link)[] }) {
+  if (controls.length === 0) return null
   return (
-    <span className="dui-link dui-link-broken" title={`no page named ${link.page}`}>
-      {label}
-    </span>
+    <div className="dui-links">
+      {controls.map((control, index) =>
+        control.block === 'action' ? (
+          <ActionButton key={index} action={control} />
+        ) : (
+          <LinkControl key={index} link={control} />
+        ),
+      )}
+    </div>
   )
 }
+
+export { LinkControl }
 
 export function Chart({
   kind,
@@ -292,12 +286,28 @@ export function Table({
   columns,
   rows,
   emptyText,
+  select = '',
+  actions = [],
 }: {
   title: string
   columns: TableColumn[]
   rows: TableRow[]
   emptyText: string
+  select?: string
+  actions?: Action[]
 }) {
+  const titleId = useId()
+  const selectable = Boolean(select)
+  const keys = rows.map((row) => row.key ?? '').filter(Boolean)
+  const [picked, setPicked] = useState<string[]>([])
+  const chosen = picked.filter((key) => keys.includes(key))
+  const allBox = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!allBox.current) return
+    allBox.current.indeterminate = chosen.length > 0 && chosen.length < keys.length
+  }, [chosen.length, keys.length])
+
   if (rows.length === 0) {
     // Nothing to show and nothing to say about it: a heading over an empty box
     // is worse than no block at all.
@@ -309,15 +319,51 @@ export function Table({
       </div>
     )
   }
+
+  function toggle(key: string, on: boolean) {
+    setPicked((current) => {
+      if (on) return current.includes(key) ? current : [...current, key]
+      return current.filter((one) => one !== key)
+    })
+  }
+
   return (
     <div className="dui-table-block">
+      {selectable && (
+        <div className="dui-table-head">
+          <div className="dui-links">
+            {actions.map((action, index) => (
+              <ActionButton
+                key={index}
+                action={action}
+                values={{ [select]: chosen }}
+                disabled={chosen.length === 0}
+              />
+            ))}
+          </div>
+        </div>
+      )}
       <div className="dui-table-scroll">
-        <table className="dui-table">
-          {/* The title names the table itself, so a reader moving between
-              tables hears which one it is. */}
-          {title && <caption className="dui-block-title dui-table-caption">{title}</caption>}
+        <table className="dui-table" aria-labelledby={title ? titleId : undefined}>
+          {title && (
+            <caption className="dui-block-title dui-table-caption" id={titleId}>
+              {title}
+            </caption>
+          )}
           <thead>
             <tr>
+              {selectable && (
+                <th className="dui-table-select" scope="col">
+                  <input
+                    ref={allBox}
+                    className="dui-checkbox"
+                    type="checkbox"
+                    checked={keys.length > 0 && chosen.length === keys.length}
+                    onChange={(event) => setPicked(event.target.checked ? keys : [])}
+                    aria-label="Select all rows"
+                  />
+                </th>
+              )}
               {columns.map((column) => (
                 <th key={column.label} scope="col" data-align={column.align}>
                   {column.label}
@@ -327,7 +373,14 @@ export function Table({
           </thead>
           <tbody>
             {rows.map((row, index) => (
-              <Row key={index} row={row} columns={columns} />
+              <Row
+                key={row.key || index}
+                row={row}
+                columns={columns}
+                selectable={selectable}
+                selected={Boolean(row.key && chosen.includes(row.key))}
+                onSelect={toggle}
+              />
             ))}
           </tbody>
         </table>
@@ -336,11 +389,42 @@ export function Table({
   )
 }
 
-function Row({ row, columns }: { row: TableRow; columns: TableColumn[] }) {
+function rowName(row: TableRow): string {
+  const first = row.cells[0]
+  if (first?.value === 'text') return first.text
+  if (first?.value === 'status') return first.label
+  return row.key || 'row'
+}
+
+function Row({
+  row,
+  columns,
+  selectable,
+  selected,
+  onSelect,
+}: {
+  row: TableRow
+  columns: TableColumn[]
+  selectable: boolean
+  selected: boolean
+  onSelect: (key: string, on: boolean) => void
+}) {
   const [open, setOpen] = useState(false)
+  const span = columns.length + (selectable ? 1 : 0)
   return (
     <>
-      <tr>
+      <tr data-selected={selected ? 'true' : undefined}>
+        {selectable && (
+          <td className="dui-table-select">
+            <input
+              className="dui-checkbox"
+              type="checkbox"
+              checked={selected}
+              onChange={(event) => onSelect(row.key, event.target.checked)}
+              aria-label={`Select ${rowName(row)}`}
+            />
+          </td>
+        )}
         {row.cells.map((cell, place) =>
           // The first cell names its row, the way a column header names its column.
           place === 0 ? (
@@ -366,7 +450,7 @@ function Row({ row, columns }: { row: TableRow; columns: TableColumn[] }) {
       </tr>
       {row.detail && open && (
         <tr className="dui-row-detail">
-          <td colSpan={columns.length}>{row.detail}</td>
+          <td colSpan={span}>{row.detail}</td>
         </tr>
       )}
     </>

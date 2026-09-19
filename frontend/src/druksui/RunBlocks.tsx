@@ -2,11 +2,16 @@ import { useState } from 'react'
 
 import type { FileSummary, ProgressStep, StatusValue, TimelineItem } from '../api/types'
 import { RelTime } from '../components/RelTime'
+import { LinkControl } from './LinkControl'
 
 // How much of one call a page block reads. A page can hold several.
 
 export function Status({ status }: { status: StatusValue }) {
-  return <span className={`dui-status dui-status-${status.tone}`}>{status.label}</span>
+  const className = `dui-status dui-status-${status.tone}`
+  if (status.link) {
+    return <LinkControl link={status.link} label={status.label} className={className} />
+  }
+  return <span className={className}>{status.label}</span>
 }
 
 export function Timeline({ title, items }: { title: string; items: TimelineItem[] }) {

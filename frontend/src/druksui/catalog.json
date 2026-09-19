@@ -192,6 +192,10 @@
         {
           "label": "Note",
           "align": "start"
+        },
+        {
+          "label": "Action",
+          "align": "start"
         }
       ],
       "rows": [
@@ -202,12 +206,43 @@
               "text": "one",
               "link": null,
               "description": "what this row is about"
+            },
+            {
+              "value": "controls",
+              "controls": [
+                {
+                  "block": "action",
+                  "label": "Write a note",
+                  "operation": "write_note",
+                  "arguments": {},
+                  "fields": [],
+                  "tone": "primary",
+                  "confirm": "",
+                  "refresh": "page",
+                  "link": null
+                }
+              ]
             }
           ],
-          "detail": "The scout could not reach the repository: HTTP 404."
+          "detail": "The scout could not reach the repository: HTTP 404.",
+          "key": "one"
         }
       ],
-      "emptyText": "No notes yet."
+      "emptyText": "No notes yet.",
+      "select": "note_ids",
+      "actions": [
+        {
+          "block": "action",
+          "label": "Write a note",
+          "operation": "write_note",
+          "arguments": {},
+          "fields": [],
+          "tone": "danger",
+          "confirm": "",
+          "refresh": "page",
+          "link": null
+        }
+      ]
     },
     {
       "block": "list",
