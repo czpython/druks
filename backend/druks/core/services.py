@@ -21,12 +21,8 @@ class Github(Service):
     # The Drukbox catalog name a box holds this identity's token under.
     secret_name = "github"
     description = (
-        "The GitHub App druks acts as — it receives webhooks, writes branches, "
-        "pull requests, and comments, and creates repositories from templates. "
-        "Create it from here, or paste an existing App's credentials from the "
-        "GitHub developer settings page. An App created before Administration "
-        "was on the manifest needs that permission added, then accepted on the "
-        "installation."
+        "The GitHub App druks acts as. Create it from here, or paste an existing "
+        "App's credentials from the GitHub developer settings page."
     )
     # What the created App is: the single operator identity documented in
     # docs/configuration.md — keep the two in step. The manifest flow adds the
