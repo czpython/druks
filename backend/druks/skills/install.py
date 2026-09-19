@@ -5,7 +5,9 @@ import tarfile
 from pathlib import Path
 from urllib.parse import urlparse
 
-from druks.core.apis.github import download_public_tarball
+from druks.core.apis.exceptions import GitHubAppNotInstalledError
+from druks.core.apis.github import download_public_tarball, get_github_client
+from druks.services.exceptions import ServiceNotConnectedError
 
 from .datastructures import CollectionContents, InstalledSkill
 
@@ -18,8 +20,12 @@ async def fetch_collection(
     ``SKILL.md`` frontmatter names it. ``reserved_names`` are skill names already
     installed (by other collections) — a clash rejects the whole install, since
     the flat skills dir and its VM projection share one global name namespace."""
-    owner, repo = _parse_github_repo(url)
-    archive = await download_public_tarball(owner, repo)
+    repo = _parse_github_repo(url)
+    try:
+        github = await get_github_client()
+        archive = await github.download_tarball(repo)
+    except (ServiceNotConnectedError, GitHubAppNotInstalledError):
+        archive = await download_public_tarball(repo)
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
         members = tar.getmembers()
         if not members:
@@ -41,7 +47,7 @@ async def fetch_collection(
                     content_hash=_hash_tree(target),
                 )
             )
-    return CollectionContents(name=f"{owner}/{repo}", skills=installed)
+    return CollectionContents(name=repo, skills=installed)
 
 
 def remove_files(path: str) -> None:
@@ -50,12 +56,12 @@ def remove_files(path: str) -> None:
         shutil.rmtree(skill_dir)
 
 
-def _parse_github_repo(url: str) -> tuple[str, str]:
+def _parse_github_repo(url: str) -> str:
     parsed = urlparse(url)
     parts = [part for part in parsed.path.split("/") if part]
     if parsed.netloc not in ("github.com", "www.github.com") or len(parts) < 2:
         raise ValueError(f"Not a GitHub repository URL: {url!r}")
-    return parts[0], parts[1].removesuffix(".git")
+    return f"{parts[0]}/{parts[1].removesuffix('.git')}"
 
 
 def _discover_skills(tar: tarfile.TarFile, root: str) -> list[tuple[str, str, str]]:
@@ -88,15 +94,14 @@ def _reject_name_clashes(discovered: list[tuple[str, str, str]], reserved_names:
 
 def _parse_frontmatter(text: str) -> dict[str, str]:
     lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}
     fields: dict[str, str] = {}
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break
-        key, separator, value = line.partition(":")
-        if separator:
-            fields[key.strip()] = value.strip().strip("'\"")
+    if lines and lines[0].strip() == "---":
+        for line in lines[1:]:
+            if line.strip() == "---":
+                break
+            key, separator, value = line.partition(":")
+            if separator:
+                fields[key.strip()] = value.strip().strip("'\"")
     return fields
 
 
@@ -121,7 +126,7 @@ def _extract_under_root(tar: tarfile.TarFile, member_root: str, target: Path) ->
             raise ValueError(f"Unsafe path in archive: {member.name}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         extracted = tar.extractfile(member)
-        if extracted is not None:
+        if extracted:
             destination.write_bytes(extracted.read())
 
 

@@ -660,7 +660,8 @@ select the account for a Linear or Jira build. See
 
 ## Skills
 
-The dashboard installs skill collections from GitHub repositories.
+The dashboard installs skill collections from GitHub repositories. A private
+repository needs the GitHub App installed on it.
 `DRUKS_SKILLS_DIR` selects the shared writable directory. Its default is
 `<DRUKS_DATA_DIR>/skills`. A call receives the enabled skills that it requests.
 If it requests none, it receives each enabled skill. A Software Factory build

@@ -2,8 +2,10 @@ import io
 import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.db import db_session
 from druks.skills import install as install_mod
 from druks.skills import routes as routes_mod
@@ -24,10 +26,17 @@ def _tarball(root: str, files: dict[str, bytes]) -> bytes:
 
 
 def _patch_download(monkeypatch, archive: bytes) -> None:
-    async def fake_download(owner, repo, ref=""):
+    async def fake_download(repo):
         return archive
 
     monkeypatch.setattr(install_mod, "download_public_tarball", fake_download)
+
+
+def _patch_github_client(monkeypatch, download_tarball) -> None:
+    async def fake_client():
+        return SimpleNamespace(download_tarball=download_tarball)
+
+    monkeypatch.setattr(install_mod, "get_github_client", fake_client)
 
 
 def _skill_md(name: str, description: str = "") -> bytes:
@@ -79,6 +88,28 @@ async def test_fetch_collection_root_skill_is_a_collection_of_one(tmp_path, monk
     assert (tmp_path / "solo" / "SKILL.md").read_bytes() == _skill_md("solo")
 
 
+async def test_fetch_collection_downloads_through_the_github_app(tmp_path, monkeypatch):
+    async def download_tarball(repo):
+        return _tarball("owner-repo-abc", {"SKILL.md": _skill_md("private")})
+
+    _patch_github_client(monkeypatch, download_tarball)
+    _patch_download(monkeypatch, _tarball("owner-repo-abc", {"SKILL.md": _skill_md("public")}))
+    contents = await _fetch("https://github.com/owner/repo", tmp_path)
+
+    assert [skill.name for skill in contents.skills] == ["private"]
+
+
+async def test_fetch_collection_is_anonymous_when_the_app_is_not_on_the_repo(tmp_path, monkeypatch):
+    async def download_tarball(repo):
+        raise GitHubAppNotInstalledError(repo)
+
+    _patch_github_client(monkeypatch, download_tarball)
+    _patch_download(monkeypatch, _tarball("owner-repo-abc", {"SKILL.md": _skill_md("public")}))
+    contents = await _fetch("https://github.com/owner/repo", tmp_path)
+
+    assert [skill.name for skill in contents.skills] == ["public"]
+
+
 async def test_fetch_collection_rejects_missing_skill_md(tmp_path, monkeypatch):
     _patch_download(monkeypatch, _tarball("owner-repo-abc", {"README.md": b"no skill"}))
     with pytest.raises(ValueError, match="SKILL.md"):
@@ -119,7 +150,9 @@ async def test_collection_create_get_cascade_delete(druks_db):
         await SkillCollection.get_for_source(db_session(), "https://github.com/o/r")
     ).id == collection.id
     assert await Skill.installed_names(db_session()) == {"alpha", "beta"}
-    assert [c.name for c in await SkillCollection.list_all(db_session())] == ["o/r"]
+    assert [collection.name for collection in await SkillCollection.list_all(db_session())] == [
+        "o/r"
+    ]
 
     assert [skill.name for skill in await Skill.list_delivered(db_session(), ())] == [
         "alpha",
@@ -171,17 +204,15 @@ def test_collection_routes_install_list_remove(tmp_path, monkeypatch):
         assert "updatedAt" in skill
         collection_id = body["id"]
 
-        # Disable the skill — flips enabled, kept in the collection.
         toggled = client.patch(f"/api/skills/{collection_id}/skills/alpha", json={"enabled": False})
         assert toggled.status_code == 200
         assert toggled.json()["enabled"] is False
         listed_skill = client.get("/api/skills").json()[0]["skills"][0]
         assert listed_skill["enabled"] is False
 
-        # Re-installing the same source is rejected — remove first.
         assert client.post("/api/skills", json={"url": "https://github.com/o/r"}).status_code == 409
 
-        assert [c["name"] for c in client.get("/api/skills").json()] == ["o/r"]
+        assert [collection["name"] for collection in client.get("/api/skills").json()] == ["o/r"]
 
         assert client.delete(f"/api/skills/{collection_id}").status_code == 204
         assert client.get("/api/skills").json() == []
