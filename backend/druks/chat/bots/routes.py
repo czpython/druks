@@ -3,16 +3,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path
 
 from druks.accounts.dependencies import current_account, current_session_account
-from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
+from druks.apps.loader import get_app
+from druks.chat.enums import BotAccess
 from druks.chat.models import Conversation
-from druks.secrets.enums import SecretKind
-from druks.secrets.models import VaultSecret
 
 from .constants import ADMIN_CODE_TTL_SECONDS
 from .schemas import AdminCodeResponse, ResumeConversationResponse
-from .service import open_admin_code, resume
+from .service import get_bot_connection, open_admin_code, resume
 
 router = APIRouter()
 
@@ -43,20 +42,38 @@ async def resume_conversation(
 
 @router.post(
     "/connections/{connection_id}/admin-code",
-    dependencies=[Depends(current_session_account)],
     response_model=AdminCodeResponse,
     response_model_by_alias=True,
 )
-async def add_admin_code(session: SessionDep, connection_id: str) -> AdminCodeResponse:
-    """A one-time code. The person who sends it to a bot's number gets the number's
-    questions on their own phone."""
-    connection = await session.get(VaultSecret, connection_id)
-    if (
-        connection
-        and connection.kind == SecretKind.SESSION
-        and connection.is_live
-        and connection.account.kind == AccountKind.BOT
-    ):
-        code = await open_admin_code(connection)
+async def add_admin_code(
+    session: SessionDep,
+    connection_id: str,
+    account: Account = Depends(current_session_account),
+) -> AdminCodeResponse:
+    """A one-time code to connect a phone to the number."""
+    connection = await get_bot_connection(session, connection_id)
+    if connection:
+        code = await open_admin_code(connection, account.id)
         return AdminCodeResponse(code=code, expires_in=ADMIN_CODE_TTL_SECONDS)
+    raise HTTPException(404, "Number not found.")
+
+
+@router.delete("/connections/{connection_id}/phone", status_code=204)
+async def disconnect_phone(
+    session: SessionDep,
+    connection_id: str,
+    account: Account = Depends(current_session_account),
+) -> None:
+    """Disconnect every phone paired to the signed-in operator on this number."""
+    connection = await get_bot_connection(session, connection_id)
+    if connection and get_app(connection.identity["app"]).bot.access == BotAccess.PAIRED:
+        connection.identity = {
+            **connection.identity,
+            "operators": {
+                sender: operator
+                for sender, operator in connection.identity["operators"].items()
+                if operator != account.id
+            },
+        }
+        return
     raise HTTPException(404, "Number not found.")

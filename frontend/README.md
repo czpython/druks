@@ -74,8 +74,8 @@ Back to Druks restores the previous work URL and keeps the work page mounted.
 
 Connections groups Services, Accounts, Browser, and Revoked. Its `tab` query
 parameter selects the active tab. The Browser profiles page manages saved browser state
-and login windows at `/settings/connections?tab=browser`. Accounts also links the
-operator's own WhatsApp number.
+and login windows at `/settings/connections?tab=browser`. Accounts lists connected
+accounts with Disconnect actions. WhatsApp setup is in Chat's Channels tab.
 
 App settings use `/apps/<name>/settings` in the work context. A gear beside the
 app name in the header opens this route. Settings search also links to app settings.
@@ -84,8 +84,15 @@ sections share one app draft. Leaving the app form offers Save, Discard, and
 Stay. An app without controls has no Settings destination. Backend app schemas
 supply these forms without a frontend module. Schedule controls use the
 existing workflow overrides. Channels at `/apps/<name>/settings/channels` appears
-only when the app declares a Bot. It links the Bot's WhatsApp numbers and opens
-admin codes.
+only when the app declares a Bot. It links the Bot's WhatsApp numbers.
+Chat links to `/apps/chat/settings/channels` from its conversation list.
+This tab shows the recommended assistant number first and the operator's
+own-number fallback below it. **Connect my phone** pairs a sender to the
+signed-in operator. App settings supply the Bot's access policy for the pane.
+The sessions response reports that operator's phone connection so a used code
+closes. **Disconnect my phone** removes their pairings on that number.
+Other app numbers keep **Add admin**.
+Chat's Bot row appears in the Agents tab.
 
 Schedules at `/schedules` groups declared workflows by app. The `app` query
 parameter filters the list. Operators change cadence and pause state here with

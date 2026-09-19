@@ -12,6 +12,10 @@ ADMIN_ADDED_MESSAGE = (
     "Druks: This person sent the admin code, so Druks sends them this number's questions "
     "from now on. Greet them and say what you can do for them."
 )
+PHONE_CONNECTED_MESSAGE = (
+    "Druks: This person connected their phone to their Druks account. "
+    "Greet them and say what you can do for them."
+)
 QUESTION_MESSAGE = (
     "Druks: Run {run} waits for a decision since {parked_at}. It is about {user_name} "
     "({user_id}). The request:\n{request}"

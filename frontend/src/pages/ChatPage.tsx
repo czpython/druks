@@ -69,7 +69,10 @@ export function ChatPage({ id }: { id?: string }) {
             </Link>)}
           </section>)}
         </div>
-        <p className="chat-privacy">Only you can see these conversations.</p>
+        <p className="chat-privacy">
+          Only you can see these conversations.{' '}
+          <Link href="/apps/chat/settings/channels">Channels</Link>
+        </p>
       </aside>
       <ConversationThread
         key={draftKey}

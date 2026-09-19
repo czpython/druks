@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from druks.apps.exceptions import AppBotError
 from druks.apps.registry import agents, bots
 from druks.chat.bots.dependencies import BotUser
+from druks.chat.enums import BotAccess
 from druks.db import db_session
 from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, step_session
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from druks.workflows import Workflow
     from druks.workspaces import Workspace
 
-__all__ = ["Agent", "AgentOutput", "Bot", "BotUser"]
+__all__ = ["Agent", "AgentOutput", "Bot", "BotAccess", "BotUser"]
 
 _QUOTA_FALLBACK_WAIT_SECONDS = 30 * 60
 _QUOTA_MAX_WAIT_SECONDS = 6 * 60 * 60
@@ -411,12 +412,11 @@ class Agent:
 
 @dataclass(frozen=True)
 class Bot:
-    """What an app answers people with in chat: the app's ``bot`` attribute. A person
-    who writes gets ``prompt`` and ``user_tools``. A channel's admin gets Druks's admin
-    prompt and ``admin_tools``. Each tool names the ``operation_id`` of an app route
-    tagged ``bot``. Settings treat the Bot like an agent, under the id ``<app>.bot``."""
+    """An app's ``<app>.bot`` agent; access selects who writes and owns the conversation.
+    Each tool names the ``operation_id`` of an app route tagged ``bot``."""
 
     prompt: str
+    access: BotAccess = BotAccess.OPEN
     user_tools: tuple[str, ...] = ()
     admin_tools: tuple[str, ...] = ()
     name: str | None = None
