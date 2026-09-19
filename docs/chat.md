@@ -12,7 +12,7 @@ Only the creator can read a conversation or receive its live events. Operators
 do not see the chats of an app's WhatsApp numbers: the people who hold the
 number's phone read them there.
 Chat uses Claude in this release. Its harness, model, billing, and effort come
-from Chat's row in **Chat → Channels → Agents**. A field that you leave unset
+from Chat's row in **Chat → Channels → Bots**. A field that you leave unset
 uses the
 [installation settings](configuration.md#personal-and-installation-settings).
 
@@ -212,7 +212,7 @@ message to a conversation by its sender:
 
 The agents of a number have no shell, file, or web tools. Their harness, model,
 billing, effort, and timeout come from the Bot's row in the app's
-**Settings → Agents**. A turn that runs past the timeout stops, and Druks marks
+**Settings → Bots**. A turn that runs past the timeout stops, and Druks marks
 it `interrupted`. A bot or bot admin account holds no credential of its own, so its
 agents and runs bill the default account.
 

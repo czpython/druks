@@ -599,7 +599,7 @@ To withdraw a waiting request, cancel it in a bot tool:
 `await GrantAccess.cancel(request)`. A subject has one active run per workflow, so
 cancel a request before you start a changed one.
 
-The Bot has a row in the app's **Settings → Agents** under the id
+The Bot has a row in the app's **Settings → Bots** under the id
 `<app>.bot`. Its harness, model, billing, effort, and timeout resolve
 like an agent's. The timeout is the longest that one turn can run. `timeout=`
 on the Bot declares its default. The Bot runs on Claude, like Chat.

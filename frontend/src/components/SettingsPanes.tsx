@@ -3164,11 +3164,11 @@ export function AppPane({
         </div>
       )}
 
-      {section === 'agents' && app.agents.length > 0 && defaults && (
+      {['agents', 'bots'].includes(section) && defaults && (
         <div className="set-group">
-          <div className="set-group-label">agents</div>
+          <div className="set-group-label">{section}</div>
           <AgentRecords
-            app={app}
+            agents={app.agents.filter((agent) => section === 'bots' ? agent.name === app.bot : agent.name !== app.bot)}
             edits={edits}
             harnessByName={harnessByName}
             defaults={defaults}
@@ -3190,7 +3190,7 @@ export function AppPane({
 }
 
 function AgentRecords({
-  app,
+  agents,
   edits,
   harnessByName,
   defaults,
@@ -3205,7 +3205,7 @@ function AgentRecords({
   onAddProvider,
   busy,
 }: {
-  app: AppSettings
+  agents: AgentSetting[]
   edits: UpdateAppsSettingsRequest
   harnessByName: Record<string, Harness>
   defaults: Defaults
@@ -3228,7 +3228,7 @@ function AgentRecords({
   ) => (pending && name in pending ? (pending[name] ?? null) : saved)
   return (
     <div className="agent-records">
-      {app.agents.map((agent) => {
+      {agents.map((agent) => {
         const harnessOverride = override(
           edits.agentHarnesses,
           agent.name,
