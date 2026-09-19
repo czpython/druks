@@ -6,11 +6,8 @@
 OAUTH_CONNECT_STATE_TTL_SECONDS = 600
 OAUTH_TOKEN_TTL_SKEW_SECONDS = 60
 
-# Mint's mutual exclusion, in the Redis that fronts the token cache (SET NX):
-# a rotating grant tolerates exactly one refresher. The lock TTL is a crash
-# backstop at three times the HTTP client's timeout — a live refresh cannot
-# outlive it. Losers poll the cache on the interval for about one
-# token-endpoint round trip, then fail loudly.
-OAUTH_REFRESH_LOCK_TTL_SECONDS = 90
+# Mint's mutual exclusion: a rotating grant tolerates exactly one refresher.
+# Losers poll the cache on the interval for about one token-endpoint round
+# trip, then fail loudly.
 OAUTH_MINT_WAIT_INTERVAL_SECONDS = 0.2
 OAUTH_MINT_WAIT_ATTEMPTS = 150

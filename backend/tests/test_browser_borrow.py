@@ -2,7 +2,6 @@ import json
 from contextlib import asynccontextmanager
 
 import pytest
-from druks.browser import locks
 from druks.browser import sessions as sessions_module
 from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
 from druks.browser.exceptions import (
@@ -16,6 +15,7 @@ from druks.browser.models import StoredBrowserSession
 from druks.browser.sessions import BrowserSession
 from druks.browser.subscribers import signed_out_session_goes_stale
 from druks.db import db_session
+from druks.redis import get_client
 from druks.sandbox.datastructures import ExecResult
 from druks.testing import make_settings
 
@@ -64,31 +64,10 @@ class FakeBrowser:
         return FakeListener()
 
 
-class FakeRedis:
-    def __init__(self):
-        self.values = {}
-
-    async def set(self, key, value, *, nx, ex):
-        if nx and key in self.values:
-            return False
-        self.values[key] = value
-        return True
-
-    async def eval(self, script, _key_count, key, *arguments):
-        owner_token = arguments[0]
-        if self.values.get(key) != owner_token:
-            return 0
-        if "del" in script:
-            del self.values[key]
-        return 1
-
-
 @pytest.fixture
 def borrow(druks_db, tmp_path, monkeypatch):
     settings = make_settings(tmp_path)
     monkeypatch.setattr(sessions_module, "load_settings", lambda: settings)
-    redis = FakeRedis()
-    monkeypatch.setattr(locks, "get_client", lambda: redis)
     browser = FakeBrowser()
 
     @asynccontextmanager
@@ -100,7 +79,7 @@ def borrow(druks_db, tmp_path, monkeypatch):
     monkeypatch.setattr(
         sessions_module, "sandbox_client", type("Client", (), {"ephemeral": ephemeral})
     )
-    return browser, redis
+    return browser
 
 
 async def stored_session(
@@ -114,6 +93,10 @@ async def stored_session(
     )
     await row.store_payload(payload)
     return row
+
+
+async def writer_locks() -> list[bytes]:
+    return await get_client().keys("browser_session:*")
 
 
 def test_declaration_carries_the_app_namespace(night_watch):
@@ -140,7 +123,7 @@ async def test_status_reads_the_row_and_writes_nothing(druks_db, night_watch):
 
 
 async def test_borrow_yields_a_tunneled_cdp_url(borrow, night_watch):
-    browser, redis = borrow
+    browser = borrow
     await stored_session(night_watch.docs)
 
     async with night_watch.docs.cdp() as cdp_url:
@@ -156,14 +139,14 @@ async def test_borrow_yields_a_tunneled_cdp_url(borrow, night_watch):
     }
     launch_script = browser.commands[0][2]
     assert "session-launch --headed" in launch_script
-    assert not redis.values
+    assert not await writer_locks()
     assert (
         await StoredBrowserSession.get_for_name(db_session(), night_watch.docs.name)
     ).last_used_at
 
 
 async def test_headless_declaration_launches_headless(borrow):
-    browser, _ = borrow
+    browser = borrow
     quiet = BrowserSession(site="docs.example")
     quiet.headless = True
     quiet.name = "night_watch.quiet"
@@ -176,13 +159,13 @@ async def test_headless_declaration_launches_headless(borrow):
 
 
 async def test_persisting_borrow_locks_exports_and_stores(borrow, night_watch):
-    browser, redis = borrow
+    browser = borrow
     row = await stored_session(night_watch.acme)
 
     async with night_watch.acme.cdp():
-        assert redis.values
+        assert await writer_locks()
 
-    assert not redis.values
+    assert not await writer_locks()
     assert browser.commands[-1] == ["session-export"]
     db_session().expunge_all()
     stored = await StoredBrowserSession.get_for_name(db_session(), night_watch.acme.name)
@@ -192,10 +175,10 @@ async def test_persisting_borrow_locks_exports_and_stores(borrow, night_watch):
 
 
 async def test_persisting_borrow_refuses_a_second_writer(borrow, night_watch):
-    browser, redis = borrow
+    browser = borrow
     await stored_session(night_watch.acme)
     row = await StoredBrowserSession.get_for_name(db_session(), night_watch.acme.name)
-    redis.values[f"browser_session:{row.id}"] = "other"
+    await get_client().set(f"browser_session:{row.id}", "other")
 
     with pytest.raises(BrowserSessionWriterLockedError):
         async with night_watch.acme.cdp():
@@ -227,7 +210,7 @@ async def test_first_borrow_writes_the_declared_session_and_asks_for_a_login(
 
 
 async def test_launch_failure_raises_and_releases_the_lock(borrow, night_watch):
-    browser, redis = borrow
+    browser = borrow
     await stored_session(night_watch.acme)
     browser.launch_exit = 1
 
@@ -235,13 +218,13 @@ async def test_launch_failure_raises_and_releases_the_lock(borrow, night_watch):
         async with night_watch.acme.cdp():
             pass
 
-    assert not redis.values
+    assert not await writer_locks()
 
 
 async def test_signed_out_borrow_stamps_the_session_and_stores_nothing(borrow, night_watch):
     """The app raises through the borrow when the site bounced the login:
     the door stamps which session bounced, and the dead state is never stored."""
-    browser, redis = borrow
+    browser = borrow
     await stored_session(night_watch.acme, payload=b"live-state")
 
     with pytest.raises(BrowserSessionSignedOutError) as caught:
@@ -254,13 +237,13 @@ async def test_signed_out_borrow_stamps_the_session_and_stores_nothing(borrow, n
         await StoredBrowserSession.get_for_name(db_session(), night_watch.acme.name)
     ).payload.decrypt() == b"live-state"
     assert ["session-export"] not in browser.commands
-    assert not redis.values  # the writer lock released on the way out
+    assert not await writer_locks()  # the writer lock released on the way out
 
 
 async def test_anonymous_borrow_needs_no_login(borrow, night_watch):
     """An anonymous borrow works with zero operator setup: the browser opens
     on a blank profile, the row records the use, and nothing is stored."""
-    browser, redis = borrow
+    browser = borrow
 
     async with night_watch.status_page.cdp() as cdp_url:
         assert cdp_url == "http://127.0.0.1:43987"
@@ -271,7 +254,7 @@ async def test_anonymous_borrow_needs_no_login(borrow, night_watch):
         "version": 0,
     }
     assert ["session-export"] not in browser.commands
-    assert not redis.values  # no writer lock: nothing to serialize
+    assert not await writer_locks()  # no writer lock: nothing to serialize
     row = await StoredBrowserSession.get_for_name(db_session(), night_watch.status_page.name)
     assert row.status == BrowserSessionStatus.ANONYMOUS.value
     assert row.last_used_at
@@ -301,7 +284,6 @@ async def test_playwright_yields_the_logged_in_context(borrow, night_watch, monk
     import types
     from contextlib import asynccontextmanager as acm
 
-    browser, _ = borrow
     await stored_session(night_watch.docs)
     seen = {}
     logged_in_context = object()

@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import secrets
+from contextlib import AsyncExitStack
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from urllib.parse import urlencode
@@ -11,6 +12,8 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.database import get_session
+from druks.exceptions import LockHeldError
+from druks.locks import lock
 from druks.redis import get_client
 from druks.secrets.models import VaultSecret
 from druks.signals import publish
@@ -19,7 +22,6 @@ from .constants import (
     OAUTH_CONNECT_STATE_TTL_SECONDS,
     OAUTH_MINT_WAIT_ATTEMPTS,
     OAUTH_MINT_WAIT_INTERVAL_SECONDS,
-    OAUTH_REFRESH_LOCK_TTL_SECONDS,
     OAUTH_TOKEN_TTL_SKEW_SECONDS,
 )
 from .exceptions import OauthExchangeError, OauthRefreshError
@@ -191,20 +193,24 @@ class OauthClient:
             suffix = ":" + hashlib.sha256(" ".join(requested).encode()).hexdigest()[:16]
         token_key = f"{self.provider}:access_token:{connection.id}{suffix}"
         lock_key = f"{self.provider}:refresh_lock:{connection.id}{suffix}"
+        refresh_lock = AsyncExitStack()
         for _ in range(self.mint_wait_attempts):
             if cached:
                 cached_token = await redis.get(token_key)
                 if cached_token:
                     ttl = await redis.ttl(token_key)
                     return cast(bytes, cached_token).decode(), _expiry(ttl)
-            if await redis.set(lock_key, "1", nx=True, ex=OAUTH_REFRESH_LOCK_TTL_SECONDS):
+            try:
+                await refresh_lock.enter_async_context(lock(lock_key, blocking=False))
+            except LockHeldError:
+                await asyncio.sleep(self.mint_wait_interval_seconds)
+            else:
                 break
-            await asyncio.sleep(self.mint_wait_interval_seconds)
         else:
             raise OauthRefreshError(
                 self.provider, "timed out waiting for a concurrent refresh to finish"
             )
-        try:
+        async with refresh_lock:
             data = {
                 "grant_type": "refresh_token",
                 "refresh_token": await connection.get_refresh_token(),
@@ -269,8 +275,6 @@ class OauthClient:
             if ttl > 0:
                 await redis.set(token_key, tokens["access_token"], ex=ttl)
             return tokens["access_token"], _expiry(ttl)
-        finally:
-            await redis.delete(lock_key)
 
     async def evict_access_token(self, connection_id: str) -> None:
         # Down-scoped tokens share the prefix, so one scan removes them all.

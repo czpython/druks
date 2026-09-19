@@ -3,6 +3,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from druks.locks import lock
 from druks.redis import get_client
 
 from .constants import GATE_USERS_PREFIX, MAX_AGENT_TIMEOUT_SECONDS, ROTATING_PREFIX
@@ -12,9 +13,6 @@ from .constants import GATE_USERS_PREFIX, MAX_AGENT_TIMEOUT_SECONDS, ROTATING_PR
 # register in a zset scored by expiry, so a crashed caller ages out.
 _RUN_HORIZON = MAX_AGENT_TIMEOUT_SECONDS  # a sandbox run never outlives this; caps every wait
 _POLL = 2.0
-# The gate is shut for a rotation, a wait on another refresher's row lock, and
-# the refresh requests. A crashed holder frees the subscription when this lapses.
-_SHUT_TTL_SECONDS = 90
 
 
 @asynccontextmanager
@@ -48,10 +46,6 @@ async def shut(subscription_id: str) -> AsyncIterator[bool]:
     client = get_client()
     rotating = f"{ROTATING_PREFIX}{subscription_id}"
     users = f"{GATE_USERS_PREFIX}{subscription_id}"
-    while not await client.set(rotating, "1", nx=True, ex=_SHUT_TTL_SECONDS):
-        await asyncio.sleep(_POLL)
-    try:
+    async with lock(rotating):
         await client.zremrangebyscore(users, "-inf", time.time())
         yield not await client.zcard(users)
-    finally:
-        await client.delete(rotating)

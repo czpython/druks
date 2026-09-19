@@ -13,7 +13,6 @@ from druks.chat.bridge import Bridge
 from druks.chat.constants import CHAT_KEY_NAME
 from druks.chat.enums import ConversationSource, MessageRole, MessageState
 from druks.chat.exceptions import ChatBridgeError, ChatSandboxGone
-from druks.chat.locks import chat_lock
 from druks.chat.models import Conversation, Message
 from druks.database import get_session
 from druks.files.datastructures import File
@@ -330,21 +329,6 @@ async def test_recovery_reads_live_events_then_saves_reply_and_replaces_archive(
     assert not archive.uploaded_by
     assert archive.size == 7
     assert host.upload_file.await_count == 0
-
-
-async def test_conversation_lock_excludes_a_second_delivery():
-    entered = asyncio.Event()
-
-    async def second():
-        async with chat_lock("chat:lock-test"):
-            entered.set()
-
-    async with chat_lock("chat:lock-test"):
-        task = asyncio.create_task(second())
-        await asyncio.sleep(0.05)
-        assert not entered.is_set()
-    await asyncio.wait_for(task, 2)
-    assert entered.is_set()
 
 
 async def test_bridge_start_uploads_the_bridge_only_when_none_answers(monkeypatch):

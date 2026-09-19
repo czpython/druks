@@ -18,6 +18,20 @@ class DetachedRowError(DruksError):
         super().__init__(f"A {model} row is not loaded in a session. Read it where it is used.")
 
 
+class LockHeldError(DruksError):
+    """``lock(blocking=False)`` found another holder."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Lock {name!r} has a holder. Try again after the holder releases it.")
+
+
+class LockLostError(DruksError):
+    """The holder lost the lock before its block ended."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Lock {name!r} left its holder before the work ended. Run it again.")
+
+
 class SessionNotBoundError(DruksError):
     """``db_session()`` ran on a task that holds no session."""
 

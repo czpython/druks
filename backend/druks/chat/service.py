@@ -14,6 +14,7 @@ from druks.files.datastructures import File
 from druks.files.storage import get_file_storage
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.config import AgentConfig, get_default_config
+from druks.locks import lock
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.inbound import get_druks_account_token, get_druks_mcp_server
 from druks.models import Base
@@ -31,7 +32,6 @@ from .bridge import Bridge
 from .constants import CHAT_KEY_NAME
 from .enums import MessageRole, MessageState
 from .exceptions import ChatBridgeError, ChatHarnessError, ChatSandboxGone
-from .locks import chat_lock
 from .models import Conversation, Message
 from .sandbox import CHAT_SANDBOX
 
@@ -68,7 +68,7 @@ async def get_sandbox(
         ),
     ]
     await session.commit()
-    async with chat_lock(f"chat:account:{account_id}"):
+    async with lock(f"chat:account:{account_id}"):
         identity = await SandboxIdentity.lookup(
             session, account_id=account_id, run_id=None, scoped_to="chat", secret_refs=refs
         )
@@ -138,7 +138,7 @@ async def deliver(conversation_id: str) -> None:
 
 async def deliver_pending(session: AsyncSession, conversation: Conversation) -> None:
     await session.commit()
-    async with chat_lock(f"chat:{conversation.id}:delivery"):
+    async with lock(f"chat:{conversation.id}:delivery"):
         while message := await conversation.get_unanswered_message(session):
             if message.state == MessageState.PENDING:
                 await reset_live_stream(conversation.id)

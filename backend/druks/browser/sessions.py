@@ -1,6 +1,6 @@
 import json
 import tempfile
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,10 +16,12 @@ from druks.browser.exceptions import (
     BrowserLaunchError,
     BrowserSessionNotReadyError,
     BrowserSessionSignedOutError,
+    BrowserSessionWriterLockedError,
 )
-from druks.browser.locks import acquire_writer_lock, release_writer_lock
 from druks.browser.models import StoredBrowserSession
 from druks.db import db_session
+from druks.exceptions import LockHeldError
+from druks.locks import lock
 from druks.sandbox.client import sandbox_client
 from druks.settings import load_settings
 
@@ -87,8 +89,15 @@ class BrowserSession:
         dies with the block; a persisting session is exported and stored
         back first."""
         row = await (self.get_or_create_row() if self.anonymous else self._ready_row())
-        writer_token = await acquire_writer_lock(row.id) if self.persist else ""
-        try:
+        writer_lock = AsyncExitStack()
+        if self.persist:
+            try:
+                await writer_lock.enter_async_context(
+                    lock(f"browser_session:{row.id}", blocking=False)
+                )
+            except LockHeldError as error:
+                raise BrowserSessionWriterLockedError(row.id) from error
+        async with writer_lock:
             settings = load_settings()
             async with sandbox_client.ephemeral(
                 image_override=settings.sandbox.browser_sandbox_image,
@@ -110,9 +119,6 @@ class BrowserSession:
                 if self.persist:
                     row.payload_format = BrowserSessionPayloadFormat.PROFILE_DIR.value
                     await row.store_payload(await self._export(browser))
-        finally:
-            if writer_token:
-                await release_writer_lock(row.id, writer_token)
 
     @asynccontextmanager
     async def playwright(self):

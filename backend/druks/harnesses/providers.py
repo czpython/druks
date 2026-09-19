@@ -7,6 +7,7 @@ import re
 import secrets
 import time
 import urllib.parse
+from contextlib import AsyncExitStack
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 from urllib.parse import urlencode
@@ -17,6 +18,8 @@ from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.core.utils.time import ensure_utc
+from druks.exceptions import LockHeldError
+from druks.locks import lock
 from druks.redis import get_client
 from druks.sandbox import gate
 from druks.sandbox.client import sandbox_client
@@ -61,9 +64,6 @@ _OPENAI_NON_CHAT_MARKERS = (
 # long — enough to authorize and paste, short enough that an abandoned attempt
 # clears.
 _CONNECT_PENDING_TTL_SECONDS = 600
-# Per-row refresh lock: five minutes outlives the token request timeout and
-# expires before the next 15-minute cron tick if the holder dies mid-refresh.
-_REFRESH_LOCK_TTL_SECONDS = 300
 # How often a fetch asks again while another refresher holds the row lock.
 _LOCK_POLL_SECONDS = 0.5
 
@@ -259,11 +259,14 @@ class Provider:
                 cls.id, "fresh", expires_at=expires_at, subscription_id=subscription_id
             )
 
-        redis = get_client()
-        lock_key = f"{REFRESH_LOCK_PREFIX}{subscription_id}"
-        if not await redis.set(lock_key, "1", nx=True, ex=_REFRESH_LOCK_TTL_SECONDS):
-            return RotationResult(cls.id, "locked", subscription_id=subscription_id)
+        refresh_lock = AsyncExitStack()
         try:
+            await refresh_lock.enter_async_context(
+                lock(f"{REFRESH_LOCK_PREFIX}{subscription_id}", blocking=False)
+            )
+        except LockHeldError:
+            return RotationResult(cls.id, "locked", subscription_id=subscription_id)
+        async with refresh_lock:
             # Re-read after winning the lock: the previous holder may have
             # advanced this lineage (or deleted the row) after our first read.
             row = await VaultSecret.reload(session, subscription_id)
@@ -316,8 +319,6 @@ class Provider:
             return RotationResult(
                 cls.id, "refreshed", expires_at=new_expiry, subscription_id=row.id
             )
-        finally:
-            await redis.delete(lock_key)
 
     @classmethod
     def refresh_is_due(cls, subscription: VaultSecret) -> bool:
