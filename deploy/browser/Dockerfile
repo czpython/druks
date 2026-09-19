@@ -54,9 +54,9 @@ RUN apt-get update \
     && rm -f /tmp/pinchtab /tmp/pinchtab-checksums.txt
 
 # Real Google Chrome — a login gate fingerprints Chromium-vs-Chrome. Google's
-# apt repo ships amd64 and arm64; the direct .deb is the same bits if apt
-# lags. Fail the build if Chrome is missing: the login window is this binary,
-# spawned as a child, not Playwright's bundled Chromium.
+# apt repo ships amd64 and arm64. Fail the build if the package is missing:
+# the login window is this binary, spawned as a child, not Playwright's
+# bundled Chromium.
 # hadolint ignore=DL3008
 RUN arch="$(dpkg --print-architecture)" \
     && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
@@ -64,19 +64,13 @@ RUN arch="$(dpkg --print-architecture)" \
     && echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
         > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
-    && if ! apt-get install -y --no-install-recommends google-chrome-stable; then \
-        curl -fsSLo /tmp/chrome.deb \
-            "https://dl.google.com/linux/direct/google-chrome-stable_current_${arch}.deb" \
-        && apt-get install -y --no-install-recommends /tmp/chrome.deb \
-        && rm -f /tmp/chrome.deb; \
-    fi \
-    && test -x /opt/google/chrome/chrome \
+    && apt-get install -y --no-install-recommends google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --shell /bin/bash druks
 
 # The browser runs unsandboxed (Docker's default seccomp blocks the sandbox's
-# namespace syscalls), so Playwright passes --no-sandbox and Chrome shows the
+# namespace syscalls), so session-launch passes --no-sandbox and Chrome shows the
 # operator a "stability and security will suffer" banner in the login window.
 # This managed policy suppresses only that command-line-flag warning; it changes
 # no browser behavior a page could read.
