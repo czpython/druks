@@ -227,9 +227,7 @@ function AppShell({
   const accent = useMemo(() => appAccent(registered), [registered])
   const defaultApp = registered[0] ?? null
   const [lastApp, setLastApp] = useState<string | null>(null)
-  const isChat = location === '/chat' || location.startsWith('/chat/')
-    || location === '/apps/chat/settings' || location.startsWith('/apps/chat/settings/')
-  const urlApp = isChat ? 'chat' : appOwning(location)
+  const urlApp = appOwning(location, rosterQuery.data)
   if (urlApp && urlApp !== lastApp) setLastApp(urlApp)
   const app = urlApp ?? lastApp ?? defaultApp
   const ui = app ? getAppUI(app) : undefined
@@ -284,6 +282,7 @@ function AppShell({
   const visibleApps = registered.filter((name) =>
     appLabel(name).toLowerCase().includes(search.toLowerCase().trim()),
   )
+  const isChat = location === '/chat' || location.startsWith('/chat/')
   const title = isChat ? 'Chat' : SHELL_PAGES[location] ?? (app ? appLabel(app) : 'Druks')
 
   return (

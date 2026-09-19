@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 
-import type { AppsSettingsResponse, FeedItem } from '../api/types'
+import type { App, AppsSettingsResponse, FeedItem } from '../api/types'
 
 export interface AppRoute {
   /** A wouter pattern under the router base, such as /notes/:id. */
@@ -79,13 +79,15 @@ export function appHome(name: string): string {
   return REGISTRY.get(name)?.home ?? `/${name}`
 }
 
-export function appOwning(location: string): string | null {
+export function appOwning(location: string, apps: App[] | undefined): string | null {
+  const names = new Set([...REGISTRY.keys(), ...(apps ?? []).map((app) => app.name)])
   const settingsApp = /^\/apps\/([^/]+)\/settings(?:\/|$)/.exec(location)?.[1]
-  if (settingsApp && REGISTRY.has(settingsApp)) return settingsApp
-  for (const ui of REGISTRY.values()) {
-    const home = ui.home ?? `/${ui.name}`
-    if (location === home || location.startsWith(`${home}/`)) return ui.name
-    if (ui.routes.some((route) => new RegExp(`^${route.path.replace(/:[^/]+/g, '[^/]+')}$`).test(location))) return ui.name
+  if (settingsApp && names.has(settingsApp)) return settingsApp
+  for (const name of names) {
+    const ui = REGISTRY.get(name)
+    const home = ui?.home ?? `/${name}`
+    if (location === home || location.startsWith(`${home}/`)) return name
+    if (ui?.routes.some((route) => new RegExp(`^${route.path.replace(/:[^/]+/g, '[^/]+')}$`).test(location))) return name
   }
   return null
 }
