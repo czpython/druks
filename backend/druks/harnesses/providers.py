@@ -447,6 +447,7 @@ class Provider:
             error=parsed.error if not parsed.ok else None,
             plan_tier=parsed.plan_tier,
             unlimited=parsed.unlimited,
+            main_limit_reached=parsed.main_limit_reached,
         )
         if parsed.five_hour:
             snapshot.five_hour_percent_left = parsed.five_hour.percent_left
@@ -923,6 +924,8 @@ class OpenAiProvider(Provider):
     # Connect-flow (PKCE): authorize on auth.openai.com; the operator pastes the
     # failed localhost redirect URL back.
     redirect_uri = "http://localhost:1455/auth/callback"
+    # This additional limit is a reserve quota, not a model's own quota.
+    reserve_limit_name = "gpt-reserve"
 
     @classmethod
     def get_secret(cls, key: str) -> Secret:
@@ -1074,8 +1077,14 @@ class OpenAiProvider(Provider):
                     raw=raw,
                 )
             return ParsedUsage(ok=False, error="parse_failed", plan_tier=plan, raw=raw)
+        rate_limit = data["rate_limit"] or {}
+        main_limit_reached = rate_limit.get("limit_reached")
+        if not isinstance(main_limit_reached, bool):
+            allowed = rate_limit.get("allowed")
+            main_limit_reached = not allowed if isinstance(allowed, bool) else None
         return ParsedUsage(
             ok=True,
+            main_limit_reached=main_limit_reached,
             plan_tier=plan,
             five_hour=five_hour,
             weeks=weeks,
@@ -1149,6 +1158,7 @@ def _codex_windows(usage: dict) -> tuple[ParsedMetric | None, tuple[ParsedMetric
                 percent_left=max(0, min(100, round(100 - block["used_percent"]))),
                 resets_at=datetime.fromtimestamp(block["reset_at"], tz=UTC),
                 model=model,
+                is_reserve=model == OpenAiProvider.reserve_limit_name,
             )
             if block["limit_window_seconds"] >= _WEEKLY_WINDOW_MINIMUM_SECONDS:
                 weekly.append(window)

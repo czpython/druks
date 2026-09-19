@@ -175,7 +175,7 @@ async def _provider_history(
     ]
     weekly_points: dict[str | None, list[UsageHistoryPoint]] = {}
     for row in rows:
-        for week in row.weeks:
+        for week in row.capacity_weeks:
             if week["percent_left"] is not None:
                 weekly_points.setdefault(week["model"], []).append(
                     UsageHistoryPoint(t=row.scraped_at, pct=week["percent_left"])
@@ -183,6 +183,14 @@ async def _provider_history(
     return UsageProviderHistory(
         id=provider_id,
         five_hour=downsample(five_hour, cap=_MAX_SPARK_POINTS),
+        reserve=downsample(
+            [
+                UsageHistoryPoint(t=row.scraped_at, pct=reserve["percent_left"])
+                for row in rows
+                if (reserve := row.reserve) and reserve["percent_left"] is not None
+            ],
+            cap=_MAX_SPARK_POINTS,
+        ),
         weeks=[
             UsageWindowHistory(
                 model=model,
@@ -224,7 +232,9 @@ def _summarize(
         provider_email=provider_email,
         plan_tier=row.plan_tier,
         five_hour=five_hour,
-        weeks=[UsageMetricSummary.model_validate(week) for week in row.weeks],
+        weeks=[UsageMetricSummary.model_validate(week) for week in row.capacity_weeks],
+        main_limit_reached=row.main_limit_reached,
+        reserve=UsageMetricSummary.model_validate(row.reserve) if row.reserve else None,
         unlimited=row.unlimited,
         scraped_at=row.scraped_at,
         age_seconds=age,

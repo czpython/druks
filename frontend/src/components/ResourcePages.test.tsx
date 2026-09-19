@@ -21,6 +21,8 @@ const usage: UsageProviderSummary = {
   planTier: 'Subscription plan',
   fiveHour: { percentLeft: 82, resetsAt: null, model: null },
   weeks: [{ percentLeft: 41, resetsAt: '2099-09-05T12:00:00Z', model: null }],
+  mainLimitReached: null,
+  reserve: null,
   unlimited: false,
   scrapedAt: '2026-09-05T08:00:00Z',
   ageSeconds: 3600,

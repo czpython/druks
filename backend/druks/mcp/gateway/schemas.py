@@ -65,6 +65,7 @@ class AgentProviderUsage(Schema):
     five_hour_resets_at: datetime | None = None
     week_percent_left: int | None = None
     week_resets_at: datetime | None = None
+    main_limit_reached: bool | None = None
     is_unlimited: bool = False
     scraped_at: datetime | None = None
     five_hour_history: list[UsageHistoryPoint] = Field(default_factory=list)

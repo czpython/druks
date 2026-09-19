@@ -87,7 +87,7 @@ async def test_successful_fetch_persists_per_provider(druks_db) -> None:
     assert claude_row is not None
     assert claude_row.five_hour_percent_left == 84
     assert claude_row.weeks == [
-        {"percent_left": 52, "resets_at": None, "model": None},
+        {"percent_left": 52, "resets_at": None, "model": None, "is_reserve": False},
     ]
 
     codex_row = await UsageScrape.latest_for(druks_db, "openai", (await _connection()).account_id)

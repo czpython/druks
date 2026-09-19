@@ -60,6 +60,7 @@ class ParsedMetric:
     resets_at: datetime | None
     # Set when a plan meters this model separately; None covers them all.
     model: str | None = None
+    is_reserve: bool = False
 
     @classmethod
     def binding(cls, windows: Sequence[Self]) -> Self | None:
@@ -85,6 +86,7 @@ class ProviderRequest:
 @dataclass(frozen=True)
 class ParsedUsage:
     ok: bool
+    main_limit_reached: bool | None = None
     error: str | None = None
     plan_tier: str | None = None
     five_hour: ParsedMetric | None = None

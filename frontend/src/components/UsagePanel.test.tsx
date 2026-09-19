@@ -20,6 +20,8 @@ const usage: UsageResponse = {
         { percentLeft: 62, resetsAt: null, model: null },
         { percentLeft: 0, resetsAt: null, model: 'Fable' },
       ],
+      mainLimitReached: null,
+      reserve: null,
       unlimited: false,
       scrapedAt: '2026-08-01T10:00:00Z',
       ageSeconds: 30,
@@ -34,6 +36,7 @@ const history: UsageHistoryResponse = {
   providers: [
     {
       id: 'anthropic',
+      reserve: [],
       fiveHour: [],
       weeks: [
         {
@@ -128,6 +131,7 @@ describe('UsagePanel', () => {
       providers: [
         {
           id: 'anthropic',
+          reserve: [],
           fiveHour: [],
           weeks: [
             { model: null, points: [] },

@@ -29,6 +29,8 @@ class UsageProviderSummary(Schema):
     plan_tier: str | None = None
     five_hour: UsageMetricSummary | None = None
     weeks: list[UsageMetricSummary] = Field(default_factory=list)
+    main_limit_reached: bool | None = None
+    reserve: UsageMetricSummary | None = None
     # Unmetered plan (Codex business/enterprise). The window buckets are
     # synthesized permanently-full — the UI shows "unmetered" plus
     # actual consumption from druks' own run records instead of a
@@ -73,6 +75,7 @@ class UsageProviderHistory(Schema):
     # empty when the provider never reported that window.
     five_hour: list[UsageHistoryPoint] = Field(default_factory=list)
     weeks: list[UsageWindowHistory] = Field(default_factory=list)
+    reserve: list[UsageHistoryPoint] = Field(default_factory=list)
 
 
 class UsageHistoryResponse(Schema):

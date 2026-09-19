@@ -38,6 +38,7 @@ class UsageScrape(Base):
     # Subscription tier when the CLI surfaces it (e.g. ``pro``, ``max``,
     # ``plus``). Display-only.
     plan_tier: Mapped[str | None]
+    main_limit_reached: Mapped[bool | None]
     # The provider's five-hour rolling window.
     five_hour_percent_left: Mapped[int | None]
     five_hour_resets_at: Mapped[datetime | None]
@@ -126,16 +127,29 @@ class UsageScrape(Base):
         return list((await session.execute(stmt)).scalars())
 
     @property
-    def quota(self) -> tuple[str | None, int | None, list[int | None]]:
+    def quota(self) -> tuple[str | None, bool | None, int | None, list[int | None]]:
         return (
             self.error,
+            self.main_limit_reached,
             self.five_hour_percent_left,
             [week["percent_left"] for week in self.weeks],
         )
 
+    @property
+    def capacity_weeks(self) -> list[dict[str, Any]]:
+        return [week for week in self.weeks if not week.get("is_reserve", False)]
+
+    @property
+    def reserve(self) -> dict[str, Any] | None:
+        for week in self.weeks:
+            if week.get("is_reserve", False):
+                return week
+
     def binding_week(self) -> dict[str, Any] | None:
         """The window closest to exhaustion — whichever stops work first."""
-        reported_windows = [week for week in self.weeks if week["percent_left"] is not None]
+        reported_windows = [
+            week for week in self.capacity_weeks if week["percent_left"] is not None
+        ]
         if reported_windows:
             return min(reported_windows, key=lambda week: week["percent_left"])
 
@@ -149,7 +163,7 @@ class UsageScrape(Base):
             and (not exhausted_only or self.five_hour_percent_left == 0)
         ):
             resets.append(self.five_hour_resets_at)
-        for week in self.weeks:
+        for week in self.capacity_weeks:
             if week["resets_at"] and (not exhausted_only or week["percent_left"] == 0):
                 reset = datetime.fromisoformat(week["resets_at"])
                 if reset > after:

@@ -176,6 +176,7 @@ async def _provider_usage(
         five_hour_resets_at=row.five_hour_resets_at,
         week_percent_left=binding_week.get("percent_left"),
         week_resets_at=binding_week.get("resets_at"),
+        main_limit_reached=row.main_limit_reached,
         is_unlimited=row.unlimited,
         scraped_at=row.scraped_at,
         five_hour_history=downsample(five_hour, cap=_HISTORY_POINTS),

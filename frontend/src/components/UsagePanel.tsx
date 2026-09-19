@@ -12,6 +12,8 @@ import type {
   UsageTodayResponse,
 } from '../api/types'
 
+type ProviderUsage = UsageProviderSummary & { mainExhausted: boolean }
+
 /** Provider capacity and consumption from the operator’s runs. */
 export function UsagePanel() {
   const { data, isLoading, isError, refresh, refetch, isFetching } = useUsage()
@@ -43,7 +45,13 @@ export function UsagePanel() {
     }
   }
 
-  const providers = data?.providers ?? []
+  const providers = (data?.providers ?? []).map((usage): ProviderUsage => ({
+    ...usage,
+    mainExhausted: usage.mainLimitReached ?? (
+      usage.fiveHour?.percentLeft === 0
+      || usage.weeks.some((metric) => !metric.model && metric.percentLeft === 0)
+    ),
+  }))
   const ages = providers.map((h) => h.ageSeconds).filter((v): v is number => v !== null)
   const updatedLabel = ages.length > 0 ? `updated ${formatAge(Math.min(...ages))} ago` : ''
   const harnessColor = harnessColors(providers.map((h) => h.id))
@@ -101,15 +109,19 @@ interface Exhausted {
   windowLabel: string
   resetsAt: string | null
   model: string | null
+  reserve: UsageMetric | null
 }
 
-function findExhausted(usage: UsageProviderSummary): Exhausted | null {
+function findExhausted(usage: ProviderUsage): Exhausted | null {
   if (!usage.available || usage.unlimited) return null
   const windows = usage.weeks.map((metric) => ({ label: 'weekly', metric }))
   if (usage.fiveHour) windows.unshift({ label: '5-hour', metric: usage.fiveHour })
 
   const empty = windows.filter(({ metric }) => metric.percentLeft === 0)
-  const exhausted = empty.find(({ metric }) => !metric.model) ?? empty[0]
+  const mainEmpty = empty.find(({ metric }) => !metric.model)
+  const exhausted = usage.mainExhausted
+    ? mainEmpty
+    : empty.find(({ metric }) => metric.model)
   if (!exhausted) return null
   return {
     provider: usage.id,
@@ -117,19 +129,19 @@ function findExhausted(usage: UsageProviderSummary): Exhausted | null {
     windowLabel: exhausted.label,
     resetsAt: exhausted.metric.resetsAt,
     model: exhausted.metric.model,
+    reserve: usage.reserve,
   }
 }
 
-function hasCapacity(usage: UsageProviderSummary): boolean {
+function hasCapacity(usage: ProviderUsage): boolean {
   if (!usage.available) return false
   if (usage.unlimited) return true
   const windows = usage.fiveHour ? [usage.fiveHour, ...usage.weeks] : usage.weeks
-  const unscopedExhausted = windows.some((metric) => !metric.model && metric.percentLeft === 0)
   const hasRoom = windows.some((metric) => metric.percentLeft !== null && metric.percentLeft > 0)
-  return !unscopedExhausted && hasRoom
+  return !usage.mainExhausted && hasRoom
 }
 
-function ExhaustionAlert({ providers }: { providers: UsageProviderSummary[] }) {
+function ExhaustionAlert({ providers }: { providers: ProviderUsage[] }) {
   const now = useNow(1000)
   const exhaustedWindows = providers
     .map(findExhausted)
@@ -152,7 +164,7 @@ function ExhaustionAlert({ providers }: { providers: UsageProviderSummary[] }) {
         <div className="us-alert-line1">
           <span className="us-alert-title">{title}</span>
           <span className="us-alert-tag mono">
-            {exhausted.model ? 'model exhausted' : 'no capacity'}
+            {exhausted.model ? 'model exhausted' : 'main limit reached'}
           </span>
         </div>
         <div className="us-alert-sub">
@@ -160,6 +172,10 @@ function ExhaustionAlert({ providers }: { providers: UsageProviderSummary[] }) {
             <span>
               New {exhausted.label} runs on {exhausted.model} will fail until the window resets.{' '}
               <b>{exhausted.label} still has capacity for other models.</b>
+            </span>
+          ) : exhausted.reserve ? (
+            <span>
+              The main {exhausted.label} quota is exhausted. Reserve quota is shown below.
             </span>
           ) : (
             <>
@@ -193,7 +209,7 @@ function ProviderPanel({
   history,
   today,
 }: {
-  usage: UsageProviderSummary
+  usage: ProviderUsage
   color: string | undefined
   history: UsageProviderHistory | undefined
   today: UsageProviderToday | undefined
@@ -232,7 +248,24 @@ function ProviderPanel({
                 />
               )}
               {usage.weeks.length > 0 && (
-                <WeeklyCarousel provider={usage.id} weeks={usage.weeks} history={history} />
+                <WeeklyCarousel
+                  provider={usage.id}
+                  weeks={usage.weeks}
+                  history={history}
+                />
+              )}
+              {usage.reserve && (
+                <details className="us-reserve" open={usage.mainExhausted}>
+                  <summary>Reserve quota</summary>
+                  <WindowRow
+                    label="weekly reserve"
+                    metric={usage.reserve}
+                    spark={history?.reserve}
+                    sparkLabel="reserve remaining · this week"
+                    sparkId={`${usage.id}-reserve`}
+                    rateNoun="week"
+                  />
+                </details>
               )}
             </>
           )}

@@ -874,6 +874,8 @@ export interface UsageProviderSummary {
   planTier: string | null
   fiveHour: UsageMetric | null
   weeks: UsageMetric[]
+  mainLimitReached: boolean | null
+  reserve: UsageMetric | null
   // An unmetered plan has permanently-full window metrics. Render "unmetered" plus
   // actual consumption instead of a quota bar that never moves.
   unlimited: boolean
@@ -902,6 +904,7 @@ export interface UsageProviderHistory {
   id: string
   fiveHour: UsageHistoryPoint[]
   weeks: UsageWindowHistory[]
+  reserve: UsageHistoryPoint[]
 }
 
 export interface UsageHistoryResponse {
