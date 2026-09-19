@@ -46,6 +46,14 @@ export interface DashboardOverview {
   lastFailedAt: string | null
 }
 
+export interface ScheduledRun {
+  run: string
+  status: string
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+}
+
 export interface DashboardSchedule {
   app: string
   kind: string
@@ -53,6 +61,8 @@ export interface DashboardSchedule {
   defaultCron: string
   enabled: boolean
   timezone: string
+  nextRunAt: string | null
+  runs: ScheduledRun[]
 }
 
 export interface DashboardSchedules {

@@ -24,6 +24,10 @@ workflow_status = sa.Table(
     sa.MetaData(schema=DBOS_SYSTEM_SCHEMA),
     sa.Column("workflow_uuid", sa.String, primary_key=True),
     sa.Column("status", sa.String),
+    sa.Column("schedule_name", sa.String),
+    sa.Column("created_at", sa.BigInteger),
+    sa.Column("started_at_epoch_ms", sa.BigInteger),
+    sa.Column("completed_at", sa.BigInteger),
     sa.Column("updated_at", sa.BigInteger),
     sa.Column("attributes", JSONB),
     sa.Column("forked_from", sa.String),
@@ -37,15 +41,48 @@ def subject_filter(
     # query composes, reading the attributes stamped at start(). A fresh alias
     # per call keeps it independent of the state/updated_at subqueries, which
     # claim the bare workflow_status table via correlate_except.
-    ws = workflow_status.alias()
+    subject_workflow = workflow_status.alias()
     return (
-        sa.select(ws.c.workflow_uuid)
+        sa.select(subject_workflow.c.workflow_uuid)
         .where(
-            ws.c.workflow_uuid == run_id,
-            ws.c.attributes["subject_type"].as_string() == subject_type,
-            ws.c.attributes["subject_id"].as_string() == subject_id,
+            subject_workflow.c.workflow_uuid == run_id,
+            subject_workflow.c.attributes["subject_type"].as_string() == subject_type,
+            subject_workflow.c.attributes["subject_id"].as_string() == subject_id,
         )
         .exists()
+    )
+
+
+def latest_invocations(schedule_names: list[str], limit: int) -> sa.Select:
+    """The newest invocations of each schedule, newest first. It includes manual triggers."""
+    # DBOS indexes schedule_name. It does not index the workflow name.
+    ranked = (
+        sa.select(
+            workflow_status.c.schedule_name,
+            workflow_status.c.workflow_uuid.label("run"),
+            workflow_status.c.status,
+            sa.func.to_timestamp(workflow_status.c.created_at / 1000.0).label("created_at"),
+            sa.func.to_timestamp(workflow_status.c.started_at_epoch_ms / 1000.0).label(
+                "started_at"
+            ),
+            sa.func.to_timestamp(workflow_status.c.completed_at / 1000.0).label("finished_at"),
+            sa.func.row_number()
+            .over(
+                partition_by=workflow_status.c.schedule_name,
+                order_by=(
+                    workflow_status.c.created_at.desc(),
+                    workflow_status.c.workflow_uuid.desc(),
+                ),
+            )
+            .label("position"),
+        )
+        .where(workflow_status.c.schedule_name.in_(schedule_names))
+        .subquery()
+    )
+    return (
+        sa.select(ranked)
+        .where(ranked.c.position <= limit)
+        .order_by(ranked.c.schedule_name, ranked.c.position)
     )
 
 

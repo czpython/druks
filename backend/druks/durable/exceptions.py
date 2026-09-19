@@ -48,3 +48,7 @@ class SubjectlessGate(FatalError):
             "to notify someone directly"
         )
         self.gate = gate
+
+
+class ScheduleUnavailable(DruksError):
+    """DBOS holds no schedule with this name, so there is nothing to trigger."""

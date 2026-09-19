@@ -88,13 +88,18 @@ admin codes. Chat's Channels tab also links the operator's own number, and the
 Chat page links to it.
 
 Schedules at `/schedules` groups declared workflows by app. The `app` query
-parameter filters the list. Operators change cadence and pause state here with
-the same controls as app settings. Each schedule saves through
-`PATCH /api/settings/apps`. Use defaults removes both overrides.
+parameter filters the list. Preset cadence and pause changes save immediately
+through `PATCH /api/settings/apps`. Custom cron input saves on blur or Enter.
+The pause switch saves only the pause state. A custom cron draft stays a draft.
+Use defaults removes both overrides. Failed saves retain the draft and offer Retry
+and Discard. The page invalidates the schedule and app settings caches after a save.
 
-A failed save keeps the draft. Polling and focus refresh preserve unsaved edits.
+Polling and focus refresh preserve unsaved edits.
 If you leave the page with unsaved edits, the shell asks first, as Settings
-does. The page shows the installation timezone beside the saved cadence.
+does. The page shows the installation timezone. Next-run estimates use that timezone.
+Each row shows the latest eight DBOS schedule invocations, including dispatch ticks.
+These records exclude downstream runs. Run now calls
+`POST /api/dashboard/schedules/{kind}/run` and works while a schedule is paused.
 
 Normal interface text uses IBM Plex Sans at 15 px. Technical values use
 IBM Plex Mono. Phone inputs use at least 16 px.

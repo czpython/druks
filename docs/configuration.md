@@ -102,15 +102,24 @@ run account's preferences. Unattended runs record the default account.
 Druks refuses to start a run before account setup.
 
 **Schedules**, below **Usage**, lists workflows that declare a schedule. You can
-change cadence, pause, or resume each schedule. **Save changes** applies the
-workflow overrides and updates the scheduler at once. **Use defaults** selects
-the declared cadence and enabled state. Save these changes to remove both
-overrides. The same fields remain in app settings.
+change cadence, pause, or resume each schedule. Preset and pause changes save
+automatically. Custom cron input saves when you press Enter or leave the field.
+**Use defaults** removes both overrides and restores the declared cadence and
+enabled state. The same fields remain in app settings.
 
 The page shows the installation timezone. Account timezone preferences do not
 change schedule timing. A failed save keeps your edits. A read refresh also
 preserves unsaved edits. If you leave the page with unsaved edits, Druks asks
 first. The `?app=` filter selects one installed app.
+
+**Next run** estimates the next invocation from the saved cadence. It does not
+confirm scheduler health. **Last run** and **Last runs** show recorded schedule
+invocations from DBOS, including dispatch ticks. They do not show the downstream
+work that dispatch starts. History contains up to eight invocations per schedule.
+
+**Run now** queues one invocation through DBOS without a change to the cadence or
+pause state. A paused schedule stays paused. The invocation uses the same entry
+and default account as its scheduled ticks.
 
 The API exposes installation settings at `GET/PATCH /api/settings` and your
 preferences at `GET/PATCH /api/settings/personal`. The personal route uses the

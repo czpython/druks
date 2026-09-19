@@ -1,30 +1,52 @@
 import asyncio
 import contextlib
+import inspect
 import os
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import psycopg
 import pytest
 from dbos import DBOS
+from druks.accounts.context import current_account_id
+from druks.accounts.models import Account
 from druks.agents import Agent, AgentOutput
-from druks.apps.registry import agents, workflows
+from druks.apps.loader import register_workflow_package
+from druks.apps.registry import Registry, agents, workflows
+from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
+from druks.browser.exceptions import BrowserSessionSignedOutError
+from druks.browser.models import StoredBrowserSession
 from druks.database import configure_session, get_session, session_scope
 from druks.db import db_session
-from druks.durable import FatalError, Run, RunState
-from druks.durable.dbos_state import workflow_status
-from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
-from druks.durable.models import Artifact
+from druks.durable import FatalError, Run, RunState, WorkflowError, engine
+from druks.durable.dbos_state import latest_invocations, workflow_status
+from druks.durable.engine import (
+    _scheduled,
+    apply_schedules,
+    configure_engine,
+    init_dbos,
+    launch,
+    shutdown,
+    trigger_schedule,
+)
+from druks.durable.enums import AgentCallStatus, WorkflowEvent
+from druks.durable.models import AgentCall, Artifact
 from druks.events.models import Event
+from druks.exceptions import SessionNotBoundError
 from druks.models import StoredSubject
+from druks.sandbox.datastructures import AgentResult
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.signals import subscribe
 from druks.testing import init_db
-from druks.user_settings.models import InstallationSettings
+from druks.user_settings.models import InstallationSettings, SettingsOverride
 from druks.workflows import Gate, OperatorReply, Subject, Workflow, step, task
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
-from pydantic import BaseModel
-from sqlalchemy import NullPool, create_engine, select
+from pydantic import ValidationError
+from sqlalchemy import NullPool, create_engine, delete, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 PG_BASE = os.environ.get("DRUKS_TEST_PG", "postgresql://druks:druks@localhost:5432")
@@ -32,30 +54,23 @@ DB = "druks_durable_test"
 URL = f"{PG_BASE.replace('postgresql://', 'postgresql+psycopg://')}/{DB}"
 
 
-def _pg_up() -> bool:
-    try:
-        psycopg.connect(f"{PG_BASE}/postgres", connect_timeout=2).close()
-        return True
-    except psycopg.Error:
-        return False
+try:
+    psycopg.connect(f"{PG_BASE}/postgres", connect_timeout=2).close()
+except psycopg.Error:
+    POSTGRES_AVAILABLE = False
+else:
+    POSTGRES_AVAILABLE = True
 
 
 pytestmark = [
-    pytest.mark.skipif(not _pg_up(), reason="test Postgres not reachable"),
+    pytest.mark.skipif(not POSTGRES_AVAILABLE, reason="test Postgres not reachable"),
     pytest.mark.asyncio(loop_scope="module"),
 ]
 
 
 class Decision(AgentOutput):
-    # Module-level so DBOS can pickle it as a step result (authors' agent
-    # contracts are module-level for the same reason). Not a registered
-    # capability, so it doesn't pollute any registry.
+    # DBOS must be able to pickle this step result.
     action: str
-
-
-class RepoCfg(BaseModel):
-    # The one typed run() input the test flows share.
-    repo: str
 
 
 class ReviewResult(AgentOutput):
@@ -81,12 +96,46 @@ class Widget(StoredSubject):
 
 
 class Gadget(Subject):
-    # A second subject class, so "not the one this workflow declares" is a real case.
     pass
 
 
-# run_multistep() below for fixtures using @step/a gate; run() for the rest.
-def _build_units():
+@pytest.fixture(scope="module", autouse=True)
+async def runtime():
+    original_database_url = os.environ.get("DRUKS_DATABASE_URL")
+
+    admin = psycopg.connect(f"{PG_BASE}/postgres", autocommit=True)
+    admin.execute(f"DROP DATABASE IF EXISTS {DB}")
+    admin.execute(f"CREATE DATABASE {DB}")
+    admin.close()
+
+    schema_engine = create_engine(URL)
+    init_db(schema_engine)
+    engine = create_async_engine(URL, poolclass=NullPool)
+    configure_engine(engine)
+    configure_session(engine)
+
+    session = get_session(engine)
+    try:
+        account = Account(username="op@example.com", is_default=True)
+        session.add(account)
+        await session.flush()
+        session.add_all(
+            Widget(id=subject_id)
+            for subject_id in (7, 4242, 636363, 424242, 515151, 878787, 909090, 313131, 616161)
+        )
+        session.add(
+            VaultSecret(
+                kind=SecretKind.SUBSCRIPTION,
+                audience=Audience.provider("anthropic"),
+                account_id=account.id,
+                identity={"email": account.username},
+                secrets={"claudeAiOauth": {"accessToken": "t"}},
+            )
+        )
+        await session.commit()
+    finally:
+        await session.close()
+
     @task
     async def record_task(repo: str) -> None:
         SINK.append(f"task:{repo}")
@@ -104,8 +153,6 @@ def _build_units():
         SINK.append("task:scheduled")
 
     class Approve(Gate):
-        # The on_wait override is what lets the subjectless flows below park
-        # here at all — without it every wait() would fail as SubjectlessGate.
         name = "approve"
         action: str = ""
 
@@ -114,7 +161,6 @@ def _build_units():
             SINK.append("approve:notified")
 
     class Confirm(Gate):
-        # No on_wait override: only a subject run may park here.
         name = "confirm"
         action: str = ""
 
@@ -136,15 +182,12 @@ def _build_units():
 
         async def run(self, repo: str) -> None:
             decision = await self.DECIDER(body="x")
-            # run()'s whole body is one step, so this agent call is in-step and
-            # must never land on the journal — on the live or the replay pass.
+
             SINK.append(f"instep-journal:{len(self.journal.filter(Decision))}")
             if decision.action == "stop":
                 raise FatalError("stopped by agent")
 
     class AgentBodyFlow(Workflow):
-        # In run_multistep the agent call is body-level — its own step — so
-        # the platform journals the domain value it returns.
         async def run_multistep(self, repo: str) -> None:
             decision = await AgentFlow.DECIDER(body="x")
             assert self.journal.latest(Decision) is decision
@@ -175,12 +218,10 @@ def _build_units():
             SINK.append("child:ran")
 
     class ParentFlow(Workflow):
-        # The child starts from the body, outside any step, where no session is bound.
         async def run_multistep(self) -> None:
             await ChildFlow.start(subject=None)
 
     class EnqueueInStepFlow(Workflow):
-        # A retried step would enqueue again, so enqueue() must refuse in-step.
         @step
         async def misuse(self) -> None:
             await record_task.enqueue(repo="from-a-step")
@@ -188,17 +229,13 @@ def _build_units():
         async def run_multistep(self) -> None:
             await self.misuse()
 
-    # every= so launch()'s apply_schedules has a schedule to create (smoke).
     class DailySweep(Workflow):
         every = "0 6 * * *"
 
-        async def run(self) -> None:  # pragma: no cover - not fired in tests
+        async def run(self) -> None:
             SINK.append("swept")
 
     class ScheduledDispatch(Workflow):
-        # every + a dispatch() classmethod: the tick fires dispatch(), never the
-        # subjectless run(). dispatch() start()s for real — the enqueue must work
-        # from the scheduled workflow's body (a step is forbidden the child-start).
         subject = Widget
         every = "0 */4 * * *"
 
@@ -209,7 +246,6 @@ def _build_units():
         async def run(self) -> None: ...
 
     class PolicyFlow(Workflow):
-        # dispatch() without a schedule: the launch policy a route or a body calls.
         subject = Widget
 
         @classmethod
@@ -219,14 +255,10 @@ def _build_units():
         async def run(self) -> None: ...
 
     class DispatchingFlow(Workflow):
-        # A body launches a sibling through its policy; dispatch() reads with a
-        # session of its own where the body holds none.
         async def run_multistep(self) -> None:
             SINK.append(f"dispatched:{await PolicyFlow.dispatch()}")
 
     class SubjectFlow(Workflow):
-        # Records the subject the platform threaded in, and returns a BaseModel
-        # so the result rides its workflow.finished event.
         subject = Widget
 
         async def run(self) -> Decision:
@@ -234,8 +266,6 @@ def _build_units():
             return Decision(action="ok")
 
     class DoubleGateFlow(Workflow):
-        # Two rounds on the same gate — the shape a stale buffered reply would
-        # ghost-resume.
         subject = Widget
 
         async def run_multistep(self) -> None:
@@ -257,8 +287,6 @@ def _build_units():
             SINK.append(f"confirmed:{reply.action}")
 
     class SubjectlessConfirmFlow(Workflow):
-        # The same no-on_wait gate, waited on by a run about nothing — nobody
-        # would ever see the park, so it must fail instead.
         async def run_multistep(self) -> None:
             await Confirm.wait()
 
@@ -267,8 +295,6 @@ def _build_units():
             await self.review()
 
     class AttributedFlow(Workflow):
-        # Records the attributed account before and after a park — resume must
-        # never swap the payer.
         subject = Widget
 
         async def run_multistep(self) -> None:
@@ -285,124 +311,32 @@ def _build_units():
             marker = f"announced:{self.workflow_id}"
             SINK.append(marker)
             if SINK.count(marker) == 1:
-                # A worker interruption leaves the run available for recovery.
                 raise asyncio.CancelledError("Simulated worker interruption")
 
-    return (
-        SampleFlow,
-        AgentFlow,
-        AgentBodyFlow,
-        RecordFeedback,
-        SubjectFlow,
-        DoubleGateFlow,
-        ConfirmFlow,
-        SubjectlessConfirmFlow,
-        ReviewFlow,
-        AttributedFlow,
-        AnnounceFlow,
-        ScheduledDispatch,
-        RetryingStepFlow,
-        EnqueueInStepFlow,
-        ParentFlow,
-        PolicyFlow,
-        DispatchingFlow,
-        record_task,
-        retry_task,
-        scheduled_task,
-    )
-
-
-@pytest.fixture(scope="module", autouse=True)
-async def rt():
-    db_url_snap = os.environ.get("DRUKS_DATABASE_URL")
-
-    admin = psycopg.connect(f"{PG_BASE}/postgres", autocommit=True)
-    admin.execute(f"DROP DATABASE IF EXISTS {DB}")
-    admin.execute(f"CREATE DATABASE {DB}")
-    admin.close()
-
-    schema_engine = create_engine(URL)
-    init_db(schema_engine)  # full schema incl. durable_runs + the work_items chain
-    engine = create_async_engine(URL, poolclass=NullPool)
-    configure_engine(engine)
-    configure_session(engine)
-
-    # An agent run checks the resolved provider is connected before any VM work;
-    # AgentFlow's decider resolves to claude, so connect anthropic for the module —
-    # and mark its account as the default.
-    from druks.accounts.models import Account
-    from druks.secrets.datastructures import Audience
-    from druks.secrets.enums import SecretKind
-    from druks.secrets.models import VaultSecret
-
-    session = get_session(engine)
-    try:
-        account = Account(username="op@example.com", is_default=True)
-        session.add(account)
-        await session.flush()
-        session.add_all(
-            Widget(id=subject_id)
-            for subject_id in (7, 4242, 636363, 424242, 515151, 878787, 909090, 313131, 616161)
-        )
-        session.add(
-            VaultSecret(
-                kind=SecretKind.SUBSCRIPTION,
-                audience=Audience.provider("anthropic"),
-                account_id=account.id,
-                identity={"email": account.username},
-                secrets={"claudeAiOauth": {"accessToken": "t"}},
-            )
-        )
-        await session.commit()
-    finally:
-        await session.close()
-
-    (
-        sample_flow,
-        agent_flow,
-        agent_body_flow,
-        feedback_flow,
-        subject_flow,
-        double_gate_flow,
-        confirm_flow,
-        subjectless_confirm_flow,
-        review_flow,
-        attributed_flow,
-        announce_flow,
-        scheduled_dispatch,
-        retrying_step_flow,
-        enqueue_in_step_flow,
-        parent_flow,
-        policy_flow,
-        dispatching_flow,
-        record_task,
-        retry_task,
-        scheduled_task,
-    ) = _build_units()
     os.environ["DRUKS_DATABASE_URL"] = URL
     init_dbos()
-    await launch()  # also runs await apply_schedules(druks_db) for daily_sweep
+    await launch()
     try:
         yield SimpleNamespace(
             engine=engine,
             schema_engine=schema_engine,
-            SampleFlow=sample_flow,
-            AgentFlow=agent_flow,
-            AgentBodyFlow=agent_body_flow,
-            RecordFeedback=feedback_flow,
-            SubjectFlow=subject_flow,
-            DoubleGateFlow=double_gate_flow,
-            ConfirmFlow=confirm_flow,
-            SubjectlessConfirmFlow=subjectless_confirm_flow,
-            ReviewFlow=review_flow,
-            AttributedFlow=attributed_flow,
-            AnnounceFlow=announce_flow,
-            ScheduledDispatch=scheduled_dispatch,
-            RetryingStepFlow=retrying_step_flow,
-            EnqueueInStepFlow=enqueue_in_step_flow,
-            ParentFlow=parent_flow,
-            PolicyFlow=policy_flow,
-            DispatchingFlow=dispatching_flow,
+            SampleFlow=SampleFlow,
+            AgentFlow=AgentFlow,
+            AgentBodyFlow=AgentBodyFlow,
+            RecordFeedback=RecordFeedback,
+            SubjectFlow=SubjectFlow,
+            DoubleGateFlow=DoubleGateFlow,
+            ConfirmFlow=ConfirmFlow,
+            SubjectlessConfirmFlow=SubjectlessConfirmFlow,
+            ReviewFlow=ReviewFlow,
+            AttributedFlow=AttributedFlow,
+            AnnounceFlow=AnnounceFlow,
+            ScheduledDispatch=ScheduledDispatch,
+            RetryingStepFlow=RetryingStepFlow,
+            EnqueueInStepFlow=EnqueueInStepFlow,
+            ParentFlow=ParentFlow,
+            PolicyFlow=PolicyFlow,
+            DispatchingFlow=DispatchingFlow,
             record_task=record_task,
             retry_task=retry_task,
             scheduled_task=scheduled_task,
@@ -411,8 +345,7 @@ async def rt():
         shutdown()
         await engine.dispose()
         schema_engine.dispose()
-        # Drop only the test's own keys so other modules see clean registries
-        # (a wholesale restore would clobber registrations made meanwhile).
+
         agents._items.pop("decider", None)
         workflows._items.pop("sample_flow", None)
         workflows._items.pop("agent_flow", None)
@@ -431,13 +364,13 @@ async def rt():
         workflows._items.pop("enqueue_in_step_flow", None)
         workflows._items.pop("child_flow", None)
         workflows._items.pop("parent_flow", None)
-        if db_url_snap is None:
+        if original_database_url is None:
             os.environ.pop("DRUKS_DATABASE_URL", None)
         else:
-            os.environ["DRUKS_DATABASE_URL"] = db_url_snap
+            os.environ["DRUKS_DATABASE_URL"] = original_database_url
 
 
-async def _state(engine, workflow_id: str) -> Run | None:
+async def _get_run(engine, workflow_id: str) -> Run | None:
     session = get_session(engine)
     try:
         return await session.get(Run, workflow_id)
@@ -445,19 +378,17 @@ async def _state(engine, workflow_id: str) -> Run | None:
         await session.close()
 
 
-async def _wait_for(engine, workflow_id, predicate, timeout=15.0):
+async def _wait_for_run(engine, workflow_id, predicate, timeout=15.0):
     deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:
-        row = await _state(engine, workflow_id)
-        if row is not None and predicate(row):
+        row = await _get_run(engine, workflow_id)
+        if row and predicate(row):
             return row
         await asyncio.sleep(0.1)
-    raise AssertionError(f"timed out; last={await _state(engine, workflow_id)}")
+    raise AssertionError(f"timed out; last={await _get_run(engine, workflow_id)}")
 
 
 async def _account_id(engine, email: str) -> str:
-    from druks.accounts.models import Account
-
     session = get_session(engine)
     try:
         result = await session.execute(select(Account).where(Account.username == email))
@@ -471,26 +402,27 @@ async def _account_id(engine, email: str) -> str:
         await session.close()
 
 
-async def test_launch_commits_installation_settings_before_serving(rt):
-    # This session must see the row committed by launch(), before any settings request.
-    async with get_session(rt.engine) as session:
+async def test_launch_commits_installation_settings_before_serving(runtime):
+    async with get_session(runtime.engine) as session:
         settings = await session.get(InstallationSettings, 1)
-        assert settings is not None
+        assert settings
         assert settings.default_harness == "claude"
 
 
-async def test_attribution_rides_the_run_and_survives_resume(rt):
-    """start(account_id=…) lands on the durable_runs row and the reserved
-    input key; attributes stay subject-only; a resume keeps the trigger account."""
-    from druks.durable.dbos_state import workflow_status
-
+async def test_attribution_rides_the_run_and_survives_resume(runtime):
     SINK.clear()
-    account_id = await _account_id(rt.engine, "op@example.com")
-    wfid = await rt.AttributedFlow.start(subject=Widget(id=878787), account_id=account_id)
-    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
-    with rt.schema_engine.connect() as conn:
-        attributes = conn.execute(
-            select(workflow_status.c.attributes).where(workflow_status.c.workflow_uuid == wfid)
+    account_id = await _account_id(runtime.engine, "op@example.com")
+    workflow_id = await runtime.AttributedFlow.start(
+        subject=Widget(id=878787), account_id=account_id
+    )
+    parked = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state == RunState.PARKED
+    )
+    with runtime.schema_engine.connect() as connection:
+        attributes = connection.execute(
+            select(workflow_status.c.attributes).where(
+                workflow_status.c.workflow_uuid == workflow_id
+            )
         ).scalar_one()
     assert attributes == {
         "subject_type": "widget",
@@ -502,105 +434,98 @@ async def test_attribution_rides_the_run_and_survives_resume(rt):
     assert f"acct-before:{account_id}" in SINK
 
     await parked.resume(action="go")
-    await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
     assert f"acct-after:{account_id}" in SINK
 
 
-async def test_browser_origin_start_inherits_the_ambient_account(rt):
-    # The auth gate stamps the request's account into a contextvar;
-    # start() reads it when no explicit account_id is passed.
-    from druks.accounts.context import current_account_id
-
-    account_id = await _account_id(rt.engine, "ambient@example.com")
+async def test_browser_origin_start_inherits_the_ambient_account(runtime):
+    account_id = await _account_id(runtime.engine, "ambient@example.com")
     token = current_account_id.set(account_id)
     try:
-        wfid = await rt.RecordFeedback.start(subject=None, repo="owner/ambient")
+        workflow_id = await runtime.RecordFeedback.start(subject=None, repo="owner/ambient")
     finally:
         current_account_id.reset(token)
-    await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
-    assert (await _state(rt.engine, wfid)).account_id == account_id
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+    assert (await _get_run(runtime.engine, workflow_id)).account_id == account_id
 
 
-async def test_duplicate_start_shares_the_run_across_accounts(rt):
-    # Attribution is NEVER part of the dedup id: two accounts starting the same
-    # subject share the one active run — and only the mint announces
-    # workflow.scheduled; the deduped start stays silent.
-    from druks.durable.enums import WorkflowEvent
-    from druks.signals import subscribe
-
+async def test_duplicate_start_shares_the_run_across_accounts(runtime):
     scheduled = []
 
-    @subscribe(WorkflowEvent.SCHEDULED)
-    async def saw(*, subject=None, **_: object) -> None:
+    @subscribe(WorkflowEvent.SCHEDULED, workflow=runtime.SampleFlow)
+    async def saw(*, subject: Widget, **_: object) -> None:
         scheduled.append(subject)
 
-    first = await _account_id(rt.engine, "op@example.com")
-    second = await _account_id(rt.engine, "peer@example.com")
+    first = await _account_id(runtime.engine, "op@example.com")
+    second = await _account_id(runtime.engine, "peer@example.com")
     subject = Widget(id=909090)
-    wfid = await rt.SampleFlow.start(subject=subject, account_id=first, repo="owner/app")
-    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
-    minted = [s for s in scheduled if s and s.get("id") == 909090]
+    workflow_id = await runtime.SampleFlow.start(
+        subject=subject, account_id=first, repo="owner/app"
+    )
+    parked = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state == RunState.PARKED
+    )
+    minted = [subject for subject in scheduled if subject.id == 909090]
     assert len(minted) == 1
 
-    dup = await rt.SampleFlow.start(subject=subject, account_id=second, repo="owner/app")
-    assert dup == wfid
-    assert len([s for s in scheduled if s and s.get("id") == 909090]) == 1
+    duplicate_id = await runtime.SampleFlow.start(
+        subject=subject, account_id=second, repo="owner/app"
+    )
+    assert duplicate_id == workflow_id
+    assert len([subject for subject in scheduled if subject.id == 909090]) == 1
 
     await parked.resume(action="merge")
-    await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
 
 
-async def test_step_gate_resume_finish(rt):
-    wfid = await rt.SampleFlow.start(subject=Widget(id=111111), repo="owner/app")
+async def test_step_gate_resume_finish(runtime):
+    workflow_id = await runtime.SampleFlow.start(subject=Widget(id=111111), repo="owner/app")
 
-    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
+    parked = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state == RunState.PARKED
+    )
     assert parked.input_gate == "approve"
     assert parked.input_requested_at is not None
 
     await parked.resume(action="merge")
-    done = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
+    done = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED
+    )
     assert done.input_gate is None
     assert done.failure is None
 
 
-async def test_duplicate_replies_to_one_round_collapse(rt):
-    """Two replies to the same parked round yield one resume — the duplicate must
-    not buffer on the topic and ghost-resume the gate's next round unprompted."""
-    from sqlalchemy import text
-
-    wfid = await rt.DoubleGateFlow.start(subject=Widget(id=515151))
-    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
+async def test_duplicate_replies_to_one_round_collapse(runtime):
+    workflow_id = await runtime.DoubleGateFlow.start(subject=Widget(id=515151))
+    parked = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state == RunState.PARKED
+    )
     first_asked_at = parked.input_requested_at
 
-    # The race: both resumers read the run while parked, then both send.
     await parked.resume(action="first")
     await parked.resume(action="duplicate")
 
-    # The duplicate collapsed against the round's one notification.
-    with rt.schema_engine.connect() as conn:
-        delivered = conn.execute(
+    with runtime.schema_engine.connect() as connection:
+        delivered = connection.execute(
             text(
                 "SELECT count(*) FROM dbos.notifications"
                 " WHERE destination_uuid = :id AND topic = 'approve'"
             ),
-            {"id": wfid},
+            {"id": workflow_id},
         ).scalar_one()
     assert delivered == 1
 
-    # Round 2 parks fresh and waits for an operator — a ghost resume would have
-    # answered it with the stale duplicate and finished the run.
-    parked = await _wait_for(
-        rt.engine,
-        wfid,
-        lambda r: (
-            r.state in (RunState.PARKED, RunState.FINISHED)
-            and r.input_requested_at != first_asked_at
+    parked = await _wait_for_run(
+        runtime.engine,
+        workflow_id,
+        lambda run: (
+            run.state in (RunState.PARKED, RunState.FINISHED)
+            and run.input_requested_at != first_asked_at
         ),
     )
     assert parked.state == RunState.PARKED
     assert "round1:first" in SINK
 
-    # A fresh reply to the new round is a new key, so it still gets through.
     second_asked_at = parked.input_requested_at
     await parked.resume(action="second")
     for _ in range(100):
@@ -609,13 +534,13 @@ async def test_duplicate_replies_to_one_round_collapse(rt):
         await asyncio.sleep(0.1)
     assert SINK.count("gate:completed") == 1
     await asyncio.sleep(0.2)
-    await DBOS.resume_workflow_async(wfid)
-    await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
+    await DBOS.resume_workflow_async(workflow_id)
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
     assert SINK.count("gate:completed") == 2
-    async with get_session(rt.engine) as session:
+    async with get_session(runtime.engine) as session:
         events = list(
             await session.scalars(
-                select(Event).where(Event.payload["run"].astext == wfid).order_by(Event.id)
+                select(Event).where(Event.payload["run"].astext == workflow_id).order_by(Event.id)
             )
         )
     requests = [event for event in events if event.type == "workflow.parked"]
@@ -631,38 +556,32 @@ async def test_duplicate_replies_to_one_round_collapse(rt):
     ]
     assert "round2:second" in SINK
     assert "round2:duplicate" not in SINK
-    # Both replies landed on the journal, in reply order.
+
     assert "gate-journal:['first', 'second']" in SINK
 
 
-async def test_fail_branch(rt):
-    from sqlalchemy import text
-
-    wfid = await rt.SampleFlow.start(subject=Widget(id=222222), repo="owner/app")
-    parked = await _wait_for(rt.engine, wfid, lambda r: r.input_gate == "approve")
+async def test_fail_branch(runtime):
+    workflow_id = await runtime.SampleFlow.start(subject=Widget(id=222222), repo="owner/app")
+    parked = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.input_gate == "approve"
+    )
 
     await parked.resume(action="close")
-    failed = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FAILED)
+    failed = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state == RunState.FAILED
+    )
     assert failed.failure == "closed at review"
-    # FAILED derives from DBOS's own record: the FatalError re-raised out of the
-    # workflow, so DBOS wrote terminal ERROR, not SUCCESS.
-    with rt.schema_engine.connect() as conn:
-        status = conn.execute(
+
+    with runtime.schema_engine.connect() as connection:
+        status = connection.execute(
             text("SELECT status FROM dbos.workflow_status WHERE workflow_uuid = :id"),
-            {"id": wfid},
+            {"id": workflow_id},
         ).scalar_one()
     assert status == "ERROR"
 
 
-async def test_signed_out_run_fails_and_marks_the_session_stale(rt):
-    # The platform owns the whole bounce reaction: the run fails under the code
-    # and the stamped session row goes stale — committed apart from the failing
-    # body's rolled-back transaction.
-    from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
-    from druks.browser.exceptions import BrowserSessionSignedOutError
-    from druks.browser.models import StoredBrowserSession
-
-    session = get_session(rt.engine)
+async def test_signed_out_run_fails_and_marks_the_session_stale(runtime):
+    session = get_session(runtime.engine)
     try:
         session.add(
             StoredBrowserSession(
@@ -682,11 +601,13 @@ async def test_signed_out_run_fails_and_marks_the_session_stale(rt):
             raise error
 
     try:
-        wfid = await BounceFlow.start(subject=None)
-        failed = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FAILED)
+        workflow_id = await BounceFlow.start(subject=None)
+        failed = await _wait_for_run(
+            runtime.engine, workflow_id, lambda run: run.state == RunState.FAILED
+        )
         assert failed.failure == "the site bounced the login"
         assert failed.failure_code == "browser_session_signed_out"
-        session = get_session(rt.engine)
+        session = get_session(runtime.engine)
         try:
             stored = (
                 await session.execute(
@@ -702,28 +623,29 @@ async def test_signed_out_run_fails_and_marks_the_session_stale(rt):
         workflows._items.pop("bounce_flow", None)
 
 
-async def test_subjectless_gate_fails_loudly(rt):
-    """A gate with no on_wait override fails a subjectless run now, instead of
-    parking it unseen for the whole gate TTL."""
-    wfid = await rt.SubjectlessConfirmFlow.start(subject=None)
-    failed = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FAILED)
+async def test_subjectless_gate_fails_loudly(runtime):
+    workflow_id = await runtime.SubjectlessConfirmFlow.start(subject=None)
+    failed = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state == RunState.FAILED
+    )
     assert failed.failure
     assert "'confirm'" in failed.failure
     assert "subjectless" in failed.failure
-    assert not failed.input_gate  # refused up front — the run never parked
+    assert not failed.input_gate
 
 
-async def test_subject_gate_parks_unchanged(rt):
-    """The same no-on_wait gate still parks and resumes for a subject run — the
-    subject's watchers are the ones who'd see it, feed-side."""
-    wfid = await rt.ConfirmFlow.start(subject=Widget(id=636363))
-    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
+async def test_subject_gate_parks_unchanged(runtime):
+    workflow_id = await runtime.ConfirmFlow.start(subject=Widget(id=636363))
+    parked = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state == RunState.PARKED
+    )
     assert parked.input_gate == "confirm"
-    # start() stamped the subject as workflow attributes — the keying every
-    # runs-for-a-subject query reads; the id normalizes to a string.
-    with rt.schema_engine.connect() as conn:
-        attributes = conn.execute(
-            select(workflow_status.c.attributes).where(workflow_status.c.workflow_uuid == wfid)
+
+    with runtime.schema_engine.connect() as connection:
+        attributes = connection.execute(
+            select(workflow_status.c.attributes).where(
+                workflow_status.c.workflow_uuid == workflow_id
+            )
         ).scalar_one()
     assert attributes == {
         "subject_type": "widget",
@@ -733,41 +655,27 @@ async def test_subject_gate_parks_unchanged(rt):
     }
 
     await parked.resume(action="go")
-    await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
     assert "confirmed:go" in SINK
 
 
-async def test_subjectless_review_fails_loudly(rt):
-    """review() is a human gate too: a subjectless run fails instead of parking
-    an in-app ask nobody would ever see."""
-    wfid = await rt.ReviewFlow.start(subject=None)
-    failed = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FAILED)
+async def test_subjectless_review_fails_loudly(runtime):
+    workflow_id = await runtime.ReviewFlow.start(subject=None)
+    failed = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state == RunState.FAILED
+    )
     assert failed.failure
     assert "'review'" in failed.failure
 
 
 def _fake_ephemeral_returning(output: dict, seen: list[dict], held: list[bool]):
-    # Class-method stand-in for Client.ephemeral: a VM whose agent returns
-    # ``output``.
-    from datetime import UTC, datetime
-
-    from druks.durable.enums import AgentCallStatus
-    from druks.sandbox.datastructures import AgentResult
-
     @contextlib.asynccontextmanager
     async def _fake_ephemeral(self, **_kw):
         async def _run_agent(_session, **kwargs):
             seen.append(kwargs)
-            # The agent runs for minutes in production, so the step commits before
-            # handing over: its own session holds no connection through the wait.
-            # Ask that session — sessions are task-scoped and the agent is awaited
-            # in the step's task, so this is it. The pool cannot answer: it is
-            # shared, and another reader in this instant is not this step pinning.
-            from druks.db import db_session
 
             held.append(db_session().in_transaction())
-            # The harness names the on-disk dir (and the row) from the supplied
-            # call_id, so the result echoes it back as run_id.
+
             return AgentResult(
                 output=output,
                 run_id=kwargs["call_id"],
@@ -778,7 +686,6 @@ def _fake_ephemeral_returning(output: dict, seen: list[dict], held: list[bool]):
                 started_at=datetime.now(UTC),
             )
 
-        # The base Workspace wrapping this box reads host_id off ``id``.
         yield SimpleNamespace(run_agent=_run_agent, id="host-test")
 
     return _fake_ephemeral
@@ -788,46 +695,43 @@ async def _fake_render(*_a, **_k):
     return "PROMPT"
 
 
-async def test_run_agent_step(rt, monkeypatch):
-    # Stub the VM; assert the step records an AgentCall and the result round-trips.
-    from druks.durable.models import AgentCall
-
+async def test_run_agent_step(runtime, monkeypatch):
     seen: list[dict] = []
     held: list[bool] = []
-    # Patch the class method (not the singleton instance): an instance-attr
-    # patch leaves a shadowing leftover that breaks later sandbox tests.
+
     monkeypatch.setattr(
         "druks.sandbox.client.Client.ephemeral",
         _fake_ephemeral_returning({"action": "stop"}, seen, held),
     )
     monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
 
-    wfid = await rt.AgentFlow.start(subject=None, repo="owner/app")
-    failed = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FAILED)
+    workflow_id = await runtime.AgentFlow.start(subject=None, repo="owner/app")
+    failed = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state == RunState.FAILED
+    )
     assert failed.failure == "stopped by agent"
-    assert "instep-journal:0" in SINK  # an agent call inside run()'s step: never recorded
-    assert seen and seen[0]["artifact_dir"].name == f"run-{wfid}"
+    assert "instep-journal:0" in SINK
+    assert seen[0]["artifact_dir"].name == f"run-{workflow_id}"
     assert seen[0]["agent"] == "decider"
-    session = get_session(rt.engine)
+    session = get_session(runtime.engine)
     try:
         recorded = list(
-            (await session.execute(select(AgentCall).where(AgentCall.run_id == wfid))).scalars()
+            (
+                await session.execute(select(AgentCall).where(AgentCall.run_id == workflow_id))
+            ).scalars()
         )
     finally:
         await session.close()
-    # The call is recorded under the orchestrator-minted id threaded to run_agent.
+
     assert recorded[0].id == seen[0]["call_id"]
-    account_id = await _account_id(rt.engine, "op@example.com")
+    account_id = await _account_id(runtime.engine, "op@example.com")
     assert failed.account_id == account_id
     assert recorded[0].subscription.account_id == account_id
     assert recorded[0].api_key_id is None
-    assert held == [False]  # the step let its connection go before the agent ran
+    assert held == [False]
 
 
-async def test_body_level_agent_output_lands_on_the_journal(rt, monkeypatch):
-    """A run_multistep body-level agent call lands the domain value the body
-    receives on the journal — AgentBodyFlow asserts identity in-body and sinks
-    the projection."""
+async def test_body_level_agent_output_lands_on_the_journal(runtime, monkeypatch):
     seen: list[dict] = []
     held: list[bool] = []
     monkeypatch.setattr(
@@ -836,34 +740,34 @@ async def test_body_level_agent_output_lands_on_the_journal(rt, monkeypatch):
     )
     monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
 
-    wfid = await rt.AgentBodyFlow.start(subject=None, repo="owner/app")
-    await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
+    workflow_id = await runtime.AgentBodyFlow.start(subject=None, repo="owner/app")
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
     assert "body-journal:1:ship" in SINK
 
 
-async def test_task_enqueue(rt):
+async def test_task_enqueue(runtime):
     SINK.clear()
-    await rt.RecordFeedback.start(subject=None, repo="owner/queued")
+    await runtime.RecordFeedback.start(subject=None, repo="owner/queued")
     deadline = asyncio.get_event_loop().time() + 15
     while "owner/queued" not in SINK and asyncio.get_event_loop().time() < deadline:
         await asyncio.sleep(0.1)
     assert "owner/queued" in SINK
 
 
-async def test_durable_task_enqueue(rt):
+async def test_durable_task_enqueue(runtime):
     SINK.clear()
-    await rt.record_task.enqueue(repo="owner/queued")
+    await runtime.record_task.enqueue(repo="owner/queued")
     deadline = asyncio.get_event_loop().time() + 15
     while "task:owner/queued" not in SINK and asyncio.get_event_loop().time() < deadline:
         await asyncio.sleep(0.1)
     assert "task:owner/queued" in SINK
 
 
-async def test_durable_task_retries(rt):
+async def test_durable_task_retries(runtime):
     global TASK_RETRY_ATTEMPTS
     TASK_RETRY_ATTEMPTS = 0
     SINK.clear()
-    await rt.retry_task.enqueue()
+    await runtime.retry_task.enqueue()
     deadline = asyncio.get_event_loop().time() + 15
     while "task:retried" not in SINK and asyncio.get_event_loop().time() < deadline:
         await asyncio.sleep(0.1)
@@ -871,19 +775,17 @@ async def test_durable_task_retries(rt):
     assert TASK_RETRY_ATTEMPTS > 1
 
 
-async def test_step_retries(rt):
+async def test_step_retries(runtime):
     global STEP_RETRY_ATTEMPTS
     STEP_RETRY_ATTEMPTS = 0
     SINK.clear()
-    workflow_id = await rt.RetryingStepFlow.start(subject=None)
-    await _wait_for(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+    workflow_id = await runtime.RetryingStepFlow.start(subject=None)
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
     assert "step:retried" in SINK
     assert STEP_RETRY_ATTEMPTS > 1
 
 
-async def test_db_session_on_a_task_with_no_bound_session_raises(rt):
-    from druks.exceptions import SessionNotBoundError
-
+async def test_db_session_on_a_task_with_no_bound_session_raises(runtime):
     async def read() -> None:
         db_session()
 
@@ -891,22 +793,14 @@ async def test_db_session_on_a_task_with_no_bound_session_raises(rt):
         await asyncio.create_task(read())
 
 
-async def test_body_starts_a_child_run(rt):
-    wfid = await rt.ParentFlow.start(subject=None)
-    await _wait_for(rt.engine, wfid, lambda row: row.state == RunState.FINISHED)
-
-    async def child_run():
-        session = get_session(rt.engine)
-        try:
-            return (
-                await session.execute(select(Run).where(Run.kind == "child_flow"))
-            ).scalar_one_or_none()
-        finally:
-            await session.close()
+async def test_body_starts_a_child_run(runtime):
+    workflow_id = await runtime.ParentFlow.start(subject=None)
+    await _wait_for_run(runtime.engine, workflow_id, lambda row: row.state == RunState.FINISHED)
 
     deadline = asyncio.get_event_loop().time() + 15
     while asyncio.get_event_loop().time() < deadline:
-        child = await child_run()
+        async with get_session(runtime.engine) as session:
+            child = await session.scalar(select(Run).where(Run.kind == "child_flow"))
         if child and child.state == RunState.FINISHED:
             break
         await asyncio.sleep(0.1)
@@ -914,44 +808,40 @@ async def test_body_starts_a_child_run(rt):
     assert "child:ran" in SINK
 
 
-async def test_body_dispatches_a_sibling_through_its_policy(rt):
-    wfid = await rt.DispatchingFlow.start(subject=None)
-    await _wait_for(rt.engine, wfid, lambda row: row.state == RunState.FINISHED)
+async def test_body_dispatches_a_sibling_through_its_policy(runtime):
+    workflow_id = await runtime.DispatchingFlow.start(subject=None)
+    await _wait_for_run(runtime.engine, workflow_id, lambda row: row.state == RunState.FINISHED)
     dispatched = next(entry for entry in SINK if entry.startswith("dispatched:"))
-    run = await _wait_for(
-        rt.engine,
+    run = await _wait_for_run(
+        runtime.engine,
         dispatched.removeprefix("dispatched:"),
         lambda row: row.state == RunState.FINISHED,
     )
     assert run.subject_key == "W-616161"
 
 
-async def test_enqueue_inside_a_step_fails_the_run(rt):
-    wfid = await rt.EnqueueInStepFlow.start(subject=None)
-    failed = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FAILED)
+async def test_enqueue_inside_a_step_fails_the_run(runtime):
+    workflow_id = await runtime.EnqueueInStepFlow.start(subject=None)
+    failed = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state == RunState.FAILED
+    )
     assert "inside a @step" in failed.failure
 
 
-async def test_scheduled_task_runs_nullary_body(rt):
-    from datetime import UTC, datetime
-
+async def test_scheduled_task_runs_nullary_body(runtime):
     SINK.clear()
-    await rt.scheduled_task._scheduled_entry(datetime.now(UTC), None)
+    await runtime.scheduled_task._scheduled_entry(datetime.now(UTC), None)
     assert "task:scheduled" in SINK
 
 
-async def test_scheduled_task_must_be_nullary(rt):
-    from druks.durable.exceptions import WorkflowError
-
+async def test_scheduled_task_must_be_nullary(runtime):
     with pytest.raises(WorkflowError, match="nullary"):
 
         @task(every="0 6 * * *")
         async def needs_argument(target: str) -> None: ...
 
 
-async def test_task_name_uses_declaring_app(rt):
-    from druks.apps.loader import register_workflow_package
-
+async def test_task_name_uses_declaring_app(runtime):
     register_workflow_package("plain_task_package", "")
     register_workflow_package("app_task_package", "alpha")
 
@@ -969,60 +859,30 @@ async def test_task_name_uses_declaring_app(rt):
     assert namespaced.name == "alpha.summarize"
 
 
-async def test_every_registers_schedule(rt):
-    # A Workflow with every= registers (schedule_name, cron, fn) so launch()'s
-    # apply_schedules creates the DBOS cron. The fn must satisfy DBOS's
-    # ScheduledWorkflow signature — (scheduled_at: datetime, context) — exactly,
-    # or production crons silently stop firing.
-    import inspect
-    from datetime import datetime
-
-    from druks.durable.engine import _scheduled
-
-    entry = next((row for row in _scheduled if row[0].kind == "daily_sweep"), None)
-    assert entry is not None, "daily_sweep did not register a schedule"
-    cls, fn = entry
-    assert cls.every == "0 6 * * *"
-    params = list(inspect.signature(fn).parameters.values())
-    assert params[0].annotation is datetime
-    assert len(params) == 2 and params[1].name == "context"
+async def test_every_registers_schedule(runtime):
+    workflow, entry = next(row for row in _scheduled if row[0].kind == "daily_sweep")
+    assert workflow.every == "0 6 * * *"
+    parameters = list(inspect.signature(entry).parameters.values())
+    assert parameters[0].annotation is datetime
+    assert len(parameters) == 2 and parameters[1].name == "context"
 
 
-async def test_scheduled_tick_fires_dispatch_not_run(rt):
-    # A workflow that declares dispatch() is subject-backed — its run() can't fire
-    # subjectless. The tick must reach dispatch(), and dispatch()'s start() must
-    # enqueue the real run from the scheduled workflow's body.
-    from datetime import UTC, datetime
-
-    from druks.durable.engine import _scheduled
-
-    _, fn = next(row for row in _scheduled if row[0].kind == "scheduled_dispatch")
-    await fn(datetime.now(UTC), None)
-
-    async def dispatched_run():
-        session = get_session(rt.engine)
-        try:
-            return (
-                await session.execute(select(Run).where(Run.kind == "scheduled_dispatch"))
-            ).scalar_one_or_none()
-        finally:
-            await session.close()
+async def test_scheduled_tick_fires_dispatch_not_run(runtime):
+    _, entry = next(row for row in _scheduled if row[0].kind == "scheduled_dispatch")
+    await entry(datetime.now(UTC), None)
 
     deadline = asyncio.get_event_loop().time() + 15
     while asyncio.get_event_loop().time() < deadline:
-        run = await dispatched_run()
+        async with get_session(runtime.engine) as session:
+            run = await session.scalar(select(Run).where(Run.kind == "scheduled_dispatch"))
         if run and run.state == RunState.FINISHED:
             break
         await asyncio.sleep(0.1)
     assert run.state == RunState.FINISHED
-    assert run.subject_key == "W-313131"  # about its subject, not subjectless
+    assert run.subject_key == "W-313131"
 
 
-async def test_scheduled_dispatch_must_be_nullary(rt):
-    # The tick fires dispatch() with no arguments, so a required parameter is a
-    # declaration error, caught when the class is defined.
-    from druks.durable.exceptions import WorkflowError
-
+async def test_scheduled_dispatch_must_be_nullary(runtime):
     with pytest.raises(WorkflowError, match="nullary"):
 
         class NeedsArg(Workflow):
@@ -1035,168 +895,131 @@ async def test_scheduled_dispatch_must_be_nullary(rt):
                 return target
 
 
-async def test_apply_schedules_drops_undeclared(rt):
-    # A schedule the sys-db still holds but no Workflow declares (a renamed or
-    # removed cron) must be reconciled away, or it keeps firing a dead name.
-    from dbos import DBOS
-    from druks.durable.engine import _scheduled, apply_schedules
-
-    cls, fn = next(row for row in _scheduled if row[0].kind == "daily_sweep")
-    DBOS.create_schedule(schedule_name="stale_cron", workflow_fn=fn, schedule=cls.every)
+async def test_apply_schedules_drops_undeclared(runtime):
+    workflow, entry = next(row for row in _scheduled if row[0].kind == "daily_sweep")
+    DBOS.create_schedule(schedule_name="stale_cron", workflow_fn=entry, schedule=workflow.every)
     assert "stale_cron" in {s["schedule_name"] for s in DBOS.list_schedules()}
 
-    async with session_scope(rt.engine) as session:
+    async with session_scope(runtime.engine) as session:
         await apply_schedules(session)
 
     live = {s["schedule_name"] for s in DBOS.list_schedules()}
-    assert "stale_cron" not in live  # undeclared → dropped
-    assert "daily_sweep" in live  # declared → preserved
+    assert "stale_cron" not in live
+    assert "daily_sweep" in live
 
 
-async def test_apply_schedules_resolves_operator_overrides(rt):
-    # The declared every= is the default cadence; a settings override retunes it and
-    # schedule_enabled=False pauses it (no sys-db schedule at all). Clearing the
-    # overrides reconciles back to the declared cron.
-    from dbos import DBOS
-    from druks.durable.engine import apply_schedules
-    from druks.user_settings.models import SettingsOverride
-
-    def sweep_cron():
-        rows = {s["schedule_name"]: s["schedule"] for s in DBOS.list_schedules()}
-        return rows.get("daily_sweep")
-
-    from druks.database import session_scope
-
-    # Each write commits — a bare test-task session stays idle-in-transaction
-    # and its row locks deadlock any later test touching the same rows.
-    async with session_scope(rt.engine) as session:
+async def test_apply_schedules_resolves_operator_overrides(runtime):
+    async with session_scope(runtime.engine) as session:
         await SettingsOverride.write(session, "workflow:daily_sweep:schedule", "0 9 * * *")
-    async with session_scope(rt.engine) as session:
+    async with session_scope(runtime.engine) as session:
         await apply_schedules(session)
-    assert sweep_cron() == "0 9 * * *"  # override wins over the declared default
+    schedule = await DBOS.get_schedule_async("daily_sweep")
+    assert schedule["schedule"] == "0 9 * * *"
 
-    async with session_scope(rt.engine) as session:
+    async with session_scope(runtime.engine) as session:
         await SettingsOverride.write(session, "workflow:daily_sweep:schedule_enabled", False)
-    async with session_scope(rt.engine) as session:
+    async with session_scope(runtime.engine) as session:
         await apply_schedules(session)
-    assert sweep_cron() is None  # paused → no schedule, nothing fires
+    paused = await DBOS.get_schedule_async("daily_sweep")
+    assert paused["status"] == "PAUSED"
+    assert paused["schedule_id"] == schedule["schedule_id"]
 
-    async with session_scope(rt.engine) as session:
+    async with session_scope(runtime.engine) as session:
+        await SettingsOverride.write(session, "workflow:daily_sweep:schedule", "0 10 * * *")
+    async with session_scope(runtime.engine) as session:
+        await apply_schedules(session)
+    retuned = await DBOS.get_schedule_async("daily_sweep")
+    assert retuned["status"] == "PAUSED"
+    assert retuned["schedule"] == "0 10 * * *"
+    assert retuned["schedule_id"] == schedule["schedule_id"]
+
+    invocation = await trigger_schedule("daily_sweep")
+    handle = await DBOS.retrieve_workflow_async(invocation)
+    await asyncio.wait_for(handle.get_result(), timeout=15)
+    assert "swept" in SINK
+    async with session_scope(runtime.engine) as session:
+        history = await session.execute(latest_invocations(["daily_sweep"], limit=8))
+    assert [row.run for row in history] == [invocation]
+    assert (await DBOS.get_schedule_async("daily_sweep"))["status"] == "PAUSED"
+
+    async with session_scope(runtime.engine) as session:
         await SettingsOverride.write(session, "workflow:daily_sweep:schedule", None)
         await SettingsOverride.write(session, "workflow:daily_sweep:schedule_enabled", None)
-    async with session_scope(rt.engine) as session:
+    async with session_scope(runtime.engine) as session:
         await apply_schedules(session)
-    assert sweep_cron() == "0 6 * * *"  # overrides cleared → declared default
+    restored = await DBOS.get_schedule_async("daily_sweep")
+    assert restored["schedule"] == "0 6 * * *"
+    assert restored["status"] == "ACTIVE"
 
 
-async def test_session_scope_commits_writes(rt):
-    # A bare Session close rolls back, so without an explicit commit every
-    # write under session_scope silently evaporates.
-    from druks.database import session_scope
-    from druks.user_settings.models import SettingsOverride
-
-    async with session_scope(rt.engine) as session:
+async def test_session_scope_commits_writes(runtime):
+    async with session_scope(runtime.engine) as session:
         await SettingsOverride.write(session, "session_scope_commit_probe", {"landed": True})
 
-    session = get_session(rt.engine)
+    session = get_session(runtime.engine)
     try:
         row = await session.get(SettingsOverride, "session_scope_commit_probe")
-        assert row is not None
+        assert row
         assert row.value == {"landed": True}
     finally:
         await session.close()
 
 
-async def test_apply_schedules_evaluates_cron_in_installation_timezone(rt, monkeypatch):
-    # The cron is stored verbatim and evaluated in the operator's timezone, so
-    # "daily at midnight" is their midnight and stays honest across DST.
-    from dbos import DBOS
-    from druks.durable.engine import apply_schedules
-
-    def sweep_timezone():
-        rows = {s["schedule_name"]: s["cron_timezone"] for s in DBOS.list_schedules()}
-        return rows.get("daily_sweep")
-
-    async with session_scope(rt.engine) as session:
+async def test_apply_schedules_evaluates_cron_in_installation_timezone(runtime, monkeypatch):
+    async with session_scope(runtime.engine) as session:
         await apply_schedules(session)
-    assert sweep_timezone() == "UTC"  # the settings default
-
-    from druks.durable import engine
+    assert (await DBOS.get_schedule_async("daily_sweep"))["cron_timezone"] == "UTC"
 
     settings = engine.load_settings().model_copy(update={"timezone": "Europe/Madrid"})
     monkeypatch.setattr(engine, "load_settings", lambda: settings)
-    async with session_scope(rt.engine) as session:
+    async with session_scope(runtime.engine) as session:
         await apply_schedules(session)
-    assert sweep_timezone() == "Europe/Madrid"
+    assert (await DBOS.get_schedule_async("daily_sweep"))["cron_timezone"] == "Europe/Madrid"
 
 
-async def test_user_settings_get_recreates_the_singleton(rt):
-    # get() is the first-touch creator; its ON CONFLICT insert lets two
-    # processes booting one fresh database both call it safely.
-    from druks.database import session_scope
-    from druks.db import db_session
-    from druks.user_settings.models import InstallationSettings
-    from sqlalchemy import delete
-
-    async with session_scope(rt.engine):
+async def test_user_settings_get_recreates_the_singleton(runtime):
+    async with session_scope(runtime.engine):
         await db_session().execute(delete(InstallationSettings))
-    async with session_scope(rt.engine) as session:
+    async with session_scope(runtime.engine) as session:
         assert (await InstallationSettings.get_or_create(session)).default_harness == "claude"
-    async with session_scope(rt.engine) as session:
+    async with session_scope(runtime.engine) as session:
         assert (await InstallationSettings.get_or_create(session)).id == 1
 
 
-async def test_a_run_hydrates_the_subject_row_it_was_started_for(rt):
-    from druks.database import session_scope
-    from druks.db import db_session
-
-    async with session_scope(rt.engine):
+async def test_a_run_hydrates_the_subject_row_it_was_started_for(runtime):
+    async with session_scope(runtime.engine):
         widget = Widget()
         db_session().add(widget)
         await db_session().flush()
         assert widget.identity == {"type": "widget", "id": widget.id}
 
-        run = rt.SubjectFlow()
+        run = runtime.SubjectFlow()
         run._subject = widget.identity
 
         assert await run.subject is widget
 
 
-async def test_input_is_validated_at_start(rt):
-    # run()'s annotation is the wire contract: a bad input fails at start(), a
-    # good one reaches the body through DBOS's own checkpointed arguments.
-    from druks.durable import WorkflowError
-    from pydantic import ValidationError
-
+async def test_input_is_validated_at_start(runtime):
     with pytest.raises(ValidationError):
-        await rt.SampleFlow.start(subject=Widget(id=333333), repo=1)  # wrong type
+        await runtime.SampleFlow.start(subject=Widget(id=333333), repo=1)
     with pytest.raises(WorkflowError):
-        await rt.SubjectFlow.start(subject=Widget(id=333333), repo="x")  # takes no input
+        await runtime.SubjectFlow.start(subject=Widget(id=333333), repo="x")
 
-    wfid = await rt.RecordFeedback.start(subject=None, repo="owner/flat")
-    await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
+    workflow_id = await runtime.RecordFeedback.start(subject=None, repo="owner/flat")
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
     assert "owner/flat" in SINK
 
 
-async def test_start_holds_a_run_to_the_declared_subject(rt):
-    # Subscribers derive their subject class from ``workflow=``, so the declaration
-    # has to be true of every run — a wrong one, a missing one, and an unexpected
-    # one all fail before anything is enqueued.
-    from druks.durable import WorkflowError
-
+async def test_start_holds_a_run_to_the_declared_subject(runtime):
     with pytest.raises(WorkflowError, match="is about Widget, not Gadget"):
-        await rt.SubjectFlow.start(subject=Gadget(id="g1"))
+        await runtime.SubjectFlow.start(subject=Gadget(id="g1"))
     with pytest.raises(WorkflowError, match="is about Widget, not nothing"):
-        await rt.SubjectFlow.start(subject=None)
+        await runtime.SubjectFlow.start(subject=None)
     with pytest.raises(WorkflowError, match="declares no subject"):
-        await rt.ReviewFlow.start(subject=Widget(id=999999))
+        await runtime.ReviewFlow.start(subject=Widget(id=999999))
 
 
-async def test_run_signature_is_enforced(rt):
-    # A body's parameters are the input contract — every one needs a type, and
-    # *args/**kwargs are rejected at class definition, not at first start.
-    from druks.durable import WorkflowError
-
+async def test_run_signature_is_enforced(runtime):
     with pytest.raises(WorkflowError):
 
         class UntypedFlow(Workflow):
@@ -1213,10 +1036,7 @@ async def test_run_signature_is_enforced(rt):
             async def run_multistep(self, repo) -> None: ...
 
 
-async def test_a_workflow_declares_exactly_one_body(rt):
-    # run()/run_multistep() are mutually exclusive, not two optional hooks.
-    from druks.durable import WorkflowError
-
+async def test_a_workflow_declares_exactly_one_body(runtime):
     with pytest.raises(WorkflowError, match="exactly one is allowed"):
 
         class BothFlow(Workflow):
@@ -1229,10 +1049,7 @@ async def test_a_workflow_declares_exactly_one_body(rt):
             async def other(self) -> None: ...
 
 
-async def test_step_on_run_or_run_multistep_is_rejected(rt):
-    # run() is already the step; run_multistep() must stay unstepped.
-    from druks.durable import WorkflowError
-
+async def test_step_on_run_or_run_multistep_is_rejected(runtime):
     with pytest.raises(WorkflowError, match="doesn't take @step"):
 
         class StepOnRunFlow(Workflow):
@@ -1246,15 +1063,13 @@ async def test_step_on_run_or_run_multistep_is_rejected(rt):
             async def run_multistep(self) -> None: ...
 
 
-async def test_subject_reaches_body_and_result_rides_finished_event(rt):
-    from druks.events.models import Event
+async def test_subject_reaches_body_and_result_rides_finished_event(runtime):
+    workflow_id = await runtime.SubjectFlow.start(subject=Widget(id=7))
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
 
-    wfid = await rt.SubjectFlow.start(subject=Widget(id=7))
-    await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
+    assert "subj-id:7" in SINK
 
-    assert "subj-id:7" in SINK  # the platform threaded subject into self.subject
-
-    session = get_session(rt.engine)
+    session = get_session(runtime.engine)
     try:
         finished = (
             await session.execute(
@@ -1263,32 +1078,24 @@ async def test_subject_reaches_body_and_result_rides_finished_event(rt):
         ).scalar_one()
     finally:
         await session.close()
-    # run()'s BaseModel return rides the finished event.
+
     assert finished.payload["result"] == {"action": "ok"}
 
 
-async def test_registry_rejects_duplicate_key(rt):
-    # Re-registering the same item is idempotent, but a different capability on an
-    # existing key is a collision (raises) — two can't share a durable identity.
-    from druks.apps.registry import Registry
-
+async def test_registry_rejects_duplicate_key(runtime):
     registry = Registry("test", key=lambda entry: entry["kind"])
     capability = {"kind": "k"}
     registry.register(capability)
-    registry.register(capability)  # same item re-imported → idempotent
+    registry.register(capability)
     with pytest.raises(ValueError, match="durable identity"):
-        registry.register({"kind": "k"})  # different capability, same kind → collision
+        registry.register({"kind": "k"})
 
 
-async def test_run_events_carry_subject(rt):
-    # The dispatch subject rides the run row (never a body arg), and every
-    # run-state transition emits a run-level event keyed to it.
-    from druks.events.models import Event
+async def test_run_events_carry_subject(runtime):
+    workflow_id = await runtime.SubjectFlow.start(subject=Widget(id=4242))
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
 
-    wfid = await rt.SubjectFlow.start(subject=Widget(id=4242))
-    await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
-
-    session = get_session(rt.engine)
+    session = get_session(runtime.engine)
     try:
         events = list(
             (
@@ -1306,108 +1113,98 @@ async def test_run_events_carry_subject(rt):
         "workflow.scheduled",
     ]
     assert {e.subject_type for e in events} == {"widget"}
-    # The label was stamped into the run's attributes at start and snapshotted
-    # onto each transition — the identity itself stays the bare key.
+
     assert {e.subject_key for e in events} == {"W-4242"}
-    assert all(e.payload["run"] == wfid for e in events)
+    assert all(e.payload["run"] == workflow_id for e in events)
 
 
-async def test_duplicate_start_returns_the_live_run(rt):
-    # One active run per subject+kind: the dedup slot is claimed at enqueue and
-    # held while the run is enqueued, running, or parked — a duplicate start()
-    # hands back the live run's id. The slot frees at the terminal outcome, so
-    # the subject can run again.
+async def test_duplicate_start_returns_the_live_run(runtime):
     subject = Widget(id=515151)
-    wfid = await rt.SampleFlow.start(subject=subject, repo="owner/app")
-    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
+    workflow_id = await runtime.SampleFlow.start(subject=subject, repo="owner/app")
+    parked = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state == RunState.PARKED
+    )
 
-    assert await rt.SampleFlow.start(subject=subject, repo="owner/app") == wfid
+    assert await runtime.SampleFlow.start(subject=subject, repo="owner/app") == workflow_id
 
     await parked.resume(action="merge")
-    await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
-    # DBOS clears the slot when the workflow's outcome commits, a beat after the
-    # workflow.finished event — poll until the fresh start wins.
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+
     deadline = asyncio.get_event_loop().time() + 10.0
-    fresh = wfid
-    while fresh == wfid and asyncio.get_event_loop().time() < deadline:
-        fresh = await rt.SampleFlow.start(subject=subject, repo="owner/app")
-        if fresh == wfid:
+    fresh = workflow_id
+    while fresh == workflow_id and asyncio.get_event_loop().time() < deadline:
+        fresh = await runtime.SampleFlow.start(subject=subject, repo="owner/app")
+        if fresh == workflow_id:
             await asyncio.sleep(0.1)
-    assert fresh != wfid
+    assert fresh != workflow_id
 
 
-async def test_failed_enqueue_claims_no_slot(rt, monkeypatch):
-    # A failure at enqueue claims nothing — the next start() proceeds instead of
-    # being handed a phantom "live" run DBOS never received.
+async def test_failed_enqueue_claims_no_slot(runtime, monkeypatch):
     subject = Widget(id=424242)
 
-    async def _boom(*args, **kwargs):
+    async def enqueue_unavailable(*args, **kwargs):
         raise RuntimeError("queue down")
 
     with monkeypatch.context() as patched:
-        patched.setattr("druks.workflows.run_queue.enqueue_async", _boom)
+        patched.setattr("druks.workflows.run_queue.enqueue_async", enqueue_unavailable)
         with pytest.raises(RuntimeError, match="queue down"):
-            await rt.SubjectFlow.start(subject=subject)
+            await runtime.SubjectFlow.start(subject=subject)
 
-    wfid = await rt.SubjectFlow.start(subject=subject)
-    await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
+    workflow_id = await runtime.SubjectFlow.start(subject=subject)
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
 
 
-async def test_subjectless_run_emits_no_events(rt):
-    # Framework crons run without a subject — plumbing, not activity — so they
-    # must not write run-level events into the feed.
-    from druks.events.models import Event
+async def test_subjectless_run_emits_no_events(runtime):
+    workflow_id = await runtime.RecordFeedback.start(subject=None, repo="owner/quiet")
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
 
-    wfid = await rt.RecordFeedback.start(subject=None, repo="owner/quiet")
-    await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
-
-    session = get_session(rt.engine)
+    session = get_session(runtime.engine)
     try:
         rows = (await session.execute(select(Event))).scalars()
-        events = [e for e in rows if e.payload.get("run") == wfid]
+        events = [e for e in rows if e.payload.get("run") == workflow_id]
     finally:
         await session.close()
 
     assert events == []
 
 
-async def test_announcements_survive_subscriber_retry_and_workflow_replay(rt):
+async def test_announcements_survive_subscriber_retry_and_workflow_replay(runtime):
     deliveries = []
 
-    @subscribe("test.revision", workflow=rt.AnnounceFlow)
+    @subscribe("test.revision", workflow=runtime.AnnounceFlow)
     async def receive(*, subject: Widget, revision: int) -> None:
-        async with get_session(rt.engine) as session:
+        async with get_session(runtime.engine) as session:
             events = list(await session.scalars(select(Event).filter_by(type="test.revision")))
         deliveries.append((revision, len(events)))
         if len(deliveries) == 1:
             raise RuntimeError("Subscriber unavailable")
 
-    workflow_id = await rt.AnnounceFlow.start(subject=Widget(id=7))
+    workflow_id = await runtime.AnnounceFlow.start(subject=Widget(id=7))
     marker = f"announced:{workflow_id}"
     try:
-        await _wait_for(rt.engine, workflow_id, lambda run: SINK.count(marker) == 1)
+        await _wait_for_run(runtime.engine, workflow_id, lambda run: SINK.count(marker) == 1)
         assert deliveries == [(1, 1), (1, 1), (2, 2)]
 
         await DBOS.resume_workflow_async(workflow_id)
-        await _wait_for(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+        await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
         assert SINK.count(marker) == 2
 
-        async with get_session(rt.engine) as session:
+        async with get_session(runtime.engine) as session:
             events = list(
                 await session.scalars(
                     select(Event).filter_by(type="test.revision").order_by(Event.id)
                 )
             )
         assert [event.payload for event in events] == [
-            {"revision": 1, "run": workflow_id, "kind": rt.AnnounceFlow.kind},
-            {"revision": 2, "run": workflow_id, "kind": rt.AnnounceFlow.kind},
+            {"revision": 1, "run": workflow_id, "kind": runtime.AnnounceFlow.kind},
+            {"revision": 2, "run": workflow_id, "kind": runtime.AnnounceFlow.kind},
         ]
         assert deliveries == [(1, 1), (1, 1), (2, 2)]
     finally:
         await DBOS.cancel_workflow_async(workflow_id)
 
 
-async def test_admission_commits_before_the_request_and_deduplicates(rt):
+async def test_admission_commits_before_the_request_and_deduplicates(runtime):
     class AdmissionFlow(Workflow):
         subject = Widget
 
@@ -1418,7 +1215,7 @@ async def test_admission_commits_before_the_request_and_deduplicates(rt):
     workflow_id = ""
     try:
         with pytest.raises(ValueError, match="Roll back the request"):
-            async with session_scope(rt.engine):
+            async with session_scope(runtime.engine):
                 request_session = db_session()
                 await request_session.execute(select(Widget).where(Widget.id == 750750))
                 workflow_id = await AdmissionFlow.start(subject=subject)
@@ -1426,7 +1223,7 @@ async def test_admission_commits_before_the_request_and_deduplicates(rt):
                 assert db_session() is request_session
                 assert request_session.in_transaction()
 
-                async with get_session(rt.engine) as reader:
+                async with get_session(runtime.engine) as reader:
                     events = list(
                         await reader.scalars(
                             select(Event).filter_by(type="workflow.scheduled", subject_id="750750")
@@ -1437,7 +1234,7 @@ async def test_admission_commits_before_the_request_and_deduplicates(rt):
                 assert events[0].subject_key == "W-750750"
                 raise ValueError("Roll back the request")
 
-        async with get_session(rt.engine) as reader:
+        async with get_session(runtime.engine) as reader:
             events = list(
                 await reader.scalars(
                     select(Event).filter_by(type="workflow.scheduled", subject_id="750750")
@@ -1447,11 +1244,13 @@ async def test_admission_commits_before_the_request_and_deduplicates(rt):
     finally:
         if workflow_id:
             await DBOS.send_async(workflow_id, "done", topic="finish")
-            await _wait_for(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+            await _wait_for_run(
+                runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED
+            )
         workflows._items.pop(AdmissionFlow.kind)
 
 
-async def test_retry_reruns_the_step_whose_result_the_body_refused(rt):
+async def test_retry_reruns_the_step_whose_result_the_body_refused(runtime):
     calls = []
 
     class RefusedDelivery(Workflow):
@@ -1473,21 +1272,21 @@ async def test_retry_reruns_the_step_whose_result_the_body_refused(rt):
 
     try:
         first_id = await RefusedDelivery.start(subject=Widget(id=8))
-        await _wait_for(rt.engine, first_id, lambda run: run.state == RunState.FAILED)
-        async with session_scope(rt.engine) as session:
+        await _wait_for_run(runtime.engine, first_id, lambda run: run.state == RunState.FAILED)
+        async with session_scope(runtime.engine) as session:
             first_run = await session.get(Run, first_id)
             retry_id = await first_run.retry()
-        await _wait_for(rt.engine, retry_id, lambda run: run.state == RunState.FAILED)
+        await _wait_for_run(runtime.engine, retry_id, lambda run: run.state == RunState.FAILED)
 
         assert calls == ["plan", "deliver", "deliver"]
-        async with get_session(rt.engine) as reader:
+        async with get_session(runtime.engine) as reader:
             retried = await reader.get(Run, retry_id)
         assert retried.failure == "delivery refused"
     finally:
         workflows._items.pop(RefusedDelivery.kind)
 
 
-async def test_failed_retry_attempts_keep_separate_terminal_records(rt):
+async def test_failed_retry_attempts_keep_separate_terminal_records(runtime):
     class FailingAttempt(Workflow):
         subject = Widget
 
@@ -1496,14 +1295,14 @@ async def test_failed_retry_attempts_keep_separate_terminal_records(rt):
 
     try:
         first_id = await FailingAttempt.start(subject=Widget(id=7))
-        await _wait_for(rt.engine, first_id, lambda run: run.state == RunState.FAILED)
-        async with session_scope(rt.engine) as session:
+        await _wait_for_run(runtime.engine, first_id, lambda run: run.state == RunState.FAILED)
+        async with session_scope(runtime.engine) as session:
             first_run = await session.get(Run, first_id)
             retry_id = await first_run.retry()
-        await _wait_for(rt.engine, retry_id, lambda run: run.state == RunState.FAILED)
+        await _wait_for_run(runtime.engine, retry_id, lambda run: run.state == RunState.FAILED)
 
         assert retry_id != first_id
-        async with get_session(rt.engine) as reader:
+        async with get_session(runtime.engine) as reader:
             retried = await reader.get(Run, retry_id)
             events = list(await reader.scalars(select(Event).filter_by(type="workflow.failed")))
         assert retried.retry_from == first_id
@@ -1515,7 +1314,7 @@ async def test_failed_retry_attempts_keep_separate_terminal_records(rt):
         workflows._items.pop(FailingAttempt.kind)
 
 
-async def test_output_event_survives_completed_step_replay(rt, monkeypatch, tmp_path):
+async def test_output_event_survives_completed_step_replay(runtime, monkeypatch, tmp_path):
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     calls = []
     held = []
@@ -1531,19 +1330,19 @@ async def test_output_event_survives_completed_step_replay(rt, monkeypatch, tmp_
 
         async def run_multistep(self) -> None:
             for _ in range(2):
-                await rt.AgentFlow.DECIDER(contract=ReviewResult, body="x")
+                await runtime.AgentFlow.DECIDER(contract=ReviewResult, body="x")
             completed.append(self.workflow_id)
             if len(completed) == 1:
                 raise asyncio.CancelledError
 
     workflow_id = await OutputFlow.start(subject=Widget(id=7))
     try:
-        await _wait_for(rt.engine, workflow_id, lambda run: len(completed) == 1)
+        await _wait_for_run(runtime.engine, workflow_id, lambda run: len(completed) == 1)
         await DBOS.resume_workflow_async(workflow_id)
-        await _wait_for(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+        await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
         assert len(completed) == 2
         assert len(calls) == 2
-        async with get_session(rt.engine) as session:
+        async with get_session(runtime.engine) as session:
             events = list(await session.scalars(select(Event).filter_by(type="review.completed")))
             artifacts = list(await session.scalars(select(Artifact)))
         assert len(events) == len(artifacts) == 2
@@ -1559,7 +1358,7 @@ async def test_output_event_survives_completed_step_replay(rt, monkeypatch, tmp_
 
 
 async def test_field_notes_activity_through_admission_review_failure_and_replay(
-    rt, monkeypatch, tmp_path
+    runtime, monkeypatch, tmp_path
 ):
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     calls = []
@@ -1579,29 +1378,29 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
             raise asyncio.CancelledError
 
     monkeypatch.setattr(Summarize, "run_multistep", interrupt_after_approval)
-    async with session_scope(rt.engine):
+    async with session_scope(runtime.engine):
         approved_note = await Note.create(body="The pump ran hot.")
         failed_note = await Note.create(body="The reading is unclear.")
 
     approved_id = await Summarize.dispatch(note=approved_note)
-    await _wait_for(rt.engine, approved_id, lambda run: run.is_parked)
-    async with session_scope(rt.engine):
+    await _wait_for_run(runtime.engine, approved_id, lambda run: run.is_parked)
+    async with session_scope(runtime.engine):
         await OperatorReply.answer(approved_note, action="request_changes", note="Name the pump.")
-    await _wait_for(rt.engine, approved_id, lambda run: len(calls) == 2 and run.is_parked)
-    async with session_scope(rt.engine):
+    await _wait_for_run(runtime.engine, approved_id, lambda run: len(calls) == 2 and run.is_parked)
+    async with session_scope(runtime.engine):
         await OperatorReply.answer(approved_note, action="approve")
-    await _wait_for(rt.engine, approved_id, lambda run: len(completed) == 1)
+    await _wait_for_run(runtime.engine, approved_id, lambda run: len(completed) == 1)
     await DBOS.resume_workflow_async(approved_id)
-    await _wait_for(rt.engine, approved_id, lambda run: run.state == RunState.FINISHED)
+    await _wait_for_run(runtime.engine, approved_id, lambda run: run.state == RunState.FINISHED)
 
     monkeypatch.setattr(
         "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning({}, calls, [])
     )
     failed_id = await Summarize.dispatch(note=failed_note)
-    await _wait_for(rt.engine, failed_id, lambda run: run.state == RunState.FAILED)
+    await _wait_for_run(runtime.engine, failed_id, lambda run: run.state == RunState.FAILED)
 
     assert completed == [approved_id, approved_id]
-    async with session_scope(rt.engine):
+    async with session_scope(runtime.engine):
         assert (await Note.get(approved_note.id)).gist == "The pump ran hot."
         activity = list(
             await db_session().scalars(Event.get_history(app="field_notes").order_by(Event.id))

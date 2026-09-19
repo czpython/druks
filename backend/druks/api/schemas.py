@@ -79,6 +79,16 @@ class DashboardOverview(Schema):
     last_failed_at: datetime | None
 
 
+class ScheduledRun(Schema):
+    model_config = ConfigDict(from_attributes=True)
+
+    run: str
+    status: str
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
 class DashboardSchedule(Schema):
     app: str
     kind: str
@@ -86,6 +96,8 @@ class DashboardSchedule(Schema):
     default_cron: str
     enabled: bool
     timezone: str
+    next_run_at: datetime | None
+    runs: list[ScheduledRun]
 
 
 class DashboardSchedules(Schema):

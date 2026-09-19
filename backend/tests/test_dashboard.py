@@ -1,6 +1,9 @@
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, Mock
+from zoneinfo import ZoneInfo
 
 import pytest
+from dbos import DBOS
 from druks.accounts.models import Account
 from druks.api import dashboard
 from druks.durable.dbos_state import workflow_status
@@ -47,6 +50,8 @@ async def test_schedules_resolve_paused_override_and_operator_timezone(
         "defaultCron": "0 9 * * *",
         "enabled": False,
         "timezone": "Europe/Madrid",
+        "nextRunAt": None,
+        "runs": [],
     } in response.json()["rows"]
 
 
@@ -58,6 +63,103 @@ def test_dashboard_requires_the_existing_identity_gate(tmp_path, druks_db):
     with TestClient(app) as anonymous:
         assert anonymous.get("/api/dashboard/overview").status_code == 401
         assert anonymous.get("/api/dashboard/schedules").status_code == 401
+        assert (
+            anonymous.post("/api/dashboard/schedules/field_notes.summarize/run").status_code == 401
+        )
+
+
+async def test_schedule_history_is_bounded_and_excludes_downstream_runs(
+    client, druks_db, monkeypatch
+):
+    monkeypatch.setattr(Summarize, "every", "0 9 * * *")
+    timestamp = int(datetime(2026, 1, 1, tzinfo=UTC).timestamp() * 1000)
+    for index in range(12):
+        await druks_db.execute(
+            workflow_status.insert().values(
+                workflow_uuid=f"invocation-{index}",
+                schedule_name=Summarize.kind,
+                status="ERROR" if index == 11 else "SUCCESS",
+                created_at=timestamp + index * 60_000,
+                started_at_epoch_ms=timestamp + index * 60_000 + 1_000,
+                completed_at=timestamp + index * 60_000 + 39_000,
+            )
+        )
+    await druks_db.execute(
+        workflow_status.insert().values(
+            workflow_uuid="downstream", status="PENDING", created_at=timestamp
+        )
+    )
+
+    response = client.get("/api/dashboard/schedules")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    row = next(row for row in response.json()["rows"] if row["kind"] == Summarize.kind)
+    assert [run["run"] for run in row["runs"]] == [
+        f"invocation-{index}" for index in range(11, 3, -1)
+    ]
+    assert row["runs"][0] == {
+        "run": "invocation-11",
+        "status": "ERROR",
+        "createdAt": "2026-01-01T00:11:00Z",
+        "startedAt": "2026-01-01T00:11:01Z",
+        "finishedAt": "2026-01-01T00:11:39Z",
+    }
+
+
+async def test_next_invocation_uses_installation_wall_clock(client, monkeypatch):
+    monkeypatch.setattr(Summarize, "every", "0 9 * * *")
+    settings = dashboard.load_settings().model_copy(update={"timezone": "Europe/Madrid"})
+    monkeypatch.setattr(dashboard, "load_settings", lambda: settings)
+    now = datetime.now(UTC)
+
+    response = client.get("/api/dashboard/schedules")
+
+    row = next(row for row in response.json()["rows"] if row["kind"] == Summarize.kind)
+    next_run = datetime.fromisoformat(row["nextRunAt"]).astimezone(ZoneInfo("Europe/Madrid"))
+    assert next_run.hour == 9
+    assert next_run.minute == 0
+    assert now < next_run < now + timedelta(hours=26)
+
+
+@pytest.mark.parametrize("cron", ["0 0 31 2 *", "*/10 * * * * *"])
+async def test_schedule_with_no_future_date_or_seconds(client, monkeypatch, cron):
+    monkeypatch.setattr(Summarize, "every", cron)
+
+    response = client.get("/api/dashboard/schedules")
+
+    assert response.status_code == 200
+    row = next(row for row in response.json()["rows"] if row["kind"] == Summarize.kind)
+    if cron == "0 0 31 2 *":
+        assert row["nextRunAt"] is None
+    else:
+        assert datetime.fromisoformat(row["nextRunAt"]).second % 10 == 0
+
+
+async def test_run_now_triggers_a_paused_schedule_without_changing_overrides(
+    client, druks_db, monkeypatch
+):
+    monkeypatch.setattr(Summarize, "every", "0 9 * * *")
+    await SettingsOverride.set_workflow_setting(druks_db, Summarize.kind, "schedule_enabled", False)
+    monkeypatch.setattr(DBOS, "get_schedule_async", AsyncMock(return_value={"status": "PAUSED"}))
+    trigger = Mock(return_value=Mock(get_workflow_id=Mock(return_value="scheduled-invocation")))
+    monkeypatch.setattr(DBOS, "trigger_schedule", trigger)
+
+    response = client.post(f"/api/dashboard/schedules/{Summarize.kind}/run")
+
+    assert response.status_code == 202
+    assert response.json() == {"run": "scheduled-invocation"}
+    trigger.assert_called_once_with(Summarize.kind)
+    assert not await Summarize.has_enabled_schedule(druks_db)
+
+
+async def test_run_now_rejects_unknown_unscheduled_and_unavailable_workflows(client, monkeypatch):
+    assert client.post("/api/dashboard/schedules/missing/run").status_code == 404
+    monkeypatch.setattr(Summarize, "every", None)
+    assert client.post(f"/api/dashboard/schedules/{Summarize.kind}/run").status_code == 404
+    monkeypatch.setattr(Summarize, "every", "0 9 * * *")
+    monkeypatch.setattr(DBOS, "get_schedule_async", AsyncMock(return_value=None))
+    assert client.post(f"/api/dashboard/schedules/{Summarize.kind}/run").status_code == 503
 
 
 @pytest.mark.parametrize("has_artifact", [True, False])

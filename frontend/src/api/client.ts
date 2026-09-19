@@ -243,6 +243,7 @@ export const api = {
     `/api/dashboard/overview${app ? `?app=${encodeURIComponent(app)}` : ''}`,
   ),
   dashboardSchedules: () => getJSON<DashboardSchedules>('/api/dashboard/schedules'),
+  runSchedule: (kind: string) => postJSON<{ run: string }>(`/api/dashboard/schedules/${encodeURIComponent(kind)}/run`, undefined),
   listApps: () => getJSON<App[]>('/api/apps'),
   // ``path`` is the location under the app's own root: "" for the landing
   // page, "/notes/7" for a detail page.

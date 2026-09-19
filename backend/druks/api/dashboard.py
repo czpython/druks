@@ -1,6 +1,10 @@
+import contextlib
+from datetime import datetime
 from itertools import groupby
 from operator import attrgetter
+from zoneinfo import ZoneInfo
 
+from croniter import CroniterBadDateError, croniter
 from fastapi import APIRouter, HTTPException, Response
 from sqlalchemy import case, func, select
 
@@ -11,9 +15,14 @@ from druks.api.schemas import (
     DashboardSchedule,
     DashboardSchedules,
     DashboardSection,
+    ScheduledRun,
 )
 from druks.apps.loader import iter_apps
+from druks.apps.registry import workflows
+from druks.durable.dbos_state import latest_invocations
+from druks.durable.engine import trigger_schedule
 from druks.durable.enums import RunState
+from druks.durable.exceptions import ScheduleUnavailable
 from druks.durable.models import Artifact, Run
 from druks.events.models import Event
 from druks.settings import load_settings
@@ -128,21 +137,53 @@ async def get_overview(
 
 @router.get("/schedules", response_model=DashboardSchedules)
 async def list_current_schedules(session: SessionDep, response: Response) -> DashboardSchedules:
-    """Configured cadence, not scheduler health."""
+    """Configured cadence and recorded invocations, not scheduler health."""
     response.headers["Cache-Control"] = "no-store"
     timezone = load_settings().timezone
-    return DashboardSchedules(
-        rows=[
-            DashboardSchedule(
-                app=owner.name,
-                kind=workflow.kind,
-                cron=await workflow.get_schedule(session),
-                default_cron=workflow.every,
-                enabled=await workflow.has_enabled_schedule(session),
-                timezone=timezone,
-            )
-            for owner in iter_apps()
-            for workflow in owner.workflows()
-            if workflow.every
-        ]
+    declared = [
+        (owner.name, workflow)
+        for owner in iter_apps()
+        for workflow in owner.workflows()
+        if workflow.every
+    ]
+    history = await session.execute(
+        latest_invocations([workflow.kind for _, workflow in declared], limit=8)
     )
+    runs = {
+        name: [ScheduledRun.model_validate(row) for row in group]
+        for name, group in groupby(history.all(), key=attrgetter("schedule_name"))
+    }
+    now = datetime.now(ZoneInfo(timezone))
+    rows = []
+    for owner, workflow in declared:
+        cron = await workflow.get_schedule(session)
+        is_enabled = await workflow.has_enabled_schedule(session)
+        next_run_at = None
+        if cron and is_enabled:
+            with contextlib.suppress(CroniterBadDateError):
+                next_run_at = croniter(cron, now, second_at_beginning=True).get_next(datetime)
+        rows.append(
+            DashboardSchedule(
+                app=owner,
+                kind=workflow.kind,
+                cron=cron,
+                default_cron=workflow.every,
+                enabled=is_enabled,
+                timezone=timezone,
+                next_run_at=next_run_at,
+                runs=runs.get(workflow.kind, []),
+            )
+        )
+    return DashboardSchedules(rows=rows)
+
+
+@router.post("/schedules/{kind}/run", status_code=202)
+async def run_schedule(kind: str) -> dict[str, str]:
+    workflow = workflows.get(kind)
+    if not workflow or not workflow.every:
+        raise HTTPException(404, "Schedule not found. Select a declared schedule.")
+    try:
+        run = await trigger_schedule(kind)
+    except ScheduleUnavailable as error:
+        raise HTTPException(503, str(error)) from error
+    return {"run": run}
