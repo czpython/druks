@@ -16,6 +16,22 @@ for name in ${DRUKBOX_ENV_KEYS:-}; do
   printf '%s=%s\n' "$name" "${!name-}" >> /etc/environment
 done
 
+# A box with secrets gets the proxy's CA in SECRETS_PROXY_CA. Install it first.
+# HTTPS_PROXY is already in the session env; without this file Claude (Node)
+# rejects the proxy's cert and dies with SSL certificate verification failed.
+if [ -n "${SECRETS_PROXY_CA:-}" ]; then
+  printf '%s' "$SECRETS_PROXY_CA" | base64 -d > /usr/local/share/ca-certificates/drukbox.crt
+  update-ca-certificates >/dev/null
+fi
+
+# git takes its credential from gh, and SSH remotes go over HTTPS.
+if [ -n "${GH_TOKEN:-}" ]; then
+  git config --system --replace-all credential.https://github.com.helper ''
+  git config --system --add credential.https://github.com.helper '!gh auth git-credential'
+  git config --system --replace-all url.https://github.com/.insteadOf git@github.com:
+  git config --system --add url.https://github.com/.insteadOf ssh://git@github.com/
+fi
+
 ssh-keygen -A
 
 exec /usr/sbin/sshd -D -e
