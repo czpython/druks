@@ -10,7 +10,6 @@ from urllib.parse import urlsplit
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.models import Account
-from druks.core.apis.github import get_github_client
 from druks.core.models import uuid7_str
 from druks.core.services import Github
 from druks.db import db_session
@@ -300,7 +299,7 @@ class RepoWorkspace(Workspace):
         Rewritten before every agent call so a reused warm host follows the
         current run's dispatcher — a system dispatch carries no hook and
         credits nobody."""
-        author_name, author_email = await (await get_github_client()).get_bot_git_author()
+        author_name, author_email = await (await Github.get_client()).get_bot_git_author()
         steps = [
             f"cd {shlex.quote(self.repo_path)}",
             f"git config user.name {shlex.quote(author_name)}",

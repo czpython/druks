@@ -46,6 +46,12 @@ class VaultSecret(Base, Uuid7Pk):
     secrets = EncryptedJsonField()
     # Non-secret facts: the App slug, the subscription's email.
     identity: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    # Who pasted a static value. The id lives in ``identity``, so this only reads.
+    pasted_by: Mapped["Account | None"] = relationship(
+        primaryjoin="foreign(VaultSecret.identity)['pasted_by'].astext == Account.id",
+        viewonly=True,
+        lazy="joined",
+    )
     identity_status: Mapped[str | None]
     identity_error: Mapped[str | None]
     # What the provider granted, for an OAuth connection.
@@ -193,7 +199,7 @@ class VaultSecret(Base, Uuid7Pk):
         header: str = "",
     ) -> "VaultSecret":
         """Store a value the operator pasted for an audience, and who pasted it."""
-        return await cls.store(
+        row = await cls.store(
             session,
             SecretKind.STATIC,
             audience,
@@ -201,6 +207,8 @@ class VaultSecret(Base, Uuid7Pk):
             identity={"pasted_by": pasted_by.id},
             header=header,
         )
+        row.pasted_by = pasted_by
+        return row
 
     @classmethod
     async def connect(
@@ -355,6 +363,15 @@ class VaultSecret(Base, Uuid7Pk):
     @property
     def is_live(self) -> bool:
         return not self.revoked_at
+
+    @property
+    def is_connected(self) -> bool:
+        """False once the token expires or the row is revoked."""
+        return self.is_live and (not self.expires_at or self.expires_at > Base.utc_now())
+
+    @property
+    def key_tail(self) -> str:
+        return self.secrets["value"][-4:]
 
     async def update_secrets(self, secrets: dict[str, Any], *, expires_at: datetime | None) -> None:
         """A rotation's write, on the live row only, so an earlier revoke keeps

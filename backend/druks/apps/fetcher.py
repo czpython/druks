@@ -1,7 +1,7 @@
 import contextlib
 import time
 
-from druks.core.apis.github import get_github_client
+from druks.core.services import Github
 from druks.settings import load_settings
 
 _TTL_SECONDS = 60 * 60 * 24  # 24 hours
@@ -17,7 +17,7 @@ async def fetch_file(*, repo: str, path: str) -> str | None:
         if time.time() - cache.stat().st_mtime < _TTL_SECONDS:
             return cache.read_text() or None
 
-    github = await get_github_client()
+    github = await Github.get_client()
 
     try:
         body = await github.get_file_content(repo, path)

@@ -14,7 +14,6 @@ from druks.contrib.software_factory.enums import (
 )
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
-from druks.core.apis.github import get_github_client
 from druks.core.services import Github
 from druks.db import db_session
 from druks.mcp.inbound import get_druks_mcp_server
@@ -373,7 +372,7 @@ class Build(Workflow):
     @step
     async def declare_merge_intent(self) -> bool:
         """Whether GitHub accepted ownership of the merge."""
-        github = await get_github_client()
+        github = await Github.get_client()
         return await github.merge_when_ready((await self.subject).repo, self.pr_number)
 
     # The branch and the PR come from the first delivery. Before it, both are None.
@@ -398,7 +397,7 @@ class Build(Workflow):
         repo = (await self.subject).repo
         if login and self.pr_number:
             try:
-                await (await get_github_client()).request_pull_request_reviewers(
+                await (await Github.get_client()).request_pull_request_reviewers(
                     repo, self.pr_number, [login]
                 )
             except Exception:  # noqa: BLE001 — a missed ping must not fail the park
@@ -413,7 +412,7 @@ class Build(Workflow):
         repo = (await self.subject).repo
         if self.pr_number:
             try:
-                await (await get_github_client()).set_pull_request_draft_state(
+                await (await Github.get_client()).set_pull_request_draft_state(
                     repo, self.pr_number, draft=draft
                 )
             except Exception:  # noqa: BLE001 — a draft merge fails loudly anyway

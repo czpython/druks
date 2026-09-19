@@ -181,7 +181,7 @@ def _dispatched_by(monkeypatch: pytest.MonkeyPatch, username: str | None) -> Sim
     async def _client():
         return SimpleNamespace(get_bot_git_author=_bot_git_author)
 
-    monkeypatch.setattr("druks.workspaces.get_github_client", _client)
+    monkeypatch.setattr("druks.core.services.Github.get_client", _client)
     account = SimpleNamespace(username=username) if username else None
 
     async def _get_account(_model, _id):

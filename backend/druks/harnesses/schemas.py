@@ -1,17 +1,12 @@
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Annotated
+from datetime import datetime
+from typing import Annotated
 
-from pydantic import BeforeValidator, ConfigDict
+from pydantic import AliasPath, BeforeValidator, ConfigDict, Field
 
 from druks.accounts.schemas import AccountResponse
 from druks.schemas import Schema
 
 SortedNames = Annotated[list[str], BeforeValidator(sorted)]
-
-
-if TYPE_CHECKING:
-    from druks.accounts.models import Account
-    from druks.secrets.models import VaultSecret
 
 
 class ProviderResponse(Schema):
@@ -23,45 +18,26 @@ class ProviderResponse(Schema):
 
 
 class ProviderSubscriptionResponse(Schema):
-    provider: str
+    model_config = ConfigDict(from_attributes=True)
+
+    provider: str = Field(validation_alias="audience_name")
     # Display only. Druks never authorizes by it.
-    provider_email: str
+    provider_email: str = Field(validation_alias=AliasPath("identity", "email"))
     expires_at: datetime | None
     updated_at: datetime
     last_refreshed_at: datetime | None
     revoked_at: datetime | None
     revoked_reason: str
-    # False once the token expires or the subscription is revoked.
-    connected: bool
-
-    @classmethod
-    def from_secret(cls, row: "VaultSecret") -> "ProviderSubscriptionResponse":
-        return cls(
-            provider=row.audience_name,
-            provider_email=row.identity["email"],
-            expires_at=row.expires_at,
-            updated_at=row.updated_at,
-            last_refreshed_at=row.last_refreshed_at,
-            revoked_at=row.revoked_at,
-            revoked_reason=row.revoked_reason,
-            connected=row.is_live and (not row.expires_at or row.expires_at > datetime.now(UTC)),
-        )
+    connected: bool = Field(validation_alias="is_connected")
 
 
 class ProviderKeyResponse(Schema):
-    provider: str
-    key_tail: str
-    updated_by: AccountResponse | None
-    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
 
-    @classmethod
-    def from_secret(cls, row: "VaultSecret", pasted_by: "Account | None") -> "ProviderKeyResponse":
-        return cls(
-            provider=row.audience_name,
-            key_tail=row.secrets["value"][-4:],
-            updated_by=AccountResponse.model_validate(pasted_by) if pasted_by else None,
-            updated_at=row.updated_at,
-        )
+    provider: str = Field(validation_alias="audience_name")
+    key_tail: str
+    updated_by: AccountResponse | None = Field(validation_alias="pasted_by")
+    updated_at: datetime
 
 
 class CatalogModel(Schema):

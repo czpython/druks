@@ -94,7 +94,7 @@ async def test_installations_lists_accounts(tmp_path: Path, doctor_db, monkeypat
     async def _fake_client():
         return _FakeClient()
 
-    monkeypatch.setattr("druks.doctor.get_github_client", _fake_client)
+    monkeypatch.setattr("druks.core.services.Github.get_client", _fake_client)
 
     result = await doctor.check_installations(make_settings(tmp_path))
 
@@ -112,7 +112,7 @@ async def test_installations_pending_when_app_has_none(
     async def _fake_client():
         return _FakeClient()
 
-    monkeypatch.setattr("druks.doctor.get_github_client", _fake_client)
+    monkeypatch.setattr("druks.core.services.Github.get_client", _fake_client)
 
     result = await doctor.check_installations(make_settings(tmp_path))
 
@@ -132,7 +132,7 @@ async def test_installations_builds_the_client_from_the_row(
         async def list_installation_accounts(self):
             return ("clawhaven",)
 
-    real_factory = doctor.get_github_client
+    real_factory = doctor.Github.get_client
     built: list[str] = []
 
     async def _tracking_factory():
@@ -140,7 +140,7 @@ async def test_installations_builds_the_client_from_the_row(
         built.append(client._app_id)
         return _FakeClient()
 
-    monkeypatch.setattr(doctor, "get_github_client", _tracking_factory)
+    monkeypatch.setattr(doctor.Github, "get_client", _tracking_factory)
 
     result = await doctor.check_installations(make_settings(tmp_path))
 

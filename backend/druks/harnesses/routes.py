@@ -2,7 +2,6 @@ import logging
 from contextlib import suppress
 
 from fastapi import APIRouter, Body, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.dependencies import current_session_account, current_session_or_setup
 from druks.accounts.models import Account
@@ -45,13 +44,10 @@ async def list_providers() -> tuple[Provider, ...]:
 async def list_subscriptions(
     session: SessionDep,
     account: Account = Depends(current_session_account),
-) -> list[ProviderSubscriptionResponse]:
-    return [
-        ProviderSubscriptionResponse.from_secret(row)
-        for row in await VaultSecret.list_subscriptions(
-            session, account_id=account.id, include_revoked=True
-        )
-    ]
+) -> list[VaultSecret]:
+    return await VaultSecret.list_subscriptions(
+        session, account_id=account.id, include_revoked=True
+    )
 
 
 @router.get(
@@ -60,13 +56,8 @@ async def list_subscriptions(
     response_model_by_alias=True,
     dependencies=[Depends(current_session_account)],
 )
-async def list_keys(session: SessionDep) -> list[ProviderKeyResponse]:
-    return [await _key_response(session, row) for row in await VaultSecret.list_keys(session)]
-
-
-async def _key_response(session: AsyncSession, row: VaultSecret) -> ProviderKeyResponse:
-    pasted_by = await session.get(Account, row.identity["pasted_by"])
-    return ProviderKeyResponse.from_secret(row, pasted_by)
+async def list_keys(session: SessionDep) -> list[VaultSecret]:
+    return await VaultSecret.list_keys(session)
 
 
 @router.get(
@@ -170,7 +161,7 @@ async def create_key(
     session: SessionDep,
     account: Account = Depends(current_session_account),
     key: str = Body(..., embed=True),
-) -> ProviderKeyResponse:
+) -> VaultSecret:
     """The installation's key at a provider. A key for a directory provider also adds it."""
     if not (key := key.strip()):
         raise HTTPException(status_code=422, detail="The API key is empty. Paste a key.")
@@ -181,16 +172,13 @@ async def create_key(
                 session, Audience.provider(provider.id), key, pasted_by=account
             )
             await provider.refresh_catalog(session)
-            return await _key_response(session, stored)
+            return stored
         raise HTTPException(status_code=422, detail=f"{provider.label} does not accept API keys.")
     try:
         await directory.add_provider(session, provider_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}") from error
-    return await _key_response(
-        session,
-        await VaultSecret.paste(session, Audience.provider(provider_id), key, pasted_by=account),
-    )
+    return await VaultSecret.paste(session, Audience.provider(provider_id), key, pasted_by=account)
 
 
 @router.delete(

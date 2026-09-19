@@ -36,7 +36,7 @@ def _patch_github_client(monkeypatch, download_tarball) -> None:
     async def fake_client():
         return SimpleNamespace(download_tarball=download_tarball)
 
-    monkeypatch.setattr(install_mod, "get_github_client", fake_client)
+    monkeypatch.setattr(install_mod.Github, "get_client", fake_client)
 
 
 def _skill_md(name: str, description: str = "") -> bytes:

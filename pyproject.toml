@@ -128,7 +128,6 @@ ignore = ["SIM108"]
 "backend/druks/browser/subscribers.py" = ["TID251"]
 "backend/druks/core/tasks.py" = ["TID251"]
 "backend/druks/core/webhooks/slack.py" = ["TID251"]
-"backend/druks/core/apis/github.py" = ["TID251"]
 "backend/druks/contrib/**" = ["TID251"]
 "backend/tests/**" = ["TID251"]
 

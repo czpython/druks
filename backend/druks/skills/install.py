@@ -6,7 +6,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
-from druks.core.apis.github import download_public_tarball, get_github_client
+from druks.core.apis.github import download_public_tarball
+from druks.core.services import Github
 from druks.services.exceptions import ServiceNotConnectedError
 
 from .datastructures import CollectionContents, InstalledSkill
@@ -22,7 +23,7 @@ async def fetch_collection(
     the flat skills dir and its VM projection share one global name namespace."""
     repo = _parse_github_repo(url)
     try:
-        github = await get_github_client()
+        github = await Github.get_client()
         archive = await github.download_tarball(repo)
     except (ServiceNotConnectedError, GitHubAppNotInstalledError):
         archive = await download_public_tarball(repo)

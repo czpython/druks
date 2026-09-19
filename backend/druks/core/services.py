@@ -74,13 +74,21 @@ class Github(Service):
         return {"slug": slug}
 
     @classmethod
-    async def client(cls) -> GitHubClient:
-        return GitHubClient.from_secret(await cls.get())
+    async def get_client(cls) -> GitHubClient:
+        """The client of the connected App's vault row. PEM plaintext exists only
+        here, feeding the auth strategy."""
+        row = await cls.get()
+        return GitHubClient(
+            app_id=row.identity["app_id"],
+            private_key=row.secrets["private_key"],
+            base_url=load_settings().github_api_url,
+            slug=row.identity["slug"],
+        )
 
     @classmethod
     async def issue_token(cls, resource: str) -> tuple[str, datetime]:
         """The installation token for the repo, and the expiry GitHub gave it."""
-        return await (await cls.client()).token_for_repo(resource)
+        return await (await cls.get_client()).token_for_repo(resource)
 
 
 class Linear(Service):

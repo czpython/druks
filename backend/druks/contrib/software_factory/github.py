@@ -23,6 +23,6 @@ class ReviewActor:
 async def get_review_actor() -> ReviewActor:
     if await GithubReviewer.is_connected():
         return ReviewActor(
-            service=GithubReviewer, client=await GithubReviewer.client(), mode="approve"
+            service=GithubReviewer, client=await GithubReviewer.get_client(), mode="approve"
         )
-    return ReviewActor(service=Github, client=await Github.client(), mode="comment")
+    return ReviewActor(service=Github, client=await Github.get_client(), mode="comment")

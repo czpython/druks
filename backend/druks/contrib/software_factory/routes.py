@@ -35,7 +35,7 @@ from druks.contrib.software_factory.schemas import (
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Profile, PullRequestReview
 from druks.core.apis.exceptions import UnknownTicketError
-from druks.core.apis.github import get_github_client
+from druks.core.services import Github
 from druks.db import db_session
 from druks.services.exceptions import ServiceNotConnectedError
 
@@ -85,7 +85,7 @@ async def list_github_repos(
         ),
     ),
 ) -> GitHubReposResponse:
-    github = await get_github_client()
+    github = await Github.get_client()
     resolved = (owner or "").strip()
     if resolved:
         owners: tuple[str, ...] = (resolved,)

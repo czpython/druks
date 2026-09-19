@@ -12,12 +12,6 @@ from githubkit.exception import GraphQLFailed, RequestFailed
 
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.utils.time import ensure_utc
-from druks.db import db_session
-from druks.secrets.datastructures import Audience
-from druks.secrets.enums import SecretKind
-from druks.secrets.models import VaultSecret
-from druks.services.exceptions import ServiceNotConnectedError
-from druks.settings import load_settings
 
 logger = logging.getLogger(__name__)
 
@@ -288,17 +282,6 @@ class GitHubClient:
                     repo,
                     exc_info=True,
                 )
-
-    @classmethod
-    def from_secret(cls, row: VaultSecret) -> "GitHubClient":
-        """The client of a connected GitHub App's vault row. PEM plaintext
-        exists only here, feeding the auth strategy."""
-        return cls(
-            app_id=row.identity["app_id"],
-            private_key=row.secrets["private_key"],
-            base_url=load_settings().github_api_url,
-            slug=row.identity["slug"],
-        )
 
     @_retry_on_401
     async def token_for_repo(self, repo: str) -> tuple[str, datetime]:
@@ -596,14 +579,3 @@ def _fold_comments_into_body(body: str, comments: list[ReviewComment]) -> str:
             location = f"`{comment.path}:{comment.start_line}-{comment.line}`"
         lines.append(f"**{location}**\n{comment.body}\n")
     return "\n".join(lines)
-
-
-async def get_github_client() -> GitHubClient:
-    """The operator client, resolved from the GitHub service-identity row —
-    the only credential source; there is no settings or file fallback. Raises
-    ``ServiceNotConnectedError`` when GitHub isn't connected. ``github_api_url``
-    stays a Settings input because it is transport, not identity. PEM plaintext
-    exists only here, feeding the client's auth strategy."""
-    if row := await VaultSecret.lookup(db_session(), SecretKind.APP_KEY, Audience.service(GITHUB)):
-        return GitHubClient.from_secret(row)
-    raise ServiceNotConnectedError(GITHUB)

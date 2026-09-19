@@ -63,7 +63,7 @@ class TestFetchFile:
         async def _client():
             return github
 
-        monkeypatch.setattr("druks.apps.fetcher.get_github_client", _client)
+        monkeypatch.setattr("druks.core.services.Github.get_client", _client)
 
     async def test_404_is_cached_as_empty(self, monkeypatch, tmp_path):
         from druks.apps.fetcher import fetch_file

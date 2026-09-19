@@ -9,7 +9,7 @@ import httpx
 import pytest
 from conftest import connect_service
 from druks.accounts.models import Account
-from druks.core.apis.github import GitHubClient, get_github_client
+from druks.core.apis.github import GitHubClient
 from druks.core.services import Github
 from druks.core.webhooks.github import GitHubEvents
 from druks.db import db_session
@@ -94,7 +94,7 @@ async def test_get_raises_when_the_service_is_not_connected(druks_db):
 async def test_client_factory_resolves_only_the_row(druks_db):
     await _connect()
 
-    client = await get_github_client()
+    client = await Github.get_client()
 
     assert client._app_id == "12345"
     assert client._private_key == _PEM
@@ -105,12 +105,12 @@ async def test_mention_handle_is_the_stored_slug(druks_db):
     # No transport stub: a refetch would ask GitHub and fail loudly here.
     await _connect()
 
-    assert await (await get_github_client()).get_mention_handle() == "druks-operator"
+    assert await (await Github.get_client()).get_mention_handle() == "druks-operator"
 
 
 async def test_client_factory_raises_the_typed_error_when_absent(druks_db):
     with pytest.raises(ServiceNotConnectedError):
-        await get_github_client()
+        await Github.get_client()
 
 
 # --- Webhook verification ----------------------------------------------------

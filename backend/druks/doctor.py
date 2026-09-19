@@ -23,7 +23,7 @@ from .agents import Agent
 from .apps.loader import iter_apps
 from .apps.registry import _ROLES, agents, autodiscover, services, webhooks, workflows
 from .chat.sandbox import CHAT_SANDBOX
-from .core.apis.github import get_github_client
+from .core.services import Github
 from .database import create_async_engine_from_url, create_engine_from_url, session_scope
 from .harnesses.providers import get_providers
 from .harnesses.registry import get_harnesses
@@ -101,7 +101,7 @@ async def check_installations(settings: Settings) -> CheckResult:
     try:
         async with _check_engine(settings) as engine:
             async with session_scope(engine):
-                client = await get_github_client()
+                client = await Github.get_client()
             accounts = await client.list_installation_accounts()
     except ServiceNotConnectedError:
         return CheckResult(
