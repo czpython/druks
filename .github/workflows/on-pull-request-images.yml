@@ -33,7 +33,30 @@ jobs:
           target: sandbox
           platforms: linux/amd64
           push: false
+          load: true
+          tags: druks-sandbox:pr
           cache-from: type=gha,scope=sandbox
+      - name: Boot installs the proxy CA, the git helper, and the druks key
+        run: |
+          ssh-keygen -t ed25519 -f "$RUNNER_TEMP/sandbox" -N '' -q
+          openssl req -x509 -newkey rsa:2048 -keyout "$RUNNER_TEMP/ca.key" \
+            -out "$RUNNER_TEMP/ca.crt" -days 1 -nodes -subj "/CN=drukbox-pr-ca"
+          SECRETS_PROXY_CA="$(base64 -w0 "$RUNNER_TEMP/ca.crt")"
+          docker run -d --name sandbox-boot \
+            -e "DRUKBOX_AUTHORIZED_KEY=$(cat "$RUNNER_TEMP/sandbox.pub")" \
+            -e "SECRETS_PROXY_CA=$SECRETS_PROXY_CA" \
+            -e GH_TOKEN=placeholder \
+            druks-sandbox:pr
+          sleep 5
+          docker inspect -f '{{.State.Running}}' sandbox-boot | grep -x true
+          docker exec -e "SECRETS_PROXY_CA=$SECRETS_PROXY_CA" sandbox-boot sh -ec '
+            printf %s "$SECRETS_PROXY_CA" | base64 -d > /tmp/expected.crt
+            openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt /tmp/expected.crt
+          '
+          docker exec sandbox-boot git config --system --get-all credential.https://github.com.helper \
+            | grep -Fx '!gh auth git-credential'
+          docker exec sandbox-boot cat /home/druks/.ssh/authorized_keys \
+            | grep -Fx "$(cat "$RUNNER_TEMP/sandbox.pub")"
 
   # The Docker Sandboxes template must keep its base's boot contract after
   # the toolchain layers: `sbx create` sends no environment variables, drukbox
