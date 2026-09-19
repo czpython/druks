@@ -233,7 +233,7 @@ describe('Chat page', () => {
     const socket = await connected()
     socket.receive({ type: 'snapshot', ...conversation })
     const links = within(screen.getByRole('complementary', { name: 'Conversations' })).getAllByRole('link')
-    expect(links.map((link) => link.getAttribute('href'))).toEqual(['/chat/new', `/chat/${conversation.id}`, '/chat/01995a3c-0000-7000-8000-000000000002', '/apps/chat/settings/channels'])
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(['/chat/new', `/chat/${conversation.id}`, '/chat/01995a3c-0000-7000-8000-000000000002'])
   })
 
   it('shows an unnamed conversation as New conversation', async () => {
@@ -258,7 +258,6 @@ describe('Chat page', () => {
     await connected()
     expect(window.location.pathname).toBe(`/chat/${conversation.id}`)
     expect(screen.getByRole('heading', { name: message.body })).toBeTruthy()
-    expect(screen.getByText('Only you can see these conversations.')).toBeTruthy()
     expect(screen.queryByText('Private conversation')).toBeNull()
   })
 
