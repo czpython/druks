@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import CheckConstraint, String, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, defer, mapped_column
 from sqlalchemy_encrypted_field import EncryptedBytesField, SecretBytes
 
 from druks.browser.constants import (
@@ -62,11 +62,19 @@ class StoredBrowserSession(Base, Uuid7Pk):
 
     @classmethod
     async def list_all(cls, session: AsyncSession):
-        return list(await session.scalars(select(cls).order_by(cls.name)))
+        return list(
+            await session.scalars(select(cls).options(defer(cls.payload)).order_by(cls.name))
+        )
 
     @classmethod
     async def get_for_name(cls, session: AsyncSession, name: str):
         return await session.scalar(select(cls).where(cls.name == name))
+
+    @classmethod
+    async def get_status_for_name(cls, session: AsyncSession, name: str) -> str | None:
+        """The login word only. The payload is the profile; a status read
+        must not load it."""
+        return await session.scalar(select(cls.status).where(cls.name == name))
 
     async def mark_stale(self) -> None:
         self.status = BrowserSessionStatus.STALE.value

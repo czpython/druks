@@ -122,6 +122,23 @@ async def test_status_reads_the_row_and_writes_nothing(druks_db, night_watch):
     assert await night_watch.docs.get_status() == BrowserSessionStatus.STALE
 
 
+async def test_get_status_does_not_load_the_payload(druks_db, night_watch, monkeypatch):
+    """A page asks where the login stands. The profile stays on the row."""
+    await stored_session(night_watch.docs, payload=b"stored-profile")
+    statements: list[str] = []
+    original = type(db_session()).scalar
+
+    async def capture(self, statement, *args, **kwargs):
+        statements.append(str(statement.compile(compile_kwargs={"literal_binds": False})))
+        return await original(self, statement, *args, **kwargs)
+
+    monkeypatch.setattr(type(db_session()), "scalar", capture)
+
+    assert await night_watch.docs.get_status() == BrowserSessionStatus.READY
+    assert statements
+    assert all("payload" not in sql.lower() for sql in statements)
+
+
 async def test_borrow_yields_a_tunneled_cdp_url(borrow, night_watch):
     browser = borrow
     await stored_session(night_watch.docs)
@@ -138,7 +155,7 @@ async def test_borrow_yields_a_tunneled_cdp_url(borrow, night_watch):
         "version": 1,
     }
     launch_script = browser.commands[0][2]
-    assert "session-launch --headed" in launch_script
+    assert "session-launch --headed --drive" in launch_script
     assert not await writer_locks()
     assert (
         await StoredBrowserSession.get_for_name(db_session(), night_watch.docs.name)
@@ -155,7 +172,7 @@ async def test_headless_declaration_launches_headless(borrow):
     async with quiet.cdp():
         pass
 
-    assert "session-launch --headless" in browser.commands[0][2]
+    assert "session-launch --headless --drive" in browser.commands[0][2]
 
 
 async def test_persisting_borrow_locks_exports_and_stores(borrow, night_watch):
@@ -312,6 +329,72 @@ async def test_playwright_yields_the_logged_in_context(borrow, night_watch, monk
         assert context is logged_in_context
 
     assert seen == {"url": "http://127.0.0.1:43987", "closed": True}
+
+
+async def test_playwright_waits_for_a_late_default_context(borrow, night_watch, monkeypatch):
+    import sys
+    import types
+    from contextlib import asynccontextmanager as acm
+
+    await stored_session(night_watch.docs)
+    logged_in_context = object()
+
+    class Connection:
+        def __init__(self):
+            self.looks = 0
+
+        @property
+        def contexts(self):
+            self.looks += 1
+            return [logged_in_context] if self.looks > 2 else []
+
+        async def close(self):
+            pass
+
+    class Chromium:
+        async def connect_over_cdp(self, url):
+            del url
+            return Connection()
+
+    @acm
+    async def fake_playwright():
+        yield types.SimpleNamespace(chromium=Chromium())
+
+    playwright_module = types.ModuleType("playwright.async_api")
+    playwright_module.async_playwright = fake_playwright
+    monkeypatch.setitem(sys.modules, "playwright", types.ModuleType("playwright"))
+    monkeypatch.setitem(sys.modules, "playwright.async_api", playwright_module)
+
+    async with night_watch.docs.playwright() as context:
+        assert context is logged_in_context
+
+
+async def test_playwright_cdp_attach_timeout_is_a_launch_error(borrow, night_watch, monkeypatch):
+    import asyncio
+    import sys
+    import types
+    from contextlib import asynccontextmanager as acm
+
+    await stored_session(night_watch.docs)
+
+    class Chromium:
+        async def connect_over_cdp(self, url):
+            del url
+            await asyncio.sleep(60)
+
+    @acm
+    async def fake_playwright():
+        yield types.SimpleNamespace(chromium=Chromium())
+
+    playwright_module = types.ModuleType("playwright.async_api")
+    playwright_module.async_playwright = fake_playwright
+    monkeypatch.setitem(sys.modules, "playwright", types.ModuleType("playwright"))
+    monkeypatch.setitem(sys.modules, "playwright.async_api", playwright_module)
+    monkeypatch.setattr(sessions_module, "CDP_CONNECT_TIMEOUT_SECONDS", 0.01)
+
+    with pytest.raises(BrowserLaunchError, match="timed out attaching"):
+        async with night_watch.docs.playwright():
+            pass
 
 
 async def test_playwright_without_the_dependency_names_the_fix(borrow, night_watch, monkeypatch):

@@ -106,6 +106,7 @@ async def test_login_launch_opens_on_the_session_site(window_runtime):
 
     command = client.browsers[0].launch_command or ""
     assert "DRUKS_BROWSER_URL=https://acme.example" in command
+    assert "--drive" not in command
 
 
 def _runtime_with_sandbox(tmp_path, monkeypatch, **sandbox) -> FakeSandboxClient:

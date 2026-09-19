@@ -6,6 +6,9 @@ SITE_MAX_LENGTH = 255
 
 SESSION_LAUNCH_TIMEOUT_SECONDS = 45
 SESSION_EXPORT_TIMEOUT_SECONDS = 5 * 60
+# connectOverCDP after session-launch --drive. A raw Chrome with no Playwright
+# context used to sit here forever; fail the borrow instead.
+CDP_CONNECT_TIMEOUT_SECONDS = 30
 
 # A login window keeps only this Redis record; if the operator walks away it
 # lapses and the container's own lease reaps the browser — nothing sweeps.

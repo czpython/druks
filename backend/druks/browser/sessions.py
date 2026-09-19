@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tempfile
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -6,6 +7,7 @@ from pathlib import Path
 
 from druks.apps.registry import browser_sessions
 from druks.browser.constants import (
+    CDP_CONNECT_TIMEOUT_SECONDS,
     SESSION_EXPORT_TIMEOUT_SECONDS,
     SESSION_LAUNCH_TIMEOUT_SECONDS,
 )
@@ -27,6 +29,18 @@ from druks.settings import load_settings
 
 SESSION_ROOT = "/work/session"
 CDP_PORT = 9222
+
+
+async def _playwright_context(connection, name: str):
+    """The default context a borrow drives. Playwright-launched Chrome has it
+    immediately; a raw debugger sometimes advertises it a beat late."""
+    if connection.contexts:
+        return connection.contexts[0]
+    for _ in range(50):
+        await asyncio.sleep(0.1)
+        if connection.contexts:
+            return connection.contexts[0]
+    raise BrowserLaunchError(name, "Chrome opened without a browser context")
 
 
 @dataclass
@@ -75,10 +89,11 @@ class BrowserSession:
 
     async def get_status(self) -> BrowserSessionStatus:
         """Where the login stands: READY to borrow, STALE after a run found it
-        signed out, NEEDS_LOGIN before the first sign-in."""
-        row = await StoredBrowserSession.get_for_name(db_session(), self.name)
-        if row:
-            return BrowserSessionStatus(row.status)
+        signed out, NEEDS_LOGIN before the first sign-in. Does not load the
+        stored profile."""
+        status = await StoredBrowserSession.get_status_for_name(db_session(), self.name)
+        if status:
+            return BrowserSessionStatus(status)
         return self.initial_status
 
     @asynccontextmanager
@@ -132,9 +147,17 @@ class BrowserSession:
         except ModuleNotFoundError as error:
             raise BrowserClientMissingError(self.name) from error
         async with self.cdp() as cdp_url, playwright_api.async_playwright() as driver:
-            connection = await driver.chromium.connect_over_cdp(cdp_url)
             try:
-                yield connection.contexts[0]
+                connection = await asyncio.wait_for(
+                    driver.chromium.connect_over_cdp(cdp_url),
+                    timeout=CDP_CONNECT_TIMEOUT_SECONDS,
+                )
+            except TimeoutError as error:
+                raise BrowserLaunchError(
+                    self.name, "timed out attaching to Chrome over CDP"
+                ) from error
+            try:
+                yield await _playwright_context(connection, self.name)
             finally:
                 await connection.close()
 
@@ -163,7 +186,7 @@ class BrowserSession:
             [
                 "sh",
                 "-c",
-                f"nohup setsid session-launch {mode} "
+                f"nohup setsid session-launch {mode} --drive "
                 f">{SESSION_ROOT}/launch.log 2>&1 </dev/null & "
                 'launcher=$!; attempt=0; while [ "$attempt" -lt 300 ]; do '
                 f"if [ -f {SESSION_ROOT}/.runtime/ready.json ]; then exit 0; fi; "
