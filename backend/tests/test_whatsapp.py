@@ -18,7 +18,7 @@ from druks.apps.registry import bots
 from druks.chat import service
 from druks.chat.bots import routes as bot_routes
 from druks.chat.bots import service as bot_service
-from druks.chat.bots.constants import PAUSE_TOPIC, PHONE_TYPED
+from druks.chat.bots.constants import PAUSE_TOPIC
 from druks.chat.bridge import Bridge
 from druks.chat.channels.whatsapp import routes
 from druks.chat.channels.whatsapp.client import WahaClient
@@ -26,7 +26,7 @@ from druks.chat.channels.whatsapp.constants import WAHA_AUDIENCE
 from druks.chat.channels.whatsapp.services import Waha
 from druks.chat.channels.whatsapp.webhooks import WahaEvents
 from druks.chat.constants import CONVERSATION_HEADER
-from druks.chat.enums import ConversationSource, MessageState
+from druks.chat.enums import ConversationSource, MessageState, PauseSignal
 from druks.chat.models import Conversation
 from druks.harnesses.claude import ClaudeHarness
 from druks.mcp.server import _is_visible, _validate_agent_tools
@@ -524,7 +524,7 @@ async def test_a_phone_message_pauses_its_chat_and_the_next_one_restarts_the_clo
     assert [message.is_internal for message in conversation.messages] == [True, True]
     assert "I'll call you." in conversation.messages[0].body
     enqueue.assert_awaited_once_with(bot_service.pause, conversation.id)
-    send.assert_awaited_once_with("PHONE1", PHONE_TYPED, topic=PAUSE_TOPIC)
+    send.assert_awaited_once_with("PHONE1", PauseSignal.EXTEND, topic=PAUSE_TOPIC)
 
 
 async def test_the_phones_chat_with_itself_is_an_admin_chat(druks_db, helpdesk):

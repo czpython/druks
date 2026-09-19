@@ -6,10 +6,6 @@ ADMIN_CODE_TTL_SECONDS = 600
 # A pause ends when the number's phone stays quiet in the chat for this long.
 PAUSE_SECONDS = 4 * 60 * 60
 PAUSE_TOPIC = "pause"
-# What ends a pause's wait early: another message from the phone restarts the clock,
-# and the admin's resume ends the pause.
-PHONE_TYPED = "typed"
-RESUMED = "resumed"
 
 # Druks writes each internal message from one of these templates.
 ADMIN_ADDED_MESSAGE = (

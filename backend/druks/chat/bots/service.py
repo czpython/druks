@@ -5,6 +5,7 @@ from pydantic_core import to_json
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
+from druks.chat.enums import PauseSignal
 from druks.chat.models import Conversation
 from druks.chat.service import deliver
 from druks.durable.engine import step_session
@@ -19,9 +20,7 @@ from .constants import (
     PAUSE_TOPIC,
     PAUSED_MESSAGE,
     PHONE_MESSAGE,
-    PHONE_TYPED,
     QUESTION_MESSAGE,
-    RESUMED,
 )
 
 # A pause holds a chat for hours, so it has its own queue, apart from runs.
@@ -129,7 +128,7 @@ async def take_over(
     await conversation.create_message(session, body, is_internal=True, source_id=key)
     await session.commit()
     if pause_id := await conversation.get_pause_id(session):
-        await DBOS.send_async(pause_id, PHONE_TYPED, topic=PAUSE_TOPIC)
+        await DBOS.send_async(pause_id, PauseSignal.EXTEND, topic=PAUSE_TOPIC)
     else:
         # The typed message names the pause, and the conversation holds one open pause.
         with (
@@ -151,9 +150,8 @@ async def pause(conversation_id: str) -> None:
         StepOptions(name="chat.pause.report"), report_pause, conversation_id
     )
     await DBOS.start_workflow_async(deliver, admin_id)
-    signal = PHONE_TYPED
-    while signal == PHONE_TYPED:
-        signal = await DBOS.recv_async(PAUSE_TOPIC, timeout_seconds=PAUSE_SECONDS)
+    while await DBOS.recv_async(PAUSE_TOPIC, timeout_seconds=PAUSE_SECONDS) == PauseSignal.EXTEND:
+        continue
 
 
 async def report_pause(conversation_id: str) -> str:
@@ -175,7 +173,7 @@ async def resume(session: AsyncSession, conversation: Conversation) -> bool:
     """End the chat's pause before it ends by itself. Its saved messages go into its
     next turn."""
     if pause_id := await conversation.get_pause_id(session):
-        await DBOS.send_async(pause_id, RESUMED, topic=PAUSE_TOPIC)
+        await DBOS.send_async(pause_id, PauseSignal.RESUME, topic=PAUSE_TOPIC)
         return True
     return False
 

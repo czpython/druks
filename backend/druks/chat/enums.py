@@ -19,3 +19,13 @@ class MessageState(StrEnum):
     REPLIED = "replied"
     INTERRUPTED = "interrupted"
     CANCELLED = "cancelled"
+
+
+class PauseSignal(StrEnum):
+    """What Druks sends to a chat's open pause. With no signal, the pause ends when
+    the phone stays quiet for long enough."""
+
+    # The phone sent another message in the chat: the quiet time starts again.
+    EXTEND = "extend"
+    # The admin resumed the chat: the pause ends now.
+    RESUME = "resume"
