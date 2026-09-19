@@ -53,20 +53,25 @@ RUN apt-get update \
     && install -m 0755 /tmp/pinchtab /usr/local/bin/pinchtab \
     && rm -f /tmp/pinchtab /tmp/pinchtab-checksums.txt
 
-# Real Google Chrome, so the login browser presents Chrome's fingerprint rather
-# than the bundled chromium's — a login gate reads the difference. Google ships
-# no arm64 Linux build, so this is amd64-only; session-launch falls back to the
-# bundled chromium where Chrome is absent.
+# Real Google Chrome — a login gate fingerprints Chromium-vs-Chrome. Google's
+# apt repo ships amd64 and arm64; the direct .deb is the same bits if apt
+# lags. Fail the build if Chrome is missing: the login window is this binary,
+# spawned as a child, not Playwright's bundled Chromium.
 # hadolint ignore=DL3008
-RUN if [ "${TARGETARCH}" = "amd64" ]; then \
-        curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
-            | gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg \
-        && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
-            > /etc/apt/sources.list.d/google-chrome.list \
-        && apt-get update \
-        && apt-get install -y --no-install-recommends google-chrome-stable \
-        && rm -rf /var/lib/apt/lists/*; \
-    fi
+RUN arch="$(dpkg --print-architecture)" \
+    && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+        | gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg \
+    && echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+        > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && if ! apt-get install -y --no-install-recommends google-chrome-stable; then \
+        curl -fsSLo /tmp/chrome.deb \
+            "https://dl.google.com/linux/direct/google-chrome-stable_current_${arch}.deb" \
+        && apt-get install -y --no-install-recommends /tmp/chrome.deb \
+        && rm -f /tmp/chrome.deb; \
+    fi \
+    && test -x /opt/google/chrome/chrome \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --shell /bin/bash druks
 
@@ -74,11 +79,9 @@ RUN useradd --create-home --shell /bin/bash druks
 # namespace syscalls), so Playwright passes --no-sandbox and Chrome shows the
 # operator a "stability and security will suffer" banner in the login window.
 # This managed policy suppresses only that command-line-flag warning; it changes
-# no browser behavior a page could read. Installed in both channels' policy dirs
-# so the fallback chromium (arm64) is covered too.
+# no browser behavior a page could read.
 COPY chrome-policy.json /tmp/chrome-policy.json
 RUN install -D -m 0644 /tmp/chrome-policy.json /etc/opt/chrome/policies/managed/druks.json \
-    && install -D -m 0644 /tmp/chrome-policy.json /etc/chromium/policies/managed/druks.json \
     && rm /tmp/chrome-policy.json
 
 COPY session-launch session-export /usr/local/bin/

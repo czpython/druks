@@ -3,21 +3,18 @@ process.env.DISPLAY ||= ":99";
 process.env.PLAYWRIGHT_BROWSERS_PATH ||= "/ms-playwright";
 
 const fs = require("node:fs");
+const http = require("node:http");
+const net = require("node:net");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
-
-const { chromium } = require("/opt/druks-browser/node_modules/playwright");
+const { spawn, spawnSync } = require("node:child_process");
 
 const SESSION_ROOT = "/work/session";
 const META_PATH = path.join(SESSION_ROOT, "state.meta.json");
 const PROFILE_ARCHIVE_PATH = path.join(SESSION_ROOT, "state.tar.gz");
 const STORAGE_STATE_PATH = path.join(SESSION_ROOT, "state.json");
 const PROFILE_PATH = path.join(SESSION_ROOT, "profile");
-// Real Google Chrome when the image carries it (amd64), else the bundled
-// chromium (arm64). A login gate reads the Chromium-vs-Chrome brand split, so
-// the login browser must be real Chrome wherever it can be.
+// Real Google Chrome — a login gate reads the Chromium-vs-Chrome brand split.
 const CHROME_PATH = "/opt/google/chrome/chrome";
-const channel = fs.existsSync(CHROME_PATH) ? "chrome" : undefined;
 // The proxy for the login only. druks sets it only when the operator gives one.
 // If it is empty, the browser uses the box IP.
 const loginProxy = process.env.DRUKS_BROWSER_LOGIN_PROXY;
@@ -26,26 +23,18 @@ const PID_PATH = path.join(RUNTIME_PATH, "launcher.pid");
 const READY_PATH = path.join(RUNTIME_PATH, "ready.json");
 const CLOSED_PATH = path.join(RUNTIME_PATH, "closed");
 
-// Chrome's --proxy-server cannot carry a password. Playwright authenticates the
-// proxy when you give it a user name and password. So a proxy URL with a user
-// name and password (http://user:pass@host:port) works with no external relay.
-// A URL with no user name and password gives a server-only proxy.
-function proxyFromUrl(raw) {
-  const url = new URL(raw);
-  const option = { server: `${url.protocol}//${url.host}` };
-  if (url.username) option.username = decodeURIComponent(url.username);
-  if (url.password) option.password = decodeURIComponent(url.password);
-  return option;
-}
-
-const proxyOption = loginProxy ? proxyFromUrl(loginProxy) : undefined;
-
-const [mode] = process.argv.slice(2);
-if (!mode || process.argv.length !== 3 || !["--headed", "--headless"].includes(mode)) {
-  console.error("usage: session-launch --headed|--headless");
+const flags = process.argv.slice(2);
+const headed = flags.includes("--headed");
+const headless = flags.includes("--headless");
+const drive = flags.includes("--drive");
+if (
+  headed === headless ||
+  flags.length !== (drive ? 2 : 1) ||
+  flags.some((flag) => !["--headed", "--headless", "--drive"].includes(flag))
+) {
+  console.error("usage: session-launch --headed|--headless [--drive]");
   process.exit(2);
 }
-const headless = mode === "--headless";
 
 let requestShutdown;
 const shutdownRequested = new Promise((resolve) => {
@@ -92,6 +81,214 @@ function unpackProfileArchive(meta) {
   }
 }
 
+// Locks from a previous Chrome (or a Playwright import) travel in the profile
+// tar and would make this process refuse the directory.
+function clearChromeLocks() {
+  for (const name of [
+    "SingletonLock",
+    "SingletonSocket",
+    "SingletonCookie",
+    "DevToolsActivePort",
+  ]) {
+    fs.rmSync(path.join(PROFILE_PATH, name), { force: true });
+  }
+}
+
+// Playwright is only used to pour an imported storage_state into the profile,
+// then it is closed. The operator never sees a Playwright-controlled window:
+// launchPersistentContext still adds Playwright's chromium switches
+// (--disable-extensions, --disable-sync, --metrics-recording-only, a long
+// --disable-features list) and injects bindings a login gate can read.
+async function applyStorageState() {
+  const { chromium } = require("/opt/druks-browser/node_modules/playwright");
+  const context = await chromium.launchPersistentContext(PROFILE_PATH, {
+    executablePath: CHROME_PATH,
+    headless: true,
+    ignoreDefaultArgs: ["--enable-automation"],
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
+  try {
+    await context.setStorageState(STORAGE_STATE_PATH);
+  } finally {
+    await context.close();
+  }
+}
+
+// Chrome's --proxy-server cannot carry a password. Playwright authenticates the
+// proxy when you give it a user name and password. A loopback relay does the
+// same for a raw Chrome spawn.
+function proxyFromUrl(raw) {
+  const url = new URL(raw);
+  const option = { server: `${url.protocol}//${url.host}` };
+  if (url.username) option.username = decodeURIComponent(url.username);
+  if (url.password) option.password = decodeURIComponent(url.password);
+  return option;
+}
+
+// Chrome's --proxy-server cannot carry a password. A loopback relay accepts
+// the browser's CONNECT and adds Proxy-Authorization toward the real proxy.
+function startAuthProxy(upstreamUrl) {
+  const token = Buffer.from(
+    `${decodeURIComponent(upstreamUrl.username)}:${decodeURIComponent(upstreamUrl.password)}`,
+    "utf8",
+  ).toString("base64");
+  const upHost = upstreamUrl.hostname;
+  const upPort = Number(upstreamUrl.port) || (upstreamUrl.protocol === "https:" ? 443 : 80);
+
+  const server = http.createServer((req, res) => {
+    const fwd = http.request(
+      {
+        hostname: upHost,
+        port: upPort,
+        method: req.method,
+        path: req.url,
+        headers: { ...req.headers, "Proxy-Authorization": `Basic ${token}` },
+      },
+      (up) => {
+        res.writeHead(up.statusCode, up.headers);
+        up.pipe(res);
+      },
+    );
+    fwd.on("error", () => res.destroy());
+    req.pipe(fwd);
+  });
+
+  server.on("connect", (req, clientSocket, head) => {
+    const up = net.connect(upPort, upHost, () => {
+      up.write(
+        `CONNECT ${req.url} HTTP/1.1\r\nHost: ${req.url}\r\nProxy-Authorization: Basic ${token}\r\n\r\n`,
+      );
+      let buf = Buffer.from(head);
+      const onData = (chunk) => {
+        buf = Buffer.concat([buf, chunk]);
+        const sep = buf.indexOf("\r\n\r\n");
+        if (sep === -1) return;
+        up.off("data", onData);
+        const statusLine = buf.subarray(0, buf.indexOf("\r\n")).toString();
+        if (!statusLine.includes(" 200 ")) {
+          clientSocket.end();
+          up.destroy();
+          return;
+        }
+        clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+        const rest = buf.subarray(sep + 4);
+        if (rest.length) up.write(rest);
+        up.pipe(clientSocket);
+        clientSocket.pipe(up);
+      };
+      up.on("data", onData);
+    });
+    up.on("error", () => clientSocket.destroy());
+    clientSocket.on("error", () => up.destroy());
+  });
+
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      resolve({ server, url: `http://127.0.0.1:${server.address().port}` });
+    });
+  });
+}
+
+async function launchDriven(meta) {
+  // A borrow attaches over CDP and drives pages. Playwright's persistent
+  // context is that attach's other half — a stock Chrome with only the
+  // debugger port open left connectOverCDP sitting until the run was cancelled.
+  const { chromium } = require("/opt/druks-browser/node_modules/playwright");
+  const context = await chromium.launchPersistentContext(PROFILE_PATH, {
+    executablePath: CHROME_PATH,
+    proxy: loginProxy ? proxyFromUrl(loginProxy) : undefined,
+    ignoreDefaultArgs: ["--enable-automation"],
+    args: [
+      "--remote-debugging-address=127.0.0.1",
+      "--remote-debugging-port=9222",
+      "--remote-allow-origins=*",
+      "--window-size=1920,1080",
+    ],
+    handleSIGHUP: false,
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    headless,
+    viewport: null,
+  });
+  let isReady = false;
+  try {
+    context.on("close", requestShutdown);
+    if (meta.format === "storage_state") {
+      await context.setStorageState(STORAGE_STATE_PATH);
+    }
+    const version = await waitForCdp();
+    console.error(`driven browser: ${version.Browser}`);
+    fs.writeFileSync(
+      READY_PATH,
+      `${JSON.stringify({ cdp: "http://127.0.0.1:9222", headless })}\n`,
+      { mode: 0o600 },
+    );
+    isReady = true;
+    await shutdownRequested;
+  } finally {
+    await context.close();
+    if (isReady) {
+      fs.writeFileSync(CLOSED_PATH, "\n", { mode: 0o600 });
+    }
+  }
+}
+
+function chromeArgs({ proxyServer, startUrl }) {
+  const args = [
+    `--user-data-dir=${PROFILE_PATH}`,
+    "--remote-debugging-address=127.0.0.1",
+    "--remote-debugging-port=9222",
+    // Chrome 111+ refuses a CDP client without this; Playwright's connectOverCDP
+    // is how a later borrow attaches. Not visible to a page.
+    "--remote-allow-origins=*",
+    "--window-size=1920,1080",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--hide-crash-restore-bubble",
+    // Docker's default seccomp blocks the sandbox's namespace syscalls.
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+  ];
+  if (headless) args.push("--headless=new");
+  if (proxyServer) {
+    args.push(`--proxy-server=${proxyServer}`);
+    args.push("--proxy-bypass-list=127.0.0.1,localhost,[::1]");
+    // WebRTC gathers ICE candidates over raw UDP, which bypasses an HTTP
+    // proxy and would reveal the box's real address.
+    args.push("--force-webrtc-ip-handling-policy=disable_non_proxied_udp");
+  }
+  if (startUrl) args.push(startUrl);
+  return args;
+}
+
+function onceExit(child) {
+  return new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve();
+      return;
+    }
+    child.once("exit", resolve);
+  });
+}
+
+async function waitForCdp(ms = 20000) {
+  const deadline = Date.now() + ms;
+  let lastError = "no response";
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch("http://127.0.0.1:9222/json/version");
+      if (response.ok) return await response.json();
+      lastError = `HTTP ${response.status}`;
+    } catch (error) {
+      lastError = error.message;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Chrome did not open its debugger on 127.0.0.1:9222 (${lastError})`);
+}
+
 async function main() {
   const meta = readSessionMeta();
 
@@ -105,47 +302,59 @@ async function main() {
     unpackProfileArchive(meta);
   }
 
-  let context;
+  if (!fs.existsSync(CHROME_PATH)) {
+    throw new Error("Google Chrome is missing at /opt/google/chrome/chrome");
+  }
+
+  if (drive) {
+    clearChromeLocks();
+    try {
+      await launchDriven(meta);
+    } finally {
+      fs.rmSync(PID_PATH, { force: true });
+    }
+    return;
+  }
+
+  if (meta.format === "storage_state") {
+    await applyStorageState();
+  }
+  clearChromeLocks();
+
+  let authProxy;
+  let chrome;
   let isReady = false;
   try {
-    context = await chromium.launchPersistentContext(PROFILE_PATH, {
-      channel,
-      proxy: proxyOption,
-      args: [
-        "--remote-debugging-address=127.0.0.1",
-        "--remote-debugging-port=9222",
-        "--window-size=1920,1080",
-        // Clears navigator.webdriver, the automation flag a logged-in site
-        // reads to challenge the session. The operator drives a real login
-        // here, so the browser must not announce itself as driven.
-        "--disable-blink-features=AutomationControlled",
-        // WebRTC gathers ICE candidates over raw UDP, which bypasses an HTTP
-        // proxy and would reveal the box's real address. Only matters with a
-        // login proxy set.
-        ...(loginProxy ? ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] : []),
-      ],
-      handleSIGHUP: false,
-      handleSIGINT: false,
-      handleSIGTERM: false,
-      headless,
-      viewport: null,
+    let proxyServer;
+    if (loginProxy) {
+      const proxyUrl = new URL(loginProxy);
+      if (proxyUrl.username || proxyUrl.password) {
+        authProxy = await startAuthProxy(proxyUrl);
+        proxyServer = authProxy.url;
+      } else {
+        proxyServer = `${proxyUrl.protocol}//${proxyUrl.host}`;
+      }
+    }
+
+    chrome = spawn(CHROME_PATH, chromeArgs({ proxyServer, startUrl: process.env.DRUKS_BROWSER_URL }), {
+      env: process.env,
+      stdio: ["ignore", "ignore", "inherit"],
     });
-    context.on("close", requestShutdown);
+    chrome.on("error", (error) => {
+      console.error(error.stack || error.message);
+      requestShutdown();
+    });
 
-    if (meta.format === "storage_state") {
-      await context.setStorageState(STORAGE_STATE_PATH);
-    }
-
-    // Open on the session's own site so the operator lands where they log in,
-    // not on a blank tab. Best-effort: a slow or blocked site still yields a
-    // usable window the operator can steer by hand.
-    const startUrl = process.env.DRUKS_BROWSER_URL;
-    if (startUrl) {
-      const page = context.pages()[0] || (await context.newPage());
-      await page
-        .goto(startUrl, { waitUntil: "domcontentloaded", timeout: 15000 })
-        .catch(() => {});
-    }
+    const version = await Promise.race([
+      waitForCdp(),
+      onceExit(chrome).then(() => {
+        throw new Error(
+          `Chrome exited before the debugger opened (code ${chrome.exitCode})`,
+        );
+      }),
+    ]);
+    chrome.on("exit", requestShutdown);
+    console.error(`login browser: ${version.Browser}`);
 
     fs.writeFileSync(
       READY_PATH,
@@ -156,8 +365,12 @@ async function main() {
 
     await shutdownRequested;
   } finally {
-    if (context) {
-      await context.close();
+    if (chrome && chrome.exitCode === null && chrome.signalCode === null) {
+      chrome.kill("SIGTERM");
+      await onceExit(chrome);
+    }
+    if (authProxy) {
+      authProxy.server.close();
     }
     if (isReady) {
       fs.writeFileSync(CLOSED_PATH, "\n", { mode: 0o600 });
