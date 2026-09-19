@@ -60,12 +60,12 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     "newSession: async p => { cwd=p.cwd; sessionId=randomUUID();",
     " if (p._meta.harness !== 'options') throw Error('meta');",
     " if (p.mcpServers[0].headers[0].value !== 'Bearer placeholder') throw Error('token');",
-    " return {sessionId, configOptions: [{id: 'model'}, {id: 'effort'}, {id: 'fast'}]}; },",
+    " return {sessionId, configOptions: [{id:'model',currentValue:'default',options:[{value:'default'},{value:'opus[1m]'},{value:'sonnet'}]},{id:'effort'},{id:'fast'}]}; },",
     "loadSession: async p => { cwd=p.cwd; sessionId=p.sessionId; memory=fs.readFileSync(transcript(), 'utf8');",
-    " await client.sessionUpdate({sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'replay'}}}); return {configOptions: [{id: 'model'}, {id: 'effort'}, {id: 'fast'}]}; },",
+    " await client.sessionUpdate({sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'replay'}}}); return {}; },",
     "setSessionMode: async p => { if (p.modeId !== 'bypassPermissions') throw Error('mode'); return {}; },",
     "setSessionConfigOption: async p => { fs.appendFileSync(path.join(cwd, 'config.log'), p.configId + '=' + p.value + '\\n');",
-    " return {configOptions: [{id: 'model'}, {id: 'effort'}, {id: 'fast'}]}; },",
+    " return {configOptions: [{id:'model',currentValue:'default',options:[{value:'default'},{value:'opus[1m]'},{value:'sonnet'}]},{id:'effort'},{id:'fast'}]}; },",
     "cancel: async () => { release?.(); },",
     "prompt: async p => {",
     " const permission = await client.requestPermission({sessionId,toolCall:{toolCallId:'permission',title:'Read'},options:[{optionId:'no',name:'Deny',kind:'reject_once'},{optionId:'yes',name:'Allow',kind:'allow_once'}]});",
@@ -116,10 +116,9 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
   const first = await launch(home);
   assert.equal((await request(port, start(id(1)))).ok, true);
   assert.equal((await request(port, start(id(2)))).ok, true);
-  assert.equal((await request(port, { ...start(id(1)), model: "claude-sonnet-5", effort: "low", fastMode: false })).ok, true);
+  assert.equal((await request(port, { ...start(id(1)), effort: "low", fastMode: false })).ok, true);
   const settings = await fs.readFile(path.join(home, "work", "chat", id(1), "config.log"), "utf8");
-  // The session opens on its model through _meta; the model option only switches it.
-  assert.deepEqual(settings.trim().split("\n"), ["effort=high", "fast=on", "model=claude-sonnet-5", "effort=low", "fast=off"]);
+  assert.deepEqual(settings.trim().split("\n"), ["model=opus[1m]", "effort=high", "fast=on", "model=opus[1m]", "effort=low", "fast=off"]);
 
   await request(port, { method: "prompt", conversationId: id(1), messageId: message(1), body: "remember-one" }, true);
   await until(() => request(port, { method: "events", conversationId: id(1), after: 0 }), result => result.events.length > 0);

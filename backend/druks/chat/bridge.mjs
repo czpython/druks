@@ -31,6 +31,17 @@ function readEvents(filename) {
   return fs.readFileSync(filename, "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line));
 }
 
+function modelValue(requested, options) {
+  // Druks stores CLI ids (claude-opus-4-8). The adapter picker uses aliases
+  // (opus[1m], sonnet, haiku). An exact miss must not fail the turn.
+  const model = (options || []).find(option => option.id === "model");
+  const values = (model?.options || []).flatMap(option => option.options || [option]);
+  if (values.some(option => option.value === requested)) return requested;
+  const family = requested.includes("opus") ? "opus" : requested.includes("sonnet") ? "sonnet" : requested.includes("haiku") ? "haiku" : "";
+  const match = family && values.find(option => option.value === family || option.value.startsWith(family + "["));
+  return match ? match.value : (model?.currentValue || requested);
+}
+
 class Conversation {
   constructor(id) {
     this.root = conversationRoot(id);
@@ -71,15 +82,14 @@ class Conversation {
   async configure(connection, request, configOptions) {
     const sessionId = this.state.sessionId;
     await connection.setSessionMode({ sessionId, modeId: request.mode });
-    // The session opened on its model through the adapter's _meta. The model option
-    // takes only the models the CLI lists, so it switches a live session and no more.
-    if (request.model !== this.state.model) {
-      ({ configOptions } = await connection.setSessionConfigOption({ sessionId, configId: "model", value: request.model }));
-      this.state.model = request.model;
-    }
-    this.configOptions = configOptions;
+    const { configOptions: next } = await connection.setSessionConfigOption({
+      sessionId,
+      configId: "model",
+      value: modelValue(request.model, configOptions || this.configOptions),
+    });
+    this.configOptions = next;
     // The adapter offers effort and fast mode only for models that support them.
-    const offered = new Set(configOptions.map(option => option.id));
+    const offered = new Set(next.map(option => option.id));
     if (request.effort && offered.has("effort")) {
       await connection.setSessionConfigOption({ sessionId, configId: "effort", value: request.effort });
     }
@@ -91,7 +101,7 @@ class Conversation {
   async start(request) {
     if (this.starting) await this.starting;
     if (this.connection) {
-      await this.configure(this.connection, request, this.configOptions);
+      await this.configure(this.connection, request);
       return this.state;
     }
     this.starting = this.open(request);
@@ -149,18 +159,24 @@ class Conversation {
         mcpServers: [{ name: "druks", type: "http", url: request.mcpUrl, headers: [{ name: "Authorization", value: "Bearer " + bearer }] }],
         _meta: request.meta,
       };
-      const session = this.state.sessionId
-        ? await connection.loadSession({ ...setup, sessionId: this.state.sessionId })
-        : await connection.newSession(setup);
-      this.state.sessionId ||= session.sessionId;
-      this.state.model = request.model;
-      await this.configure(connection, request, session.configOptions ?? []);
+      let configOptions;
+      if (this.state.sessionId) {
+        configOptions = (await connection.loadSession({ ...setup, sessionId: this.state.sessionId })).configOptions;
+      } else {
+        const created = await connection.newSession(setup);
+        this.state.sessionId = created.sessionId;
+        configOptions = created.configOptions;
+      }
+      await this.configure(connection, request, configOptions);
       this.connection = connection;
       this.projects = projects;
       this.state.status = "idle";
       this.save();
     } catch (error) {
       child.kill();
+      // newSession ran; configure did not. Forget the id so the next start
+      // does not loadSession a session the adapter already dropped.
+      this.state.sessionId = "";
       throw error;
     }
   }
