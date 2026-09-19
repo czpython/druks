@@ -53,14 +53,7 @@ header. Settings opens from the bottom of the sidebar. Below 650 px, a
 navigation button opens a modal drawer. Escape closes the drawer and returns
 focus to the button.
 
-Chat uses `/chat`, `/chat/new`, and `/chat/<id>`. Its conversation list and
-thread share the platform shell. Title search filters the full conversation list.
-Pins are stored on the owner account's conversations. Groups use the account's
-timezone and each conversation's latest message time. Below 760 px, the list and
-thread appear separately. The thread receives ACP events through an
-owner-only WebSocket. Its reducer uses the ACP SDK types. `use-stick-to-bottom`
-keeps streamed replies visible until the operator scrolls up. See the
-[Chat guide](../docs/chat.md) for message states and recovery limits.
+See the [Chat guide](../docs/chat.md) for conversation behavior and controls.
 
 Settings use `/settings/<section>` routes. `/settings/personal` edits the current
 account's preferences through `/api/settings/personal`. `/settings/agents` edits

@@ -41,13 +41,18 @@ again to remove it. A pin does not change a conversation's message times.
 
 The remaining conversations appear under **Today**, **Yesterday**, or **Earlier**,
 using the timezone in your preferences. Each group shows the most recent message
-first. The header shows the last reply time only after Druks saves a reply.
+first. The header shows the last saved agent reply time. Times include a date
+for messages from previous days.
 
 On a narrow screen, Chat shows either the list or the conversation. Use
 **Back to conversations** to return to the list. Your draft stays in the message
 field when you switch conversations.
 
 ## Wait for a reply
+
+Replies use the **Agent** label. Messages that Druks writes for the agent use
+**Druks**. Your web messages use **You**. WhatsApp messages use the contact name,
+or the contact identifier if no name is available.
 
 **Connecting…** appears at the next reply position until the agent can reply.
 The first message can take longer than later messages. The composer stays

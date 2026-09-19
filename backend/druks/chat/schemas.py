@@ -13,13 +13,12 @@ class ConversationResponse(Schema):
 
     id: str
     title: str | None
-    pinned: bool
+    is_pinned: bool
     source: ConversationSource
     user_id: str | None
     user_name: str
     created_at: datetime
     last_message_at: datetime
-    last_reply_at: datetime | None
     message_count: int
     active_message_id: str | None
 

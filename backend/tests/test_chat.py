@@ -436,26 +436,82 @@ async def test_each_open_page_receives_the_same_live_event(druks_db, conversatio
     assert pages[0][-1] == pages[1][-1] == event
 
 
+async def test_conversation_recency_comes_from_messages_not_pins(druks_db):
+    owner = await Account.get_or_create(druks_db, "pins@example.com")
+    earlier = await Conversation.create(druks_db, account_id=owner.id, body="First")
+    later = await Conversation.create(druks_db, account_id=owner.id, body="Second")
+    empty = Conversation(account_id=owner.id, created_at=Base.utc_now() - timedelta(days=1))
+    druks_db.add(empty)
+    await druks_db.flush()
+    reply = await earlier.create_message(druks_db, "Done", role=MessageRole.ASSISTANT)
+    reply.created_at = later.created_at + timedelta(seconds=1)
+    later.is_pinned = True
+    await druks_db.flush()
+    for conversation in (earlier, later, empty):
+        await druks_db.refresh(conversation)
+
+    conversations = await Conversation.list_for_account(druks_db, owner.id)
+
+    assert [conversation.id for conversation in conversations] == [earlier.id, later.id, empty.id]
+    assert earlier.last_message_at == reply.created_at
+    assert empty.last_message_at == empty.created_at
+    assert not empty.is_pinned
+
+    reply.created_at = later.last_message_at
+    await druks_db.flush()
+    conversations = await Conversation.list_for_account(druks_db, owner.id)
+    assert [conversation.id for conversation in conversations] == [later.id, earlier.id, empty.id]
+
+
+async def test_owner_can_pin_and_unpin(druks_db, conversation, tmp_path):
+    api = configure_app_for_test(
+        settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-User"}),
+        authenticated=False,
+    )
+    async with asgi_client(api) as client:
+        for is_pinned in (True, False):
+            response = await client.patch(
+                f"/api/chat/conversations/{conversation.id}",
+                json={"is_pinned": is_pinned},
+                headers={"X-User": "owner@example.com"},
+            )
+            assert response.status_code == 200
+            assert response.json()["isPinned"] == is_pinned
+            await druks_db.refresh(conversation, ["is_pinned"])
+            assert conversation.is_pinned == is_pinned
+
+
 async def test_http_routes_are_private_and_reject_bearer_tokens(druks_db, conversation, tmp_path):
     api = configure_app_for_test(
         settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-User"}),
         authenticated=False,
     )
     async with asgi_client(api) as client:
-        headers = {"X-User": "other@example.com"}
         for method, suffix, body in [
             ("GET", "", None),
+            ("PATCH", "", {"is_pinned": True}),
             ("POST", "/messages", {"body": "hello"}),
             ("POST", "/cancel", {"messageId": "missing"}),
         ]:
-            response = await client.request(
-                method,
-                f"/api/chat/conversations/{conversation.id}{suffix}",
-                headers=headers,
-                json=body,
-            )
-            assert response.status_code == 404
-        response = await client.get("/api/chat/conversations", headers=headers)
+            for conversation_id, headers, status in [
+                (conversation.id, {"X-User": "other@example.com"}, 404),
+                ("missing", {"X-User": "owner@example.com"}, 404),
+                (
+                    conversation.id,
+                    {"Authorization": "Bearer invalid", "X-User": "owner@example.com"},
+                    401,
+                ),
+            ]:
+                response = await client.request(
+                    method,
+                    f"/api/chat/conversations/{conversation_id}{suffix}",
+                    headers=headers,
+                    json=body,
+                )
+                assert response.status_code == status
+        response = await client.get(
+            "/api/chat/conversations", headers={"X-User": "other@example.com"}
+        )
         assert response.json() == []
         response = await client.post(
             "/api/chat/conversations",

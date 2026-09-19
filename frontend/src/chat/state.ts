@@ -5,13 +5,12 @@ import type { FileSummary } from '../api/types'
 export interface ConversationSummary {
   id: string
   title: string | null
-  pinned: boolean
+  isPinned: boolean
   source: 'web' | 'whatsapp'
   userId: string | null
   userName: string
   createdAt: string
   lastMessageAt: string
-  lastReplyAt: string | null
   messageCount: number
   activeMessageId: string | null
 }

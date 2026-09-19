@@ -29,7 +29,7 @@ export function ChatPage({ id }: { id?: string }) {
   const [now, setNow] = useState(() => new Date())
   const list = useQuery({ queryKey: conversationListKey, queryFn: chatApi.list, refetchInterval: 10_000 })
   const pin = useMutation({
-    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) => chatApi.pin(id, pinned),
+    mutationFn: ({ id, isPinned }: { id: string; isPinned: boolean }) => chatApi.setPinned(id, isPinned),
     onSuccess: (summary) => {
       queryClient.setQueryData<ConversationSummary[]>(conversationListKey, (current = []) =>
         current.map((conversation) => conversation.id === summary.id ? summary : conversation).sort(compareConversations),
@@ -51,7 +51,11 @@ export function ChatPage({ id }: { id?: string }) {
   for (const conversation of matches) {
     const day = zonedParts(new Date(conversation.lastMessageAt), format.timezone)
     const daysAgo = (todayDate - Date.UTC(day.year, day.month - 1, day.day)) / 86_400_000
-    const group = conversation.pinned ? 'Pinned' : daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : 'Earlier'
+    let group: string
+    if (conversation.isPinned) group = 'Pinned'
+    else if (daysAgo === 0) group = 'Today'
+    else if (daysAgo === 1) group = 'Yesterday'
+    else group = 'Earlier'
     groups.get(group)!.push(conversation)
   }
 
@@ -61,7 +65,7 @@ export function ChatPage({ id }: { id?: string }) {
   }, [])
 
   function setPinned(conversation: ConversationSummary) {
-    pin.mutate({ id: conversation.id, pinned: !conversation.pinned })
+    pin.mutate({ id: conversation.id, isPinned: !conversation.isPinned })
   }
 
   if (conversationId !== undefined && !conversationIdPattern.test(conversationId)) {
@@ -102,7 +106,7 @@ export function ChatPage({ id }: { id?: string }) {
               <Link href={`/chat/${conversation.id}`} className="chat-list-item" aria-current={conversation.id === conversationId ? 'page' : undefined}>
                 <span className="chat-list-title" title={conversationTitle(conversation)}>{conversationTitle(conversation)}</span>
                 <time dateTime={conversation.lastMessageAt} title={format.absTime(conversation.lastMessageAt)}>
-                  {day === 'Earlier' ? format.absDay(conversation.lastMessageAt).split(' ').slice(0, 2).join(' ') : format.clockTime(conversation.lastMessageAt)}
+                  {format.absTimeCompact(conversation.lastMessageAt)}
                 </time>
                 {conversation.activeMessageId
                   ? <span className="chat-list-status"><span className="chat-activity-dot" />Agent is replying</span>
@@ -139,8 +143,8 @@ function PinButton({ conversation, onPin, disabled }: {
   onPin: (conversation: ConversationSummary) => void
   disabled: boolean
 }) {
-  const label = `${conversation.pinned ? 'Unpin' : 'Pin'} ${conversationTitle(conversation)}`
-  return <button className="chat-icon-button chat-pin" aria-label={label} title={label} aria-pressed={conversation.pinned} disabled={disabled} onClick={() => onPin(conversation)}>
+  const label = `Pin ${conversationTitle(conversation)}`
+  return <button className="chat-icon-button chat-pin" aria-label={label} title={label} aria-pressed={conversation.isPinned} disabled={disabled} onClick={() => onPin(conversation)}>
     <Pin size={16} aria-hidden="true" />
   </button>
 }
@@ -191,7 +195,7 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
         const summary: ConversationSummary = {
           id: action.id, title: action.title, source: action.source, userId: action.userId,
           userName: action.userName, createdAt: action.createdAt,
-          pinned: action.pinned, lastMessageAt: action.lastMessageAt, lastReplyAt: action.lastReplyAt,
+          isPinned: action.isPinned, lastMessageAt: action.lastMessageAt,
           messageCount: action.messageCount, activeMessageId: action.activeMessageId,
         }
         queryClient.setQueryData<ConversationSummary[]>(conversationListKey, (current = []) =>
@@ -286,6 +290,8 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
   const messages = conversation?.messages ?? []
   const replies = new Map(messages.filter((message) => message.role === 'assistant').map((message) => [message.replyTo, message]))
   const userMessages = messages.filter((message) => message.role === 'user')
+  const lastReply = messages.findLast((message) => message.role === 'assistant')
+  const userLabel = conversation?.source === 'whatsapp' ? conversation.userName || conversation.userId || 'Contact' : 'You'
   // A WhatsApp turn can answer several messages, and its newest delivered message names it.
   const unansweredMessage = userMessages.findLast((message) => message.state === 'delivered')
     ?? userMessages.find((message) => message.state === 'pending')
@@ -296,7 +302,7 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
       <div className="chat-thread-title">
         {id && <h1>{conversation ? conversationTitle(conversation) : 'Conversation'}</h1>}
         {conversation && <p>{conversation.messageCount} {conversation.messageCount === 1 ? 'message' : 'messages'}
-          {conversation.lastReplyAt && <> <span aria-hidden="true">/</span> last reply <time dateTime={conversation.lastReplyAt} title={format.absTime(conversation.lastReplyAt)}>{format.clockTime(conversation.lastReplyAt)}</time></>}
+          {lastReply && <> <span aria-hidden="true">/</span> last reply <time dateTime={lastReply.createdAt} title={format.absTime(lastReply.createdAt)}>{format.absTimeCompact(lastReply.createdAt)}</time></>}
         </p>}
       </div>
       {id && connection === 'reconnecting' && <span className="chat-connection" role="status">Reconnecting…</span>}
@@ -317,14 +323,14 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
           const isWaiting = unansweredMessage?.id === message.id && rows.length === 0 && !state.error
           return <article className="chat-turn" key={message.id} aria-label="Message and reply">
             <div className={message.isInternal ? 'chat-user is-internal' : 'chat-user'}>
-              <div className="chat-message-meta">{message.isInternal ? 'Druks' : 'You'} <time dateTime={message.createdAt} title={format.absTime(message.createdAt)}>{format.clockTime(message.createdAt)}</time></div>
+              <div className="chat-message-meta">{message.isInternal ? 'Druks' : userLabel} <time dateTime={message.createdAt} title={format.absTime(message.createdAt)}>{format.absTimeCompact(message.createdAt)}</time></div>
               <div className="chat-user-body">{message.body}</div>
               {message.file && <a href={message.file.url} target="_blank" rel="noreferrer">{message.file.name}</a>}
               {isQueued && <span className="chat-queued">Queued</span>}
             </div>
             <div className="chat-reply">
-              {(rows.length > 0 || isWaiting) && <div className="chat-message-meta chat-agent-meta">Druks
-                {reply && <time dateTime={reply.createdAt} title={format.absTime(reply.createdAt)}>{format.clockTime(reply.createdAt)}</time>}
+              {(rows.length > 0 || isWaiting) && <div className="chat-message-meta chat-agent-meta">Agent
+                {reply && <time dateTime={reply.createdAt} title={format.absTime(reply.createdAt)}>{format.absTimeCompact(reply.createdAt)}</time>}
               </div>}
               <Reply rows={rows} />
               {isWaiting && <p className="chat-waiting" role="status"><span className="chat-activity-dot" />{message.state === 'delivered' ? 'Agent is replying…' : 'Connecting…'}</p>}

@@ -6,7 +6,7 @@ import { compareConversations, conversationReducer, initialConversation, replyRo
 const conversation: Conversation = {
   id: '01995a3c-0000-7000-8000-000000000001', title: 'Read the gate', source: 'web', userId: null, userName: '', createdAt: '2026-09-18T10:00:00Z',
   messageCount: 1, activeMessageId: '2',
-  pinned: false, lastMessageAt: '2026-09-18T10:00:00Z', lastReplyAt: null,
+  isPinned: false, lastMessageAt: '2026-09-18T10:00:00Z',
   messages: [{ id: '2', role: 'user', body: 'Read the gate', state: 'delivered', replyTo: null, toolCalls: [], isInternal: false, file: null, createdAt: '2026-09-18T10:00:00Z', deliveredAt: '2026-09-18T10:00:01Z' }],
 }
 
@@ -18,7 +18,7 @@ describe('Chat events', () => {
   it('orders conversations by their latest message with a stable id tie-breaker', () => {
     const later = { ...conversation, id: '01995a3c-0000-7000-8000-000000000002' }
     const latest = { ...conversation, id: '01995a3c-0000-7000-8000-000000000003', lastMessageAt: '2026-09-19T10:00:00Z' }
-    const pinned = { ...conversation, pinned: true }
+    const pinned = { ...conversation, isPinned: true }
     expect([pinned, latest, later].sort(compareConversations).map((item) => item.id)).toEqual([latest.id, later.id, pinned.id])
   })
 

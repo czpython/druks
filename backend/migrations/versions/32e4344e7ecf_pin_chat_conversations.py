@@ -12,9 +12,9 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "chat_conversations",
-        sa.Column("pinned", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("is_pinned", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
 
 
 def downgrade() -> None:
-    op.drop_column("chat_conversations", "pinned")
+    op.drop_column("chat_conversations", "is_pinned")
