@@ -41,7 +41,10 @@ async def create_conversation(
     conversation = await Conversation.create(session, account_id=account.id, body=body)
     await session.commit()
     await DBOS.start_workflow_async(deliver, conversation.id)
-    await session.refresh(conversation, ["messages", "message_count", "active_message_id"])
+    await session.refresh(
+        conversation,
+        ["messages", "message_count", "active_message_id", "last_message_at"],
+    )
     return conversation
 
 
@@ -58,6 +61,26 @@ async def get_conversation(
         raise HTTPException(404, "Conversation not found.")
     await session.refresh(conversation, ["messages"])
     return conversation
+
+
+@router.patch(
+    "/conversations/{conversation_id}",
+    response_model=ConversationResponse,
+    response_model_by_alias=True,
+)
+async def set_conversation_pinned(
+    conversation_id: str,
+    session: SessionDep,
+    is_pinned: Annotated[bool, Body(embed=True)],
+    account: Account = Depends(current_session_account),
+) -> ConversationResponse:
+    conversation = await Conversation.get_for_account(session, conversation_id, account.id)
+    if not conversation:
+        raise HTTPException(404, "Conversation not found.")
+    conversation.is_pinned = is_pinned
+    response = ConversationResponse.model_validate(conversation)
+    await session.commit()
+    return response
 
 
 @router.post(

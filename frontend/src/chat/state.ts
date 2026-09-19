@@ -5,10 +5,12 @@ import type { FileSummary } from '../api/types'
 export interface ConversationSummary {
   id: string
   title: string | null
+  isPinned: boolean
   source: 'web' | 'whatsapp'
   userId: string | null
   userName: string
   createdAt: string
+  lastMessageAt: string
   messageCount: number
   activeMessageId: string | null
 }
@@ -59,6 +61,10 @@ export const initialConversation: ConversationState = { conversation: null, turn
 // A WhatsApp conversation has no title, so the person's name stands in.
 export function conversationTitle(conversation: ConversationSummary): string {
   return conversation.title ?? (conversation.userName || conversation.userId || 'New conversation')
+}
+
+export function compareConversations(left: ConversationSummary, right: ConversationSummary): number {
+  return Date.parse(right.lastMessageAt) - Date.parse(left.lastMessageAt) || right.id.localeCompare(left.id)
 }
 
 export function replyRows(rows: ReplyRow[], update: SessionUpdate): ReplyRow[] {

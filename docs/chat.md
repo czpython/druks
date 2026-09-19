@@ -27,6 +27,33 @@ The first message creates the conversation. It shows as **New conversation**
 until the agent's first reply. Then Claude names it in a short separate call.
 New lines use Shift + Enter.
 
+The starter prompts fill the message field. They do not send a message.
+The new conversation page also lists the installed apps.
+
+## Find and pin conversations
+
+Search filters conversation titles. It ignores letter case and does not search
+message text. Search does not close the current conversation or clear its draft.
+
+Select the pin beside a conversation or in its header to keep it in **Pinned**.
+Pins are saved for your account and stay after a page reload. Select the pin
+again to remove it. A pin does not change a conversation's message times.
+
+The remaining conversations appear under **Today**, **Yesterday**, or **Earlier**,
+using the timezone in your preferences. Each group shows the most recent message
+first. The header shows the last saved agent reply time. Times include a date
+for messages from previous days.
+
+On a narrow screen, Chat shows either the list or the conversation. Use
+**Back to conversations** to return to the list. Your draft stays in the message
+field when you switch conversations.
+
+## Wait for a reply
+
+Replies use the **Agent** label. Messages that Druks writes for the agent use
+**Druks**. Your web messages use **You**. WhatsApp messages use the contact name,
+or the contact identifier if no name is available.
+
 **Connecting…** appears at the next reply position until the agent can reply.
 The first message can take longer than later messages. The composer stays
 available while you wait.
