@@ -204,7 +204,7 @@ async def test_acquire_persists_private_key_when_returned(
     assert oct(os.stat(key_path).st_mode & 0o777) == "0o600"
 
 
-async def test_acquire_passes_template_to_drukbox(
+async def test_acquire_sends_a_template_without_the_installation_image(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
@@ -214,6 +214,7 @@ async def test_acquire_passes_template_to_drukbox(
         pass
 
     assert calls[0]["template"] == "template-1"
+    assert calls[0]["image"] is None
 
 
 async def test_acquire_sends_no_template_by_default(

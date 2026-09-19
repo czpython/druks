@@ -93,7 +93,11 @@ class Client:
         api = self._api()
         try:
             settings = load_settings()
-            image = image_override or settings.sandbox.image
+            if template:
+                # A template names its own image, built on the installation image.
+                image = None
+            else:
+                image = image_override or settings.sandbox.image
             # drukbox reaps the host at lease end, so a dead worker still frees its VM.
             expires_at = datetime.now(UTC) + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
             try:
