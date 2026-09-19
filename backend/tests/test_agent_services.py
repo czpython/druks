@@ -328,9 +328,9 @@ async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):
     run = await seed_note_run(druks_db, note=item, state="failed")
     retried_run_id = "retried-run"
     steps = [
-        {"function_id": 2, "error": None},
-        {"function_id": 6, "error": RuntimeError("first failure")},
-        {"function_id": 8, "error": RuntimeError("final failure")},
+        {"function_id": 2, "function_name": "run.running:propagate", "error": None},
+        {"function_id": 6, "function_name": f"{run.kind}.fetch", "error": RuntimeError("first")},
+        {"function_id": 8, "function_name": f"{run.kind}.fetch", "error": RuntimeError("final")},
     ]
     list_steps = mock.AsyncMock(return_value=steps)
     events = []
@@ -374,19 +374,6 @@ async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):
             },
         )
     ]
-
-
-async def test_run_retry_restarts_at_step_one_without_a_failed_checkpoint(druks_db, monkeypatch):
-    run = await seed_note_run(druks_db, state="failed")
-    list_steps = mock.AsyncMock(return_value=[{"function_id": 2, "error": None}])
-    fork = mock.AsyncMock(return_value=SimpleNamespace(workflow_id="clean-retry"))
-    monkeypatch.setattr("dbos.DBOS.list_workflow_steps_async", list_steps)
-    monkeypatch.setattr("dbos.DBOS.fork_workflow_async", fork)
-    monkeypatch.setattr("druks.durable.models.publish", mock.AsyncMock())
-
-    await run.retry()
-
-    fork.assert_awaited_once_with(run.id, 1, queue_name=run_queue.name)
 
 
 async def test_retry_run_refuses_a_non_failed_run(druks_db, monkeypatch):

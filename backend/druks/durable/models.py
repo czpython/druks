@@ -415,10 +415,11 @@ class Run(Base):
 
     async def retry(self) -> str:
         steps = await DBOS.list_workflow_steps_async(self.id)
-        start_step = max(
-            (step["function_id"] for step in steps if step["error"]),
-            default=1,
-        )
+        failed = [step for step in steps if step["error"]]
+        # The body can refuse a step's result, and then no step failed. The fork goes
+        # to the workflow's last own step. A lifecycle step replays the old run's record.
+        own = [step for step in steps if step["function_name"].startswith(f"{self.kind}.")]
+        start_step = max((step["function_id"] for step in failed or own), default=1)
         handle = await DBOS.fork_workflow_async(
             self.id,
             start_step,

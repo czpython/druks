@@ -1451,6 +1451,42 @@ async def test_admission_commits_before_the_request_and_deduplicates(rt):
         workflows._items.pop(AdmissionFlow.kind)
 
 
+async def test_retry_reruns_the_step_whose_result_the_body_refused(rt):
+    calls = []
+
+    class RefusedDelivery(Workflow):
+        subject = Widget
+
+        @step
+        async def plan(self) -> None:
+            calls.append("plan")
+
+        @step
+        async def deliver(self) -> str:
+            calls.append("deliver")
+            return "refused"
+
+        async def run_multistep(self) -> None:
+            await self.plan()
+            if await self.deliver() == "refused":
+                raise FatalError("delivery refused")
+
+    try:
+        first_id = await RefusedDelivery.start(subject=Widget(id=8))
+        await _wait_for(rt.engine, first_id, lambda run: run.state == RunState.FAILED)
+        async with session_scope(rt.engine) as session:
+            first_run = await session.get(Run, first_id)
+            retry_id = await first_run.retry()
+        await _wait_for(rt.engine, retry_id, lambda run: run.state == RunState.FAILED)
+
+        assert calls == ["plan", "deliver", "deliver"]
+        async with get_session(rt.engine) as reader:
+            retried = await reader.get(Run, retry_id)
+        assert retried.failure == "delivery refused"
+    finally:
+        workflows._items.pop(RefusedDelivery.kind)
+
+
 async def test_failed_retry_attempts_keep_separate_terminal_records(rt):
     class FailingAttempt(Workflow):
         subject = Widget
