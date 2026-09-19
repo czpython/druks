@@ -12,6 +12,7 @@ class SessionResponse(Schema):
     number: str | None = Field(None, validation_alias=AliasPath("identity", "number"))
     name: str | None = Field(None, validation_alias=AliasPath("identity", "name"))
     admin: str | None = Field(None, validation_alias=AliasPath("identity", "admin", "name"))
+    is_phone_connected: bool = False
     identity_status: str | None
     revoked_at: datetime | None
     revoked_reason: str

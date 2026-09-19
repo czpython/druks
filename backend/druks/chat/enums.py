@@ -1,6 +1,15 @@
 from enum import StrEnum
 
 
+class BotAccess(StrEnum):
+    """Who can write to a Bot's number and which account owns each conversation."""
+
+    # Anyone writes under the number's bot account. The number has an admin.
+    OPEN = "open"
+    # Proven senders write under their paired operator accounts. There is no admin.
+    PAIRED = "paired"
+
+
 class ConversationSource(StrEnum):
     WEB = "web"
     WHATSAPP = "whatsapp"

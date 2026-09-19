@@ -8,8 +8,8 @@ from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.apps.loader import get_app
 from druks.chat.bots.service import resume
+from druks.chat.enums import BotAccess
 from druks.chat.models import Conversation
-from druks.secrets.models import VaultSecret
 
 from .schemas import QrResponse, SessionResponse
 from .services import Waha
@@ -20,9 +20,18 @@ router = APIRouter(prefix="/services/waha")
 @router.get("/sessions", response_model=list[SessionResponse], response_model_by_alias=True)
 async def list_sessions(
     session: SessionDep, app: str = "", account: Account = Depends(current_session_account)
-) -> list[VaultSecret]:
+) -> list[SessionResponse]:
     """An app's numbers, or the operator's own number."""
-    return await Waha.list_sessions(session, app=app, account_id=account.id)
+    numbers = []
+    for connection in await Waha.list_sessions(session, app=app, account_id=account.id):
+        number = SessionResponse.model_validate(connection)
+        if (
+            connection.account.kind == AccountKind.BOT
+            and get_app(connection.identity["app"]).bot.access == BotAccess.PAIRED
+        ):
+            number.is_phone_connected = account.id in connection.identity["operators"].values()
+        numbers.append(number)
+    return numbers
 
 
 @router.post(
@@ -32,9 +41,8 @@ async def link_session(
     session: SessionDep,
     app: Annotated[str, Body(embed=True)] = "",
     account: Account = Depends(current_session_account),
-) -> VaultSecret:
-    """Link a number for an app's Bot, under new bot and admin accounts, or for the
-    operator."""
+) -> SessionResponse:
+    """Link a number for an app's Bot or for the operator."""
     owner = account
     identity = {}
     if app:
@@ -45,9 +53,13 @@ async def link_session(
         if not bot:
             raise HTTPException(404, f"App {app!r} declares no Bot.")
         owner = await Account.create_for_bot(session, AccountKind.BOT)
-        admin = await Account.create_for_bot(session, AccountKind.BOT_ADMIN)
-        identity = {"app": app, "admin": {"account_id": admin.id}}
-    return await Waha.link(session, owner, identity=identity)
+        if bot.access == BotAccess.PAIRED:
+            identity = {"app": app, "operators": {}}
+        else:
+            admin = await Account.create_for_bot(session, AccountKind.BOT_ADMIN)
+            identity = {"app": app, "admin": {"account_id": admin.id}}
+    connection = await Waha.link(session, owner, identity=identity)
+    return SessionResponse.model_validate(connection)
 
 
 @router.get("/sessions/{session_id}/qr", response_model=QrResponse, response_model_by_alias=True)

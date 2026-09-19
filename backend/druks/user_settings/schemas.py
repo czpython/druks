@@ -12,6 +12,7 @@ from druks.apps.settings import (
     field_visibility,
     validate_field_choice_details,
 )
+from druks.chat.enums import BotAccess
 from druks.core.utils.time import validate_timezone
 from druks.harnesses.datastructures import Billing
 from druks.harnesses.schemas import SortedNames
@@ -157,6 +158,7 @@ class AppSettingsResponse(Schema):
     builtin: bool
     # The id of the app's Bot, which answers people on its channels.
     bot: str | None
+    bot_access: BotAccess | None
     agents: list[AgentSettingResponse]
     workflows: list[WorkflowSettingsResponse]
     settings: list[SettingsFieldResponse]

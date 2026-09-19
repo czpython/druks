@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '../api/client'
-import type { WahaSession } from '../api/types'
+import type { AppSettings, WahaSession } from '../api/types'
 import { appLabel } from '../apps/registry'
 
 // WAHA replaces the QR code every 20 to 60 seconds, and the number links when a phone scans it.
@@ -29,22 +29,25 @@ function isWaiting(number: WahaSession) {
 }
 
 /** The WhatsApp numbers of an app's Bot, or without ``app`` the operator's own number. */
-export function WhatsAppNumbersPane({ app }: { app?: string }) {
+export function WhatsAppNumbersPane({ app }: { app?: Pick<AppSettings, 'name' | 'botAccess'> }) {
+  const appName = app?.name
+  const isPaired = app?.botAccess === 'paired'
   const queryClient = useQueryClient()
   const [adminCodes, setAdminCodes] = useState<AdminCode[]>([])
   const query = useQuery({
-    queryKey: ['wahaSessions', app],
-    queryFn: () => api.wahaSessions(app),
+    queryKey: ['wahaSessions', appName],
+    queryFn: () => api.wahaSessions(appName),
     refetchInterval: (current) =>
       current.state.data?.some(isWaiting) || adminCodes.length > 0 ? LINK_POLL_INTERVAL : false,
   })
-  const [busy, setBusy] = useState(false)
+  const [isBusy, setIsBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // A spent code gives its number a new admin, so the code closes.
-  const openCodes = adminCodes.filter(
-    (adminCode) =>
-      query.data?.find((number) => number.id === adminCode.numberId)?.admin === adminCode.admin,
-  )
+  const openCodes = adminCodes.filter((adminCode) => {
+    const number = query.data?.find((number) => number.id === adminCode.numberId)
+    return number && !number.revokedAt && (isPaired
+      ? !number.isPhoneConnected
+      : number.admin === adminCode.admin)
+  })
   if (openCodes.length < adminCodes.length) setAdminCodes(openCodes)
   const newest = query.data?.at(-1)
   // An operator links one number at a time, so their block shows only the live one. A number
@@ -57,15 +60,15 @@ export function WhatsAppNumbersPane({ app }: { app?: string }) {
   )
 
   async function changeNumbers(action: () => Promise<unknown>) {
-    setBusy(true)
+    setIsBusy(true)
     setError(null)
     try {
       await action()
-      await queryClient.invalidateQueries({ queryKey: ['wahaSessions', app] })
+      await queryClient.invalidateQueries({ queryKey: ['wahaSessions', appName] })
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
     } finally {
-      setBusy(false)
+      setIsBusy(false)
     }
   }
 
@@ -93,11 +96,15 @@ export function WhatsAppNumbersPane({ app }: { app?: string }) {
   return (
     <div className="set-pane mcp-pane svc-pane">
       <header className="mcp-pane-head">
-        <h2 className="mcp-pane-title">{app ? 'WhatsApp numbers' : 'WhatsApp'}</h2>
+        <h2 className="mcp-pane-title">
+          {isPaired ? "Assistant's number — Recommended" : app ? 'WhatsApp numbers' : 'Your own number'}
+        </h2>
         <p className="mcp-pane-sub">
-          {app
-            ? `People chat with ${appLabel(app)} at these numbers.`
-            : 'Link your own number to chat with Druks from WhatsApp.'}
+          {isPaired
+            ? 'Keep your private account outside WAHA. Replies arrive as incoming messages and can ring. This needs one more WhatsApp number.'
+            : app
+            ? `People chat with ${appLabel(app.name)} at these numbers.`
+            : 'Use your chat with yourself without a second number. Replies have no incoming-message sound. WAHA receives your direct chats, but Druks ignores other senders.'}
         </p>
       </header>
       {query.isPending && <p role="status">Loading numbers…</p>}
@@ -118,8 +125,8 @@ export function WhatsAppNumbersPane({ app }: { app?: string }) {
         <div>
           <button
             className="set-btn primary"
-            onClick={() => void changeNumbers(() => api.linkWahaSession(app))}
-            disabled={busy}
+            onClick={() => void changeNumbers(() => api.linkWahaSession(appName))}
+            disabled={isBusy}
           >
             {app ? 'Add number' : 'Link your number'}
           </button>
@@ -145,7 +152,9 @@ export function WhatsAppNumbersPane({ app }: { app?: string }) {
                     {number.name && <span className="connection-context">{number.name}</span>}
                     {app && isLinked && (
                       <span className="connection-context">
-                        Admin: {number.admin ?? 'the phone, in its chat with itself'}
+                        {isPaired
+                          ? number.isPhoneConnected ? 'Your phone is connected.' : 'Connect your phone to start a conversation.'
+                          : `Admin: ${number.admin ?? 'the phone, in its chat with itself'}`}
                       </span>
                     )}
                   </div>
@@ -164,25 +173,36 @@ export function WhatsAppNumbersPane({ app }: { app?: string }) {
                 {adminCode && (
                   <p className="channel-admin-code" role="status">
                     Send <code>{adminCode.code}</code> from your own WhatsApp to {number.number}{' '}
-                    within {Math.round(adminCode.expiresIn / 60)} minutes. Druks then sends this
-                    number's questions to the sender.
+                    within {Math.round(adminCode.expiresIn / 60)} minutes.{' '}
+                    {isPaired
+                      ? 'Druks connects that phone to your account. Keep this code private.'
+                      : "Druks then sends this number's questions to the sender."}
                   </p>
                 )}
                 {!number.revokedAt && (
                   <div className="svc-actions">
-                    {app && isLinked && (
+                    {isPaired && number.isPhoneConnected && (
+                      <button
+                        className="set-btn ghost"
+                        onClick={() => void changeNumbers(() => api.disconnectBotPhone(number.id))}
+                        disabled={isBusy}
+                      >
+                        Disconnect my phone
+                      </button>
+                    )}
+                    {app && isLinked && !(isPaired && number.isPhoneConnected) && (
                       <button
                         className="set-btn ghost"
                         onClick={() => addAdmin(number)}
-                        disabled={busy}
+                        disabled={isBusy}
                       >
-                        Add admin
+                        {isPaired ? 'Connect my phone' : 'Add admin'}
                       </button>
                     )}
                     <button
                       className="set-btn danger"
                       onClick={() => remove(number)}
-                      disabled={busy}
+                      disabled={isBusy}
                     >
                       Remove
                     </button>

@@ -2,23 +2,25 @@ import hashlib
 import hmac
 import json
 from types import SimpleNamespace
+from typing import Annotated
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from conftest import connect_service
+from conftest import bind_ambient_session, connect_service
 from druks.accounts.dependencies import current_account, resolve_single_operator
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
-from druks.agents import Bot, BotUser
+from druks.agents import Bot, BotAccess, BotUser
 from druks.api.dependencies import request_session
 from druks.apps import App, loader
 from druks.apps.exceptions import AppBotError
 from druks.apps.registry import bots
 from druks.chat import service
+from druks.chat.app import Chat
 from druks.chat.bots import routes as bot_routes
 from druks.chat.bots import service as bot_service
-from druks.chat.bots.constants import PAUSE_TOPIC
+from druks.chat.bots.constants import PAUSE_TOPIC, PHONE_CONNECTED_MESSAGE
 from druks.chat.bridge import Bridge
 from druks.chat.channels.whatsapp import routes
 from druks.chat.channels.whatsapp.client import WahaClient
@@ -26,9 +28,10 @@ from druks.chat.channels.whatsapp.constants import WAHA_AUDIENCE
 from druks.chat.channels.whatsapp.services import Waha
 from druks.chat.channels.whatsapp.webhooks import WahaEvents
 from druks.chat.constants import CONVERSATION_HEADER
-from druks.chat.enums import ConversationSource, MessageState, PauseSignal
+from druks.chat.enums import ConversationSource, MessageRole, MessageState, PauseSignal
 from druks.chat.models import Conversation
 from druks.harnesses.claude import ClaudeHarness
+from druks.mcp.enums import Toolkit
 from druks.mcp.server import _is_visible, _validate_agent_tools
 from druks.models import Base
 from druks.notifications.exceptions import AnswerNotAllowedError
@@ -39,8 +42,8 @@ from druks.settings import Urls
 from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_run
 from druks.user_settings import reads
 from druks.user_settings.models import InstallationSettings
-from fastapi import APIRouter, Depends, FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException
+from sqlalchemy import func, select
 
 ANA = "41700000001@c.us"
 BEN = "41700000002@c.us"
@@ -48,13 +51,14 @@ NUMBER = "41000000000@c.us"
 
 
 @pytest.fixture
-def helpdesk(monkeypatch):
+def helpdesk(monkeypatch, request):
     declared = dict(bots._items)
 
     class Helpdesk(App):
         name = "helpdesk"
         bot = Bot(
             prompt="helpdesk/bot.md",
+            access=getattr(request, "param", BotAccess.OPEN),
             user_tools=("get_ticket",),
             admin_tools=("list_requests",),
         )
@@ -87,13 +91,23 @@ def waha(monkeypatch):
 
 
 async def link(
-    session, owner, *, app="helpdesk", session_name="session_one", number="+41000000000"
+    session,
+    owner,
+    *,
+    app="helpdesk",
+    access=BotAccess.OPEN,
+    session_name="session_one",
+    number="+41000000000",
 ):
+    bind_ambient_session(session)
     await connect_service("waha", identity={"url": "http://waha.test"}, secrets={"key": "admin"})
     identity = {}
     if app:
-        admin = await Account.create_for_bot(session, AccountKind.BOT_ADMIN)
-        identity = {"app": app, "admin": {"account_id": admin.id}}
+        if access == BotAccess.PAIRED:
+            identity = {"app": app, "operators": {}}
+        else:
+            admin = await Account.create_for_bot(session, AccountKind.BOT_ADMIN)
+            identity = {"app": app, "admin": {"account_id": admin.id}}
     if number:
         identity = {**identity, "number": number, "user_id": NUMBER}
     identity = {**identity, "session": session_name}
@@ -237,6 +251,30 @@ async def test_a_number_cannot_be_linked_twice_or_on_an_engine_druks_cannot_read
     assert third.revoked_reason == "unsupported_engine"
 
 
+async def test_chat_links_a_number_without_an_admin_account(
+    druks_db, druks_client, waha, monkeypatch
+):
+    webhook_base(monkeypatch)
+    await connect_service("waha", identity={"url": "http://waha.test"}, secrets={"key": "admin"})
+
+    response = await druks_client.post("/api/chat/services/waha/sessions", json={"app": "chat"})
+
+    assert response.status_code == 201
+    connection = await druks_db.get(VaultSecret, response.json()["id"])
+    assert connection.account.kind == AccountKind.BOT
+    assert connection.identity == {"app": "chat", "operators": {}, "session": "session_two"}
+    assert not response.json()["isPhoneConnected"]
+    assert not await druks_db.scalar(
+        select(func.count()).select_from(Account).where(Account.kind == AccountKind.BOT_ADMIN)
+    )
+    settings = await druks_client.get("/api/settings/apps")
+    [chat] = [app for app in settings.json()["apps"] if app["name"] == "chat"]
+    assert chat["builtin"]
+    assert chat["bot"] == "chat.bot"
+    assert chat["botAccess"] == "paired"
+    assert [agent["name"] for agent in chat["agents"]] == ["chat.bot"]
+
+
 async def test_a_session_that_stops_working_is_no_longer_linked(druks_db):
     connection = await link(druks_db, await bot_account(druks_db))
 
@@ -245,6 +283,24 @@ async def test_a_session_that_stops_working_is_no_longer_linked(druks_db):
 
     assert connection.identity_status == "unavailable"
     assert connection.identity["number"] == "+41000000000"
+
+
+@pytest.mark.parametrize("sender, prefix", [(NUMBER, "[Druks] "), (ANA, "")])
+async def test_only_self_chat_replies_have_a_prefix(druks_db, waha, sender, prefix):
+    owner = await bot_account(druks_db)
+    connection = await link(druks_db, owner)
+    conversation = await Conversation.get_or_create_for_user(
+        druks_db, connection, owner.id, **user(sender)
+    )
+    reply = await conversation.create_message(
+        druks_db, "Your ticket is open.", role=MessageRole.ASSISTANT
+    )
+
+    await Waha.send_reply(druks_db, conversation, reply)
+
+    assert waha.calls[-1][2]["text"] == f"{prefix}Your ticket is open."
+    await druks_db.refresh(reply)
+    assert reply.body == "Your ticket is open."
 
 
 async def test_a_message_reaches_the_bot_of_its_numbers_app(druks_db, helpdesk, monkeypatch):
@@ -321,6 +377,7 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
     [start] = [values for method, values in requests if method == "start"]
     assert start["headers"] == [{"name": CONVERSATION_HEADER, "value": conversation.id}]
     assert start["meta"]["claudeCode"]["options"]["tools"] == []
+    assert start["meta"]["claudeCode"]["options"]["systemPrompt"] == "Be kind."
     await druks_db.refresh(conversation, ["messages"])
     *asked, reply = conversation.messages
     assert [message.state for message in asked] == [MessageState.REPLIED] * 3
@@ -332,13 +389,9 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
     pause.assert_not_awaited()
 
 
-class TicketRequest(BaseModel):
-    ticket: str
-
-
-async def get_ticket(body: TicketRequest, user: BotUser) -> dict:
+async def get_ticket(ticket: Annotated[str, Body(embed=True)], user: BotUser) -> dict:
     """Get a ticket for the person writing."""
-    return {"user": user.id, "ticket": body.ticket}
+    return {"user": user.id, "ticket": ticket}
 
 
 def test_the_person_writing_never_enters_a_tool_schema():
@@ -349,7 +402,8 @@ def test_the_person_writing_never_enters_a_tool_schema():
 
     assert "parameters" not in operation
     schema = operation["requestBody"]["content"]["application/json"]["schema"]
-    assert schema == {"$ref": "#/components/schemas/TicketRequest"}
+    body = api.openapi()["components"]["schemas"][schema["$ref"].rpartition("/")[2]]
+    assert body["properties"] == {"ticket": {"type": "string", "title": "Ticket"}}
 
 
 async def test_a_bot_tool_serves_only_the_callers_own_conversation(druks_db, tmp_path):
@@ -437,7 +491,8 @@ async def test_the_bot_row_saves_and_resolves_like_an_agent_row(druks_db, druks_
 async def test_the_admin_code_makes_its_sender_the_number_admin(druks_db, helpdesk):
     owner = await bot_account(druks_db)
     connection = await link(druks_db, owner)
-    code = await bot_service.open_admin_code(connection)
+    operator = await Account.get_or_create(druks_db, "op@example.com")
+    code = await bot_service.open_admin_code(connection, operator.id)
 
     await receive(connection, message_event(ANA, f" {code} ", key="M1"))
     await receive(connection, message_event(ANA, "Requests today?", key="M2"))
@@ -467,6 +522,236 @@ async def test_bot_and_bot_admin_accounts_never_count_as_operators(druks_db):
 
     assert await resolve_single_operator(druks_db) == operator
     assert await Account.list_operators(druks_db) == [operator]
+
+
+async def test_two_operators_pair_to_one_number_under_their_own_accounts(
+    druks_db, tmp_path, monkeypatch
+):
+    connection = await link(
+        druks_db, await bot_account(druks_db), app="chat", access=BotAccess.PAIRED
+    )
+    operators = [
+        await Account.get_or_create(druks_db, "ana@example.com"),
+        await Account.get_or_create(druks_db, "ben@example.com"),
+    ]
+    api = configure_app_for_test(
+        settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-User"}),
+        authenticated=False,
+    )
+    delivery = AsyncMock()
+    monkeypatch.setattr(bot_service.DBOS, "start_workflow_async", delivery)
+    async with asgi_client(api) as client:
+        for operator, sender in zip(operators, (ANA, BEN), strict=True):
+            headers = {"X-User": operator.username}
+            before = await client.get("/api/chat/services/waha/sessions?app=chat", headers=headers)
+            assert not before.json()[0]["isPhoneConnected"]
+            response = await client.post(
+                f"/api/chat/connections/{connection.id}/admin-code",
+                json={"account_id": connection.account_id},
+                headers=headers,
+            )
+            assert response.status_code == 200
+            code = response.json()["code"]
+            await receive(connection, message_event(sender, code, key=f"proof-{operator.id}"))
+            after = await client.get("/api/chat/services/waha/sessions?app=chat", headers=headers)
+            assert after.json()[0]["isPhoneConnected"]
+            conversations = await Conversation.list_for_connection(druks_db, connection.id)
+            [conversation] = [chat for chat in conversations if chat.account_id == operator.id]
+            await druks_db.refresh(conversation, ["messages"])
+            assert [(message.body, message.is_internal) for message in conversation.messages] == [
+                (PHONE_CONNECTED_MESSAGE, True)
+            ]
+            delivery.assert_awaited_with(service.deliver, conversation.id)
+        assert delivery.await_count == 2
+        await receive(connection, message_event("41700000003@c.us", code, key="used-proof"))
+        assert delivery.await_count == 2
+
+    assert connection.identity["operators"] == {ANA: operators[0].id, BEN: operators[1].id}
+    for sender in (ANA, BEN):
+        await receive(connection, message_event(sender, "Read my runs", key=sender))
+    conversations = await Conversation.list_for_connection(druks_db, connection.id)
+    assert {conversation.user_id: conversation.account_id for conversation in conversations} == {
+        ANA: operators[0].id,
+        BEN: operators[1].id,
+    }
+    for conversation in conversations:
+        await druks_db.refresh(conversation, ["messages"])
+        assert [message.body for message in conversation.messages] == [
+            PHONE_CONNECTED_MESSAGE,
+            "Read my runs",
+        ]
+
+
+async def test_disconnect_removes_only_the_signed_in_operators_phones(
+    druks_db, tmp_path, monkeypatch
+):
+    connection = await link(
+        druks_db, await bot_account(druks_db), app="chat", access=BotAccess.PAIRED
+    )
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    ben = await Account.get_or_create(druks_db, "ben@example.com")
+    second_phone = "41700000003@c.us"
+    connection.identity = {
+        **connection.identity,
+        "operators": {ANA: ana.id, second_phone: ana.id, BEN: ben.id},
+    }
+    await druks_db.commit()
+    api = configure_app_for_test(
+        settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-User"}),
+        authenticated=False,
+    )
+    delivery = AsyncMock()
+    monkeypatch.setattr(bot_service.DBOS, "start_workflow_async", delivery)
+
+    async with asgi_client(api) as client:
+        response = await client.delete(
+            f"/api/chat/connections/{connection.id}/phone", headers={"X-User": ana.username}
+        )
+        assert response.status_code == 204
+        for operator, is_connected in ((ana, False), (ben, True)):
+            response = await client.get(
+                "/api/chat/services/waha/sessions?app=chat", headers={"X-User": operator.username}
+            )
+            assert response.json()[0]["isPhoneConnected"] == is_connected
+    await druks_db.refresh(connection)
+    assert connection.identity["operators"] == {BEN: ben.id}
+    for sender in (ANA, second_phone):
+        await receive(connection, message_event(sender, "Read my runs", key=sender))
+    delivery.assert_not_awaited()
+    assert not await Conversation.list_for_connection(druks_db, connection.id)
+    await receive(connection, message_event(BEN, "Read my runs", key=BEN))
+    [conversation] = await Conversation.list_for_connection(druks_db, connection.id)
+    assert conversation.account_id == ben.id
+
+
+async def test_disconnect_refuses_an_open_number(druks_db, druks_client, helpdesk):
+    connection = await link(druks_db, await bot_account(druks_db))
+    identity = dict(connection.identity)
+
+    response = await druks_client.delete(f"/api/chat/connections/{connection.id}/phone")
+
+    assert response.status_code == 404
+    await druks_db.refresh(connection)
+    assert connection.identity == identity
+
+
+async def test_a_paired_number_ignores_strangers_and_its_own_phone(druks_db, monkeypatch):
+    connection = await link(
+        druks_db, await bot_account(druks_db), app="chat", access=BotAccess.PAIRED
+    )
+    operator = await Account.get_or_create(druks_db, "op@example.com")
+    code = await bot_service.open_admin_code(connection, operator.id)
+    save_media, delivery, take_over = AsyncMock(), AsyncMock(), AsyncMock()
+    monkeypatch.setattr(WahaEvents, "save_media", save_media)
+    monkeypatch.setattr(bot_service.DBOS, "start_workflow_async", delivery)
+    monkeypatch.setattr(bot_service, "take_over", take_over)
+
+    for sender, is_from_phone in ((ANA, False), (ANA, True), (NUMBER, True), ("900@lid", True)):
+        body = code if is_from_phone else "Hello"
+        event = message_event(sender, body, key=f"{sender}-{is_from_phone}", from_me=is_from_phone)
+        event["payload"].update(hasMedia=True, media={"url": "http://waha.test/media/one"})
+        await receive(connection, event)
+
+    assert not await Conversation.list_for_connection(druks_db, connection.id)
+    assert not connection.identity["operators"]
+    assert await bot_service.close_admin_code(connection, code) == operator.id
+    save_media.assert_not_awaited()
+    delivery.assert_not_awaited()
+    take_over.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "source, app",
+    [
+        (ConversationSource.WEB, "chat"),
+        (ConversationSource.WHATSAPP, ""),
+        (ConversationSource.WHATSAPP, "chat"),
+        (ConversationSource.WHATSAPP, "helpdesk"),
+    ],
+)
+@pytest.mark.parametrize("helpdesk", [BotAccess.PAIRED], indirect=True)
+async def test_operator_turns_use_the_apps_prompt_and_settings_without_a_timeout(
+    druks_db, monkeypatch, helpdesk, source, app
+):
+    operator = await Account.get_or_create(druks_db, "op@example.com")
+    if source == ConversationSource.WHATSAPP:
+        connection = await link(
+            druks_db,
+            await bot_account(druks_db) if app else operator,
+            app=app,
+            access=BotAccess.PAIRED,
+        )
+        conversation = await Conversation.get_or_create_for_user(
+            druks_db, connection, operator.id, **user(ANA)
+        )
+        await conversation.create_message(druks_db, "Read my runs")
+    else:
+        conversation = await Conversation.create(
+            druks_db, account_id=operator.id, body="Read my runs"
+        )
+        await druks_db.refresh(conversation, ["account"])
+    config = SimpleNamespace(
+        harness_class=ClaudeHarness, model_id="m", effort="low", fast_mode=False, timeout=30
+    )
+    get_config = AsyncMock(return_value=config)
+    render_prompt = AsyncMock(return_value="Operator prompt")
+    monkeypatch.setattr(service, "get_config", get_config)
+    monkeypatch.setattr(service, "render_prompt", render_prompt)
+    monkeypatch.setattr(
+        "druks.mcp.inbound.load_settings",
+        lambda: SimpleNamespace(urls=Urls(webhook_host="hooks.test", endpoint="")),
+    )
+    monkeypatch.setattr(service, "sandbox_client", SimpleNamespace(set_expiry=AsyncMock()))
+    request = AsyncMock(return_value={"status": "idle", "sessionId": "one"})
+    monkeypatch.setattr(Bridge, "request", request)
+    host = SimpleNamespace(id="operator-sandbox")
+    message = await conversation.get_unanswered_message(druks_db)
+
+    resolved_config, prompt, tools = await service.get_agent(druks_db, conversation)
+    await service.send_turn(
+        druks_db, conversation, message, Bridge(host), SimpleNamespace(), resolved_config, prompt
+    )
+
+    bot = helpdesk.bot if app == "helpdesk" else Chat.bot
+    get_config.assert_awaited_once_with(druks_db, bot.id, operator.id)
+    render_prompt.assert_awaited_once_with(bot.prompt, source=source)
+    assert tools == Toolkit.ALL
+    [start] = [call.kwargs for call in request.await_args_list if call.args[0] == "start"]
+    assert start["meta"]["claudeCode"]["options"]["systemPrompt"] == {
+        "type": "preset",
+        "preset": "claude_code",
+        "append": prompt,
+    }
+    [turn] = [call.kwargs for call in request.await_args_list if call.args[0] == "prompt"]
+    assert turn["timeout"] == 0
+
+
+async def test_an_operator_on_a_paired_number_keeps_normal_gate_access(druks_db):
+    connection = await link(
+        druks_db, await bot_account(druks_db), app="chat", access=BotAccess.PAIRED
+    )
+    operator = await Account.get_or_create(druks_db, "op@example.com")
+    conversation = await Conversation.get_or_create_for_user(
+        druks_db, connection, operator.id, **user(ANA)
+    )
+    run = await seed_run(
+        druks_db,
+        kind="test",
+        state="parked",
+        input_gate="review",
+        input_request={"presentation": "in_app", "controls": ["approve"], "questions": []},
+    )
+    run.conversation_id = conversation.id
+
+    assert not conversation.admin_account_id
+    for account_id in (operator.id, None):
+        answer = await validate_in_app_answer(
+            druks_db, run, account_id=account_id, control="approve", answers={}, note=""
+        )
+        assert answer["action"] == "approve"
+    assert not await bot_service.ask_admin(druks_db, run)
+    await druks_db.refresh(conversation, ["messages"])
+    assert not conversation.messages
 
 
 async def test_only_the_number_admin_answers_its_questions_or_resumes_its_chats(

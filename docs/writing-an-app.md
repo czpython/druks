@@ -519,14 +519,14 @@ The prompt or a subsequent explicit step owns those actions.
 ## Answer WhatsApp with a Bot
 
 A Bot answers the WhatsApp numbers that an operator links to your app. It is not
-an agent: it has no contract, and no workflow awaits it. Each person who writes
-gets their own [chat conversation](chat.md#whatsapp). The Bot acts only through
-the app routes that you tag `bot`.
+an agent: it has no contract, and no workflow awaits it. Each sender that its
+access permits gets their own [chat conversation](chat.md#whatsapp). With open
+access, the Bot acts only through the app routes that you tag `bot`.
 
 Declare the Bot as the `bot` attribute of the app class. An app has one Bot:
 
 ```python
-from druks.agents import Bot
+from druks.agents import Bot, BotAccess
 from druks.apps import App
 
 
@@ -535,18 +535,42 @@ class Helpdesk(App):
 
     bot = Bot(
         prompt="helpdesk/bot.md",
+        access=BotAccess.OPEN,
         user_tools=("get_ticket", "request_access"),
         admin_tools=("list_requests",),
     )
 ```
 
-- `prompt` names a template, like an agent's prompt. Druks renders it with no
-  context and gives it to the agent as its system prompt.
+- `prompt` names a template, like an agent's prompt. Druks renders it with
+  `source`, the conversation source (`web` or `whatsapp`), as template context.
+  The rendered text supplies the agent's system prompt.
+- `access` selects who can write to the number. `BotAccess.OPEN` is the default.
+  Anyone can write under the bot account. The number has one admin.
 - `user_tools` are the tools of each person who writes to the number.
 - `admin_tools` are the tools of the number's admin. The admin also gets
   Druks's admin prompt, `answer_gate`, and `chat_resume_conversation`.
 
-Each name is the `operation_id` of one of the app's routes tagged `bot`. Druks
+Chat declares paired access:
+
+```python
+from druks.agents import Bot, BotAccess
+
+bot = Bot(prompt="chat/bot.md", access=BotAccess.PAIRED)
+```
+
+`BotAccess.PAIRED` admits only senders that an operator connects with a code.
+The conversation belongs to that operator's account and uses the app's Bot
+prompt and settings, with the whole Druks toolkit. Druks ignores unpaired
+senders and messages from the number's phone. This number has no admin account,
+take-over, or pause.
+The Bot's `user_tools` and `admin_tools` do not apply to operator conversations.
+`prompt` stays required for every Bot. Druks appends the Bot's prompt to the
+Claude Code prompt for operator conversations. Web conversations and the
+own-number fallback use Chat's Bot. The agent greets a sender after pairing.
+An operator can disconnect their phones without changing other pairings.
+See [number setup and ownership](chat.md#link-a-number).
+
+For open access, each tool name is the `operation_id` of an app route tagged `bot`. Druks
 refuses to start when an app declares a Bot under another attribute name, or
 when a name matches no such route. The Bot's agent has no shell, file, or web
 tools.
@@ -559,8 +583,9 @@ agent. Tag a route with both `agent` and `bot` to put it in both.
 A bot tool takes the person who writes as `user: BotUser`:
 
 ```python
-from fastapi import APIRouter
-from pydantic import BaseModel
+from typing import Annotated
+
+from fastapi import APIRouter, Body
 
 from druks.agents import BotUser
 
@@ -569,14 +594,10 @@ from .workflows import GrantAccess
 router = APIRouter(prefix="/access")
 
 
-class AccessRequest(BaseModel):
-    system: str
-
-
 @router.post("", tags=["bot"], operation_id="request_access")
-async def request_access(body: AccessRequest, user: BotUser) -> str:
+async def request_access(system: Annotated[str, Body(embed=True)], user: BotUser) -> str:
     """Ask an admin to approve access to a system for the person writing."""
-    return await GrantAccess.dispatch(system=body.system, user_id=user.id)
+    return await GrantAccess.dispatch(system=system, user_id=user.id)
 ```
 
 | Field | Value |
@@ -591,7 +612,7 @@ never appears in the tool's input schema. A route that takes `BotUser` refuses a
 call from outside a conversation.
 
 A run that a bot tool starts remembers its conversation. Ask for approval with
-an in-app question, `self.review()`. Druks then asks the number's admin in the
+an in-app question, `self.review()`. With open access, Druks asks the number's admin in the
 admin's own chat, and only that admin can answer. When a run that waited ends,
 Druks tells the conversation the run's result or its failure, and the Bot tells
 the person. A cancelled run tells nothing.
@@ -602,8 +623,9 @@ cancel a request before you start a changed one.
 
 The Bot has a row in the app's **Settings → Agents** under the id
 `<app>.bot`. Its harness, model, billing, effort, and timeout resolve
-like an agent's. The timeout is the longest that one turn can run. `timeout=`
-on the Bot declares its default. The Bot runs on Claude, like Chat.
+like an agent's. For bot and bot admin accounts, the timeout limits each turn.
+`timeout=` on the Bot declares its default. Operator turns have no timeout.
+The Bot runs on Claude, like Chat.
 
 ## Customize the workspace
 
@@ -1799,7 +1821,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.apps` | `App`, `AppSettings`, `Choices`, `Secret` |
 | `druks.services` | `Service`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
 | `druks.secrets.fields` | `EncryptedJsonField`, `SecretsMapping` |
-| `druks.agents` | `Agent`, `AgentOutput`, `Bot`, `BotUser` |
+| `druks.agents` | `Agent`, `AgentOutput`, `Bot`, `BotAccess`, `BotUser` |
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox` |
 | `druks.workspaces` | `Workspace`, `RepoWorkspace` |

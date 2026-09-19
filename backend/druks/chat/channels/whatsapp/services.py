@@ -186,4 +186,7 @@ class Waha(Service):
         client = await cls.get_client(session, conversation.connection)
         reply.source_id = await client.new_message_id()
         await session.commit()
-        await client.send_text(conversation.user_id, reply.body, message_id=reply.source_id)
+        body = reply.body
+        if conversation.user_id == conversation.connection.identity["user_id"]:
+            body = f"[Druks] {body}"
+        await client.send_text(conversation.user_id, body, message_id=reply.source_id)

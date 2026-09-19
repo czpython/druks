@@ -18,7 +18,7 @@ from druks.durable.models import Run
 from druks.files.datastructures import File
 from druks.files.storage import get_file_storage
 from druks.harnesses.claude import ClaudeHarness
-from druks.harnesses.config import AgentConfig, get_config, get_default_config
+from druks.harnesses.config import AgentConfig, get_config
 from druks.locks import lock
 from druks.mcp.enums import AllowedTools, Toolkit
 from druks.mcp.helpers import get_bearer_token_env_var
@@ -65,13 +65,14 @@ async def get_agent(
     """How the conversation's agent runs: its settings, its system prompt, and the
     tools its key allows."""
     kind = conversation.account.kind
-    if kind == AccountKind.OPERATOR:
-        return await get_default_config(session, conversation.account_id), "", Toolkit.ALL
-    bot = get_app(conversation.connection.identity["app"]).bot
+    app = conversation.connection.identity.get("app", "chat") if conversation.connection else "chat"
+    bot = get_app(app).bot
     config = await get_config(session, bot.id, conversation.account_id)
+    if kind == AccountKind.OPERATOR:
+        return config, await render_prompt(bot.prompt, source=conversation.source), Toolkit.ALL
     if kind == AccountKind.BOT:
         tools = tuple(get_tool_name(name, [bot.app], {bot.app}) for name in bot.user_tools)
-        return config, await render_prompt(bot.prompt), tools
+        return config, await render_prompt(bot.prompt, source=conversation.source), tools
     tools = tuple(get_tool_name(name, [bot.app], {bot.app}) for name in bot.admin_tools)
     return config, await render_prompt(ADMIN_PROMPT), (*tools, *ADMIN_TOOLS)
 
@@ -209,9 +210,8 @@ async def send_turn(
     config: AgentConfig,
     prompt: str,
 ) -> Message | None:
-    """Start the conversation's agent and send it the turn: the message, or every
-    pending message of a conversation on a channel. Returns the message that names the
-    turn, or None when a Stop or a pause came first."""
+    """Start the agent and send the pending messages.
+    Return the turn's message, unless a Stop or pause came first."""
     host = bridge.host
     status = await bridge.request("status", conversationId=conversation.id)
     if status["status"] == "running":
@@ -228,18 +228,23 @@ async def send_turn(
     if conversation.connection:
         headers = [{"name": CONVERSATION_HEADER, "value": conversation.id}]
     meta = config.harness_class.get_acp_meta(config.model_id)
+    options = meta["claudeCode"]["options"]
     timeout = 0
-    if conversation.account.kind in (AccountKind.BOT, AccountKind.BOT_ADMIN):
-        # A Bot's agent works only through its tools: no shell, files, web, or settings files.
+    if conversation.account.kind == AccountKind.OPERATOR:
         options = {
-            **meta["claudeCode"]["options"],
+            **options,
+            "systemPrompt": {"type": "preset", "preset": "claude_code", "append": prompt},
+        }
+    else:
+        options = {
+            **options,
             "systemPrompt": prompt,
             "tools": [],
             "settingSources": [],
             "strictMcpConfig": True,
         }
-        meta = {**meta, "claudeCode": {**meta["claudeCode"], "options": options}}
         timeout = config.timeout
+    meta = {**meta, "claudeCode": {**meta["claudeCode"], "options": options}}
     await bridge.request(
         "start",
         conversationId=conversation.id,
