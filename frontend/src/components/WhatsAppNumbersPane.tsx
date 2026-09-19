@@ -50,13 +50,13 @@ export function WhatsAppNumbersPane({ app }: { app?: Pick<AppSettings, 'name' | 
   })
   if (openCodes.length < adminCodes.length) setAdminCodes(openCodes)
   const newest = query.data?.at(-1)
-  // An operator links one number at a time, so their block shows only the live one. A number
-  // that WhatsApp refused stays in view, so the operator learns why.
+  // A removed number stays in view only while it has something to say: the newest one says
+  // why Druks refused it, and an app's removed number says which number it held.
   const numbers = (query.data ?? []).filter(
     (number) =>
-      app ||
       !number.revokedAt ||
-      (number === newest && number.revokedReason in REFUSALS),
+      (number === newest && number.revokedReason in REFUSALS) ||
+      (app && number.number),
   )
 
   async function changeNumbers(action: () => Promise<unknown>) {

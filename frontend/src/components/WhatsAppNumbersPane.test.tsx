@@ -121,6 +121,16 @@ describe('WhatsAppNumbersPane', () => {
     )).toBe(true)
   })
 
+  it('hides a removed number that never linked', async () => {
+    const removed = { ...waiting, revokedAt: '2026-09-19T10:00:00Z', revokedReason: 'user' }
+    const held = { ...removed, id: 'number-2', number: '+41000000000' }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([removed, held]))))
+    renderPane('helpdesk')
+
+    expect(await screen.findByText('+41000000000')).toBeTruthy()
+    expect(screen.queryByText('Not linked')).toBeNull()
+  })
+
   it('links the own-number fallback without an app', async () => {
     const fetchMock = vi.fn(async (_url: string, request?: RequestInit) =>
       new Response(JSON.stringify(request?.method === 'POST' ? waiting : [])),
