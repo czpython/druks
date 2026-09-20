@@ -112,6 +112,7 @@ async function main() {
       channel,
       proxy: proxyOption,
       args: [
+        "--restore-last-session",
         "--remote-debugging-address=127.0.0.1",
         "--remote-debugging-port=9222",
         "--window-size=1920,1080",
