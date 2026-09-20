@@ -901,7 +901,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
   const createGithubApp = (
     <button
       className="set-btn primary"
-      onClick={() => window.open('/api/core/github/manifest')}
+      onClick={() => window.open('/api/core/services/github/manifest')}
       disabled={busy}
     >
       Create GitHub App

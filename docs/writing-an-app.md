@@ -1157,6 +1157,9 @@ platform stores them after an operator connection.
 
 See [Connect provider accounts](#connect-provider-accounts-oauth).
 
+An app serves a service's endpoints under `/api/<app>/services/<slug>/...`, where
+the app mounts those routers like every other route.
+
 Put a credential that only your app uses in its app settings.
 
 Declare one class in `services.py`. The platform creates the connection card in
