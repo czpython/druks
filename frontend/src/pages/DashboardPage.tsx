@@ -84,7 +84,7 @@ export function DashboardPage({ apps }: { apps: string[] }) {
             {(primary === 'failed' || primary === 'running') && (
               <li className="dashboard-status-row dashboard-status-empty">
                 <span className="dashboard-status-dot" aria-hidden="true" />
-                <div><strong>No current requests</strong></div>
+                <div><strong>No pending approvals</strong></div>
               </li>
             )}
           </ul>
