@@ -186,7 +186,7 @@ class BrowserSession:
             [
                 "sh",
                 "-c",
-                f"nohup setsid session-launch {mode} --drive "
+                f"nohup setsid session-launch {mode} "
                 f">{SESSION_ROOT}/launch.log 2>&1 </dev/null & "
                 'launcher=$!; attempt=0; while [ "$attempt" -lt 300 ]; do '
                 f"if [ -f {SESSION_ROOT}/.runtime/ready.json ]; then exit 0; fi; "
