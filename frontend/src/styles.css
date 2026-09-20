@@ -1635,6 +1635,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .ins-needs-k { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bucket-human); margin-bottom: 6px; display: flex; align-items: center; gap: 7px; }
 .ins-needs-body { font-size: 13px; line-height: 1.55; color: var(--text-mid); max-width: 76ch; text-wrap: pretty; }
 
+.review-prompt { font-size: 13px; line-height: 1.55; color: var(--text-mid); max-width: 76ch; text-wrap: pretty; margin-bottom: 10px; }
 .review-artifact { margin: 4px 0 14px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); padding: 12px 14px; }
 .review-artifact-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
 .review-question { border: none; margin: 0 0 12px; padding: 0; }

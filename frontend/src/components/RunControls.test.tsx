@@ -91,6 +91,19 @@ describe('InAppReview', () => {
     expect(requestChanges.disabled).toBe(false)
   })
 
+  it('shows the app-declared label with its controls', () => {
+    stubFetch()
+    renderReview({
+      presentation: 'in_app',
+      label: 'Keep this quote?',
+      controls: ['keep', 'skip'],
+    })
+
+    expect(screen.getByText('Keep this quote?')).toBeTruthy()
+    expect(screen.getByText('keep')).toBeTruthy()
+    expect(screen.getByText('skip')).toBeTruthy()
+  })
+
   it('explains what a note does', () => {
     stubFetch()
     renderReview({ presentation: 'in_app', controls: ['approve'], questions: [] })

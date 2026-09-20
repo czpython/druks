@@ -149,6 +149,7 @@ export function InAppReview({
 
   return (
     <div className="ins-needs">
+      {ask.label && <div className="review-prompt">{ask.label}</div>}
       {ask.artifact_id &&
         !artifact &&
         (artifactFailed ? (
