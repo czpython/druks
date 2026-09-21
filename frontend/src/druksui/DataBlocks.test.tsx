@@ -364,6 +364,7 @@ describe('Table', () => {
 
     const heading = screen.getByRole('heading', { name: 'Peers' })
     expect(heading.tagName).toBe('H3')
+    expect(heading.closest('.dui-table-head')).toBeTruthy()
     expect(heading.compareDocumentPosition(screen.getByRole('table', { name: 'Peers' }))).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     )
