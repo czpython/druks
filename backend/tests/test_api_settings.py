@@ -209,6 +209,11 @@ def _software_factory_app(client: TestClient) -> dict:
     return next(app for app in body["apps"] if app["name"] == "software_factory")
 
 
+def _chat_app(client: TestClient) -> dict:
+    body = client.get("/api/settings/apps").json()
+    return next(app for app in body["apps"] if app["name"] == "chat")
+
+
 def _software_factory_settings_fields(client: TestClient) -> dict:
     return {field["name"]: field for field in _software_factory_app(client)["settings"]}
 
@@ -491,6 +496,50 @@ def test_apps_override_agent_model_persists(tmp_path: Path):
 
     assert agents["software_factory.implement"]["model"] == "openai/gpt-5.5"
     assert agents["software_factory.implement"]["source"] == "agent"
+
+
+def test_apps_accept_a_bot_id_across_the_override_maps(tmp_path: Path):
+    with settings_client(tmp_path) as client:
+        response = client.patch(
+            "/api/settings/apps",
+            json={
+                "agentHarnesses": {"chat.bot": "codex"},
+                "agentModels": {"chat.bot": "openai/gpt-5.5"},
+                "agentBillings": {"chat.bot": "api_key"},
+            },
+        )
+        assert response.status_code == 200
+        agents = {agent["name"]: agent for agent in _chat_app(client)["agents"]}
+
+    bot = agents["chat.bot"]
+    assert (bot["harness"], bot["model"], bot["billing"]) == ("codex", "openai/gpt-5.5", "api_key")
+    assert (bot["harnessSource"], bot["source"], bot["billingSource"]) == (
+        "agent",
+        "agent",
+        "agent",
+    )
+
+
+async def test_apps_reject_a_name_in_neither_registry_without_storing_it(tmp_path: Path):
+    with settings_client(tmp_path) as client:
+        response = client.patch(
+            "/api/settings/apps",
+            json={
+                "agentHarnesses": {"chat.ghost": "codex"},
+                "agentModels": {"chat.ghost": "openai/gpt-5.5"},
+                "agentBillings": {"chat.ghost": "api_key"},
+            },
+        )
+        stored = (
+            await db_session().execute(
+                text("SELECT 1 FROM settings_overrides WHERE key LIKE :key"),
+                {"key": "agent_%:chat.ghost"},
+            )
+        ).one_or_none()
+
+    assert response.status_code == 422
+    assert "chat.ghost" in response.json()["detail"]
+    assert not stored
 
 
 def test_apps_default_effort_and_per_agent_effort_override(tmp_path: Path):

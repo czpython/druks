@@ -160,7 +160,7 @@ async def update_app_settings(
     # A cell set alone must still fit the two it inherits, so the check reads
     # the stored triple; a rejection rolls the writes back.
     for name in {*body.agent_harnesses, *body.agent_models, *body.agent_billings}:
-        if name not in agents:
+        if name not in agents and name not in bots:
             raise HTTPException(status_code=422, detail=f"Unknown agent {name!r}")
     if body.agent_harnesses or body.agent_models or body.agent_billings:
         installation = await InstallationSettings.get_or_create(session)
