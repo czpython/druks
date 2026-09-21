@@ -902,11 +902,10 @@ An action cannot set both `fields` and `confirm`. When a page function builds
 this action, Druks refuses it. Each option asks the operator before the action
 runs.
 
-After a successful send, the shell navigates when this action sets `link`, or
-when the operation answers `{"url": "https://..."}` — a top-level string,
-absolute `http` or `https` only, and the only field of the answer. A returned
-row that has a `url` column is not a hand-off. `refresh` applies only when
-neither navigates.
+After a send, the shell navigates when the action sets `link`, or when the
+operation answers exactly `{"url": "https://..."}`. The URL must be absolute
+`http` or `https`. An answer with any other field is not a hand-off. `refresh`
+applies only when neither navigates.
 
 ### Form
 
@@ -936,8 +935,7 @@ Use a `Form` when the page exists to collect the values. Use an `Action` with
 A form keeps all its fields on the form. When a form action also has fields,
 Druks refuses the form when the page function builds it.
 
-`extra_actions` are more submit buttons on the same fields. Use them when the
-page exists to collect one value and then choose what to do with it.
+`extra_actions` are more buttons that send the same fields.
 
 ```json
 {
@@ -1293,11 +1291,9 @@ status, the reason behind a verdict. The shell keeps it folded and the reader
 opens it, so twenty rows that stopped for one reason do not cost twenty page
 loads to find that out. It is text, not blocks.
 
-`select` and `actions` turn the table into a multi-select. `select` names the
-argument the selected `key`s fill — a list of strings. `actions` are what run
-on that list. They cannot collect fields: the selected rows are the submit. Two
-rows cannot share a key. The page cannot put a row without a key on a
-selectable table.
+`select` names the argument that takes the selected row keys, as a list of
+strings. `actions` run on that list, and they cannot collect fields. Set both
+or neither. On a table with `select`, each row needs its own `key`.
 
 ### List
 
@@ -1407,7 +1403,7 @@ class StatusValue:
 
 The app writes the word. The tone selects the presentation. The contract has
 no type named `Status`. `active` reads as work in flight, so a settled fact
-takes another tone. `link` is how a fact or a cell reaches the thing it names.
+takes another tone. `link` reaches the thing it names.
 
 ### TimeValue
 
@@ -1451,11 +1447,9 @@ class ControlsValue:
 }
 ```
 
-Actions and links, in the same cell as a value. The shell draws them the way
-it draws a card's controls. `check_placement` runs when the page function
-builds the `Page`, so `refresh="region"` still needs a named Section.
-`check_operation` runs on each page read, so an unknown operation still fails
-the page.
+Actions and links in a cell, a fact, or a list item. Druks checks them like
+any other control: `refresh="region"` needs a named Section, and an unknown
+operation fails the page.
 
 ## Fields
 

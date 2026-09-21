@@ -298,6 +298,9 @@ describe('every V1 renderer', () => {
           arguments: {},
           fields: [],
         },
+        extraActions: [],
+        submit: 'button',
+        layout: 'stack',
       },
     ])
 

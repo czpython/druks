@@ -259,8 +259,7 @@ export const api = {
   getGate: (run: string) => getJSON<Gate>(`/api/gates/${run}`),
   // An action's own call. The shell fills the path from the payload and sends
   // what is left as the body; the platform route keeps the identity gate. An
-  // operation that returns no content is a success like any other. A JSON
-  // ``{url}`` that is http(s) is a hand-off: the shell navigates there.
+  // operation that returns no content is a success like any other.
   callOperation: (method: string, path: string, body: unknown) =>
     sendOperation(method, path, body),
   // An UploadField's file, stored under the app whose page holds the form. The

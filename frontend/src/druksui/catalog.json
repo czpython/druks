@@ -18,7 +18,8 @@
       "block": "callout",
       "tone": "warning",
       "title": "Callout",
-      "text": "Something to notice."
+      "text": "Something to notice.",
+      "controls": []
     },
     {
       "block": "divider"
@@ -59,7 +60,8 @@
           "status": {
             "value": "status",
             "label": "running",
-            "tone": "active"
+            "tone": "active",
+            "link": null
           }
         }
       ]
@@ -82,7 +84,8 @@
           "status": {
             "value": "status",
             "label": "running",
-            "tone": "active"
+            "tone": "active",
+            "link": null
           }
         }
       ]
@@ -173,7 +176,8 @@
           "value": {
             "value": "status",
             "label": "running",
-            "tone": "active"
+            "tone": "active",
+            "link": null
           }
         },
         {
@@ -489,7 +493,10 @@
         "confirm": "",
         "refresh": "page",
         "link": null
-      }
+      },
+      "extraActions": [],
+      "submit": "button",
+      "layout": "stack"
     },
     {
       "block": "action",

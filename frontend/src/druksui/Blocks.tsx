@@ -105,9 +105,9 @@ function BlockContent({ block }: { block: Block }) {
           description={block.description}
           fields={block.fields}
           action={block.action}
-          extraActions={block.extraActions ?? []}
-          submit={block.submit ?? 'button'}
-          layout={block.layout ?? 'stack'}
+          extraActions={block.extraActions}
+          submit={block.submit}
+          layout={block.layout}
         />
       )
     case 'gate_controls':
@@ -154,8 +154,8 @@ function BlockContent({ block }: { block: Block }) {
           columns={block.columns}
           rows={block.rows}
           emptyText={block.emptyText}
-          select={block.select ?? ''}
-          actions={block.actions ?? []}
+          select={block.select}
+          actions={block.actions}
         />
       )
     case 'list':
@@ -183,7 +183,7 @@ function BlockContent({ block }: { block: Block }) {
         <div className={`dui-callout dui-callout-${block.tone}`} role="note">
           {block.title && <div className="dui-callout-title">{block.title}</div>}
           <div className="dui-callout-text">{block.text}</div>
-          <Controls controls={block.controls ?? []} />
+          <Controls controls={block.controls} />
         </div>
       )
     case 'empty_state':

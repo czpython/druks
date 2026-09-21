@@ -284,15 +284,15 @@ export function Table({
   columns,
   rows,
   emptyText,
-  select = '',
-  actions = [],
+  select,
+  actions,
 }: {
   title: string
   columns: TableColumn[]
   rows: TableRow[]
   emptyText: string
-  select?: string
-  actions?: Action[]
+  select: string
+  actions: Action[]
 }) {
   const titleId = useId()
   const selectable = Boolean(select)

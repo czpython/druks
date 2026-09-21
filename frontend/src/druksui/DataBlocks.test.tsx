@@ -43,7 +43,7 @@ function renderBlocks(blocks: Block[], operations: Operation[] = []) {
 
 const TEXT: Value = { value: 'text', text: 'peer-7', description: '', link: null }
 const NUMBER: Value = { value: 'number', number: 1234, unit: 'ms', tone: 'neutral' }
-const STATUS: Value = { value: 'status', label: 'parked', tone: 'warning' }
+const STATUS: Value = { value: 'status', label: 'parked', tone: 'warning', link: null }
 const TIME: Value = { value: 'time', when: '2026-08-29T09:14:02Z' }
 
 describe('values', () => {
@@ -63,6 +63,8 @@ describe('values', () => {
         columns: cells.map((_value, index) => ({ label: `c${index}`, align: 'start' as const })),
         rows: [{ cells, detail: '', key: '' }],
         emptyText: '',
+        select: '',
+        actions: [],
       },
     ])
 
@@ -99,6 +101,8 @@ describe('values', () => {
           },
         ],
         emptyText: '',
+        select: '',
+        actions: [],
       },
     ])
 
@@ -166,6 +170,8 @@ describe('values', () => {
             },
           ],
           emptyText: '',
+          select: '',
+          actions: [],
         },
       ],
       [{ id: 'write_note', method: 'POST', path: '/api/field_notes/notes' }],
@@ -331,6 +337,8 @@ describe('Table', () => {
         columns: [{ label: 'Peer', align: 'start' }],
         rows: [],
         emptyText: 'No peers yet.',
+        select: '',
+        actions: [],
       },
     ])
 
@@ -346,6 +354,8 @@ describe('Table', () => {
         columns: [{ label: 'Peer', align: 'start' }],
         rows: [],
         emptyText: '',
+        select: '',
+        actions: [],
       },
     ])
 
@@ -361,6 +371,8 @@ describe('Table', () => {
         columns: [{ label: 'Peer', align: 'start' }],
         rows: [{ cells: [TEXT], detail: '', key: '' }],
         emptyText: '',
+        select: '',
+        actions: [],
       },
     ])
 
@@ -383,6 +395,8 @@ describe('Table', () => {
         ],
         rows: [{ cells: [TEXT, NUMBER], detail: '', key: '' }],
         emptyText: '',
+        select: '',
+        actions: [],
       },
     ])
 
@@ -409,6 +423,8 @@ describe('Table', () => {
           },
         ],
         emptyText: '',
+        select: '',
+        actions: [],
       },
     ])
 

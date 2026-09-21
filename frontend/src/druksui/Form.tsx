@@ -20,17 +20,17 @@ export function Form({
   description,
   fields,
   action,
-  extraActions = [],
-  submit = 'button',
-  layout = 'stack',
+  extraActions,
+  submit,
+  layout,
 }: {
   title: string
   description: string
   fields: Field[]
   action: Action
-  extraActions?: Action[]
-  submit?: 'button' | 'change'
-  layout?: 'stack' | 'prose' | 'row'
+  extraActions: Action[]
+  submit: 'button' | 'change'
+  layout: 'stack' | 'prose' | 'row'
 }) {
   const fieldState = useFieldState(fields)
   const live = submit === 'change'
@@ -477,8 +477,8 @@ export function useAction(fields: Field[] = [], clear?: () => void) {
     return { payload, failures }
   }
 
-  // An answer of exactly {url}, absolute http(s), is a hand-off. A returned
-  // row that has a url column carries other keys, so it is not one.
+  // A returned row can have a url column, so only an answer of exactly {url}
+  // hands off.
   async function finish(next: Action, result?: unknown) {
     const outbound = handedOffUrl(result)
     if (outbound) {

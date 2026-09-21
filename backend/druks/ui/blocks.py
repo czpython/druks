@@ -127,11 +127,9 @@ class Action(PageBlock):
     route's ``operation_id``; the shell resolves it to a method and a URL, so
     the author writes no URL.
 
-    After a successful send, the shell navigates when this action sets
-    ``link``, or when the operation answers ``{"url": "https://..."}`` — a
-    top-level string, absolute ``http`` or ``https`` only, and the only field
-    of the answer. A returned row that has a ``url`` column is not a hand-off.
-    ``refresh`` applies only when neither navigates."""
+    After a send, the shell navigates when the action sets ``link``, or when
+    the operation answers exactly ``{"url": ...}`` with an absolute http(s)
+    URL. ``refresh`` applies only when neither navigates."""
 
     block: Literal["action"] = "action"
     label: str
@@ -273,7 +271,7 @@ class Quote(PageBlock):
 class Callout(PageBlock):
     """A short message the reader should not miss. The tone selects the
     presentation; the app writes the words. ``controls`` are the next step
-    the message points at, the same slot EmptyState uses."""
+    the message points at."""
 
     block: Literal["callout"] = "callout"
     tone: Literal["info", "success", "warning", "danger"] = "info"
@@ -337,9 +335,8 @@ class GateControls(PageBlock):
         )
 
 
-class Datum(Schema):
-    """What every value shares. ``iter_actions`` and ``check_placement`` are
-    no-ops unless a value holds controls."""
+class PageValue(Schema):
+    """What every value shares."""
 
     def iter_actions(self) -> Iterable[Action]:
         return ()
@@ -348,7 +345,7 @@ class Datum(Schema):
         """Raise when this value cannot sit where the page put it."""
 
 
-class TextValue(Datum):
+class TextValue(PageValue):
     """Words. ``link`` is how a table cell, a fact, or a list item reaches
     another page."""
 
@@ -361,7 +358,7 @@ class TextValue(Datum):
     link: Link | None = None
 
 
-class NumberValue(Datum):
+class NumberValue(PageValue):
     value: Literal["number"] = "number"
     number: float = Field(allow_inf_nan=False)
     unit: str = ""
@@ -371,9 +368,9 @@ class NumberValue(Datum):
         super().__init__(number=number, **data)
 
 
-class StatusValue(Datum):
+class StatusValue(PageValue):
     """Where something stands. The app writes the word; the tone selects the
-    presentation. ``link`` is how a fact or a cell reaches the thing it names."""
+    presentation. ``link`` reaches the thing it names."""
 
     value: Literal["status"] = "status"
     label: str
@@ -384,7 +381,7 @@ class StatusValue(Datum):
         super().__init__(label=label, **data)
 
 
-class TimeValue(Datum):
+class TimeValue(PageValue):
     value: Literal["time"] = "time"
     when: AwareDatetime
 
@@ -392,9 +389,8 @@ class TimeValue(Datum):
         super().__init__(when=when, **data)
 
 
-class ControlsValue(Datum):
-    """Actions and links in a cell, a fact, or a list item. The shell draws
-    them the way it draws a card's controls."""
+class ControlsValue(PageValue):
+    """Actions and links in a cell, a fact, or a list item."""
 
     def __init__(self, controls=(), **data):
         super().__init__(controls=controls, **data)
@@ -665,8 +661,7 @@ class Table(PageBlock):
             )
         if not self.select:
             return self
-        missing = sum(1 for row in self.rows if not row.key)
-        if missing:
+        if not all(row.key for row in self.rows):
             raise ValueError(
                 f"table {self.title!r} can select rows, and a row has no key. Give each row a key."
             )
@@ -682,7 +677,7 @@ class Table(PageBlock):
             if action.fields:
                 raise ValueError(
                     f"table {self.title!r} action {action.label!r} collects fields. "
-                    "The selected rows are the submit."
+                    "A table action sends only the selected keys. Remove its fields."
                 )
             if self.select in action.arguments:
                 raise ValueError(

@@ -20,8 +20,8 @@ function renderBlocks(blocks: Block[]) {
   )
 }
 
-const ACTIVE = { value: 'status', label: 'active', tone: 'active' } as const
-const DONE = { value: 'status', label: 'done', tone: 'success' } as const
+const ACTIVE = { value: 'status', label: 'active', tone: 'active', link: null } as const
+const DONE = { value: 'status', label: 'done', tone: 'success', link: null } as const
 
 describe('Timeline', () => {
   it('shows the items in the order Druks ordered them', () => {

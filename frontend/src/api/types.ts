@@ -254,7 +254,7 @@ export interface StatusValue {
   value: 'status'
   label: string
   tone: 'neutral' | 'active' | 'success' | 'warning' | 'danger'
-  link?: Link | null
+  link: Link | null
 }
 
 export interface TimelineItem {
@@ -456,8 +456,8 @@ export type Block =
       columns: TableColumn[]
       rows: TableRow[]
       emptyText: string
-      select?: string
-      actions?: Action[]
+      select: string
+      actions: Action[]
     }
   | { block: 'list'; title: string; items: Value[] }
   | { block: 'stack'; gap: 'small' | 'medium' | 'large'; blocks: Block[] }
@@ -469,9 +469,9 @@ export type Block =
       description: string
       fields: Field[]
       action: Action
-      extraActions?: Action[]
-      submit?: 'button' | 'change'
-      layout?: 'stack' | 'prose' | 'row'
+      extraActions: Action[]
+      submit: 'button' | 'change'
+      layout: 'stack' | 'prose' | 'row'
     }
   | CardBlock
   | {

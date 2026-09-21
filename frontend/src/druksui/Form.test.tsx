@@ -136,6 +136,9 @@ function form(
     description: 'What did you see?',
     fields,
     action: sends,
+    extraActions: [],
+    submit: 'button',
+    layout: 'stack',
     ...extras,
   }
 }
