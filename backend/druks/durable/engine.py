@@ -4,7 +4,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from dbos import DBOS, DBOSConfig, Queue
+from dbos import DBOS, DBOSConfig
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.database import create_async_engine_from_url, session_scope
@@ -19,9 +19,16 @@ if TYPE_CHECKING:
 
 # Workflows enqueue here; execution distributes across whichever processes
 # launched DBOS. One queue until a unit earns its own policy.
-run_queue = Queue("druks")
+RUN_QUEUE = "druks"
+TASK_QUEUE = "druks_tasks"
+# A pause holds a chat for hours, so it has its own queue, apart from runs.
+PAUSE_QUEUE = "druks_chat_pauses"
+# Delivery retries on its own schedule, fully decoupled from run lifecycles.
+NOTIFICATIONS_QUEUE = "druks_notifications"
+_QUEUES = (RUN_QUEUE, TASK_QUEUE, PAUSE_QUEUE, NOTIFICATIONS_QUEUE)
 
 _scheduled: list[tuple["type[Workflow]", Callable]] = []
+_task_schedules: list[tuple[str, str, Callable]] = []
 
 _initialized = False
 _engine = None
@@ -38,12 +45,11 @@ def init_dbos() -> None:
     if _initialized:
         return
     settings = load_settings()
-    # Both urls point at the app database: DBOS self-migrates its bookkeeping
-    # into the dbos schema there, so derived Run.state is a same-DB read.
+    # System URL is the app database: DBOS self-migrates its bookkeeping into
+    # the dbos schema there, so derived Run.state is a same-DB read.
     url = _dbos_database_url(settings.database_url)
     config: DBOSConfig = {
         "name": "druks",
-        "application_database_url": url,
         "system_database_url": url,
         "dbos_system_schema": DBOS_SYSTEM_SCHEMA,
         "log_level": settings.log_level,
@@ -69,8 +75,14 @@ def register_schedule(
     _scheduled.append((workflow, scheduled_workflow))
 
 
+def register_task_schedule(name: str, cron: str, entry: Callable) -> None:
+    _task_schedules.append((name, cron, entry))
+
+
 async def apply_schedules(session: AsyncSession) -> None:
-    declared = {workflow.kind for workflow, _ in _scheduled}
+    declared = {workflow.kind for workflow, _ in _scheduled} | {
+        name for name, _, _ in _task_schedules
+    }
     existing = {row["schedule_name"]: row for row in await DBOS.list_schedules_async()}
     for name in existing.keys() - declared:
         await DBOS.delete_schedule_async(name)
@@ -101,6 +113,19 @@ async def apply_schedules(session: AsyncSession) -> None:
             await asyncio.to_thread(DBOS.resume_schedule, workflow.kind)
         elif not current:
             await asyncio.to_thread(DBOS.pause_schedule, workflow.kind)
+    for name, cron, entry in _task_schedules:
+        current = existing.get(name)
+        if not current or current["schedule"] != cron or current["cron_timezone"] != timezone:
+            await DBOS.apply_schedules_async(
+                [
+                    {
+                        "schedule_name": name,
+                        "workflow_fn": entry,
+                        "schedule": cron,
+                        "cron_timezone": timezone,
+                    }
+                ]
+            )
 
 
 async def trigger_schedule(kind: str) -> str:
@@ -115,8 +140,11 @@ async def trigger_schedule(kind: str) -> str:
 
 async def launch() -> None:
     # Called with the serving loop running, so DBOS captures it as the main
-    # loop and async steps share it.
+    # loop and async steps share it. Queues persist in the system database and
+    # must be registered after launch.
     DBOS.launch()
+    for name in _QUEUES:
+        await DBOS.register_queue_async(name)
     async with session_scope(_step_engine()) as session:
         # Commit the singleton before concurrent settings requests can create it.
         await InstallationSettings.get_or_create(session)

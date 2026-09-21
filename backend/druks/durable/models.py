@@ -23,7 +23,7 @@ from druks.durable.dbos_state import (
     updated_at_expression,
     workflow_status,
 )
-from druks.durable.engine import _step_engine, run_queue
+from druks.durable.engine import RUN_QUEUE, _step_engine
 from druks.durable.enums import (
     ACTIVE_STATES,
     OPEN_STATES,
@@ -447,7 +447,7 @@ class Run(Base):
         handle = await DBOS.fork_workflow_async(
             self.id,
             start_step,
-            queue_name=run_queue.name,
+            queue_name=RUN_QUEUE,
         )
         workflow_id = handle.workflow_id
         await Run.create_row(

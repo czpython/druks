@@ -9,13 +9,13 @@ from druks.accounts.models import Account
 from druks.apps.registry import workflows
 from druks.database import configure_session, get_session
 from druks.db import db_session
-from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
+from druks.durable.engine import NOTIFICATIONS_QUEUE, configure_engine, init_dbos, launch, shutdown
 from druks.durable.enums import RunState
 from druks.models import StoredSubject
 from druks.notifications import outbox
 from druks.notifications.exceptions import DeliveryError, NotificationError
 from druks.notifications.models import Destination, Notification
-from druks.notifications.outbox import notifications_queue, send_notification
+from druks.notifications.outbox import send_notification
 from druks.notifications.services import respond_to_notification
 from druks.testing import configure_app_for_test, init_db, make_settings
 from druks.workflows import Gate, OperatorReply, Run, Workflow
@@ -257,7 +257,7 @@ async def _deliver(rt, *, to, subject=None, reason="r", body="b", actions=None):
         return notification.id
 
     notification_id = await _seed(rt, create)
-    await notifications_queue.enqueue_async(send_notification, notification_id)
+    await DBOS.enqueue_workflow_async(NOTIFICATIONS_QUEUE, send_notification, notification_id)
     return notification_id
 
 
@@ -365,7 +365,9 @@ async def test_rerun_on_delivered_notification_skips_the_send(rt, deliver_spy):
     await _wait_for(rt, notification_id, lambda s: s["state"] == "delivered")
     assert len(deliver_spy.calls) == 1
 
-    handle = await notifications_queue.enqueue_async(send_notification, notification_id)
+    handle = await DBOS.enqueue_workflow_async(
+        NOTIFICATIONS_QUEUE, send_notification, notification_id
+    )
     await handle.get_result()
 
     assert len(deliver_spy.calls) == 1
@@ -388,7 +390,9 @@ async def test_create_seam_plus_direct_enqueue_delivers(rt, deliver_spy):
     assert (await _snapshot(rt, notification.id))["state"] == "pending"
     assert deliver_spy.calls == []
 
-    handle = await notifications_queue.enqueue_async(send_notification, notification.id)
+    handle = await DBOS.enqueue_workflow_async(
+        NOTIFICATIONS_QUEUE, send_notification, notification.id
+    )
     await handle.get_result()
 
     assert (await _snapshot(rt, notification.id))["state"] == "delivered"
