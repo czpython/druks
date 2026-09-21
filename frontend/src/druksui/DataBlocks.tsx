@@ -313,13 +313,32 @@ export function Table({
     allBox.current.indeterminate = chosen.length > 0 && chosen.length < keys.length
   }, [chosen.length, keys.length])
 
+  const head =
+    title || selectable ? (
+      <div className="dui-table-head">
+        {heading}
+        {selectable && (
+          <div className="dui-links">
+            {actions.map((action, index) => (
+              <ActionButton
+                key={index}
+                action={action}
+                values={{ [select]: chosen }}
+                disabled={chosen.length === 0}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    ) : null
+
   if (rows.length === 0) {
     // Nothing to show and nothing to say about it: a heading over an empty box
     // is worse than no block at all.
     if (!emptyText) return null
     return (
       <div className="dui-table-block">
-        {heading}
+        {title ? <div className="dui-table-head">{heading}</div> : null}
         <div className="dui-table-empty dim">{emptyText}</div>
       </div>
     )
@@ -334,21 +353,7 @@ export function Table({
 
   return (
     <div className="dui-table-block">
-      {heading}
-      {selectable && (
-        <div className="dui-table-head">
-          <div className="dui-links">
-            {actions.map((action, index) => (
-              <ActionButton
-                key={index}
-                action={action}
-                values={{ [select]: chosen }}
-                disabled={chosen.length === 0}
-              />
-            ))}
-          </div>
-        </div>
-      )}
+      {head}
       <div className="dui-table-scroll">
         <table className="dui-table" aria-labelledby={title ? titleId : undefined}>
           <thead>
@@ -421,7 +426,10 @@ function Row({
               className="dui-checkbox"
               type="checkbox"
               checked={selected}
-              onChange={(event) => onSelect(row.key, event.target.checked)}
+              onChange={(event) => {
+                if (!row.key) return
+                onSelect(row.key, event.target.checked)
+              }}
               aria-label={`Select ${rowName(row)}`}
             />
           </td>
