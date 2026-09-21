@@ -438,6 +438,8 @@ function RunSegment({
   const metrics = runMetrics(run)
   const selectRun = () => onSelect(run.id)
   const runSelected = selection?.run.id === run.id && selection.call == null
+  // A stale call must not hide a failed or cancelled run's status.
+  const callSpeaking = isRunning(run) && run.agentCalls.some((call) => call.status === 'running')
   return (
     <>
       {retry > 0 && (
@@ -467,16 +469,18 @@ function RunSegment({
           onSelect={() => onSelect(call.id)}
         />
       ))}
-      <div
-        role="button"
-        tabIndex={0}
-        aria-label={`Select run ${run.id}`}
-        className="wic-call wic-status"
-        onClick={selectRun}
-        onKeyDown={selectOnKey(selectRun)}
-      >
-        <RunStatus run={run} phase={phase} collapsed={false} />
-      </div>
+      {!callSpeaking && (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label={`Select run ${run.id}`}
+          className="wic-call wic-status"
+          onClick={selectRun}
+          onKeyDown={selectOnKey(selectRun)}
+        >
+          <RunStatus run={run} phase={phase} collapsed={false} />
+        </div>
+      )}
     </>
   )
 }

@@ -150,6 +150,29 @@ describe('a declared page', () => {
     expect(screen.getByText('a jotted observation')).toBeTruthy()
   })
 
+  it('draws a page control link as a button', async () => {
+    const { container } = renderAt('/field_notes', 'notes', {
+      ...NOTES,
+      controls: [
+        {
+          block: 'link',
+          label: 'Open composer',
+          page: '',
+          arguments: {},
+          url: 'https://example.com/compose',
+          subject: null,
+        },
+      ],
+    })
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Open composer (opens in a new tab)' })).toBeTruthy(),
+    )
+    const control = container.querySelector('.dui-page-head a.dui-action')
+    expect(control?.textContent).toBe('Open composer')
+    expect(control?.getAttribute('href')).toBe('https://example.com/compose')
+  })
+
   it('reads a detail page at its own location', async () => {
     renderAt('/field_notes/notes/7', 'note', {
       title: 'Note 7',

@@ -264,6 +264,7 @@ export interface StatusValue {
   value: 'status'
   label: string
   tone: 'neutral' | 'active' | 'success' | 'warning' | 'danger'
+  link: Link | null
 }
 
 export interface TimelineItem {
@@ -297,8 +298,13 @@ export interface TimeValue {
   when: string
 }
 
+export interface ControlsValue {
+  value: 'controls'
+  controls: Array<Action | Link>
+}
+
 // One rendered datum. It reads the same way in Facts, Metrics, List, and Table.
-export type Value = TextValue | NumberValue | StatusValue | TimeValue
+export type Value = TextValue | NumberValue | StatusValue | TimeValue | ControlsValue
 
 export interface ChartSeries {
   label: string
@@ -324,6 +330,7 @@ export interface TableColumn {
 export interface TableRow {
   cells: Value[]
   detail: string
+  key: string
 }
 
 export interface CardBlock {
@@ -459,6 +466,8 @@ export type Block =
       columns: TableColumn[]
       rows: TableRow[]
       emptyText: string
+      select: string
+      actions: Action[]
     }
   | { block: 'list'; title: string; items: Value[] }
   | { block: 'stack'; gap: 'small' | 'medium' | 'large'; blocks: Block[] }
@@ -470,8 +479,9 @@ export type Block =
       description: string
       fields: Field[]
       action: Action
-      submit?: 'button' | 'change'
-      layout?: 'stack' | 'prose' | 'row'
+      extraActions: Action[]
+      submit: 'button' | 'change'
+      layout: 'stack' | 'prose' | 'row'
     }
   | CardBlock
   | {
@@ -487,6 +497,7 @@ export type Block =
       tone: 'info' | 'success' | 'warning' | 'danger'
       title: string
       text: string
+      controls: (Action | Link)[]
     }
   | { block: 'divider' }
   | EmptyStateBlock

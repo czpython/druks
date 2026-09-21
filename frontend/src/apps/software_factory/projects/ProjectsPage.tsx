@@ -1,547 +1,460 @@
-import { Button, EmptyState, Field, Page, Select, TextInput } from '@druks/ui'
+import { Button, EmptyState, Page, PageHeader, TextInput } from '@druks/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { ChevronDown, MoreVertical, Pencil, Plus, RotateCw, Trash2, X } from 'lucide-react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
-import { useFlashNote } from '../../../lib/useFlashNote'
 import { projectsApi } from './api'
-import { repoProfiling, useRepoRuns, type RepoProfiling } from './profiling'
+import { repoProfiling, useRepoRuns } from './profiling'
 import type { Project, ProjectRepo } from './types'
-
-function pickPlaceholder(loading: boolean, available: number): string {
-  if (loading) return 'loading repos…'
-  if (available === 0) return 'no more repos to add'
-  return '— pick a repo —'
-}
-
-function splitRepo(full: string): { org: string; short: string } {
-  const i = full.indexOf('/')
-  if (i < 0) return { org: '', short: full }
-  return { org: full.slice(0, i + 1), short: full.slice(i + 1) }
-}
+import './projects.css'
 
 export function ProjectsPage() {
-  const queryClient = useQueryClient()
   const runs = useRepoRuns()
   const anyProfiling = [...runs.values()].some((status) => status.state === 'running')
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['projects'],
     queryFn: projectsApi.list,
-    // A finished profiler run changes what a repo stores, so refresh alongside
-    // the board that reports the run.
+    // Completed profiler runs change the stored profile as well as the repo board.
     refetchInterval: anyProfiling ? 3_000 : 30_000,
   })
-
-  const [draft, setDraft] = useState('')
-  // A project delete can still fail (a race, a server error); surface it here at
-  // page level as a transient error toast so it's never a silent no-op.
-  const [deleteError, setDeleteError] = useFlashNote<string>()
-  const createMutation = useMutation({
-    mutationFn: projectsApi.create,
-    onSuccess: () => {
-      setDraft('')
-      void queryClient.invalidateQueries({ queryKey: ['projects'] })
-    },
-  })
-  const onCreate = () => {
-    const name = draft.trim()
-    if (name) createMutation.mutate({ name })
-  }
+  const [creating, setCreating] = useState(false)
 
   if (isLoading) {
+    return <Page className="page-projects"><EmptyState glyph="…" msg="Loading projects" /></Page>
+  }
+  if (!data) {
     return (
-      <Page inset className="page-projects">
-        <EmptyState glyph="…" msg="loading projects" />
+      <Page className="page-projects">
+        <EmptyState
+          glyph="!"
+          msg="Could not load projects"
+          action={<Button onClick={() => void refetch()}>Retry</Button>}
+        />
       </Page>
     )
   }
-  if (isError || !data) {
-    return (
-      <Page inset className="page-projects">
-        <EmptyState glyph="!" msg="could not load projects" />
-      </Page>
-    )
-  }
+
+  const head = (
+    <PageHeader
+      eyebrow="projects"
+      count={data.projects.length}
+      right={
+        <Button variant="primary" onClick={() => setCreating(true)}>
+          <Plus size={14} aria-hidden="true" /> New project
+        </Button>
+      }
+    />
+  )
 
   return (
-    <Page inset className="page-projects">
-      {deleteError && (
-        <div className="pj-toast pj-toast-error mono" role="alert">
-          {deleteError}
+    <Page className="page-projects" header={head}>
+      {isError && <div className="pj-refresh-error">
+        <p role="alert">Could not refresh projects. Druks shows the last saved data.</p>
+        <Button onClick={() => void refetch()}>Retry</Button>
+      </div>}
+      {data.projects.length ? (
+        <div className="pj-list">
+          {data.projects.map((project) => <ProjectSection key={project.id} project={project} />)}
         </div>
-      )}
-      <div className="pj-head">
-        <span className="pj-head-title">Projects</span>
-        <span className="pj-head-count mono">({data.projects.length})</span>
-      </div>
-
-      {data.projects.length === 0 ? (
+      ) : (
         <EmptyState
           glyph="⊞"
           msg="No projects yet"
-          sub="A project groups the GitHub repositories a build operates on. Each work item targets one of those repos for its changes, while the rest give agents cross-repo context. Name your first one to get started."
-          action={
-            <div className="pj-empty-create">
-              <CreateRow
-                value={draft}
-                onChange={setDraft}
-                onCreate={onCreate}
-                pending={createMutation.isPending}
-              />
-              <Field error={createMutation.error && String(createMutation.error)} />
-            </div>
-          }
+          sub="A project groups the GitHub repositories a build operates on. Each work item targets one of those repos for its changes, while the rest give agents cross-repo context. Create a project to start."
         />
-      ) : (
-        <div className="pj-list">
-          <CreateRow
-            value={draft}
-            onChange={setDraft}
-            onCreate={onCreate}
-            pending={createMutation.isPending}
-          />
-          <Field error={createMutation.error && String(createMutation.error)} />
-          {data.projects.map((p) => (
-            <ProjectCard key={p.id} project={p} onDeleteError={setDeleteError} />
-          ))}
-        </div>
       )}
+      {creating && <ProjectNameDialog onClose={() => setCreating(false)} />}
     </Page>
   )
 }
 
-function CreateRow({
-  value,
-  onChange,
-  onCreate,
+function ProjectDialog({
+  title,
   pending,
+  onClose,
+  children,
 }: {
-  value: string
-  onChange: (v: string) => void
-  onCreate: () => void
+  title: string
   pending: boolean
+  onClose: () => void
+  children: ReactNode
 }) {
-  const enabled = value.trim().length > 0 && !pending
+  const dialog = useRef<HTMLDialogElement>(null)
+  const titleId = useId()
+  const [opener] = useState(() => document.activeElement)
+
+  useEffect(() => {
+    const element = dialog.current!
+    element.showModal()
+    return () => {
+      element.close()
+      if (opener instanceof HTMLElement) opener.focus()
+    }
+  }, [opener])
+
   return (
-    <div className="pj-create">
-      <TextInput
-        placeholder="new project name (e.g. 'Acme')"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && enabled) onCreate()
-        }}
-      />
-      <Button variant="primary" disabled={!enabled} onClick={onCreate}>
-        + create
-      </Button>
-    </div>
+    <dialog
+      ref={dialog}
+      className="pj-dialog"
+      aria-labelledby={titleId}
+      onCancel={(event) => {
+        event.preventDefault()
+        if (!pending) onClose()
+      }}
+    >
+      <header className="pj-dialog-head">
+        <h2 id={titleId}>{title}</h2>
+        <button type="button" className="pj-icon-button" aria-label="Close" disabled={pending} onClick={onClose}>
+          <X size={16} aria-hidden="true" />
+        </button>
+      </header>
+      {children}
+    </dialog>
   )
 }
 
-function ProjectCard({
-  project,
-  onDeleteError,
-}: {
-  project: Project
-  onDeleteError: (message: string) => void
-}) {
+function ProjectNameDialog({ project, onClose }: { project?: Project; onClose: () => void }) {
   const queryClient = useQueryClient()
-  const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['projects'] })
-
-  const [collapsed, setCollapsed] = useState(false)
-  const [adding, setAdding] = useState(false)
-  const [editingName, setEditingName] = useState(false)
-  const [name, setName] = useState(project.name)
-
-  const rename = useMutation({
-    mutationFn: (next: string) => projectsApi.update(project.id, { name: next }),
-    onSuccess: () => {
-      setEditingName(false)
-      invalidate()
+  const [name, setName] = useState(project?.name ?? '')
+  const save = useMutation({
+    mutationFn: (next: string) => project
+      ? projectsApi.update(project.id, { name: next })
+      : projectsApi.create({ name: next }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['projects'] })
+      onClose()
     },
   })
-  const remove = useMutation({
-    mutationFn: () => projectsApi.delete(project.id),
-    onSuccess: invalidate,
-    // Leave the card in place and surface the reason at page level — never a
-    // silent no-op, which is the failure ENG-846 set out to fix.
-    onError: (error) => onDeleteError(String(error)),
-  })
-
-  const repoCount = `${project.repos.length} ${project.repos.length === 1 ? 'repo' : 'repos'}`
 
   return (
-    <section className={`pj-card ${collapsed ? 'pj-card-collapsed' : ''}`}>
-      <header className="pj-card-head">
-        <button
-          type="button"
-          className="pj-disclosure"
-          aria-expanded={!collapsed}
-          title={collapsed ? 'expand' : 'collapse'}
-          onClick={() => setCollapsed((c) => !c)}
-        >
-          <span className="pj-disclosure-caret">▾</span>
-        </button>
-        <div className="pj-card-head-left">
-          {editingName ? (
-            <input
-              className="pj-name-input mono"
-              value={name}
-              autoFocus
-              onChange={(e) => setName(e.target.value)}
-              onBlur={() => {
-                const next = name.trim()
-                if (next && next !== project.name) rename.mutate(next)
-                else {
-                  setName(project.name)
-                  setEditingName(false)
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                if (e.key === 'Escape') {
-                  setName(project.name)
-                  setEditingName(false)
-                }
-              }}
-            />
-          ) : (
-            <span
-              className="pj-name"
-              onClick={() => setEditingName(true)}
-              title="click to rename"
-            >
-              {project.name}
-            </span>
-          )}
-          <span className="pj-repocount mono">{repoCount}</span>
+    <ProjectDialog title={project ? 'Rename project' : 'New project'} pending={save.isPending} onClose={onClose}>
+      <form onSubmit={(event) => {
+        event.preventDefault()
+        if (name.trim() && !save.isPending) save.mutate(name.trim())
+      }}>
+        <div className="pj-dialog-body">
+          <label className="pj-field">
+            Project name
+            <TextInput autoFocus value={name} disabled={save.isPending} onChange={(event) => setName(event.target.value)} />
+          </label>
+          {!project && <p>A project groups the repos a build operates on. Add repos after you create it.</p>}
+          {save.error && <p className="pj-error" role="alert">{String(save.error)}</p>}
         </div>
-        <button
-          type="button"
-          className="pj-delete mono"
-          onClick={() => {
-            if (
-              confirm(
-                `Delete project "${project.name}"? This permanently deletes the project and every work item it owns.`,
-              )
-            ) {
-              remove.mutate()
-            }
+        <footer className="pj-dialog-foot">
+          <Button disabled={save.isPending} onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" disabled={!name.trim() || save.isPending}>
+            {save.isPending ? 'Saving…' : project ? 'Save name' : 'Create project'}
+          </Button>
+        </footer>
+      </form>
+    </ProjectDialog>
+  )
+}
+
+function ProjectSection({ project }: { project: Project }) {
+  const queryClient = useQueryClient()
+  const actions = useRef<HTMLDetailsElement>(null)
+  const [collapsed, setCollapsed] = useState(false)
+  const [dialog, setDialog] = useState<'rename' | 'add' | null>(null)
+  const reposId = useId()
+  const headingId = useId()
+  const remove = useMutation({
+    mutationFn: () => projectsApi.delete(project.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+  })
+  const focusActions = () => actions.current!.querySelector('summary')!.focus()
+  const closeActions = () => {
+    actions.current!.open = false
+    focusActions()
+  }
+
+  return (
+    <section className="pj-project" aria-labelledby={headingId}>
+      <header className="pj-project-head">
+        <h2 id={headingId}>
+          <button
+            type="button"
+            className="pj-disclosure"
+            aria-expanded={!collapsed}
+            aria-controls={reposId}
+            onClick={() => setCollapsed(!collapsed)}
+          >
+            <ChevronDown size={16} aria-hidden="true" />
+            <span>{project.name}</span>
+          </button>
+        </h2>
+        <details
+          ref={actions}
+          className="pj-actions"
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false
           }}
-          disabled={remove.isPending}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') closeActions()
+          }}
         >
-          delete
-        </button>
-      </header>
-
-      {!collapsed && (
-        <>
-          {project.repos.length > 0 && (
-            <div className="pj-repos">
-              {project.repos.map((repo) => (
-                <RepoRow
-                  key={repo.id}
-                  projectId={project.id}
-                  repo={repo}
-                  onChange={invalidate}
-                />
-              ))}
-            </div>
-          )}
-
-          <div className="pj-addrow">
-            {adding ? (
-              <AddRepoForm
-                projectId={project.id}
-                taken={project.repos.map((r) => r.fullName)}
-                onCancel={() => setAdding(false)}
-                onAdded={() => {
-                  setAdding(false)
-                  invalidate()
-                }}
-              />
-            ) : (
-              <button type="button" className="pj-add-btn" onClick={() => setAdding(true)}>
-                <span className="pj-add-plus">+</span> add repo
-              </button>
-            )}
+          <summary className="pj-icon-button" aria-label={`Project actions for ${project.name}`}>
+            <MoreVertical size={16} aria-hidden="true" />
+          </summary>
+          <div className="pj-action-list">
+            <button type="button" onClick={() => { closeActions(); setDialog('add') }}>
+              <Plus size={15} aria-hidden="true" /> Add repo
+            </button>
+            <button type="button" onClick={() => { closeActions(); setDialog('rename') }}>
+              <Pencil size={15} aria-hidden="true" /> Rename project
+            </button>
+            <button type="button" className="pj-danger" disabled={remove.isPending} onClick={() => {
+              closeActions()
+              if (confirm(`Delete project "${project.name}"? This permanently deletes the project and every work item it owns.`)) {
+                remove.mutate()
+              }
+            }}>
+              <Trash2 size={15} aria-hidden="true" /> {remove.isPending ? 'Deleting…' : 'Delete project'}
+            </button>
           </div>
-        </>
-      )}
+        </details>
+      </header>
+      {remove.error && <p className="pj-error" role="alert">{String(remove.error)}</p>}
+      <div id={reposId} hidden={collapsed}>
+        {project.repos.length ? (
+          <div className="pj-repos">
+            {project.repos.map((repo) => <RepoRow key={repo.id} projectId={project.id} repo={repo} />)}
+          </div>
+        ) : (
+          <div className="pj-empty-project">
+            <p>No repositories yet. Add a repo to give builds their code and context.</p>
+            {/* A dialog returns focus to whatever opened it. Point it at the actions
+                menu, which outlives the empty state this button sits in. */}
+            <Button onClick={() => { focusActions(); setDialog('add') }}>
+              <Plus size={14} aria-hidden="true" /> Add repo
+            </Button>
+          </div>
+        )}
+      </div>
+      {dialog === 'rename' && <ProjectNameDialog project={project} onClose={() => setDialog(null)} />}
+      {dialog === 'add' && <AddRepoDialog project={project} onClose={() => setDialog(null)} />}
     </section>
   )
 }
 
-function RepoRow({
-  projectId,
-  repo,
-  onChange,
-}: {
-  projectId: number
-  repo: ProjectRepo
-  onChange: () => void
-}) {
-  const { org, short } = splitRepo(repo.fullName)
+function RepoRow({ projectId, repo }: { projectId: number; repo: ProjectRepo }) {
+  const queryClient = useQueryClient()
   const runs = useRepoRuns()
-  const profiling = repoProfiling(repo.profile, runs.get(repo.id))
+  const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [purpose, setPurpose] = useState(repo.purpose ?? '')
-  const [open, setOpen] = useState(false)
-
-  const update = useMutation({
-    mutationFn: (next: string) =>
-      projectsApi.updateRepo(projectId, repo.id, { purpose: next || null }),
-    onSuccess: () => {
-      setEditing(false)
-      onChange()
-    },
+  const [showFullSummary, setShowFullSummary] = useState(false)
+  const [showAllCommands, setShowAllCommands] = useState(false)
+  const detailsId = useId()
+  const headingId = useId()
+  const commandsId = useId()
+  const summaryId = useId()
+  const profiling = repoProfiling(repo.profile, runs.get(repo.id))
+  const profile = useMutation({
+    mutationFn: () => projectsApi.profileRepo(projectId, repo.id),
+    onSuccess: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['projects'] }),
+      queryClient.invalidateQueries({ queryKey: ['project-repo-board'] }),
+    ]),
   })
   const remove = useMutation({
     mutationFn: () => projectsApi.deleteRepo(projectId, repo.id),
-    onSuccess: onChange,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
   })
-  const profile = useMutation({
-    mutationFn: () => projectsApi.profileRepo(projectId, repo.id),
-    onSuccess: onChange,
+  const update = useMutation({
+    mutationFn: () => projectsApi.updateRepo(projectId, repo.id, { purpose: purpose.trim() || null }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['projects'] })
+      setEditing(false)
+    },
   })
 
+  // The repo board has not seen the run yet in the moment after the request.
+  const profileState = profile.isPending ? 'running' : profiling.state
+  const isProfiling = profileState === 'running'
+  const status = {
+    unprofiled: 'Not profiled',
+    running: 'Profiling…',
+    ready: 'Profiled',
+    failed: 'Profile failed',
+  }[profileState]
+  const separator = repo.fullName.indexOf('/') + 1
+  const stack = [...new Set([
+    ...(repo.profile.languages ?? []),
+    ...(repo.profile.frameworks ?? []),
+    ...(repo.profile.package_managers ?? []),
+  ])]
+  const commands = [...new Set([
+    ...(repo.profile.verification?.test_commands ?? []),
+    ...(repo.profile.verification?.lint_commands ?? []),
+    ...(repo.profile.verification?.typecheck_commands ?? []),
+  ].map((entry) => entry.command))]
+  const skills = repo.profile.recommended_skills ?? []
+  const summary = repo.profile.stack_summary ?? ''
+  const isLongSummary = summary.length > 280
+
   return (
-    <>
-      <div className="pj-repo">
-        <span className="pj-repo-name" title={repo.fullName}>
-          <span className="pj-repo-org">{org}</span>
-          <span className="pj-repo-short">{short}</span>
+    <div className="pj-repo">
+      <button
+        type="button"
+        className="pj-repo-row"
+        aria-expanded={open}
+        aria-controls={detailsId}
+        onClick={() => setOpen(!open)}
+      >
+        <span id={headingId} className="pj-repo-name">
+          <span className="pj-repo-org">{repo.fullName.slice(0, separator)}</span>
+          {repo.fullName.slice(separator)}
         </span>
-        {editing ? (
-          <TextInput
-            autoFocus
-            value={purpose}
-            placeholder="what this repo gives the agent as context…"
-            onChange={(e) => setPurpose(e.target.value)}
-            onBlur={() => {
-              const next = purpose.trim()
-              if (next !== (repo.purpose ?? '')) update.mutate(next)
-              else setEditing(false)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-              if (e.key === 'Escape') {
-                setPurpose(repo.purpose ?? '')
-                setEditing(false)
-              }
-            }}
-          />
-        ) : repo.purpose ? (
-          <span className="pj-repo-purpose" onClick={() => setEditing(true)} title="click to edit">
-            {repo.purpose}
-          </span>
-        ) : (
-          <span
-            className="pj-repo-purpose pj-repo-purpose-empty"
-            onClick={() => setEditing(true)}
-            title="click to set a purpose"
-          >
-            no purpose set
-          </span>
-        )}
-        <ProfileChip
-          profiling={profiling}
-          open={open}
-          pending={profile.isPending}
-          onToggle={() => setOpen((o) => !o)}
-          onProfile={() => profile.mutate()}
-        />
-        <button
-          type="button"
-          className="pj-repo-x"
-          title="remove repo"
-          onClick={() => {
-            if (confirm(`Remove ${repo.fullName} from this project?`)) remove.mutate()
-          }}
-        >
-          ✕
-        </button>
-      </div>
-      {open && (
-        <ProfilePanel
-          repo={repo}
-          profiling={profiling}
-          pending={profile.isPending}
-          onProfile={() => profile.mutate()}
-        />
-      )}
-      <Field error={profile.error && String(profile.error)} />
-    </>
-  )
-}
-
-function ProfileChip({
-  profiling,
-  open,
-  pending,
-  onToggle,
-  onProfile,
-}: {
-  profiling: RepoProfiling
-  open: boolean
-  pending: boolean
-  onToggle: () => void
-  onProfile: () => void
-}) {
-  // The chip is the whole profile affordance: unprofiled → trigger profiling;
-  // running → progress; ready/failed → toggle the details panel.
-  if (profiling.state === 'unprofiled') {
-    return (
-      <button type="button" className="pj-profile-chip mono" disabled={pending} onClick={onProfile}>
-        {pending ? 'profiling…' : 'profile'}
+        <span className={`pj-repo-purpose ${repo.purpose ? '' : 'pj-muted'}`}>
+          {repo.purpose || 'No purpose set'}
+        </span>
+        <span className="pj-profile-status" data-state={profileState}>{status}</span>
       </button>
-    )
-  }
-  if (profiling.state === 'running' || pending) {
-    return <span className="pj-profile-chip pj-profile-running mono">profiling…</span>
-  }
-  const failed = profiling.state === 'failed'
-  return (
-    <button
-      type="button"
-      className={`pj-profile-chip mono ${failed ? 'pj-profile-failed' : 'pj-profile-ready'}`}
-      title={failed ? (profiling.failure ?? 'profiler run failed') : 'view profile'}
-      onClick={onToggle}
-    >
-      {failed ? 'profile failed' : 'profiled'} {open ? '▴' : '▾'}
-    </button>
-  )
-}
-
-function ProfilePanel({
-  repo,
-  profiling,
-  pending,
-  onProfile,
-}: {
-  repo: ProjectRepo
-  profiling: RepoProfiling
-  pending: boolean
-  onProfile: () => void
-}) {
-  const found = repo.profile
-  const stack = [
-    ...(found.languages ?? []),
-    ...(found.frameworks ?? []),
-    ...(found.package_managers ?? []),
-  ]
-  const verification = [
-    ...(found.verification?.test_commands ?? []),
-    ...(found.verification?.lint_commands ?? []),
-    ...(found.verification?.typecheck_commands ?? []),
-  ]
-  return (
-    <div className="pj-profile-panel">
-      {profiling.state === 'failed' && (
-        <div className="pj-profile-failure mono">{profiling.failure ?? 'profiler run failed'}</div>
-      )}
-      {found.stack_summary && <p className="pj-profile-summary">{found.stack_summary}</p>}
-      {stack.length > 0 && (
-        <div className="pj-profile-row">
-          <span className="pj-profile-label">stack</span>
-          {stack.map((item) => (
-            <span key={item} className="pj-profile-tag mono">
-              {item}
-            </span>
-          ))}
-        </div>
-      )}
-      {verification.length > 0 && (
-        <div className="pj-profile-row">
-          <span className="pj-profile-label">verification</span>
-          <div className="pj-profile-cmds">
-            {verification.map((entry) => (
-              <code key={entry.command} className="pj-profile-cmd mono">
-                {entry.command}
-              </code>
-            ))}
+      <div id={detailsId} role="region" aria-labelledby={headingId} hidden={!open}>
+        <div className="pj-repo-details">
+          <div className="pj-repo-rail">
+            <dl className="pj-profile-facts">
+              <div><dt>Stack</dt><dd>{stack.length} entries</dd></div>
+              <div><dt>Skills</dt><dd>{skills.length} recommended</dd></div>
+            </dl>
+            <div className="pj-repo-actions">
+              <Button disabled={isProfiling || remove.isPending} onClick={() => profile.mutate()}>
+                <RotateCw size={13} aria-hidden="true" />
+                {isProfiling ? 'Profiling…' : profileState === 'ready' ? 'Re-profile' : 'Profile repo'}
+              </Button>
+              <Button disabled={remove.isPending || update.isPending} onClick={() => {
+                setPurpose(repo.purpose ?? '')
+                update.reset()
+                setEditing(true)
+              }}><Pencil size={13} aria-hidden="true" /> Edit purpose</Button>
+              <Button disabled={remove.isPending || isProfiling || update.isPending} onClick={() => {
+                if (confirm(`Remove ${repo.fullName} from this project?`)) remove.mutate()
+              }}>
+                <X size={13} aria-hidden="true" /> {remove.isPending ? 'Removing…' : 'Remove'}
+              </Button>
+            </div>
+          </div>
+          <div className="pj-profile-content">
+            {editing && (
+              <form className="pj-purpose-form" onSubmit={(event) => {
+                event.preventDefault()
+                if (!update.isPending) update.mutate()
+              }}>
+                <label className="pj-field">
+                  Purpose
+                  <TextInput autoFocus value={purpose} disabled={update.isPending} onChange={(event) => setPurpose(event.target.value)} />
+                </label>
+                <div className="pj-form-actions">
+                  <Button type="submit" variant="primary" disabled={update.isPending}>{update.isPending ? 'Saving…' : 'Save purpose'}</Button>
+                  <Button disabled={update.isPending} onClick={() => setEditing(false)}>Cancel</Button>
+                </div>
+                {update.error && <p className="pj-error" role="alert">{String(update.error)}</p>}
+              </form>
+            )}
+            {profileState === 'failed' && <p className="pj-error" role="alert">{profiling.failure || 'The profiler run failed. Try Profile repo again.'}</p>}
+            {profileState === 'unprofiled' && <p className="pj-muted">Profile this repo to find its stack, verification commands, and recommended skills.</p>}
+            {isProfiling && <p className="pj-muted" role="status">The profiler examines this repo. The profile updates when the run completes.</p>}
+            {summary && (
+              <div>
+                <p id={summaryId} className="pj-profile-summary">
+                  {isLongSummary && !showFullSummary ? `${summary.slice(0, 280).replace(/\s+\S*$/, '')}…` : summary}
+                </p>
+                {isLongSummary && <button type="button" className="pj-text-button" aria-controls={summaryId} aria-expanded={showFullSummary} onClick={() => setShowFullSummary(!showFullSummary)}>
+                  {showFullSummary ? 'Less' : 'More'} <ChevronDown size={12} aria-hidden="true" />
+                </button>}
+              </div>
+            )}
+            {stack.length > 0 && <div className="pj-profile-line"><h3>Stack</h3><p className="mono">{stack.join(' · ')}</p></div>}
+            {commands.length > 0 && (
+              <div className="pj-profile-line">
+                <h3>Verify</h3>
+                <div>
+                  <ul id={commandsId} className="pj-profile-commands">
+                    {(showAllCommands ? commands : commands.slice(0, 3)).map((command) => <li key={command}><code>{command}</code></li>)}
+                  </ul>
+                  {commands.length > 3 && <button type="button" className="pj-text-button" aria-controls={commandsId} aria-expanded={showAllCommands} onClick={() => setShowAllCommands(!showAllCommands)}>
+                    {showAllCommands ? 'Fewer commands' : `+${commands.length - 3} more`} <ChevronDown size={12} aria-hidden="true" />
+                  </button>}
+                </div>
+              </div>
+            )}
+            {skills.length > 0 && <div className="pj-profile-line"><h3>Skills</h3><p className="mono">{skills.join(' · ')}</p></div>}
           </div>
         </div>
-      )}
-      {(found.recommended_skills ?? []).length > 0 && (
-        <div className="pj-profile-row">
-          <span className="pj-profile-label">skills</span>
-          {(found.recommended_skills ?? []).map((skill) => (
-            <span key={skill} className="pj-profile-tag mono">
-              {skill}
-            </span>
-          ))}
-        </div>
-      )}
-      <button type="button" className="pj-profile-rerun mono" disabled={pending} onClick={onProfile}>
-        {pending ? 'profiling…' : 're-profile'}
-      </button>
+      </div>
+      {profile.error && <p className="pj-error" role="alert">{String(profile.error)}</p>}
+      {remove.error && <p className="pj-error" role="alert">{String(remove.error)}</p>}
     </div>
   )
 }
 
-function AddRepoForm({
-  projectId,
-  taken,
-  onCancel,
-  onAdded,
-}: {
-  projectId: number
-  taken: string[]
-  onCancel: () => void
-  onAdded: () => void
-}) {
+function AddRepoDialog({ project, onClose }: { project: Project; onClose: () => void }) {
+  const queryClient = useQueryClient()
   const [pick, setPick] = useState('')
+  const [filter, setFilter] = useState('')
   const [purpose, setPurpose] = useState('')
-
-  const ghRepos = useQuery({
+  const githubRepos = useQuery({
     queryKey: ['github-repos'],
     queryFn: () => projectsApi.listGithubRepos(),
     staleTime: 60_000,
   })
   const add = useMutation({
-    mutationFn: () =>
-      projectsApi.addRepo(projectId, { fullName: pick, purpose: purpose.trim() || null }),
-    onSuccess: onAdded,
+    mutationFn: () => projectsApi.addRepo(project.id, { fullName: pick, purpose: purpose.trim() || null }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['projects'] })
+      onClose()
+    },
   })
-
-  const takenSet = new Set(taken.map((s) => s.toLowerCase()))
-  const available = (ghRepos.data?.repos ?? []).filter(
-    (r) => !takenSet.has(r.fullName.toLowerCase()),
-  )
+  const taken = new Set(project.repos.map((repo) => repo.fullName.toLowerCase()))
+  const available = (githubRepos.data?.repos ?? []).filter((repo) => !taken.has(repo.fullName.toLowerCase()))
+  const search = filter.trim().toLowerCase()
+  const matches = available.filter((repo) => repo.fullName.toLowerCase().includes(search))
+  // A repo the filter hides cannot be added, because its radio is gone.
+  const canAdd = matches.some((repo) => repo.fullName === pick) && !add.isPending
 
   return (
-    <div className="pj-addform">
-      <div className="pj-addform-fields">
-        <Field label="repository">
-          <Select value={pick} onChange={(e) => setPick(e.target.value)}>
-            <option value="">{pickPlaceholder(ghRepos.isLoading, available.length)}</option>
-            {available.map((r) => (
-              <option key={r.fullName} value={r.fullName}>
-                {r.fullName}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="purpose" help="optional">
-          <TextInput
-            placeholder="what this repo gives the agent as context…"
-            value={purpose}
-            onChange={(e) => setPurpose(e.target.value)}
-          />
-        </Field>
-        <div />
-      </div>
-      <div className="pj-addform-foot">
-        <Button variant="primary" disabled={!pick || add.isPending} onClick={() => add.mutate()}>
-          add repo
-        </Button>
-        <Button onClick={onCancel}>cancel</Button>
-        <Field
-          error={ghRepos.isError && `could not load repos — ${String(ghRepos.error)}`}
-        />
-        <Field error={add.error && String(add.error)} />
-      </div>
-    </div>
+    <ProjectDialog title={`Add repo to ${project.name}`} pending={add.isPending} onClose={onClose}>
+      <form onSubmit={(event) => {
+        event.preventDefault()
+        if (canAdd) add.mutate()
+      }}>
+        <div className="pj-dialog-body">
+          {githubRepos.isLoading ? <p role="status">Loading repositories…</p> : githubRepos.isError ? (
+            <div>
+              <p className="pj-error" role="alert">Could not load repositories. {String(githubRepos.error)}</p>
+              <Button onClick={() => void githubRepos.refetch()}>Retry</Button>
+            </div>
+          ) : available.length ? (
+            <>
+              <label className="pj-field">
+                Filter repositories
+                <TextInput autoFocus value={filter} disabled={add.isPending} onChange={(event) => setFilter(event.target.value)} placeholder="Owner or name" />
+              </label>
+              {matches.length ? (
+                <fieldset className="pj-repo-choices" disabled={add.isPending}>
+                  <legend>Repository</legend>
+                  {matches.map((repo) => (
+                    <label key={repo.fullName} className="pj-repo-choice">
+                      <input type="radio" name="repository" value={repo.fullName} checked={pick === repo.fullName} onChange={() => setPick(repo.fullName)} />
+                      <span className="mono">{repo.fullName}</span>
+                    </label>
+                  ))}
+                </fieldset>
+              ) : <p>No repository matches this filter.</p>}
+            </>
+          ) : <p>No more repositories to add. Check repository access in the GitHub connection if a repo is missing.</p>}
+          {available.length > 0 && <label className="pj-field">
+            Purpose (optional)
+            <TextInput value={purpose} disabled={add.isPending} onChange={(event) => setPurpose(event.target.value)} placeholder="Context this repo gives the agent" />
+          </label>}
+          {add.error && <p className="pj-error" role="alert">{String(add.error)}</p>}
+        </div>
+        <footer className="pj-dialog-foot">
+          <Button disabled={add.isPending} onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" disabled={!canAdd}>{add.isPending ? 'Adding…' : 'Add repo'}</Button>
+        </footer>
+      </form>
+    </ProjectDialog>
   )
 }

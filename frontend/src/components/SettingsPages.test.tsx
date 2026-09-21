@@ -1085,31 +1085,44 @@ describe('canonical app settings', () => {
     await screen.findByLabelText('Notebook')
   })
 
-  it('shows the Channels tab only for an app with a Bot', async () => {
+  it.each([
+    { hasAgents: true, hasBot: false, tabs: [] },
+    { hasAgents: false, hasBot: true, tabs: ['Bots', 'Channels'] },
+    { hasAgents: true, hasBot: true, tabs: ['Agents', 'Bots', 'Channels'] },
+    { hasAgents: false, hasBot: false, tabs: [] },
+  ])('shows settings tabs for agents=$hasAgents and bot=$hasBot', async ({ hasAgents, hasBot, tabs }) => {
     const helpdesk = {
       ...appSettings.apps[2]!,
       name: 'helpdesk',
       description: 'Helpdesk settings',
-      bot: 'helpdesk.bot',
-      botAccess: 'open' as const,
-      agents: [{ ...coder, name: 'helpdesk.bot', label: 'bot' }],
-      settings: [],
+      bot: hasBot ? 'helpdesk.bot' : null,
+      botAccess: hasBot ? 'open' as const : null,
+      agents: [
+        ...(hasAgents ? [{ ...coder, name: 'helpdesk.coder' }] : []),
+        ...(hasBot ? [{ ...coder, name: 'helpdesk.bot', label: 'bot' }] : []),
+      ],
+      settings: hasAgents || hasBot ? [] : appSettings.apps[2]!.settings,
     }
     stubFetch(true, undefined, { ...appSettings, apps: [...appSettings.apps, helpdesk] })
-    renderSettings('/apps/software_factory/settings')
-    const factoryTabs = await screen.findByRole('navigation', { name: 'App settings sections' })
-    expect(within(factoryTabs).queryByRole('link', { name: 'Channels' })).toBeNull()
-    cleanup()
-
     renderSettings('/apps/helpdesk/settings')
-    const helpdeskTabs = await screen.findByRole('navigation', { name: 'App settings sections' })
-    expect(within(helpdeskTabs).getAllByRole('link').map((link) => link.textContent)).toEqual([
-      'Agents',
-      'Channels',
-    ])
-    fireEvent.click(within(helpdeskTabs).getByRole('link', { name: 'Channels' }))
-    expect(await screen.findByRole('heading', { name: 'WhatsApp numbers' })).toBeTruthy()
-    expect(window.location.pathname).toBe('/apps/helpdesk/settings/channels')
+    if (hasAgents) {
+      expect(await screen.findByRole('region', { name: 'coder' })).toBeTruthy()
+      expect(screen.queryByRole('region', { name: 'bot' })).toBeNull()
+    }
+    if (hasBot) {
+      const navigation = within(await screen.findByRole('navigation', { name: 'App settings sections' }))
+      expect(navigation.getAllByRole('link').map((link) => link.textContent)).toEqual(tabs)
+      expect(navigation.getByRole('link', { name: tabs[0] }).getAttribute('aria-current')).toBe('page')
+      fireEvent.click(navigation.getByRole('link', { name: 'Bots' }))
+      expect(await screen.findByRole('region', { name: 'bot' })).toBeTruthy()
+      expect(screen.queryByRole('region', { name: 'coder' })).toBeNull()
+      fireEvent.click(navigation.getByRole('link', { name: 'Channels' }))
+      expect(await screen.findByRole('heading', { name: 'WhatsApp numbers' })).toBeTruthy()
+      expect(window.location.pathname).toBe('/apps/helpdesk/settings/channels')
+    } else {
+      if (!hasAgents) await screen.findByLabelText('Notebook')
+      expect(screen.queryByRole('navigation', { name: 'App settings sections' })).toBeNull()
+    }
   })
 
   it('does not create settings destinations for apps without controls', async () => {
@@ -1186,16 +1199,21 @@ describe('canonical app settings', () => {
     )
   })
 
-  it('does not show an empty Agents page for an app that only declares options', async () => {
+  it.each(['agents', 'bots'])('does not show an empty %s page for an app that only declares options', async (tab) => {
     stubFetch(false)
-    renderSettings('/apps/field_notes/settings/agents')
+    renderSettings(`/apps/field_notes/settings/${tab}`)
     expect(await screen.findByText('No settings page matches this address.')).toBeTruthy()
     expect(screen.queryByLabelText('Notebook')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull()
   })
 
-  it('keeps Options and Agents drafts together and sends only that app', async () => {
-    stubFetch(false)
+  it('keeps Options, Agents, and Bots drafts together and sends only that app', async () => {
+    const settings = structuredClone(appSettings)
+    const factory = settings.apps[0]!
+    factory.bot = 'software_factory.bot'
+    factory.botAccess = 'open'
+    factory.agents.push({ ...coder, name: factory.bot, label: 'bot' })
+    stubFetch(false, undefined, settings)
     renderSettings('/apps/software_factory/settings')
     await screen.findByLabelText('Tracker')
     fireEvent.change(screen.getByLabelText('Trigger status'), {
@@ -1204,6 +1222,9 @@ describe('canonical app settings', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
     fireEvent.click(await screen.findByText('high'))
     fireEvent.click(await screen.findByText('low'))
+    fireEvent.click(screen.getByRole('link', { name: 'Bots' }))
+    fireEvent.click(await screen.findByText('high'))
+    fireEvent.click(await screen.findByText('medium'))
     fireEvent.click(screen.getByRole('link', { name: 'Options' }))
     expect((screen.getByLabelText('Trigger status') as HTMLInputElement).value).toBe(
       'Agent Queue',
@@ -1220,7 +1241,7 @@ describe('canonical app settings', () => {
         ([path, init]) => String(path) === '/api/settings/apps' && init?.method === 'PATCH',
       )
     expect(JSON.parse(String(patch?.[1]?.body))).toEqual({
-      agentEfforts: { 'software_factory.coder': 'low' },
+      agentEfforts: { 'software_factory.coder': 'low', 'software_factory.bot': 'medium' },
       appSettings: { software_factory: { trigger_status: 'Agent Queue' } },
       workflowSettings: {},
     })
@@ -1232,6 +1253,8 @@ describe('canonical app settings', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
     const savedEffort = await screen.findByText('low')
     expect(savedEffort.closest('button')?.classList.contains('override')).toBe(true)
+    fireEvent.click(screen.getByRole('link', { name: 'Bots' }))
+    expect((await screen.findByText('medium')).closest('button')?.classList.contains('override')).toBe(true)
   })
 
   it('asks before leaving a dirty app and keeps its draft after Stay', async () => {
@@ -1524,8 +1547,13 @@ function mockScroll() {
   return scroll
 }
 
-it('finds model defaults, app overrides, and timezone with working field focus', async () => {
-  stubFetch(false)
+it('finds model defaults, agent and bot overrides, and timezone with working field focus', async () => {
+  const settings = structuredClone(appSettings)
+  const factory = settings.apps[0]!
+  factory.bot = 'software_factory.bot'
+  factory.botAccess = 'open'
+  factory.agents.push({ ...coder, name: factory.bot, label: 'bot' })
+  stubFetch(false, undefined, settings)
   const scroll = mockScroll()
   renderSettings('/settings/personal')
   const search = await screen.findByLabelText('Search settings')
@@ -1539,6 +1567,12 @@ it('finds model defaults, app overrides, and timezone with working field focus',
   fireEvent.click(screen.getByRole('link', { name: 'Timezone Preferences · Field' }))
   await waitFor(() => expect(document.activeElement?.id).toBe('personal-timezone'))
   expect(scroll).toHaveBeenCalled()
+  fireEvent.change(screen.getByLabelText('Search settings'), { target: { value: 'model' } })
+  const botModel = screen.getByRole('link', { name: 'Model · bot Software Factory · Field' })
+  expect(botModel.getAttribute('href')).toBe('/apps/software_factory/settings/bots?field=agent.software_factory.bot.model')
+  fireEvent.click(botModel)
+  await waitFor(() => expect(document.activeElement?.closest('[data-setting]')?.getAttribute('data-setting')).toBe('agent.software_factory.bot.model'))
+  expect(screen.queryByRole('region', { name: 'coder' })).toBeNull()
 })
 
 

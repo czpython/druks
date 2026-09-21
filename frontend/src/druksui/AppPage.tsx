@@ -9,7 +9,8 @@ import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
 import { useRawLocation } from '../lib/useRawLocation'
 import { AppSurface } from './AppSurface'
-import { Blocks, Controls } from './Blocks'
+import { Blocks } from './Blocks'
+import { Controls } from './DataBlocks'
 import { Fields } from './Fields'
 import {
   followedSubjects,

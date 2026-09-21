@@ -599,7 +599,7 @@ To withdraw a waiting request, cancel it in a bot tool:
 `await GrantAccess.cancel(request)`. A subject has one active run per workflow, so
 cancel a request before you start a changed one.
 
-The Bot has a row in the app's **Settings → Agents** under the id
+The Bot has a row in the app's **Settings → Bots** under the id
 `<app>.bot`. Its harness, model, billing, effort, and timeout resolve
 like an agent's. The timeout is the longest that one turn can run. `timeout=`
 on the Bot declares its default. The Bot runs on Claude, like Chat.
@@ -1156,6 +1156,9 @@ the first service identity. OAuth grants are not service identities. The
 platform stores them after an operator connection.
 
 See [Connect provider accounts](#connect-provider-accounts-oauth).
+
+An app serves a service's endpoints under `/api/<app>/services/<slug>/...`, where
+the app mounts those routers like every other route.
 
 Put a credential that only your app uses in its app settings.
 
@@ -1804,7 +1807,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.workspaces` | `Workspace`, `RepoWorkspace` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
 | `druks.schemas` | `Schema` |
-| `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `MultiUploadField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `Quote`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |
+| `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `ControlsValue`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `MultiUploadField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `Quote`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |
 | `druks.files` | `File`, `FileField` |
