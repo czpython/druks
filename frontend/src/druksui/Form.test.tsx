@@ -877,6 +877,18 @@ describe('what an action does next', () => {
     await waitFor(() => expect(assign).toHaveBeenCalledWith('https://example.com/compose'))
   })
 
+  it('stays when the operation answers with a row that has a url', async () => {
+    const assign = vi.fn()
+    vi.stubGlobal('location', { ...window.location, assign })
+    callOperation.mockResolvedValueOnce({ id: 7, url: 'https://example.com/notes/7' })
+    renderBlocks([form([BODY], action({ refresh: 'none' }))])
+
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(screen.getByText('Save — done')).toBeTruthy())
+    expect(assign).not.toHaveBeenCalled()
+  })
+
   it('says so rather than calling a path it cannot fill', async () => {
     renderBlocks([form([BODY], action({ operation: 'clear_gist', refresh: 'none' }))])
 

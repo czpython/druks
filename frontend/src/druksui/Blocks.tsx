@@ -4,17 +4,9 @@ import { Link as RouteLink } from 'wouter'
 import type { Action, Block, CardBlock } from '../api/types'
 import { Markdown } from '../components/Markdown'
 import { GateControls } from './GateControls'
-import {
-  Chart,
-  Controls,
-  Facts,
-  ImageGallery,
-  LinkControl,
-  List,
-  Metrics,
-  Table,
-} from './DataBlocks'
+import { Chart, Controls, Facts, ImageGallery, List, Metrics, Table } from './DataBlocks'
 import { ActionButton, Form, useAction } from './Form'
+import { LinkControl } from './LinkControl'
 import { Files, Image, Progress, Timeline } from './RunBlocks'
 import { hrefForLink, PagesContext, RegionContext } from './pages'
 
@@ -439,5 +431,3 @@ function CardsDrop({
     </CardsZoneContext.Provider>
   )
 }
-
-export { Controls }

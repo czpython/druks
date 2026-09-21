@@ -61,7 +61,7 @@ describe('values', () => {
         block: 'table',
         title: '',
         columns: cells.map((_value, index) => ({ label: `c${index}`, align: 'start' as const })),
-        rows: [{ cells, detail: '' }],
+        rows: [{ cells, detail: '', key: '' }],
         emptyText: '',
       },
     ])
@@ -95,6 +95,7 @@ describe('values', () => {
               },
             ],
             detail: '',
+            key: '',
           },
         ],
         emptyText: '',
@@ -161,6 +162,7 @@ describe('values', () => {
             {
               cells: [TEXT, { value: 'controls', controls: [action] }],
               detail: '',
+              key: '',
             },
           ],
           emptyText: '',
@@ -357,7 +359,7 @@ describe('Table', () => {
         block: 'table',
         title: 'Peers',
         columns: [{ label: 'Peer', align: 'start' }],
-        rows: [{ cells: [TEXT], detail: '' }],
+        rows: [{ cells: [TEXT], detail: '', key: '' }],
         emptyText: '',
       },
     ])
@@ -379,7 +381,7 @@ describe('Table', () => {
           { label: 'Peer', align: 'start' },
           { label: 'Answers', align: 'end' },
         ],
-        rows: [{ cells: [TEXT, NUMBER], detail: '' }],
+        rows: [{ cells: [TEXT, NUMBER], detail: '', key: '' }],
         emptyText: '',
       },
     ])
@@ -403,6 +405,7 @@ describe('Table', () => {
           {
             cells: [{ value: 'text', text: 'peer-7', description: '', link: null }],
             detail: 'the GitHub App has no access to this repository',
+            key: '',
           },
         ],
         emptyText: '',

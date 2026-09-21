@@ -84,8 +84,8 @@ export function Form({
       )}
       {live ? null : (
         <div className="dui-form-submit">
-          {run.confirming && run.asked ? (
-            <Confirm action={run.asked} run={run} />
+          {run.asked ? (
+            <Confirm action={run.asked.action} run={run} />
           ) : (
             <>
               <button
@@ -120,7 +120,7 @@ export function Form({
 }
 
 function handedOffUrl(result: unknown): string | null {
-  if (!result || typeof result !== 'object' || !('url' in result)) return null
+  if (!result || typeof result !== 'object' || Object.keys(result).join() !== 'url') return null
   const url = Reflect.get(result, 'url')
   return typeof url === 'string' && /^https?:\/\//.test(url) ? url : null
 }
@@ -161,8 +161,8 @@ function ImmediateAction({
 
   return (
     <>
-      {run.confirming ? (
-        <Confirm action={run.asked ?? action} run={run} />
+      {run.asked ? (
+        <Confirm action={action} run={run} />
       ) : (
         <button
           type="button"
@@ -372,9 +372,8 @@ export function useAction(fields: Field[] = [], clear?: () => void) {
   const [saved, setSaved] = useState(false)
   const [problem, setProblem] = useState('')
   const [note, setNote] = useFlashNote<string>()
-  const [current, setCurrent] = useState<Action | null>(null)
-  // The payload an action is holding while it asks; null when it is not asking.
-  const [asked, setAsked] = useState<Payload | null>(null)
+  // The action that is asking and the payload it holds; null when none asks.
+  const [asked, setAsked] = useState<{ action: Action; values: Payload } | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const { app, pages, operations } = useContext(PagesContext)
   const region = useContext(RegionContext)
@@ -385,19 +384,17 @@ export function useAction(fields: Field[] = [], clear?: () => void) {
 
   async function call(next: Action, values: Payload) {
     if (pending || saved) return
-    setCurrent(next)
     if (next.confirm) {
-      setAsked(values)
+      setAsked({ action: next, values })
       return
     }
     await perform(next, values)
   }
 
   async function confirm() {
-    if (pending || saved || !current) return
-    const values = asked ?? {}
+    if (pending || saved || !asked) return
     setAsked(null)
-    await perform(current, values)
+    await perform(asked.action, asked.values)
   }
 
   async function perform(next: Action, values: Payload) {
@@ -480,8 +477,8 @@ export function useAction(fields: Field[] = [], clear?: () => void) {
     return { payload, failures }
   }
 
-  // An operation may answer {url} with an absolute http(s) string. That is a
-  // hand-off declared on Action, not a column named url on a returned row.
+  // An answer of exactly {url}, absolute http(s), is a hand-off. A returned
+  // row that has a url column carries other keys, so it is not one.
   async function finish(next: Action, result?: unknown) {
     const outbound = handedOffUrl(result)
     if (outbound) {
@@ -525,8 +522,7 @@ export function useAction(fields: Field[] = [], clear?: () => void) {
     call,
     confirm,
     back: () => setAsked(null),
-    confirming: asked !== null,
-    asked: current,
+    asked,
   }
 }
 

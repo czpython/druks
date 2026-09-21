@@ -320,7 +320,7 @@ export interface TableColumn {
 export interface TableRow {
   cells: Value[]
   detail: string
-  key?: string
+  key: string
 }
 
 export interface CardBlock {

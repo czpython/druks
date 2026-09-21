@@ -129,9 +129,9 @@ class Action(PageBlock):
 
     After a successful send, the shell navigates when this action sets
     ``link``, or when the operation answers ``{"url": "https://..."}`` — a
-    top-level string, absolute ``http`` or ``https`` only. A row or object
-    that happens to contain a ``url`` field is not a hand-off. ``refresh``
-    applies only when neither navigates."""
+    top-level string, absolute ``http`` or ``https`` only, and the only field
+    of the answer. A returned row that has a ``url`` column is not a hand-off.
+    ``refresh`` applies only when neither navigates."""
 
     block: Literal["action"] = "action"
     label: str
@@ -219,9 +219,12 @@ class Form(PageBlock):
             raise ValueError(
                 f"form {self.title!r} has fields on its action. Put all form fields on the form."
             )
-        if self.submit == "change" and (
-            self.action.confirm or any(extra.confirm for extra in self.extra_actions)
-        ):
+        if self.submit == "change" and self.extra_actions:
+            raise ValueError(
+                f"form {self.title!r} submits on change and also has extra actions. "
+                "An extra action is a button; give the form a button, or drop extra_actions."
+            )
+        if self.submit == "change" and self.action.confirm:
             raise ValueError(
                 f"form {self.title!r} submits on change and also asks to confirm. "
                 "A confirm is a press; give the form a button, or drop confirm."
@@ -342,7 +345,7 @@ class Datum(Schema):
         return ()
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
-        return None
+        """Raise when this value cannot sit where the page put it."""
 
 
 class TextValue(Datum):
@@ -665,8 +668,7 @@ class Table(PageBlock):
         missing = sum(1 for row in self.rows if not row.key)
         if missing:
             raise ValueError(
-                f"table {self.title!r} can select rows, and a row has no key. "
-                "Give each row a key."
+                f"table {self.title!r} can select rows, and a row has no key. Give each row a key."
             )
         keys = [row.key for row in self.rows]
         repeated = sorted({key for key in keys if keys.count(key) > 1})

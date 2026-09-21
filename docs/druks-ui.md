@@ -904,8 +904,9 @@ runs.
 
 After a successful send, the shell navigates when this action sets `link`, or
 when the operation answers `{"url": "https://..."}` — a top-level string,
-absolute `http` or `https` only. A row or object that happens to contain a
-`url` field is not a hand-off. `refresh` applies only when neither navigates.
+absolute `http` or `https` only, and the only field of the answer. A returned
+row that has a `url` column is not a hand-off. `refresh` applies only when
+neither navigates.
 
 ### Form
 
@@ -972,7 +973,8 @@ page exists to collect one value and then choose what to do with it.
 
 `submit="change"` sends the form when a select changes or a text field blurs.
 The shell draws no button. `layout="prose"` is a title and body. `layout="row"`
-is a labelled property. A form cannot both submit on change and set `confirm`.
+is a labelled property. A form cannot both submit on change and set `confirm`
+or `extra_actions`.
 
 ### Timeline
 

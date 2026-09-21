@@ -90,8 +90,6 @@ export function Controls({ controls }: { controls: (Action | Link)[] }) {
   )
 }
 
-export { LinkControl }
-
 export function Chart({
   kind,
   title,
@@ -298,7 +296,7 @@ export function Table({
 }) {
   const titleId = useId()
   const selectable = Boolean(select)
-  const keys = rows.map((row) => row.key ?? '').filter(Boolean)
+  const keys = rows.map((row) => row.key)
   const [picked, setPicked] = useState<string[]>([])
   const chosen = picked.filter((key) => keys.includes(key))
   const allBox = useRef<HTMLInputElement>(null)
@@ -384,7 +382,7 @@ export function Table({
                 row={row}
                 columns={columns}
                 selectable={selectable}
-                selected={Boolean(row.key && chosen.includes(row.key))}
+                selected={chosen.includes(row.key)}
                 onSelect={toggle}
               />
             ))}
@@ -399,7 +397,7 @@ function rowName(row: TableRow): string {
   const first = row.cells[0]
   if (first?.value === 'text') return first.text
   if (first?.value === 'status') return first.label
-  return row.key || 'row'
+  return row.key
 }
 
 function Row({
@@ -426,10 +424,7 @@ function Row({
               className="dui-checkbox"
               type="checkbox"
               checked={selected}
-              onChange={(event) => {
-                if (!row.key) return
-                onSelect(row.key, event.target.checked)
-              }}
+              onChange={(event) => onSelect(row.key, event.target.checked)}
               aria-label={`Select ${rowName(row)}`}
             />
           </td>

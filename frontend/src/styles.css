@@ -1942,18 +1942,6 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 .dui-callout-title { font-weight: 600; color: var(--text); margin-bottom: 3px; }
 .dui-callout-text { color: var(--text-mid); overflow-wrap: anywhere; }
 .dui-callout .dui-links { margin-top: 12px; }
-:is(.dui-callout, .dui-card, .dui-section-head, .dui-page-head) .dui-links .dui-link {
-  min-height: var(--dui-control-height);
-  padding: 0 14px;
-  border: 1px solid var(--border-loud);
-  border-radius: var(--dui-radius-control);
-  background: var(--surface-2);
-}
-:is(.dui-callout, .dui-card, .dui-section-head, .dui-page-head) .dui-links .dui-link:hover {
-  text-decoration: none;
-  background: var(--surface-3);
-  color: var(--text);
-}
 
 .dui-callout-info { --dui-callout-tone: var(--bucket-run); }
 .dui-callout-success { --dui-callout-tone: var(--outcome-merged); }

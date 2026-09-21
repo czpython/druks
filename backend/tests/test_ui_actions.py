@@ -302,9 +302,7 @@ def test_a_form_extra_action_sends_each_value_once():
     with pytest.raises(ValueError, match="already carries as arguments"):
         Form(
             action=Action(label="Save", operation="write_note"),
-            extra_actions=[
-                Action(label="Also", operation="write_note", arguments={"body": "x"})
-            ],
+            extra_actions=[Action(label="Also", operation="write_note", arguments={"body": "x"})],
             fields=[TextField(name="body", label="Note")],
         )
 
@@ -313,6 +311,16 @@ def test_a_form_that_submits_on_change_cannot_also_confirm():
     with pytest.raises(ValueError, match="submits on change"):
         Form(
             action=Action(label="Save", operation="write_note", confirm="Sure?"),
+            fields=[TextField(name="body", label="Note")],
+            submit="change",
+        )
+
+
+def test_a_form_that_submits_on_change_cannot_have_extra_actions():
+    with pytest.raises(ValueError, match="also has extra actions"):
+        Form(
+            action=Action(label="Save", operation="write_note"),
+            extra_actions=[Action(label="Also", operation="write_note")],
             fields=[TextField(name="body", label="Note")],
             submit="change",
         )
@@ -461,9 +469,7 @@ def test_a_table_cell_action_is_checked():
         blocks=[
             Table(
                 columns=[TableColumn("Do")],
-                rows=[
-                    TableRow([ControlsValue([Action(label="Go", operation="nowhere")])])
-                ],
+                rows=[TableRow([ControlsValue([Action(label="Go", operation="nowhere")])])],
             )
         ],
     )
