@@ -20,8 +20,8 @@ function renderBlocks(blocks: Block[]) {
   )
 }
 
-const ACTIVE = { value: 'status', label: 'active', tone: 'active' } as const
-const DONE = { value: 'status', label: 'done', tone: 'success' } as const
+const ACTIVE = { value: 'status', label: 'active', tone: 'active', link: null } as const
+const DONE = { value: 'status', label: 'done', tone: 'success', link: null } as const
 
 describe('Timeline', () => {
   it('shows the items in the order Druks ordered them', () => {
@@ -44,7 +44,38 @@ describe('Timeline', () => {
     expect(screen.getByText('active')).toBeTruthy()
   })
 
+  it('opens a status link from a timeline item', () => {
+    renderBlocks([
+      {
+        block: 'timeline',
+        title: 'Sweep',
+        items: [
+          {
+            when: '2026-08-29T09:00:00Z',
+            title: 'Run started',
+            description: '',
+            status: {
+              value: 'status',
+              label: 'live',
+              tone: 'success',
+              link: {
+                block: 'link',
+                label: 'live',
+                page: '',
+                arguments: {},
+                url: 'https://example.com/run',
+                subject: null,
+              },
+            },
+          },
+        ],
+      },
+    ])
 
+    const live = screen.getByRole('link', { name: 'live (opens in a new tab)' })
+    expect(live.getAttribute('href')).toBe('https://example.com/run')
+    expect(live.className).toContain('dui-status-success')
+  })
 })
 
 describe('Progress', () => {

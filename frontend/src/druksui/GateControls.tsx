@@ -33,7 +33,7 @@ export function GateControls({ run, expected, onAnswer }: { run: string; expecte
       </div>
     )
   }
-  if (expected && gate.data.parkedAt !== expected) {
+  if (expected && gate.data.parkedAt !== expected.replace(/\+00:00$/, 'Z')) {
     return (
       <p role="alert">
         This input request has changed. Return to the Dashboard to open the current request.

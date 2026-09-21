@@ -183,17 +183,23 @@ export function SettingsPages({
   ]
   const dirty = dirtyPages.includes(section)
   const app = appName ? apps.find((entry) => entry.name === appName) : undefined
-  const appTab = ['agents', 'channels'].find((tab) => location.endsWith(`/${tab}`)) ?? 'options'
+  const hasAgents = Boolean(app?.agents.some((agent) => agent.name !== app.bot))
+  const appTab = ['agents', 'bots', 'channels'].find((tab) => location.endsWith(`/${tab}`)) ?? 'options'
   const validAppPage =
     !appName ||
     location === `/apps/${appName}/settings` ||
-    Boolean(app?.agents.length && location === `/apps/${appName}/settings/agents`) ||
+    (hasAgents && location === `/apps/${appName}/settings/agents`) ||
+    Boolean(app?.bot && location === `/apps/${appName}/settings/bots`) ||
     Boolean(app?.bot && location === `/apps/${appName}/settings/channels`)
   const hasOptions = Boolean(
     app && (app.settings.length || app.workflows.some((workflow) => workflow.fields.length)),
   )
-  const paneSection = app?.agents.length && !hasOptions && appTab === 'options' ? 'agents' : appTab
-  const executionPage = section === 'agents' || Boolean(appName && paneSection === 'agents')
+  let paneSection = appTab
+  if (!hasOptions && appTab === 'options') {
+    if (hasAgents) paneSection = 'agents'
+    else if (app?.bot) paneSection = 'bots'
+  }
+  const executionPage = section === 'agents' || Boolean(appName && ['agents', 'bots'].includes(paneSection))
   const Content = appName ? 'section' : 'main'
   const title =
     SECTIONS.find((entry) => entry.id === section)?.label ?? (app ? appLabel(app.name) : 'Settings')
@@ -413,7 +419,7 @@ export function SettingsPages({
     ...entry.agents.flatMap((agent) => [SETTINGS_FIELDS.harness, SETTINGS_FIELDS.model, SETTINGS_FIELDS.billing, SETTINGS_FIELDS.effort, SETTINGS_FIELDS.timeout].map((field) => ({
       label: `${field.label} · ${agent.label}`, owner: appLabel(entry.name), kind: 'Field',
       terms: `agent override inheritance ${agent.description}`,
-      path: `/apps/${entry.name}/settings/agents?field=${encodeURIComponent(`agent.${agent.name}.${field.field}`)}`,
+      path: `/apps/${entry.name}/settings/${agent.name === entry.bot ? 'bots' : 'agents'}?field=${encodeURIComponent(`agent.${agent.name}.${field.field}`)}`,
     }))),
   ])).filter((entry) => `${entry.label} ${entry.owner} ${entry.terms}`.toLowerCase().includes(search.trim().toLowerCase()))
 
@@ -546,7 +552,7 @@ export function SettingsPages({
           {appName && app && (
             <>
               <p className="app-settings-description">{app.description}</p>
-              {(app.bot || (hasOptions && app.agents.length > 0)) && (
+              {(app.bot || (hasOptions && hasAgents)) && (
                 <nav className="settings-tabs" aria-label="App settings sections">
                   {hasOptions && (
                     <Link
@@ -556,12 +562,22 @@ export function SettingsPages({
                       Options
                     </Link>
                   )}
-                  <Link
-                    href={`/apps/${app.name}/settings/agents`}
-                    aria-current={paneSection === 'agents' ? 'page' : undefined}
-                  >
-                    Agents
-                  </Link>
+                  {hasAgents && (
+                    <Link
+                      href={`/apps/${app.name}/settings/agents`}
+                      aria-current={paneSection === 'agents' ? 'page' : undefined}
+                    >
+                      Agents
+                    </Link>
+                  )}
+                  {app.bot && (
+                    <Link
+                      href={`/apps/${app.name}/settings/bots`}
+                      aria-current={paneSection === 'bots' ? 'page' : undefined}
+                    >
+                      Bots
+                    </Link>
+                  )}
                   {app.bot && (
                     <Link
                       href={`/apps/${app.name}/settings/channels`}
@@ -729,7 +745,7 @@ export function SettingsPages({
                 .filter(
                   (entry) =>
                     validAppPage && appName === entry.name && page === `apps/${entry.name}` &&
-                    (paneSection === 'options' || (paneSection === 'agents' && executionReady)),
+                    (paneSection === 'options' || (executionPage && executionReady)),
                 )
                 .map((entry) => (
                   <div key={entry.name} className="app-settings-layout">

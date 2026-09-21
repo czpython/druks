@@ -47,6 +47,7 @@ AUTHOR_SURFACE = {
         "ChartSeries",
         "CheckboxField",
         "Columns",
+        "ControlsValue",
         "Divider",
         "EmptyState",
         "Fact",

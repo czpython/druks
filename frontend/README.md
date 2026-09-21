@@ -78,7 +78,7 @@ and login windows at `/settings/connections?tab=browser`.
 
 App settings use `/apps/<name>/settings` in the work context. A gear beside the
 app name in the header opens this route. Settings search also links to app settings.
-Options and Agents appear only when the app declares those controls. Both
+Options, Agents, and Bots appear only when the app declares those controls. These
 sections share one app draft. Leaving the app form offers Save, Discard, and
 Stay. An app without controls has no Settings destination. Backend app schemas
 supply these forms without a frontend module. Schedule controls use the

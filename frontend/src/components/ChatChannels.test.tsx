@@ -54,8 +54,9 @@ it.each(['chat', 'helpdesk'])('uses paired access for the number options in %s C
   expect(await screen.findByRole('button', { name: 'Link your number' })).toBeTruthy()
   expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent))
     .toEqual(["Assistant's number — Recommended", 'Your own number'])
-  expect(screen.getByRole('link', { name: 'Agents' }).getAttribute('href'))
-    .toBe(`/apps/${app}/settings/agents`)
+  expect(screen.getByRole('link', { name: 'Bots' }).getAttribute('href'))
+    .toBe(`/apps/${app}/settings/bots`)
+  expect(screen.queryByRole('link', { name: 'Agents' })).toBeNull()
 })
 
 it('keeps WhatsApp setup out of Connections Accounts', async () => {

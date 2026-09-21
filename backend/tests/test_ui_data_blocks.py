@@ -3,11 +3,13 @@ from datetime import UTC, datetime
 import pytest
 from druks.ui import (
     Action,
+    Callout,
     Card,
     Cards,
     Chart,
     ChartSeries,
     Columns,
+    ControlsValue,
     EmptyState,
     Fact,
     Facts,
@@ -94,6 +96,122 @@ def test_a_table_cell_can_reach_another_page():
     assert block["emptyText"] == "No peers yet."
 
 
+def test_a_table_can_select_rows_for_its_actions():
+    (block,) = wire(
+        Table(
+            columns=[TableColumn("Peer")],
+            rows=[TableRow([TextValue("peer-7")], key="7")],
+            select="peer_ids",
+            actions=[Action(label="Park", operation="write_note", tone="danger")],
+        )
+    )
+
+    assert block["select"] == "peer_ids"
+    assert block["rows"][0]["key"] == "7"
+    assert [action["label"] for action in block["actions"]] == ["Park"]
+
+
+def test_a_selectable_table_needs_actions_and_a_key_on_every_row():
+    with pytest.raises(ValueError, match="has actions and no select"):
+        Table(
+            columns=[TableColumn("Peer")],
+            rows=[TableRow([TextValue("peer-7")], key="7")],
+            actions=[Action(label="Park", operation="write_note")],
+        )
+    with pytest.raises(ValueError, match="names select and has no actions"):
+        Table(
+            columns=[TableColumn("Peer")],
+            rows=[TableRow([TextValue("peer-7")], key="7")],
+            select="peer_ids",
+        )
+    with pytest.raises(ValueError, match="a row has no key"):
+        Table(
+            columns=[TableColumn("Peer")],
+            rows=[TableRow([TextValue("peer-7")])],
+            select="peer_ids",
+            actions=[Action(label="Park", operation="write_note")],
+        )
+    with pytest.raises(ValueError, match="two rows keyed"):
+        Table(
+            columns=[TableColumn("Peer")],
+            rows=[
+                TableRow([TextValue("a")], key="7"),
+                TableRow([TextValue("b")], key="7"),
+            ],
+            select="peer_ids",
+            actions=[Action(label="Park", operation="write_note")],
+        )
+
+
+def test_a_table_action_cannot_collect_fields():
+    with pytest.raises(ValueError, match="collects fields"):
+        Table(
+            columns=[TableColumn("Peer")],
+            rows=[TableRow([TextValue("peer-7")], key="7")],
+            select="peer_ids",
+            actions=[
+                Action(
+                    label="Park",
+                    operation="write_note",
+                    fields=[TextField(name="why", label="Why")],
+                )
+            ],
+        )
+
+
+def test_a_table_cell_can_hold_actions():
+    (block,) = wire(
+        Table(
+            columns=[TableColumn("Do")],
+            rows=[
+                TableRow(
+                    [
+                        ControlsValue(
+                            [
+                                Action(label="Go", operation="write_note", tone="primary"),
+                                Link("Home", url="/"),
+                            ]
+                        )
+                    ]
+                )
+            ],
+        )
+    )
+
+    cell = block["rows"][0]["cells"][0]
+    assert cell["value"] == "controls"
+    assert [control["label"] for control in cell["controls"]] == ["Go", "Home"]
+
+
+def test_a_status_can_reach_the_thing_it_names():
+    (facts,) = wire(
+        Facts(
+            [
+                Fact(
+                    "Site",
+                    value=StatusValue(
+                        "live", tone="success", link=Link("live", url="https://ada.example")
+                    ),
+                )
+            ]
+        )
+    )
+
+    assert facts["facts"][0]["value"] == {
+        "value": "status",
+        "label": "live",
+        "tone": "success",
+        "link": {
+            "block": "link",
+            "label": "live",
+            "page": "",
+            "arguments": {},
+            "url": "https://ada.example",
+            "subject": None,
+        },
+    }
+
+
 def test_every_value_carries_its_own_discriminator():
     (facts,) = wire(
         Facts(
@@ -102,6 +220,7 @@ def test_every_value_carries_its_own_discriminator():
                 Fact("Answers", value=NumberValue(40, unit="ms")),
                 Fact("State", value=StatusValue("parked", tone="warning")),
                 Fact("When", value=TimeValue(AT)),
+                Fact("Do", value=ControlsValue([Action(label="Go", operation="write_note")])),
             ]
         )
     )
@@ -111,6 +230,7 @@ def test_every_value_carries_its_own_discriminator():
         "number",
         "status",
         "time",
+        "controls",
     ]
     assert facts["facts"][1]["value"] == {
         "value": "number",
@@ -171,6 +291,20 @@ def test_cards_finds_an_action_in_a_card_and_in_its_empty_state():
         "retire_peer",
         "scan",
     ]
+
+
+def test_a_callout_carries_its_next_step():
+    block = Callout(
+        "Paste the client.",
+        title="Connect first",
+        controls=[
+            Link("Settings → Connections → Services", url="/settings/connections"),
+            Action(label="Retry", operation="retry_connect"),
+        ],
+    )
+
+    assert wire(block)[0]["controls"][0]["url"] == "/settings/connections"
+    assert [action.operation for action in block.iter_actions()] == ["retry_connect"]
 
 
 def test_cards_drop_cannot_collect_fields_or_confirm():
