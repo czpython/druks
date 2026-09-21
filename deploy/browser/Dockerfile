@@ -70,7 +70,7 @@ RUN arch="$(dpkg --print-architecture)" \
 RUN useradd --create-home --shell /bin/bash druks
 
 # The browser runs unsandboxed (Docker's default seccomp blocks the sandbox's
-# namespace syscalls), so Playwright passes --no-sandbox and Chrome shows the
+# namespace syscalls), so the launcher passes --no-sandbox and Chrome shows the
 # operator a "stability and security will suffer" banner in the login window.
 # This managed policy suppresses only that command-line-flag warning; it changes
 # no browser behavior a page could read.
