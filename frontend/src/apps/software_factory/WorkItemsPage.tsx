@@ -43,18 +43,18 @@ function WorkItemRowView({
   return (
     <div className={`row row-work-item${failed ? ' row-failed' : ''}`} onClick={(event) => { if (!(event.target as Element).closest('a')) onOpen(row) }}>
       <div className="work-item-identity">
-        <Link className="work-item-title" href={workItemPathFromSummary(wi)}>
+        <Link className="work-item-title" href={workItemPathFromSummary(wi)} title={wi.title}>
           {wi.title}
         </Link>
         <div className="work-item-references">
           <TicketCell ticketKey={wi.ticketKey} ticketUrl={wi.links.ticket} />
-          <RepoCell repo={wi.repo} project={wi.projectName} />
+          <span className="work-item-repo"><RepoCell repo={wi.repo} project={wi.projectName} /></span>
           {wi.prNumber != null && <PRCell prNumber={wi.prNumber} prUrl={wi.links.pr} />}
         </div>
       </div>
       <div className="work-item-state">
         <StatusGlyph state={status.state} />
-        <span>{live ? `${next}…` : next}</span>
+        <span className="work-item-next" title={next}>{live ? `${next}…` : next}</span>
       </div>
       <span className="work-item-updated">
         {failed ? `Failed ${when}` : parked ? `Waiting ${when}` : `Updated ${when}`}
