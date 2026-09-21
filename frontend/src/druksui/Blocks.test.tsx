@@ -134,8 +134,8 @@ describe('the display core', () => {
 
     expect(screen.getByText('No notes yet')).toBeTruthy()
     expect(screen.getByText('Write a note').getAttribute('href')).toBe('/field_notes')
+    expect(screen.getByText('Write a note').className).toContain('dui-action')
   })
-
   it('renders a callout with its next-step control', () => {
     renderBlocks([
       {
@@ -182,6 +182,8 @@ describe('links', () => {
     expect(link.getAttribute('href')).toBe('https://example.com')
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.getAttribute('title')).toBe('Opens in a new tab')
+    expect(link.className).toContain('dui-link')
+    expect(link.className).not.toContain('dui-action')
   })
 
   it('shows a link to an undeclared page as broken', () => {
@@ -375,6 +377,7 @@ describe('Cards', () => {
     )
     expect(screen.getByText('Ship the board').closest('.dui-card')?.tagName).toBe('DIV')
     expect(screen.getByText('Archive').getAttribute('href')).toBe('/field_notes')
+    expect(screen.getByText('Archive').className).toContain('dui-action')
   })
 
   it('stacks cards in one column when layout is stack', () => {

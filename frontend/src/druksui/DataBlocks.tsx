@@ -83,7 +83,7 @@ export function Controls({ controls }: { controls: (Action | Link)[] }) {
         control.block === 'action' ? (
           <ActionButton key={index} action={control} />
         ) : (
-          <LinkControl key={index} link={control} />
+          <LinkControl key={index} link={control} className="dui-action" />
         ),
       )}
     </div>
@@ -302,6 +302,11 @@ export function Table({
   const [picked, setPicked] = useState<string[]>([])
   const chosen = picked.filter((key) => keys.includes(key))
   const allBox = useRef<HTMLInputElement>(null)
+  const heading = title ? (
+    <h3 id={titleId} className="dui-block-title">
+      {title}
+    </h3>
+  ) : null
 
   useEffect(() => {
     if (!allBox.current) return
@@ -314,7 +319,7 @@ export function Table({
     if (!emptyText) return null
     return (
       <div className="dui-table-block">
-        {title && <h3 className="dui-block-title">{title}</h3>}
+        {heading}
         <div className="dui-table-empty dim">{emptyText}</div>
       </div>
     )
@@ -329,6 +334,7 @@ export function Table({
 
   return (
     <div className="dui-table-block">
+      {heading}
       {selectable && (
         <div className="dui-table-head">
           <div className="dui-links">
@@ -345,11 +351,6 @@ export function Table({
       )}
       <div className="dui-table-scroll">
         <table className="dui-table" aria-labelledby={title ? titleId : undefined}>
-          {title && (
-            <caption className="dui-block-title dui-table-caption" id={titleId}>
-              {title}
-            </caption>
-          )}
           <thead>
             <tr>
               {selectable && (

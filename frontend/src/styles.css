@@ -2057,10 +2057,9 @@ a.dui-status:hover { text-decoration: underline; }
 .dui-table tbody tr:hover > * { background: var(--surface-2); }
 .dui-table tbody tr[data-selected='true'] > * { background: color-mix(in oklch, var(--dui-primary) 8%, var(--surface)); }
 .dui-table .dui-table-select { width: 1%; padding-right: 0; }
-.dui-table [data-align='end'] { text-align: right; }
+.dui-table :is(th, td)[data-align='end'] { text-align: right; }
 
 .dui-table tr > :last-child { padding-right: 16px; }
-.dui-table-caption { text-align: left; caption-side: top; margin: 20px 0 10px; padding: 0; }
 .dui-table-empty { font-size: 13px; line-height: 18px; padding: 24px 0; }
 .dui-table-empty:empty { display: none; }
 

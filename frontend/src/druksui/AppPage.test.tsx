@@ -168,7 +168,7 @@ describe('a declared page', () => {
     await waitFor(() =>
       expect(screen.getByRole('link', { name: 'Open composer (opens in a new tab)' })).toBeTruthy(),
     )
-    const control = container.querySelector('.dui-page-head a.dui-link')
+    const control = container.querySelector('.dui-page-head a.dui-action')
     expect(control?.textContent).toBe('Open composer')
     expect(control?.getAttribute('href')).toBe('https://example.com/compose')
   })

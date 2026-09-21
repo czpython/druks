@@ -362,7 +362,11 @@ describe('Table', () => {
       },
     ])
 
-    expect(screen.getByRole('table', { name: 'Peers' })).toBeTruthy()
+    const heading = screen.getByRole('heading', { name: 'Peers' })
+    expect(heading.tagName).toBe('H3')
+    expect(heading.compareDocumentPosition(screen.getByRole('table', { name: 'Peers' }))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
   })
 
   it('scrolls a wide table inside its own box, headers and all', () => {
