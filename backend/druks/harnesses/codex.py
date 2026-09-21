@@ -256,7 +256,10 @@ def _rate_for(model: str | None) -> tuple[_Rate, bool]:
     if model in _DEFAULT_RATES:
         return _DEFAULT_RATES[model], False
     # Prefix-match Codex variants (e.g. ``gpt-5-codex-preview-2026-05-01``).
-    for known, rate in _DEFAULT_RATES.items():
+    # Longest key first so a specific family (``gpt-5-mini``, ``gpt-5-nano``)
+    # wins over an overlapping generic prefix (``gpt-5``) regardless of the
+    # table's insertion order.
+    for known, rate in sorted(_DEFAULT_RATES.items(), key=lambda item: -len(item[0])):
         if model.startswith(known):
             return rate, False
     return _DEFAULT_RATE, True
