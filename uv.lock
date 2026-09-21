@@ -600,7 +600,7 @@ requires-dist = [
     { name = "blinker", specifier = ">=1.9" },
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=48.0.1" },
-    { name = "dbos", specifier = ">=2.30" },
+    { name = "dbos", specifier = ">=2.30,<3" },
     { name = "drukbox-python-sdk", specifier = ">=0.3.0" },
     { name = "fastapi", specifier = ">=0.138.0" },
     { name = "fastmcp", specifier = ">=4.0.2,<5" },

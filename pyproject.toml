@@ -33,7 +33,8 @@ dependencies = [
     "uuid-utils>=0.16.0",
     "psycopg[binary]>=3.2",
     "alembic>=1.13",
-    "dbos>=2.30",
+    # 3.0 forbids Queue() at import; druks still constructs queues that way.
+    "dbos>=2.30,<3",
     "croniter>=6.2.2",
     "redis>=8",
     "tomlkit>=0.13",
