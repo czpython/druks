@@ -155,7 +155,7 @@ async def test_borrow_yields_a_tunneled_cdp_url(borrow, night_watch):
         "version": 1,
     }
     launch_script = browser.commands[0][2]
-    assert "session-launch --headed --drive" in launch_script
+    assert "session-launch --headed >/work/session/launch.log" in launch_script
     assert not await writer_locks()
     assert (
         await StoredBrowserSession.get_for_name(db_session(), night_watch.docs.name)
@@ -172,7 +172,7 @@ async def test_headless_declaration_launches_headless(borrow):
     async with quiet.cdp():
         pass
 
-    assert "session-launch --headless --drive" in browser.commands[0][2]
+    assert "session-launch --headless >/work/session/launch.log" in browser.commands[0][2]
 
 
 async def test_persisting_borrow_locks_exports_and_stores(borrow, night_watch):

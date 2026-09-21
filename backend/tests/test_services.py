@@ -287,14 +287,17 @@ async def test_manifest_page_submits_the_documented_app_to_github(
         tmp_path, urls={"endpoint": "https://druks.example/"}
     )
 
-    response = await druks_client.get("/api/core/github/manifest")
+    response = await druks_client.get("/api/core/services/github/manifest")
 
     assert response.status_code == 200
     assert 'action="https://github.com/settings/apps/new"' in response.text
     manifest = _manifest_from(response.text)
     assert manifest["name"] == "druks"
     assert manifest["url"] == "https://druks.example"
-    assert manifest["redirect_url"] == "https://druks.example/api/core/github/manifest/callback"
+    assert (
+        manifest["redirect_url"]
+        == "https://druks.example/api/core/services/github/manifest/callback"
+    )
     assert manifest["hook_attributes"] == {
         "url": "https://druks.example/_external/github/events/",
         "active": True,
@@ -313,7 +316,7 @@ async def test_manifest_page_prefers_the_webhook_host_for_deliveries(
         urls={"endpoint": "https://druks.example", "webhook_host": "hooks.druks.example"},
     )
 
-    manifest = _manifest_from((await druks_client.get("/api/core/github/manifest")).text)
+    manifest = _manifest_from((await druks_client.get("/api/core/services/github/manifest")).text)
 
     assert (
         manifest["hook_attributes"]["url"] == "https://hooks.druks.example/_external/github/events/"
@@ -327,7 +330,7 @@ async def test_manifest_page_lets_the_operator_target_an_org(druks_client: TestC
         tmp_path, urls={"endpoint": "https://druks.example"}
     )
 
-    response = await druks_client.get("/api/core/github/manifest")
+    response = await druks_client.get("/api/core/services/github/manifest")
 
     assert '<input name="org">' in response.text
     assert "https://github.com/organizations/" in response.text
@@ -335,7 +338,7 @@ async def test_manifest_page_lets_the_operator_target_an_org(druks_client: TestC
 
 
 async def test_manifest_page_refuses_without_an_endpoint(druks_client: TestClient):
-    response = await druks_client.get("/api/core/github/manifest")
+    response = await druks_client.get("/api/core/services/github/manifest")
 
     assert response.status_code == 409
     assert "urls.endpoint" in response.json()["detail"]
@@ -362,7 +365,7 @@ async def test_manifest_callback_exchanges_the_code_and_connects(
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
     response = await druks_client.get(
-        "/api/core/github/manifest/callback", params={"code": "fresh-code"}
+        "/api/core/services/github/manifest/callback", params={"code": "fresh-code"}
     )
 
     assert response.status_code == 200
@@ -389,7 +392,7 @@ async def test_manifest_callback_rejects_a_dead_code(
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
     response = await druks_client.get(
-        "/api/core/github/manifest/callback", params={"code": "stale"}
+        "/api/core/services/github/manifest/callback", params={"code": "stale"}
     )
 
     assert response.status_code == 400

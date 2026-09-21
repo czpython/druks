@@ -14,7 +14,7 @@ from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 
 # Mounted by the loader under /api/core, like any app's routes.
-router = APIRouter(prefix="/github", tags=["services"])
+router = APIRouter(prefix="/services/github", tags=["services"])
 
 
 @router.get("/manifest", response_class=HTMLResponse)
@@ -35,7 +35,7 @@ async def create_github_app(request: Request) -> HTMLResponse:
     manifest = {
         **Github.manifest,
         "url": endpoint,
-        "redirect_url": f"{endpoint}/api/core/github/manifest/callback",
+        "redirect_url": f"{endpoint}/api/core/services/github/manifest/callback",
         "hook_attributes": {
             "url": f"{settings.urls.webhook_base}/_external/github/events/",
             "active": True,

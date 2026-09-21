@@ -257,7 +257,7 @@ describe('ServicesPane', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Configure GitHub' }))
     fireEvent.click(screen.getByText('Create GitHub App'))
-    expect(open).toHaveBeenCalledWith('/api/core/github/manifest')
+    expect(open).toHaveBeenCalledWith('/api/core/services/github/manifest')
 
     act(() => {
       new BroadcastChannel('druks-service-connect').postMessage('github')

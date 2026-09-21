@@ -5,6 +5,7 @@ from druks.apps.schemas import Operation
 from druks.ui import (
     Action,
     Card,
+    ControlsValue,
     EmptyState,
     Form,
     Link,
@@ -14,8 +15,12 @@ from druks.ui import (
     SecretField,
     Section,
     SelectField,
+    Table,
+    TableColumn,
+    TableRow,
     TextAreaField,
     TextField,
+    TextValue,
 )
 from druks.ui.fields import PageField
 from fastapi import APIRouter
@@ -263,12 +268,59 @@ def test_a_form_keeps_all_fields_on_the_form():
             ),
             fields=[TextField(name="body", label="Body")],
         )
+    with pytest.raises(ValueError, match="Put all form fields on the form"):
+        Form(
+            action=Action(label="Save", operation="write_note"),
+            extra_actions=[
+                Action(
+                    label="Also",
+                    operation="write_note",
+                    fields=[TextField(name="tag", label="Tag")],
+                )
+            ],
+            fields=[TextField(name="body", label="Body")],
+        )
+
+
+def test_a_form_extra_action_sends_the_same_fields():
+    (block,) = wire(
+        Form(
+            title="Draft",
+            fields=[TextField(name="body", label="Note")],
+            action=Action(label="Save", operation="write_note"),
+            extra_actions=[Action(label="Also", operation="write_note")],
+        )
+    )
+
+    assert [action["label"] for action in [block["action"], *block["extraActions"]]] == [
+        "Save",
+        "Also",
+    ]
+
+
+def test_a_form_extra_action_sends_each_value_once():
+    with pytest.raises(ValueError, match="already carries as arguments"):
+        Form(
+            action=Action(label="Save", operation="write_note"),
+            extra_actions=[Action(label="Also", operation="write_note", arguments={"body": "x"})],
+            fields=[TextField(name="body", label="Note")],
+        )
 
 
 def test_a_form_that_submits_on_change_cannot_also_confirm():
     with pytest.raises(ValueError, match="submits on change"):
         Form(
             action=Action(label="Save", operation="write_note", confirm="Sure?"),
+            fields=[TextField(name="body", label="Note")],
+            submit="change",
+        )
+
+
+def test_a_form_that_submits_on_change_cannot_have_extra_actions():
+    with pytest.raises(ValueError, match="also has extra actions"):
+        Form(
+            action=Action(label="Save", operation="write_note"),
+            extra_actions=[Action(label="Also", operation="write_note")],
             fields=[TextField(name="body", label="Note")],
             submit="change",
         )
@@ -391,3 +443,91 @@ def test_a_page_action_cannot_refresh_a_region():
             "x",
             controls=[Action(label="Go", operation="write_note", refresh="region")],
         )
+
+
+def test_a_table_bulk_action_is_checked():
+    page = Page(
+        "x",
+        blocks=[
+            Table(
+                columns=[TableColumn("Do")],
+                rows=[TableRow([TextValue("peer-7")], key="7")],
+                select="peer_ids",
+                actions=[Action(label="Park", operation="nowhere")],
+            )
+        ],
+    )
+
+    assert [action.operation for action in page.iter_actions()] == ["nowhere"]
+    with pytest.raises(ValueError, match="nowhere"):
+        check(page)
+
+
+def test_a_table_cell_action_is_checked():
+    page = Page(
+        "x",
+        blocks=[
+            Table(
+                columns=[TableColumn("Do")],
+                rows=[TableRow([ControlsValue([Action(label="Go", operation="nowhere")])])],
+            )
+        ],
+    )
+
+    assert [action.operation for action in page.iter_actions()] == ["nowhere"]
+    with pytest.raises(ValueError, match="nowhere"):
+        check(page)
+
+
+def test_an_action_in_a_table_cell_that_refreshes_its_region_needs_one():
+    with pytest.raises(ValueError, match="refreshes its region, and it sits in none"):
+        Page(
+            "x",
+            blocks=[
+                Table(
+                    columns=[TableColumn("Do")],
+                    rows=[
+                        TableRow(
+                            [
+                                ControlsValue(
+                                    [Action(label="Go", operation="write_note", refresh="region")]
+                                )
+                            ]
+                        )
+                    ],
+                )
+            ],
+        )
+
+
+def test_a_named_section_can_refresh_from_a_table_cell():
+    page = Page(
+        "x",
+        blocks=[
+            Section(
+                name="queue",
+                blocks=[
+                    Table(
+                        columns=[TableColumn("Do")],
+                        rows=[
+                            TableRow(
+                                [
+                                    ControlsValue(
+                                        [
+                                            Action(
+                                                label="Go",
+                                                operation="write_note",
+                                                refresh="region",
+                                            )
+                                        ]
+                                    )
+                                ]
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    assert [action.label for action in page.iter_actions()] == ["Go"]

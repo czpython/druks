@@ -157,6 +157,7 @@ describe('every V1 renderer', () => {
         control.closest('label')?.textContent?.trim()
       expect(named).toBeTruthy()
       expect(control.getAttribute('tabindex')).not.toBe('-1')
+      if ((control as HTMLButtonElement).disabled) continue
       control.focus()
       expect(document.activeElement).toBe(control)
     }
@@ -297,6 +298,9 @@ describe('every V1 renderer', () => {
           arguments: {},
           fields: [],
         },
+        extraActions: [],
+        submit: 'button',
+        layout: 'stack',
       },
     ])
 
