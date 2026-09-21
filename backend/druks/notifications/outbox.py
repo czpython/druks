@@ -1,4 +1,4 @@
-from dbos import DBOS, Queue, StepOptions
+from dbos import DBOS, StepOptions
 from dbos._error import DBOSMaxStepRetriesExceeded
 
 from druks.durable.engine import step_session
@@ -9,9 +9,8 @@ from druks.notifications.models import Destination, Notification
 
 # Delivery retries on its own schedule, fully decoupled from run lifecycles: a
 # flaky provider endpoint must never retry (or wedge) a run's steps, so the
-# outbox gets its own queue + workflow instead of riding run_queue. Both are
-# module-level so a workflow body can import and enqueue directly.
-notifications_queue = Queue("druks_notifications")
+# outbox gets its own queue + workflow instead of riding RUN_QUEUE. The
+# workflow must exist before DBOS.launch(); the queue is registered after.
 
 _SEND_RETRIES: StepOptions = {"retries_allowed": True, "max_attempts": 5}
 

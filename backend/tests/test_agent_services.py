@@ -21,7 +21,7 @@ from druks.api.exceptions import (
     SubjectBusy,
 )
 from druks.db import db_session
-from druks.durable.engine import run_queue
+from druks.durable.engine import RUN_QUEUE
 from druks.durable.enums import WorkflowEvent
 from druks.durable.exceptions import AgentCallNotFound
 from druks.durable.models import AgentCall, Artifact, Run
@@ -366,7 +366,7 @@ async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):
 
     assert result == retried_run_id
     list_steps.assert_awaited_once_with(run.id)
-    fork.assert_awaited_once_with(run.id, 8, queue_name=run_queue.name)
+    fork.assert_awaited_once_with(run.id, 8, queue_name=RUN_QUEUE)
     druks_db.expunge_all()
     retried = await druks_db.get(Run, retried_run_id)
     assert retried.kind == run.kind

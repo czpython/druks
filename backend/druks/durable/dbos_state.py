@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from druks.durable.enums import RunState
 
 # DBOS keeps its bookkeeping in this schema of the app database (init_dbos
-# points both DBOS urls at it), so a run's state is one correlated read away.
+# points the system URL at it), so a run's state is one correlated read away.
 DBOS_SYSTEM_SCHEMA = "dbos"
 
 # start() commits the durable_runs row before DBOS commits the enqueue, so a

@@ -1146,7 +1146,7 @@ async def test_failed_enqueue_claims_no_slot(runtime, monkeypatch):
         raise RuntimeError("queue down")
 
     with monkeypatch.context() as patched:
-        patched.setattr("druks.workflows.run_queue.enqueue_async", enqueue_unavailable)
+        patched.setattr("druks.workflows.DBOS.enqueue_workflow_async", enqueue_unavailable)
         with pytest.raises(RuntimeError, match="queue down"):
             await runtime.SubjectFlow.start(subject=subject)
 

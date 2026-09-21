@@ -1,7 +1,7 @@
 import json
 import secrets
 
-from dbos import DBOS, Queue, SetEnqueueOptions, SetWorkflowAttributes, SetWorkflowID, StepOptions
+from dbos import DBOS, SetEnqueueOptions, SetWorkflowAttributes, SetWorkflowID, StepOptions
 from pydantic_core import to_json
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,7 +10,7 @@ from druks.apps.loader import get_app
 from druks.chat.enums import BotAccess, PauseSignal
 from druks.chat.models import Conversation
 from druks.chat.service import deliver
-from druks.durable.engine import step_session
+from druks.durable.engine import PAUSE_QUEUE, step_session
 from druks.durable.models import Run
 from druks.redis import get_client
 from druks.secrets.enums import SecretKind
@@ -26,9 +26,6 @@ from .constants import (
     QUESTION_MESSAGE,
     TAKEN_OVER_MESSAGE,
 )
-
-# A pause holds a chat for hours, so it has its own queue, apart from runs.
-pause_queue = Queue("druks_chat_pauses")
 
 
 async def get_bot_connection(session: AsyncSession, connection_id: str) -> VaultSecret | None:
@@ -183,7 +180,7 @@ async def take_over(
                 duplication_policy="return-existing",
             ),
         ):
-            await pause_queue.enqueue_async(pause, conversation.id)
+            await DBOS.enqueue_workflow_async(PAUSE_QUEUE, pause, conversation.id)
 
 
 @DBOS.workflow(name="chat.pause")
