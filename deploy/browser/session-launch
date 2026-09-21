@@ -20,6 +20,9 @@ const RUNTIME_PATH = path.join(SESSION_ROOT, ".runtime");
 const PID_PATH = path.join(RUNTIME_PATH, "launcher.pid");
 const READY_PATH = path.join(RUNTIME_PATH, "ready.json");
 const CLOSED_PATH = path.join(RUNTIME_PATH, "closed");
+// Chrome drops session-only cookies when it closes, and a login often lives in
+// one. They ride in the profile so the export carries them to the next launch.
+const SESSION_COOKIES_PATH = path.join(PROFILE_PATH, "druks-session-cookies.json");
 
 // Chrome's --proxy-server cannot carry a password. Playwright authenticates the
 // proxy when you give it a user name and password. So a proxy URL with a user
@@ -109,7 +112,6 @@ async function main() {
       channel: "chrome",
       proxy: proxyOption,
       args: [
-        "--restore-last-session",
         "--remote-debugging-address=127.0.0.1",
         "--remote-debugging-port=9222",
         "--window-size=1920,1080",
@@ -133,6 +135,9 @@ async function main() {
     if (meta.format === "storage_state") {
       await context.setStorageState(STORAGE_STATE_PATH);
     }
+    if (fs.existsSync(SESSION_COOKIES_PATH)) {
+      await context.addCookies(JSON.parse(fs.readFileSync(SESSION_COOKIES_PATH, "utf8")));
+    }
 
     // Open on the session's own site so the operator lands where they log in,
     // not on a blank tab. Best-effort: a slow or blocked site still yields a
@@ -155,6 +160,13 @@ async function main() {
     await shutdownRequested;
   } finally {
     if (context) {
+      // A window the operator already closed has no cookies left to read.
+      const cookies = await context.cookies().catch(() => []);
+      fs.writeFileSync(
+        SESSION_COOKIES_PATH,
+        JSON.stringify(cookies.filter((cookie) => cookie.expires === -1)),
+        { mode: 0o600 },
+      );
       await context.close();
     }
     if (isReady) {
