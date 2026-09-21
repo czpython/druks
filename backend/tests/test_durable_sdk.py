@@ -22,7 +22,7 @@ from druks.db import db_session
 from druks.durable import FatalError, Run, RunState, WorkflowError, engine
 from druks.durable.dbos_state import latest_invocations, workflow_status
 from druks.durable.engine import (
-    _scheduled,
+    _workflow_schedules,
     apply_schedules,
     configure_engine,
     init_dbos,
@@ -858,7 +858,7 @@ async def test_task_name_uses_declaring_app(runtime):
 
 
 async def test_every_registers_schedule(runtime):
-    workflow, entry = next(row for row in _scheduled if row[0].kind == "daily_sweep")
+    workflow, entry = next(row for row in _workflow_schedules if row[0].kind == "daily_sweep")
     assert workflow.every == "0 6 * * *"
     parameters = list(inspect.signature(entry).parameters.values())
     assert parameters[0].annotation is datetime
@@ -866,7 +866,7 @@ async def test_every_registers_schedule(runtime):
 
 
 async def test_scheduled_tick_fires_dispatch_not_run(runtime):
-    _, entry = next(row for row in _scheduled if row[0].kind == "scheduled_dispatch")
+    _, entry = next(row for row in _workflow_schedules if row[0].kind == "scheduled_dispatch")
     await entry(datetime.now(UTC), None)
 
     deadline = asyncio.get_event_loop().time() + 15
@@ -894,7 +894,7 @@ async def test_scheduled_dispatch_must_be_nullary(runtime):
 
 
 async def test_apply_schedules_drops_undeclared(runtime):
-    workflow, entry = next(row for row in _scheduled if row[0].kind == "daily_sweep")
+    workflow, entry = next(row for row in _workflow_schedules if row[0].kind == "daily_sweep")
     DBOS.create_schedule(schedule_name="stale_cron", workflow_fn=entry, schedule=workflow.every)
     assert "stale_cron" in {s["schedule_name"] for s in DBOS.list_schedules()}
 
@@ -973,6 +973,8 @@ async def test_apply_schedules_evaluates_cron_in_installation_timezone(runtime, 
     async with session_scope(runtime.engine) as session:
         await apply_schedules(session)
     assert (await DBOS.get_schedule_async("daily_sweep"))["cron_timezone"] == "Europe/Madrid"
+    task_schedule = await DBOS.get_schedule_async(engine._task_schedules[0][0])
+    assert task_schedule["cron_timezone"] == "UTC"
 
 
 async def test_user_settings_get_recreates_the_singleton(runtime):
@@ -1144,7 +1146,7 @@ async def test_failed_enqueue_claims_no_slot(runtime, monkeypatch):
         raise RuntimeError("queue down")
 
     with monkeypatch.context() as patched:
-        patched.setattr("druks.workflows.run_queue.enqueue_async", enqueue_unavailable)
+        patched.setattr("druks.workflows.DBOS.enqueue_workflow_async", enqueue_unavailable)
         with pytest.raises(RuntimeError, match="queue down"):
             await runtime.SubjectFlow.start(subject=subject)
 

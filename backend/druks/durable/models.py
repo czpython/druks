@@ -25,6 +25,7 @@ from druks.accounts.models import Account
 from druks.apps.registry import workflows
 from druks.core.models import Uuid7Pk
 from druks.database import get_session
+from druks.durable.constants import RUN_QUEUE
 from druks.durable.dbos_state import (
     retry_from_expression,
     state_expression,
@@ -33,7 +34,7 @@ from druks.durable.dbos_state import (
     updated_at_expression,
     workflow_status,
 )
-from druks.durable.engine import _step_engine, run_queue
+from druks.durable.engine import _step_engine
 from druks.durable.enums import (
     ACTIVE_STATES,
     OPEN_STATES,
@@ -464,7 +465,7 @@ class Run(Base):
         handle = await DBOS.fork_workflow_async(
             self.id,
             start_step,
-            queue_name=run_queue.name,
+            queue_name=RUN_QUEUE,
         )
         workflow_id = handle.workflow_id
         await Run.create_row(

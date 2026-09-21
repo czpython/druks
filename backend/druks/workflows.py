@@ -17,7 +17,7 @@ from typing import (
 )
 
 from croniter import croniter
-from dbos import DBOS, Queue, SetEnqueueOptions, SetWorkflowAttributes, SetWorkflowID, StepOptions
+from dbos import DBOS, SetEnqueueOptions, SetWorkflowAttributes, SetWorkflowID, StepOptions
 from dbos._dbos import _get_or_create_dbos_registry
 from dbos._error import (
     DBOSAwaitedWorkflowCancelledError,
@@ -42,12 +42,13 @@ from druks.chat.service import deliver, report_failure, report_result
 from druks.database import get_session
 from druks.db import db_session
 from druks.durable.activity import set_run_phase
+from druks.durable.constants import NOTIFICATIONS_QUEUE, RUN_QUEUE, TASK_QUEUE
 from druks.durable.datastructures import Subject
 from druks.durable.engine import (
     _step_engine,
     bound_session,
     register_schedule,
-    run_queue,
+    register_task_schedule,
     step_session,
 )
 from druks.durable.enums import AgentCallStatus, RunState, WorkflowEvent
@@ -62,7 +63,7 @@ from druks.durable.schemas import (
 from druks.events.models import Event
 from druks.harnesses.exceptions import HarnessError
 from druks.models import StoredSubject, snake_name
-from druks.notifications.outbox import notifications_queue, send_notification
+from druks.notifications.outbox import send_notification
 from druks.sandbox.client import provisioning_key, sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.sandbox.datastructures import Sandbox
@@ -118,8 +119,6 @@ current_workflow: ContextVar["Workflow"] = ContextVar("current_workflow")
 # True while a @step body runs. An agent run inside one is already memoized by that
 # step, so it skips wrapping itself; outside, it wraps itself in its own step.
 _in_step: ContextVar[bool] = ContextVar("_in_step", default=False)
-
-task_queue = Queue("druks_tasks")
 
 # Reserved so _entry's arity and old checkpoints stay untouched; a body
 # parameter may not claim either.
@@ -411,7 +410,7 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
     if notification_id:
         # The step memoized the row (one per parked round); this body-level enqueue
         # is DBOS's deterministic child-start, so a replayed park never double-sends.
-        await notifications_queue.enqueue_async(send_notification, notification_id)
+        await DBOS.enqueue_workflow_async(NOTIFICATIONS_QUEUE, send_notification, notification_id)
 
 
 async def _post_to_chat(workflow_id: str, name: str, post: Callable) -> None:
@@ -495,12 +494,14 @@ class _Task:
 
         if every:
 
-            @DBOS.scheduled(every)
             @DBOS.workflow(name=f"{self.name}.scheduled")
-            async def _scheduled_entry(scheduled_at: datetime, started_at: datetime | None) -> None:
+            async def _scheduled_entry(
+                _scheduled_at: datetime, _context: dict[str, Any] | None = None
+            ) -> None:
                 await self._run({})
 
             self._scheduled_entry = _scheduled_entry
+            register_task_schedule(f"{self.name}.scheduled", every, _scheduled_entry)
 
     async def enqueue(self, **input: Any) -> None:
         if _in_step.get():
@@ -512,7 +513,7 @@ class _Task:
             wire = self._input_model.model_validate(input).model_dump(mode="json")
         elif input:
             raise WorkflowError(f"task {self.name} takes no input")
-        await task_queue.enqueue_async(self._entry, wire)
+        await DBOS.enqueue_workflow_async(TASK_QUEUE, self._entry, wire)
 
     async def _run(self, input: dict[str, Any]) -> None:
         kwargs: dict[str, Any] = {}
@@ -1116,7 +1117,9 @@ class Workflow:
                 SetWorkflowAttributes(attributes),
                 enqueue_options,
             ):
-                handle = await run_queue.enqueue_async(cls._entry, subject_record, wire)
+                handle = await DBOS.enqueue_workflow_async(
+                    RUN_QUEUE, cls._entry, subject_record, wire
+                )
             if handle.workflow_id == workflow_id:
                 # The body also creates its row (idempotently) — this one just makes it
                 # visible before an executor picks the workflow up.
