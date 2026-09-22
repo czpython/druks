@@ -63,13 +63,17 @@ def main() -> None:
     create_app_parser = create_subparsers.add_parser(
         "app",
         help=(
-            "Scaffold a standalone app package at ./druks-<name>: a "
+            "Scaffold a standalone app package in the current directory: a "
             "registered App subclass, an /api/<name> router, and its own "
             "Alembic history — bootable once installed."
         ),
     )
     create_app_parser.add_argument(
-        "name", help="Lowercase identifier ([a-z][a-z0-9_]*) — keys /api/<name> and more."
+        "name",
+        help=(
+            "Lowercase identifier ([a-z][a-z0-9_]*) or its hyphenated spelling "
+            "— keys /api/<name> and more."
+        ),
     )
     args = parser.parse_args()
 

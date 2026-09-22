@@ -68,29 +68,31 @@ rows. See [Activity facts](#activity-facts-and-signals) for the ownership rules.
 ## Scaffold and prove the package
 
 ```bash
-uvx --from druks druks create app night_watch
-cd druks-night_watch
+uvx --from druks druks create app night-watch
+cd druks-night-watch
 uv sync
 uv run pytest
 ```
 
-From a Druks checkout, `uv run druks create app night_watch` scaffolds with
+From a Druks checkout, `uv run druks create app night-watch` scaffolds with
 that checkout's CLI instead.
 
-The command writes a standalone `druks-night_watch` project in the current
-directory. Its `pyproject.toml` contains:
+The command writes a standalone `druks-night-watch` project in the current
+directory. The folder and the distribution use hyphens. The app name and its
+package use underscores. Its `pyproject.toml` contains:
 
 ```toml
 [project.entry-points."druks.apps"]
 night_watch = "druks_night_watch.app:NightWatch"
 ```
 
-The name must match `[a-z][a-z0-9_]*`. It becomes the API namespace, table
+The app name must match `[a-z][a-z0-9_]*`. The command also accepts the
+hyphenated spelling and converts it. The name becomes the API namespace, table
 prefix, migration version-table suffix, and settings namespace. Installing the
 distribution is the registration:
 
 ```bash
-uv pip install -e /path/to/druks-night_watch
+uv pip install -e /path/to/druks-night-watch
 ```
 
 At boot Druks imports installed entry points and fails loudly on duplicate

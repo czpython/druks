@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`druks-{{ name }}` is a Druks app: a standalone Python distribution that owns
+`druks-{{ slug }}` is a Druks app: a standalone Python distribution that owns
 domain behavior while Druks supplies durable execution, agents, events, gates,
 webhooks, and the dashboard.
 

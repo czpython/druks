@@ -9,10 +9,10 @@ from fastapi.testclient import TestClient
 
 
 def test_create_app_scaffolds_a_loadable_package(tmp_path):
-    target = create_app("night_watch", tmp_path)
+    target = create_app("daily_quote", tmp_path)
 
-    assert target == tmp_path / "druks-night_watch"
-    package = target / "druks_night_watch"
+    assert target == tmp_path / "druks-daily-quote"
+    package = target / "druks_daily_quote"
     assert (package / "migrations" / "versions").is_dir()
     rendered = [path for path in target.rglob("*") if path.is_file()]
     assert rendered
@@ -25,10 +25,11 @@ def test_create_app_scaffolds_a_loadable_package(tmp_path):
     for path in rendered:
         assert "-tpl" not in path.name
         assert "{{" not in path.read_text()
-    assert (
-        'night_watch = "druks_night_watch.app:NightWatch"'
-        in (target / "pyproject.toml").read_text()
-    )
+    # House style: the folder and the distribution use hyphens. The app name
+    # and the package keep underscores.
+    pyproject = (target / "pyproject.toml").read_text()
+    assert 'name = "druks-daily-quote"' in pyproject
+    assert 'daily_quote = "druks_daily_quote.app:DailyQuote"' in pyproject
 
     # No rendered file may reference retired surfaces: the old storage namespace, the
     # taskiq worker, the one-arg ``config`` workflow wording, or either spelling of a
@@ -48,15 +49,15 @@ def test_create_app_scaffolds_a_loadable_package(tmp_path):
     # and mounting must serve its API routes and the pages it declares.
     sys.path.insert(0, str(target))
     try:
-        module = importlib.import_module("druks_night_watch.app")
-        night_watch = module.NightWatch
-        assert night_watch.name == "night_watch"
-        assert night_watch.table_prefix == "night_watch_"
-        assert night_watch.package == "druks_night_watch"
+        module = importlib.import_module("druks_daily_quote.app")
+        daily_quote = module.DailyQuote
+        assert daily_quote.name == "daily_quote"
+        assert daily_quote.table_prefix == "daily_quote_"
+        assert daily_quote.package == "druks_daily_quote"
 
         # An installed app has its package claimed by the loader before any
         # module imports; the generated workflow resolves its identity from that.
-        register_workflow_package(night_watch.package, night_watch.name)
+        register_workflow_package(daily_quote.package, daily_quote.name)
 
         for role in (
             "models",
@@ -67,41 +68,43 @@ def test_create_app_scaffolds_a_loadable_package(tmp_path):
             "pages",
             "subscribers",
         ):
-            importlib.import_module(f"druks_night_watch.{role}")
+            importlib.import_module(f"druks_daily_quote.{role}")
 
         # The workflow guidance must not teach a per-run app= argument —
         # a workflow's identity comes from its declaring app.
-        assert "app=" not in (target / "druks_night_watch" / "workflows.py").read_text()
+        assert "app=" not in (target / "druks_daily_quote" / "workflows.py").read_text()
 
         api = FastAPI()
-        mount(api, night_watch, night_watch.discover())
+        mount(api, daily_quote, daily_quote.discover())
         # Scaffolding is under test, not the identity gate.
         from druks.accounts.dependencies import current_account
 
         api.dependency_overrides[current_account] = lambda: None
         client = TestClient(api)
-        assert client.get("/api/night_watch/status").json() == {"app": "night_watch"}
+        assert client.get("/api/daily_quote/status").json() == {"app": "daily_quote"}
         # The landing page is the scaffold's own, and it renders with no
         # JavaScript anywhere in the package.
-        landing = client.get("/api/night_watch/pages")
+        landing = client.get("/api/daily_quote/pages")
         assert landing.status_code == 200
-        assert landing.json()["title"] == "NightWatch"
+        assert landing.json()["title"] == "DailyQuote"
         assert landing.json()["blocks"][0]["block"] == "stack"
-        assert night_watch.frontend_dist() is None
-        assert [page.name for page in night_watch.pages()] == ["overview"]
-        assert [page.label for page in night_watch.navigation_pages()] == ["overview"]
+        assert daily_quote.frontend_dist() is None
+        assert [page.name for page in daily_quote.pages()] == ["overview"]
+        assert [page.label for page in daily_quote.navigation_pages()] == ["overview"]
     finally:
         sys.path.remove(str(target))
-        _workflow_packages.pop("druks_night_watch", None)
-        for name in [m for m in sys.modules if m.startswith("druks_night_watch")]:
+        _workflow_packages.pop("druks_daily_quote", None)
+        for name in [m for m in sys.modules if m.startswith("druks_daily_quote")]:
             del sys.modules[name]
 
 
 def test_create_app_rejects_bad_and_taken_names(tmp_path):
     with pytest.raises(ValueError, match="must match"):
-        create_app("Night-Watch", tmp_path)
+        create_app("Daily-Quote", tmp_path)
     with pytest.raises(ValueError, match="already installed"):
         create_app("software_factory", tmp_path)
-    create_app("night_watch", tmp_path)
+    create_app("daily_quote", tmp_path)
+    # A hyphenated argument names the same app. It collides with the folder
+    # that the snake_case spelling wrote.
     with pytest.raises(ValueError, match="already exists"):
-        create_app("night_watch", tmp_path)
+        create_app("daily-quote", tmp_path)
