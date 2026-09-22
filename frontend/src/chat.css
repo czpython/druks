@@ -115,7 +115,7 @@
 .chat-composer-controls:focus-within { border-color: var(--chat-accent); }
 .chat-composer textarea { flex: 1; width: 100%; min-width: 0; min-height: 36px; max-height: 180px; field-sizing: content; resize: vertical; padding: 6px 8px; border: 0; background: transparent; color: var(--text); font: inherit; line-height: 1.6; }
 .chat-composer textarea::placeholder { color: var(--text-dim); }
-.page-chat .chat-composer textarea:focus-visible { outline-offset: -2px; }
+.page-chat .chat-composer textarea:focus-visible { outline: none; }
 .chat-composer-actions { display: flex; align-items: center; gap: 8px; }
 .chat-composer > p { margin: 7px 0 0; color: var(--text-dim); font-size: 11px; text-align: right; }
 .chat-thread.is-new { overflow-y: auto; }
