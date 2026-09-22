@@ -5,10 +5,11 @@
 # the same tool layers to whichever base ``BASE`` selects:
 #
 #   - ``sandbox`` (the default target, on ``docker-base``) serves the drukbox
-#     docker provider, published as ghcr.io/czpython/druks/sandbox. It swaps
-#     the base entrypoint to seed the non-root ``druks`` user because Claude
-#     Code refuses ``--permission-mode bypassPermissions`` as root. Point
-#     DRUKS_SANDBOX_IMAGE at it and run drukbox with DOCKER_SSH_USERNAME=druks.
+#     docker provider, published as ghcr.io/czpython/druks/sandbox. It adds
+#     the non-root ``druks`` user because Claude Code refuses
+#     ``--permission-mode bypassPermissions`` as root; the base entrypoint
+#     seeds that user's key when drukbox runs with DOCKER_SSH_USERNAME=druks.
+#     Point DRUKS_SANDBOX_IMAGE at it.
 #   - ``sbx`` (build with ``--build-arg BASE=sbx-base``) serves the drukbox
 #     docker-sbx provider as a Docker Sandboxes template, published as
 #     ghcr.io/czpython/druks/sandbox-sbx. The base's env-free entrypoint and
@@ -20,7 +21,7 @@
 # Both targets are published by .github/workflows/publish-sandbox-image.yml.
 ARG BASE=docker-base
 
-FROM ghcr.io/czpython/drukbox/sandbox:latest@sha256:72c6ab246c53481051d8d4ec9ed34e9aff47f539f989f625cf20ba82e9b3f311 AS docker-base
+FROM ghcr.io/czpython/drukbox/sandbox:latest@sha256:cccf324cada9c1b0df409858dac8188e0ed2591ed88ee3d5fb59db9055a75244 AS docker-base
 FROM ghcr.io/czpython/drukbox/sbx-sandbox:latest@sha256:ab08421818ad21ed7a8a9db6f5c184a754c4ab6c85c26877983c245dbcd34bcf AS sbx-base
 
 FROM ${BASE} AS toolchain
@@ -64,10 +65,5 @@ RUN useradd --create-home --shell /bin/bash druks
 FROM toolchain AS sbx
 
 # Docker provider image, the default target: ``docker build deploy/sandbox``
-# builds this one.
+# builds this one. The toolchain as is: the base entrypoint boots it.
 FROM toolchain AS sandbox
-
-COPY entrypoint.sh /usr/local/bin/druks-sandbox-entrypoint
-RUN chmod +x /usr/local/bin/druks-sandbox-entrypoint
-
-ENTRYPOINT ["/usr/local/bin/druks-sandbox-entrypoint"]
