@@ -1,5 +1,5 @@
 [project]
-name = "druks-{{ name }}"
+name = "druks-{{ slug }}"
 version = "0.1.0"
 description = "{{ Name }} app for druks."
 requires-python = ">=3.11"

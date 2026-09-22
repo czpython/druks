@@ -103,7 +103,7 @@ Druks does not require an app-specific plugin list.
 Scaffold one with the published CLI, no checkout required:
 
 ```bash
-uvx --from druks druks create app night_watch
+uvx --from druks druks create app daily-quote
 ```
 
 The generated project root carries an `AGENTS.md` with the contracts and a link

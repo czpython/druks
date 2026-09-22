@@ -12,11 +12,13 @@ _PACKAGE_DIR = "package"
 
 
 def create_app(name: str, parent: Path) -> Path:
-    """Copy the app template to ``parent/druks-<name>`` and render its
+    """Copy the app template to ``parent/druks-<slug>`` and render its
     placeholders — a standalone package whose entry point self-registers with the
-    platform on install. Raises ``ValueError`` on a bad name, a collision with an
+    platform on install. ``name`` may use hyphens; the app name is its
+    snake_case form. Raises ``ValueError`` on a bad name, a collision with an
     installed app, or an existing target directory."""
-    if not NAME_RE.match(name):
+    app_name = name.replace("-", "_")
+    if not NAME_RE.match(app_name):
         raise ValueError(
             f"app name {name!r} must match {NAME_RE.pattern!r} — it keys the "
             "/api/<name> namespace, the version table, and settings keys"
@@ -24,21 +26,26 @@ def create_app(name: str, parent: Path) -> Path:
     # Names only, no entry.load(): colliding with an installed app would break
     # boot, and listing entry points doesn't import anything.
     installed = {entry.name for entry in metadata.entry_points(group="druks.apps")}
-    if name in installed:
-        raise ValueError(f"app {name!r} is already installed")
-    target = parent / f"druks-{name}"
+    if app_name in installed:
+        raise ValueError(f"app {app_name!r} is already installed")
+    # The folder and the distribution use hyphens, like the other druks apps.
+    # The app name and the package keep underscores: the name keys /api/<name>,
+    # the table prefix, and the settings namespace.
+    slug = app_name.replace("_", "-")
+    target = parent / f"druks-{slug}"
     if target.exists():
         raise ValueError(f"{target} already exists")
 
     values = {
-        "{{ name }}": name,
-        "{{ Name }}": "".join(part.capitalize() for part in name.split("_")),
+        "{{ name }}": app_name,
+        "{{ slug }}": slug,
+        "{{ Name }}": "".join(part.capitalize() for part in app_name.split("_")),
     }
     for source in sorted(_TEMPLATE.rglob("*")):
         if source.is_dir():
             continue
         parts = [
-            f"druks_{name}" if part == _PACKAGE_DIR else part
+            f"druks_{app_name}" if part == _PACKAGE_DIR else part
             for part in source.relative_to(_TEMPLATE).parts
         ]
         if parts[-1].endswith(_TPL_SUFFIX):
