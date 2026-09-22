@@ -1955,6 +1955,7 @@ a.dui-status:hover { text-decoration: underline; }
 
 .dui-cards { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 16px 0; position: relative; }
 .dui-cards-stack { display: flex; flex-direction: column; }
+.dui-cards > li { display: grid; }
 /* A board column stretches to the tallest neighbor. The drop target has to
    fill that height, or an empty column only accepts a drop on its empty copy.
    min-width: 0 keeps columns from growing with empty copy, which would shove
