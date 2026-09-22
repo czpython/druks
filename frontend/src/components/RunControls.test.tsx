@@ -74,6 +74,7 @@ describe('InAppReview', () => {
         },
       ],
       context,
+      reply_fields: ['action', 'answers', 'note'],
     }
     renderReview(ask)
 
@@ -102,11 +103,17 @@ describe('InAppReview', () => {
     expect(screen.getByText('Keep this quote?')).toBeTruthy()
     expect(screen.getByText('keep')).toBeTruthy()
     expect(screen.getByText('skip')).toBeTruthy()
+    expect(screen.queryByLabelText('Your note')).toBeNull()
   })
 
   it('explains what a note does', () => {
     stubFetch()
-    renderReview({ presentation: 'in_app', controls: ['approve'], questions: [] })
+    renderReview({
+      presentation: 'in_app',
+      controls: ['approve'],
+      questions: [],
+      reply_fields: ['action', 'answers', 'note'],
+    })
 
     expect(screen.getByText('A note is sent to the agent as feedback.')).toBeTruthy()
   })

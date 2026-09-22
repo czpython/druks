@@ -141,6 +141,8 @@ export interface InputRequest {
   artifact_id?: string | null
   /** Workflow-declared prose rendered beside the reviewed document. */
   context?: string
+  /** The reply fields the gate declares. */
+  reply_fields?: string[]
 }
 
 // A call's renderable output, fetched to render inside an in-app review.

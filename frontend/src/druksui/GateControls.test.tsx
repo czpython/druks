@@ -37,6 +37,7 @@ const GATE: Gate = {
       },
     ],
     context: 'The plan covers three files.',
+    reply_fields: ['action', 'answers', 'note'],
   },
   artifact: null,
 }

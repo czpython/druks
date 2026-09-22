@@ -90,6 +90,7 @@ __all__ = [
     "Workflow",
     "WorkflowError",
     "WorkflowEvent",
+    "YesNo",
     "step",
     "task",
 ]
@@ -105,7 +106,6 @@ GATE_TTL_SECONDS = 14 * 24 * 60 * 60
 # agent supplies the plan and questions (content), but the verbs are ours — so a
 # resume can only carry an action we defined, the line the resume endpoint checks.
 _ReviewAction = Literal["approve", "request_changes"]
-_REVIEW_CONTROLS = get_args(_ReviewAction)
 
 T = TypeVar("T")
 GateReply = TypeVar("GateReply", bound="Gate")
@@ -342,6 +342,14 @@ class OperatorReply(Gate):
     note: str = ""
 
 
+class YesNo(Gate):
+    """A built-in yes or no decision, with an optional note."""
+
+    name = "yes_no"
+    action: Literal["yes", "no"]
+    note: str = ""
+
+
 async def _park(
     workflow: "Workflow",
     gate: type[GateReply],
@@ -351,6 +359,12 @@ async def _park(
     # Shared park core: a park lasts days, so reap the warm VM, then suspend on the
     # gate's channel until Run.resume answers it.
     await workflow._reap_run()
+    if input_request and input_request.get("presentation") == "in_app":
+        # The dashboard shows a note box only for a gate whose reply fields
+        # include note.
+        input_request = {"questions": [], **input_request, "reply_fields": list(gate.model_fields)}
+        if action := gate.model_fields.get("action"):
+            input_request.setdefault("controls", list(get_args(action.annotation)))
     await _emit_run_event(
         workflow.workflow_id,
         RunState.PARKED,
@@ -887,7 +901,6 @@ class Workflow:
             raise SubjectlessGate(OperatorReply.name)
         request = {
             "presentation": "in_app",
-            "controls": list(_REVIEW_CONTROLS),
             "questions": [q.model_dump(mode="json") for q in questions or ()],
         }
         if context:

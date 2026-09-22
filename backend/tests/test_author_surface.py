@@ -32,6 +32,7 @@ AUTHOR_SURFACE = {
         "Workflow",
         "WorkflowError",
         "WorkflowEvent",
+        "YesNo",
         "step",
         "task",
     },
