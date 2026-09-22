@@ -400,7 +400,7 @@ if status.gate:
 
 The shell derives everything else from the parked run: the questions, the
 options, the recommended choice, the context, the controls, the note, and the
-artifact.
+artifact. The note box shows only when the gate declares `note`.
 
 - The shell reads `GET /api/gates/{run}`.
 - The shell submits `POST /api/gates/{run}/answer`.

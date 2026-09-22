@@ -819,6 +819,16 @@ subjectless custom gate must override `on_wait()` to show the wait.
 Without this
 override, Druks raises an error instead of a silent park.
 
+For a yes or no decision, park the built-in `YesNo` gate:
+
+```python
+from druks.workflows import YesNo
+
+reply = await YesNo.wait(input_request={"presentation": "in_app", "label": "Keep this quote?"})
+if reply.action == "yes":
+    ...
+```
+
 Raise `FatalError` for a deliberate domain stop. If readers need a stable
 machine failure code, subclass it. Set `code` on the subclass. Unexpected exceptions fail
 the run and are re-raised to DBOS.

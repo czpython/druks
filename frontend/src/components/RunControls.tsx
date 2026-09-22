@@ -84,6 +84,8 @@ const CONTROL_LABEL: Record<string, string> = {
   approve: 'Approve',
   request_changes: 'Request changes',
   revise_contract: 'Revise contract',
+  yes: 'Yes',
+  no: 'No',
 }
 
 export function InAppReview({
@@ -194,17 +196,21 @@ export function InAppReview({
           </fieldset>
         )
       })}
-      <label className="review-note-label" htmlFor={`${formId}-note`}>
-        Your note
-      </label>
-      <textarea
-        id={`${formId}-note`}
-        className="review-note"
-        placeholder="optional note — what should change?"
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-      />
-      <div className="review-helper">A note is sent to the agent as feedback.</div>
+      {ask.reply_fields?.includes('note') && (
+        <>
+          <label className="review-note-label" htmlFor={`${formId}-note`}>
+            Your note
+          </label>
+          <textarea
+            id={`${formId}-note`}
+            className="review-note"
+            placeholder="optional note — what should change?"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <div className="review-helper">A note is sent to the agent as feedback.</div>
+        </>
+      )}
       <div className="review-controls">
         {ask.controls?.map((control) => {
           const needsGuidance =
