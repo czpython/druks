@@ -38,6 +38,22 @@ async def test_no_signal_matches_any_repo(druks_db):
     assert await _lookup(project_name="Octo", labels=["bug"]) is None
 
 
+async def test_underscore_in_bare_name_is_literal(druks_db):
+    """``_`` is a LIKE wildcard. A bare ``software_factory`` must not bind to a
+    competing ``software-factory`` repo, and must still resolve the exact slug
+    without regard to case."""
+    await _register(druks_db, "octo/software-factory", "acme/Software_Factory")
+    row = await _lookup(project_name="software_factory")
+    assert row.full_name == "acme/Software_Factory"
+
+
+async def test_percent_in_bare_name_is_literal(druks_db):
+    """``%`` is a LIKE wildcard. A bare name that contains it must not bind to a
+    repo it would only match as a wildcard."""
+    await _register(druks_db, "octo/telemetry")
+    assert await _lookup(project_name="te%y") is None
+
+
 async def test_siblings_returns_only_other_repos_in_the_project(druks_db):
     project = await Project.create(name="Acme")
     target = await ProjectRepo.create(project_id=project.id, full_name="acme/api")

@@ -183,7 +183,9 @@ class ProjectRepo(StoredSubject):
             return
         if "/" in target:
             return await cls.get_for_repo(target)
-        stmt = select(cls).where(func.lower(cls.full_name).like(f"%/{target}")).limit(1)
+        # ``iendswith`` escapes ``%`` and ``_`` so a wildcard-shaped name matches the
+        # literal slug, not a different registered repo.
+        stmt = select(cls).where(cls.full_name.iendswith(f"/{target}", autoescape=True)).limit(1)
         return (await db_session().scalars(stmt)).first()
 
     @classmethod
