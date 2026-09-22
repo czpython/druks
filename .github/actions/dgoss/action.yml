@@ -1,0 +1,28 @@
+name: Validate an image with goss
+description: >-
+  Boots a loaded image the way the drukbox docker provider boots a druks box
+  and checks the goss.yaml beside its Dockerfile inside it.
+inputs:
+  image:
+    description: The loaded image to boot.
+    required: true
+  files-path:
+    description: The directory that holds goss.yaml.
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GOSS_VERSION: 0.4.10
+        GOSS_FILES_PATH: ${{ inputs.files-path }}
+        GOSS_OPTS: -r 30s -s 1s --format documentation
+        IMAGE: ${{ inputs.image }}
+      run: |
+        curl -fsSL "https://github.com/goss-org/goss/releases/download/v$GOSS_VERSION/goss_${GOSS_VERSION}_linux_x86_64.tar.gz" \
+          | tar -xz -C "$RUNNER_TEMP" goss
+        curl -fsSL -o "$RUNNER_TEMP/dgoss" "https://github.com/goss-org/goss/releases/download/v$GOSS_VERSION/dgoss"
+        chmod +x "$RUNNER_TEMP/dgoss"
+        GOSS_PATH="$RUNNER_TEMP/goss" "$RUNNER_TEMP/dgoss" run \
+          -e DRUKBOX_SSH_USER=druks -e 'DRUKBOX_AUTHORIZED_KEY=ssh-ed25519 AAAA goss' \
+          "$IMAGE"

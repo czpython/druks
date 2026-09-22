@@ -3,12 +3,13 @@
 # vault session and drive it — over CDP or pinchtab, both loopback-only,
 # reached through SSH like every sandbox. No harness ever runs here.
 #
-# Built from the drukbox sandbox base (Ubuntu + sshd); the entrypoint
-# seeds a non-root user and starts the display stack.
+# Built from the drukbox sandbox base (Ubuntu + sshd). The image adds a
+# non-root user; its entrypoint starts the display stack, then the base
+# entrypoint seeds that user's key and runs sshd.
 #
 # Published by .github/workflows/publish-sandbox-image.yml as
 # ghcr.io/czpython/druks/browser.
-FROM ghcr.io/czpython/drukbox/sandbox:latest@sha256:72c6ab246c53481051d8d4ec9ed34e9aff47f539f989f625cf20ba82e9b3f311
+FROM ghcr.io/czpython/drukbox/sandbox:latest@sha256:cccf324cada9c1b0df409858dac8188e0ed2591ed88ee3d5fb59db9055a75244
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 

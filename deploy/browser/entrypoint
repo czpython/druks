@@ -1,20 +1,8 @@
 #!/usr/bin/env bash
-# First-boot entrypoint. Seeds the non-root ``druks`` user like the sandbox
-# entrypoint, then the display stack: Xvfb for the browser to render into,
-# loopback-only VNC for the login window's bridge. SSH stays the only ingress.
+# The display stack, then the drukbox base entrypoint boots the box: Xvfb for
+# the browser to render into, loopback-only VNC for the login window's bridge.
+# SSH stays the only ingress.
 set -euo pipefail
-
-: "${DRUKBOX_AUTHORIZED_KEY:?DRUKBOX_AUTHORIZED_KEY is required}"
-
-install -d -m 700 -o druks -g druks /home/druks/.ssh
-printf '%s\n' "$DRUKBOX_AUTHORIZED_KEY" > /home/druks/.ssh/authorized_keys
-chmod 600 /home/druks/.ssh/authorized_keys
-chown druks:druks /home/druks/.ssh/authorized_keys
-
-# Persist caller-supplied env for SSH sessions: pam_env reads /etc/environment.
-for name in ${DRUKBOX_ENV_KEYS:-}; do
-  printf '%s=%s\n' "$name" "${!name-}" >> /etc/environment
-done
 
 Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp -ac &
 # The VNC port binds loopback only and is reached solely over the authenticated
@@ -24,6 +12,4 @@ Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp -ac &
 x11vnc -display :99 -loop -forever -listen 127.0.0.1 -rfbport 5900 \
   -nopw -noxdamage -shared &
 
-ssh-keygen -A
-
-exec /usr/sbin/sshd -D -e
+exec /usr/local/bin/drukbox-entrypoint
