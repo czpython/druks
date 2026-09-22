@@ -305,8 +305,9 @@ To register the GitHub App manually, use this webhook URL:
 Webhook URL:
 `https://<webhook-host>/_external/github/events/`
 
-Subscribe to issue comment, pull request, pull request review, pull request
-review comment, and push events.
+Subscribe to issues, issue comment, pull request, pull request review, pull
+request review comment, and push events. The issues event is what the GitHub
+tracker reads; an App that omits it receives no intake.
 
 | Repository permission | Access |
 | --- | --- |
@@ -358,15 +359,20 @@ Select the tracker in **Software Factory → Settings**. The default is Linear.
 **Linear** and **Jira** are service identities. Connect them from
 **Settings → Connections → Services**. The Linear identity uses an API key
 and webhook secret. The Jira identity uses a base URL, email, API token, and
-webhook secret. Druks validates the credentials before it stores them. Linear
-and Jira share five status settings: trigger, in progress, in review, done, and
-resting. When the selected tracker is connected, the settings page lists its
-statuses. After you change the tracker, save the settings to list the statuses of
-the new tracker. An empty in review or resting status leaves the ticket where it is.
+webhook secret. Druks validates the credentials before it stores them. Linear,
+Jira, and GitHub share five status settings: trigger, in progress, in review,
+done, and resting. When the selected tracker is connected and lists its statuses,
+the settings page offers them as choices. After you change the tracker, save the
+settings to list the statuses of the new tracker. An empty in review or resting
+status leaves the ticket where it is.
 
 Select **druks** to use the ticket board on this appliance. That choice needs no
 credentials. The status settings stay hidden. The trigger status is
 Ready for Agent, and it is not a setting.
+
+Select **GitHub** to take work from GitHub Issues in the repositories the
+operator GitHub App is already installed on. That choice needs no second
+credential. See [GitHub Issues as the tracker](#github-issues-as-the-tracker).
 
 The dashboard shows the board and the ticket pages only for **druks**. Each
 ticket selects a GitHub repository from a Software Factory project. Druks derives
@@ -395,9 +401,42 @@ Webhook URLs remain `/_external/linear/events/` and
 
 Select **Issue data (Jira format)** as its body.
 Druks accepts the REST issue JSON under `issue`. Put the shared token in the
-`x-druks-webhook-token` header. `druks doctor` treats a disconnected Linear or
-Jira identity as optional when that tracker is not selected. It reports pending
-setup if the selected tracker is Linear or Jira and that identity is missing.
+`x-druks-webhook-token` header. `druks doctor` treats a disconnected tracker
+identity as optional when that tracker is not selected. It reports pending setup
+if the selected tracker is Linear, Jira, or GitHub and its identity is missing.
+
+### GitHub Issues as the tracker
+
+GitHub has no status field, so the GitHub tracker reads the five status settings
+as **label names** and uses the existing `/_external/github/events/` webhook as
+its intake. An issue that gains the trigger label opens a build.
+
+Set the five labels in **Software Factory → Settings**. They default to the
+Linear status names, so name them for GitHub before you select this tracker - for
+example `ready-for-agent`, `agent:in-progress`, `agent:in-review`, and
+`agent:done`. Create each label in the repository first: GitHub rejects a label
+that does not exist. An empty in review or resting label leaves the issue where
+it is, as it does on Linear and Jira.
+
+The labels behave as one exclusive group. Setting any of them removes the others,
+including the trigger label - so an issue never reads as two states at once, and
+re-applying the trigger label opens a fresh build. Reaching the done label also
+closes the issue as completed, which is what a GitHub reader expects finished
+work to look like.
+
+Three differences from Linear and Jira are worth knowing. A ticket key is
+`owner/repo#number`, because issue numbers repeat across repositories. The
+settings page lists no label choices, because labels are per repository rather
+than per workspace, so you type them. And a build never runs as the issue
+assignee: a GitHub login is not an identity any grant issuer vouches for, so
+every GitHub build uses the default account.
+
+The App must subscribe to the **issues** event. An App created through
+**Settings → Connections → Services → Create GitHub App** subscribes to it. An
+older App, or one registered by hand, needs the event adding before any build
+opens. Adding it needs no permission change: **Issues: Read and write** is
+already on the App's list and it covers the labelling and closing this tracker
+does, so no installation has to approve anything.
 
 Software Factory starts a Linear or Jira build under the Druks account of the
 ticket assignee. It finds that account from the assignee ID in the webhook. The

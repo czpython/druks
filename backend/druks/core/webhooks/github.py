@@ -97,6 +97,43 @@ class GitHubEvents(Webhook):
                 },
             )
 
+    async def on_issues_labeled(self) -> Response:
+        """A label landing on an issue is GitHub's nearest thing to a status
+        transition, so it is published as one.
+
+        No sender filter: the trigger label is the only status a subscriber acts
+        on, and druks setting it through the tracker API is the intended way to
+        open a build - exactly as moving a Linear ticket is. Every other label
+        this app writes carries a non-trigger status, so its echo is inert, and a
+        redelivery resolves to the same work item.
+        """
+        issue, repository = self.data["issue"], self.data["repository"]
+        # GitHub issue numbers repeat across repositories, so the repo travels
+        # in the identifier. It also makes the key self-routing.
+        identifier = f"{repository['full_name']}#{issue['number']}"
+        assignee = issue.get("assignee") or {}
+        await publish(
+            "ticket.transitioned",
+            payload={
+                "source": "github",
+                "identifier": identifier,
+                "status": self.data["label"]["name"],
+                "title": issue["title"],
+                "url": issue["html_url"],
+                # The bare repo name routes to a ProjectRepo the same way a
+                # Linear project name does.
+                "project_name": repository["name"],
+                "labels": [label["name"] for label in issue["labels"]],
+                # A GitHub webhook carries a login, which is neither an address
+                # nor an identity any grant issuer vouches for. Leave both unset
+                # rather than guess; the name is for display only.
+                "assignee_id": None,
+                "assignee_email": None,
+                "assignee_name": assignee.get("login"),
+            },
+        )
+        return _accepted()
+
     async def on_pull_request_closed(self) -> Response:
         pull_request = self.data["pull_request"]
         merged = pull_request["merged"]
