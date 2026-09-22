@@ -1,0 +1,17 @@
+# The boot contract of the sandbox image: the drukbox base entrypoint seeds
+# the ``druks`` user this image adds. dgoss checks it in CI with
+# DRUKBOX_SSH_USER=druks and DRUKBOX_AUTHORIZED_KEY="ssh-ed25519 AAAA goss".
+file:
+  /home/druks/.ssh/authorized_keys:
+    exists: true
+    mode: "0600"
+    owner: druks
+    group: druks
+    contents:
+      - ssh-ed25519 AAAA goss
+process:
+  sshd:
+    running: true
+port:
+  tcp:22:
+    listening: true
