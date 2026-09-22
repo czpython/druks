@@ -193,10 +193,12 @@ session's key, and the webhook secret. There are three kinds:
 
 Druks creates the WAHA session and its key, saves the connection, and then
 writes the session's config. Scan the QR code from **Linked devices** in
-WhatsApp on the phone. The number is live when WAHA reports that the session
-works. When WhatsApp unlinks the device, the number shows **Disconnected** and
-its QR code again. Druks refuses a number that another live connection holds. **Remove**
-deletes the WAHA session and its key, and ends the pauses of the number's chats.
+WhatsApp on the phone, which shows the device as Druks. The number is live when
+WAHA reports that the session works. When WhatsApp unlinks the device, the
+number shows **Disconnected**, and **Link again** takes a new scan on the same
+connection, which keeps its chats, its admin, and its connected phones. Druks
+refuses a number that another live connection holds. **Remove** deletes the WAHA
+session and its key, and ends the pauses of the number's chats.
 The connection and its chats stay as history, and each new link is a new
 connection.
 

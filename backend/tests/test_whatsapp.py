@@ -239,6 +239,7 @@ async def test_adding_a_number_creates_its_accounts_and_session(
     ]
     assert config["ignore"] == {"status": True, "groups": True, "channels": True, "broadcast": True}
     assert config["noweb"] == {"markOnline": False}
+    assert config["client"] == {"deviceName": "Druks", "browserName": "Chrome"}
 
 
 async def test_a_number_cannot_be_linked_twice_or_on_an_engine_druks_cannot_read(druks_db, waha):
@@ -866,6 +867,26 @@ async def test_removing_a_number_holds_its_chats_and_relinking_keeps_its_history
     sessions = await Waha.list_sessions(druks_db, app="helpdesk", account_id=owner.id)
     assert [session.id for session in sessions] == [first.id, second.id]
     assert first.identity["number"] == "+41000000000"
+
+
+async def test_a_number_that_lost_its_link_takes_a_new_scan_and_keeps_its_chats(
+    druks_db, druks_client, helpdesk, waha, monkeypatch
+):
+    webhook_base(monkeypatch)
+    connection = await link(druks_db, await bot_account(druks_db))
+    await receive(connection, message_event(ANA, "Hello", key="M1"))
+    [chat] = await Conversation.list_for_connection(druks_db, connection.id)
+
+    response = await druks_client.post(f"/api/chat/services/waha/sessions/{connection.id}/relink")
+
+    assert response.status_code == 200
+    assert response.json()["number"] is None
+    await druks_db.refresh(connection)
+    assert ("POST", "/api/sessions/session_one/logout", None) in waha.calls
+    assert ("POST", "/api/sessions/session_one/start", None) in waha.calls
+    assert connection.identity_status == "unavailable"
+    held = await Conversation.list_for_connection(druks_db, connection.id)
+    assert [conversation.id for conversation in held] == [chat.id]
 
 
 async def test_a_waiting_run_asks_the_admin_and_its_end_reaches_the_chat(druks_db, helpdesk):

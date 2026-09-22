@@ -169,7 +169,7 @@ export function WhatsAppNumbersPane({ app }: { app?: Pick<AppSettings, 'name' | 
                           : 'Waiting'}
                   </span>
                 </div>
-                {isWaiting(number) && <NumberQr number={number} />}
+                {isWaiting(number) && !number.number && <NumberQr number={number} />}
                 {adminCode && (
                   <p className="channel-admin-code" role="status">
                     Send <code>{adminCode.code}</code> from your own WhatsApp to {number.number}{' '}
@@ -188,6 +188,15 @@ export function WhatsAppNumbersPane({ app }: { app?: Pick<AppSettings, 'name' | 
                         disabled={isBusy}
                       >
                         Disconnect my phone
+                      </button>
+                    )}
+                    {isWaiting(number) && number.number && (
+                      <button
+                        className="set-btn ghost"
+                        onClick={() => void changeNumbers(() => api.relinkWahaSession(number.id))}
+                        disabled={isBusy}
+                      >
+                        Link again
                       </button>
                     )}
                     {app && isLinked && !(isPaired && number.isPhoneConnected) && (
