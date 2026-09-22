@@ -10,6 +10,7 @@ from druks.apps.loader import get_app
 from druks.chat.bots.service import resume
 from druks.chat.enums import BotAccess
 from druks.chat.models import Conversation
+from druks.secrets.models import VaultSecret
 
 from .schemas import QrResponse, SessionResponse
 from .services import Waha
@@ -41,7 +42,7 @@ async def link_session(
     session: SessionDep,
     app: Annotated[str, Body(embed=True)] = "",
     account: Account = Depends(current_session_account),
-) -> SessionResponse:
+) -> VaultSecret:
     """Link a number for an app's Bot or for the operator."""
     owner = account
     identity = {}
@@ -58,8 +59,7 @@ async def link_session(
         else:
             admin = await Account.create_for_bot(session, AccountKind.BOT_ADMIN)
             identity = {"app": app, "admin": {"account_id": admin.id}}
-    connection = await Waha.link(session, owner, identity=identity)
-    return SessionResponse.model_validate(connection)
+    return await Waha.link(session, owner, identity=identity)
 
 
 @router.get("/sessions/{session_id}/qr", response_model=QrResponse, response_model_by_alias=True)
@@ -70,6 +70,20 @@ async def get_qr(
     if connection and connection.is_live:
         client = await Waha.get_client(session, connection)
         return await client.get_qr()
+    raise HTTPException(404, "Session not found.")
+
+
+@router.post(
+    "/sessions/{session_id}/relink", response_model=SessionResponse, response_model_by_alias=True
+)
+async def relink_session(
+    session: SessionDep, session_id: str, account: Account = Depends(current_session_account)
+) -> VaultSecret:
+    """Take a new scan on a number that lost its link."""
+    connection = await Waha.get_session(session, session_id, account.id)
+    if connection and connection.is_live:
+        await Waha.relink(session, connection)
+        return connection
     raise HTTPException(404, "Session not found.")
 
 

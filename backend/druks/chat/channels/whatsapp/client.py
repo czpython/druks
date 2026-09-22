@@ -42,6 +42,13 @@ class WahaClient:
     async def delete_key(self, key_id: str) -> None:
         await self.request("DELETE", f"/api/keys/{key_id}")
 
+    async def logout(self) -> None:
+        """Drop the session's linked device. WhatsApp then wants a new scan."""
+        await self.request("POST", f"/api/sessions/{self.session_name}/logout")
+
+    async def start(self) -> None:
+        await self.request("POST", f"/api/sessions/{self.session_name}/start")
+
     async def configure(self, config: dict) -> None:
         """Replace the session's whole config. WAHA restarts the session."""
         await self.request("PUT", f"/api/sessions/{self.session_name}", json={"config": config})

@@ -336,6 +336,8 @@ export const api = {
     getJSON<{ mimetype: string; data: string }>(
       `/api/chat/services/waha/sessions/${encodeURIComponent(id)}/qr`,
     ),
+  relinkWahaSession: (id: string) =>
+    postJSON<WahaSession>(`/api/chat/services/waha/sessions/${encodeURIComponent(id)}/relink`, {}),
   removeWahaSession: (id: string) =>
     deleteRequest(`/api/chat/services/waha/sessions/${encodeURIComponent(id)}`),
   openBotAdminCode: (connectionId: string) =>

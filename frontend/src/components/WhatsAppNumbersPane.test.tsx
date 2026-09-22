@@ -121,6 +121,30 @@ describe('WhatsAppNumbersPane', () => {
     )).toBe(true)
   })
 
+  it('offers a new scan to a number that lost its link', async () => {
+    const dropped = { ...waiting, number: '+41000000000', identityStatus: 'unavailable' as const }
+    const numbers: WahaSession[] = [dropped]
+    const fetchMock = vi.fn(async (url: string, request?: RequestInit) => {
+      if (url === '/api/chat/services/waha/sessions/number-1/relink' && request?.method === 'POST') {
+        numbers[0] = waiting
+        return new Response(JSON.stringify(waiting))
+      }
+      if (url === '/api/chat/services/waha/sessions?app=helpdesk')
+        return new Response(JSON.stringify(numbers))
+      if (url === '/api/chat/services/waha/sessions/number-1/qr')
+        return new Response(JSON.stringify({ mimetype: 'image/png', data: 'qr' }))
+      return new Response('{}', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderPane('helpdesk')
+
+    expect(await screen.findByText('Disconnected')).toBeTruthy()
+    expect(screen.queryByText('Loading the QR code…')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Link again' }))
+
+    expect(await screen.findByRole('img', { name: 'WhatsApp QR code' })).toBeTruthy()
+  })
+
   it('hides a removed number that never linked', async () => {
     const removed = { ...waiting, revokedAt: '2026-09-19T10:00:00Z', revokedReason: 'user' }
     const held = { ...removed, id: 'number-2', number: '+41000000000' }

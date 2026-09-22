@@ -87,6 +87,9 @@ class Waha(Service):
                 # WhatsApp does not ring the phone while a linked client is online, and
                 # a NOWEB session marks itself online unless its config says otherwise.
                 "noweb": {"markOnline": False},
+                # WhatsApp names the linked device "<browserName> (<deviceName>)", and it
+                # drops a device name that comes with a browser name it does not know.
+                "client": {"deviceName": "Druks", "browserName": "Chrome"},
             }
         )
         return connection
@@ -98,6 +101,20 @@ class Waha(Service):
         await card.delete_session(connection.identity["session"])
         await card.delete_key(connection.secrets["key_id"])
         await connection.revoke(reason)
+
+    @classmethod
+    async def relink(cls, session: AsyncSession, connection: VaultSecret) -> None:
+        """Take a new scan on the same connection, which keeps its chats, its admin, and
+        its connected phones. The session teaches Druks the number again when it works."""
+        client = await cls.get_client(session, connection)
+        await client.logout()
+        await client.start()
+        connection.identity = {
+            key: value
+            for key, value in connection.identity.items()
+            if key not in ("number", "name", "user_id")
+        }
+        connection.identity_status = IdentityStatus.UNAVAILABLE
 
     @classmethod
     async def list_sessions(
