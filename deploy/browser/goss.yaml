@@ -1,0 +1,26 @@
+# The boot contract of the browser image: the drukbox base entrypoint seeds
+# the ``druks`` user this image adds, and the display stack is up on loopback.
+# dgoss checks it in CI with DRUKBOX_SSH_USER=druks and
+# DRUKBOX_AUTHORIZED_KEY="ssh-ed25519 AAAA goss".
+file:
+  /home/druks/.ssh/authorized_keys:
+    exists: true
+    mode: "0600"
+    owner: druks
+    group: druks
+    contents:
+      - ssh-ed25519 AAAA goss
+process:
+  sshd:
+    running: true
+  Xvfb:
+    running: true
+  x11vnc:
+    running: true
+port:
+  tcp:22:
+    listening: true
+  tcp:5900:
+    listening: true
+    ip:
+      - 127.0.0.1
