@@ -52,11 +52,13 @@ def upgrade() -> None:
         WHERE call.account_id = 'system' AND split_part(call.model, '/', 1) = key.provider
     """)
     )
-    # Unmatched historical billing must be reconciled before enforcing references.
+    # Legacy calls whose model or account names no connected provider stay
+    # unbilled, so the check covers new rows only.
     op.create_check_constraint(
         "agent_calls_billing_source_check",
         "agent_calls",
         "(subscription_id IS NOT NULL) <> (api_key_provider IS NOT NULL)",
+        postgresql_not_valid=True,
     )
     op.drop_index("agent_calls_account_finished_idx", table_name="agent_calls")
     op.drop_column("agent_calls", "account_id")
