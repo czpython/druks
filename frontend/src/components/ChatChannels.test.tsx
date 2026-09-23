@@ -37,6 +37,7 @@ beforeEach(() => {
       }],
     }
     if (url === '/api/settings/apps/chat/choices') response = {}
+    if (url === '/api/services') response = [{ slug: 'waha', connected: true }]
     if (url === '/api/agents') response = { apps: [] }
     return new Response(JSON.stringify(response))
   }))
