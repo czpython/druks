@@ -1,6 +1,6 @@
 [project]
 name = "druks"
-version = "0.6.0"
+version = "0.7.0"
 description = "Autonomous software delivery; the self-hosted home for durable agent apps."
 readme = "README.md"
 license = "MIT"

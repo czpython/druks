@@ -3,6 +3,128 @@
 All notable changes to Druks. Versions follow [semantic versioning](https://semver.org);
 while Druks is pre-1.0, a minor bump may break compatibility.
 
+## [0.7.0] — 2026-09-23
+
+### Added
+
+- **Chat.** Talk to an agent that acts on Druks as your account. A conversation is
+  a live agent session in a sandbox that your account leases, not a workflow. Send
+  stays available during a reply, with Stop beside it, and a queued message waits
+  its turn. After a restart, Druks runs an interrupted delivery again. The list has
+  title search, pins that stay with your account, and day groups in your timezone.
+  Chat runs on Claude in this release. Its harness, model, billing, and effort come
+  from its row in Chat → Bots. The guide is `docs/chat.md`.
+- **WhatsApp is a Chat source.** Connect a WAHA service under Connections →
+  Services, then link a number from an app's Channels tab with a QR code. A person
+  who writes to the number gets their own conversation, and Druks sends the reply
+  through WAHA. The person who holds the number's phone is its admin. A run that
+  waits asks that admin in the phone's chat with itself, and only the admin can
+  answer. A message typed on the phone pauses the chat for four hours. An operator
+  links their own number under Connections → Accounts. WAHA must run the NOWEB or
+  GOWS engine and reach `/_external/waha/events/`. Set `urls.webhook_host` or
+  `urls.endpoint` before you link a number.
+- **An app can declare a Bot.** `Bot(prompt, user_tools, admin_tools)` from
+  `druks.agents` answers the numbers linked to the app. A route tagged `bot` is a
+  tool of the Bot, and it takes the person who writes as `user: BotUser`. A run
+  that a bot tool starts remembers its conversation, so `self.review()` asks the
+  number's admin. The Bot has a row in the app's Settings → Bots as `<app>.bot`.
+- **A `YesNo` gate.** `druks.workflows.YesNo` parks with the actions `yes` and `no`
+  and an optional `note`. A gate's own fields shape its review: the note box shows
+  only when the gate declares `note`, and the values of `action` are the controls
+  when the ask names none. The review shows the question in the ask's `label`.
+- **A page can put actions on more blocks.** A `Callout` takes `controls`, a `Form`
+  takes `extra_actions`, a `Table` takes `select` with row `actions`, a
+  `StatusValue` takes a `link`, and a `ControlsValue` puts actions and links in a
+  cell, a fact, or a list item. An operation that answers `{"url": "https://..."}`
+  sends the browser to that URL.
+- **A skill collection installs from a private repository** when the GitHub App is
+  installed on it.
+
+### Changed
+
+- **Activity is compact and app-scoped.** Rows take two lines under day headings,
+  and a panel shows the details. Filters and the date range live in the URL. A type
+  belongs to its app. Search matches the recorded work key or title. Rows show work
+  titles, PR references, review summaries, and failure causes. A spent budget
+  records as `spend_limit`, and the run fails without a quota wait. The live stream
+  resumes from a transaction snapshot, so a late commit does not disappear.
+- **A subject's stable handle is `key`.** `get_key()`, `subject.key`,
+  `SubjectSummary.key`, and `subjectKey` on the wire replace the label. A migration
+  renames the column. Rename an override of `get_label()` to `get_key()`.
+  `get_summary()` projects the id and the key; override it for a title. An
+  announcement that names `title`, `run`, or `kind` raises `WorkflowError`.
+- **A `Choices` source returns dicts.** Each choice is `{"value", "label"}` with an
+  optional `group`. This replaces `(value, label)` pairs. The select is searchable
+  and grouped. A stored value that the source does not list shows under
+  Unavailable choices, and save and `druks doctor` reject it.
+- **Schedules is a full-width page.** Rows group by app. Preset and pause changes
+  save at once. Each row shows a next-run estimate and up to eight recorded
+  invocations. Run now queues one invocation, and a paused schedule stays paused.
+- **Software Factory pages are easier to scan.** Projects has collapsible headings,
+  flat repository rows, and an inline repository profile. Overview has compact
+  desktop rows. A retry shows as a continuation of its build, with the summed time
+  and cost, and Retry works only on the latest run of a work item. The work item
+  shows a finished call's artifact as a tab beside the transcript, and the
+  evaluation is that artifact. An external review request shows as information
+  with a link to its source.
+- **The evaluator is quieter.** It files no follow-up tickets. Its findings stay in
+  `review_notes` and in the GitHub review, and the operator decides what becomes
+  work. After the first round, a review says only what changed. A rework push
+  resolves the review threads it addressed. A review request keeps the note around
+  the mention. A retry with no failed step forks from the last declared step. Jira
+  gets no transition when the status already matches.
+- **The GitHub App needs Administration: write** to create a repository from a
+  template. An existing App must add the permission and accept it on the
+  installation. The manifest routes now serve under `/api/core/services/github/`.
+- **`urls.webhook_host` is the HTTPS host of this installation's `/mcp` endpoint.**
+  When it is empty, `urls.endpoint` is the base. `docs/deployment.md` describes an
+  installation behind an external proxy.
+- **Connections explain more.** Removing an MCP server lists the accounts whose
+  connections it revokes. MCP sign-in shows "Preparing sign-in" and gives discovery
+  and client registration 30 seconds in total. A failed identity lookup records its
+  reason on the connection.
+- **Codex reserve quota is separate from normal capacity.** An empty reserve raises
+  no exhaustion alert while the main quota has capacity. The Usage page keeps the
+  reserve collapsed until the main quota is exhausted. Codex model variants are
+  priced by their family, so a dated `gpt-5-mini` id gets the mini rates.
+- **A lock that a dead process holds frees in 30 seconds.** Provider and OAuth token
+  refresh, the sandbox rotation gate, and the browser writer lock renew one TTL. A
+  run that loses its lock fails with `LockLostError`. Reading a saved browser
+  session's status no longer decrypts its profile.
+- **The sandbox and browser images boot with the Drukbox base entrypoint.** The
+  SSH key, the caller environment, the secrets-proxy CA, and the `gh` git
+  credential come from the base. Both images have `build-essential`. The browser
+  image installs Google Chrome on arm64 too.
+- **`druks create app` writes hyphenated folder and distribution names.** The app
+  name and its package keep underscores. The command accepts both spellings.
+- **The execution-defaults error names the agent** that a default change breaks.
+
+### Fixed
+
+- **Druks resumes every run after an upgrade.** A run parked at a gate before an
+  upgrade stayed pending, because any edit to any workflow changed the DBOS
+  application version. The version is now one constant, so DBOS resumes parked and
+  interrupted runs after every upgrade. A run that the new code cannot replay fails
+  at the step that differs, with an error that names it.
+- **The 0.6.0 upgrade completes on an installation with older agent calls.** Its
+  billing-source check failed on calls from before provider-namespaced models. The
+  check now applies to new calls, and older calls stay unbilled.
+- **A saved browser profile keeps its login cookies.** The launcher writes the
+  session-only cookies at shutdown and adds them back at launch.
+- **A templated sandbox boots its template image.** Druks sent the installation
+  image with the template, so Drukbox booted the plain image and lost the setup.
+- **Six open dashboard tabs no longer block a seventh.** A hidden tab closes its
+  live streams and opens them again when shown.
+- **Hosted deployments run the current Drukbox janitor**, so expired sandboxes are
+  removed.
+- **A page `Link` to an `/api/` path loads from the server.** Before, the shell
+  handled the click and nothing happened.
+- **A bare repository name in a ticket matches only that name.** `%` and `_` no
+  longer act as wildcards.
+- **Druks installs `dbos` below 3.** DBOS 3 refuses the queues at import.
+- **The Software Factory timeline shows one running row** for an active agent call,
+  and a work-item row omits the PR cell until a PR exists.
+
 ## [0.6.0] — 2026-09-15
 
 ### Added
