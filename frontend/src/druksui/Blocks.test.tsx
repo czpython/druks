@@ -186,6 +186,18 @@ describe('links', () => {
     expect(link.className).not.toContain('dui-action')
   })
 
+  it('leaves an /api/ url to the browser in this tab', () => {
+    renderBlocks([
+      { block: 'link', label: 'Connect', page: '', arguments: {}, url: '/api/oauth/acme/connect', subject: null },
+    ])
+
+    const link = screen.getByRole('link', { name: 'Connect' })
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    link.dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(false)
+    expect(link.getAttribute('target')).toBeNull()
+  })
+
   it('shows a link to an undeclared page as broken', () => {
     const { container } = renderBlocks([
       { block: 'link', label: 'Ghost', page: 'nowhere', arguments: {}, url: '', subject: null },

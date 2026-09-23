@@ -11,7 +11,8 @@ function isOutbound(url: string): boolean {
 
 /** A control that navigates. It is a block of its own, or the link on a value,
     which shows the value's own text. A relative `url` stays in this tab; only
-    an absolute http(s) URL is outbound. */
+    an absolute http(s) URL is outbound. A `/api/` path is a server route, so it
+    gets a full navigation instead of the router. */
 export function LinkControl({
   link,
   label = link.label,
@@ -35,6 +36,13 @@ export function LinkControl({
       >
         {label}
         <ArrowUpRight className="dui-link-external" size={12} aria-hidden="true" />
+      </a>
+    )
+  }
+  if (href.startsWith('/api/')) {
+    return (
+      <a className={className} href={href}>
+        {label}
       </a>
     )
   }
