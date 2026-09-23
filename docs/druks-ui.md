@@ -543,6 +543,10 @@ page's route parameters. The shell resolves both against the page table. It
 shows a `Link` it cannot resolve as broken and names the page it wanted, and
 the rest of the page still renders.
 
+An absolute `url` opens in a new tab. A relative `url` stays in this tab: a
+path under `/api/`, such as `/api/oauth/acme/connect`, loads from the server,
+and any other path opens in the shell.
+
 `Link` and `Action` are different public types. Both are blocks, so a page can
 hold one directly. Every container's `controls` holds either one.
 
