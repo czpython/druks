@@ -103,6 +103,7 @@ export function SettingsPages({
   const agentsQuery = useQuery({ queryKey: ['agents'], queryFn: api.agents })
   const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
   const providersQuery = useQuery({ queryKey: ['providers'], queryFn: api.providers })
+  const servicesQuery = useQuery({ queryKey: ['services'], queryFn: api.services, staleTime: 60_000 })
   const subscriptionsQuery = useQuery({
     queryKey: ['providerSubscriptions'],
     queryFn: api.providerSubscriptions,
@@ -184,13 +185,17 @@ export function SettingsPages({
   const dirty = dirtyPages.includes(section)
   const app = appName ? apps.find((entry) => entry.name === appName) : undefined
   const hasAgents = Boolean(app?.agents.some((agent) => agent.name !== app.bot))
+  // Chat's Bot always exists; its numbers need a connected WAHA to link through.
+  const hasChannels = Boolean(
+    app?.bot && servicesQuery.data?.some((service) => service.slug === 'waha' && service.connected),
+  )
   const appTab = ['agents', 'bots', 'channels'].find((tab) => location.endsWith(`/${tab}`)) ?? 'options'
   const validAppPage =
     !appName ||
     location === `/apps/${appName}/settings` ||
     (hasAgents && location === `/apps/${appName}/settings/agents`) ||
     Boolean(app?.bot && location === `/apps/${appName}/settings/bots`) ||
-    Boolean(app?.bot && location === `/apps/${appName}/settings/channels`)
+    (hasChannels && location === `/apps/${appName}/settings/channels`)
   const hasOptions = Boolean(
     app && (app.settings.length || app.workflows.some((workflow) => workflow.fields.length)),
   )
@@ -578,7 +583,7 @@ export function SettingsPages({
                       Bots
                     </Link>
                   )}
-                  {app.bot && (
+                  {hasChannels && (
                     <Link
                       href={`/apps/${app.name}/settings/channels`}
                       aria-current={paneSection === 'channels' ? 'page' : undefined}
@@ -613,7 +618,7 @@ export function SettingsPages({
               {errors[section]}
             </p>
           )}
-          {appName && appsQuery.isPending && <p role="status">Loading app settings…</p>}
+          {appName && (appsQuery.isPending || servicesQuery.isPending) && <p role="status">Loading app settings…</p>}
           {section === 'personal' && personalQuery.isPending && (
             <p role="status">Loading preferences…</p>
           )}
@@ -736,7 +741,7 @@ export function SettingsPages({
               {page === 'mcp' && <McpServersPane />}
               {page === 'skills' && <SkillsPane />}
               {page === 'api-tokens' && <AgentAccessPane />}
-              {app?.bot && validAppPage && paneSection === 'channels' &&
+              {app && hasChannels && validAppPage && paneSection === 'channels' &&
                 page === `apps/${app.name}` && <>
                   <WhatsAppNumbersPane app={app} />
                   {app.botAccess === 'paired' && <WhatsAppNumbersPane />}
@@ -826,7 +831,7 @@ export function SettingsPages({
                 ))}
             </div>
           ))}
-          {appsQuery.isSuccess &&
+          {appsQuery.isSuccess && !servicesQuery.isPending &&
             (!validAppPage || (!SECTIONS.some((entry) => entry.id === section) && !app)) && (
               <p>No settings page matches this address.</p>
             )}

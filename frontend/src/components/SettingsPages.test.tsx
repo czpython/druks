@@ -10,6 +10,7 @@ import type {
   AppSettingChoices,
   PersonalSettings,
   AppsSettingsResponse,
+  Service,
   UpdateAppsSettingsRequest,
 } from '../api/types'
 
@@ -1086,11 +1087,12 @@ describe('canonical app settings', () => {
   })
 
   it.each([
-    { hasAgents: true, hasBot: false, tabs: [] },
-    { hasAgents: false, hasBot: true, tabs: ['Bots', 'Channels'] },
-    { hasAgents: true, hasBot: true, tabs: ['Agents', 'Bots', 'Channels'] },
-    { hasAgents: false, hasBot: false, tabs: [] },
-  ])('shows settings tabs for agents=$hasAgents and bot=$hasBot', async ({ hasAgents, hasBot, tabs }) => {
+    { hasAgents: true, hasBot: false, hasWaha: true, tabs: [] },
+    { hasAgents: false, hasBot: true, hasWaha: true, tabs: ['Bots', 'Channels'] },
+    { hasAgents: true, hasBot: true, hasWaha: true, tabs: ['Agents', 'Bots', 'Channels'] },
+    { hasAgents: true, hasBot: true, hasWaha: false, tabs: ['Agents', 'Bots'] },
+    { hasAgents: false, hasBot: false, hasWaha: true, tabs: [] },
+  ])('shows settings tabs for agents=$hasAgents, bot=$hasBot, and waha=$hasWaha', async ({ hasAgents, hasBot, hasWaha, tabs }) => {
     const helpdesk = {
       ...appSettings.apps[2]!,
       name: 'helpdesk',
@@ -1104,6 +1106,7 @@ describe('canonical app settings', () => {
       settings: hasAgents || hasBot ? [] : appSettings.apps[2]!.settings,
     }
     stubFetch(true, undefined, { ...appSettings, apps: [...appSettings.apps, helpdesk] })
+    vi.spyOn(api, 'services').mockResolvedValue([{ slug: 'waha', connected: hasWaha } as Service])
     renderSettings('/apps/helpdesk/settings')
     if (hasAgents) {
       expect(await screen.findByRole('region', { name: 'coder' })).toBeTruthy()
@@ -1116,9 +1119,11 @@ describe('canonical app settings', () => {
       fireEvent.click(navigation.getByRole('link', { name: 'Bots' }))
       expect(await screen.findByRole('region', { name: 'bot' })).toBeTruthy()
       expect(screen.queryByRole('region', { name: 'coder' })).toBeNull()
-      fireEvent.click(navigation.getByRole('link', { name: 'Channels' }))
-      expect(await screen.findByRole('heading', { name: 'WhatsApp numbers' })).toBeTruthy()
-      expect(window.location.pathname).toBe('/apps/helpdesk/settings/channels')
+      if (hasWaha) {
+        fireEvent.click(navigation.getByRole('link', { name: 'Channels' }))
+        expect(await screen.findByRole('heading', { name: 'WhatsApp numbers' })).toBeTruthy()
+        expect(window.location.pathname).toBe('/apps/helpdesk/settings/channels')
+      }
     } else {
       if (!hasAgents) await screen.findByLabelText('Notebook')
       expect(screen.queryByRole('navigation', { name: 'App settings sections' })).toBeNull()
