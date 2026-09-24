@@ -13,7 +13,7 @@ class McpServerResponse(Schema):
     name: str
     url: str
     is_enabled: bool
-    token_source: str
+    is_oauth: bool
     identity_mode: str | None
     builtin: bool
     # Whether the server can authenticate at delivery — never the token itself.
@@ -48,7 +48,10 @@ class McpRegistryCandidateResponse(Schema):
 class CreateMcpServerRequest(BaseModel):
     name: str
     url: str
-    token: str = ""
+    # Each entry becomes a vault row delivered as that header, exactly like a
+    # registry entry's isSecret headers. A bearer is the header spelled out:
+    # {"Authorization": "Bearer <token>"} — the UI's Bearer field composes it.
+    secret_headers: dict[str, str] = {}
 
 
 class InstallMcpServerRequest(BaseModel):

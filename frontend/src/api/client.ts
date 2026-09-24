@@ -395,10 +395,11 @@ export const api = {
     deleteJSON<Pat>(`/api/auth/personal-tokens/${encodeURIComponent(id)}`),
 
   // MCP servers — a backend-owned registry, delivered into every agent VM. The
-  // token is write-only: sent on create, redacted in every response. Keyed by
+  // Secret header values are write-only: sent on create, redacted in every
+  // response. A bearer is the Authorization header spelled out. Keyed by
   // name (a built-in has no id until an operator overlays it).
   mcpServers: () => getJSON<McpServer[]>('/api/mcp-servers'),
-  createMcpServer: (body: { name: string; url: string; token: string }) =>
+  createMcpServer: (body: { name: string; url: string; secret_headers: Record<string, string> }) =>
     postJSON<McpServer>('/api/mcp-servers', body),
   // The official-registry picker: resolved candidates (badge + declared
   // inputs), then an install that sends only the druks name, the registry

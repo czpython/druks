@@ -12,7 +12,7 @@ from druks.accounts.models import Account
 from druks.apps.registry import mcp_servers
 from druks.db import db_session
 from druks.mcp import oauth
-from druks.mcp.enums import IdentityMode, TokenSource
+from druks.mcp.enums import IdentityMode
 from druks.mcp.exceptions import (
     GrantRefreshError,
     MissingGrantError,
@@ -112,7 +112,7 @@ def _register_oauth_server(name: str = _NAME, enabled: bool = True) -> None:
         {
             "name": name,
             "url": _SERVER_URL,
-            "token_source": TokenSource.OAUTH,
+            "is_oauth": True,
             "enabled": enabled,
         }
     )
@@ -130,7 +130,7 @@ async def _store_grant(
             db_session(),
             name=_NAME,
             url=_SERVER_URL,
-            token_source=TokenSource.OAUTH,
+            is_oauth=True,
         )
     server.identity_mode = identity_mode
     return await VaultSecret.connect(
@@ -721,9 +721,7 @@ async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
     registry_state, druks_db
 ):
     _register_oauth_server()
-    server = await McpServer.create(
-        db_session(), name=_NAME, url=_SERVER_URL, token_source=TokenSource.OAUTH
-    )
+    server = await McpServer.create(db_session(), name=_NAME, url=_SERVER_URL, is_oauth=True)
     server.identity_mode = IdentityMode.SHARED
 
     with pytest.raises(MissingGrantError, match=_NAME):
@@ -732,9 +730,7 @@ async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
 
 async def test_delivery_names_the_account_missing_its_per_user_grant(druks_db):
     account = await Account.get_or_create(druks_db, "run@example.com")
-    server = await McpServer.create(
-        db_session(), name=_NAME, url=_SERVER_URL, token_source=TokenSource.OAUTH
-    )
+    server = await McpServer.create(db_session(), name=_NAME, url=_SERVER_URL, is_oauth=True)
     server.identity_mode = IdentityMode.PER_USER
 
     with pytest.raises(MissingGrantError) as error:
@@ -940,7 +936,7 @@ async def test_api_has_token_reflects_the_grant_and_leaks_no_secret(
     _register_oauth_server()
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         server = next(s for s in client.get("/api/mcp-servers").json() if s["name"] == _NAME)
-        assert server["tokenSource"] == "oauth"
+        assert server["isOauth"] is True
         assert server["hasToken"] is False
 
         await _store_grant(refresh_token="rt-secret-value")

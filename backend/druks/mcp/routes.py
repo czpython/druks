@@ -11,7 +11,8 @@ from druks.api.dependencies import SessionDep
 from druks.apps.registry import mcp_servers
 from druks.core.templates import render_page
 from druks.mcp import oauth, registry
-from druks.mcp.enums import IdentityMode, TokenSource
+from druks.mcp.constants import HEADER_NAME_PATTERN
+from druks.mcp.enums import IdentityMode
 from druks.mcp.exceptions import (
     InvalidServerNameError,
     OauthConnectError,
@@ -71,19 +72,26 @@ async def add_mcp_server(session: SessionDep, body: CreateMcpServerRequest) -> M
             status_code=409, detail=f"MCP server {body.name!r} already exists; remove it first."
         )
     # A custom server is delivered enabled, so a blank url (an unreachable
-    # endpoint) or a blank token (unauthenticated) would break every agent VM.
-    # Reject both here rather than persist a row that fails at delivery.
+    # endpoint) or missing auth (unauthenticated) would break every agent VM.
+    # Reject here rather than persist a row that fails at delivery.
     if not body.url.strip():
         raise HTTPException(status_code=422, detail=f"MCP server {body.name!r} needs a url.")
-    if not body.token.strip():
-        raise HTTPException(
-            status_code=422, detail=f"MCP server {body.name!r} needs a bearer token."
-        )
-    try:
-        await McpServer.create(session, name=body.name, url=body.url, token=body.token)
-    except (InvalidServerNameError, ReservedServerNameError) as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    return await _response(session, body.name)
+    secret_headers = {name.strip(): value for name, value in body.secret_headers.items()}
+    if secret_headers and all(
+        HEADER_NAME_PATTERN.match(header) and value.strip()
+        for header, value in secret_headers.items()
+    ):
+        try:
+            await McpServer.create(
+                session, name=body.name, url=body.url, secret_headers=secret_headers
+            )
+        except (InvalidServerNameError, ReservedServerNameError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return await _response(session, body.name)
+    raise HTTPException(
+        status_code=422,
+        detail=f"MCP server {body.name!r} needs a secret header with a valid name and a value.",
+    )
 
 
 @router.post("/registry", response_model=McpServerResponse)
@@ -130,23 +138,18 @@ async def install_mcp_server(
             status_code=422, detail=f"Missing required header value(s): {', '.join(missing)}."
         )
     secret = {spec["name"] for spec in candidate["headers"] if spec.get("isSecret")}
-    if secret:
-        # A secret declared header carries the auth itself — no bearer.
-        token_source = ""
-        is_enabled = True
-    else:
-        # OAuth: ships dark until its Connect lands.
-        token_source = TokenSource.OAUTH
-        is_enabled = False
+    # A secret declared header carries the auth itself; without one the server
+    # is OAuth and ships dark until its Connect lands.
+    is_oauth = not secret
     try:
         await McpServer.create(
             session,
             name=body.name,
             url=candidate["url"],
-            token_source=token_source,
+            is_oauth=is_oauth,
             headers={h: v for h, v in filled.items() if h not in secret},
             secret_headers={h: v for h, v in filled.items() if h in secret},
-            is_enabled=is_enabled,
+            is_enabled=not is_oauth,
         )
     except (InvalidServerNameError, ReservedServerNameError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -194,7 +197,7 @@ async def connect_mcp_server(
     identity_mode: Annotated[IdentityMode, Body(embed=True)],
 ) -> ConnectMcpServerResponse:
     server = (await McpServer.get_resolved(session, current_account_id.get())).get(name)
-    if not server or server["token_source"] != TokenSource.OAUTH:
+    if not server or not server["is_oauth"]:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} is not an OAuth server.")
     if await oauth.list_connections(session, name) and server["identity_mode"] != identity_mode:
         raise HTTPException(
@@ -256,7 +259,7 @@ async def oauth_callback(
 @router.delete("/{name}/grant", status_code=204)
 async def disconnect_mcp_server(session: SessionDep, name: str) -> None:
     server = (await McpServer.get_resolved(session, current_account_id.get())).get(name)
-    if not server or server["token_source"] != TokenSource.OAUTH:
+    if not server or not server["is_oauth"]:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} is not an OAuth server.")
     if not server["identity_mode"]:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} has no grant.")

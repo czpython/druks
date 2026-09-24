@@ -13,7 +13,7 @@ afterEach(() => {
 it.each(['success', 'failure'])('shows pending sign-in and handles %s', async (outcome) => {
   vi.spyOn(api, 'mcpServers').mockResolvedValue([{
     name: 'jira', url: 'https://jira.test/mcp', isEnabled: true,
-    tokenSource: 'oauth', identityMode: 'shared', builtin: false, hasToken: false,
+    isOauth: true, identityMode: 'shared', builtin: false, hasToken: false,
   }])
   let resolve!: (value: { authorizationUrl: string }) => void
   let reject!: (error: Error) => void

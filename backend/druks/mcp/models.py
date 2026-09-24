@@ -8,8 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from druks.apps.registry import mcp_servers
 from druks.core.models import Uuid7Pk
-from druks.mcp.constants import BEARER_HEADER, DRUKS_SERVER_NAME, NAME_PATTERN
-from druks.mcp.enums import TokenSource
+from druks.mcp.constants import DRUKS_SERVER_NAME, NAME_PATTERN
 from druks.mcp.exceptions import InvalidServerNameError, ReservedServerNameError
 from druks.mcp.helpers import get_grant_account
 from druks.models import Base
@@ -26,11 +25,11 @@ class McpServer(Base, Uuid7Pk):
     # the url from the built-in def when the operator's choice first creates it.
     name: Mapped[str] = mapped_column(String, unique=True)
     url: Mapped[str] = mapped_column(String)
-    # How delivery sources this row's Authorization bearer (a TokenSource), or
-    # "" for no bearer — the server authenticates through its declared headers,
-    # or takes none. A catalog-managed name reads its source from the registry
-    # definition instead.
-    token_source: Mapped[str] = mapped_column(String, default=TokenSource.STATIC)
+    # Whether delivery mints the Authorization bearer from a stored grant.
+    # Otherwise the server authenticates through its header rows (a pasted
+    # bearer is the Authorization header spelled out). A catalog-managed name
+    # reads this from the registry definition instead.
+    is_oauth: Mapped[bool] = mapped_column(Boolean, default=False)
     # The plain declared header values from the server's spec. A secret one,
     # like the bearer itself, is a vault row at the server's audience.
     headers: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
@@ -57,13 +56,9 @@ class McpServer(Base, Uuid7Pk):
         # fully custom rows. A secret is the vault row itself; its value is
         # read where it enters a run.
         rows = {server.name: server for server in await cls.list_all(session)}
-        tokens: dict[str, VaultSecret] = {}
         secret_headers: dict[str, dict[str, VaultSecret]] = {}
         for secret in await VaultSecret.list_installation_tokens(session):
-            if secret.header == BEARER_HEADER:
-                tokens[secret.audience_name] = secret
-            else:
-                secret_headers.setdefault(secret.audience_name, {})[secret.header] = secret
+            secret_headers.setdefault(secret.audience_name, {})[secret.header] = secret
         servers: dict[str, dict] = {}
         for definition in mcp_servers.all():
             name = definition["name"]
@@ -71,9 +66,8 @@ class McpServer(Base, Uuid7Pk):
             servers[name] = {
                 "name": name,
                 "url": definition["url"],
-                "token_source": definition["token_source"],
+                "is_oauth": definition["is_oauth"],
                 "is_enabled": row.is_enabled if row else definition["enabled"],
-                "token": tokens.get(name),
                 "headers": row.headers if row else {},
                 "secret_headers": secret_headers.get(name, {}),
                 "identity_mode": row.identity_mode if row else None,
@@ -83,9 +77,8 @@ class McpServer(Base, Uuid7Pk):
             servers[row.name] = {
                 "name": row.name,
                 "url": row.url,
-                "token_source": row.token_source,
+                "is_oauth": row.is_oauth,
                 "is_enabled": row.is_enabled,
-                "token": tokens.get(row.name),
                 "headers": row.headers,
                 "secret_headers": secret_headers.get(row.name, {}),
                 "identity_mode": row.identity_mode,
@@ -98,13 +91,10 @@ class McpServer(Base, Uuid7Pk):
         servers = await cls._merged(session)
         # has_token = nothing blocks this server's auth at delivery, read from
         # wherever its source keeps the secret: a stored grant for a connected
-        # server, the stored token for a static one; a bearerless server has
-        # none to miss.
+        # server, the header rows for every other; a server with neither
+        # cannot authenticate.
         for server in servers.values():
-            source = server["token_source"]
-            if not source:
-                server["has_token"] = True
-            elif source == TokenSource.OAUTH:
+            if server["is_oauth"]:
                 server["has_token"] = False
                 if server["identity_mode"]:
                     grant_account = get_grant_account(server["identity_mode"], account_id)
@@ -114,7 +104,7 @@ class McpServer(Base, Uuid7Pk):
                         )
                     )
             else:
-                server["has_token"] = bool(server["token"])
+                server["has_token"] = bool(server["secret_headers"])
         return servers
 
     @classmethod
@@ -145,8 +135,7 @@ class McpServer(Base, Uuid7Pk):
         *,
         name: str,
         url: str,
-        token: str = "",
-        token_source: str = TokenSource.STATIC,
+        is_oauth: bool = False,
         headers: dict[str, str] | None = None,
         secret_headers: dict[str, str] | None = None,
         is_enabled: bool = True,
@@ -158,21 +147,13 @@ class McpServer(Base, Uuid7Pk):
         server = cls(
             name=name,
             url=url,
-            token_source=token_source,
+            is_oauth=is_oauth,
             headers=headers or {},
             is_enabled=is_enabled,
         )
         session.add(server)
         await session.flush()
         audience = Audience.mcp(name)
-        if token:
-            await VaultSecret.store(
-                session,
-                SecretKind.STATIC,
-                audience,
-                header=BEARER_HEADER,
-                secrets={"value": token},
-            )
         for header, value in (secret_headers or {}).items():
             await VaultSecret.store(
                 session, SecretKind.STATIC, audience, header=header, secrets={"value": value}

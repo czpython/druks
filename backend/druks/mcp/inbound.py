@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.models import PersonalAccessToken
-from druks.mcp.constants import BEARER_HEADER, DRUKS_SERVER_NAME
+from druks.mcp.constants import BEARER_HEADER, BEARER_PREFIX, DRUKS_SERVER_NAME
 from druks.mcp.enums import AllowedTools, Toolkit
 from druks.mcp.exceptions import MissingEndpointError
 from druks.sandbox.datastructures import RequiredMcpServer
@@ -49,7 +49,8 @@ async def get_druks_account_token(
         session,
         SecretKind.STATIC,
         audience,
-        secrets={"value": token},
+        # A header row holds the verbatim header value; the box adds no prefix.
+        secrets={"value": f"{BEARER_PREFIX}{token}"},
         identity={"token_prefix": minted.token_prefix},
         account_id=account_id,
         header=BEARER_HEADER,

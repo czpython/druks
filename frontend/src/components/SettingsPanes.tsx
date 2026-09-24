@@ -2265,6 +2265,10 @@ export function McpServersPane() {
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
   const [token, setToken] = useState('')
+  // Header auth: an API-key-style secret header instead of a bearer.
+  const [authMode, setAuthMode] = useState<'bearer' | 'header'>('bearer')
+  const [headerName, setHeaderName] = useState('')
+  const [headerValue, setHeaderValue] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [registryQuery, setRegistryQuery] = useState('')
@@ -2333,21 +2337,31 @@ export function McpServersPane() {
     }
   }
 
+  const authReady =
+    authMode === 'bearer' ? token.trim() !== '' : headerName.trim() !== '' && headerValue.trim() !== ''
+
   async function add() {
-    // A custom server is static — the backend requires a bearer token, so gate
-    // the add on all three rather than let a tokenless submit 422.
-    if (!name.trim() || !url.trim() || !token.trim()) return
+    // A custom server is static — the backend requires its auth up front, so
+    // gate the add on complete fields rather than let a submit 422.
+    if (!name.trim() || !url.trim() || !authReady) return
     setBusy(true)
     setError(null)
     try {
       await api.createMcpServer({
         name: name.trim(),
         url: url.trim(),
-        token: token.trim(),
+        // A bearer is the Authorization header spelled out — one storage
+        // shape for every static credential.
+        secret_headers:
+          authMode === 'bearer'
+            ? { Authorization: `Bearer ${token.trim()}` }
+            : { [headerName.trim()]: headerValue.trim() },
       })
       setName('')
       setUrl('')
       setToken('')
+      setHeaderName('')
+      setHeaderValue('')
       await refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -2607,7 +2621,7 @@ export function McpServersPane() {
         <summary className="mcp-custom-summary">Add a custom server</summary>
         <div className="mcp-custom-body">
           <p className="mcp-help">
-            For a server that isn&apos;t in the registry. All three fields are required.
+            For a server that isn&apos;t in the registry. Every field is required.
           </p>
           <div className="mcp-form-grid">
             <div className="mcp-field">
@@ -2643,32 +2657,100 @@ export function McpServersPane() {
               />
             </div>
             <div className="mcp-field">
-              <label className="mcp-label" htmlFor={`${fieldId}-token`}>
-                Bearer token <span className="mcp-req">(required)</span>
-              </label>
-              <TextInput
-                id={`${fieldId}-token`}
-                type="password"
-                required
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void add()
-                }}
-                autoComplete="new-password"
-                data-1p-ignore=""
-                data-lpignore="true"
-                disabled={busy}
-              />
-              <p className="mcp-help">
-                Stored write-only — never returned or emitted in config.
-              </p>
+              <span className="mcp-label">Authentication</span>
+              <div role="radiogroup" aria-label="Authentication" className="mcp-auth-mode">
+                <label>
+                  <input
+                    type="radio"
+                    name={`${fieldId}-auth`}
+                    checked={authMode === 'bearer'}
+                    onChange={() => setAuthMode('bearer')}
+                    disabled={busy}
+                  />{' '}
+                  Bearer token
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name={`${fieldId}-auth`}
+                    checked={authMode === 'header'}
+                    onChange={() => setAuthMode('header')}
+                    disabled={busy}
+                  />{' '}
+                  Header
+                </label>
+              </div>
             </div>
+            {authMode === 'bearer' ? (
+              <div className="mcp-field">
+                <label className="mcp-label" htmlFor={`${fieldId}-token`}>
+                  Bearer token <span className="mcp-req">(required)</span>
+                </label>
+                <TextInput
+                  id={`${fieldId}-token`}
+                  type="password"
+                  required
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void add()
+                  }}
+                  autoComplete="new-password"
+                  data-1p-ignore=""
+                  data-lpignore="true"
+                  disabled={busy}
+                />
+                <p className="mcp-help">
+                  Stored write-only — never returned or emitted in config.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="mcp-field">
+                  <label className="mcp-label" htmlFor={`${fieldId}-header-name`}>
+                    Header name <span className="mcp-req">(required)</span>
+                  </label>
+                  <TextInput
+                    id={`${fieldId}-header-name`}
+                    placeholder="x-api-key"
+                    required
+                    value={headerName}
+                    onChange={(e) => setHeaderName(e.target.value)}
+                    autoComplete="off"
+                    data-1p-ignore=""
+                    data-lpignore="true"
+                    disabled={busy}
+                  />
+                </div>
+                <div className="mcp-field">
+                  <label className="mcp-label" htmlFor={`${fieldId}-header-value`}>
+                    Header value <span className="mcp-req">(required)</span>
+                  </label>
+                  <TextInput
+                    id={`${fieldId}-header-value`}
+                    type="password"
+                    required
+                    value={headerValue}
+                    onChange={(e) => setHeaderValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void add()
+                    }}
+                    autoComplete="new-password"
+                    data-1p-ignore=""
+                    data-lpignore="true"
+                    disabled={busy}
+                  />
+                  <p className="mcp-help">
+                    Stored write-only — never returned or emitted in config.
+                  </p>
+                </div>
+              </>
+            )}
           </div>
           <div>
             <button
               className="set-btn primary"
-              disabled={busy || !name.trim() || !url.trim() || !token.trim()}
+              disabled={busy || !name.trim() || !url.trim() || !authReady}
               aria-busy={busy}
               onClick={() => void add()}
             >
@@ -2682,14 +2764,11 @@ export function McpServersPane() {
 }
 
 function tokenStatusLabel(server: McpServer): string {
-  if (server.tokenSource === 'oauth') {
+  if (server.isOauth) {
     return server.hasToken ? 'Connected' : 'Not connected'
   }
-  if (!server.tokenSource) {
-    // No bearer — header-auth'd (or auth-free): nothing to connect or store.
-    return 'Ready'
-  }
-  return server.hasToken ? 'Token set' : 'No token'
+  // Header-auth'd: its rows are the credential. A catalog entry can lack them.
+  return server.hasToken ? 'Ready' : 'No secret header'
 }
 
 function McpServerRow({
@@ -2710,8 +2789,7 @@ function McpServerRow({
   onDisconnect: (name: string) => Promise<void>
 }) {
   const claimedMode = server.identityMode
-  // A header-auth'd (or auth-free) server holds no credential to connect.
-  const isLive = server.hasToken || !server.tokenSource
+  const isLive = server.hasToken
   return (
     <div className={'set-card mcp-row' + (server.isEnabled ? '' : ' is-off')}>
       <div className="mcp-id">
@@ -2738,7 +2816,7 @@ function McpServerRow({
           <span className="mcp-enable-label">Enabled</span>
         </span>
         <div className="mcp-actions">
-          {server.tokenSource === 'oauth' &&
+          {server.isOauth &&
             (claimedMode === null ? (
               // The first connect claims how this server's credential is held;
               // afterwards the choice is fixed until the last grant is dropped.

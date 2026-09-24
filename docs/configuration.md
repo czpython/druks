@@ -641,14 +641,15 @@ not declare the URL, pin the URL.
 The dashboard can enable catalog entries and add custom servers. Authentication
 is one of:
 
-- A static token, which Druks keeps in the vault
+- Secret headers, which Druks keeps in the vault. A bearer token is the
+  `Authorization` header spelled out; the form's Bearer field composes it.
 - An OAuth connection, which requires `urls.endpoint`.
 
 Druks gives OAuth discovery and client registration 30 seconds in total.
 A timeout names the stage that was pending. Retry the connection.
 
 Druks delivers enabled servers through the selected harness unless an app
-workspace owns a required server with the same name. Each bearer token and
+workspace owns a required server with the same name. Each OAuth bearer and
 each secret header is a Drukbox entry behind a vault row. The sandbox holds a
 placeholder under a derived variable, and the harness configuration names that
 variable. The secrets proxy swaps the placeholder only for the server's host.
@@ -711,7 +712,7 @@ kind, an audience, and an encrypted mapping of secrets:
 
 | Kind | Audience | What the row keeps |
 | --- | --- | --- |
-| `static` | `provider:<id>`, `mcp:<name>` | A pasted API key, an MCP bearer token, or one secret header |
+| `static` | `provider:<id>`, `mcp:<name>` | A pasted API key, or one secret header of an MCP server |
 | `app_key` | `service:<slug>` | A GitHub App private key and webhook secret |
 | `oauth` | `service:<slug>`, `mcp:<name>` | A refresh token and the client that refreshes it |
 | `subscription` | `provider:<id>` | The token payload of a provider subscription |

@@ -7,11 +7,6 @@ class IdentityMode(StrEnum):
     PER_USER = "per_user"
 
 
-class TokenSource(StrEnum):
-    STATIC = "static"
-    OAUTH = "oauth"
-
-
 class Toolkit(Enum):
     """What a Druks key allows when it has no tool list: the whole API."""
 

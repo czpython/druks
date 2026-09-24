@@ -36,11 +36,13 @@ class ReservedServerNameError(McpServerError):
 
 
 class MissingTokenError(McpServerError):
-    # An enabled server carries no token, so it can't authenticate in the VM.
-    # Raised loudly at delivery rather than shipping a header the harness can't
-    # fill — the silent-degrade path this subsystem exists to close.
+    # An enabled server holds no secret header, so it can't authenticate in the
+    # VM. Raised loudly at delivery rather than shipping it bare — the
+    # silent-degrade path this subsystem exists to close.
     def __init__(self, name: str):
-        super().__init__(f"Enabled MCP server {name!r} has no token; it cannot authenticate.")
+        super().__init__(
+            f"Enabled MCP server {name!r} has no secret header; it cannot authenticate."
+        )
         self.name = name
 
 
