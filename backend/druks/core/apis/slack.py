@@ -1,5 +1,6 @@
 from collections import deque
 
+import aiohttp
 from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
@@ -15,13 +16,15 @@ SLACK_BOT_SCOPES = (
     "im:history",
     "mpim:history",
     "users:read",
+    "files:read",
 )
 USER_NAME_TTL_SECONDS = 24 * 60 * 60
 
 
 class SlackClient(AsyncWebClient):
     """Slack's Web API under one token, the bot's or a person's, plus what Druks adds
-    on top: the Markdown message it sends, a thread's tail, and the names it keeps."""
+    on top: the Markdown message it sends, a thread's tail, the names it keeps, and a
+    file's bytes."""
 
     async def post_markdown(
         self, channel: str, text: str, *, thread_ts: str = ""
@@ -55,3 +58,12 @@ class SlackClient(AsyncWebClient):
         name = user["profile"]["display_name"] or user["real_name"]
         await get_client().set(key, name, ex=USER_NAME_TTL_SECONDS)
         return name
+
+    async def download(self, url: str) -> bytes:
+        """A file's bytes from its private Slack URL."""
+        async with (
+            aiohttp.ClientSession() as http,
+            http.get(url, headers={"Authorization": f"Bearer {self.token}"}) as response,
+        ):
+            response.raise_for_status()
+            return await response.read()

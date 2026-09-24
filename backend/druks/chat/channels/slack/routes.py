@@ -37,7 +37,7 @@ async def link_account(
         link_page = quote(f"/api/chat/services/slack/link/{token}?has_connected=true", safe="")
         return RedirectResponse(f"/api/oauth/slack/connect?next={link_page}")
     if linked_account and linked_account.id == account.id:
-        await get_client().delete(LINK_KEY.format(token=token))
         conversation = await SlackChannel.save_message(session, card, account, message)
+        await get_client().delete(LINK_KEY.format(token=token))
         return RedirectResponse(f"/chat/{conversation.id}")
     return RedirectResponse("/chat")

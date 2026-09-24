@@ -13,6 +13,7 @@ from druks.chat.models import Conversation, Message
 from druks.chat.service import deliver
 from druks.core.apis.slack import SLACK_AUTHORITY, SlackClient
 from druks.core.services import Slack
+from druks.files.datastructures import File
 from druks.models import Base
 from druks.redis import get_client
 from druks.secrets.models import VaultSecret
@@ -77,7 +78,9 @@ class SlackChannel(Channel):
         cls, session: AsyncSession, card: VaultSecret, account: Account, message: dict
     ) -> Conversation:
         """Save the message in the account's conversation for its place, and start its
-        turn."""
+        turn. Each file the message carries is a Druks file: the first on the message,
+        each further one on a message of its own. A message with no text and no file
+        gives the agent nothing to read."""
         conversation = await Conversation.get_or_create_for_user(
             session,
             card,
@@ -88,9 +91,32 @@ class SlackChannel(Channel):
             user_phone="",
             thread_id=get_thread_id(message),
         )
-        await conversation.create_message(
-            session, message["text"], source_id=f"{message['channel']}:{message['ts']}"
-        )
+        client = SlackClient(token=card.secrets["bot_token"])
+        shares = message.get("files", [])
+        # Every download first: a failed one then leaves no file on disk.
+        contents = [await client.download(shared["url_private_download"]) for shared in shares]
+        files = [
+            await File.create(
+                name=shared["name"],
+                content_type=shared["mimetype"],
+                content=content,
+                app="chat",
+                uploaded_by=account.id,
+            )
+            for shared, content in zip(shares, contents, strict=True)
+        ]
+        source_id = f"{message['channel']}:{message['ts']}"
+        if files:
+            body = message["text"] or files[0].name
+            await conversation.create_message(session, body, source_id=source_id, file=files[0])
+            for shared, file in zip(shares[1:], files[1:], strict=True):
+                await conversation.create_message(
+                    session, file.name, source_id=f"{source_id}:{shared['id']}", file=file
+                )
+        elif message["text"]:
+            await conversation.create_message(session, message["text"], source_id=source_id)
+        else:
+            return conversation
         await session.commit()
         await DBOS.start_workflow_async(deliver, conversation.id)
         return conversation

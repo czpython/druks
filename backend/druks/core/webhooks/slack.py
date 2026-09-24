@@ -156,7 +156,7 @@ class SlackEvents(SlackWebhook):
         own messages, and people from other workspaces are not facts for anyone."""
         event = self.data["event"]
         is_from_person = (
-            (not event.get("subtype") or event["subtype"] == "thread_broadcast")
+            (not event.get("subtype") or event["subtype"] in ("file_share", "thread_broadcast"))
             and not event.get("hidden")
             and not event.get("bot_id")
             and event.get("user") != self.card.identity["bot_user_id"]

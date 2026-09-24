@@ -300,8 +300,15 @@ person who wrote it.
 You have one conversation with the bot in your direct message. Druks drops a
 repeated event by its room and timestamp. The agent writes Markdown, and Druks
 posts each reply in the direct message, in pieces of at most 12,000 characters.
-Druks ignores the bot's own messages, edits, deletes, joins, files, hidden
-events, and people from other workspaces.
+Druks ignores the bot's own messages, edits, deletes, joins, hidden events, and
+people from other workspaces.
+
+### Files
+
+A file you send to the bot, in a direct message or in a thread you joined,
+becomes a Druks file on its message. A message with only a file starts a turn
+like any other, with the file's name as its text. Each further file in one
+Slack message gets a message of its own. The agent sends no files back.
 
 ### Rooms
 
