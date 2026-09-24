@@ -94,6 +94,7 @@ async def get_or_create_admin_conversation(
         user_id=identity["admin"].get("user_id") or identity["user_id"],
         user_name="",
         user_phone="",
+        thread_id="",
     )
 
 

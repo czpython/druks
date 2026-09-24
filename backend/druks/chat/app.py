@@ -6,7 +6,7 @@ from .enums import BotAccess
 
 class Chat(App):
     """Live agent sessions per account, and the channels people reach them through.
-    The package walk discovers each channel's services, webhooks, and routes."""
+    The package walk discovers each channel, with its services, webhooks, and routes."""
 
     name = "chat"
     icon = "messages-square"

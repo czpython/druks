@@ -5,7 +5,7 @@ from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.apps.loader import get_app, iter_apps
-from druks.apps.registry import agents, bots, workflows
+from druks.apps.registry import agents, bots, channels, workflows
 from druks.durable.engine import apply_schedules
 from druks.harnesses.base import Harness
 from druks.harnesses.config import check_config
@@ -129,6 +129,9 @@ async def get_app_settings(session: SessionDep) -> AppsSettingsResponse:
     return AppsSettingsResponse(
         allowed_efforts=list(ALLOWED_EFFORTS),
         apps=[out for out in projected if out.agents or out.workflows or out.settings],
+        channels=[
+            channel.name for channel in channels.all() if await channel.service.is_connected()
+        ],
     )
 
 

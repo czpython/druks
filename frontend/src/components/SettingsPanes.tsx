@@ -768,7 +768,7 @@ export function ServicesPane() {
     const channel = new BroadcastChannel('druks-service-connect')
     channel.onmessage = () =>
       void queryClient.invalidateQueries({
-        predicate: (query) => ['services', 'connections', 'appSettingChoices'].includes(String(query.queryKey[0])),
+        predicate: (query) => ['services', 'connections', 'appSettingChoices', 'appSettings'].includes(String(query.queryKey[0])),
       })
     return () => channel.close()
   }, [queryClient])
@@ -891,7 +891,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
         setValues({})
         setFormOpen(false)
         await queryClient.invalidateQueries({
-          predicate: (query) => ['services', 'connections', 'appSettingChoices'].includes(String(query.queryKey[0])),
+          predicate: (query) => ['services', 'connections', 'appSettingChoices', 'appSettings'].includes(String(query.queryKey[0])),
         })
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))

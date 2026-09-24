@@ -32,7 +32,8 @@ async def resume_conversation(
     account: Account = Depends(current_account),
 ) -> ResumeConversationResponse:
     """Let the bot answer a chat again, before the pause ends by itself, after a person
-    answered it from the number's phone. Only the number's admin can resume its chats."""
+    answered it from the connection's phone. Only the connection's admin can resume its
+    chats."""
     conversation = await session.get(Conversation, conversation_id)
     if conversation and conversation.admin_account_id == account.id:
         result = "resumed" if await resume(session, conversation) else "not_paused"
@@ -50,21 +51,21 @@ async def add_admin_code(
     connection_id: str,
     account: Account = Depends(current_session_account),
 ) -> AdminCodeResponse:
-    """A one-time code to connect a phone to the number."""
+    """A one-time code to connect a phone to the connection."""
     connection = await get_bot_connection(session, connection_id)
     if connection:
         code = await create_admin_code(connection, account.id)
         return AdminCodeResponse(code=code, expires_in=ADMIN_CODE_TTL_SECONDS)
-    raise HTTPException(404, "Number not found.")
+    raise HTTPException(404, "Connection not found.")
 
 
-@router.delete("/connections/{connection_id}/phone", status_code=204)
-async def disconnect_phone(
+@router.delete("/connections/{connection_id}/pairing", status_code=204)
+async def unpair(
     session: SessionDep,
     connection_id: str,
     account: Account = Depends(current_session_account),
 ) -> None:
-    """Disconnect every phone paired to the signed-in operator on this number."""
+    """Remove the signed-in operator's phones from this connection."""
     connection = await get_bot_connection(session, connection_id)
     if connection and get_app(connection.identity["app"]).bot.access == BotAccess.PAIRED:
         connection.identity = {
@@ -76,4 +77,4 @@ async def disconnect_phone(
             },
         }
         return
-    raise HTTPException(404, "Number not found.")
+    raise HTTPException(404, "Connection not found.")

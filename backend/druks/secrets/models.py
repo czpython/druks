@@ -18,8 +18,8 @@ if TYPE_CHECKING:
 
 
 class VaultSecret(Base, Uuid7Pk):
-    """A pasted value, an OAuth connection, a GitHub App key, a subscription, or the
-    WAHA session of a linked WhatsApp number."""
+    """A pasted value, an OAuth connection, a GitHub App key, a subscription, or a chat
+    channel's connection, such as the WAHA session of a linked WhatsApp number."""
 
     __tablename__ = "vault"
     __table_args__ = (

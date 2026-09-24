@@ -19,7 +19,7 @@ function settingsWithTracker(tracker: string): AppsSettingsResponse {
 describe('isDruksTracker', () => {
   it('is true only when the Software Factory tracker is druks', () => {
     expect(isDruksTracker()).toBe(false)
-    expect(isDruksTracker({ allowedEfforts: [], apps: [] })).toBe(false)
+    expect(isDruksTracker({ allowedEfforts: [], apps: [], channels: [] })).toBe(false)
     expect(isDruksTracker(settingsWithTracker('linear'))).toBe(false)
     expect(isDruksTracker(settingsWithTracker('jira'))).toBe(false)
     expect(isDruksTracker(settingsWithTracker('none'))).toBe(false)

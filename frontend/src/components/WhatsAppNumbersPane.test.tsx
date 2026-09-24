@@ -101,7 +101,7 @@ describe('WhatsAppNumbersPane', () => {
   it('disconnects the current operator phone and offers pairing again', async () => {
     const number = { ...waiting, number: '+41000000000', identityStatus: 'resolved', isPhoneConnected: true }
     const fetchMock = vi.fn(async (url: string, request?: RequestInit) => {
-      if (url === '/api/chat/connections/number-1/phone' && request?.method === 'DELETE') {
+      if (url === '/api/chat/connections/number-1/pairing' && request?.method === 'DELETE') {
         number.isPhoneConnected = false
         return new Response(null, { status: 204 })
       }
@@ -117,7 +117,7 @@ describe('WhatsAppNumbersPane', () => {
     expect(await screen.findByRole('button', { name: 'Connect my phone' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Disconnect my phone' })).toBeNull()
     expect(fetchMock.mock.calls.some(([url, request]) =>
-      url === '/api/chat/connections/number-1/phone' && request?.method === 'DELETE',
+      url === '/api/chat/connections/number-1/pairing' && request?.method === 'DELETE',
     )).toBe(true)
   })
 

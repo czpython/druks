@@ -22,6 +22,7 @@ from .accounts.models import Account
 from .agents import Agent
 from .apps.loader import iter_apps
 from .apps.registry import _ROLES, agents, autodiscover, services, webhooks, workflows
+from .chat.channels.base import Channel
 from .chat.sandbox import CHAT_SANDBOX
 from .core.services import Github
 from .database import create_async_engine_from_url, create_engine_from_url, session_scope
@@ -435,6 +436,8 @@ def _defined_capability(module: ModuleType) -> tuple[str, str] | None:
             return "services", value.slug
         if isinstance(value, Agent) and value.module == name:
             return "agents", value.name
+        if isinstance(value, type) and issubclass(value, Channel) and value.__module__ == name:
+            return "channels", value.name
     return
 
 

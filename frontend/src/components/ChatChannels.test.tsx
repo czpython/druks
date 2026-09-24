@@ -28,7 +28,7 @@ beforeEach(() => {
     }
     if (url === '/api/settings/personal') response = { timezone: 'UTC', gateParkDestinationId: null }
     if (url === '/api/settings/apps') response = {
-      allowedEfforts: [], apps: [{
+      allowedEfforts: [], channels: ['whatsapp'], apps: [{
         name: 'chat', description: 'Live agent conversations.', icon: 'messages-square',
         builtin: true, bot: 'chat.bot', botAccess: 'paired', agents: [], workflows: [], settings: [],
       }, {
@@ -37,7 +37,6 @@ beforeEach(() => {
       }],
     }
     if (url === '/api/settings/apps/chat/choices') response = {}
-    if (url === '/api/services') response = [{ slug: 'waha', connected: true }]
     if (url === '/api/agents') response = { apps: [] }
     return new Response(JSON.stringify(response))
   }))

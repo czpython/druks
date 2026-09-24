@@ -99,7 +99,7 @@ afterEach(cleanup)
 
 beforeEach(() => {
   vi.mocked(api.listApps).mockResolvedValue(roster)
-  vi.mocked(api.getAppSettings).mockResolvedValue({ allowedEfforts: [], apps: [] })
+  vi.mocked(api.getAppSettings).mockResolvedValue({ allowedEfforts: [], apps: [], channels: [] })
   vi.stubGlobal(
     'matchMedia',
     vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),

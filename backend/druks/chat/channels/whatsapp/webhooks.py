@@ -92,6 +92,7 @@ class WahaEvents(Webhook):
             "user_id": chat_id,
             "user_name": name or "",
             "user_phone": phone,
+            "thread_id": "",
         }
 
     async def save_message(

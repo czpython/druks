@@ -28,6 +28,17 @@ function isWaiting(number: WahaSession) {
   return !number.revokedAt && number.identityStatus !== 'resolved'
 }
 
+/** The WhatsApp channel of an app's Bot: its numbers, and under paired access the
+ * operator's own number. */
+export function WhatsAppChannelPane({ app }: { app: AppSettings }) {
+  return (
+    <>
+      <WhatsAppNumbersPane app={app} />
+      {app.botAccess === 'paired' && <WhatsAppNumbersPane />}
+    </>
+  )
+}
+
 /** The WhatsApp numbers of an app's Bot, or without ``app`` the operator's own number. */
 export function WhatsAppNumbersPane({ app }: { app?: Pick<AppSettings, 'name' | 'botAccess'> }) {
   const appName = app?.name
@@ -184,7 +195,7 @@ export function WhatsAppNumbersPane({ app }: { app?: Pick<AppSettings, 'name' | 
                     {isPaired && number.isPhoneConnected && (
                       <button
                         className="set-btn ghost"
-                        onClick={() => void changeNumbers(() => api.disconnectBotPhone(number.id))}
+                        onClick={() => void changeNumbers(() => api.unpair(number.id))}
                         disabled={isBusy}
                       >
                         Disconnect my phone
