@@ -132,7 +132,7 @@ package modules:
 | `dist/` | optional built frontend module, mounted inside the shell (served under `/app/<name>`) |
 
 Druks recursively discovers leaf modules named `workflows`, `tasks`, `routes`,
-`pages`, `subscribers`, `webhooks`, `services`, and `channels`. A capability
+`pages`, `subscribers`, `webhooks`, `services`, and `channel`. A capability
 hidden in `workflow.py` is not discovered. Ordinary names such as `policy.py` and `workspace.py` have no import
 side effect unless a discovered module imports them.
 

@@ -9,7 +9,7 @@ from druks.db import db_session
 from druks.redis import get_client
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
-from druks.services import OauthClient, OauthExchangeError, OauthRefreshError
+from druks.services import OauthClient, OauthRefreshError
 from druks.services.oauth import complete_connect
 
 _PROVIDER = "acme"
@@ -287,15 +287,6 @@ async def test_begin_connect_call_params_override_the_declared_ones():
     params = dict(parse_qsl(urlparse(url).query))
     assert params["access_type"] == "offline"
     assert params["prompt"] == "select_account"
-
-
-async def test_complete_connect_requires_a_refresh_token(token_endpoint):
-    token_endpoint.response = {"access_token": "at-1", "expires_in": 3600}
-    url = await _client().begin_connect(redirect_uri=_REDIRECT_URI)
-    state = dict(parse_qsl(urlparse(url).query))["state"]
-
-    with pytest.raises(OauthExchangeError, match="no refresh token"):
-        await complete_connect(state=state, code="code-1")
 
 
 async def test_downscoped_get_asks_and_caches_apart_from_the_full_grant(token_endpoint):

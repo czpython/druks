@@ -393,6 +393,10 @@ async def complete_connect(session: AsyncSession, *, state: str, code: str) -> s
     except OauthExchangeError as error:
         raise OauthConnectError(error.context.get("name", "unknown"), error.reason) from error
     name = pending["name"]
+    if not tokens.get("refresh_token"):
+        raise OauthConnectError(
+            name, "the authorization server granted no refresh token; druks needs offline access"
+        )
     identity, identity_status, identity_error = await get_grant_identity(tokens, pending)
     # An omitted scope means the provider granted the requested scopes (RFC 6749 section 5.1).
     scope = tokens.get("scope", " ".join(pending["scopes"]) or None)

@@ -105,7 +105,7 @@ class Webhook:
         """
         raise NotImplementedError
 
-    def delivery_key(self) -> str | None:
+    def get_delivery_key(self) -> str | None:
         """Return a stable key for at-most-once delivery, or None to skip.
 
         Default disables dedup. Subclasses return e.g. the
@@ -152,7 +152,7 @@ class Webhook:
             )
 
         provider = self.provider or self.path or "unknown"
-        key = self.delivery_key()
+        key = self.get_delivery_key()
         if not await mark_delivery(provider, key):
             return await self.on_duplicate()
 

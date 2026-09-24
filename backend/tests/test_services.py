@@ -534,7 +534,7 @@ async def test_with_scopes_declares_the_union_and_reads_connections(declared_ser
     monkeypatch.setattr("druks.services.base.iter_apps", lambda: [NightWatch, Digest])
 
     assert NightWatch.acme.scopes == ("profile.read", "posts.write")
-    assert Acme.required_scopes() == ("posts.write", "profile.read")
+    assert Acme.scopes() == ("posts.write", "profile.read")
     assert [declaration.label for declaration in Acme.declarations()] == [
         "night_watch.acme",
         "digest.acme",
@@ -1224,7 +1224,7 @@ async def test_list_serves_the_connections_beside_the_declared_union(tmp_path, a
         before = await entry(client)
         assert before["isOauth"] is True
         assert before["connections"] == []
-        assert before["requiredScopes"] == ["openid", "posts.write", "profile.read"]
+        assert before["scopes"] == ["openid", "posts.write", "profile.read"]
         assert before["usedBy"] == ["night_watch.acme"]
 
         row = await VaultSecret.connect(

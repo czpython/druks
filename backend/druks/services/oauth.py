@@ -112,13 +112,16 @@ class OauthClient:
         *,
         redirect_uri: str,
         scopes: tuple[str, ...] = (),
+        consent_query: dict[str, str] | None = None,
         context: dict[str, Any] | None = None,
         extra_authorize_params: dict[str, str] | None = None,
     ) -> str:
         """Stash the pending exchange in Redis under a new single-use state, and
-        return the consent URL. ``context`` comes back from ``complete_connect``.
-        ``extra_authorize_params`` override the client's declared ones on the same
-        key. Nothing durable is written, so an abandoned consent expires."""
+        return the consent URL. ``consent_query`` is the query that asks for ``scopes``,
+        when the provider names them otherwise than RFC 6749's ``scope``. ``context``
+        comes back from ``complete_connect``. ``extra_authorize_params`` override the
+        client's declared ones on the same key. Nothing durable is written, so an
+        abandoned consent expires."""
         state = secrets.token_urlsafe(32)
         code_verifier = secrets.token_urlsafe(64)
         code_challenge = (
@@ -152,7 +155,7 @@ class OauthClient:
             "code_challenge_method": "S256",
         }
         if scopes:
-            query["scope"] = " ".join(scopes)
+            query.update(consent_query or {"scope": " ".join(scopes)})
         query.update({**self.extra_authorize_params, **(extra_authorize_params or {})})
         return f"{self.authorization_endpoint}?{urlencode(query)}"
 
@@ -211,9 +214,13 @@ class OauthClient:
                 self.provider, "timed out waiting for a concurrent refresh to finish"
             )
         async with refresh_lock:
+            grant = await connection.get_grant()
+            if token := grant.get("access_token"):
+                # The grant is one access token that never expires.
+                return token, None
             data = {
                 "grant_type": "refresh_token",
-                "refresh_token": await connection.get_refresh_token(),
+                "refresh_token": grant["refresh_token"],
                 **self.extra_token_params,
             }
             if requested:
@@ -345,11 +352,9 @@ async def complete_connect(*, state: str, code: str) -> tuple[dict, dict]:
         raise OauthExchangeError(
             provider, "the token endpoint returned malformed JSON", context=pending
         ) from error
-    if not isinstance(tokens, dict) or not tokens.get("refresh_token"):
+    if not isinstance(tokens, dict):
         raise OauthExchangeError(
-            provider,
-            "the authorization server granted no refresh token; druks needs offline access",
-            context=pending,
+            provider, "the token endpoint returned malformed JSON", context=pending
         )
     return tokens, pending
 

@@ -436,8 +436,13 @@ def _defined_capability(module: ModuleType) -> tuple[str, str] | None:
             return "services", value.slug
         if isinstance(value, Agent) and value.module == name:
             return "agents", value.name
-        if isinstance(value, type) and issubclass(value, Channel) and value.__module__ == name:
-            return "channels", value.name
+        if (
+            isinstance(value, type)
+            and issubclass(value, Channel)
+            and value is not Channel
+            and value.__module__ == name
+        ):
+            return "channel", value.name
     return
 
 

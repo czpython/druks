@@ -431,6 +431,42 @@ updates, groups, channels, and broadcasts) into each session's config. Each
 event carries an HMAC SHA-512 signature, and Druks refuses an event without a
 valid one. See [Chat](chat.md#whatsapp) for linking numbers.
 
+## Slack
+
+**Slack** is the service identity that Druks answers Slack messages as: one Slack
+app in one workspace. Create the app from Druks's manifest, install it, and paste
+its keys.
+
+1. Set `urls.endpoint`. Set `urls.webhook_host` when Slack must reach Druks at
+   another host.
+2. Open **Settings → Connections → Services → Slack** and select **Open
+   manifest**. Copy the manifest.
+3. At [api.slack.com/apps](https://api.slack.com/apps), select **Create New
+   App**, then **From a manifest**. Select the workspace and paste the manifest.
+4. Install the app in the workspace. Slack shows the bot token on **OAuth &
+   Permissions**, and the client ID, client secret, and signing secret on
+   **Basic Information**.
+5. Paste the four values on the Slack card. Druks checks the bot token with
+   `auth.test` and keeps the workspace and the bot user.
+6. In the Slack app's **Event Subscriptions**, verify the Request URL again.
+   Slack's first check ran before the card held the signing secret, so Druks
+   refused it.
+
+The manifest asks for the bot scopes `chat:write`, `channels:history`,
+`groups:history`, `im:history`, `mpim:history`, and `users:read`. It subscribes
+the bot to direct messages, leaves token rotation off, and names these URLs:
+
+Events URL:
+`https://<webhook-host>/_external/slack/events/`
+
+Redirect URL:
+`<endpoint>/api/oauth/callback`
+
+Druks checks each event's signature with the signing secret, and refuses an
+event older than five minutes. With rotation off, the pasted bot token and each
+person's Slack token live until someone revokes them. A person connects their
+own Slack account through the same app: see [Chat](chat.md#slack).
+
 ## Harnesses
 
 Druks registers two subscription providers, `anthropic` and `openai`. Each
@@ -606,7 +642,8 @@ topology.
 The dashboard has no notifications page yet. Manage destinations through the
 API. The current destination type is a Slack incoming webhook. Actionable
 messages use Slack Block Kit. Other messages use the same URL through Apprise.
-`SLACK_SIGNING_SECRET` authenticates Slack interactivity callbacks.
+The [Slack card](#slack)'s signing secret authenticates the button clicks that
+Slack sends back.
 
 Select one enabled destination as the gate-notification destination through
 the API. A parked subjected run then produces a durable notification. Failure

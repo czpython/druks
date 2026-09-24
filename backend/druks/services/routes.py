@@ -98,9 +98,11 @@ async def connect_oauth_service(
         client = await service.get_oauth_client()
     except ServiceNotConnectedError as error:
         raise OauthPageError(str(error), status_code=409) from error
+    scopes = service.scopes()
     url = await client.begin_connect(
         redirect_uri=f"{endpoint.rstrip('/')}/api/oauth/callback",
-        scopes=service.required_scopes(),
+        scopes=scopes,
+        consent_query=service.get_consent_query(scopes),
         context={"account_id": account_id, "connection_id": connection, "next": next},
     )
     return RedirectResponse(url)
@@ -129,8 +131,16 @@ async def oauth_callback(
     if not service:
         # A state begun by another door (an MCP connect) finishes at its own callback.
         raise OauthPageError(f"No OAuth service {provider!r}.", status_code=400)
-    granted = tokens.get("scope", "").split() or pending["scopes"]
-    identity = await service.get_identity(tokens["access_token"])
+    try:
+        grant = service.read_grant(tokens)
+    except OauthExchangeError as exchange_error:
+        raise OauthPageError(str(exchange_error), status_code=400) from exchange_error
+    granted = grant["scopes"] or pending["scopes"]
+    identity = await service.get_identity(grant["access_token"])
+    # A grant refreshes through its refresh token. Without one, the access token
+    # never expires and is the grant itself.
+    refresh_token = grant.get("refresh_token", "")
+    kept = {} if refresh_token else {"access_token": grant["access_token"]}
     connection_id = pending["connection_id"]
     # Reconsent names an existing row by id; a declared identity key
     # matches a fresh sign-in to one. Both make a revoked row live again.
@@ -148,7 +158,7 @@ async def oauth_callback(
     reconsent = bool(row)
     if row:
         await row.reconnect(
-            refresh_token=tokens["refresh_token"], scopes=granted, identity=identity
+            refresh_token=refresh_token, scopes=granted, identity=identity, secrets=kept
         )
         # A token cached before this consent must not serve the new one.
         await OauthClient(provider=provider).evict_access_token(row.id)
@@ -157,9 +167,10 @@ async def oauth_callback(
             session,
             Audience.service(provider),
             account_id=pending["account_id"],
-            refresh_token=tokens["refresh_token"],
+            refresh_token=refresh_token,
             scopes=granted,
             identity=identity,
+            secrets=kept,
         )
     await publish(
         "oauth.connected",
@@ -169,6 +180,9 @@ async def oauth_callback(
         reconsent=reconsent,
     )
     if pending["next"]:
+        # The request's session commits after the response leaves, and the browser
+        # follows a redirect at once: the next page must find the grant.
+        await session.commit()
         return RedirectResponse(pending["next"])
     return render_page("service_oauth_callback.html", slug=provider)
 

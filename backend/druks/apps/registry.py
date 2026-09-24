@@ -10,7 +10,7 @@ from typing import Any
 # effect). The set is the single source of truth for what "a capability module"
 # is named.
 _ROLES = frozenset(
-    {"webhooks", "subscribers", "workflows", "tasks", "routes", "pages", "services", "channels"}
+    {"webhooks", "subscribers", "workflows", "tasks", "routes", "pages", "services", "channel"}
 )
 
 

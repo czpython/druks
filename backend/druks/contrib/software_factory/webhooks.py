@@ -34,7 +34,7 @@ class LinearEvents(Webhook):
         )
         return True
 
-    def delivery_key(self) -> str:
+    def get_delivery_key(self) -> str:
         headers = {key.lower(): value for key, value in self.request.headers.items()}
         return compute_delivery_key(headers, self.raw_body, self.data)
 
@@ -107,7 +107,7 @@ class JiraEvents(Webhook):
     def get_action(self) -> str:
         return "issue_event"
 
-    def delivery_key(self) -> str:
+    def get_delivery_key(self) -> str:
         # Automation sends no delivery id. A retry sends the same body, so its digest is
         # the dedup key. A new transition changes the body.
         return hashlib.sha256(self.raw_body).hexdigest()[:16]

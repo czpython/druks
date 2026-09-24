@@ -8,13 +8,20 @@ from fastapi.responses import HTMLResponse
 from druks.accounts.dependencies import current_session_account
 from druks.api.dependencies import SessionDep
 from druks.core.apis.github import GITHUB
-from druks.core.services import Github
+from druks.core.services import Github, Slack
 from druks.core.templates import render_page
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 
 # Mounted by the loader under /api/core, like any app's routes.
 router = APIRouter(prefix="/services/github", tags=["services"])
+slack_router = APIRouter(prefix="/services/slack", tags=["services"])
+
+
+@slack_router.get("/manifest")
+async def get_slack_manifest() -> dict:
+    """The Slack app to create, for Slack's create-from-manifest page."""
+    return Slack.get_manifest()
 
 
 @router.get("/manifest", response_class=HTMLResponse)

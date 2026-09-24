@@ -36,7 +36,7 @@ const disconnected: Service = {
   connectedAt: null,
   fields: githubFields,
   isOauth: false,
-  requiredScopes: [],
+  scopes: [],
   usedBy: [],
   connections: [],
 }
@@ -73,7 +73,7 @@ const pasteOnly: Service = {
     },
   ],
   isOauth: false,
-  requiredScopes: [],
+  scopes: [],
   usedBy: [],
   connections: [],
 }
