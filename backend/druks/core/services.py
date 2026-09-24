@@ -211,7 +211,11 @@ class Slack(Service):
         """A person's grant sits under ``authed_user``, with its scopes joined by commas.
         Token rotation stays off, as on every peer, so the access token never expires."""
         person = tokens["authed_user"]
-        return {"access_token": person["access_token"], "scopes": person["scope"].split(",")}
+        return {
+            "access_token": person["access_token"],
+            "refresh_token": "",
+            "scopes": person["scope"].split(","),
+        }
 
     @classmethod
     def get_manifest(cls) -> dict[str, Any]:
@@ -234,7 +238,12 @@ class Slack(Service):
             "settings": {
                 "event_subscriptions": {
                     "request_url": f"{urls.webhook_base}/_external/slack/events/",
-                    "bot_events": ["message.im"],
+                    "bot_events": [
+                        "message.channels",
+                        "message.groups",
+                        "message.im",
+                        "message.mpim",
+                    ],
                 },
                 "token_rotation_enabled": False,
             },

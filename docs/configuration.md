@@ -454,7 +454,8 @@ its keys.
 
 The manifest asks for the bot scopes `chat:write`, `channels:history`,
 `groups:history`, `im:history`, `mpim:history`, and `users:read`. It subscribes
-the bot to direct messages, leaves token rotation off, and names these URLs:
+the bot to direct messages and to the rooms it is invited to, leaves token rotation
+off, and names these URLs:
 
 Events URL:
 `https://<webhook-host>/_external/slack/events/`

@@ -215,9 +215,9 @@ class OauthClient:
             )
         async with refresh_lock:
             grant = await connection.get_grant()
-            if token := grant.get("access_token"):
+            if not grant["refresh_token"]:
                 # The grant is one access token that never expires.
-                return token, None
+                return grant["access_token"], None
             data = {
                 "grant_type": "refresh_token",
                 "refresh_token": grant["refresh_token"],

@@ -275,8 +275,9 @@ workflow that the typed message names, and a chat has at most one open pause.
 
 ## Slack
 
-Slack is a source for Chat. You write to the Druks bot in a direct message, and
-your own agent answers there, under your account and with your whole toolkit.
+Slack is a source for Chat. You write to the Druks bot in a direct message, or
+tag it in a room, and your own agent answers there, under your account and with
+your whole toolkit.
 One Slack app serves every app in Druks. Connect the Slack card first: see
 [Slack](configuration.md#slack). **Chat → Channels** shows the workspace, the
 bot, and your Slack account while the card is connected.
@@ -301,3 +302,20 @@ repeated event by its room and timestamp. The agent writes Markdown, and Druks
 posts each reply in the direct message, in pieces of at most 12,000 characters.
 Druks ignores the bot's own messages, edits, deletes, joins, files, hidden
 events, and people from other workspaces.
+
+### Rooms
+
+Invite the bot to a channel or a group. Tag it in a message, and your own agent
+answers in that message's thread. A tag inside a thread answers in that thread.
+Each person who tags the bot gets their own conversation for the thread, so two
+people can talk to their own agents in one thread. For 24 hours after the last
+message in your conversation there, your untagged replies in the thread reach
+your agent too. Other people must tag it, and a top-level message with no tag
+reaches nobody. When you tag the bot before you connect Slack, the link comes as
+a message in the room that only you see.
+
+The agent reads the thread with `chat_read_thread`: the newest 200 messages,
+oldest first, each with its author's id and name, whether this agent wrote it,
+and whether the person it answers wrote it. Every agent in a thread posts as the
+one bot, so Druks tells an agent's own replies by the Slack ids it recorded. In
+a direct message the tool answers that there is no thread.

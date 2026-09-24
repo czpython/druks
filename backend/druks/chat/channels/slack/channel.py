@@ -1,5 +1,6 @@
 import json
 import secrets
+from datetime import timedelta
 
 from dbos import DBOS
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,15 +8,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from druks.accounts.models import Account
 from druks.chat.channels.base import Channel
 from druks.chat.enums import ConversationSource
+from druks.chat.exceptions import ChannelHasNoThreadsError
 from druks.chat.models import Conversation, Message
 from druks.chat.service import deliver
 from druks.core.apis.slack import SLACK_AUTHORITY, SlackClient
 from druks.core.services import Slack
+from druks.models import Base
 from druks.redis import get_client
 from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
 
-from .constants import LINK_KEY, LINK_MESSAGE, LINK_TTL_SECONDS, REPLY_PIECE_CHARACTERS
+from .constants import (
+    JOINED_THREAD_SECONDS,
+    LINK_KEY,
+    LINK_MESSAGE,
+    LINK_TTL_SECONDS,
+    REPLY_PIECE_CHARACTERS,
+    THREAD_MESSAGES,
+)
+
+
+def get_thread_id(message: dict) -> str:
+    """Where a message lives, as the room and the thread in one id. A direct message
+    has none. A message at the top of a room starts a thread at itself."""
+    if message["channel_type"] == "im":
+        return ""
+    return f"{message['channel']}:{message.get('thread_ts') or message['ts']}"
 
 
 class SlackChannel(Channel):
@@ -23,44 +41,52 @@ class SlackChannel(Channel):
     service = Slack
 
     @classmethod
-    async def lookup_writer(
+    async def lookup_account(
         cls, session: AsyncSession, card: VaultSecret, message: dict
     ) -> Account | None:
-        """The account with a live Slack grant for the message's writer."""
+        """The account with a live Slack grant for the Slack user who wrote the message."""
         authority = SLACK_AUTHORITY.format(team_id=card.identity["team_id"])
         return await Account.lookup(session, authority, message["user"])
 
     @classmethod
     async def route_message(cls, session: AsyncSession, card: VaultSecret, message: dict) -> None:
-        """Route a message for the bot: to the writer's own conversation, or to a private
-        link that holds it until they connect their Slack account."""
-        writer = await cls.lookup_writer(session, card, message)
-        if writer:
-            await cls.save_message(session, card, writer, message)
+        """Route a message for the bot. A direct message or a tag reaches the linked
+        account's own conversation, or waits under a private link until the person
+        connects their Slack account. An untagged reply reaches the thread conversation
+        the person used in the last day. Everything else is not for the bot."""
+        thread_id = get_thread_id(message)
+        is_addressed = not thread_id or f"<@{card.identity['bot_user_id']}>" in message["text"]
+        if not is_addressed and "thread_ts" not in message:
+            # Most of a room's traffic: a top-level message that names nobody.
             return
-        token = secrets.token_urlsafe(32)
-        await get_client().set(
-            LINK_KEY.format(token=token), json.dumps(message), ex=LINK_TTL_SECONDS
-        )
-        endpoint = load_settings().urls.endpoint.rstrip("/")
-        url = f"{endpoint}/api/chat/services/slack/link/{token}"
-        client = SlackClient(token=card.secrets["bot_token"])
-        await client.post_markdown(message["user"], LINK_MESSAGE.format(url=url))
+        linked_account = await cls.lookup_account(session, card, message)
+        if is_addressed and linked_account:
+            await cls.save_message(session, card, linked_account, message)
+        elif is_addressed:
+            await cls.send_link(card, message)
+        elif linked_account:
+            joined = await Conversation.get_for_user(
+                session, card, user_id=message["user"], thread_id=thread_id
+            )
+            since = Base.utc_now() - timedelta(seconds=JOINED_THREAD_SECONDS)
+            if joined and joined.last_message_at > since:
+                await cls.save_message(session, card, linked_account, message)
 
     @classmethod
     async def save_message(
-        cls, session: AsyncSession, card: VaultSecret, writer: Account, message: dict
+        cls, session: AsyncSession, card: VaultSecret, account: Account, message: dict
     ) -> Conversation:
-        """Save the message in the writer's DM conversation and start its turn."""
+        """Save the message in the account's conversation for its place, and start its
+        turn."""
         conversation = await Conversation.get_or_create_for_user(
             session,
             card,
-            writer.id,
+            account.id,
             source=ConversationSource.SLACK,
             user_id=message["user"],
             user_name="",
             user_phone="",
-            thread_id="",
+            thread_id=get_thread_id(message),
         )
         await conversation.create_message(
             session, message["text"], source_id=f"{message['channel']}:{message['ts']}"
@@ -70,17 +96,65 @@ class SlackChannel(Channel):
         return conversation
 
     @classmethod
+    async def send_link(cls, card: VaultSecret, message: dict) -> None:
+        """Hold the message under a private link, and send the person the link: in their
+        DM, or in the room where only they see it."""
+        token = secrets.token_urlsafe(32)
+        await get_client().set(
+            LINK_KEY.format(token=token), json.dumps(message), ex=LINK_TTL_SECONDS
+        )
+        endpoint = load_settings().urls.endpoint.rstrip("/")
+        text = LINK_MESSAGE.format(url=f"{endpoint}/api/chat/services/slack/link/{token}")
+        client = SlackClient(token=card.secrets["bot_token"])
+        if message["channel_type"] == "im":
+            await client.post_markdown(message["user"], text)
+        else:
+            await client.chat_postEphemeral(
+                channel=message["channel"],
+                user=message["user"],
+                text=text,
+                thread_ts=message.get("thread_ts"),
+            )
+
+    @classmethod
     async def send_reply(
         cls, session: AsyncSession, conversation: Conversation, reply: Message
     ) -> None:
-        """Post the reply in the person's DM, in pieces that fit a markdown block. The
-        first piece's Slack id is the reply's source id."""
+        """Post the reply where the conversation lives, in pieces that fit a markdown
+        block. The first piece's Slack id is the reply's source id."""
         client = SlackClient(token=conversation.connection.secrets["bot_token"])
+        room, _, thread_ts = conversation.thread_id.partition(":")
         posted = [
             await client.post_markdown(
-                conversation.user_id, reply.body[start : start + REPLY_PIECE_CHARACTERS]
+                room or conversation.user_id,
+                reply.body[start : start + REPLY_PIECE_CHARACTERS],
+                thread_ts=thread_ts,
             )
             for start in range(0, len(reply.body), REPLY_PIECE_CHARACTERS)
         ]
         reply.source_id = f"{posted[0]['channel']}:{posted[0]['ts']}"
         await session.commit()
+
+    @classmethod
+    async def read_thread(cls, session: AsyncSession, conversation: Conversation) -> list[dict]:
+        """The thread's newest messages, oldest first, with who wrote each one. Every
+        agent in the thread posts as the one bot, so a reply is this conversation's by
+        its recorded Slack id. A webhook's post has no author and is left out."""
+        room, _, thread_ts = conversation.thread_id.partition(":")
+        if not room:
+            raise ChannelHasNoThreadsError("A direct message has no thread to read.")
+        client = SlackClient(token=conversation.connection.secrets["bot_token"])
+        messages = await client.list_replies(room, thread_ts, limit=THREAD_MESSAGES)
+        own_replies = await conversation.list_reply_source_ids(session)
+        return [
+            {
+                "ts": message["ts"],
+                "user_id": message["user"],
+                "user_name": await client.get_user_name(message["user"]),
+                "text": message["text"],
+                "is_from_you": f"{room}:{message['ts']}" in own_replies,
+                "is_from_user": message["user"] == conversation.user_id,
+            }
+            for message in messages
+            if "user" in message
+        ]
