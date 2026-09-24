@@ -3,9 +3,9 @@
   "private": true,
   "dependencies": {
     "@anthropic-ai/claude-code": "2.1.278",
-    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.86.1",
     "@openai/codex": "0.155.1",
     "opencode-ai": "1.18.31",
-    "pi-mcp-adapter": "2.34.0"
+    "pi-mcp-adapter": "2.35.0"
   }
 }
