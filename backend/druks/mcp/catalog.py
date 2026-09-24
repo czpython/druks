@@ -47,7 +47,9 @@ def load_mcp_catalog(path: Path) -> None:
             {
                 "name": name,
                 "url": parsed.url,
-                "token_source": parsed.auth.type,
+                # "static" is header-shaped: the credential rides the server's
+                # vault header rows, never a minted bearer.
+                "is_oauth": parsed.auth.type == "oauth",
                 "enabled": parsed.enabled,
             }
         )

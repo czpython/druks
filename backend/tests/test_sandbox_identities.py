@@ -11,7 +11,8 @@ from druks.db import db_session
 from druks.durable.engine import _step_engine
 from druks.harnesses import providers as pbase
 from druks.harnesses.providers import AnthropicProvider
-from druks.mcp.enums import IdentityMode
+from druks.mcp.enums import IdentityMode, Toolkit
+from druks.mcp.inbound import get_druks_account_token
 from druks.mcp.models import McpServer
 from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.models import SandboxIdentity, SecretRef
@@ -421,26 +422,30 @@ async def test_an_mcp_ref_binds_a_custom_entry_and_the_issuer_answers_the_stored
     druks_db, tmp_path
 ):
     await McpServer.create(
-        druks_db, name="linear", url="https://mcp.linear.app/mcp", token="lin_secret"
+        druks_db,
+        name="linear",
+        url="https://mcp.linear.app/mcp",
+        secret_headers={"Authorization": "Bearer lin_secret"},
     )
     identity, bearer, entry = await _mcp_identity()
 
-    response = await _fetch(tmp_path, identity.id, bearer, "mcp_linear_token")
+    response = await _fetch(tmp_path, identity.id, bearer, "mcp_linear_header_0")
 
-    # The entry binds the host, the variable, the header, and the prefix. A
-    # pasted value has no expiry, so the static refresh bounds it.
+    # The entry binds the host, the variable, and the header. A header row's
+    # value is verbatim — the prefix is already inside it — and a pasted value
+    # has no expiry, so the static refresh bounds it.
     assert entry == {
         "host": "mcp.linear.app",
-        "auth_variable": "MCP_LINEAR_TOKEN",
+        "auth_variable": "MCP_LINEAR_HEADER_0",
         "auth_header": "Authorization",
-        "auth_prefix": "Bearer ",
+        "auth_prefix": "",
         "issuer": {
-            "url": f"http://127.0.0.1:8001/api/secrets/{identity.id}/mcp_linear_token",
+            "url": f"http://127.0.0.1:8001/api/secrets/{identity.id}/mcp_linear_header_0",
             "headers": {"Authorization": f"Bearer {bearer}"},
             "refresh": "5m",
         },
     }
-    assert response.json() == {"value": "lin_secret", "expires_at": None}
+    assert response.json() == {"value": "Bearer lin_secret", "expires_at": None}
     # A later server edit moves nothing: the row keeps the host its entry was made for.
     [stored] = identity.secret_refs
     assert stored.host == "mcp.linear.app"
@@ -451,7 +456,7 @@ async def test_a_secret_header_entry_fills_its_own_header_with_no_prefix(druks_d
         druks_db,
         name="grafana",
         url="https://mcp.grafana.com/mcp",
-        token_source="",
+        is_oauth=False,
         secret_headers={"X-Api-Key": "grafana-api-secret"},
     )
     identity, bearer, entry = await _mcp_identity()
@@ -466,9 +471,28 @@ async def test_a_secret_header_entry_fills_its_own_header_with_no_prefix(druks_d
     assert response.json() == {"value": "grafana-api-secret", "expires_at": None}
 
 
+async def test_the_gateway_key_entry_sends_its_bearer_verbatim(druks_db):
+    # Druks' own server: the account's key row is the Authorization header
+    # spelled out, so the entry adds no prefix and /mcp still reads "Bearer ".
+    await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
+    account = await Account.get_or_create(db_session(), "run@example.com")
+    row = await get_druks_account_token(db_session(), account.id, Toolkit.ALL)
+    _, entries = await SandboxIdentity.create(
+        db_session(),
+        account_id=account.id,
+        run_id="run-1",
+        scoped_to="workflow",
+        secret_refs=[SecretRef(name="mcp_druks_token", secret_id=row.id, host="hooks.test")],
+    )
+
+    entry = entries["mcp_druks_token"].entry()
+    assert (entry["auth_header"], entry["auth_prefix"]) == ("Authorization", "")
+    assert (await row.issue_token(""))[0].startswith("Bearer ")
+
+
 async def test_the_issuer_answers_503_for_a_disconnected_mcp_grant(druks_db, tmp_path):
     server = await McpServer.create(
-        druks_db, name="linear", url="https://mcp.linear.app/mcp", token_source="oauth"
+        druks_db, name="linear", url="https://mcp.linear.app/mcp", is_oauth=True
     )
     server.identity_mode = IdentityMode.SHARED
     grant = await VaultSecret.connect(

@@ -11,6 +11,10 @@ TOKEN_ENV_SUFFIX = "_TOKEN"
 # two names never collapse to one env var.
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
+# A custom secret header name is an HTTP field name (RFC 9110 token): the box
+# sets it verbatim at egress, so a stray space or colon would fail every run.
+HEADER_NAME_PATTERN = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+
 # Druks' own MCP server, as a box names it. Reserved: a registry row may not
 # claim it, or the emitted config would carry two servers under one key.
 DRUKS_SERVER_NAME = "druks"

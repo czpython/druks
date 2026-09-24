@@ -21,7 +21,7 @@ from druks.files.storage import get_file_storage
 from druks.mcp import models as mcp_models
 from druks.mcp import oauth
 from druks.mcp.constants import TOKEN_ENV_PREFIX
-from druks.mcp.enums import TokenSource, Toolkit
+from druks.mcp.enums import Toolkit
 from druks.mcp.exceptions import MissingGrantError, MissingTokenError
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
 from druks.mcp.inbound import get_druks_account_token
@@ -216,24 +216,21 @@ class Workspace:
             if name in required_names:
                 continue
             host = urlsplit(server["url"]).hostname
-            # The bearer's vault row, by source, loud when the server cannot
-            # authenticate. A bearerless server rides its declared headers.
-            source = server["token_source"]
+            # An OAuth server mints its bearer from the stored grant, loud when
+            # it cannot authenticate. Every other server rides its header rows,
+            # loud when it has none.
             bearer_token_env_var = ""
-            if source == TokenSource.STATIC:
-                secret = server["token"]
-                if not secret:
-                    raise MissingTokenError(name)
-            elif source:
+            if server["is_oauth"]:
                 grant_account = get_grant_account(server["identity_mode"], run_account)
                 secret = await oauth.get_connection(session, name, grant_account)
                 if not secret:
                     raise MissingGrantError(name, grant_account)
-            if source:
                 bearer_token_env_var = get_bearer_token_env_var(name)
                 refs.append(
                     SecretRef(name=bearer_token_env_var.lower(), secret_id=secret.id, host=host)
                 )
+            elif not server["secret_headers"]:
+                raise MissingTokenError(name)
             env_headers = {}
             for index, (header, secret) in enumerate(server["secret_headers"].items()):
                 variable = f"{TOKEN_ENV_PREFIX}{name.upper()}_HEADER_{index}"

@@ -153,8 +153,8 @@ class Harness(ABC):
         # Workspace.get_mcp_delivery). The delivered server is what
         # this harness ran against, so record its url + env var; fall back to
         # the declared values only for a declared-but-not-delivered entry.
-        # token_present reads the delivered shape: it names a bearer env var
-        # iff the box holds an entry behind it.
+        # token_present reads the delivered shape: it names a bearer or secret
+        # header env var iff the box holds an entry behind it.
         declared = {
             server["name"]: server for server in await mcp_models.McpServer.list_enabled(session)
         }
@@ -170,7 +170,9 @@ class Harness(ABC):
                     "bearer_token_env_var": env_var,
                     "declared": name in declared,
                     "delivered": name in delivered_by_name,
-                    "token_present": bool(server and server.bearer_token_env_var),
+                    "token_present": bool(
+                        server and (server.bearer_token_env_var or server.env_headers)
+                    ),
                 }
             )
         # Only the delivered skill set is reachable in either CLI home, so the

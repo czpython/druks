@@ -123,12 +123,13 @@ class SandboxIdentity(Base, Uuid7Pk):
             # entry leaves those to Drukbox.
             fields = {}
             if ref.host:
-                header = secret.header or BEARER_HEADER
+                # A header row stores the verbatim header value; a headerless
+                # row is a raw token the header frames at egress.
                 fields = {
                     "host": ref.host,
                     "auth_variable": ref.name.upper(),
-                    "auth_header": header,
-                    "auth_prefix": BEARER_PREFIX if header == BEARER_HEADER else "",
+                    "auth_header": secret.header or BEARER_HEADER,
+                    "auth_prefix": "" if secret.header else BEARER_PREFIX,
                 }
             entries[ref.name] = Issuer(
                 url=f"{issuer_url}/api/secrets/{identity.id}/{ref.name}",

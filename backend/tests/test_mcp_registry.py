@@ -328,7 +328,7 @@ async def test_add_from_registry_writes_the_row_and_redacts_the_secret(
         assert created.status_code == 200
         body = created.json()
         # Header-auth'd: no bearer to miss, ready and enabled immediately.
-        assert body["tokenSource"] == ""
+        assert body["isOauth"] is False
         assert body["isEnabled"] is True
         assert body["hasToken"] is True
         assert "acme-api-secret" not in created.text
@@ -363,7 +363,7 @@ async def test_add_from_registry_oauth_candidate_ships_dark_and_connects(
 
         assert created.status_code == 200
         body = created.json()
-        assert body["tokenSource"] == "oauth"
+        assert body["isOauth"] is True
         # Dark until its Connect lands — an enabled unconnected oauth server
         # would fail every delivery.
         assert body["isEnabled"] is False

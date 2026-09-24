@@ -33,6 +33,7 @@ from druks.workspaces import Workspace
 
 _LINEAR_URL = "https://mcp.linear.app/mcp"
 _TOKEN = "lin_secret_value"
+_BEARER = {"Authorization": f"Bearer {_TOKEN}"}
 
 
 class _FakeSandbox:
@@ -88,7 +89,9 @@ def _requiring(*servers: RequiredMcpServer) -> type[Workspace]:
 
 
 async def test_create_lists_and_deletes(druks_db):
-    server = await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
+    server = await McpServer.create(
+        druks_db, name="linear", url=_LINEAR_URL, secret_headers=_BEARER
+    )
 
     by_name = await McpServer.get_for_name(druks_db, "linear")
     assert by_name
@@ -100,7 +103,9 @@ async def test_create_lists_and_deletes(druks_db):
 
 
 async def test_enable_disable_moves_in_and_out_of_the_enabled_set(druks_db):
-    server = await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
+    server = await McpServer.create(
+        druks_db, name="linear", url=_LINEAR_URL, secret_headers=_BEARER
+    )
     assert "linear" in {s["name"] for s in await McpServer.list_enabled(druks_db)}
 
     server.is_enabled = False
@@ -120,18 +125,22 @@ async def test_create_rejects_names_that_break_env_or_config(druks_db):
     # path; a leading digit and uppercase are rejected for the same reason.
     for bad in ("linear-app", "1linear", "Linear", "linear.app", "linear app"):
         with pytest.raises(InvalidServerNameError, match="Invalid MCP server name"):
-            await McpServer.create(druks_db, name=bad, url=_LINEAR_URL, token=_TOKEN)
+            await McpServer.create(druks_db, name=bad, url=_LINEAR_URL, secret_headers=_BEARER)
 
 
 async def test_create_refuses_the_name_this_appliance_delivers_under(druks_db):
     """This appliance's own /mcp owns that config key. A row claiming it would
     collide in the VM's config, so the operator hears about it at creation."""
     with pytest.raises(ReservedServerNameError, match="reserved"):
-        await McpServer.create(druks_db, name=DRUKS_SERVER_NAME, url=_LINEAR_URL, token=_TOKEN)
+        await McpServer.create(
+            druks_db, name=DRUKS_SERVER_NAME, url=_LINEAR_URL, secret_headers=_BEARER
+        )
 
 
 async def test_valid_name_derives_shell_safe_env_var(druks_db):
-    server = await McpServer.create(druks_db, name="linear_app", url=_LINEAR_URL, token=_TOKEN)
+    server = await McpServer.create(
+        druks_db, name="linear_app", url=_LINEAR_URL, secret_headers=_BEARER
+    )
     # Every char of the derived var is a valid shell identifier char.
     var = get_bearer_token_env_var(server.name)
     assert var == "MCP_LINEAR_APP_TOKEN"
@@ -142,29 +151,31 @@ async def test_valid_name_derives_shell_safe_env_var(druks_db):
 # --- delivery at the workspace seam --------------------------------------
 
 
-async def test_delivery_names_the_variable_and_binds_the_static_row(druks_db):
-    await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
+async def test_delivery_names_the_variable_and_binds_the_header_row(druks_db):
+    await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, secret_headers=_BEARER)
     row = await _bearer_row("linear")
 
     kwargs = await _delivery()
     refs = await _refs()
 
     # The wire shape names only the var. The value is a box entry the issuer
-    # answers from the bound row; nothing rides the run env.
+    # answers from the bound row; nothing rides the run env. A pasted bearer
+    # is the Authorization header spelled out, delivered like any other.
     linear = next(s for s in kwargs["mcp_servers"] if s.name == "linear")
-    assert linear.bearer_token_env_var == "MCP_LINEAR_TOKEN"
+    assert linear.bearer_token_env_var == ""
+    assert linear.env_headers == {"Authorization": "MCP_LINEAR_HEADER_0"}
     assert "extra_env" not in kwargs
     [ref] = refs.values()
-    assert ref.key == ("mcp_linear_token", row.id, "", "mcp.linear.app")
+    assert ref.key == ("mcp_linear_header_0", row.id, "", "mcp.linear.app")
     assert _TOKEN not in repr(linear) + repr(refs)
-    assert await row.issue_token("") == (_TOKEN, None)
+    assert await row.issue_token("") == (f"Bearer {_TOKEN}", None)
 
 
 async def test_required_server_delivers_beside_the_registry(druks_db):
     # A workspace declares a server with its own vault row and resource
     # (SoftwareFactory's review identity and repo): wire shape + entry ride
     # the same seam as every registry server.
-    await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, secret_headers=_BEARER)
     row = await _github_row()
     workspace = _requiring(
         RequiredMcpServer(
@@ -188,15 +199,15 @@ async def test_required_server_delivers_beside_the_registry(druks_db):
         "api.githubcopilot.com",
     )
     assert "linear" in {s.name for s in wire}
-    assert "mcp_linear_token" in by_name
+    assert "mcp_linear_header_0" in by_name
 
 
 async def test_required_server_owns_its_name_against_a_registry_twin(druks_db):
     # Exactly one wire entry per name — the workspace's — and the registry twin
     # is skipped whole: it is neither bound to an entry nor resolved at all (a
     # tokenless twin would otherwise raise).
-    await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
-    await McpServer.create(druks_db, name="notion", url="https://mcp.notion.com/sse", token="")
+    await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, secret_headers=_BEARER)
+    await McpServer.create(druks_db, name="notion", url="https://mcp.notion.com/sse")
     row = await _github_row()
     workspace = _requiring(
         RequiredMcpServer(name="linear", url="https://required.internal/linear", secret_id=row.id),
@@ -225,18 +236,18 @@ async def test_duplicate_required_names_are_refused(druks_db):
         await workspace.get_mcp_delivery(db_session(), None, None)
 
 
-async def test_enabled_static_server_without_token_raises_loudly(druks_db):
-    # A tokenless enabled static row can't authenticate; delivery raises rather
-    # than shipping a header the harness can't fill. (The API rejects creating
-    # one; this guards the model-level path.)
-    await McpServer.create(druks_db, name="notion", url="https://mcp.notion.com/sse", token="")
+async def test_enabled_server_without_secrets_raises_loudly(druks_db):
+    # A non-OAuth server with no secret header can't authenticate; delivery
+    # raises rather than shipping it bare. (The API rejects creating one; this
+    # guards the model-level path, which a catalog "static" entry reaches.)
+    await McpServer.create(druks_db, name="notion", url="https://mcp.notion.com/sse")
 
     with pytest.raises(MissingTokenError, match="notion"):
         await _delivery()
 
 
 async def test_enabled_server_reaches_both_harness_configs_without_token(druks_db):
-    await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, secret_headers=_BEARER)
     kwargs = await _delivery()
     servers = kwargs["mcp_servers"]
 
@@ -246,7 +257,7 @@ async def test_enabled_server_reaches_both_harness_configs_without_token(druks_d
         )._mcp_flags(servers)
     )
     assert _LINEAR_URL in claude_config
-    assert get_bearer_token_env_var("linear") in claude_config
+    assert "MCP_LINEAR_HEADER_0" in claude_config
     assert _TOKEN not in claude_config
 
     codex_config = " ".join(
@@ -258,7 +269,7 @@ async def test_enabled_server_reaches_both_harness_configs_without_token(druks_d
         )._mcp_flags(servers)
     )
     assert _LINEAR_URL in codex_config
-    assert get_bearer_token_env_var("linear") in codex_config
+    assert "MCP_LINEAR_HEADER_0" in codex_config
     assert _TOKEN not in codex_config
     assert "extra_env" not in kwargs
 
@@ -267,13 +278,13 @@ async def test_enabled_server_reaches_both_harness_configs_without_token(druks_d
 
 
 async def _grafana_shaped_server() -> None:
-    # A registry-installed shape: no bearer (empty token_source), one plain
+    # A registry-installed shape: no bearer, one plain
     # declared header and one secret one.
     await McpServer.create(
         db_session(),
         name="grafana",
         url="https://mcp.grafana.com/mcp",
-        token_source="",
+        is_oauth=False,
         headers={"X-Grafana-URL": "https://acme.grafana.net"},
         secret_headers={"X-Api-Key": "grafana-api-secret"},
     )
@@ -304,25 +315,28 @@ async def test_declared_headers_deliver_inline_and_secret_values_are_entries(dru
     assert await row.issue_token("") == ("grafana-api-secret", None)
 
 
-async def test_two_secret_headers_bind_two_entries_beside_the_bearer(druks_db):
+async def test_three_secret_headers_bind_three_entries(druks_db):
     await McpServer.create(
         druks_db,
         name="acme",
         url="https://mcp.acme.com/mcp",
-        token=_TOKEN,
-        secret_headers={"X-Api-Key": "key-secret", "X-Org": "org-secret"},
+        secret_headers={**_BEARER, "X-Api-Key": "key-secret", "X-Org": "org-secret"},
     )
 
     kwargs = await _delivery()
     refs = await _refs()
 
     acme = next(s for s in kwargs["mcp_servers"] if s.name == "acme")
-    assert acme.env_headers == {"X-Api-Key": "MCP_ACME_HEADER_0", "X-Org": "MCP_ACME_HEADER_1"}
-    assert set(refs) == {"mcp_acme_token", "mcp_acme_header_0", "mcp_acme_header_1"}
-    org = await druks_db.get(VaultSecret, refs["mcp_acme_header_1"].secret_id)
+    assert acme.env_headers == {
+        "Authorization": "MCP_ACME_HEADER_0",
+        "X-Api-Key": "MCP_ACME_HEADER_1",
+        "X-Org": "MCP_ACME_HEADER_2",
+    }
+    assert set(refs) == {"mcp_acme_header_0", "mcp_acme_header_1", "mcp_acme_header_2"}
+    org = await druks_db.get(VaultSecret, refs["mcp_acme_header_2"].secret_id)
     assert org.header == "X-Org"
     assert await org.issue_token("") == ("org-secret", None)
-    key = await druks_db.get(VaultSecret, refs["mcp_acme_header_0"].secret_id)
+    key = await druks_db.get(VaultSecret, refs["mcp_acme_header_1"].secret_id)
     assert await key.issue_token("") == ("key-secret", None)
 
 
@@ -356,14 +370,14 @@ async def test_two_header_server_emits_both_headers_in_each_harness_config(druks
     assert "grafana-api-secret" not in codex_config
 
 
-async def test_bearer_and_declared_headers_combine_on_one_server(druks_db):
-    # A static-token server may also declare plain headers; the Authorization
-    # bearer keeps its env-ref form beside them.
+async def test_secret_and_declared_headers_combine_on_one_server(druks_db):
+    # A pasted bearer may sit beside plain declared headers; the secret keeps
+    # its env-ref form and the plain value rides inline.
     await McpServer.create(
         druks_db,
         name="acme",
         url="https://mcp.acme.com/mcp",
-        token=_TOKEN,
+        secret_headers=_BEARER,
         headers={"X-Region": "eu"},
     )
 
@@ -375,23 +389,9 @@ async def test_bearer_and_declared_headers_combine_on_one_server(druks_db):
     )._mcp_flags(servers)
     headers = json.loads(claude_flags[1])["mcpServers"]["acme"]["headers"]
     assert headers == {
-        "Authorization": f"Bearer ${{{get_bearer_token_env_var('acme')}}}",
+        "Authorization": "${MCP_ACME_HEADER_0}",
         "X-Region": "eu",
     }
-    assert "extra_env" not in kwargs
-
-
-async def test_bearerless_server_delivers_without_a_bearer(druks_db):
-    # The loud MissingTokenError is a static-source contract; a bearerless
-    # server (auth in its headers, or no auth) delivers without any bearer.
-    await McpServer.create(
-        druks_db, name="public_docs", url="https://docs.example.com/mcp", token_source=""
-    )
-
-    kwargs = await _delivery()
-
-    docs = next(s for s in kwargs["mcp_servers"] if s.name == "public_docs")
-    assert docs.bearer_token_env_var == ""
     assert "extra_env" not in kwargs
 
 
@@ -399,7 +399,7 @@ async def test_bearerless_server_merges_with_its_headers(druks_db):
     await _grafana_shaped_server()
 
     grafana = (await McpServer._merged(druks_db))["grafana"]
-    assert grafana["token_source"] == ""
+    assert grafana["is_oauth"] is False
     assert grafana["headers"] == {"X-Grafana-URL": "https://acme.grafana.net"}
     assert grafana["secret_headers"]["X-Api-Key"].secrets["value"] == "grafana-api-secret"
 
@@ -410,7 +410,8 @@ async def test_bearerless_server_merges_with_its_headers(druks_db):
 async def test_routes_crud_and_token_stays_backend_side(tmp_path, druks_db):
     async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         created = await client.post(
-            "/api/mcp-servers", json={"name": "linear", "url": _LINEAR_URL, "token": _TOKEN}
+            "/api/mcp-servers",
+            json={"name": "linear", "url": _LINEAR_URL, "secret_headers": _BEARER},
         )
         assert created.status_code == 200
         body = created.json()
@@ -435,7 +436,8 @@ async def test_routes_crud_and_token_stays_backend_side(tmp_path, druks_db):
         # Re-adding the same name is rejected — remove first.
         assert (
             await client.post(
-                "/api/mcp-servers", json={"name": "linear", "url": _LINEAR_URL, "token": _TOKEN}
+                "/api/mcp-servers",
+                json={"name": "linear", "url": _LINEAR_URL, "secret_headers": _BEARER},
             )
         ).status_code == 409
 
@@ -447,23 +449,54 @@ async def test_routes_crud_and_token_stays_backend_side(tmp_path, druks_db):
 async def test_routes_reject_invalid_name(tmp_path, druks_db, name):
     async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         created = await client.post(
-            "/api/mcp-servers", json={"name": name, "url": _LINEAR_URL, "token": _TOKEN}
+            "/api/mcp-servers", json={"name": name, "url": _LINEAR_URL, "secret_headers": _BEARER}
         )
         assert created.status_code == 422
         assert "MCP server name" in created.text
 
 
-async def test_routes_reject_creating_a_tokenless_custom_server(tmp_path, druks_db):
+async def test_routes_reject_creating_an_authless_custom_server(tmp_path, druks_db):
     url = "https://mcp.notion.com/sse"
     async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        # A custom server is static; a blank (or whitespace-only) token would
-        # create an enabled server that breaks every run at delivery. Rejected at
-        # the boundary instead.
-        for body in ({"name": "notion", "url": url}, {"name": "notion", "url": url, "token": "  "}):
-            created = await client.post("/api/mcp-servers", json=body)
-            assert created.status_code == 422
-            assert "bearer token" in created.text
+        # A custom server is delivered enabled; without a secret header it
+        # cannot authenticate and breaks every run. Rejected at the boundary.
+        created = await client.post("/api/mcp-servers", json={"name": "notion", "url": url})
+        assert created.status_code == 422
+        assert "secret header" in created.text
         assert not any(s["name"] == "notion" for s in (await client.get("/api/mcp-servers")).json())
+
+
+async def test_routes_create_a_custom_server_with_a_secret_header(tmp_path, druks_db):
+    url = "https://mcp.acme.example"
+    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        created = await client.post(
+            "/api/mcp-servers",
+            json={"name": "acme", "url": url, "secret_headers": {"x-api-key": "acme-key"}},
+        )
+        assert created.status_code == 200
+        body = created.json()
+        # A secret header carries the auth itself: no bearer, enabled at once.
+        assert body["isOauth"] is False
+        assert body["isEnabled"] is True
+        assert "acme-key" not in created.text
+
+    merged = (await McpServer._merged(druks_db))["acme"]
+    assert merged["is_oauth"] is False
+    assert merged["secret_headers"]["x-api-key"].secrets["value"] == "acme-key"
+
+
+async def test_routes_reject_a_custom_server_with_bad_header_parts(tmp_path, druks_db):
+    url = "https://mcp.acme.example"
+    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        # The box sets the header name verbatim, so a blank or non-token name
+        # would fail every run; a blank value cannot authenticate.
+        for headers in ({"": "acme-key"}, {"x api key": "acme-key"}, {"x-api-key": "  "}):
+            rejected = await client.post(
+                "/api/mcp-servers", json={"name": "acme", "url": url, "secret_headers": headers}
+            )
+            assert rejected.status_code == 422
+            assert "secret header" in rejected.text
+        assert not any(s["name"] == "acme" for s in (await client.get("/api/mcp-servers")).json())
 
 
 async def test_routes_reject_creating_a_urlless_custom_server(tmp_path, druks_db):
@@ -472,7 +505,8 @@ async def test_routes_reject_creating_a_urlless_custom_server(tmp_path, druks_db
         # ship into every VM; rejected server-side, not just disabled in the UI.
         for bad_url in ("", "   "):
             created = await client.post(
-                "/api/mcp-servers", json={"name": "notion", "url": bad_url, "token": _TOKEN}
+                "/api/mcp-servers",
+                json={"name": "notion", "url": bad_url, "secret_headers": _BEARER},
             )
             assert created.status_code == 422
             assert "needs a url" in created.text
@@ -648,6 +682,11 @@ async def _druks_row(account_id: str) -> VaultSecret:
     )
 
 
+async def _druks_pat(account_id: str) -> str:
+    # The row holds the header value; the key itself sits behind "Bearer ".
+    return (await _druks_row(account_id)).secrets["value"].removeprefix("Bearer ")
+
+
 def test_druks_needs_an_address_a_box_reaches(monkeypatch):
     monkeypatch.setattr(
         "druks.mcp.inbound.load_settings",
@@ -666,7 +705,7 @@ async def test_delivery_mints_the_run_account_its_own_token(druks_db, monkeypatc
     wire, refs = await workspace.get_mcp_delivery(db_session(), None, account.id)
 
     row = await _druks_row(account.id)
-    minted = await PersonalAccessToken.authenticate(druks_db, row.secrets["value"])
+    minted = await PersonalAccessToken.authenticate(druks_db, await _druks_pat(account.id))
     assert (minted.account_id, minted.allowed_tools) == (account.id, list(allowed_tools))
     server = next(one for one in wire if one.name == DRUKS_SERVER_NAME)
     assert server.url == "https://druks.test/mcp"
@@ -680,19 +719,19 @@ async def test_a_later_run_reuses_the_token_and_a_retired_one_is_replaced(druks_
     workspace = _requiring_druks(monkeypatch)
     account = await Account.get_or_create(druks_db, "op@example.com")
     await workspace.get_mcp_delivery(db_session(), None, account.id)
-    first = (await _druks_row(account.id)).secrets["value"]
+    first = await _druks_pat(account.id)
     # No tools: the token carries the account's whole API.
     assert (await PersonalAccessToken.authenticate(druks_db, first)).allowed_tools is None
 
     await workspace.get_mcp_delivery(db_session(), None, account.id)
 
-    assert (await _druks_row(account.id)).secrets["value"] == first
+    assert await _druks_pat(account.id) == first
     assert len(await PersonalAccessToken.list_for_account(druks_db, account.id)) == 1
 
     await (await PersonalAccessToken.authenticate(druks_db, first)).revoke()
     await workspace.get_mcp_delivery(db_session(), None, account.id)
 
-    assert (await _druks_row(account.id)).secrets["value"] != first
+    assert await _druks_pat(account.id) != first
     assert len(await PersonalAccessToken.list_for_account(druks_db, account.id)) == 2
 
 
@@ -704,9 +743,8 @@ async def test_two_accounts_hold_their_own_tokens(druks_db, monkeypatch):
     await workspace.get_mcp_delivery(db_session(), None, first.id)
     await workspace.get_mcp_delivery(db_session(), None, second.id)
 
-    rows = [await _druks_row(first.id), await _druks_row(second.id)]
     holders = [
-        (await PersonalAccessToken.authenticate(druks_db, row.secrets["value"])).account_id
-        for row in rows
+        (await PersonalAccessToken.authenticate(druks_db, await _druks_pat(account_id))).account_id
+        for account_id in (first.id, second.id)
     ]
     assert holders == [first.id, second.id]

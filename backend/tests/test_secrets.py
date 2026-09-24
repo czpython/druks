@@ -29,7 +29,10 @@ def _set_key(monkeypatch, tmp_path, value: str) -> None:
 async def _store_token(token: str = _TOKEN) -> None:
     # The paste path: a server's bearer lands in the vault under its header.
     await McpServer.create(
-        db_session(), name="linear", url="https://mcp.linear.app/sse", token=token
+        db_session(),
+        name="linear",
+        url="https://mcp.linear.app/sse",
+        secret_headers={BEARER_HEADER: token},
     )
 
 
@@ -67,7 +70,7 @@ async def test_stored_secrets_are_ciphertext_and_reads_restore_them(druks_db):
     # The merged view every consumer reads carries the vault row itself, so
     # the plaintext exists only where the value is read.
     merged = (await McpServer._merged(druks_db))["linear"]
-    assert merged["token"].secrets["value"] == _TOKEN
+    assert merged["secret_headers"][BEARER_HEADER].secrets["value"] == _TOKEN
 
 
 async def test_grant_secret_halves_round_trip(druks_db):
