@@ -907,15 +907,10 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
       Create GitHub App
     </button>
   )
-  const openSlackManifest = (
-    <a
-      className="set-btn ghost"
-      href="/api/core/services/slack/manifest"
-      target="_blank"
-      rel="noreferrer"
-    >
-      Open manifest
-    </a>
+  const createSlackApp = (
+    <button className="set-btn ghost" onClick={() => window.open('/api/core/services/slack/manifest')}>
+      Create Slack App
+    </button>
   )
 
   return (
@@ -966,7 +961,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
                   Manage installations
                 </a>
               )}
-              {service.slug === 'slack' && openSlackManifest}
+              {service.slug === 'slack' && createSlackApp}
               <button className="set-btn ghost" onClick={() => setFormOpen(true)} disabled={busy}>
                 Replace connection
               </button>
@@ -985,7 +980,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
             </>
           ) : (
             <div className="svc-actions">
-              {service.slug === 'slack' && openSlackManifest}
+              {service.slug === 'slack' && createSlackApp}
               <button className="set-btn primary" onClick={() => setFormOpen(true)}>
                 Connect {service.title}
               </button>

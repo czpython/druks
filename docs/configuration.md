@@ -439,10 +439,9 @@ its keys.
 
 1. Set `urls.endpoint`. Set `urls.webhook_host` when Slack must reach Druks at
    another host.
-2. Open **Settings → Connections → Services → Slack** and select **Open
-   manifest**. Copy the manifest.
-3. At [api.slack.com/apps](https://api.slack.com/apps), select **Create New
-   App**, then **From a manifest**. Select the workspace and paste the manifest.
+2. Open **Settings → Connections → Services → Slack** and select **Create Slack
+   App**. Slack opens its app creation page with Druks's manifest filled in.
+3. Select the workspace, review the app, and create it.
 4. Install the app in the workspace. Slack shows the bot token on **OAuth &
    Permissions**, and the client ID, client secret, and signing secret on
    **Basic Information**.
