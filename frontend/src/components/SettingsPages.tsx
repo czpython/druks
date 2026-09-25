@@ -1,4 +1,13 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type RefObject,
+} from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ArrowUpRight, Search } from 'lucide-react'
 import { Link, useLocation, useSearch } from 'wouter'
@@ -6,6 +15,7 @@ import { Link, useLocation, useSearch } from 'wouter'
 import { ApiError, api } from '../api/client'
 import type {
   Account,
+  AppSettings,
   AppSettingsProblems,
   UpdateAppsSettingsRequest,
   UpdatePersonalSettingsRequest,
@@ -18,7 +28,7 @@ import { harnessColors } from '../lib/harnessColors'
 import { Page } from './Page'
 import { Sidebar } from './Sidebar'
 import { BrowserProfilesPane } from './BrowserProfilesPane'
-import { WhatsAppNumbersPane } from './WhatsAppNumbersPane'
+import { WhatsAppChannelPane } from './WhatsAppNumbersPane'
 import {
   AgentAccessPane,
   AgentsPane,
@@ -56,6 +66,11 @@ const CONNECTION_TABS = [
   { id: 'browser', label: 'Browser' },
   { id: 'revoked', label: 'Revoked' },
 ]
+
+// One pane for each chat channel, by the channel's name.
+const CHANNEL_PANES: Record<string, ComponentType<{ app: AppSettings }>> = {
+  whatsapp: WhatsAppChannelPane,
+}
 
 function withField(
   current: Record<string, unknown> | undefined,
@@ -103,7 +118,6 @@ export function SettingsPages({
   const agentsQuery = useQuery({ queryKey: ['agents'], queryFn: api.agents })
   const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
   const providersQuery = useQuery({ queryKey: ['providers'], queryFn: api.providers })
-  const servicesQuery = useQuery({ queryKey: ['services'], queryFn: api.services, staleTime: 60_000 })
   const subscriptionsQuery = useQuery({
     queryKey: ['providerSubscriptions'],
     queryFn: api.providerSubscriptions,
@@ -185,10 +199,8 @@ export function SettingsPages({
   const dirty = dirtyPages.includes(section)
   const app = appName ? apps.find((entry) => entry.name === appName) : undefined
   const hasAgents = Boolean(app?.agents.some((agent) => agent.name !== app.bot))
-  // Chat's Bot always exists; its numbers need a connected WAHA to link through.
-  const hasChannels = Boolean(
-    app?.bot && servicesQuery.data?.some((service) => service.slug === 'waha' && service.connected),
-  )
+  const channels = appsQuery.data?.channels ?? []
+  const hasChannels = Boolean(app?.bot && channels.length)
   const appTab = ['agents', 'bots', 'channels'].find((tab) => location.endsWith(`/${tab}`)) ?? 'options'
   const validAppPage =
     !appName ||
@@ -618,7 +630,7 @@ export function SettingsPages({
               {errors[section]}
             </p>
           )}
-          {appName && (appsQuery.isPending || servicesQuery.isPending) && <p role="status">Loading app settings…</p>}
+          {appName && appsQuery.isPending && <p role="status">Loading app settings…</p>}
           {section === 'personal' && personalQuery.isPending && (
             <p role="status">Loading preferences…</p>
           )}
@@ -742,10 +754,11 @@ export function SettingsPages({
               {page === 'skills' && <SkillsPane />}
               {page === 'api-tokens' && <AgentAccessPane />}
               {app && hasChannels && validAppPage && paneSection === 'channels' &&
-                page === `apps/${app.name}` && <>
-                  <WhatsAppNumbersPane app={app} />
-                  {app.botAccess === 'paired' && <WhatsAppNumbersPane />}
-                </>}
+                page === `apps/${app.name}` &&
+                channels.map((channel) => {
+                  const ChannelPane = CHANNEL_PANES[channel]!
+                  return <ChannelPane key={channel} app={app} />
+                })}
               {apps
                 .filter(
                   (entry) =>
@@ -831,7 +844,7 @@ export function SettingsPages({
                 ))}
             </div>
           ))}
-          {appsQuery.isSuccess && !servicesQuery.isPending &&
+          {appsQuery.isSuccess &&
             (!validAppPage || (!SECTIONS.some((entry) => entry.id === section) && !app)) && (
               <p>No settings page matches this address.</p>
             )}

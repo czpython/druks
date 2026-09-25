@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
 from druks.apps.loader import get_app
-from druks.apps.registry import services
+from druks.apps.registry import channels
 from druks.durable.engine import step_session
 from druks.durable.models import Run
 from druks.files.datastructures import File
@@ -71,7 +71,7 @@ async def get_agent(
     """How the conversation's agent runs: its settings, its system prompt, and the
     tools its key allows."""
     kind = conversation.account.kind
-    # A web conversation and an operator's own number belong to Chat.
+    # A web conversation and an operator's own connection belong to Chat.
     app = "chat"
     if conversation.connection:
         app = conversation.connection.identity.get("app", app)
@@ -354,8 +354,7 @@ async def finish_turn(
     if conversation.connection:
         # A person who took the chat over during the turn answers it instead.
         if state == MessageState.REPLIED and body and not await conversation.is_held(session):
-            channel = services.get(conversation.connection.audience_name)
-            await channel.send_reply(session, conversation, reply)
+            await channels.get(conversation.source).send_reply(session, conversation, reply)
     elif not conversation.title:
         await name_conversation(session, conversation, bridge.host, message, body)
 

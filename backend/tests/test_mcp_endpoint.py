@@ -306,6 +306,7 @@ async def test_a_bot_key_calls_its_tool_for_the_person_in_its_conversation(
         user_id="41700000001@c.us",
         user_name="Ana",
         user_phone="",
+        thread_id="",
     )
     _, token = await PersonalAccessToken.create(
         druks_db, account_id=owner.id, name="bot", allowed_tools=["field_notes_jot_note"]

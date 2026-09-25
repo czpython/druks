@@ -9,7 +9,9 @@ from typing import Any
 # defines the app's screens; the rest fire registration as an import side
 # effect). The set is the single source of truth for what "a capability module"
 # is named.
-_ROLES = frozenset({"webhooks", "subscribers", "workflows", "tasks", "routes", "pages", "services"})
+_ROLES = frozenset(
+    {"webhooks", "subscribers", "workflows", "tasks", "routes", "pages", "services", "channels"}
+)
 
 
 class Registry:
@@ -68,6 +70,8 @@ services = Registry("services", key=lambda cls: cls.slug)
 workflows = Registry("workflows", key=lambda cls: cls.kind)
 agents = Registry("agents", key=lambda agent: agent.id)
 bots = Registry("bots", key=lambda bot: bot.id)
+# The ways people reach a Bot. A channel's name is the source of its conversations.
+channels = Registry("channels", key=lambda cls: cls.name)
 browser_sessions = Registry("browser_sessions", key=lambda session: session.name)
 # MCP server definitions from the deployment's catalog, mounted by an explicit
 # startup load (druks/mcp/catalog.py); an operator's DB overlay enables and

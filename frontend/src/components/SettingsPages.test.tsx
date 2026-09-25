@@ -10,7 +10,6 @@ import type {
   AppSettingChoices,
   PersonalSettings,
   AppsSettingsResponse,
-  Service,
   UpdateAppsSettingsRequest,
 } from '../api/types'
 
@@ -148,6 +147,7 @@ const personalPatched: Record<string, unknown>[] = []
 
 const appSettings: AppsSettingsResponse = {
   allowedEfforts: ['low', 'medium', 'high'],
+  channels: [],
   apps: [
     {
       name: 'software_factory',
@@ -1087,12 +1087,12 @@ describe('canonical app settings', () => {
   })
 
   it.each([
-    { hasAgents: true, hasBot: false, hasWaha: true, tabs: [] },
-    { hasAgents: false, hasBot: true, hasWaha: true, tabs: ['Bots', 'Channels'] },
-    { hasAgents: true, hasBot: true, hasWaha: true, tabs: ['Agents', 'Bots', 'Channels'] },
-    { hasAgents: true, hasBot: true, hasWaha: false, tabs: ['Agents', 'Bots'] },
-    { hasAgents: false, hasBot: false, hasWaha: true, tabs: [] },
-  ])('shows settings tabs for agents=$hasAgents, bot=$hasBot, and waha=$hasWaha', async ({ hasAgents, hasBot, hasWaha, tabs }) => {
+    { hasAgents: true, hasBot: false, channels: ['whatsapp'], tabs: [] },
+    { hasAgents: false, hasBot: true, channels: ['whatsapp'], tabs: ['Bots', 'Channels'] },
+    { hasAgents: true, hasBot: true, channels: ['whatsapp'], tabs: ['Agents', 'Bots', 'Channels'] },
+    { hasAgents: true, hasBot: true, channels: [], tabs: ['Agents', 'Bots'] },
+    { hasAgents: false, hasBot: false, channels: ['whatsapp'], tabs: [] },
+  ])('shows settings tabs for agents=$hasAgents, bot=$hasBot, and channels=$channels', async ({ hasAgents, hasBot, channels, tabs }) => {
     const helpdesk = {
       ...appSettings.apps[2]!,
       name: 'helpdesk',
@@ -1105,8 +1105,7 @@ describe('canonical app settings', () => {
       ],
       settings: hasAgents || hasBot ? [] : appSettings.apps[2]!.settings,
     }
-    stubFetch(true, undefined, { ...appSettings, apps: [...appSettings.apps, helpdesk] })
-    vi.spyOn(api, 'services').mockResolvedValue([{ slug: 'waha', connected: hasWaha } as Service])
+    stubFetch(true, undefined, { ...appSettings, apps: [...appSettings.apps, helpdesk], channels })
     renderSettings('/apps/helpdesk/settings')
     if (hasAgents) {
       expect(await screen.findByRole('region', { name: 'coder' })).toBeTruthy()
@@ -1119,7 +1118,7 @@ describe('canonical app settings', () => {
       fireEvent.click(navigation.getByRole('link', { name: 'Bots' }))
       expect(await screen.findByRole('region', { name: 'bot' })).toBeTruthy()
       expect(screen.queryByRole('region', { name: 'coder' })).toBeNull()
-      if (hasWaha) {
+      if (channels.length) {
         fireEvent.click(navigation.getByRole('link', { name: 'Channels' }))
         expect(await screen.findByRole('heading', { name: 'WhatsApp numbers' })).toBeTruthy()
         expect(window.location.pathname).toBe('/apps/helpdesk/settings/channels')

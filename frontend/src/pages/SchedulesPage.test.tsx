@@ -48,7 +48,7 @@ beforeEach(() => {
         enabled: edits.schedule_enabled === undefined ? row.enabled : (edits.schedule_enabled as boolean | null ?? true),
       }
     })
-    return { apps: [], allowedEfforts: [] }
+    return { apps: [], allowedEfforts: [], channels: [] }
   })
   trigger.mockResolvedValue({ run: 'scheduled-invocation' })
 })
@@ -166,7 +166,7 @@ it('guards custom edits until they are saved or discarded', async () => {
 it('does not offer to discard a save that is in flight', async () => {
   let finishSave = () => {}
   save.mockImplementationOnce(() => new Promise((resolve) => {
-    finishSave = () => resolve({ apps: [], allowedEfforts: [] })
+    finishSave = () => resolve({ apps: [], allowedEfforts: [], channels: [] })
   }))
   const { unsavedForm } = mount()
   const input = await customInput()

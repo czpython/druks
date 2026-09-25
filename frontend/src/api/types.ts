@@ -809,7 +809,7 @@ export interface AppSettings {
   icon: string
   /** Platform apps are excluded from the installed app roster. */
   builtin: boolean
-  /** The id of the app's Bot, which answers its WhatsApp numbers. */
+  /** The id of the app's Bot, which answers people on its channels. */
   bot: string | null
   botAccess: 'open' | 'paired' | null
   agents: AgentSetting[]
@@ -824,6 +824,8 @@ export type AppSettingChoices = Record<string, { value: string; label: string; g
 export interface AppsSettingsResponse {
   allowedEfforts: string[]
   apps: AppSettings[]
+  /** The chat channels a Bot answers on now: the registered ones whose service is connected. */
+  channels: string[]
 }
 
 export type AppSettingsProblems = Record<string, Record<string, string>>

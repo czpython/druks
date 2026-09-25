@@ -132,8 +132,8 @@ package modules:
 | `dist/` | optional built frontend module, mounted inside the shell (served under `/app/<name>`) |
 
 Druks recursively discovers leaf modules named `workflows`, `tasks`, `routes`,
-`pages`, `subscribers`, `webhooks`, and `services`. A capability hidden in
-`workflow.py` is not discovered. Ordinary names such as `policy.py` and `workspace.py` have no import
+`pages`, `subscribers`, `webhooks`, `services`, and `channels`. A capability
+hidden in `workflow.py` is not discovered. Ordinary names such as `policy.py` and `workspace.py` have no import
 side effect unless a discovered module imports them.
 
 ## Declare the app
@@ -520,10 +520,10 @@ The prompt or a subsequent explicit step owns those actions.
 
 ## Answer WhatsApp with a Bot
 
-A Bot answers the WhatsApp numbers that an operator links to your app. It is not
-an agent: it has no contract, and no workflow awaits it. Each person who writes
-gets their own [chat conversation](chat.md#whatsapp). The Bot acts only through
-the app routes that you tag `bot`.
+A Bot answers the connections that an operator links to your app, such as a
+WhatsApp number. It is not an agent: it has no contract, and no workflow awaits
+it. Each person who writes gets their own [chat conversation](chat.md#whatsapp).
+The Bot acts only through the app routes that you tag `bot`.
 
 Declare the Bot as the `bot` attribute of the app class. An app has one Bot:
 
@@ -546,8 +546,8 @@ class Helpdesk(App):
   `source`, the conversation's source (`web` or `whatsapp`), and gives it to the
   agent as its system prompt. Druks adds one paragraph at the end. It explains
   the `[Internal: …]` messages that Druks writes to the agent.
-- `user_tools` are the tools of each person who writes to the number.
-- `admin_tools` are the tools of the number's admin. The admin also gets
+- `user_tools` are the tools of each person who writes to the connection.
+- `admin_tools` are the tools of the connection's admin. The admin also gets
   Druks's admin prompt, `answer_gate`, and `chat_resume_conversation`.
 
 Each name is the `operation_id` of one of the app's routes tagged `bot`. Druks
@@ -592,7 +592,7 @@ never appears in the tool's input schema. A route that takes `BotUser` refuses a
 call from outside a conversation.
 
 A run that a bot tool starts remembers its conversation. Ask for approval with
-an in-app question, `self.review()`. Druks then asks the number's admin in the
+an in-app question, `self.review()`. Druks then asks the connection's admin in the
 admin's own chat, and only that admin can answer. When a run that waited ends,
 Druks tells the conversation the run's result or its failure, and the Bot tells
 the person. A cancelled run tells nothing.

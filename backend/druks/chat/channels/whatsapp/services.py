@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
-from druks.chat.models import Conversation, Message
 from druks.secrets.enums import IdentityStatus, SecretKind
 from druks.secrets.models import VaultSecret
 from druks.services import Service
@@ -193,17 +192,3 @@ class Waha(Service):
             connection.identity_status = IdentityStatus.RESOLVED
         else:
             connection.identity_status = IdentityStatus.UNAVAILABLE
-
-    @classmethod
-    async def send_reply(
-        cls, session: AsyncSession, conversation: Conversation, reply: Message
-    ) -> None:
-        """Send a reply to the person who wrote. Druks records the reply's WhatsApp id
-        before the send, so the copy that WAHA reports back is known as Druks's own."""
-        client = await cls.get_client(session, conversation.connection)
-        reply.source_id = await client.new_message_id()
-        await session.commit()
-        body = reply.body
-        if conversation.user_id == conversation.connection.identity["user_id"]:
-            body = f"[Druks] {body}"
-        await client.send_text(conversation.user_id, body, message_id=reply.source_id)

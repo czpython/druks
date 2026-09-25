@@ -74,6 +74,7 @@ class Conversation(Base, Uuid7Pk):
             "connection_id",
             "account_id",
             "user_id",
+            "thread_id",
             unique=True,
             postgresql_where=text("connection_id IS NOT NULL"),
         ),
@@ -82,7 +83,7 @@ class Conversation(Base, Uuid7Pk):
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     account: Mapped[Account] = relationship(lazy="joined")
     source: Mapped[str] = mapped_column(default=ConversationSource.WEB)
-    # The channel connection that the conversation arrives on, such as a linked number.
+    # The channel connection that the conversation arrives on.
     connection_id: Mapped[str | None] = mapped_column(ForeignKey("vault.id", ondelete="RESTRICT"))
     # Loaded in its own query: a join would hand the vault's encrypted column a NULL.
     connection: Mapped[VaultSecret | None] = relationship(lazy="selectin")
@@ -90,6 +91,10 @@ class Conversation(Base, Uuid7Pk):
     user_id: Mapped[str | None]
     user_name: Mapped[str] = mapped_column(default="", server_default=text("''"))
     user_phone: Mapped[str] = mapped_column(default="", server_default=text("''"))
+    # The place on the connection where the conversation lives, as its channel names
+    # it: a Slack thread, a Telegram topic. Empty for a direct chat. Only the channel
+    # that wrote it reads inside it.
+    thread_id: Mapped[str] = mapped_column(default="", server_default=text("''"))
     title: Mapped[str | None]
     is_pinned: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     session_file: Mapped[File | None] = FileField()
@@ -100,7 +105,7 @@ class Conversation(Base, Uuid7Pk):
 
     @property
     def admin_account_id(self) -> str | None:
-        """The admin account of the app number that the conversation arrives on."""
+        """The admin account of the app connection that the conversation arrives on."""
         if (
             self.account.kind in (AccountKind.BOT, AccountKind.BOT_ADMIN)
             and self.connection
@@ -111,7 +116,7 @@ class Conversation(Base, Uuid7Pk):
 
     def is_answerable_by(self, account_id: str | None) -> bool:
         """Whether the account may answer a question that the conversation's run asks.
-        On a number with open access, only the number's admin may."""
+        On a connection with open access, only its admin may."""
         if admin_account_id := self.admin_account_id:
             return account_id == admin_account_id
         return True
@@ -136,9 +141,11 @@ class Conversation(Base, Uuid7Pk):
         user_id: str,
         user_name: str,
         user_phone: str,
+        thread_id: str,
     ) -> "Conversation":
-        """The one conversation of a person on a channel's connection, under the account
-        the person routes to. It keeps the name the person shows now."""
+        """The one conversation of a person in a thread, or in a direct chat, on a
+        channel's connection, under the account the person routes to. It keeps the name
+        the person shows now."""
         await session.execute(
             insert(cls)
             .values(
@@ -149,10 +156,11 @@ class Conversation(Base, Uuid7Pk):
                 user_id=user_id,
                 user_name=user_name,
                 user_phone=user_phone,
+                thread_id=thread_id,
                 created_at=Base.utc_now(),
             )
             .on_conflict_do_nothing(
-                index_elements=["connection_id", "account_id", "user_id"],
+                index_elements=["connection_id", "account_id", "user_id", "thread_id"],
                 index_where=text("connection_id IS NOT NULL"),
             )
         )
@@ -161,6 +169,7 @@ class Conversation(Base, Uuid7Pk):
                 cls.connection_id == connection.id,
                 cls.account_id == account_id,
                 cls.user_id == user_id,
+                cls.thread_id == thread_id,
             )
         )
         if user_name:
@@ -270,8 +279,8 @@ class Conversation(Base, Uuid7Pk):
         )
 
     async def is_held(self, session: AsyncSession) -> bool:
-        """Whether the chat's turns wait: a person answers it from the number's phone,
-        or its number was removed."""
+        """Whether the chat's turns wait: a person answers it from the connection's
+        phone, or its connection was removed."""
         if self.connection and not self.connection.is_live:
             return True
         return bool(await self.get_pause_id(session))

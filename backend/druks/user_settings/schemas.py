@@ -167,6 +167,8 @@ class AppSettingsResponse(Schema):
 class AppsSettingsResponse(Schema):
     allowed_efforts: list[str]
     apps: list[AppSettingsResponse]
+    # The chat channels a Bot answers on now: the registered ones whose service is connected.
+    channels: list[str]
 
 
 class AppsSettingsUpdate(BaseModel):

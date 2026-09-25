@@ -19,3 +19,7 @@ class ChatSandboxGone(ChatError):
 
 class ChatBridgeUnavailable(ChatBridgeError):
     """The loopback listener is not available."""
+
+
+class ChannelHasNoThreadsError(ChatError):
+    """The conversation's channel has no thread to read."""

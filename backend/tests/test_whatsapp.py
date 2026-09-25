@@ -23,6 +23,7 @@ from druks.chat.bots import service as bot_service
 from druks.chat.bots.constants import OPERATOR_PAIRED_MESSAGE, PAUSE_TOPIC
 from druks.chat.bridge import Bridge
 from druks.chat.channels.whatsapp import routes
+from druks.chat.channels.whatsapp.channels import WhatsAppChannel
 from druks.chat.channels.whatsapp.client import WahaClient
 from druks.chat.channels.whatsapp.constants import WAHA_AUDIENCE
 from druks.chat.channels.whatsapp.services import Waha
@@ -139,6 +140,7 @@ def user(chat, name=""):
         "user_id": chat,
         "user_name": name,
         "user_phone": "",
+        "thread_id": "",
     }
 
 
@@ -303,7 +305,7 @@ async def test_only_self_chat_replies_have_a_prefix(druks_db, waha, sender, pref
         druks_db, "Your ticket is open.", role=MessageRole.ASSISTANT
     )
 
-    await Waha.send_reply(druks_db, conversation, reply)
+    await WhatsAppChannel.send_reply(druks_db, conversation, reply)
 
     assert waha.calls[-1][2]["text"] == f"{prefix}Your ticket is open."
     await druks_db.refresh(reply)
@@ -612,7 +614,7 @@ async def test_disconnect_removes_only_the_signed_in_operators_phones(
 
     async with asgi_client(api) as client:
         response = await client.delete(
-            f"/api/chat/connections/{connection.id}/phone", headers={"X-User": ana.username}
+            f"/api/chat/connections/{connection.id}/pairing", headers={"X-User": ana.username}
         )
         assert response.status_code == 204
         for operator, is_connected in ((ana, False), (ben, True)):
@@ -635,7 +637,7 @@ async def test_disconnect_refuses_an_open_number(druks_db, druks_client, helpdes
     connection = await link(druks_db, await bot_account(druks_db))
     identity = dict(connection.identity)
 
-    response = await druks_client.delete(f"/api/chat/connections/{connection.id}/phone")
+    response = await druks_client.delete(f"/api/chat/connections/{connection.id}/pairing")
 
     assert response.status_code == 404
     await druks_db.refresh(connection)
