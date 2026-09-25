@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from urllib.parse import urlencode
 
 import pytest
+from conftest import bind_ambient_session, connect_service
 from druks.accounts.models import Account
 from druks.core.webhooks.slack import SlackInteractivity, verify_slack_signature
 from druks.db import db_session as ambient_db_session
@@ -71,11 +72,19 @@ def _interactivity_body(action_id: str) -> bytes:
 
 
 def _client(tmp_path) -> TestClient:
-    return TestClient(
-        configure_app_for_test(
-            settings=make_settings(tmp_path, slack_signing_secret=_SIGNING_SECRET)
-        )
+    return TestClient(configure_app_for_test(settings=make_settings(tmp_path)))
+
+
+@pytest.fixture
+async def slack_card(druks_db):
+    """The Slack card whose signing secret signs every delivery."""
+    bind_ambient_session(druks_db)
+    await connect_service(
+        "slack",
+        identity={"client_id": "c1", "team": "Acme", "team_id": "T1", "bot_user_id": "U900"},
+        secrets={"client_secret": "cs", "signing_secret": _SIGNING_SECRET, "bot_token": "xoxb"},
     )
+    await druks_db.commit()
 
 
 @pytest.fixture
@@ -119,7 +128,9 @@ def test_signature_verifier_against_a_known_answer(monkeypatch):
     assert getattr(tampered_body.value, "status_code", None) == 401
 
 
-async def test_unsigned_or_stale_requests_401_and_never_resume(tmp_path, druks_db, resume_spy):
+async def test_unsigned_or_stale_requests_401_and_never_resume(
+    tmp_path, druks_db, resume_spy, slack_card
+):
     run, notification = await _parked_notification(druks_db)
     body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
     with _client(tmp_path) as client:
@@ -147,7 +158,7 @@ async def test_unsigned_or_stale_requests_401_and_never_resume(tmp_path, druks_d
         assert notification.correlation_token not in response.text
 
 
-async def test_signed_click_routes_through_respond(tmp_path, druks_db, resume_spy):
+async def test_signed_click_routes_through_respond(tmp_path, druks_db, resume_spy, slack_card):
     run, notification = await _parked_notification(druks_db)
     body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
     with _client(tmp_path) as client:
@@ -166,7 +177,9 @@ async def test_signed_click_routes_through_respond(tmp_path, druks_db, resume_sp
     assert _SIGNING_SECRET not in response.text
 
 
-async def test_dead_round_click_is_acknowledged_without_resume(tmp_path, druks_db, resume_spy):
+async def test_dead_round_click_is_acknowledged_without_resume(
+    tmp_path, druks_db, resume_spy, slack_card
+):
     run, notification = await _parked_notification(druks_db)
     await notification.mark_acknowledged()
     with _client(tmp_path) as client:
@@ -188,7 +201,9 @@ async def test_dead_round_click_is_acknowledged_without_resume(tmp_path, druks_d
     assert resume_spy == []
 
 
-async def test_malformed_payloads_400_never_500_never_resume(tmp_path, druks_db, resume_spy):
+async def test_malformed_payloads_400_never_500_never_resume(
+    tmp_path, druks_db, resume_spy, slack_card
+):
     run, notification = await _parked_notification(druks_db)
     malformed = [
         b"not-a-form",
@@ -210,7 +225,9 @@ async def test_malformed_payloads_400_never_500_never_resume(tmp_path, druks_db,
     assert (await ambient_db_session().get(Notification, notification.id)).state == "pending"
 
 
-async def test_unknown_interactivity_type_is_acknowledged_unhandled(tmp_path, druks_db, resume_spy):
+async def test_unknown_interactivity_type_is_acknowledged_unhandled(
+    tmp_path, druks_db, resume_spy, slack_card
+):
     await _parked_notification(druks_db)
     body = urlencode({"payload": json.dumps({"type": "view_submission"})}).encode()
 

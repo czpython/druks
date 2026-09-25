@@ -272,3 +272,32 @@ pause. The pause ends when the phone stays quiet in that chat for 4 hours, and
 each typed message starts the 4 hours again. To end it sooner, the admin tells
 their agent, which calls `chat_resume_conversation`. The pause is a DBOS
 workflow that the typed message names, and a chat has at most one open pause.
+
+## Slack
+
+Slack is a source for Chat. You write to the Druks bot in a direct message, and
+your own agent answers there, under your account and with your whole toolkit.
+One Slack app serves every app in Druks. Connect the Slack card first: see
+[Slack](configuration.md#slack). **Chat → Channels** shows the workspace, the
+bot, and your Slack account while the card is connected.
+
+### Link your account
+
+Druks knows you by your Slack account. Select **Connect Slack** on the Slack
+pane. Slack asks you to sign in, and Druks saves your Slack token under your
+account, like a Gmail connection. Other apps can use that grant. **Disconnect**
+revokes it.
+
+When you write to the bot before you connect, the bot answers with a private
+link. Open it, sign in to Druks, and connect Slack. Druks then answers the
+message you wrote. The link works for 10 minutes. A forwarded link is harmless:
+Slack's sign-in links whoever opens it, and the held message waits for the
+person who wrote it.
+
+### Direct messages
+
+You have one conversation with the bot in your direct message. Druks drops a
+repeated event by its room and timestamp. The agent writes Markdown, and Druks
+posts each reply in the direct message, in pieces of at most 12,000 characters.
+Druks ignores the bot's own messages, edits, deletes, joins, files, hidden
+events, and people from other workspaces.

@@ -13,6 +13,7 @@ class BotAccess(StrEnum):
 class ConversationSource(StrEnum):
     WEB = "web"
     WHATSAPP = "whatsapp"
+    SLACK = "slack"
 
 
 class MessageRole(StrEnum):

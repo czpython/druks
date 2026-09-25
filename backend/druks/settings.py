@@ -183,10 +183,6 @@ class Settings(BaseSettings):
     # not in Settings; this points every client at a compatible API endpoint.
     github_api_url: str = Field(default="https://api.github.com", alias="GITHUB_API_URL")
 
-    # The Slack app's signing secret, gating inbound interactivity callbacks —
-    # distinct from the per-destination outbound webhook URLs.
-    slack_signing_secret: str = Field(default="", alias="SLACK_SIGNING_SECRET")
-
     redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="DRUKS_REDIS_URL")
     # Per-VM SSH keys when drukbox returns them; empty otherwise.
     sandbox_keys_dir: ExpandedPath = Field(

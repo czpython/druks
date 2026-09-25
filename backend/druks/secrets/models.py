@@ -326,9 +326,11 @@ class VaultSecret(Base, Uuid7Pk):
             )
         )
 
-    async def get_refresh_token(self) -> str:
+    async def get_grant(self) -> dict[str, Any]:
+        """The live row's grant, read past the identity map, so a refresher never
+        presents a token that a peer already rotated."""
         if fresh := await VaultSecret.reload(self.session, self.id):
-            return fresh.secrets["refresh_token"]
+            return fresh.secrets
         # The services package imports the vault.
         from druks.services.exceptions import OauthRefreshError
 

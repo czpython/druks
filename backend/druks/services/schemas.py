@@ -45,7 +45,7 @@ class ServiceResponse(Schema):
     connected_at: datetime | None
     fields: list[ServiceFieldSpec]
     is_oauth: bool
-    required_scopes: list[str]
+    scopes: list[str]
     used_by: list[str]
     connections: list[ConnectionResponse]
 
@@ -66,7 +66,7 @@ class ServiceResponse(Schema):
             connected_at=row.updated_at if row else None,
             fields=[ServiceFieldSpec(**spec) for spec in service.connect_fields()],
             is_oauth=bool(service.token_endpoint),
-            required_scopes=list(service.required_scopes()),
+            scopes=list(service.scopes()),
             used_by=[declaration.label for declaration in service.declarations()],
             connections=connections or [],
         )

@@ -4,9 +4,11 @@ from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field, SecretStr
+from slack_sdk.errors import SlackApiError
 
 from druks.core.apis.github import GitHubClient
 from druks.core.apis.linear import LINEAR_GRAPHQL_URL
+from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
 from druks.secrets.enums import SecretKind
 from druks.services import Service, ServiceConnectError
 from druks.settings import load_settings
@@ -147,3 +149,93 @@ class Jira(Service):
                 "Jira did not accept these credentials — check the base URL, email, and API token."
             ) from error
         return facts
+
+
+class Slack(Service):
+    """The Slack app that Druks answers as, in one workspace. The operator creates it
+    from the manifest, installs it, and pastes its keys. People connect their own
+    Slack account through the same app."""
+
+    description = (
+        "The Slack app that Druks answers as. Create it in Slack from the manifest, "
+        "install it in your workspace, and paste its keys here."
+    )
+    required = False
+    authorization_endpoint = "https://slack.com/oauth/v2/authorize"
+    token_endpoint = "https://slack.com/api/oauth.v2.access"
+    # Slack issues a person's token only with a scope. This one reads the identity.
+    identity_scopes = ("users:read",)
+    # A fresh sign-in by the same Slack user updates their row.
+    identity_key = "subject"
+
+    class Settings(BaseModel):
+        client_id: str = Field(title="Client ID")
+        client_secret: SecretStr = Field(title="Client secret")
+        signing_secret: SecretStr = Field(title="Signing secret")
+        bot_token: SecretStr = Field(title="Bot token")
+
+    @classmethod
+    async def verify(cls, settings: Settings) -> dict[str, Any]:
+        try:
+            bot = await SlackClient(token=settings.bot_token.get_secret_value()).auth_test()
+        except SlackApiError as error:
+            logger.warning("Slack connect rejected: %s", error)
+            raise ServiceConnectError(
+                "Slack did not accept the bot token. Paste the Bot User OAuth Token from the "
+                "app's OAuth & Permissions page."
+            ) from error
+        return {
+            "team": bot["team"],
+            "team_id": bot["team_id"],
+            "bot_name": bot["user"],
+            "bot_user_id": bot["user_id"],
+        }
+
+    @classmethod
+    async def get_identity(cls, access_token: str) -> dict[str, Any]:
+        """The person behind a user token, keyed the way ``Account.lookup`` finds them."""
+        person = await SlackClient(token=access_token).auth_test()
+        return {
+            "authority": SLACK_AUTHORITY.format(team_id=person["team_id"]),
+            "subject": person["user_id"],
+            "name": person["user"],
+        }
+
+    @classmethod
+    def get_consent_query(cls, scopes: tuple[str, ...]) -> dict[str, str]:
+        """Slack takes a person's scopes as ``user_scope``, joined by commas."""
+        return {"user_scope": ",".join(scopes)}
+
+    @classmethod
+    def read_grant(cls, tokens: dict[str, Any]) -> dict[str, Any]:
+        """A person's grant sits under ``authed_user``, with its scopes joined by commas.
+        Token rotation stays off, as on every peer, so the access token never expires."""
+        person = tokens["authed_user"]
+        return {"access_token": person["access_token"], "scopes": person["scope"].split(",")}
+
+    @classmethod
+    def get_manifest(cls) -> dict[str, Any]:
+        """The app to create, for Slack's create-from-manifest page."""
+        urls = load_settings().urls
+        return {
+            "display_information": {
+                "name": "Druks",
+                "description": "Your Druks agent, in Slack.",
+            },
+            "features": {
+                "bot_user": {"display_name": "Druks", "always_online": True},
+                # Without a writable Messages tab, Slack refuses every DM to the bot.
+                "app_home": {"messages_tab_enabled": True, "messages_tab_read_only_enabled": False},
+            },
+            "oauth_config": {
+                "redirect_urls": [f"{urls.endpoint.rstrip('/')}/api/oauth/callback"],
+                "scopes": {"bot": list(SLACK_BOT_SCOPES), "user": list(cls.scopes())},
+            },
+            "settings": {
+                "event_subscriptions": {
+                    "request_url": f"{urls.webhook_base}/_external/slack/events/",
+                    "bot_events": ["message.im"],
+                },
+                "token_rotation_enabled": False,
+            },
+        }

@@ -34,7 +34,7 @@ class WahaEvents(Webhook):
             return hmac.compare_digest(expected, self.request.headers.get("X-Webhook-Hmac", ""))
         return False
 
-    def delivery_key(self) -> str:
+    def get_delivery_key(self) -> str:
         return self.data["id"]
 
     def get_action(self) -> str:

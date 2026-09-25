@@ -13,7 +13,7 @@ from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 
-from .exceptions import ServiceConnectError, ServiceNotConnectedError
+from .exceptions import OauthExchangeError, ServiceConnectError, ServiceNotConnectedError
 from .oauth import OauthClient, fetch_identity
 
 # GoogleCalendar -> google_calendar, HTTPServer -> http_server.
@@ -240,7 +240,7 @@ class Service:
         ]
 
     @classmethod
-    def required_scopes(cls) -> tuple[str, ...]:
+    def scopes(cls) -> tuple[str, ...]:
         """The union of every installed declaration's scopes — the consent ask."""
         scopes = {scope for declaration in cls.declarations() for scope in declaration.scopes}
         scopes.update(cls.identity_scopes)
@@ -253,6 +253,30 @@ class Service:
         if cls.identity_endpoint:
             return await fetch_identity(cls.identity_endpoint, access_token)
         return {}
+
+    @classmethod
+    def get_consent_query(cls, scopes: tuple[str, ...]) -> dict[str, str]:
+        """The consent query that asks for ``scopes``. Override for a provider that
+        names or joins them differently."""
+        return {"scope": " ".join(scopes)}
+
+    @classmethod
+    def read_grant(cls, tokens: dict[str, Any]) -> dict[str, Any]:
+        """The grant in the token endpoint's answer: its access token, its refresh
+        token, and its scopes. Override for a provider that shapes the answer
+        differently. A grant with no refresh token is one access token that never
+        expires."""
+        if not tokens.get("refresh_token"):
+            raise OauthExchangeError(
+                cls.slug,
+                "the authorization server granted no refresh token; druks needs offline access",
+                context={},
+            )
+        return {
+            "access_token": tokens["access_token"],
+            "refresh_token": tokens["refresh_token"],
+            "scopes": tokens.get("scope", "").split(),
+        }
 
     @classmethod
     async def get_oauth_client(cls) -> OauthClient:

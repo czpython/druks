@@ -45,7 +45,7 @@ class GitHubEvents(Webhook):
         )
         return True
 
-    def delivery_key(self) -> str:
+    def get_delivery_key(self) -> str:
         return self.request.headers[self.DELIVERY_HEADER]
 
     def get_action(self) -> str:

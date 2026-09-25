@@ -299,7 +299,7 @@ def test_dedup_first_call_dispatches_second_call_short_circuits(settings):
         def get_action(self):
             return "ping"
 
-        def delivery_key(self):
+        def get_delivery_key(self):
             return self.data["key"]
 
         async def on_ping(self):
@@ -330,7 +330,7 @@ def test_failed_handler_releases_claim_so_retry_reprocesses(settings):
         async def request_is_authentic(self):
             return True
 
-        def delivery_key(self):
+        def get_delivery_key(self):
             return self.data["key"]
 
         def get_action(self):

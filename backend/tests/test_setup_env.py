@@ -277,7 +277,7 @@ def test_deployment_env_addition_renders_verbatim_and_survives_rerender(tmp_path
         env_path,
         provider="docker",
         set_values=(
-            "env.SLACK_SIGNING_SECRET=slack-secret",
+            "env.OTEL_EXPORTER_OTLP_ENDPOINT=http://otel:4318",
             "env.DRUKS_SANDBOX_SERVICE_TIMEOUT=45",
         ),
     )
@@ -285,8 +285,8 @@ def test_deployment_env_addition_renders_verbatim_and_survives_rerender(tmp_path
     _run(env_path)
 
     config = _read_toml(tmp_path / "druks.toml")
-    assert config["env"]["SLACK_SIGNING_SECRET"] == "slack-secret"
-    assert read_env(env_path)["SLACK_SIGNING_SECRET"] == "slack-secret"
+    assert config["env"]["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://otel:4318"
+    assert read_env(env_path)["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://otel:4318"
     assert read_env(env_path)["DRUKS_SANDBOX_SERVICE_TIMEOUT"] == "45"
     assert "# DEPLOYMENT ENVIRONMENT ADDITIONS" in env_path.read_text()
 

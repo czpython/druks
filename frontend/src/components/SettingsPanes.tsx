@@ -907,6 +907,16 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
       Create GitHub App
     </button>
   )
+  const openSlackManifest = (
+    <a
+      className="set-btn ghost"
+      href="/api/core/services/slack/manifest"
+      target="_blank"
+      rel="noreferrer"
+    >
+      Open manifest
+    </a>
+  )
 
   return (
     <>
@@ -956,6 +966,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
                   Manage installations
                 </a>
               )}
+              {service.slug === 'slack' && openSlackManifest}
               <button className="set-btn ghost" onClick={() => setFormOpen(true)} disabled={busy}>
                 Replace connection
               </button>
@@ -973,7 +984,8 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
               </button>
             </>
           ) : (
-            <div>
+            <div className="svc-actions">
+              {service.slug === 'slack' && openSlackManifest}
               <button className="set-btn primary" onClick={() => setFormOpen(true)}>
                 Connect {service.title}
               </button>
@@ -1097,7 +1109,7 @@ function ServiceAccess({ service }: { service: Service }) {
       .finally(() => setBusy(false))
   }
   const missingScopes = (connection: Connection) =>
-    service.requiredScopes.filter((scope) => !connection.scopes?.includes(scope))
+    service.scopes.filter((scope) => !connection.scopes?.includes(scope))
   const live = service.connections.filter((connection) => !connection.revokedAt)
   const revoked = service.connections.filter((connection) => connection.revokedAt)
 
@@ -1108,10 +1120,10 @@ function ServiceAccess({ service }: { service: Service }) {
           {error}
         </div>
       )}
-      {service.requiredScopes.length > 0 && (
+      {service.scopes.length > 0 && (
         <div className="svc-fact">
           <span className="svc-fact-key">scopes</span>
-          <span className="svc-fact-val">{service.requiredScopes.join(', ')}</span>
+          <span className="svc-fact-val">{service.scopes.join(', ')}</span>
         </div>
       )}
       {service.usedBy.length > 0 && (

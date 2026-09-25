@@ -682,7 +682,7 @@ export interface Service {
   connectedAt: string | null
   fields: ServiceField[]
   isOauth: boolean
-  requiredScopes: string[]
+  scopes: string[]
   usedBy: string[]
   connections: Connection[]
 }

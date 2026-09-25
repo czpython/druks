@@ -23,7 +23,7 @@ from druks.chat.bots import service as bot_service
 from druks.chat.bots.constants import OPERATOR_PAIRED_MESSAGE, PAUSE_TOPIC
 from druks.chat.bridge import Bridge
 from druks.chat.channels.whatsapp import routes
-from druks.chat.channels.whatsapp.channels import WhatsAppChannel
+from druks.chat.channels.whatsapp.channel import WhatsAppChannel
 from druks.chat.channels.whatsapp.client import WahaClient
 from druks.chat.channels.whatsapp.constants import WAHA_AUDIENCE
 from druks.chat.channels.whatsapp.services import Waha
