@@ -105,16 +105,18 @@ class SlackChannel(Channel):
             )
             for shared, content in zip(shares, contents, strict=True)
         ]
+        # The agent would take the bot's own mention for the person it answers.
+        text = message["text"].replace(f"<@{card.identity['bot_user_id']}>", "").strip()
         source_id = f"{message['channel']}:{message['ts']}"
         if files:
-            body = message["text"] or files[0].name
+            body = text or files[0].name
             await conversation.create_message(session, body, source_id=source_id, file=files[0])
             for shared, file in zip(shares[1:], files[1:], strict=True):
                 await conversation.create_message(
                     session, file.name, source_id=f"{source_id}:{shared['id']}", file=file
                 )
-        elif message["text"]:
-            await conversation.create_message(session, message["text"], source_id=source_id)
+        elif text:
+            await conversation.create_message(session, text, source_id=source_id)
         else:
             return conversation
         await session.commit()
