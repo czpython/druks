@@ -84,6 +84,8 @@ class SoftwareFactory(App):
         "Turns a ticket into a pull request — it plans the change, builds it, and "
         "gates on you before shipping. Reviews a pull request when asked."
     )
+    # The requester's GitHub sign-in names them in a review.
+    github = services.Github.with_scopes()
 
     class Settings(AppSettings):
         tracker: Literal["none", "linear", "jira", "druks"] = Field(

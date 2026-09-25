@@ -20,6 +20,11 @@ class Channel:
         channels.register(cls)
 
     @classmethod
+    async def get_prompt_context(cls, session: AsyncSession, conversation: Conversation) -> dict:
+        """Facts about where the conversation lives, for the Bot's prompt."""
+        return {}
+
+    @classmethod
     async def send_reply(
         cls, session: AsyncSession, conversation: Conversation, reply: Message
     ) -> None:

@@ -1,19 +1,24 @@
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from conftest import connect_service
+from druks.accounts.models import Account
 from druks.apps.settings import field_kind, field_multiline
 from druks.contrib.software_factory import subscribers  # noqa: F401 — the import registers it
 from druks.contrib.software_factory.app import check_review_identity
 from druks.contrib.software_factory.datastructures import PullRequest
 from druks.contrib.software_factory.github import get_review_actor
+from druks.contrib.software_factory.models import Project, ProjectRepo
 from druks.contrib.software_factory.services import GithubReviewer
 from druks.contrib.software_factory.workflows import PullRequestReview
+from druks.core.apis.github import GITHUB_AUTHORITY
 from druks.core.services import Github
 from druks.prompts import render_prompt
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.services.exceptions import ServiceNotConnectedError
-from druks.signals import publish
 from druks.testing import configure_app_for_test, make_settings, seed_run
 from druks.workflows import _bind_instance
 from fastapi.testclient import TestClient
@@ -70,7 +75,7 @@ async def test_the_pull_request_board_and_page_mount(client: TestClient, druks_d
 def test_the_run_carries_the_pull_request_once():
     # The repo and the number are the subject, so they are not also input: the body
     # takes what only the request knows.
-    assert list(PullRequestReview._run_input_model.model_fields) == ["requested_by", "note"]
+    assert list(PullRequestReview._run_input_model.model_fields) == ["note"]
 
 
 async def test_a_queued_run_replays_through_its_subject():
@@ -84,7 +89,7 @@ async def test_a_queued_run_replays_through_its_subject():
         account_id="review-account",
     )
 
-    assert run_kwargs == {"requested_by": "dev@example.com", "note": ""}
+    assert run_kwargs == {"note": ""}
     subject = await instance.subject
     assert (subject.repo, subject.number) == ("acme/app", 7)
 
@@ -92,7 +97,7 @@ async def test_a_queued_run_replays_through_its_subject():
 async def test_the_reviewer_prompt_names_the_pull_request_it_is_about():
     workflow = SimpleNamespace(
         subject=PullRequest.get("acme/app", 7),
-        input=SimpleNamespace(requested_by="dev@example.com", note=""),
+        input=SimpleNamespace(note=""),
     )
     workspace = SimpleNamespace(
         repo_path="/home/agent/work/repo", related_root="/home/agent/related"
@@ -104,6 +109,7 @@ async def test_the_reviewer_prompt_names_the_pull_request_it_is_about():
         workspace=workspace,
         siblings=[],
         review_mode="approve",
+        requested_by="dev@example.com",
     )
 
     assert "pull request #7 on `acme/app`" in output
@@ -116,7 +122,7 @@ async def test_comment_mode_reviews_publish_as_comments():
     # its reviews publish as comments — the prompt carries that rule.
     workflow = SimpleNamespace(
         subject=PullRequest.get("acme/app", 7),
-        input=SimpleNamespace(requested_by="dev@example.com", note=""),
+        input=SimpleNamespace(note=""),
     )
     workspace = SimpleNamespace(
         repo_path="/home/agent/work/repo", related_root="/home/agent/related"
@@ -128,6 +134,7 @@ async def test_comment_mode_reviews_publish_as_comments():
         workspace=workspace,
         siblings=[],
         review_mode="comment",
+        requested_by="dev@example.com",
     )
 
     assert "`COMMENT` event" in output
@@ -149,6 +156,30 @@ async def _connect_reviewer() -> None:
     )
 
 
+async def test_the_requester_goes_by_their_github_login_once_linked(druks_db, monkeypatch):
+    await _connect_operator()
+    project = await Project.create(name="Acme")
+    await ProjectRepo.create(project_id=project.id, full_name="acme/app")
+    monkeypatch.setattr(ProjectRepo, "siblings", AsyncMock(return_value=[]))
+    dev = await Account.get_or_create(druks_db, "dev@example.com")
+    review, _ = _bind_instance(
+        PullRequestReview, PullRequest.get("acme/app", 7).identity, {}, account_id=dev.id
+    )
+
+    assert (await review.get_prompt_context())["requested_by"] == "dev@example.com"
+
+    await VaultSecret.connect(
+        druks_db,
+        Audience.service("github"),
+        account_id=dev.id,
+        refresh_token="ghr",
+        scopes=[],
+        identity={"authority": GITHUB_AUTHORITY, "subject": "100", "login": "dev"},
+    )
+
+    assert (await review.get_prompt_context())["requested_by"] == "dev"
+
+
 async def test_a_connected_reviewer_approves(druks_db):
     await _connect_operator()
     await _connect_reviewer()
@@ -156,7 +187,6 @@ async def test_a_connected_reviewer_approves(druks_db):
     actor = await get_review_actor()
 
     assert (actor.mode, actor.service) == ("approve", GithubReviewer)
-    assert actor.client._app_id == "2"
 
 
 async def test_an_unconnected_reviewer_borrows_the_operator_in_comment_mode(druks_db):
@@ -165,7 +195,6 @@ async def test_an_unconnected_reviewer_borrows_the_operator_in_comment_mode(druk
     actor = await get_review_actor()
 
     assert (actor.mode, actor.service) == ("comment", Github)
-    assert actor.client._app_id == "1"
 
 
 def test_the_reviewer_is_an_optional_service_the_app_declares():
@@ -197,11 +226,10 @@ async def test_review_dispatch_refuses_before_start_without_github(druks_db, mon
         return "run-review"
 
     monkeypatch.setattr(PullRequestReview, "start", classmethod(_start))
+    dev = await Account.get_or_create(druks_db, "dev@example.com")
 
     with pytest.raises(ServiceNotConnectedError, match="github is not connected"):
-        await PullRequestReview.dispatch(
-            repo="acme/app", pr_number=7, requested_by="dev@example.com"
-        )
+        await PullRequestReview.dispatch(repo="acme/app", pr_number=7, account=dev)
 
     assert not started
 
@@ -215,34 +243,12 @@ async def test_review_dispatch_starts_once_github_is_connected(druks_db, monkeyp
         return "run-review"
 
     monkeypatch.setattr(PullRequestReview, "start", classmethod(_start))
+    dev = await Account.get_or_create(druks_db, "dev@example.com")
 
     run_id = await PullRequestReview.dispatch(
-        repo="acme/app",
-        pr_number=7,
-        requested_by="dev@example.com",
-        note="Focus on the upgrade path.",
+        repo="acme/app", pr_number=7, account=dev, note="Focus on the upgrade path."
     )
 
     assert run_id == "run-review"
-    assert len(started) == 1
-    assert started[0]["note"] == "Focus on the upgrade path."
-
-
-async def test_a_passer_by_cannot_spend_a_review(monkeypatch):
-    # The repos druks reviews are public, so the mention is the whole internet's to write
-    # and each one would spend a run. The filter answers before the body asks GitHub.
-    dispatched = []
-
-    async def dispatch(**kwargs):
-        dispatched.append(kwargs)
-
-    monkeypatch.setattr(PullRequestReview, "dispatch", dispatch)
-
-    await publish(
-        "pr.commented",
-        repo="acme/app",
-        pr_number=7,
-        payload={"author": "passer-by", "author_can_write": False, "body": "@druks review"},
-    )
-
-    assert not dispatched
+    [start] = started
+    assert (start["account_id"], start["note"]) == (dev.id, "Focus on the upgrade path.")

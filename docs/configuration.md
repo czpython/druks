@@ -295,18 +295,31 @@ you set `urls.webhook_host`, the webhook uses that host. Otherwise, it uses the
 endpoint host.
 
 You can paste the credentials of an existing GitHub App into the same card.
-Enter the GitHub App ID, original PEM private key, and webhook secret. Druks
-validates the credentials against GitHub and stores the app slug. Each operator
-client then uses this service-identity row. Webhook deliveries use its stored
-secret for validation.
+Enter the GitHub App ID, client ID, client secret, original PEM private key,
+and webhook secret. Druks validates the App ID and the key against GitHub and
+stores the app slug. Each operator client then uses this service-identity row.
+Webhook deliveries use its stored secret for validation. On a connected card, a
+secret you leave blank stays as it is.
+
+The App's slug is the handle people tag in an issue or pull request comment,
+for example `@druks-acme`. A person signs in to Druks through the same App, and
+their sign-in links their GitHub account to their Druks account: see
+[Chat](chat.md#github). The client ID and secret are the App's OAuth client.
+A new paste with the same client ID keeps every linked account. A paste with
+another client ID revokes them.
 
 To register the GitHub App manually, use this webhook URL:
 
 Webhook URL:
 `https://<webhook-host>/_external/github/events/`
 
+Callback URL:
+`<endpoint>/api/oauth/callback`
+
 Subscribe to issue comment, pull request, pull request review, pull request
-review comment, and push events.
+review comment, and push events. Keep **Expire user authorization tokens** on:
+Druks refreshes a person's sign-in with the refresh token that comes with it,
+and refuses a sign-in that has none.
 
 | Repository permission | Access |
 | --- | --- |
@@ -332,9 +345,13 @@ review identity through a second entry.
 
 **To upgrade an existing installation**, paste the credentials one time on each
 active host. Open **Settings → Connections → Services**. Connect GitHub with the
-existing operator GitHub App ID, private key, and webhook secret. Do not create
-a replacement GitHub App. The current webhook and installations continue to use
-the pasted credentials.
+existing operator GitHub App ID, client ID, client secret, private key, and
+webhook secret. Do not create a replacement GitHub App. The current webhook and
+installations continue to use the pasted credentials. An App created before
+Druks answered on GitHub has no client ID on its card. Until it has one,
+**Connect GitHub** fails. Open the card and select **Replace connection**. Enter the client ID from the App's settings page and a client
+secret you generate there. Leave the other fields blank, and save. Then add the
+callback URL to the App on GitHub.
 
 ### Review identity (optional)
 

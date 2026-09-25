@@ -874,7 +874,11 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const complete = service.fields.every((field) => (values[field.name] ?? '').trim() !== '')
+  // A connected card keeps a secret its box leaves blank, so only the plain fields must be typed.
+  const complete = service.fields.every(
+    (field) =>
+      (service.connected && field.type === 'secret') || (values[field.name] ?? '').trim() !== '',
+  )
 
   const closeForm = () => {
     setFormOpen(false)
@@ -1014,6 +1018,9 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
               disabled={busy}
             />
           ))}
+          {service.connected && (
+            <p className="mcp-help">Leave a secret blank to keep the one the card holds.</p>
+          )}
           <div className="svc-actions">
             <button className="set-btn ghost" onClick={closeForm} disabled={busy}>
               Cancel
@@ -1033,6 +1040,7 @@ function connectionIdentity(connection: Connection): string | null {
   return (
     identity.email ??
     identity.username ??
+    identity.login ??
     identity.subscription ??
     identity.name ??
     identity.subject ??

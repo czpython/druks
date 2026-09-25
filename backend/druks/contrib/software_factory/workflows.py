@@ -525,29 +525,29 @@ class PullRequestReview(Workflow):
     workspace_class = ReviewWorkspace
 
     @classmethod
-    async def dispatch(cls, *, repo: str, pr_number: int, requested_by: str, note: str = "") -> str:
+    async def dispatch(cls, *, repo: str, pr_number: int, account: Account, note: str = "") -> str:
+        """Start a review under the account that asks for it."""
         # The review workspace sets its git author from the operator App, even when a
         # reviewer is connected. The lookup raises a clear error before the run starts a VM.
         await Github.get()
-        # The review runs under the account with the requester's name. Without that
-        # account, it runs under the default account.
-        account = await Account.get_for_username(db_session(), requested_by)
         return await cls.start(
-            subject=PullRequest.get(repo, pr_number),
-            account_id=account.id if account else None,
-            requested_by=requested_by,
-            note=note,
+            subject=PullRequest.get(repo, pr_number), account_id=account.id, note=note
         )
 
-    async def run(self, requested_by: str, note: str = "") -> None:
+    async def run(self, note: str = "") -> None:
         await SoftwareFactory.review_pull_request()
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         project_repo = await ProjectRepo.get_for_repo(
             (await self.subject).repo, raise_on_missing=True
         )
+        # The reviewer writes on GitHub, so the requester goes by their GitHub login.
+        account = await Account.get_for_run(db_session(), self.account_id)
+        sign_ins = await SoftwareFactory.github.list_for_account(account.id)
+        requested_by = sign_ins[0].identity["login"] if sign_ins else account.username
         return {
             "siblings": await project_repo.siblings(),
             "review_mode": (await get_review_actor()).mode,
+            "requested_by": requested_by,
             **await super().get_prompt_context(**context),
         }

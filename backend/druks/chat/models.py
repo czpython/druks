@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, func, select, text, update
+from sqlalchemy import ForeignKey, Index, func, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
@@ -275,6 +275,21 @@ class Conversation(Base, Uuid7Pk):
             select(Message)
             .where(Message.conversation_id == self.id, Message.state == MessageState.PENDING)
             .order_by(Message.created_at, Message.id)
+            .limit(1)
+        )
+
+    async def get_answered_source_id(self, session: AsyncSession, message: Message) -> str:
+        """The source id of the person's message that a reply to ``message`` answers:
+        ``message`` itself, else the person's newest message before it."""
+        return await session.scalar(
+            select(Message.source_id)
+            .where(
+                Message.conversation_id == self.id,
+                Message.role == MessageRole.USER,
+                Message.source_id.is_not(None),
+                tuple_(Message.created_at, Message.id) <= (message.created_at, message.id),
+            )
+            .order_by(Message.created_at.desc(), Message.id.desc())
             .limit(1)
         )
 

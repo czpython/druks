@@ -140,7 +140,7 @@ class Service:
     identity_endpoint: ClassVar[str] = ""
     identity_scopes: ClassVar[tuple[str, ...]] = ()
     # The identity fact that names the provider account — "sub" for Google,
-    # "id" for GitHub. When set, a fresh sign-in that matches an existing
+    # "subject" for GitHub. When set, a fresh sign-in that matches an existing
     # connection for the same owner updates that row; a revoked row becomes
     # live again. When empty, each fresh sign-in creates a new connection.
     identity_key: ClassVar[str] = ""
@@ -309,22 +309,29 @@ class Service:
         )
 
     @classmethod
-    async def connect(cls, payload: dict[str, Any]) -> VaultSecret:
-        """Verify and store a full paste of the service's fields. Secret fields
-        land in the encrypted ``secrets``, the rest become ``identity`` facts.
-        Plain fields are stripped as pasted; secrets are stored byte-for-byte."""
+    async def connect(cls, payload: dict[str, str]) -> VaultSecret:
+        """Verify and store a paste of the service's fields: secrets encrypted, the rest as
+        identity facts. On a connected card a blank secret keeps the stored one. Another
+        client ID revokes the connections that belong to the old one."""
         fields = cls.settings_model.model_fields
-        pasted: dict[str, Any] = {}
+        session = db_session()
+        card = await VaultSecret.lookup(session, cls.secret_kind, Audience.service(cls.slug))
+        # A card from before its service had a sign-in names no client.
+        previous_client_id = card.identity.get("client_id") if card else None
+        pasted = dict(card.secrets) if card else {}
         for name, value in payload.items():
             if name not in fields:
                 continue
-            if isinstance(value, str) and field_kind(fields[name]) != "secret":
+            if field_kind(fields[name]) != "secret":
                 value = value.strip()
-            pasted[name] = value
+            if value:
+                pasted[name] = value
         try:
             settings = cls.settings_model.model_validate(pasted)
         except ValidationError as error:
-            raise ServiceConnectError("Every field is required.") from error
+            labels = {spec["name"]: spec["label"] for spec in cls.connect_fields()}
+            missing = ", ".join(labels[err["loc"][0]] for err in error.errors())
+            raise ServiceConnectError(f"Enter {missing}.") from error
         secrets = {
             name: getattr(settings, name).get_secret_value()
             for name, field in fields.items()
@@ -335,13 +342,18 @@ class Service:
             for name, field in fields.items()
             if field_kind(field) != "secret"
         }
-        if all(str(value).strip() for value in (*identity.values(), *secrets.values())):
-            proven = await cls.verify(settings)
-            return await VaultSecret.store(
-                db_session(),
-                cls.secret_kind,
-                Audience.service(cls.slug),
-                identity={**identity, **proven},
-                secrets=secrets,
-            )
-        raise ServiceConnectError("Every field is required.")
+        proven = await cls.verify(settings)
+        row = await VaultSecret.store(
+            session,
+            cls.secret_kind,
+            Audience.service(cls.slug),
+            identity={**identity, **proven},
+            secrets=secrets,
+        )
+        if cls.token_endpoint and row.identity["client_id"] != previous_client_id:
+            client = OauthClient(provider=cls.slug)
+            for connection in await VaultSecret.list_connections(
+                session, Audience.service(cls.slug)
+            ):
+                await client.disconnect(connection, reason="client_replaced")
+        return row

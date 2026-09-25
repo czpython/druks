@@ -84,7 +84,11 @@ async def get_agent(
         template = ADMIN_PROMPT
         admin_tools = (get_tool_name(name, [bot.app], {bot.app}) for name in bot.admin_tools)
         tools = (*admin_tools, *ADMIN_TOOLS)
-    prompt = await render_prompt(template, source=conversation.source)
+    context = {"source": conversation.source, "thread_id": conversation.thread_id}
+    if conversation.connection:
+        channel = channels.get(conversation.source)
+        context.update(await channel.get_prompt_context(session, conversation))
+    prompt = await render_prompt(template, **context)
     return config, f"{prompt}\n\n{INTERNAL_MESSAGES_PROMPT}", tools
 
 
@@ -360,22 +364,24 @@ async def finish_turn(
 
 
 async def report_result(session: AsyncSession, run: Run, *, result) -> str | None:
-    body = RESULT_MESSAGE.format(run=run.id, result=to_json(result, fallback=str).decode())
-    return await report_outcome(session, run, body)
+    """Report a run's result to the chat that started it, once the run waited for an
+    answer. Returns that conversation."""
+    if run.input_requested_at:
+        body = RESULT_MESSAGE.format(run=run.id, result=to_json(result, fallback=str).decode())
+        return await report_outcome(session, run, body)
+    return
 
 
-async def report_failure(session: AsyncSession, run: Run, *, failure: str) -> str | None:
+async def report_failure(session: AsyncSession, run: Run, *, failure: str) -> str:
+    """Report a run's failure to the chat that started it, whether or not the run waited
+    for an answer. Returns that conversation."""
     return await report_outcome(session, run, FAILURE_MESSAGE.format(run=run.id, failure=failure))
 
 
-async def report_outcome(session: AsyncSession, run: Run, body: str) -> str | None:
-    """Report how a run ended to the chat that started it, once the run waited for an
-    answer. Returns that conversation."""
-    if run.input_requested_at:
-        conversation = await session.get(Conversation, run.conversation_id)
-        await conversation.create_message(session, body, is_internal=True)
-        return conversation.id
-    return
+async def report_outcome(session: AsyncSession, run: Run, body: str) -> str:
+    conversation = await session.get(Conversation, run.conversation_id)
+    await conversation.create_message(session, body, is_internal=True)
+    return conversation.id
 
 
 async def name_conversation(

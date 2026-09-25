@@ -249,6 +249,26 @@ describe('ServicesPane', () => {
     expect(screen.queryByPlaceholderText('not set')).toBeNull()
   })
 
+  it('lets a connected card keep the secrets it leaves blank', async () => {
+    const fetchMock = stubFetch([[connected]])
+    renderPane()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure GitHub' }))
+    fireEvent.click(screen.getByText('Replace connection'))
+    expect(screen.getByText('Leave a secret blank to keep the one the card holds.')).toBeTruthy()
+    const replace = screen.getByRole('button', { name: 'Replace connection' })
+    expect((replace as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('App ID'), { target: { value: '777' } })
+    expect((replace as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(replace)
+    await flush()
+
+    const post = fetchMock.mock.calls.find(
+      ([url, init]) => url === '/api/services/github' && init?.method === 'POST',
+    )
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ app_id: '777' })
+  })
+
   it('opens the manifest page and refreshes on the callback broadcast', async () => {
     stubFetch([[disconnected], [connected]])
     const open = vi.fn()

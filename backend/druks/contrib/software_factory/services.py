@@ -13,6 +13,9 @@ class GithubReviewer(Github):
         "and contents, write access to pull requests, and no webhook. Leave it "
         "unconnected and reviews publish as operator comments."
     )
+    # Nobody signs in through the reviewer App: it only posts.
+    authorization_endpoint = ""
+    token_endpoint = ""
 
     class Settings(BaseModel):
         app_id: str = Field(title="App ID")

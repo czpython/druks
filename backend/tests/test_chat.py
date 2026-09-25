@@ -25,7 +25,7 @@ from druks.redis import get_client
 from druks.sandbox.exceptions import IdentityDenied
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.settings import Urls
-from druks.testing import asgi_client, configure_app_for_test, make_settings
+from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_run
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy import delete
 
@@ -734,3 +734,21 @@ async def test_cancel_route_only_changes_the_requested_pending_message(
     await druks_db.refresh(first)
     assert first.state == "pending"
     get_running_sandbox.assert_not_called()
+
+
+async def test_a_failed_run_reports_to_its_conversation_whether_or_not_it_parked(
+    druks_db, conversation
+):
+    run = await seed_run(druks_db, kind="test", account_id=conversation.account_id)
+    run.conversation_id = conversation.id
+
+    assert await service.report_result(druks_db, run, result={"ok": True}) is None
+    reported = await service.report_failure(druks_db, run, failure="the sandbox died")
+    assert reported == conversation.id
+
+    *_, report = await list_messages(druks_db, conversation)
+    assert (report.is_internal, run.id in report.body, "the sandbox died" in report.body) == (
+        True,
+        True,
+        True,
+    )

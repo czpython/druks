@@ -83,9 +83,9 @@ class Run(Base):
     retry_from: Mapped[str | None] = column_property(retry_from_expression(id))
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     account: Mapped[Account] = relationship(lazy="joined", foreign_keys=[account_id])
-    # The chat conversation whose tool call started the run. Druks tells it how a
-    # run that waited for an answer ends. This key closes a cycle through files and
-    # agent calls, so create_all adds it after the tables.
+    # The chat conversation whose tool call started the run. Druks tells it the result
+    # of a run that waited for an answer, and every failure. This key closes a cycle
+    # through files and agent calls, so create_all adds it after the tables.
     conversation_id: Mapped[str | None] = mapped_column(
         ForeignKey(
             "chat_conversations.id",

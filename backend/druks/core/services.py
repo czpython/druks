@@ -3,10 +3,11 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+from githubkit import GitHub
 from pydantic import BaseModel, Field, SecretStr
 from slack_sdk.errors import SlackApiError
 
-from druks.core.apis.github import GitHubClient
+from druks.core.apis.github import GITHUB_AUTHORITY, GitHubClient
 from druks.core.apis.linear import LINEAR_GRAPHQL_URL
 from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
 from druks.secrets.enums import SecretKind
@@ -19,6 +20,9 @@ _VERIFY_TIMEOUT = 10.0
 
 
 class Github(Service):
+    """The GitHub App that Druks acts as, and that people sign in to Druks through. A
+    person's sign-in through it links their GitHub account to their Druks account."""
+
     secret_kind = SecretKind.APP_KEY
     # The Drukbox catalog name a box holds this identity's token under.
     secret_name = "github"
@@ -26,6 +30,10 @@ class Github(Service):
         "The GitHub App druks acts as. Create it from here, or paste an existing "
         "App's credentials from the GitHub developer settings page."
     )
+    authorization_endpoint = "https://github.com/login/oauth/authorize"
+    token_endpoint = "https://github.com/login/oauth/access_token"
+    # A fresh sign-in by the same GitHub user updates their row.
+    identity_key = "subject"
     # What the created App is: the single operator identity documented in
     # docs/configuration.md — keep the two in step. The manifest flow adds the
     # appliance's own URLs before handing it to GitHub.
@@ -54,6 +62,8 @@ class Github(Service):
 
     class Settings(BaseModel):
         app_id: str = Field(title="App ID")
+        client_id: str = Field(title="Client ID")
+        client_secret: SecretStr = Field(title="Client secret")
         private_key: SecretStr = Field(
             title="Private key (PEM)", json_schema_extra={"multiline": True}
         )
@@ -91,6 +101,13 @@ class Github(Service):
     async def issue_token(cls, resource: str) -> tuple[str, datetime]:
         """The installation token for the repo, and the expiry GitHub gave it."""
         return await (await cls.get_client()).token_for_repo(resource)
+
+    @classmethod
+    async def get_identity(cls, access_token: str) -> dict[str, Any]:
+        """The person behind a user token, keyed the way ``Account.lookup`` finds them."""
+        async with GitHub(access_token, base_url=load_settings().github_api_url) as github:
+            person = (await github.rest.users.async_get_authenticated()).parsed_data
+        return {"authority": GITHUB_AUTHORITY, "subject": str(person.id), "login": person.login}
 
 
 class Linear(Service):
