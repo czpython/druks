@@ -139,7 +139,7 @@ async def oauth_callback(
     identity = await service.get_identity(grant["access_token"])
     # A grant refreshes through its refresh token. Without one, the access token
     # never expires and is the grant itself.
-    refresh_token = grant.get("refresh_token", "")
+    refresh_token = grant["refresh_token"]
     kept = {} if refresh_token else {"access_token": grant["access_token"]}
     connection_id = pending["connection_id"]
     # Reconsent names an existing row by id; a declared identity key

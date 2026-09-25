@@ -3,12 +3,15 @@ from typing import Annotated
 
 from dbos import DBOS
 from fastapi import APIRouter, Body, Depends, HTTPException
+from slack_sdk.errors import SlackApiError
 
-from druks.accounts.dependencies import current_session_account
+from druks.accounts.context import current_conversation_id
+from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
+from druks.apps.registry import channels
 
-from .exceptions import ChatSandboxGone
+from .exceptions import ChannelHasNoThreadsError, ChatSandboxGone
 from .models import Conversation, Message
 from .schemas import ConversationDetailResponse, ConversationResponse, MessageResponse
 from .service import cancel_turn, deliver, publish
@@ -123,3 +126,25 @@ async def cancel(
     with suppress(ChatSandboxGone):
         await cancel_turn(session, conversation, message)
     await DBOS.start_workflow_async(deliver, conversation.id)
+
+
+@router.get("/thread", operation_id="read_thread", tags=["agent"])
+async def read_thread(
+    session: SessionDep, account: Account = Depends(current_account)
+) -> list[dict]:
+    """Read the thread of the conversation this call comes from: its newest 200
+    messages, oldest first. Each one has ts, user_id, user_name, text, is_from_you (you
+    wrote it), and is_from_user (the person you answer wrote it). A direct message has
+    no thread."""
+    conversation_id = current_conversation_id.get()
+    if not conversation_id:
+        raise HTTPException(
+            409, "This tool reads a channel conversation's thread. Call it from one."
+        )
+    conversation = await session.get(Conversation, conversation_id)
+    try:
+        return await channels.get(conversation.source).read_thread(session, conversation)
+    except ChannelHasNoThreadsError as error:
+        raise HTTPException(409, str(error)) from error
+    except SlackApiError as error:
+        raise HTTPException(502, str(error)) from error

@@ -27,6 +27,6 @@ class Channel:
         raise NotImplementedError
 
     @classmethod
-    async def read_thread(cls, conversation: Conversation) -> list[dict]:
+    async def read_thread(cls, session: AsyncSession, conversation: Conversation) -> list[dict]:
         """The conversation's thread at its source, oldest first."""
         raise ChannelHasNoThreadsError(f"A {cls.name} conversation has no thread to read.")

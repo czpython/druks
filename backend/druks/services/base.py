@@ -264,8 +264,8 @@ class Service:
     def read_grant(cls, tokens: dict[str, Any]) -> dict[str, Any]:
         """The grant in the token endpoint's answer: its access token, its refresh
         token, and its scopes. Override for a provider that shapes the answer
-        differently. A grant with no refresh token is one access token that never
-        expires."""
+        differently. A grant whose refresh token is empty is one access token that
+        never expires."""
         if not tokens.get("refresh_token"):
             raise OauthExchangeError(
                 cls.slug,

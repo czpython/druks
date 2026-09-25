@@ -176,6 +176,24 @@ class Conversation(Base, Uuid7Pk):
             conversation.user_name = user_name
         return conversation
 
+    @classmethod
+    async def get_for_user(
+        cls,
+        session: AsyncSession,
+        connection: VaultSecret,
+        *,
+        user_id: str,
+        thread_id: str,
+    ) -> "Conversation | None":
+        """The conversation of a person in a thread on a channel's connection."""
+        return await session.scalar(
+            select(cls).where(
+                cls.connection_id == connection.id,
+                cls.user_id == user_id,
+                cls.thread_id == thread_id,
+            )
+        )
+
     async def create_message(
         self,
         session: AsyncSession,
@@ -258,6 +276,18 @@ class Conversation(Base, Uuid7Pk):
             .where(Message.conversation_id == self.id, Message.state == MessageState.PENDING)
             .order_by(Message.created_at, Message.id)
             .limit(1)
+        )
+
+    async def list_reply_source_ids(self, session: AsyncSession) -> list[str]:
+        """The ids at the source of the replies Druks sent in this conversation."""
+        return list(
+            await session.scalars(
+                select(Message.source_id).where(
+                    Message.conversation_id == self.id,
+                    Message.role == MessageRole.ASSISTANT,
+                    Message.source_id.is_not(None),
+                )
+            )
         )
 
     async def list_pending_messages(self, session: AsyncSession) -> list[Message]:

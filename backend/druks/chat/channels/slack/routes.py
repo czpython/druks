@@ -32,11 +32,11 @@ async def link_account(
         raise OauthPageError("This link expired. Write to the bot again.", status_code=410)
     message = json.loads(held_message)
     card = await Slack.get()
-    writer = await SlackChannel.lookup_writer(session, card, message)
-    if not writer and not has_connected:
+    linked_account = await SlackChannel.lookup_account(session, card, message)
+    if not linked_account and not has_connected:
         link_page = quote(f"/api/chat/services/slack/link/{token}?has_connected=true", safe="")
         return RedirectResponse(f"/api/oauth/slack/connect?next={link_page}")
-    if writer and writer.id == account.id:
+    if linked_account and linked_account.id == account.id:
         await get_client().delete(LINK_KEY.format(token=token))
         conversation = await SlackChannel.save_message(session, card, account, message)
         return RedirectResponse(f"/chat/{conversation.id}")

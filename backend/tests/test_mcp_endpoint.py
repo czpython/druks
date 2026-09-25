@@ -181,6 +181,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
 
     assert list(tools)[:7] == _TOOL_NAMES
     assert list(tools)[7:] == [
+        "chat_read_thread",
         "software_factory_start",
         "software_factory_review",
         "software_factory_create_ticket",
