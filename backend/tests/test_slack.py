@@ -355,7 +355,7 @@ async def test_only_a_linked_persons_untagged_reply_in_a_fresh_thread_reaches_th
 
     [conversation] = await Conversation.list_for_connection(druks_db, card.id)
     await druks_db.refresh(conversation, ["messages"])
-    assert [message.body for message in conversation.messages] == [f"<@{BOT}> read my runs", "more"]
+    assert [message.body for message in conversation.messages] == ["read my runs", "more"]
     assert delivery.await_count == 2
     assert not slack
 
