@@ -3,6 +3,7 @@ from typing import Annotated
 
 from dbos import DBOS
 from fastapi import APIRouter, Body, Depends, HTTPException
+from githubkit.exception import RequestFailed
 from slack_sdk.errors import SlackApiError
 
 from druks.accounts.context import current_conversation_id
@@ -146,5 +147,5 @@ async def read_thread(
         return await channels.get(conversation.source).read_thread(session, conversation)
     except ChannelHasNoThreadsError as error:
         raise HTTPException(409, str(error)) from error
-    except SlackApiError as error:
+    except (SlackApiError, RequestFailed) as error:
         raise HTTPException(502, str(error)) from error

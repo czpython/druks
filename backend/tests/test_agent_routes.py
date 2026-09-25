@@ -146,7 +146,7 @@ async def test_review_request_returns_the_run_id_start_hands_back(
     responses = [
         client.post(
             "/api/software_factory/reviews",
-            json={"repo": "acme/app", "prNumber": 7},
+            json={"repo": "acme/app", "prNumber": 7, "note": "Mind the upgrade path."},
         )
         for _ in range(2)
     ]
@@ -158,6 +158,7 @@ async def test_review_request_returns_the_run_id_start_hands_back(
         {"type": "pull_request", "id": "acme/app#7"},
     ]
     assert {call["account_id"] for call in starts} == {account.id}
+    assert {call["note"] for call in starts} == {"Mind the upgrade path."}
 
 
 class _FakeTracker:

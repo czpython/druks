@@ -6,12 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from druks.accounts.dependencies import current_session_account
-from druks.api.dependencies import SessionDep
 from druks.core.apis.github import GITHUB
 from druks.core.services import Github, Slack
 from druks.core.templates import render_page
-from druks.secrets.datastructures import Audience
-from druks.secrets.models import VaultSecret
 
 # Mounted by the loader under /api/core, like any app's routes.
 router = APIRouter(prefix="/services/github", tags=["services"])
@@ -43,6 +40,7 @@ async def create_github_app(request: Request) -> HTMLResponse:
         **Github.manifest,
         "url": endpoint,
         "redirect_url": f"{endpoint}/api/core/services/github/manifest/callback",
+        "callback_urls": [f"{endpoint}/api/oauth/callback"],
         "hook_attributes": {
             "url": f"{settings.urls.webhook_base}/_external/github/events/",
             "active": True,
@@ -56,9 +54,7 @@ async def create_github_app(request: Request) -> HTMLResponse:
     response_class=HTMLResponse,
     dependencies=[Depends(current_session_account)],
 )
-async def github_manifest_callback(
-    session: SessionDep, request: Request, code: str = ""
-) -> HTMLResponse:
+async def github_manifest_callback(request: Request, code: str = "") -> HTMLResponse:
     if not code:
         raise HTTPException(status_code=400, detail="Missing code in the GitHub redirect.")
     api_url = request.app.state.settings.github_api_url
@@ -75,14 +71,16 @@ async def github_manifest_callback(
             detail="GitHub rejected the creation code — restart from Create GitHub App.",
         )
     app = converted.json()
-    slug = app["slug"]
-    await VaultSecret.store(
-        session,
-        Github.secret_kind,
-        Audience.service(GITHUB),
-        identity={"app_id": str(app["id"]), "slug": slug},
-        secrets={"private_key": app["pem"], "webhook_secret": app["webhook_secret"]},
+    row = await Github.connect(
+        {
+            "app_id": str(app["id"]),
+            "client_id": app["client_id"],
+            "client_secret": app["client_secret"],
+            "private_key": app["pem"],
+            "webhook_secret": app["webhook_secret"],
+        }
     )
+    slug = row.identity["slug"]
     install_url = f"https://github.com/apps/{quote(slug, safe='')}/installations/new"
     # druks opened this tab via window.open; the broadcast tells the connect
     # card to refetch, then the tab moves on to the one step GitHub still

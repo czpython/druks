@@ -41,13 +41,17 @@ async def _post_token(
     client_secret: str,
     basic_auth: bool,
 ) -> httpx.Response:
+    # RFC 6749 answers in JSON, but GitHub answers in form encoding unless asked.
+    headers = {"Accept": "application/json"}
     # RFC 6749: HTTP Basic keeps the client credentials out of the form body.
     if basic_auth:
-        return await http.post(token_endpoint, data=data, auth=(client_id, client_secret))
+        return await http.post(
+            token_endpoint, data=data, headers=headers, auth=(client_id, client_secret)
+        )
     data["client_id"] = client_id
     if client_secret:
         data["client_secret"] = client_secret
-    return await http.post(token_endpoint, data=data)
+    return await http.post(token_endpoint, data=data, headers=headers)
 
 
 class OauthClient:

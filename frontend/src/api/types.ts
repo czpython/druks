@@ -647,6 +647,7 @@ export interface Connection {
     email?: string
     email_verified?: boolean
     name?: string
+    login?: string
     username?: string
     subscription?: string
   }

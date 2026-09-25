@@ -16,6 +16,8 @@ from druks.core.utils.time import ensure_utc
 logger = logging.getLogger(__name__)
 
 GITHUB = "github"
+# The authority of a GitHub sign-in: one GitHub, so a user id names one person.
+GITHUB_AUTHORITY = "https://github.com"
 
 
 @dataclass(frozen=True)
@@ -315,6 +317,48 @@ class GitHubClient:
         owner, name = repo.split("/", 1)
         github = await self._for_repo(repo)
         response = await github.rest.issues.async_get(owner, name, issue_number)
+        return response.parsed_data.model_dump()
+
+    @_retry_on_401
+    async def list_comments(self, repo: str, issue_number: int) -> list[dict[str, Any]]:
+        """Every top-level comment on the issue or pull request, oldest first."""
+        owner, name = repo.split("/", 1)
+        github = await self._for_repo(repo)
+        comments = github.rest.paginate(
+            github.rest.issues.async_list_comments, owner, name, issue_number, per_page=100
+        )
+        return [comment.model_dump() async for comment in comments]
+
+    @_retry_on_401
+    async def list_review_comments(self, repo: str, pr_number: int) -> list[dict[str, Any]]:
+        """Every inline comment on the pull request, oldest first."""
+        owner, name = repo.split("/", 1)
+        github = await self._for_repo(repo)
+        comments = github.rest.paginate(
+            github.rest.pulls.async_list_review_comments, owner, name, pr_number, per_page=100
+        )
+        return [comment.model_dump() async for comment in comments]
+
+    @_retry_on_401
+    async def create_comment(self, repo: str, issue_number: int, body: str) -> dict[str, Any]:
+        owner, name = repo.split("/", 1)
+        github = await self._for_repo(repo)
+        response = await github.rest.issues.async_create_comment(
+            owner, name, issue_number, body=body
+        )
+        return response.parsed_data.model_dump()
+
+    @_retry_on_401
+    async def reply_to_review_comment(
+        self, repo: str, pr_number: int, comment_id: int, body: str
+    ) -> dict[str, Any]:
+        """A reply in the inline thread that ``comment_id`` starts. GitHub takes the
+        thread's first comment only, never a reply in it."""
+        owner, name = repo.split("/", 1)
+        github = await self._for_repo(repo)
+        response = await github.rest.pulls.async_create_reply_for_review_comment(
+            owner, name, pr_number, comment_id, body=body
+        )
         return response.parsed_data.model_dump()
 
     @_retry_on_401

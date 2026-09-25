@@ -259,9 +259,11 @@ Only the number's admin can answer a question that came from the number's
 chats. The dashboard, `answer_gate`, and notification buttons all refuse
 everyone else, operators included.
 
-When a run that waited ends, Druks adds an internal message with its result or
-its failure to the conversation that started it. The Bot then tells the person.
-A cancelled run adds nothing.
+When a run that waited ends, Druks adds an internal message with its result to
+the conversation that started it. When a run fails, waited or not, Druks adds an
+internal message with its failure. The Bot then tells the person: a failure in
+one short line, with no error details and no retry. A cancelled run adds
+nothing.
 
 ### Taking over
 
@@ -326,3 +328,51 @@ oldest first, each with its author's id and name, whether this agent wrote it,
 and whether the person it answers wrote it. Every agent in a thread posts as the
 one bot, so Druks tells an agent's own replies by the Slack ids it recorded. In
 a direct message the tool answers that there is no thread.
+
+## GitHub
+
+GitHub is a source for Chat. You tag the operator App in an issue or pull request
+comment, and your own agent answers there, under your account and with your whole
+toolkit. The App's slug is the tag, for example `@druks-acme`. The channel is live
+while the GitHub card is connected: see [GitHub](configuration.md#github).
+**Chat → Channels** shows the tag and your GitHub account.
+
+### Link your account
+
+Druks knows you by your GitHub account. Select **Connect GitHub** on the GitHub
+pane. GitHub asks you to authorize the App, and Druks saves your GitHub sign-in
+under your account, like a Gmail connection. Other apps can use that grant.
+**Disconnect** revokes it.
+
+When you tag the App before you connect, the App answers once in the thread:
+connect GitHub in Druks, then tag it again. It holds nothing.
+
+### Who the App answers
+
+Only a comment that tags the App reaches an agent, and only when its author can
+write to the repository. A comment with no tag does nothing, also when it
+answers the agent. A tag on a quoted line does not count. Each person who tags
+the App gets their own conversation for the issue or pull request, so two people
+can talk to their own agents in one thread. Druks saves a comment once, whatever
+GitHub delivers.
+
+The agent decides what to do: answer, open a ticket, start a build, or start a
+review. To review, it calls `review` and passes your comment as the note. A tag
+no longer starts a review by itself. When a run the agent started fails, the
+agent says so in one short line, without error details, and does not retry. Tag
+it again to try again.
+
+### Where the reply goes
+
+The reply is a comment where the tag was: in the inline thread of a pull
+request when you tagged the App there, and at the top of the issue or pull
+request otherwise. Every write goes through the operator App, so every reply
+posts as the App. On a public repository, anyone can read it.
+
+The agent reads the thread with `chat_read_thread`: the issue or pull request
+itself, then its newest 200 comments, oldest first, each with its author's id and
+login, whether this agent wrote it, and whether the person it answers wrote it.
+An inline comment also names its file and line. Every agent posts as the one
+App, so Druks tells an agent's own replies by the GitHub ids it recorded. The
+prompt treats only the comment of the person the agent answers as instructions.
+Everything else in the thread is context.

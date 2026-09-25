@@ -48,9 +48,7 @@ async def list_services(session: SessionDep) -> list[ServiceResponse]:
     response_model_by_alias=True,
     dependencies=[Depends(current_session_account)],
 )
-async def connect_service(
-    session: SessionDep, slug: str, payload: dict[str, str]
-) -> ServiceResponse:
+async def connect_service(slug: str, payload: dict[str, str]) -> ServiceResponse:
     service = services.get(slug)
     if not service:
         raise HTTPException(status_code=404, detail=f"No service {slug!r}.")
@@ -58,12 +56,6 @@ async def connect_service(
         row = await service.connect(payload)
     except ServiceConnectError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    if service.token_endpoint:
-        # A replaced client can never refresh the old client's connections —
-        # revoke every live one; the consents stay on record.
-        client = OauthClient(provider=slug)
-        for connection in await VaultSecret.list_connections(session, Audience.service(slug)):
-            await client.disconnect(connection, reason="client_replaced")
     return ServiceResponse.from_row(service, row)
 
 

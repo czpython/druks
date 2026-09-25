@@ -31,6 +31,7 @@ def _server_app():
 
 _PEM = "-----BEGIN RSA PRIVATE KEY-----\nline-one\nline-two\n-----END RSA PRIVATE KEY-----\n"
 _SECRET = "hook-secret-value"
+_CLIENT = {"client_id": "Iv1.abc", "client_secret": "client-secret-value"}
 
 
 async def _connect(
@@ -173,16 +174,32 @@ async def test_list_reports_each_declared_service(druks_client: TestClient):
     assert entry["connectedAt"] is None
     assert [field["name"] for field in entry["fields"]] == [
         "app_id",
+        "client_id",
+        "client_secret",
         "private_key",
         "webhook_secret",
     ]
-    assert [field["type"] for field in entry["fields"]] == ["str", "secret", "secret"]
+    assert [field["type"] for field in entry["fields"]] == [
+        "str",
+        "str",
+        "secret",
+        "secret",
+        "secret",
+    ]
     assert [field["label"] for field in entry["fields"]] == [
         "App ID",
+        "Client ID",
+        "Client secret",
         "Private key (PEM)",
         "Webhook secret",
     ]
-    assert [field["multiline"] for field in entry["fields"]] == [False, True, False]
+    assert [field["multiline"] for field in entry["fields"]] == [
+        False,
+        False,
+        False,
+        True,
+        False,
+    ]
 
 
 async def test_post_authenticates_then_creates_the_row(
@@ -192,16 +209,17 @@ async def test_post_authenticates_then_creates_the_row(
 
     response = await druks_client.post(
         "/api/services/github",
-        json={"app_id": "12345", "private_key": _PEM, "webhook_secret": _SECRET},
+        json={**_CLIENT, "app_id": "12345", "private_key": _PEM, "webhook_secret": _SECRET},
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["connected"] is True
-    assert body["facts"] == {"app_id": "12345", "slug": "druks-operator"}
-    # No response carries either pasted secret.
+    assert body["facts"] == {"app_id": "12345", "client_id": "Iv1.abc", "slug": "druks-operator"}
+    # No response carries a pasted secret.
     assert _PEM not in response.text
     assert _SECRET not in response.text
+    assert "client-secret-value" not in response.text
 
     connected = await _github_entry(druks_client)
     assert connected["connected"] is True
@@ -214,11 +232,15 @@ async def test_post_replaces_an_existing_row(druks_client: TestClient, druks_db,
 
     response = await druks_client.post(
         "/api/services/github",
-        json={"app_id": "777", "private_key": "new-pem", "webhook_secret": "new-secret"},
+        json={**_CLIENT, "app_id": "777", "private_key": "new-pem", "webhook_secret": "new-secret"},
     )
 
     assert response.status_code == 200
-    assert response.json()["facts"] == {"app_id": "777", "slug": "replacement-app"}
+    assert response.json()["facts"] == {
+        "app_id": "777",
+        "client_id": "Iv1.abc",
+        "slug": "replacement-app",
+    }
 
 
 async def test_post_rejects_an_unknown_service(druks_client: TestClient):
@@ -239,7 +261,7 @@ async def test_invalid_credentials_preserve_the_previous_row(
 
     response = await druks_client.post(
         "/api/services/github",
-        json={"app_id": "999", "private_key": "bad-pem", "webhook_secret": "bad-secret"},
+        json={**_CLIENT, "app_id": "999", "private_key": "bad-pem", "webhook_secret": "bad-secret"},
     )
 
     assert response.status_code == 422
@@ -252,6 +274,37 @@ async def test_invalid_credentials_preserve_the_previous_row(
     row = await Github.get()
     assert row.identity["app_id"] == "12345"
     assert row.secrets["private_key"] == _PEM
+
+
+async def test_a_paste_on_a_connected_card_keeps_the_secrets_it_leaves_blank(
+    druks_client: TestClient, druks_db, monkeypatch
+):
+    # A card connected before the App signed people in holds no client secret, so
+    # that one must be typed. The key and the webhook secret it holds stay.
+    await _connect()
+    _mock_authenticated_app(monkeypatch)
+    blanks = {"app_id": "12345", "private_key": "", "webhook_secret": ""}
+
+    short = await druks_client.post(
+        "/api/services/github", json={**blanks, "client_id": "Iv1.abc", "client_secret": ""}
+    )
+    assert (short.status_code, short.json()["detail"]) == (422, "Enter Client secret.")
+
+    response = await druks_client.post("/api/services/github", json={**blanks, **_CLIENT})
+
+    assert response.status_code == 200
+    assert response.json()["facts"] == {
+        "app_id": "12345",
+        "client_id": "Iv1.abc",
+        "slug": "druks-operator",
+    }
+    druks_db.expunge_all()
+    row = await Github.get()
+    assert row.secrets == {
+        "client_secret": "client-secret-value",
+        "private_key": _PEM,
+        "webhook_secret": _SECRET,
+    }
 
 
 async def test_blank_fields_are_rejected_without_touching_github(
@@ -268,6 +321,7 @@ async def test_blank_fields_are_rejected_without_touching_github(
     )
 
     assert response.status_code == 422
+    assert response.json()["detail"].startswith("Enter App ID, Client ID, Client secret, ")
     with pytest.raises(ServiceNotConnectedError):
         await Github.get()
 
@@ -302,6 +356,7 @@ async def test_manifest_page_submits_the_documented_app_to_github(
         "url": "https://druks.example/_external/github/events/",
         "active": True,
     }
+    assert manifest["callback_urls"] == ["https://druks.example/api/oauth/callback"]
     assert manifest["public"] is False
     assert manifest["default_permissions"]["contents"] == "write"
     assert manifest["default_permissions"]["administration"] == "write"
@@ -347,6 +402,12 @@ async def test_manifest_page_refuses_without_an_endpoint(druks_client: TestClien
 async def test_manifest_callback_exchanges_the_code_and_connects(
     druks_client: TestClient, druks_db, monkeypatch
 ):
+    # A new App is another OAuth client: the sign-ins through the old one go.
+    await _connect()
+    old_sign_in = await VaultSecret.connect(
+        db_session(), Audience.service("github"), account_id=None, refresh_token="ghr", scopes=[]
+    )
+    _mock_authenticated_app(monkeypatch, slug="druks")
     exchanged = []
 
     async def fake_post(self, url, **kwargs):
@@ -356,6 +417,8 @@ async def test_manifest_callback_exchanges_the_code_and_connects(
             json={
                 "id": 4242,
                 "slug": "druks",
+                "client_id": "Iv1.abc",
+                "client_secret": "client-secret-value",
                 "pem": _PEM,
                 "webhook_secret": _SECRET,
                 "html_url": "https://github.com/apps/druks",
@@ -377,10 +440,18 @@ async def test_manifest_callback_exchanges_the_code_and_connects(
     # The page never carries the stored secrets.
     assert "line-one" not in response.text
     assert _SECRET not in response.text
+    assert "client-secret-value" not in response.text
     druks_db.expunge_all()
     row = await Github.get()
-    assert row.identity == {"app_id": "4242", "slug": "druks"}
-    assert row.secrets == {"private_key": _PEM, "webhook_secret": _SECRET}
+    assert row.identity == {"app_id": "4242", "slug": "druks", "client_id": "Iv1.abc"}
+    assert row.secrets == {
+        "client_secret": "client-secret-value",
+        "private_key": _PEM,
+        "webhook_secret": _SECRET,
+    }
+    db_session().expunge_all()
+    revoked = await db_session().get(VaultSecret, old_sign_in.id)
+    assert revoked.revoked_reason == "client_replaced"
 
 
 async def test_manifest_callback_rejects_a_dead_code(
@@ -693,7 +764,7 @@ def test_oauth_connect_guards(tmp_path, acme, druks_db):
     from druks.testing import configure_app_for_test
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        assert client.get("/api/oauth/github/connect").status_code == 404
+        assert client.get("/api/oauth/github_reviewer/connect").status_code == 404
         # No urls.endpoint configured.
         assert client.get("/api/oauth/acme/connect").status_code == 409
 
@@ -1211,6 +1282,28 @@ async def test_replacing_the_client_credentials_revokes_its_connections(
     ]
 
 
+async def test_a_paste_with_the_same_client_keeps_its_connections(tmp_path, acme, druks_db):
+    from druks.secrets.datastructures import Audience
+    from druks.secrets.models import VaultSecret
+    from druks.testing import configure_app_for_test
+
+    await connect_service("acme", identity={"client_id": "id-1"}, secrets={"client_secret": "s"})
+    row = await VaultSecret.connect(
+        db_session(), Audience.service("acme"), account_id=None, refresh_token="rt-old", scopes=[]
+    )
+
+    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        response = client.post(
+            "/api/services/acme", json={"client_id": "id-1", "client_secret": "sec-2"}
+        )
+        assert response.status_code == 200
+
+    # A person's sign-in belongs to the client, so a new secret keeps it.
+    db_session().expunge_all()
+    [kept] = await VaultSecret.list_connections(db_session(), Audience.service("acme"))
+    assert (kept.id, kept.revoked_at) == (row.id, None)
+
+
 async def test_list_serves_the_connections_beside_the_declared_union(tmp_path, acme, druks_db):
     from druks.secrets.datastructures import Audience
     from druks.secrets.models import VaultSecret
@@ -1220,7 +1313,7 @@ async def test_list_serves_the_connections_beside_the_declared_union(tmp_path, a
         return next(e for e in client.get("/api/services").json() if e["slug"] == slug)
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        assert (await entry(client, "github"))["isOauth"] is False
+        assert (await entry(client, "github"))["isOauth"] is True
         before = await entry(client)
         assert before["isOauth"] is True
         assert before["connections"] == []

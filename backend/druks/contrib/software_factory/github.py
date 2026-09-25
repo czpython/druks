@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from druks.core.apis.github import GitHubClient
 from druks.core.services import Github
 
 from .services import GithubReviewer
@@ -16,13 +15,10 @@ class ReviewActor:
     comment events with the verdict in the body."""
 
     service: type[Github]
-    client: GitHubClient
     mode: Literal["approve", "comment"]
 
 
 async def get_review_actor() -> ReviewActor:
     if await GithubReviewer.is_connected():
-        return ReviewActor(
-            service=GithubReviewer, client=await GithubReviewer.get_client(), mode="approve"
-        )
-    return ReviewActor(service=Github, client=await Github.get_client(), mode="comment")
+        return ReviewActor(service=GithubReviewer, mode="approve")
+    return ReviewActor(service=Github, mode="comment")

@@ -14,4 +14,7 @@ INTERNAL_MESSAGES_PROMPT = (
 )
 # Druks tells a run's conversation how the run ended with one of these templates.
 RESULT_MESSAGE = "[Internal: Run {run} ended. Its result:\n{result}]"
-FAILURE_MESSAGE = "[Internal: Run {run} failed: {failure}]"
+FAILURE_MESSAGE = (
+    "[Internal: Run {run} failed: {failure}. Tell the person in one short line, with no "
+    "error details, and do not retry it.]"
+)

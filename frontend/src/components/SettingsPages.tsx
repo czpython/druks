@@ -28,6 +28,7 @@ import { harnessColors } from '../lib/harnessColors'
 import { Page } from './Page'
 import { Sidebar } from './Sidebar'
 import { BrowserProfilesPane } from './BrowserProfilesPane'
+import { GitHubPane } from './GitHubPane'
 import { SlackPane } from './SlackPane'
 import { WhatsAppChannelPane } from './WhatsAppNumbersPane'
 import {
@@ -70,6 +71,7 @@ const CONNECTION_TABS = [
 
 // One pane for each chat channel, by the channel's name.
 const CHANNEL_PANES: Record<string, ComponentType<{ app: AppSettings }>> = {
+  github: GitHubPane,
   slack: SlackPane,
   whatsapp: WhatsAppChannelPane,
 }

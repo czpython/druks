@@ -6,7 +6,7 @@ export interface ConversationSummary {
   id: string
   title: string | null
   isPinned: boolean
-  source: 'web' | 'whatsapp' | 'slack'
+  source: 'web' | 'whatsapp' | 'slack' | 'github'
   userId: string | null
   userName: string
   createdAt: string

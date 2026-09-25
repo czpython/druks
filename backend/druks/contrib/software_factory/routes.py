@@ -336,12 +336,17 @@ async def request_review(
         gt=0,
         description="The pull request number in that repository.",
     ),
+    note: str = Body(
+        "",
+        embed=True,
+        description="What the reviewer must pay attention to, in the words of whoever asks.",
+    ),
     account: Account = Depends(current_account),
 ) -> str:
     """Start a pull request review."""
     if await ProjectRepo.get_for_repo(repo):
         return await PullRequestReview.dispatch(
-            repo=repo, pr_number=pr_number, requested_by=account.username
+            repo=repo, pr_number=pr_number, account=account, note=note
         )
     raise HTTPException(
         status.HTTP_404_NOT_FOUND,

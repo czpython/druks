@@ -74,26 +74,37 @@ class GitHubEvents(Webhook):
     async def on_issue_comment_created(self) -> Response:
         # GitHub files pull-request comments under issues; only those carry ``pull_request``.
         issue = self.data["issue"]
-        if "pull_request" in issue:
-            await self._publish_comment(issue["number"])
+        await self._publish_comment(issue["number"], is_pull_request="pull_request" in issue)
         return _accepted()
 
     async def on_pull_request_review_comment_created(self) -> Response:
-        await self._publish_comment(self.data["pull_request"]["number"])
+        comment = self.data["comment"]
+        await self._publish_comment(
+            self.data["pull_request"]["number"],
+            is_pull_request=True,
+            review_thread_id=comment.get("in_reply_to_id") or comment["id"],
+        )
         return _accepted()
 
-    async def _publish_comment(self, pr_number: int) -> None:
-        # A non-User sender is an app talking to itself.
+    async def _publish_comment(
+        self, number: int, *, is_pull_request: bool, review_thread_id: int | None = None
+    ) -> None:
+        """Publish a person's comment. An inline comment names the review comment GitHub
+        takes replies under. A non-User sender is an app talking to itself."""
         sender, comment = self.data["sender"], self.data["comment"]
         if sender["type"] == "User":
             await publish(
-                "pr.commented",
+                "issue.commented",
                 repo=_repo_name(self.data),
-                pr_number=pr_number,
+                number=number,
                 payload={
                     "author": sender["login"],
+                    "author_id": sender["id"],
                     "author_can_write": comment["author_association"] in _WRITERS,
                     "body": comment["body"],
+                    "comment_id": comment["id"],
+                    "review_thread_id": review_thread_id,
+                    "is_pull_request": is_pull_request,
                 },
             )
 
