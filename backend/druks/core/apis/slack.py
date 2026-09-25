@@ -6,6 +6,8 @@ from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from druks.redis import get_client
 
+# Slack's app creation page. With new_app=1 and manifest_json, it opens with the app filled in.
+SLACK_CREATE_APP_URL = "https://api.slack.com/apps"
 # The authority of a Slack grant: the workspace that a Slack user id belongs to.
 SLACK_AUTHORITY = "https://slack.com/{team_id}"
 # What the bot does in the workspace. The manifest asks for these.

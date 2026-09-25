@@ -1,13 +1,14 @@
 import json
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from druks.accounts.dependencies import current_session_account
 from druks.api.dependencies import SessionDep
 from druks.core.apis.github import GITHUB
+from druks.core.apis.slack import SLACK_CREATE_APP_URL
 from druks.core.services import Github, Slack
 from druks.core.templates import render_page
 from druks.secrets.datastructures import Audience
@@ -19,9 +20,10 @@ slack_router = APIRouter(prefix="/services/slack", tags=["services"])
 
 
 @slack_router.get("/manifest")
-async def get_slack_manifest() -> dict:
-    """The Slack app to create, for Slack's create-from-manifest page."""
-    return Slack.get_manifest()
+async def create_slack_app() -> RedirectResponse:
+    """Open Slack's app creation with the Slack app's manifest filled in."""
+    query = urlencode({"new_app": 1, "manifest_json": json.dumps(Slack.get_manifest())})
+    return RedirectResponse(f"{SLACK_CREATE_APP_URL}?{query}")
 
 
 @router.get("/manifest", response_class=HTMLResponse)

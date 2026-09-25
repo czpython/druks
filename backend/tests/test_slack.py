@@ -262,6 +262,18 @@ async def test_connect_slack_asks_for_user_scopes_and_keeps_the_token_from_authe
     assert await client.get_access_token(druks_db, connection=grant) == ("xoxp-1", None)
 
 
+def test_create_slack_app_opens_slack_with_the_whole_manifest(tmp_path):
+    settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        response = client.get("/api/core/services/slack/manifest", follow_redirects=False)
+        manifest = Slack.get_manifest()
+
+    location = urlparse(response.headers["location"])
+    query = dict(parse_qsl(location.query))
+    assert (location.netloc, location.path, query["new_app"]) == ("api.slack.com", "/apps", "1")
+    assert json.loads(query["manifest_json"]) == manifest
+
+
 def room_event(user=ANA, text=f"<@{BOT}> read my runs", ts="10.0", **event):
     return message_event(user, text, ts, channel="C1", channel_type="channel", **event)
 
