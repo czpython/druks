@@ -432,3 +432,56 @@ async def test_chat_read_thread_reads_the_callers_own_conversation(
     assert [(message["ts"], message["is_from_user"]) for message in thread.json()] == [
         ("10.0", True)
     ]
+
+
+def shared_file(file_id="F1", name="plan.pdf"):
+    return {
+        "id": file_id,
+        "name": name,
+        "mimetype": "application/pdf",
+        "url_private_download": f"https://files.slack.com/{file_id}/{name}",
+    }
+
+
+async def test_a_file_a_linked_person_sends_is_a_druks_file_on_their_message(
+    card, druks_db, slack, delivery, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+    downloads = []
+
+    async def download(client, url):
+        downloads.append((client.token, url))
+        return b"%PDF"
+
+    monkeypatch.setattr(SlackClient, "download", download)
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    await link_person(druks_db, ana)
+
+    await receive(card, message_event(text="", subtype="file_share", files=[shared_file()]))
+    await receive(
+        card,
+        message_event(
+            text="both of these",
+            ts="2.0",
+            subtype="file_share",
+            files=[shared_file("F2", "a.pdf"), shared_file("F3", "b.pdf")],
+        ),
+    )
+    await receive(card, message_event(text="", ts="3.0"))
+
+    [conversation] = await Conversation.list_for_account(druks_db, ana.id)
+    await druks_db.refresh(conversation, ["messages"])
+    assert [
+        (message.body, message.source_id, message.file.name) for message in conversation.messages
+    ] == [
+        ("plan.pdf", "D1:1.0", "plan.pdf"),
+        ("both of these", "D1:2.0", "a.pdf"),
+        ("b.pdf", "D1:2.0:F3", "b.pdf"),
+    ]
+    assert [url for _, url in downloads] == [
+        "https://files.slack.com/F1/plan.pdf",
+        "https://files.slack.com/F2/a.pdf",
+        "https://files.slack.com/F3/b.pdf",
+    ]
+    assert {token for token, _ in downloads} == {"xoxb-1"}
+    assert delivery.await_count == 2
