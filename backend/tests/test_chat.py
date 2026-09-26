@@ -21,6 +21,7 @@ from druks.files.datastructures import File
 from druks.files.models import FileRecord
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
+from druks.harnesses.opencode import OpenCodeHarness
 from druks.mcp.enums import Toolkit
 from druks.mcp.inbound import get_druks_account_token, get_druks_mcp_server
 from druks.models import Base
@@ -36,6 +37,11 @@ from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy import delete
 
 CODEX_KEY_LOGIN = json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": "${CODEX_API_KEY}"})
+OPENCODE_BOT_AGENT = (
+    "---\nmode: primary\npermission: "
+    '{"edit": "deny", "bash": "deny", "read": "deny", "glob": "deny", "grep": "deny", '
+    '"list": "deny", "webfetch": "deny", "websearch": "deny"}\n---\nBe kind.\n'
+)
 
 
 @pytest.fixture
@@ -525,6 +531,52 @@ async def test_new_sandbox_restores_archive_and_drains_pending_messages(
                 "sessionFiles": ["/home/druks/.codex/sessions/**/rollout-*{sessionId}.jsonl"],
             },
         ),
+        (
+            OpenCodeHarness,
+            AccountKind.OPERATOR,
+            {
+                "meta": {},
+                "env": {
+                    "OPENCODE_CONFIG_CONTENT": json.dumps(
+                        {
+                            "$schema": "https://opencode.ai/config.json",
+                            "instructions": ["/home/druks/work/chat/one/instructions.md"],
+                            "model": "anthropic/claude-sonnet-4-5",
+                            "permission": "allow",
+                        }
+                    ),
+                    "OPENCODE_DB": "/home/druks/work/chat/one/opencode.db",
+                },
+                "files": {"/home/druks/work/chat/one/instructions.md": "Be kind."},
+                "mode": "build",
+                "model": "anthropic/claude-sonnet-4-5",
+                "options": {"model": "model"},
+                "sessionFiles": ["/home/druks/work/chat/one/opencode.db*"],
+            },
+        ),
+        (
+            OpenCodeHarness,
+            AccountKind.BOT,
+            {
+                "meta": {},
+                "env": {
+                    "OPENCODE_CONFIG_CONTENT": json.dumps(
+                        {
+                            "$schema": "https://opencode.ai/config.json",
+                            "model": "anthropic/claude-sonnet-4-5",
+                        }
+                    ),
+                    "OPENCODE_DB": "/home/druks/work/chat/one/opencode.db",
+                },
+                "files": {
+                    "/home/druks/work/chat/one/.opencode/agents/druks.md": OPENCODE_BOT_AGENT
+                },
+                "mode": "druks",
+                "model": "anthropic/claude-sonnet-4-5",
+                "options": {"model": "model"},
+                "sessionFiles": ["/home/druks/work/chat/one/opencode.db*"],
+            },
+        ),
     ],
 )
 def test_the_harness_answers_the_chat_contract_for_an_operator_and_a_bot(
@@ -555,7 +607,7 @@ async def test_a_bot_on_a_harness_with_no_adapter_fails_at_the_first_turn(druks_
         druks_db, Audience.provider("anthropic"), "sk-key", pasted_by=conversation.account
     )
 
-    with pytest.raises(ChatHarnessError, match="Chat runs on claude, codex. The Bot's settings"):
+    with pytest.raises(ChatHarnessError, match="Chat runs on claude, codex, opencode. The Bot"):
         await service.deliver_pending(druks_db, conversation)
 
 
