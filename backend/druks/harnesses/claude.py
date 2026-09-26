@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from druks.accounts.enums import AccountKind
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
@@ -38,16 +39,39 @@ class ClaudeHarness(Harness):
     billing_options = frozenset({"subscription", "api_key"})
     default_model = "anthropic/claude-opus-4-7"
     command = "claude"
-    adapter_command = "/opt/druks-chat/node_modules/.bin/claude-agent-acp"
+    adapter_command = ("/opt/druks-chat/node_modules/.bin/claude-agent-acp",)
+    reply_command = (command, "-p")
     no_ask_mode = "bypassPermissions"
-    session_files = ".claude/projects"
 
     @classmethod
-    def get_acp_meta(cls, model: str) -> dict:
-        """The session options the adapter reads from the ACP _meta. Chat has no asks,
-        and the model goes here because the adapter's model option takes only the
-        models its CLI lists."""
-        return {"claudeCode": {"options": {"disallowedTools": ["AskUserQuestion"], "model": model}}}
+    def get_acp_session(
+        cls, account_type: AccountKind, model: str, prompt: str, home: str, root: str
+    ) -> dict:
+        """Chat has no asks, and the model goes in the _meta because the adapter's model
+        option takes only the models its CLI lists."""
+        model_id = model.partition("/")[2]
+        options: dict[str, object] = {"disallowedTools": ["AskUserQuestion"], "model": model_id}
+        if account_type == AccountKind.OPERATOR:
+            options["systemPrompt"] = {"type": "preset", "preset": "claude_code", "append": prompt}
+        else:
+            options |= {
+                "systemPrompt": prompt,
+                "tools": [],
+                "settingSources": [],
+                "strictMcpConfig": True,
+            }
+        return {
+            "meta": {"claudeCode": {"options": options}},
+            "env": {},
+            "files": {},
+            "mode": cls.no_ask_mode,
+            "model": model_id,
+            "options": {"model": "model", "effort": "effort", "fast": "fast"},
+            "sessionFiles": [
+                f"{home}/.claude/projects/*/{{sessionId}}.jsonl",
+                f"{home}/.claude/projects/*/{{sessionId}}",
+            ],
+        }
 
     # The CLI dies with the raw API error in the result text ("API Error: 529
     # {…overloaded_error…}"), so "api error: 5" covers 529 and every 5xx; 429
@@ -127,7 +151,7 @@ class ClaudeHarness(Harness):
             f"touch {run_dir_q}/.start && "
             f"{claude_cmdline}; "
             "ec=$?; "
-            f"sf=$(find $HOME/{self.session_files} -name '*.jsonl' -type f "
+            f"sf=$(find $HOME/.claude/projects -name '*.jsonl' -type f "
             f"-newer {run_dir_q}/.start 2>/dev/null | head -1); "
             f'if [ -n "$sf" ]; then cp "$sf" {session_q}; fi; '
             "exit $ec"

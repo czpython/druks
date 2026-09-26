@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, ClassVar
 from drukbox_sdk import Secret
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from druks.accounts.enums import AccountKind
 from druks.mcp import models as mcp_models
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox.models import SecretRef
@@ -55,6 +56,10 @@ class Harness(ABC):
     # Claude's slowest measured cold start is under 60 seconds. This margin
     # covers slow MCP loads, token refresh, and prompt assembly.
     first_byte_seconds: ClassVar[int | None] = 90
+    # The argv of the ACP adapter a chat conversation runs on. Empty for a harness without one.
+    adapter_command: ClassVar[tuple[str, ...]] = ()
+    # The argv that answers one prompt and exits.
+    reply_command: ClassVar[tuple[str, ...]]
 
     def __init__(
         self,
@@ -92,6 +97,14 @@ class Harness(ABC):
                 if marker in lowered:
                     raise error(message)
             raise exceptions.HarnessError(message)
+
+    @classmethod
+    def get_acp_session(
+        cls, account_type: AccountKind, model: str, prompt: str, home: str, root: str
+    ) -> dict:
+        """The ACP session of an ``account_type`` conversation under ``root``: what the
+        bridge spawns the adapter with, and the session's file patterns, as absolute paths."""
+        raise exceptions.HarnessError(f"{cls.name} has no ACP adapter.")
 
     @classmethod
     def accepts(cls, subscription: VaultSecret) -> bool:

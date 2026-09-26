@@ -109,8 +109,10 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     return child;
   }
   const start = conversation => ({
-    method: "start", conversationId: conversation, archivePath: "", command: adapter,
-    sessionFiles: ".claude/projects", mode: "bypassPermissions", model: "claude-opus-4-7", meta: { harness: "options" },
+    method: "start", conversationId: conversation, archivePath: "", harness: "claude", command: [adapter],
+    sessionFiles: [path.join(home, ".claude/projects/*/{sessionId}.jsonl"), path.join(home, ".claude/projects/*/{sessionId}")],
+    mode: "bypassPermissions", model: "claude-opus-4-7", meta: { harness: "options" }, env: {}, files: {},
+    options: { model: "model", effort: "effort", fast: "fast" },
     effort: "high", fastMode: true, bearerVariable: "MCP_DRUKS_TOKEN", mcpUrl: "https://hooks.example.com/mcp",
     headers: [],
   });
@@ -123,7 +125,7 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
   assert.deepEqual(headers[1], conversationHeader);
   assert.equal((await request(port, { ...start(id(1)), model: "claude-sonnet-5", effort: "low", fastMode: false })).ok, true);
   const settings = await fs.readFile(path.join(home, "work", "chat", id(1), "config.log"), "utf8");
-  // The session opens on its model through _meta; the model option only switches it.
+  // The session opens on its model at session/new; the model option only switches it.
   assert.deepEqual(settings.trim().split("\n"), ["effort=high", "fast=on", "model=claude-sonnet-5", "effort=low", "fast=off"]);
 
   await request(port, { method: "prompt", conversationId: id(1), messageId: message(1), body: "remember-one" }, true);
@@ -149,13 +151,14 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
   assert.equal((await request(port, { method: "prompt", conversationId: id(1), messageId: message(4), body: "never send" })).status, "cancelled");
   assert.equal((await request(port, { method: "events", conversationId: id(1), after: 0 })).events.some(event => event.messageId === message(4)), false);
 
-  const restoredHome = path.join(temporary, "restored-sandbox");
-  await fs.mkdir(restoredHome);
   const archive = path.join(temporary, "session.tar.gz");
   await fs.copyFile(saved.archivePath, archive);
   process.kill(-first.pid, "SIGKILL");
   await once(first, "exit");
-  const second = await launch(restoredHome);
+  // A new sandbox has the same home path, so the archived paths land where the adapter reads them.
+  await fs.rm(home, { recursive: true, force: true });
+  await fs.mkdir(home);
+  const second = await launch(home);
   assert.equal((await request(port, { ...start(id(1)), archivePath: archive })).ok, true);
   assert.equal((await request(port, { method: "events", conversationId: id(1), after: 0 })).events.length, 0);
   await request(port, { method: "prompt", conversationId: id(1), messageId: message(5), body: "continue" });
@@ -164,6 +167,12 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
   assert.match(events[0].notification.update.content.text, /remember-one/);
   assert.doesNotMatch(events[0].notification.update.content.text, /private-two|replay/);
   assert.equal((await status(id(2))).status, "missing");
+  // An archive from another harness stays unread: the conversation opens a fresh session.
+  assert.equal((await request(port, { ...start(id(3)), archivePath: archive, harness: "other" })).ok, true);
+  await request(port, { method: "prompt", conversationId: id(3), messageId: message(8), body: "fresh" });
+  await until(() => status(id(3)), result => result.status === "replied");
+  const fresh = (await request(port, { method: "events", conversationId: id(3), after: 0 })).events;
+  assert.equal(fresh[0].notification.update.content.text, "fresh");
 
   await request(port, { method: "prompt", conversationId: id(1), messageId: message(6), body: "wait" });
   await request(port, { method: "cancel", conversationId: id(1), messageId: message(5) });
@@ -171,6 +180,6 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
   assert.equal((await status(id(1))).stopReason, "");
   process.kill(-second.pid, "SIGKILL");
   await once(second, "exit");
-  await launch(restoredHome);
+  await launch(home);
   assert.equal((await status(id(1))).status, "interrupted");
 });
