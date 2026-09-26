@@ -110,23 +110,8 @@ class ProjectRepo(StoredSubject):
     # A free-form role for the dashboard, for example "design", "infra", or "app".
     purpose: Mapped[str | None]
     profile: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
-    created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     project: Mapped[Project] = relationship(back_populates="repos", lazy="joined")
-
-    @classmethod
-    async def create(
-        cls,
-        *,
-        project_id: int,
-        full_name: str,
-        purpose: str | None = None,
-    ) -> "ProjectRepo":
-        session = db_session()
-        row = cls(project_id=project_id, full_name=full_name, purpose=purpose)
-        session.add(row)
-        await session.flush()
-        return row
 
     @classmethod
     async def get(cls, repo_id: int) -> "ProjectRepo | None":
@@ -251,8 +236,6 @@ class WorkItem(StoredSubject):
     resolution: Mapped[str | None] = mapped_column(default=None)
     # The time of the GitHub verdict, or of the cancel reaction.
     resolved_at: Mapped[datetime | None] = mapped_column(default=None)
-    created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
-    updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     def get_key(self) -> str:
         return self.ticket_key
@@ -268,30 +251,6 @@ class WorkItem(StoredSubject):
             select(cls).where(cls.resolution.is_(None)).order_by(cls.updated_at.desc()).limit(500)
         )
         return [item.get_summary() for item in await db_session().scalars(stmt)]
-
-    @classmethod
-    async def create(
-        cls,
-        *,
-        project_id: int,
-        source: str = "github",
-        title: str,
-        ticket_key: str,
-        ticket_url: str | None = None,
-        repo: str,
-    ) -> "WorkItem":
-        session = db_session()
-        item = cls(
-            project=await session.get(Project, project_id),
-            source=source,
-            title=title,
-            ticket_key=ticket_key,
-            ticket_url=ticket_url,
-            repo=repo,
-        )
-        session.add(item)
-        await session.flush()
-        return item
 
     @classmethod
     async def get(cls, work_item_id: int) -> "WorkItem | None":
@@ -312,7 +271,6 @@ class WorkItem(StoredSubject):
         self.pr_number = None
         self.resolution = None
         self.resolved_at = None
-        self.updated_at = Base.utc_now()
         await db_session().flush()
 
     async def resolve(self, resolution: Resolution, *, at: datetime) -> None:
@@ -322,7 +280,6 @@ class WorkItem(StoredSubject):
 
         self.resolution = resolution
         self.resolved_at = at
-        self.updated_at = Base.utc_now()
         await db_session().flush()
         if resolution in (Resolution.MERGED, Resolution.CLOSED):
             await self.announce(resolution, repo=self.repo, pr_number=self.pr_number)
@@ -410,7 +367,6 @@ class WorkItem(StoredSubject):
             self.branch = branch
         if project_id is not _KEEP:
             self.project_id = project_id
-        self.updated_at = Base.utc_now()
         await db_session().flush()
 
 

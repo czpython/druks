@@ -3,11 +3,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from druks.db import db_session
+from druks.durable.schemas import SubjectSummary
 from druks.events.models import Event
 from druks.models import snake_name
 
 if TYPE_CHECKING:
-    from druks.durable.schemas import SubjectStatus, SubjectSummary
+    from druks.durable.schemas import SubjectStatus
     from druks.workflows import Workflow
 
 
@@ -21,6 +22,9 @@ class Subject:
     instead."""
 
     subject_type: ClassVar[str]
+    # The header its board and page show it under. Set a ``SubjectSummary``
+    # subclass to add the app's own fields and a descriptive ``title``.
+    summary_class: ClassVar[type[SubjectSummary]] = SubjectSummary
 
     id: str
 
@@ -45,20 +49,16 @@ class Subject:
         await Event.announce(db_session(), self, topic, facts)
 
     @classmethod
-    async def get_for_subject_id(cls, subject_id: str) -> Self | None:
+    async def get_for_id(cls, subject_id: str) -> Self | None:
         """The subject this id names. Ids reach the read side as free text off a URL,
         so override to return None for a shape this subject could never wear."""
         return cls(id=subject_id)
 
-    def get_summary(self) -> "SubjectSummary":
-        """The header its board and page show it under: the id and label. Override it
-        to add the app's own fields and a descriptive ``title``."""
-        from druks.durable.schemas import SubjectSummary
-
-        return SubjectSummary.model_validate(self)
+    def get_summary(self) -> SubjectSummary:
+        return self.summary_class.model_validate(self)
 
     @classmethod
-    async def list_summaries(cls, account_id: str | None) -> "Sequence[SubjectSummary]":
+    async def list_summaries(cls, account_id: str | None) -> Sequence[SubjectSummary]:
         """The subjects on this class's board, newest-movement first, each as its domain
         summary. ``account_id`` is the caller, or None outside a request. A shared
         board ignores it. Returns a covariant ``Sequence`` so an app can return

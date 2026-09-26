@@ -40,3 +40,10 @@ class SessionNotBoundError(DruksError):
             "No database session is bound to this task. "
             "Read inside a @step, a dispatch(), or a request."
         )
+
+
+class SubjectNotFound(DruksError):
+    """An id names no subject."""
+
+    def __init__(self, subject_type: str, subject_id: int | str) -> None:
+        super().__init__(f"No {subject_type} {subject_id}")

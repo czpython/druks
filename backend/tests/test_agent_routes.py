@@ -198,7 +198,7 @@ async def test_software_factory_start_stamps_the_trigger_status_for_known_and_un
     project = await Project.create(name="Acme")
     await ProjectRepo.create(project_id=project.id, full_name="acme/app")
     await WorkItem.create(
-        project_id=project.id,
+        project=project,
         source="linear",
         title="Build the agent route",
         ticket_key="ENG-831",

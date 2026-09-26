@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.db import db_session
+from druks.exceptions import SubjectNotFound
 from druks.models import StoredSubject
 from druks.ui.exceptions import PageContractError, PageReadError, PageRouteError
 from druks.user_settings.models import SettingsOverride
@@ -142,8 +143,14 @@ class App:
         cls.table_prefix = f"{name}_"
         if "package" not in cls.__dict__:
             cls.package = cls.__module__.rpartition(".")[0]
+        if cls.package:
+            # Claimed here so the package's models and workflows resolve their app
+            # as they define. Cycle: the loader is built on App.
+            from .loader import register_workflow_package
+
+            register_workflow_package(cls.package, name)
         declared = cls.__dict__.get("Settings")
-        if declared is not None:
+        if declared:
             if not isinstance(declared, type) or not issubclass(declared, AppSettings):
                 raise SettingsDeclarationError(f"{cls.__name__}.Settings must subclass AppSettings")
             validate_settings_declaration(declared)
@@ -207,12 +214,13 @@ class App:
 
     @classmethod
     def subjects(cls) -> "list[type[Subject] | type[StoredSubject]]":
-        """The subjects this app's workflows declare, ordered by subject type.
-        Each must implement ``list_summaries()``. The check compares method identity
+        """The subjects this app's workflows declare, ordered by subject type. An
+        identity-only ``Subject`` must implement ``list_summaries()``; a
+        ``StoredSubject`` has a board by default. The check compares method identity
         and does not call the method."""
         from druks.durable.datastructures import Subject
 
-        stubs = {Subject.list_summaries.__func__, StoredSubject.list_summaries.__func__}
+        stub = Subject.list_summaries.__func__
         declared = {workflow.subject for workflow in cls.workflows() if workflow.subject}
         for subject_class in declared:
             if subject_class.subject_type in RESERVED_SEGMENTS:
@@ -220,7 +228,7 @@ class App:
                     f"{subject_class.__name__} is a {subject_class.subject_type!r} subject; "
                     "that segment serves every app's platform reads. Name it for what it is"
                 )
-            if subject_class.list_summaries.__func__ in stubs:
+            if subject_class.list_summaries.__func__ is stub:
                 raise AppSubjectContractError(
                     f"app {cls.name!r} declares subject {subject_class.__name__} "
                     f"without list_summaries(); the board calls it. Implement "
@@ -427,12 +435,14 @@ class App:
     def _page_endpoint(cls, declaration: "PageRoute", operations: "dict[str, Operation]"):
         """``wraps`` keeps the page function's signature, so FastAPI still
         validates every route parameter."""
-        from druks.ui import Page
+        from druks.ui import EmptyState, Page
 
         @wraps(declaration.function)
         async def read_page(**parameters):
             try:
                 page = await declaration.function(**parameters)
+            except SubjectNotFound as error:
+                return Page(str(error), blocks=[EmptyState(str(error))])
             except Exception as error:
                 raise PageReadError(
                     cls.name, declaration.name, f"its own code raised {type(error).__name__}"
@@ -618,7 +628,7 @@ class App:
         async def subject_response(
             session: AsyncSession, subject_id: str
         ) -> SubjectResponse | None:
-            if subject := await subject_class.get_for_subject_id(subject_id):
+            if subject := await subject_class.get_for_id(subject_id):
                 return await reads.get_subject_response(
                     session, subject_type, subject_id, summary=subject.get_summary()
                 )

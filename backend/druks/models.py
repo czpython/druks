@@ -1,15 +1,18 @@
+import enum
 import re
 from collections.abc import Sequence
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
-from sqlalchemy import DateTime, Integer, cast, select
+from sqlalchemy import DateTime, Enum, Integer, cast, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession, async_object_session
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 from druks.core.utils.time import ensure_utc
-from druks.exceptions import DetachedRowError
+from druks.exceptions import DetachedRowError, SubjectNotFound
 
 if TYPE_CHECKING:
     from druks.durable.schemas import SubjectStatus, SubjectSummary
@@ -32,10 +35,30 @@ class _UtcDateTime(TypeDecorator):
 
 
 class Base(AsyncAttrs, DeclarativeBase):
-    # Every ``Mapped[datetime]`` column stores tz-aware UTC — the decorator
-    # guarantees aware values on read (writes are unaffected). Mapping it here
-    # means models declare ``Mapped[datetime]`` with no per-column type.
-    type_annotation_map = {datetime: _UtcDateTime()}
+    # A model declares the Python type and no column type: datetimes are tz-aware
+    # UTC, a StrEnum is text under a CHECK named after the enum, list and dict are JSONB.
+    type_annotation_map = {
+        datetime: _UtcDateTime(),
+        enum.StrEnum: Enum(
+            enum.StrEnum,
+            native_enum=False,
+            create_constraint=True,
+            length=64,
+            values_callable=lambda members: [member.value for member in members],
+        ),
+        list: JSONB,
+        dict: JSONB,
+    }
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        # A table is named for its app and its class unless the class names it.
+        if "__tablename__" not in cls.__dict__ and not cls.__dict__.get("__abstract__"):
+            # Cycle: the loader is built on this module's Base.
+            from druks.apps.loader import resolve_workflow_app
+
+            app = resolve_workflow_app(cls.__module__)
+            cls.__tablename__ = f"{app}_{snake_name(cls.__name__)}"
+        super().__init_subclass__(**kwargs)
 
     @property
     def session(self) -> AsyncSession:
@@ -57,11 +80,21 @@ class StoredSubject(Base):
     __abstract__ = True
 
     subject_type: ClassVar[str]
+    # The header its board and page show it under. Set a ``SubjectSummary``
+    # subclass to add the app's own fields and a descriptive ``title``.
+    summary_class: ClassVar["type[SubjectSummary]"]
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         cls.subject_type = snake_name(cls.__name__)
+        if "summary_class" not in cls.__dict__:
+            # Cycle: the durable read side is built on this module's Base.
+            from druks.durable.schemas import SubjectSummary
+
+            cls.summary_class = SubjectSummary
         super().__init_subclass__(**kwargs)
 
     @property
@@ -81,6 +114,24 @@ class StoredSubject(Base):
     def key(self) -> str:
         return self.get_key()
 
+    @classmethod
+    async def create(cls, **fields: object) -> Self:
+        """A saved row, flushed so it carries its id."""
+        # Cycle: the session seam is built on this module's Base.
+        from druks.db import db_session
+
+        row = cls(**fields)
+        db_session().add(row)
+        await db_session().flush()
+        return row
+
+    async def save(self) -> None:
+        await self.session.flush()
+
+    async def delete(self) -> None:
+        await self.session.delete(self)
+        await self.session.flush()
+
     async def announce(self, topic: str, **facts: Any) -> None:
         """Record and deliver a domain fact in the current transaction."""
         # The event log is built on this module's Base.
@@ -90,36 +141,36 @@ class StoredSubject(Base):
         await Event.announce(db_session(), self, topic, facts)
 
     @classmethod
-    async def get_for_subject_id(cls, subject_id: str) -> Self | None:
+    async def get_for_id(
+        cls, subject_id: int | str, *, raise_on_missing: bool = False
+    ) -> Self | None:
         """The row this subject id names. A subject id is free text and reaches the
         read-side straight off a URL, so an id this table could never hold is a miss
-        rather than an error."""
+        rather than an error. ``raise_on_missing`` makes a miss ``SubjectNotFound``:
+        the API answers it with 404 and a page with an empty state."""
         from druks.db import db_session
 
-        try:
-            key = int(subject_id)
-        except ValueError:
-            return
-        return await db_session().get(cls, key)
+        row = None
+        with suppress(ValueError):
+            row = await db_session().get(cls, int(subject_id))
+        if row or not raise_on_missing:
+            return row
+        raise SubjectNotFound(cls.subject_type, subject_id)
 
     def get_summary(self) -> "SubjectSummary":
-        """The header its board and page show it under: the id and label. Override it
-        to add the app's own fields and a descriptive ``title``."""
-        # Cycle: the durable read side is built on this module's Base.
-        from druks.durable.schemas import SubjectSummary
-
-        return SubjectSummary.model_validate(self)
+        return self.summary_class.model_validate(self)
 
     @classmethod
     async def list_summaries(cls, account_id: str | None) -> "Sequence[SubjectSummary]":
-        """The rows on this class's board, newest-movement first, each as its domain
-        summary. ``account_id`` is the caller, or None outside a request. A shared
-        board ignores it. Returns a covariant ``Sequence`` so an app can return
-        a ``list`` of its own ``SubjectSummary`` subclass. Required once a workflow
-        declares it."""
-        raise NotImplementedError(
-            f"a workflow declares {cls.__name__}, so it needs a list_summaries()"
-        )
+        """The rows on this class's board, newest movement first, each as its domain
+        summary. ``account_id`` is the caller, or None outside a request; this shared
+        board ignores it. Override to scope the board by caller or to select
+        differently."""
+        from druks.db import db_session
+
+        # The newest hundred cover a board; a bigger one selects for itself.
+        statement = select(cls).order_by(cls.updated_at.desc(), cls.id.desc()).limit(100)
+        return [row.get_summary() for row in await db_session().scalars(statement)]
 
     async def get_status(self, *, workflow: "type[Workflow] | None" = None) -> "SubjectStatus":
         from druks.db import db_session

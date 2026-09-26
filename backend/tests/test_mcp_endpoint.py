@@ -321,7 +321,7 @@ async def test_a_bot_key_calls_its_tool_for_the_person_in_its_conversation(
         toolkit = {tool.name for tool in await client.list_tools()}
 
     assert names == {"field_notes_jot_note"}
-    assert (await Note.get(jotted.structured_content["id"])).body == "Ana: The gate sticks."
+    assert (await Note.get_for_id(jotted.structured_content["id"])).body == "Ana: The gate sticks."
     assert "field_notes_jot_note" not in toolkit
 
 

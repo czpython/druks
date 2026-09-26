@@ -89,7 +89,7 @@ async def test_same_topic_keeps_its_owner_in_history(druks_db, druks_client, own
     note = await Note.create(body="Combine these observations")
     project = await Project.create(name="Activity")
     item = await WorkItem.create(
-        project_id=project.id, title="Combine notes", ticket_key="ACT-1", repo="acme/notes"
+        project=project, title="Combine notes", ticket_key="ACT-1", repo="acme/notes"
     )
     await note.announce("merged")
     await item.announce("merged")

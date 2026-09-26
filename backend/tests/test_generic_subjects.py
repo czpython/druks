@@ -41,7 +41,7 @@ class Ticket(Subject):
     separators a URL path is cut on."""
 
     @classmethod
-    async def get_for_subject_id(cls, subject_id: str) -> "Ticket | None":
+    async def get_for_id(cls, subject_id: str) -> "Ticket | None":
         if "#" in subject_id:
             return cls(id=subject_id)
         return

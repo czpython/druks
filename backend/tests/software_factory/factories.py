@@ -12,7 +12,7 @@ async def make_test_work_item(*, repo: str, **kwargs):
         project = await Project.create(name=repo)
         await ProjectRepo.create(project_id=project.id, full_name=repo)
     kwargs.setdefault("ticket_key", f"TEST-{uuid7()}")
-    return await WorkItem.create(project_id=project.id, repo=repo, **kwargs)
+    return await WorkItem.create(project=project, repo=repo, **kwargs)
 
 
 async def seed_build_run(

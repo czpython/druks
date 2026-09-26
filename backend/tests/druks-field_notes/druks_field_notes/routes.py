@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from druks.agents import BotUser
-from fastapi import APIRouter, Body, HTTPException, status
+from fastapi import APIRouter, Body, status
 
 from druks_field_notes.models import Note
 from druks_field_notes.schemas import NoteSummary
@@ -32,8 +32,6 @@ async def jot_note(body: Annotated[str, Body(embed=True)], user: BotUser) -> dic
 
 @router.post("/{note_id}/gist", operation_id="clear_gist")
 async def clear_gist(note_id: int) -> dict[str, str]:
-    note = await Note.get(note_id)
-    if not note:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No note {note_id}.")
+    note = await Note.get_for_id(note_id, raise_on_missing=True)
     await note.save_gist("")
     return {"result": "cleared"}

@@ -45,11 +45,11 @@ def test_a_pull_requests_identity_is_its_handle():
 
 @pytest.mark.parametrize("subject_id", ["acme/app", "acme/app#", "acme/app#0", "app#7", "#7"])
 async def test_an_id_that_names_no_pull_request_is_a_miss(subject_id):
-    assert await PullRequest.get_for_subject_id(subject_id) is None
+    assert await PullRequest.get_for_id(subject_id) is None
 
 
 async def test_a_pull_request_heads_its_own_page():
-    summary = (await PullRequest.get_for_subject_id("acme/app#7")).get_summary()
+    summary = (await PullRequest.get_for_id("acme/app#7")).get_summary()
 
     assert summary.repo == "acme/app"
     assert summary.pr_number == 7
