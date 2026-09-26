@@ -27,6 +27,8 @@ export interface Message {
   /** Druks wrote this message for the agent. The person on WhatsApp never sees it. */
   isInternal: boolean
   file: FileSummary | null
+  /** What the person said in the message's voice note. */
+  transcript: string
 }
 
 export interface Conversation extends ConversationSummary {
