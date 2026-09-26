@@ -15,6 +15,8 @@ Chat runs on Claude, Codex, or OpenCode. Its harness, model, billing, and
 effort come from Chat's row in **Chat → Channels → Bots**. A field that you
 leave unset uses the
 [installation settings](configuration.md#personal-and-installation-settings).
+OpenCode ignores the effort: its effort values are model variants, and Druks's
+levels are not among them.
 
 ## Start a conversation
 
