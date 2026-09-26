@@ -486,9 +486,9 @@ async def test_a_file_a_linked_person_sends_is_a_druks_file_on_their_message(
     assert [
         (message.body, message.source_id, message.file.name) for message in conversation.messages
     ] == [
-        ("plan.pdf", "D1:1.0", "plan.pdf"),
+        ("", "D1:1.0", "plan.pdf"),
         ("both of these", "D1:2.0", "a.pdf"),
-        ("b.pdf", "D1:2.0:F3", "b.pdf"),
+        ("", "D1:2.0:F3", "b.pdf"),
     ]
     assert [url for _, url in downloads] == [
         "https://files.slack.com/F1/plan.pdf",
