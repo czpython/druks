@@ -325,7 +325,11 @@ class GitHubClient:
         owner, name = repo.split("/", 1)
         github = await self._for_repo(repo)
         comments = github.rest.paginate(
-            github.rest.issues.async_list_comments, owner, name, issue_number, per_page=100
+            github.rest.issues.async_list_comments,
+            owner=owner,
+            repo=name,
+            issue_number=issue_number,
+            per_page=100,
         )
         return [comment.model_dump() async for comment in comments]
 
@@ -335,7 +339,11 @@ class GitHubClient:
         owner, name = repo.split("/", 1)
         github = await self._for_repo(repo)
         comments = github.rest.paginate(
-            github.rest.pulls.async_list_review_comments, owner, name, pr_number, per_page=100
+            github.rest.pulls.async_list_review_comments,
+            owner=owner,
+            repo=name,
+            pull_number=pr_number,
+            per_page=100,
         )
         return [comment.model_dump() async for comment in comments]
 
