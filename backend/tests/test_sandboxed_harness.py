@@ -732,7 +732,7 @@ async def test_codex_subscription_token_stays_on_the_server(
     assert not start.kwargs["extra_env"]
     bundle = start.kwargs["credentials_bundle"]
     assert not any(type(entry) is HomeFile for entry in bundle.home)
-    assert "$CODEX_SUBSCRIPTION_TOKEN" in " ".join(start.kwargs["cmd"])
+    assert "${CODEX_SUBSCRIPTION_TOKEN}" in " ".join(start.kwargs["cmd"])
     for secret in (tokens["access_token"], tokens["refresh_token"], tokens["id_token"]):
         assert secret not in " ".join(start.kwargs["cmd"])
         assert secret not in start.kwargs["stdin_data"].decode()

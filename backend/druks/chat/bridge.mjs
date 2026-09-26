@@ -117,7 +117,12 @@ class Conversation {
     }
     for (const [filename, content] of Object.entries(request.files)) {
       fs.mkdirSync(path.dirname(filename), { recursive: true });
-      fs.writeFileSync(filename, content, { mode: 0o600 });
+      // The box holds each secret as a placeholder in its environment, so a file names the variable.
+      const filled = content.replace(/\$\{(\w+)\}/g, (_, name) => {
+        if (!(name in process.env)) throw new Error(`The sandbox environment lacks ${name}.`);
+        return process.env[name];
+      });
+      fs.writeFileSync(filename, filled, { mode: 0o600 });
     }
     const [command, ...args] = request.command;
     const child = spawn(command, args, { cwd: this.root, env: { ...process.env, ...request.env }, stdio: ["pipe", "pipe", "pipe"] });

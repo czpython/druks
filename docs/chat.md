@@ -11,7 +11,7 @@ gate, or park. Chat does not add entries to Activity.
 Only the creator can read a conversation or receive its live events. Operators
 do not see the chats of an app's WhatsApp numbers: the people who hold the
 number's phone read them there.
-Chat uses Claude in this release. Its harness, model, billing, and effort come
+Chat runs on Claude or Codex. Its harness, model, billing, and effort come
 from Chat's row in **Chat → Channels → Bots**. A field that you leave unset
 uses the
 [installation settings](configuration.md#personal-and-installation-settings).
@@ -24,7 +24,7 @@ uses the
 4. Select **Send**, or press Enter.
 
 The first message creates the conversation. It shows as **New conversation**
-until the agent's first reply. Then Claude names it in a short separate call.
+until the agent's first reply. Then the harness names it in a short separate call.
 New lines use Shift + Enter.
 
 The starter prompts fill the message field. They do not send a message.
@@ -101,8 +101,9 @@ tool list lists and calls only those tools. The agents of a WhatsApp number have
 such keys: see [WhatsApp](#whatsapp).
 
 The agent can change Druks through those tools. Chat has no permission dialog
-or proposal mode. The adapter runs in bypass mode and cannot call
-`AskUserQuestion`.
+or proposal mode. Claude runs in bypass mode and cannot call `AskUserQuestion`.
+Codex runs in full-access mode for an operator. For a Bot it runs in read-only
+mode without shell, web, or image tools.
 
 The sandbox receives credential placeholders. The Drukbox proxy exchanges
 them for real credentials. See [public URLs and access control](configuration.md#public-urls-and-access-control)
@@ -138,7 +139,8 @@ The bridge numbers the current turn's events and writes them to disk. Druks
 reads the events after its last position and streams them only to the owner's
 open pages.
 After a completed turn, Druks saves the adapter's session files as a Druks
-file. The next saved archive replaces the previous archive.
+file. The next saved archive replaces the previous archive. A conversation that
+moves to another harness starts a fresh agent session and keeps its messages.
 
 ### Druks restarts
 

@@ -267,7 +267,7 @@ async def test_the_codex_wrapper_writes_its_login_around_the_placeholder(druks_d
     # The file rides in a double-quoted shell word, so the box expands the variable.
     [auth] = [json.loads(word) for word in shlex.split(wrapper) if word.startswith('{"OPENAI')]
     assert auth["OPENAI_API_KEY"] is None
-    assert auth["tokens"]["access_token"] == "$CODEX_SUBSCRIPTION_TOKEN"
+    assert auth["tokens"]["access_token"] == "${CODEX_SUBSCRIPTION_TOKEN}"
     assert auth["tokens"]["refresh_token"] == "druks-placeholder"
     assert auth["tokens"]["account_id"] == "acc-1"
     assert auth["last_refresh"].endswith("Z")

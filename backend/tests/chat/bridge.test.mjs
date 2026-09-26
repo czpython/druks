@@ -120,9 +120,12 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
   const first = await launch(home);
   assert.equal((await request(port, start(id(1)))).ok, true);
   const conversationHeader = { name: "X-Druks-Conversation", value: id(2) };
-  assert.equal((await request(port, { ...start(id(2)), headers: [conversationHeader] })).ok, true);
+  const login = path.join(home, ".fake/login.json");
+  assert.equal((await request(port, { ...start(id(2)), headers: [conversationHeader], files: { [login]: '{"token": "${MCP_DRUKS_TOKEN}"}' } })).ok, true);
   const headers = JSON.parse(await fs.readFile(path.join(home, "work", "chat", id(2), "setup.json"), "utf8"));
   assert.deepEqual(headers[1], conversationHeader);
+  // A file names a placeholder variable, and the bridge fills it from the sandbox environment.
+  assert.equal(await fs.readFile(login, "utf8"), '{"token": "placeholder"}');
   assert.equal((await request(port, { ...start(id(1)), model: "claude-sonnet-5", effort: "low", fastMode: false })).ok, true);
   const settings = await fs.readFile(path.join(home, "work", "chat", id(1), "config.log"), "utf8");
   // The session opens on its model at session/new; the model option only switches it.
