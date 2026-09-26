@@ -17,8 +17,9 @@ from druks.durable.engine import step_session
 from druks.durable.models import Run
 from druks.files.datastructures import File
 from druks.files.storage import get_file_storage
-from druks.harnesses.claude import ClaudeHarness
+from druks.harnesses.base import Harness
 from druks.harnesses.config import AgentConfig, get_config
+from druks.harnesses.registry import get_harness, get_harnesses
 from druks.locks import lock
 from druks.mcp.enums import AllowedTools, Toolkit
 from druks.mcp.helpers import get_bearer_token_env_var
@@ -31,7 +32,7 @@ from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.exceptions import HostGone
 from druks.sandbox.host import Host
-from druks.sandbox.layout import get_work_root
+from druks.sandbox.layout import get_remote_home, get_work_root
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
 from druks.workspaces import Workspace
@@ -70,7 +71,7 @@ async def get_agent(
 ) -> tuple[AgentConfig, str, AllowedTools]:
     """How the conversation's agent runs: its settings, its system prompt, and the
     tools its key allows."""
-    kind = conversation.account.kind
+    account_type = conversation.account.kind
     # A web conversation and an operator's own connection belong to Chat.
     app = "chat"
     if conversation.connection:
@@ -78,9 +79,9 @@ async def get_agent(
     bot = get_app(app).bot
     config = await get_config(session, bot.id, conversation.account_id)
     template, tools = bot.prompt, Toolkit.ALL
-    if kind == AccountKind.BOT:
+    if account_type == AccountKind.BOT:
         tools = tuple(get_tool_name(name, [bot.app], {bot.app}) for name in bot.user_tools)
-    if kind == AccountKind.BOT_ADMIN:
+    if account_type == AccountKind.BOT_ADMIN:
         template = ADMIN_PROMPT
         admin_tools = (get_tool_name(name, [bot.app], {bot.app}) for name in bot.admin_tools)
         tools = (*admin_tools, *ADMIN_TOOLS)
@@ -188,8 +189,14 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                     return
                 await reset_live_stream(conversation.id)
                 config, prompt, tools = await get_agent(session, conversation)
-                if config.harness_class is not ClaudeHarness:
-                    raise ChatHarnessError("Chat supports the Claude harness only.")
+                if not config.harness_class.adapter_command:
+                    adapters = ", ".join(
+                        harness.name for harness in get_harnesses() if harness.adapter_command
+                    )
+                    raise ChatHarnessError(
+                        f"Chat runs on {adapters}. The Bot's settings select "
+                        f"{config.harness_class.name}. Set its harness to one of them."
+                    )
                 host, identity = await get_sandbox(session, conversation.account_id, config, tools)
                 try:
                     bridge = Bridge(host)
@@ -231,9 +238,11 @@ async def send_turn(
     status = await bridge.request("status", conversationId=conversation.id)
     if status["status"] == "running":
         raise ChatBridgeError("The bridge has a turn that Druks did not expect.")
+    home = get_remote_home(host.ssh_username)
+    root = f"{get_work_root(host.ssh_username)}/chat/{conversation.id}"
     archive_path = ""
     if not status["sessionId"] and conversation.session_file:
-        archive_path = f"{get_work_root(host.ssh_username)}/chat/{conversation.id}/restore.tar.gz"
+        archive_path = f"{root}/restore.tar.gz"
         await host.upload_file(
             local=get_file_storage().path(conversation.session_file.id),
             remote=archive_path,
@@ -242,38 +251,20 @@ async def send_turn(
     headers = []
     if conversation.connection:
         headers = [{"name": CONVERSATION_HEADER, "value": conversation.id}]
-    meta = config.harness_class.get_acp_meta(config.model_id)
-    options = meta["claudeCode"]["options"]
-    timeout = 0
-    if conversation.account.kind == AccountKind.OPERATOR:
-        options = {
-            **options,
-            "systemPrompt": {"type": "preset", "preset": "claude_code", "append": prompt},
-        }
-    else:
-        options = {
-            **options,
-            "systemPrompt": prompt,
-            "tools": [],
-            "settingSources": [],
-            "strictMcpConfig": True,
-        }
-        timeout = config.timeout
-    meta = {**meta, "claudeCode": {**meta["claudeCode"], "options": options}}
+    account_type = conversation.account.kind
+    timeout = 0 if account_type == AccountKind.OPERATOR else config.timeout
     await bridge.request(
         "start",
         conversationId=conversation.id,
         archivePath=archive_path,
+        harness=config.harness_class.name,
         command=config.harness_class.adapter_command,
-        mode=config.harness_class.no_ask_mode,
-        sessionFiles=config.harness_class.session_files,
-        meta=meta,
-        model=config.model_id,
         effort=config.effort,
         fastMode=config.fast_mode,
         mcpUrl=server.url,
         bearerVariable=get_bearer_token_env_var(server.name),
         headers=headers,
+        **config.harness_class.get_acp_session(account_type, config.model, prompt, home, root),
     )
     expires_at = Base.utc_now() + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
     await sandbox_client.set_expiry(host_id=host.id, expires_at=expires_at)
@@ -360,7 +351,8 @@ async def finish_turn(
         if state == MessageState.REPLIED and body and not await conversation.is_held(session):
             await channels.get(conversation.source).send_reply(session, conversation, reply)
     elif not conversation.title:
-        await name_conversation(session, conversation, bridge.host, message, body)
+        harness = get_harness(status["harness"])
+        await name_conversation(session, conversation, bridge.host, message, body, harness)
 
 
 async def report_result(session: AsyncSession, run: Run, *, result) -> str | None:
@@ -385,16 +377,21 @@ async def report_outcome(session: AsyncSession, run: Run, body: str) -> str:
 
 
 async def name_conversation(
-    session: AsyncSession, conversation: Conversation, host: Host, message: Message, reply: str
+    session: AsyncSession,
+    conversation: Conversation,
+    host: Host,
+    message: Message,
+    reply: str,
+    harness: type[Harness],
 ) -> None:
-    """Ask Claude for a short name. A failed call leaves the conversation unnamed, and
-    the next reply asks again: a name is never worth failing a delivery."""
+    """Ask the harness for a short name. A failed call leaves the conversation unnamed,
+    and the next reply asks again: a name is never worth failing a delivery."""
     prompt = (
         "Name this conversation in at most six words. Reply with the name only.\n\n"
         f"Message: {message.body[:2000]}\n\nReply: {reply[:2000]}"
     )
     with suppress(asyncssh.Error, OSError):
-        result = await host.exec([ClaudeHarness.command, "-p", prompt], timeout=30)
+        result = await host.exec([*harness.reply_command, prompt], timeout=30)
         if result.ok and result.stdout.strip():
             conversation.title = result.stdout.strip()[:80]
             await session.commit()

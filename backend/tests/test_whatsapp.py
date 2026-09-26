@@ -341,7 +341,7 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
         await receive(connection, message_event(ANA, body, key=key))
     [conversation] = await Conversation.list_for_connection(druks_db, connection.id)
     config = SimpleNamespace(
-        harness_class=ClaudeHarness, model_id="m", effort="", fast_mode=False, timeout=60
+        harness_class=ClaudeHarness, model="anthropic/m", effort="", fast_mode=False, timeout=60
     )
     tools = ("helpdesk_get_ticket",)
     monkeypatch.setattr(service, "get_agent", AsyncMock(return_value=(config, "Be kind.", tools)))
@@ -385,7 +385,6 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
     assert prompt["timeout"] == 60
     [start] = [values for method, values in requests if method == "start"]
     assert start["headers"] == [{"name": CONVERSATION_HEADER, "value": conversation.id}]
-    assert start["meta"]["claudeCode"]["options"]["tools"] == []
     assert start["meta"]["claudeCode"]["options"]["systemPrompt"] == "Be kind."
     await druks_db.refresh(conversation, ["messages"])
     *asked, reply = conversation.messages
@@ -700,7 +699,7 @@ async def test_operator_turns_use_the_apps_prompt_and_settings_without_a_timeout
         )
         await druks_db.refresh(conversation, ["account"])
     config = SimpleNamespace(
-        harness_class=ClaudeHarness, model_id="m", effort="low", fast_mode=False, timeout=30
+        harness_class=ClaudeHarness, model="anthropic/m", effort="low", fast_mode=False, timeout=30
     )
     get_config = AsyncMock(return_value=config)
     render_prompt = AsyncMock(return_value="Operator prompt")
@@ -713,7 +712,7 @@ async def test_operator_turns_use_the_apps_prompt_and_settings_without_a_timeout
     monkeypatch.setattr(service, "sandbox_client", SimpleNamespace(set_expiry=AsyncMock()))
     request = AsyncMock(return_value={"status": "idle", "sessionId": "one"})
     monkeypatch.setattr(Bridge, "request", request)
-    host = SimpleNamespace(id="operator-sandbox")
+    host = SimpleNamespace(id="operator-sandbox", ssh_username="druks")
     message = await conversation.get_unanswered_message(druks_db)
 
     resolved_config, prompt, tools = await service.get_agent(druks_db, conversation)

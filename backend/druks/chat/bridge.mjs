@@ -23,7 +23,7 @@ function conversationRoot(id) {
 function readState(directory) {
   const filename = path.join(directory, "state.json");
   if (fs.existsSync(filename)) return JSON.parse(fs.readFileSync(filename, "utf8"));
-  return { status: "missing", sequence: 0, messageId: "", sessionId: "", epoch: randomUUID(), archivePath: "" };
+  return { status: "missing", sequence: 0, messageId: "", sessionId: "", harness: "", epoch: randomUUID(), archivePath: "" };
 }
 
 function readEvents(filename) {
@@ -71,20 +71,20 @@ class Conversation {
   async configure(connection, request, configOptions) {
     const sessionId = this.state.sessionId;
     await connection.setSessionMode({ sessionId, modeId: request.mode });
-    // The session opened on its model through the adapter's _meta. The model option
-    // takes only the models the CLI lists, so it switches a live session and no more.
+    // The session opened on its model through the harness's session setup. The model
+    // option takes only the models the CLI lists, so it switches a live session and no more.
     if (request.model !== this.state.model) {
-      ({ configOptions } = await connection.setSessionConfigOption({ sessionId, configId: "model", value: request.model }));
+      ({ configOptions } = await connection.setSessionConfigOption({ sessionId, configId: request.options.model, value: request.model }));
       this.state.model = request.model;
     }
     this.configOptions = configOptions;
     // The adapter offers effort and fast mode only for models that support them.
     const offered = new Set(configOptions.map(option => option.id));
-    if (request.effort && offered.has("effort")) {
-      await connection.setSessionConfigOption({ sessionId, configId: "effort", value: request.effort });
+    if (request.effort && offered.has(request.options.effort)) {
+      await connection.setSessionConfigOption({ sessionId, configId: request.options.effort, value: request.effort });
     }
-    if (offered.has("fast")) {
-      await connection.setSessionConfigOption({ sessionId, configId: "fast", value: request.fastMode ? "on" : "off" });
+    if (offered.has(request.options.fast)) {
+      await connection.setSessionConfigOption({ sessionId, configId: request.options.fast, value: request.fastMode ? "on" : "off" });
     }
   }
 
@@ -104,18 +104,23 @@ class Conversation {
   }
 
   async open(request) {
-    const projects = path.join(home, request.sessionFiles);
-    const project = path.join(projects, this.root.replace(/[^a-zA-Z0-9]/g, "-"));
     if (!this.state.sessionId && request.archivePath) {
       const restored = path.join(this.root, "restored");
       fs.mkdirSync(restored, { recursive: true });
       await execute("tar", ["-xzf", request.archivePath, "-C", restored]);
       const saved = JSON.parse(fs.readFileSync(path.join(restored, "session.json"), "utf8"));
-      this.state.sessionId = saved.sessionId;
-      fs.mkdirSync(project, { recursive: true });
-      fs.cpSync(path.join(restored, "files"), project, { recursive: true });
+      // A conversation that moved to another harness starts a fresh session; Postgres keeps its messages.
+      if (saved.harness === request.harness) {
+        this.state.sessionId = saved.sessionId;
+        fs.cpSync(path.join(restored, "files"), home, { recursive: true });
+      }
     }
-    const child = spawn(request.command, [], { cwd: this.root, stdio: ["pipe", "pipe", "pipe"] });
+    for (const [filename, content] of Object.entries(request.files)) {
+      fs.mkdirSync(path.dirname(filename), { recursive: true });
+      fs.writeFileSync(filename, content, { mode: 0o600 });
+    }
+    const [command, ...args] = request.command;
+    const child = spawn(command, args, { cwd: this.root, env: { ...process.env, ...request.env }, stdio: ["pipe", "pipe", "pipe"] });
     child.stderr.pipe(fs.createWriteStream(path.join(this.root, "adapter.log"), { flags: "a", mode: 0o600 }));
     const connection = new ClientSideConnection(() => ({
       sessionUpdate: async notification => {
@@ -153,10 +158,11 @@ class Conversation {
         ? await connection.loadSession({ ...setup, sessionId: this.state.sessionId })
         : await connection.newSession(setup);
       this.state.sessionId ||= session.sessionId;
+      this.state.harness = request.harness;
       this.state.model = request.model;
       await this.configure(connection, request, session.configOptions ?? []);
       this.connection = connection;
-      this.projects = projects;
+      this.sessionFiles = request.sessionFiles;
       this.state.status = "idle";
       this.save();
     } catch (error) {
@@ -170,18 +176,11 @@ class Conversation {
     const files = path.join(directory, "files");
     fs.rmSync(directory, { recursive: true, force: true });
     fs.mkdirSync(files, { recursive: true });
-    let found = false;
-    for (const project of fs.readdirSync(this.projects)) {
-      const transcript = path.join(this.projects, project, this.state.sessionId + ".jsonl");
-      if (fs.existsSync(transcript)) {
-        fs.copyFileSync(transcript, path.join(files, this.state.sessionId + ".jsonl"));
-        const subagents = path.join(this.projects, project, this.state.sessionId);
-        if (fs.existsSync(subagents)) fs.cpSync(subagents, path.join(files, this.state.sessionId), { recursive: true });
-        found = true;
-      }
-    }
-    if (!found) throw new Error("The Claude session transcript is missing.");
-    fs.writeFileSync(path.join(directory, "session.json"), JSON.stringify({ sessionId: this.state.sessionId }));
+    const patterns = this.sessionFiles.map(pattern => pattern.replaceAll("{sessionId}", this.state.sessionId));
+    const matched = fs.globSync(patterns);
+    if (matched.length === 0) throw new Error("The session files are missing.");
+    for (const file of matched) fs.cpSync(file, path.join(files, path.relative(home, file)), { recursive: true });
+    fs.writeFileSync(path.join(directory, "session.json"), JSON.stringify({ sessionId: this.state.sessionId, harness: this.state.harness }));
     const archivePath = path.join(this.root, "session.tar.gz");
     await execute("tar", ["-czf", archivePath + ".tmp", "-C", directory, "session.json", "files"]);
     fs.renameSync(archivePath + ".tmp", archivePath);

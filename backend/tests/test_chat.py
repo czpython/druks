@@ -7,12 +7,13 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.chat import service, sockets
 from druks.chat.bridge import Bridge
 from druks.chat.constants import CHAT_KEY_NAME
 from druks.chat.enums import ConversationSource, MessageRole, MessageState
-from druks.chat.exceptions import ChatBridgeError, ChatSandboxGone
+from druks.chat.exceptions import ChatBridgeError, ChatHarnessError, ChatSandboxGone
 from druks.chat.models import Conversation, Message
 from druks.database import get_session
 from druks.files.datastructures import File
@@ -24,8 +25,11 @@ from druks.models import Base
 from druks.redis import get_client
 from druks.sandbox.exceptions import IdentityDenied
 from druks.sandbox.models import SandboxIdentity, SecretRef
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.settings import Urls
 from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_run
+from druks.user_settings.models import SettingsOverride
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy import delete
 
@@ -65,7 +69,7 @@ async def sandbox(druks_db, conversation, monkeypatch):
     monkeypatch.setattr(service, "get_sandbox", AsyncMock(return_value=(host, identity)))
     monkeypatch.setattr(service, "get_running_sandbox", AsyncMock(return_value=host))
     config = SimpleNamespace(
-        harness_class=ClaudeHarness, model_id="claude-opus-4-7", effort="", fast_mode=False
+        harness_class=ClaudeHarness, model="anthropic/claude-opus-4-7", effort="", fast_mode=False
     )
     monkeypatch.setattr(service, "get_agent", AsyncMock(return_value=(config, "", Toolkit.ALL)))
     monkeypatch.setattr(service, "sandbox_client", SimpleNamespace(set_expiry=AsyncMock()))
@@ -293,6 +297,7 @@ async def test_recovery_reads_live_events_then_saves_reply_and_replaces_archive(
             return {
                 "status": "running" if statuses == 1 else terminal_state,
                 "messageId": message.id,
+                "harness": "claude",
                 "epoch": "sandbox-one",
                 "sequence": 4,
                 "archivePath": "/home/druks/work/chat/session.tar.gz",
@@ -370,7 +375,7 @@ async def test_new_sandbox_restores_archive_and_drains_pending_messages(
     conversation.session_file = File(id=previous.id)
     first = await conversation.get_unanswered_message(druks_db)
     second = await conversation.create_message(druks_db, "Continue")
-    state = {"status": "missing", "sessionId": "", "messageId": ""}
+    state = {"status": "missing", "sessionId": "", "messageId": "", "harness": "claude"}
     prompts = []
     starts = []
 
@@ -406,6 +411,86 @@ async def test_new_sandbox_restores_archive_and_drains_pending_messages(
     assert starts[1]["archivePath"] == ""
     assert host.upload_file.await_count == 1
     assert previous.deleted_at
+
+
+@pytest.mark.parametrize(
+    "harness, account_type, expected",
+    [
+        (
+            ClaudeHarness,
+            AccountKind.OPERATOR,
+            {
+                "meta": {
+                    "claudeCode": {
+                        "options": {
+                            "disallowedTools": ["AskUserQuestion"],
+                            "model": "claude-opus-4-7",
+                            "systemPrompt": {
+                                "type": "preset",
+                                "preset": "claude_code",
+                                "append": "Be kind.",
+                            },
+                        }
+                    }
+                },
+                "env": {},
+                "files": {},
+                "mode": "bypassPermissions",
+                "model": "claude-opus-4-7",
+                "options": {"model": "model", "effort": "effort", "fast": "fast"},
+                "sessionFiles": [
+                    "/home/druks/.claude/projects/*/{sessionId}.jsonl",
+                    "/home/druks/.claude/projects/*/{sessionId}",
+                ],
+            },
+        ),
+        (
+            ClaudeHarness,
+            AccountKind.BOT,
+            {
+                "meta": {
+                    "claudeCode": {
+                        "options": {
+                            "disallowedTools": ["AskUserQuestion"],
+                            "model": "claude-opus-4-7",
+                            "systemPrompt": "Be kind.",
+                            "tools": [],
+                            "settingSources": [],
+                            "strictMcpConfig": True,
+                        }
+                    }
+                },
+                "env": {},
+                "files": {},
+                "mode": "bypassPermissions",
+                "model": "claude-opus-4-7",
+                "options": {"model": "model", "effort": "effort", "fast": "fast"},
+                "sessionFiles": [
+                    "/home/druks/.claude/projects/*/{sessionId}.jsonl",
+                    "/home/druks/.claude/projects/*/{sessionId}",
+                ],
+            },
+        ),
+    ],
+)
+def test_the_harness_answers_the_chat_contract_for_an_operator_and_a_bot(
+    harness, account_type, expected
+):
+    home = "/home/druks"
+    root = f"{home}/work/chat/one"
+    session = harness.get_acp_session(account_type, harness.default_model, "Be kind.", home, root)
+    assert session == expected
+
+
+async def test_a_bot_on_a_harness_with_no_adapter_fails_at_the_first_turn(druks_db, conversation):
+    await SettingsOverride.set_agent_harness(druks_db, "chat.bot", "pi")
+    await SettingsOverride.set_agent_billing(druks_db, "chat.bot", "api_key")
+    await VaultSecret.paste(
+        druks_db, Audience.provider("anthropic"), "sk-key", pasted_by=conversation.account
+    )
+
+    with pytest.raises(ChatHarnessError, match="Chat runs on claude. The Bot's settings select pi"):
+        await service.deliver_pending(druks_db, conversation)
 
 
 async def test_each_open_page_receives_the_same_live_event(druks_db, conversation, tmp_path):
@@ -742,7 +827,7 @@ async def test_a_failed_run_reports_to_its_conversation_whether_or_not_it_parked
     run = await seed_run(druks_db, kind="test", account_id=conversation.account_id)
     run.conversation_id = conversation.id
 
-    assert await service.report_result(druks_db, run, result={"ok": True}) is None
+    assert not await service.report_result(druks_db, run, result={"ok": True})
     reported = await service.report_failure(druks_db, run, failure="the sandbox died")
     assert reported == conversation.id
 

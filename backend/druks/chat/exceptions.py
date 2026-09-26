@@ -10,7 +10,7 @@ class ChatBridgeError(ChatError):
 
 
 class ChatHarnessError(ChatError):
-    """The shared settings do not select Claude for Chat."""
+    """The settings select a harness with no ACP adapter for Chat."""
 
 
 class ChatSandboxGone(ChatError):
