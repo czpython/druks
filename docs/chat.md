@@ -226,11 +226,14 @@ agents and runs bill the default account.
 
 All pending messages of a WhatsApp conversation go into one turn. Druks saves
 media as a Druks file on its message. An image reaches the agent with its
-message. Druks drops a repeated message by its WhatsApp ID. Druks writes to a
-person only to answer them, one reply for each turn. It never starts a chat and
-never sends in bulk. Before it sends a reply, Druks takes a new message ID from
-WAHA and records it. WAHA's copy of the sent message then carries a known ID,
-even when the copy arrives before the send returns.
+message. Any other file except audio reaches it as a link to a copy in the
+sandbox. An operator's agent opens the copy with its tools. A number's bot
+agents have no file tools, so they see the link and the file's name. Druks
+drops a repeated message by its WhatsApp ID. Druks writes to a person only to
+answer them, one reply for each turn. It never starts a chat and never sends in
+bulk. Before it sends a reply, Druks takes a new message ID from WAHA and
+records it. WAHA's copy of the sent message then carries a known ID, even when
+the copy arrives before the send returns.
 
 Druks also adds **internal messages** to a conversation. Each one comes from a
 fixed template. An internal message starts a turn like any message, and it
@@ -315,8 +318,11 @@ people from other workspaces.
 
 A file you send to the bot, in a direct message or in a thread you joined,
 becomes a Druks file on its message. A message with only a file starts a turn
-like any other. An image reaches the agent with its message. Each further file
-in one Slack message gets a message of its own. The agent sends no files back.
+like any other. An image reaches the agent with its message. Any other file
+except audio reaches the agent as a link to a copy in the sandbox. The agent
+opens the copy with its tools. An image over 25 MiB goes as a link too. Each
+further file in one Slack message gets a message of its own. The agent sends no
+files back.
 
 ### Rooms
 
