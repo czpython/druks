@@ -11,9 +11,9 @@ gate, or park. Chat does not add entries to Activity.
 Only the creator can read a conversation or receive its live events. Operators
 do not see the chats of an app's WhatsApp numbers: the people who hold the
 number's phone read them there.
-Chat runs on Claude or Codex. Its harness, model, billing, and effort come
-from Chat's row in **Chat → Channels → Bots**. A field that you leave unset
-uses the
+Chat runs on Claude, Codex, or OpenCode. Its harness, model, billing, and
+effort come from Chat's row in **Chat → Channels → Bots**. A field that you
+leave unset uses the
 [installation settings](configuration.md#personal-and-installation-settings).
 
 ## Start a conversation
@@ -103,7 +103,9 @@ such keys: see [WhatsApp](#whatsapp).
 The agent can change Druks through those tools. Chat has no permission dialog
 or proposal mode. Claude runs in bypass mode and cannot call `AskUserQuestion`.
 Codex runs in full-access mode for an operator. For a Bot it runs in read-only
-mode without shell, web, or image tools.
+mode without shell, web, or image tools. OpenCode runs its default agent with
+every permission allowed for an operator. For a Bot it runs an agent that
+denies the file, shell, and web tools.
 
 The sandbox receives credential placeholders. The Drukbox proxy exchanges
 them for real credentials. See [public URLs and access control](configuration.md#public-urls-and-access-control)

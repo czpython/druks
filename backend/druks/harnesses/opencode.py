@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from druks.accounts.enums import AccountKind
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
@@ -37,6 +38,48 @@ class OpenCodeHarness(Harness):
     # The server writes nothing until the message POST completes; the wrapper
     # owns an earlier deadline so it can abort the OpenCode session cleanly.
     first_byte_seconds = None
+    adapter_command = (command, "acp")
+    reply_command = (command, "run")
+
+    @classmethod
+    def get_acp_session(
+        cls,
+        account_type: AccountKind,
+        model: str,
+        prompt: str,
+        identity: dict,
+        sandbox_home: str,
+        conversation_root: str,
+    ) -> dict:
+        """The adapter reads no _meta: the config rides OPENCODE_CONFIG_CONTENT, and a mode
+        is an agent. A database under the conversation root keeps its session apart."""
+        config: dict[str, object] = {"$schema": "https://opencode.ai/config.json", "model": model}
+        if account_type == AccountKind.OPERATOR:
+            files = {f"{conversation_root}/instructions.md": prompt}
+            config |= {
+                "instructions": [f"{conversation_root}/instructions.md"],
+                "permission": "allow",
+            }
+            mode = "build"
+        else:
+            denied = ("edit", "bash", "read", "glob", "grep", "list", "webfetch", "websearch")
+            permission = json.dumps(dict.fromkeys(denied, "deny"))
+            agent = f"---\nmode: primary\npermission: {permission}\n---\n{prompt}\n"
+            files = {f"{conversation_root}/.opencode/agents/druks.md": agent}
+            mode = "druks"
+        return {
+            "meta": {},
+            "env": {
+                "OPENCODE_CONFIG_CONTENT": json.dumps(config, sort_keys=True),
+                "OPENCODE_DB": f"{conversation_root}/opencode.db",
+            },
+            "files": files,
+            "mode": mode,
+            "model": model,
+            # The effort option takes a model variant, and Druks's levels are not variants.
+            "options": {"model": "model"},
+            "sessionFiles": [f"{conversation_root}/opencode.db*"],
+        }
 
     async def build_invocation(
         self,
