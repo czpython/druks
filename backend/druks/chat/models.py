@@ -37,6 +37,8 @@ class Message(Base, Uuid7Pk):
     # reply, so the source's copy of it is known as Druks's own.
     source_id: Mapped[str | None] = mapped_column(unique=True)
     file: Mapped[File | None] = FileField()
+    # What the person said in the message's voice note.
+    transcript: Mapped[str] = mapped_column(default="", server_default=text("''"))
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     delivered_at: Mapped[datetime | None]
 

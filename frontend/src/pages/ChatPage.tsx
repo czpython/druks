@@ -323,6 +323,7 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
             <div className={message.isInternal ? 'chat-user is-internal' : 'chat-user'}>
               <div className="chat-message-meta">{message.isInternal ? 'Druks' : 'You'} <time dateTime={message.createdAt} title={format.absTime(message.createdAt)}>{format.absTimeCompact(message.createdAt)}</time></div>
               {message.body && <div className="chat-user-body">{message.body}</div>}
+              {message.transcript && <div className="chat-user-body chat-user-transcript">{message.transcript}</div>}
               {message.file && <a href={message.file.url} target="_blank" rel="noreferrer">{message.file.name}</a>}
               {isQueued && <span className="chat-queued">Queued</span>}
             </div>

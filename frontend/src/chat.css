@@ -65,6 +65,7 @@
 .chat-agent-meta { color: var(--chat-accent); }
 .chat-agent-meta time { color: var(--text-dim); }
 .chat-user-body { max-width: 75ch; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-mid); }
+.chat-user-transcript { font-style: italic; }
 .chat-user.is-internal .chat-message-meta { color: var(--chat-accent); }
 .chat-user > a { color: var(--chat-accent); text-underline-offset: 3px; overflow-wrap: anywhere; }
 .chat-queued { font-size: 12px; color: var(--text-mid); border: 1px solid var(--border-loud); border-radius: 4px; padding: 3px 8px; }

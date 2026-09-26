@@ -235,6 +235,15 @@ bulk. Before it sends a reply, Druks takes a new message ID from WAHA and
 records it. WAHA's copy of the sent message then carries a known ID, even when
 the copy arrives before the send returns.
 
+A voice note becomes text before its turn. Druks sends the audio to the
+[Speech To Text card](configuration.md#speech-to-text) and saves the words on
+the message. The agent reads them under what the person typed, marked as a
+voice note, and answers in text. Nothing goes to the person before the reply.
+When Druks cannot transcribe a note, when no card is connected, or when the
+note is over 25 MiB, the agent gets an internal message instead. It then tells
+the person in one line to write instead. The web page shows the typed text, the
+words, and a link to the audio.
+
 Druks also adds **internal messages** to a conversation. Each one comes from a
 fixed template. An internal message starts a turn like any message, and it
 never goes to WhatsApp. Druks talks to agents, and agents talk to people.
@@ -320,9 +329,10 @@ A file you send to the bot, in a direct message or in a thread you joined,
 becomes a Druks file on its message. A message with only a file starts a turn
 like any other. An image reaches the agent with its message. Any other file
 except audio reaches the agent as a link to a copy in the sandbox. The agent
-opens the copy with its tools. An image over 25 MiB goes as a link too. Each
-further file in one Slack message gets a message of its own. The agent sends no
-files back.
+opens the copy with its tools. An image over 25 MiB goes as a link too. An audio
+clip becomes text the way a WhatsApp voice note does: see
+[WhatsApp](#whatsapp). Each further file in one Slack message gets a message of
+its own. The agent sends no files back.
 
 ### Rooms
 

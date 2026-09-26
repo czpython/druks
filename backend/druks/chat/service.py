@@ -38,6 +38,7 @@ from druks.sandbox.host import Host
 from druks.sandbox.layout import get_remote_home, get_work_root
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
+from druks.services.exceptions import ServiceNotConnectedError
 from druks.workspaces import Workspace
 
 from .bots.constants import ADMIN_PROMPT, ADMIN_TOOLS
@@ -48,11 +49,14 @@ from .constants import (
     FAILURE_MESSAGE,
     INTERNAL_MESSAGES_PROMPT,
     RESULT_MESSAGE,
+    TRANSCRIPTION_FAILED_MESSAGE,
+    VOICE_NOTE_MARKER,
 )
 from .enums import MessageRole, MessageState
-from .exceptions import ChatBridgeError, ChatHarnessError, ChatSandboxGone
+from .exceptions import ChatBridgeError, ChatHarnessError, ChatSandboxGone, TranscriptionError
 from .models import Conversation, Message
 from .sandbox import CHAT_SANDBOX
+from .services import SpeechToText
 
 logger = logging.getLogger(__name__)
 
@@ -235,8 +239,8 @@ async def send_turn(
     config: AgentConfig,
     prompt: str,
 ) -> Message | None:
-    """Start the agent and send the pending messages.
-    Return the turn's message, unless a Stop or pause came first."""
+    """Start the agent, transcribe the pending voice notes, and send the pending
+    messages. Return the turn's message, unless a Stop or pause came first."""
     host = bridge.host
     status = await bridge.request("status", conversationId=conversation.id)
     if status["status"] == "running":
@@ -274,13 +278,32 @@ async def send_turn(
     expires_at = Base.utc_now() + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
     await sandbox_client.set_expiry(host_id=host.id, expires_at=expires_at)
     identity.expires_at = expires_at
+    # The account's other conversations write this row too. Release it before the
+    # transcription calls.
+    await session.commit()
     messages = [message]
     if conversation.connection:
         # The sandbox can take seconds to start, and a person can take the chat over meanwhile.
         if await conversation.is_held(session):
             return
         messages = await conversation.list_pending_messages(session)
-    delivered_messages = [pending for pending in messages if await pending.mark_delivered(session)]
+    notes = []
+    for pending in messages:
+        file = pending.file
+        if file and file.content_type.startswith("audio/"):
+            try:
+                pending.transcript = await get_transcript(session, file)
+            except (TranscriptionError, ServiceNotConnectedError) as error:
+                logger.warning("Chat message %s has no transcript: %s", pending.id, error)
+                notes.append(
+                    await conversation.create_message(
+                        session, TRANSCRIPTION_FAILED_MESSAGE, is_internal=True
+                    )
+                )
+    # The notes are the newest messages, so they close the turn.
+    delivered_messages = [
+        pending for pending in (*messages, *notes) if await pending.mark_delivered(session)
+    ]
     await session.commit()
     if delivered_messages:
         await bridge.request(
@@ -295,16 +318,33 @@ async def send_turn(
     return
 
 
+async def get_transcript(session: AsyncSession, file: File) -> str:
+    """The words in a voice note, from the Speech To Text card. Druks refuses a note
+    over the upload cap before the call."""
+    if file.size > MAX_UPLOAD_BYTES:
+        raise TranscriptionError(
+            f"The voice note is {file.size} bytes. The cap is {MAX_UPLOAD_BYTES} bytes."
+        )
+    content = get_file_storage().open(file.id)
+    return await SpeechToText.transcribe(
+        session, name=file.name, content_type=file.content_type, content=content
+    )
+
+
 async def get_turn_content(
     host: Host, conversation_root: str, messages: list[Message]
 ) -> list[dict]:
-    """The ACP content blocks the agent reads: each message's text, then its file. An
-    image travels in the prompt. Audio adds nothing. Any other file goes to the
-    conversation's folder in the sandbox, and the agent gets a link to it."""
+    """The ACP content blocks the agent reads: each message's text, with the words of
+    its voice note under a marker, then its file. An image travels in the prompt. Audio
+    adds nothing more. Any other file goes to the conversation's folder in the sandbox,
+    and the agent gets a link to it."""
     content = []
     for message in messages:
-        if message.body:
-            content.append({"type": "text", "text": message.body})
+        parts = [message.body]
+        if message.transcript:
+            parts += [VOICE_NOTE_MARKER, message.transcript]
+        if text := "\n".join(part for part in parts if part):
+            content.append({"type": "text", "text": text})
         if file := message.file:
             if file.content_type.startswith("image/") and file.size <= MAX_UPLOAD_BYTES:
                 image = get_file_storage().open(file.id)

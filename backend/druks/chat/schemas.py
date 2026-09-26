@@ -34,6 +34,7 @@ class MessageResponse(Schema):
     tool_calls: list[dict]
     is_internal: bool
     file: FileSummary | None
+    transcript: str
     created_at: datetime
     delivered_at: datetime | None
 

@@ -484,6 +484,17 @@ event older than five minutes. With rotation off, the pasted bot token and each
 person's Slack token live until someone revokes them. A person connects their
 own Slack account through the same app: see [Chat](chat.md#slack).
 
+## Speech to text
+
+**Speech To Text** is the service that Druks sends voice notes to: any server
+that speaks the OpenAI audio API, such as OpenAI, Groq, or a local server.
+Connect it from **Settings → Connections → Services** with the server's base
+URL, for example `https://api.openai.com/v1`, a key, and a model, for example
+`whisper-1`. Druks checks none of the values when you save the card, so a wrong
+key shows up on the first voice note. Druks sends a note of at most 25 MiB and
+refuses a bigger one without a call. Without the card, the agent tells the
+person to write instead. See [Chat](chat.md#whatsapp) for what the agent gets.
+
 ## Harnesses
 
 Druks registers two subscription providers, `anthropic` and `openai`. Each

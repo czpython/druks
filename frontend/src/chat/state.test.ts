@@ -7,7 +7,7 @@ const conversation: Conversation = {
   id: '01995a3c-0000-7000-8000-000000000001', title: 'Read the gate', source: 'web', userId: null, userName: '', createdAt: '2026-09-18T10:00:00Z',
   messageCount: 1, activeMessageId: '2',
   isPinned: false, lastMessageAt: '2026-09-18T10:00:00Z',
-  messages: [{ id: '2', role: 'user', body: 'Read the gate', state: 'delivered', replyTo: null, toolCalls: [], isInternal: false, file: null, createdAt: '2026-09-18T10:00:00Z', deliveredAt: '2026-09-18T10:00:01Z' }],
+  messages: [{ id: '2', role: 'user', body: 'Read the gate', state: 'delivered', replyTo: null, toolCalls: [], isInternal: false, file: null, transcript: '', createdAt: '2026-09-18T10:00:00Z', deliveredAt: '2026-09-18T10:00:01Z' }],
 }
 
 function event(sequence: number, update: SessionUpdate, epoch = 'one'): ConversationAction {
@@ -68,7 +68,7 @@ describe('Chat events', () => {
   it('restores tool positions after non-BMP text and multiple tools at the same position', () => {
     expect(savedReplyRows({
       id: '4', role: 'assistant', state: null, replyTo: '2', createdAt: conversation.createdAt, body: '🌱 Read.Done.', deliveredAt: null,
-      isInternal: false, file: null,
+      isInternal: false, file: null, transcript: '',
       toolCalls: [
         { toolCallId: 'one', title: 'Read', textOffset: 7 },
         { toolCallId: 'two', title: 'Check', textOffset: 7 },

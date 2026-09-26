@@ -29,7 +29,12 @@ from druks.chat.channels.whatsapp.client import WahaClient
 from druks.chat.channels.whatsapp.constants import WAHA_AUDIENCE
 from druks.chat.channels.whatsapp.services import Waha
 from druks.chat.channels.whatsapp.webhooks import WahaEvents
-from druks.chat.constants import CONVERSATION_HEADER, INTERNAL_MESSAGES_PROMPT
+from druks.chat.constants import (
+    CONVERSATION_HEADER,
+    INTERNAL_MESSAGES_PROMPT,
+    TRANSCRIPTION_FAILED_MESSAGE,
+    VOICE_NOTE_MARKER,
+)
 from druks.chat.enums import (
     BotAccess,
     ConversationSource,
@@ -37,6 +42,7 @@ from druks.chat.enums import (
     MessageState,
     PauseSignal,
 )
+from druks.chat.exceptions import TranscriptionError
 from druks.chat.models import Conversation
 from druks.harnesses.claude import ClaudeHarness
 from druks.mcp.enums import Toolkit
@@ -348,13 +354,19 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
     photo["payload"].update(hasMedia=True, media=waha_media("photo.png", "image/png"))
     form = message_event(ANA, "Here is the form", key="M4")
     form["payload"].update(hasMedia=True, media=waha_media("form.pdf", "application/pdf"))
-    note = message_event(ANA, "", key="M5")
+    note = message_event(ANA, "Call me", key="M5")
     note["payload"].update(hasMedia=True, media=waha_media("note.oga", "audio/ogg"))
+    failed_note = message_event(ANA, "", key="M6")
+    failed_note["payload"].update(hasMedia=True, media=waha_media("again.oga", "audio/ogg"))
     await receive(connection, message_event(ANA, "Hello", key="M1"))
     await receive(connection, photo)
     await receive(connection, message_event(ANA, "And the second one?", key="M3"))
     await receive(connection, form)
     await receive(connection, note)
+    await receive(connection, failed_note)
+    await receive(connection, message_event(ANA, "Anyone there?", key="M7"))
+    transcribe = AsyncMock(side_effect=["at six", TranscriptionError("The provider is down.")])
+    monkeypatch.setattr(service.SpeechToText, "transcribe", transcribe)
     [conversation] = await Conversation.list_for_connection(druks_db, connection.id)
     config = SimpleNamespace(
         harness_class=ClaudeHarness,
@@ -418,14 +430,24 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
             "name": "form.pdf",
             "mimeType": "application/pdf",
         },
+        {"type": "text", "text": f"Call me\n{VOICE_NOTE_MARKER}\nat six"},
+        {"type": "text", "text": "Anyone there?"},
+        {"type": "text", "text": TRANSCRIPTION_FAILED_MESSAGE},
     ]
-    assert prompt["timeout"] == 60
+    assert (prompt["timeout"], prompt["messageId"]) == (60, asked[-1].id)
+    assert [(message.body, message.transcript) for message in asked[4:]] == [
+        ("Call me", "at six"),
+        ("", ""),
+        ("Anyone there?", ""),
+        (TRANSCRIPTION_FAILED_MESSAGE, ""),
+    ]
+    assert asked[-1].is_internal
     [upload] = host.upload_file.await_args_list
     assert (upload.kwargs["local"].is_file(), upload.kwargs["remote"]) == (True, copy)
     [start] = [values for method, values in requests if method == "start"]
     assert start["headers"] == [{"name": CONVERSATION_HEADER, "value": conversation.id}]
     assert start["meta"]["claudeCode"]["options"]["systemPrompt"] == "Be kind."
-    assert [message.state for message in asked] == [MessageState.REPLIED] * 5
+    assert [message.state for message in asked] == [MessageState.REPLIED] * 8
     assert reply.source_id == "REPLY1"
     sends = [body for method, path, body in waha.calls if path == "/api/sendText"]
     assert sends == [
