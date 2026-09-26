@@ -241,7 +241,7 @@ async def runtime():
 
         @classmethod
         async def dispatch(cls) -> str:
-            return await cls.start(subject=await Widget.get_for_subject_id("313131"))
+            return await cls.start(subject=await Widget.get_for_id("313131"))
 
         async def run(self) -> None: ...
 
@@ -250,7 +250,7 @@ async def runtime():
 
         @classmethod
         async def dispatch(cls) -> str:
-            return await cls.start(subject=await Widget.get_for_subject_id("616161"))
+            return await cls.start(subject=await Widget.get_for_id("616161"))
 
         async def run(self) -> None: ...
 
@@ -1401,7 +1401,7 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
 
     assert completed == [approved_id, approved_id]
     async with session_scope(runtime.engine):
-        assert (await Note.get(approved_note.id)).gist == "The pump ran hot."
+        assert (await Note.get_for_id(approved_note.id)).gist == "The pump ran hot."
         activity = list(
             await db_session().scalars(Event.get_history(app="field_notes").order_by(Event.id))
         )

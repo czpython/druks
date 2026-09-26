@@ -55,7 +55,7 @@ def make_app_migration(app_name: str, message: str, database_url: str) -> None:
     package_dir = app.package_dir()
     if not package_dir:
         raise ValueError(f"app {app_name!r} ships no package to write migrations into")
-    migrations_dir = package_dir / "migrations"
+    versions_dir = package_dir / "migrations" / "versions"
 
     scoped = MetaData()
     for table in Base.metadata.tables.values():
@@ -73,11 +73,13 @@ def make_app_migration(app_name: str, message: str, database_url: str) -> None:
         table.to_metadata(scoped).info[_MIGRATION_SUPPORT_ONLY] = True
 
     config = Config(str(_ALEMBIC_INI))
-    config.set_main_option("version_locations", str(migrations_dir / "versions"))
+    config.set_main_option("version_locations", str(versions_dir))
     config.set_main_option("sqlalchemy.url", database_url)
     config.attributes["version_table"] = f"alembic_version_{app.name}"
     config.attributes["target_metadata"] = scoped
-    command.revision(config, message=message, autogenerate=True)
+    # The app's history reads in order: ``<name>_0001``, ``<name>_0002``, and so on.
+    revision = f"{app.name}_{len(list(versions_dir.glob('*.py'))) + 1:04d}"
+    command.revision(config, message=message, autogenerate=True, rev_id=revision)
 
 
 def _app_migration_dirs() -> list[tuple[str, Path]]:

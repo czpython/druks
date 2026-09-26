@@ -37,6 +37,7 @@ AUTHOR_SURFACE = {
         "task",
     },
     "druks.db": {"Base", "StoredSubject", "db_session"},
+    "druks.db.fields": {"EncryptedJsonField", "EncryptedTextField", "Secret", "SecretsMapping"},
     "druks.schemas": {"Schema"},
     "druks.ui": {
         "Action",

@@ -29,7 +29,7 @@ async def test_survey_writes_the_repository_gist(druks_db, monkeypatch):
     await run_workflow(Survey, subject=repository)
 
     survey.assert_awaited_once_with()
-    assert (await Repository.get(repository.id)).gist == "Widgets for every shelf."
+    assert (await Repository.get_for_id(repository.id)).gist == "Widgets for every shelf."
 
 
 async def test_survey_workspace_clones_the_subject_repo(druks_db):

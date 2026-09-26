@@ -159,51 +159,47 @@ async def new_note():
 
 @ui.page("/notes/{note_id}", subject=Note)
 async def note(note_id: int):
-    found = await Note.get(note_id)
-    if found:
-        status = await found.get_status()
-        # The region follows the note, so answering the gate refreshes it and
-        # the controls go away.
-        if status.gate:
-            decision = [ui.GateControls(status.run)]
-        else:
-            decision = [ui.Text("Nothing is waiting on you.")]
-        return ui.Page(
-            f"Note {note_id}",
-            description=found.gist or "Waiting for its gist.",
-            blocks=[
-                ui.Markdown(found.body),
-                ui.Card(
-                    title="Gist",
-                    description=found.gist or "Waiting for its gist.",
-                    controls=[
-                        ui.Action(
-                            label="Clear the gist",
-                            operation="clear_gist",
-                            arguments={"note_id": found.id},
-                            tone="danger",
-                            confirm="Clear this note's gist? An agent has to read it again.",
-                        )
-                    ],
-                ),
-                ui.Section(title="Your decision", name="decision", follows=found, blocks=decision),
-            ],
-        )
-    return ui.Page(f"Note {note_id}", blocks=[ui.EmptyState("No such note")])
+    found = await Note.get_for_id(note_id, raise_on_missing=True)
+    status = await found.get_status()
+    # The region follows the note, so answering the gate refreshes it and
+    # the controls go away.
+    if status.gate:
+        decision = [ui.GateControls(status.run)]
+    else:
+        decision = [ui.Text("Nothing is waiting on you.")]
+    return ui.Page(
+        f"Note {note_id}",
+        description=found.gist or "Waiting for its gist.",
+        blocks=[
+            ui.Markdown(found.body),
+            ui.Card(
+                title="Gist",
+                description=found.gist or "Waiting for its gist.",
+                controls=[
+                    ui.Action(
+                        label="Clear the gist",
+                        operation="clear_gist",
+                        arguments={"note_id": found.id},
+                        tone="danger",
+                        confirm="Clear this note's gist? An agent has to read it again.",
+                    )
+                ],
+            ),
+            ui.Section(title="Your decision", name="decision", follows=found, blocks=decision),
+        ],
+    )
 
 
 @note.child("/history")
 async def note_history(note_id: int):
-    found = await Note.get(note_id)
-    if found:
-        return ui.Page(
-            f"Note {note_id} history",
-            blocks=[
-                ui.Timeline(
-                    [ui.TimelineItem(when=found.created_at, title="Captured")], title="This note"
-                ),
-                ui.Progress("Summarized", completed=1 if found.gist else 0, total=1),
-                ui.Link("Everything druks did about this note", subject=found),
-            ],
-        )
-    return ui.Page(f"Note {note_id} history", blocks=[ui.EmptyState("No such note")])
+    found = await Note.get_for_id(note_id, raise_on_missing=True)
+    return ui.Page(
+        f"Note {note_id} history",
+        blocks=[
+            ui.Timeline(
+                [ui.TimelineItem(when=found.created_at, title="Captured")], title="This note"
+            ),
+            ui.Progress("Summarized", completed=1 if found.gist else 0, total=1),
+            ui.Link("Everything druks did about this note", subject=found),
+        ],
+    )

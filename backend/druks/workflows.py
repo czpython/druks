@@ -179,7 +179,7 @@ class _DeclaredSubject:
                     return run.__dict__["subject"]
                 if run._subject:
                     async with bound_session():
-                        return await self.subject_class.get_for_subject_id(str(run._subject["id"]))
+                        return await self.subject_class.get_for_id(str(run._subject["id"]))
 
             return resolve()
         return self.subject_class

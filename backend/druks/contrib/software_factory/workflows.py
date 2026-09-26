@@ -156,7 +156,7 @@ class Build(Workflow):
             )
             if project_repo:
                 item = await WorkItem.create(
-                    project_id=project_repo.project_id,
+                    project=project_repo.project,
                     source=ticket["source"],
                     title=ticket["title"] or ticket["identifier"],
                     ticket_key=ticket["identifier"],

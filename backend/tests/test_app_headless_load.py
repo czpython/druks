@@ -9,7 +9,6 @@ from druks.apps.exceptions import (
     AppImportError,
     AppLoadError,
     AppNotFound,
-    AppSubjectContractError,
     MalformedApp,
 )
 from druks.apps.loader import load_app
@@ -88,39 +87,6 @@ _FILES = {
             class Settings(BaseModel):
                 account: str = Field(title="Account")
                 api_key: SecretStr = Field(title="API key")
-    """,
-}
-
-
-# A package whose declared ``StoredSubject`` omits ``list_summaries()``. Its own
-# table keeps it off the conforming probe's shared metadata.
-_BROKEN_STORED_FILES = {
-    "app.py": """
-        from druks.apps import App
-
-
-        class BrokenStored(App):
-            name = "brokenstored"
-    """,
-    "models.py": """
-        from druks.db import StoredSubject
-
-
-        class Ledger(StoredSubject):
-            __tablename__ = "brokenstored_ledgers"
-            # No list_summaries() — the load gate must reject it.
-    """,
-    "workflows.py": """
-        from druks.workflows import Workflow
-
-        from .models import Ledger
-
-
-        class Post(Workflow):
-            subject = Ledger
-
-            async def run(self) -> None:
-                ...
     """,
 }
 
@@ -351,49 +317,3 @@ def test_import_error_in_models_raises_app_import_error(tmp_path, monkeypatch):
     with pytest.raises(AppImportError, match="failed to import") as caught:
         load_app("probe")
     assert isinstance(caught.value.__cause__, RuntimeError)
-
-
-@pytest.fixture
-def broken_stored_app(tmp_path_factory, monkeypatch):
-    """The broken package as the only installed entry point; restores the globals
-    its load mutates."""
-    from druks.apps import loader as apps_loader
-    from druks.apps.registry import agents, services, webhooks, workflows
-    from druks.models import Base
-
-    package = "druks_broken_stored"
-    root = tmp_path_factory.mktemp("broken_stored")
-    _write_package(root, package, _BROKEN_STORED_FILES)
-    sys.path.insert(0, str(root))
-
-    tables = set(Base.metadata.tables)
-    registries = {
-        registry: dict(registry._items) for registry in (agents, services, webhooks, workflows)
-    }
-    packages = dict(apps_loader._workflow_packages)
-    entry = EntryPoint(name="brokenstored", value=f"{package}.app:BrokenStored", group="druks.apps")
-    monkeypatch.setattr(loader, "entry_points", lambda *, group: [entry])
-    try:
-        yield
-    finally:
-        sys.path.remove(str(root))
-        for name in set(Base.metadata.tables) - tables:
-            Base.metadata.remove(Base.metadata.tables[name])
-        for registry, snapshot in registries.items():
-            registry._items = snapshot
-        apps_loader._workflow_packages.clear()
-        apps_loader._workflow_packages.update(packages)
-        for name in [m for m in sys.modules if m == package or m.startswith(f"{package}.")]:
-            del sys.modules[name]
-
-
-def test_headless_load_rejects_a_stored_subject_missing_list_summaries(broken_stored_app):
-    """A row-backed subject is gated the same as ``Subject`` — typed, not an import error."""
-    with pytest.raises(AppSubjectContractError) as caught:
-        load_app("brokenstored")
-    message = str(caught.value)
-    assert "brokenstored" in message  # the app name
-    assert "Ledger" in message  # the subject class
-    assert "list_summaries()" in message  # the missing method
-    assert "Implement list_summaries()" in message  # the implementation direction
-    assert isinstance(caught.value, AppLoadError)

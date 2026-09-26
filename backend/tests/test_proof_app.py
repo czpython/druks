@@ -15,7 +15,7 @@ def test_boot_loads_the_external_app():
 def test_discovery_registers_the_tables_and_capabilities():
     app = load_app("field_notes")
 
-    assert "field_notes_notes" in Base.metadata.tables
+    assert "field_notes_note" in Base.metadata.tables
     assert [workflow.__name__ for workflow in app.workflows()] == ["Summarize", "Survey"]
 
     prefixes = {router.prefix for router in app.routers()}

@@ -70,9 +70,6 @@ def iter_apps() -> list[type[App]]:
         if app.name in seen:
             raise ValueError(f"duplicate app name {app.name!r}")
         seen.add(app.name)
-        # Ownership registers before discover() imports the capability modules,
-        # whose Workflow classes resolve their app at definition.
-        register_workflow_package(app.package, app.name)
         apps.append(app)
     return apps
 
@@ -137,7 +134,6 @@ def _resolve(name: str) -> type[App]:
             f"app {name!r} entry point resolves to an App named "
             f"{app.name!r} — the entry-point name must match App.name"
         )
-    register_workflow_package(app.package, app.name)
     return app
 
 

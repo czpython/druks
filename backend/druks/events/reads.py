@@ -23,7 +23,7 @@ async def get_destinations(session: AsyncSession, event: Event) -> FeedDestinati
     subject_class = subject_classes.get(event.subject_type)
     subject = None
     if subject_class and event.subject_id:
-        subject = await subject_class.get_for_subject_id(event.subject_id)
+        subject = await subject_class.get_for_id(event.subject_id)
     run_id = await session.scalar(select(Run.id).where(Run.id == event.payload.get("run")))
     artifact_id = await session.scalar(
         select(Artifact.id).where(Artifact.id == event.payload.get("artifact_id"))

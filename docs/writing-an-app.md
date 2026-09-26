@@ -324,8 +324,6 @@ from sqlalchemy.orm import Mapped
 
 
 class Report(StoredSubject):
-    __tablename__ = "night_watch_reports"
-
     published_url: Mapped[str | None]
 
     async def publish(self, url: str) -> None:
@@ -866,27 +864,22 @@ subclass `StoredSubject` instead of `Base`. The class name is the subject type:
 
 ```python
 from druks.db import StoredSubject
-from druks.workflows import SubjectSummary
+from sqlalchemy.orm import Mapped
 
 
 class Repository(StoredSubject):
-    __tablename__ = "night_watch_repositories"
+    full_name: Mapped[str]
 
     def get_key(self) -> str:
         return self.full_name
-
-    def get_summary(self) -> SubjectSummary:
-        return SubjectSummary.model_validate(self)
-
-    @classmethod
-    async def list_summaries(cls, account_id: str | None) -> list[SubjectSummary]:
-        return [repository.get_summary() for repository in await cls.list_open()]
 ```
 
-Select the rows for the board. Druks supplies the other behavior. Each subject
-already supplies its ID and `key`. The key is its stable work key. The
-summary has an optional descriptive `title`; a subject without one leaves it absent.
-For a title or more fields, add a custom summary:
+Druks supplies the rest: the table `night_watch_repository`, an `id`,
+`created_at` and `updated_at`, `create()`, `save()`, `delete()`, and a board of
+the newest hundred rows by `updated_at`. Each subject already supplies its ID
+and `key`. The key is its stable work key. The summary has an optional
+descriptive `title`; a subject without one leaves it absent. For a title or more
+fields, add a custom summary:
 
 ```python
 from druks.workflows import SubjectSummary
@@ -897,9 +890,11 @@ class RepositorySummary(SubjectSummary):
 
 
 class Repository(StoredSubject):
-    def get_summary(self) -> RepositorySummary:
-        return RepositorySummary.model_validate(self)
+    summary_class = RepositorySummary
 ```
+
+To scope the board by caller, or to select other rows, override
+`list_summaries()`.
 
 If you keep no row for a subject, subclass `Subject`. The platform requires only
 an identity. The ID is the full record and its label:
@@ -909,27 +904,24 @@ from druks.workflows import Subject, SubjectSummary
 
 
 class PullRequest(Subject):
-    def get_summary(self) -> SubjectSummary:
-        return SubjectSummary.model_validate(self)
-
     @classmethod
     async def list_summaries(cls, account_id: str | None) -> list[SubjectSummary]:
         return [pull_request.get_summary() for pull_request in await cls.list_open()]
 ```
 
 Each ID names one of these subjects, so a detail read always answers. Override
-`get_for_subject_id()` to reject an invalid shape. For example,
+`get_for_id()` to reject an invalid shape. For example,
 `owner/repo#7` is a pull request and `nonsense` returns a 404.
 
-Each subject a workflow declares must implement `list_summaries()`. The board
-reads it and passes the caller. `account_id` is the signed-in account, or None
+An identity-only `Subject` a workflow declares must implement
+`list_summaries()`; a `StoredSubject` has a board by default. The board reads
+the method and passes the caller. `account_id` is the signed-in account, or None
 outside a request. If each operator has a separate board, use it to scope the
 rows. If all operators share one board, ignore it.
 
-A model method never
-reads request context. Druks validates the method at load. If it is missing, the
-app does not load. The error names the app, the subject, and the
-method.
+A model method never reads request context. Druks validates the method at load.
+If a `Subject` lacks it, the app does not load. The error names the app, the
+subject, and the method.
 
 Druks serves the same `/api/night_watch/repository` surface for both subject
 types. This surface contains a board, detail pages, and a live stream. Druks
@@ -1082,8 +1074,9 @@ claim so the provider can retry.
 
 ## Models and migrations
 
-Models subclass `druks.db.Base` and every normal app table starts with
-`<name>_`:
+Models subclass `druks.db.Base`. Druks names the table for the app and the
+class: `Report` in `night_watch` is the table `night_watch_report`. A class that
+sets `__tablename__` keeps it, and every app table starts with `<name>_`:
 
 ```python
 from sqlalchemy.orm import Mapped, mapped_column
@@ -1092,10 +1085,15 @@ from druks.db import Base
 
 
 class Report(Base):
-    __tablename__ = "night_watch_reports"
-
     id: Mapped[int] = mapped_column(primary_key=True)
+    body: Mapped[str]
 ```
+
+A `Mapped[datetime]` column stores UTC. A `Mapped[SomeStrEnum]` column stores
+the member's value as text under a CHECK constraint named after the enum. A
+`Mapped[list]` or `Mapped[dict]` column is JSONB. Encrypted columns come from
+`druks.db.fields`: `EncryptedTextField` and `EncryptedJsonField`, with their
+value types `Secret` and `SecretsMapping`.
 
 Generate the app's revision after the model is importable:
 
@@ -1104,8 +1102,24 @@ uv run druks makemigrations night_watch -m "add reports"
 uv run druks init-db
 ```
 
-Druks scopes autogeneration to the table prefix and writes the version to
-`alembic_version_night_watch`. Query through `druks.db.db_session()` inside an
+Druks scopes autogeneration to the table prefix, names the revisions
+`night_watch_0001`, `night_watch_0002`, and so on, and writes the version to
+`alembic_version_night_watch`. Never write a revision by hand. The one change
+Alembic does not detect is a new member of an enum: that is one
+`drop_constraint` and one `create_check_constraint`.
+
+A route or a page that names a subject by id reads it with
+`raise_on_missing=True`. A miss raises `SubjectNotFound`; the API answers 404
+and a page answers an empty state, so neither spells it:
+
+```python
+@router.post("/reports/{report_id}/close", operation_id="close_report")
+async def close_report(report_id: int) -> None:
+    report = await Report.get_for_id(report_id, raise_on_missing=True)
+    await report.close()
+```
+
+Query through `druks.db.db_session()` inside an
 HTTP request, durable step, or other platform-bound session. Outside those,
 `db_session()` raises. A workflow body holds no session: read inside a `@step`.
 `await self.subject`, `start()`, and `dispatch()` bring their own. A row a step
@@ -1658,7 +1672,7 @@ shell rereads the page on each snapshot:
 ```python
 @ui.page("/notes/{note_id}")
 async def note(note_id: int):
-    found = await Note.get(note_id)
+    found = await Note.get_for_id(note_id, raise_on_missing=True)
     status = await found.get_status()
     if status.gate:
         decision = [ui.GateControls(status.run)]
@@ -1736,7 +1750,7 @@ server's words, because a validation message can carry the token back.
 
 The masking protects the screen. Your operation receives the token in plain
 text and owns it from there. Keep one secret per record in an
-`EncryptedJsonField` column or a `SecretsMapping`. A token the whole app shares
+`EncryptedJsonField` column from `druks.db.fields`. A token the whole app shares
 belongs in `AppSettings` as a `Secret`, where Druks encrypts it and never reads
 it back.
 
@@ -1812,12 +1826,13 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.accounts` | `current_account_id` |
 | `druks.apps` | `App`, `AppSettings`, `Choices`, `Secret` |
 | `druks.services` | `Service`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
-| `druks.secrets.fields` | `EncryptedJsonField`, `SecretsMapping` |
 | `druks.agents` | `Agent`, `AgentOutput`, `Bot`, `BotUser` |
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox` |
 | `druks.workspaces` | `Workspace`, `RepoWorkspace` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
+| `druks.db.fields` | `EncryptedJsonField`, `EncryptedTextField`, `Secret`, `SecretsMapping` |
+| `druks.exceptions` | `DruksError`, `SubjectNotFound` |
 | `druks.schemas` | `Schema` |
 | `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `ControlsValue`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `MultiUploadField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `Quote`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |
 | `druks.signals` | `subscribe` |

@@ -321,7 +321,7 @@ A `Page` or a named region declares what it watches:
 ```python
 @ui.page("/peers/{peer_id}")
 async def peer(peer_id: int):
-    watched = await Peer.get(peer_id)
+    watched = await Peer.get_for_id(peer_id, raise_on_missing=True)
     status = await watched.get_status()
     if status.gate:
         decision = [ui.GateControls(status.run)]

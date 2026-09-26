@@ -14,7 +14,7 @@ class PullRequest(Subject):
         return cls(id=f"{repo}#{number}")
 
     @classmethod
-    async def get_for_subject_id(cls, subject_id: str) -> Self | None:
+    async def get_for_id(cls, subject_id: str) -> Self | None:
         # Ids reach the read side as free text off a URL, so a shape that names no
         # pull request is a miss rather than a crashed read.
         repo, _, number = subject_id.partition("#")

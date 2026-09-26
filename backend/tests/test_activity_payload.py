@@ -9,7 +9,7 @@ async def test_recorded_titles_and_facts_survive_rename_and_deletion(druks_db, d
     db_session.registry.set(druks_db)
     project = await Project.create(name="Pumps")
     item = await WorkItem.create(
-        project_id=project.id, repo="acme/pumps", title="Pump 50%_ hot", ticket_key="PUMP-1"
+        project=project, repo="acme/pumps", title="Pump 50%_ hot", ticket_key="PUMP-1"
     )
     facts = {"revision_number": 2, "inspection": {"sensor_id": "A", "readings": [0, 50]}}
     await item.announce("item.inspected", **facts)
@@ -17,7 +17,7 @@ async def test_recorded_titles_and_facts_survive_rename_and_deletion(druks_db, d
     await druks_db.delete(item)
     await druks_db.flush()
     other = await WorkItem.create(
-        project_id=project.id, repo="acme/pumps", title="Pump 50ZZ hot", ticket_key="PUMP-2"
+        project=project, repo="acme/pumps", title="Pump 50ZZ hot", ticket_key="PUMP-2"
     )
     await other.announce("item.inspected", **facts)
 
