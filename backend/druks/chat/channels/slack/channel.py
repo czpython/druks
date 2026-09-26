@@ -109,11 +109,10 @@ class SlackChannel(Channel):
         text = message["text"].replace(f"<@{card.identity['bot_user_id']}>", "").strip()
         source_id = f"{message['channel']}:{message['ts']}"
         if files:
-            body = text or files[0].name
-            await conversation.create_message(session, body, source_id=source_id, file=files[0])
+            await conversation.create_message(session, text, source_id=source_id, file=files[0])
             for shared, file in zip(shares[1:], files[1:], strict=True):
                 await conversation.create_message(
-                    session, file.name, source_id=f"{source_id}:{shared['id']}", file=file
+                    session, "", source_id=f"{source_id}:{shared['id']}", file=file
                 )
         elif text:
             await conversation.create_message(session, text, source_id=source_id)

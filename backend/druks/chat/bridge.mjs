@@ -212,7 +212,7 @@ class Conversation {
         connection.cancel({ sessionId: this.state.sessionId }).catch(console.error);
       }, request.timeout * 1000);
       try {
-        const result = await connection.prompt({ sessionId: this.state.sessionId, prompt: [{ type: "text", text: request.body }] });
+        const result = await connection.prompt({ sessionId: this.state.sessionId, prompt: request.content });
         await this.archive();
         this.state.stopReason = result.stopReason;
         if (timedOut) this.state.status = "interrupted";

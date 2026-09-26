@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import logging
 from contextlib import suppress
@@ -15,6 +16,7 @@ from druks.apps.loader import get_app
 from druks.apps.registry import channels
 from druks.durable.engine import step_session
 from druks.durable.models import Run
+from druks.files.constants import MAX_UPLOAD_BYTES
 from druks.files.datastructures import File
 from druks.files.storage import get_file_storage
 from druks.harnesses.base import Harness
@@ -284,12 +286,31 @@ async def send_turn(
             "prompt",
             conversationId=conversation.id,
             messageId=delivered_messages[-1].id,
-            body="\n\n".join(pending.body for pending in delivered_messages),
+            content=await get_turn_content(delivered_messages),
             timeout=timeout,
         )
         await publish(conversation.id, {"type": "messages"})
         return delivered_messages[-1]
     return
+
+
+async def get_turn_content(messages: list[Message]) -> list[dict]:
+    """The ACP content blocks the agent reads: each message's text, then its image."""
+    content = []
+    for message in messages:
+        if message.body:
+            content.append({"type": "text", "text": message.body})
+        file = message.file
+        if file and file.content_type.startswith("image/") and file.size <= MAX_UPLOAD_BYTES:
+            image = await asyncio.to_thread(get_file_storage().open, file.id)
+            content.append(
+                {
+                    "type": "image",
+                    "data": base64.b64encode(image).decode(),
+                    "mimeType": file.content_type,
+                }
+            )
+    return content
 
 
 async def follow_turn(

@@ -100,9 +100,9 @@ class WahaEvents(Webhook):
     ) -> None:
         """Save the message and start its turn. A message with no text and no media, such
         as a shared location, gives the agent nothing to read."""
-        message = self.data["payload"]
+        body = self.data["payload"]["body"] or ""
         file = await self.save_media(session, conversation)
-        if body := message["body"] or (file.name if file else ""):
+        if body or file:
             await conversation.create_message(session, body, source_id=key, file=file)
             await session.commit()
             await DBOS.start_workflow_async(deliver, conversation.id)

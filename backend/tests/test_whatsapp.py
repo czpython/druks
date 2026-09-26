@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import json
@@ -334,11 +335,17 @@ async def test_a_message_reaches_the_bot_of_its_numbers_app(druks_db, helpdesk, 
 
 
 async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
-    druks_db, helpdesk, waha, monkeypatch
+    druks_db, helpdesk, waha, tmp_path, monkeypatch
 ):
+    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(WahaClient, "download", AsyncMock(return_value=b"\x89PNG"))
     connection = await link(druks_db, await bot_account(druks_db))
-    for key, body in (("M1", "Hello"), ("M2", "Is my ticket open?"), ("M3", "And the second one?")):
-        await receive(connection, message_event(ANA, body, key=key))
+    photo = message_event(ANA, "", key="M2")
+    media = {"url": "http://waha.test/api/files/photo.png", "mimetype": "image/png"}
+    photo["payload"].update(hasMedia=True, media=media)
+    await receive(connection, message_event(ANA, "Hello", key="M1"))
+    await receive(connection, photo)
+    await receive(connection, message_event(ANA, "And the second one?", key="M3"))
     [conversation] = await Conversation.list_for_connection(druks_db, connection.id)
     config = SimpleNamespace(
         harness_class=ClaudeHarness,
@@ -386,7 +393,11 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
     await service.deliver_pending(druks_db, conversation)
 
     [prompt] = [values for method, values in requests if method == "prompt"]
-    assert prompt["body"] == "Hello\n\nIs my ticket open?\n\nAnd the second one?"
+    assert prompt["content"] == [
+        {"type": "text", "text": "Hello"},
+        {"type": "image", "data": base64.b64encode(b"\x89PNG").decode(), "mimeType": "image/png"},
+        {"type": "text", "text": "And the second one?"},
+    ]
     assert prompt["timeout"] == 60
     [start] = [values for method, values in requests if method == "start"]
     assert start["headers"] == [{"name": CONVERSATION_HEADER, "value": conversation.id}]

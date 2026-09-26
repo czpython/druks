@@ -32,6 +32,7 @@ async function request(port, values, abandon = false) {
 
 const id = number => `00000000-0000-7000-8000-${String(number).padStart(12, "0")}`;
 const message = number => id(100 + number);
+const text = value => [{ type: "text", text: value }];
 
 async function until(action, matches) {
   for (let attempt = 0; attempt < 200; attempt++) {
@@ -71,7 +72,7 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     "prompt: async p => {",
     " const permission = await client.requestPermission({sessionId,toolCall:{toolCallId:'permission',title:'Read'},options:[{optionId:'no',name:'Deny',kind:'reject_once'},{optionId:'yes',name:'Allow',kind:'allow_once'}]});",
     " if (permission.outcome.optionId !== 'yes') throw Error('permission');",
-    " const text = p.prompt[0].text;",
+    " const text = p.prompt.map(block => block.text ?? block.type).join(' ');",
     " await client.sessionUpdate({sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:memory+text}}});",
     " if(text==='wait') await new Promise(resolve => { release=resolve; });",
     " else await new Promise(resolve => setTimeout(resolve, 100));",
@@ -131,27 +132,27 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
   // The session opens on its model at session/new; the model option only switches it.
   assert.deepEqual(settings.trim().split("\n"), ["effort=high", "fast=on", "model=claude-sonnet-5", "effort=low", "fast=off"]);
 
-  await request(port, { method: "prompt", conversationId: id(1), messageId: message(1), body: "remember-one" }, true);
+  await request(port, { method: "prompt", conversationId: id(1), messageId: message(1), content: [...text("remember-one"), { type: "image", data: "aGk=", mimeType: "image/png" }] }, true);
   await until(() => request(port, { method: "events", conversationId: id(1), after: 0 }), result => result.events.length > 0);
   const saved = await until(() => status(id(1)), result => result.status === "replied");
-  await request(port, { method: "prompt", conversationId: id(2), messageId: message(2), body: "private-two" });
+  await request(port, { method: "prompt", conversationId: id(2), messageId: message(2), content: text("private-two") });
   await until(() => status(id(2)), result => result.status === "replied");
-  await request(port, { method: "prompt", conversationId: id(2), messageId: message(7), body: "wait", timeout: 0.2 });
+  await request(port, { method: "prompt", conversationId: id(2), messageId: message(7), content: text("wait"), timeout: 0.2 });
   await until(() => status(id(2)), result => result.status === "interrupted");
 
-  await request(port, { method: "prompt", conversationId: id(1), messageId: message(3), body: "wait" });
+  await request(port, { method: "prompt", conversationId: id(1), messageId: message(3), content: text("wait") });
   await until(() => status(id(1)), result => result.status === "running");
-  assert.equal((await request(port, { method: "prompt", conversationId: id(1), messageId: message(4), body: "duplicate" })).ok, false);
+  assert.equal((await request(port, { method: "prompt", conversationId: id(1), messageId: message(4), content: text("duplicate") })).ok, false);
   await until(() => request(port, { method: "events", conversationId: id(1), after: 0 }), result => result.events.some(event => event.messageId === message(3)));
   assert.equal((await request(port, { method: "events", conversationId: id(1), after: 0 })).events.some(event => event.messageId === message(1)), false);
   await request(port, { method: "cancel", conversationId: id(1), messageId: message(3) });
   assert.equal((await until(() => status(id(1)), result => result.status === "cancelled")).stopReason, "cancelled");
   const partial = await request(port, { method: "events", conversationId: id(1), after: 0 });
   assert.match(partial.events.find(event => event.messageId === message(3)).notification.update.content.text, /wait/);
-  assert.equal((await request(port, { method: "prompt", conversationId: id(1), messageId: message(3), body: "again" })).status, "cancelled");
+  assert.equal((await request(port, { method: "prompt", conversationId: id(1), messageId: message(3), content: text("again") })).status, "cancelled");
 
   await request(port, { method: "cancel", conversationId: id(1), messageId: message(4) });
-  assert.equal((await request(port, { method: "prompt", conversationId: id(1), messageId: message(4), body: "never send" })).status, "cancelled");
+  assert.equal((await request(port, { method: "prompt", conversationId: id(1), messageId: message(4), content: text("never send") })).status, "cancelled");
   assert.equal((await request(port, { method: "events", conversationId: id(1), after: 0 })).events.some(event => event.messageId === message(4)), false);
 
   const archive = path.join(temporary, "session.tar.gz");
@@ -164,20 +165,20 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
   const second = await launch(home);
   assert.equal((await request(port, { ...start(id(1)), archivePath: archive })).ok, true);
   assert.equal((await request(port, { method: "events", conversationId: id(1), after: 0 })).events.length, 0);
-  await request(port, { method: "prompt", conversationId: id(1), messageId: message(5), body: "continue" });
+  await request(port, { method: "prompt", conversationId: id(1), messageId: message(5), content: text("continue") });
   await until(() => status(id(1)), result => result.status === "replied");
   const events = (await request(port, { method: "events", conversationId: id(1), after: 0 })).events;
-  assert.match(events[0].notification.update.content.text, /remember-one/);
+  assert.match(events[0].notification.update.content.text, /remember-one image/);
   assert.doesNotMatch(events[0].notification.update.content.text, /private-two|replay/);
   assert.equal((await status(id(2))).status, "missing");
   // An archive from another harness stays unread: the conversation opens a fresh session.
   assert.equal((await request(port, { ...start(id(3)), archivePath: archive, harness: "other" })).ok, true);
-  await request(port, { method: "prompt", conversationId: id(3), messageId: message(8), body: "fresh" });
+  await request(port, { method: "prompt", conversationId: id(3), messageId: message(8), content: text("fresh") });
   await until(() => status(id(3)), result => result.status === "replied");
   const fresh = (await request(port, { method: "events", conversationId: id(3), after: 0 })).events;
   assert.equal(fresh[0].notification.update.content.text, "fresh");
 
-  await request(port, { method: "prompt", conversationId: id(1), messageId: message(6), body: "wait" });
+  await request(port, { method: "prompt", conversationId: id(1), messageId: message(6), content: text("wait") });
   await request(port, { method: "cancel", conversationId: id(1), messageId: message(5) });
   assert.equal((await status(id(1))).status, "running");
   assert.equal((await status(id(1))).stopReason, "");
