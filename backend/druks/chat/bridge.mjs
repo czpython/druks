@@ -26,6 +26,15 @@ function readState(directory) {
   return { status: "missing", sequence: 0, messageId: "", sessionId: "", harness: "", epoch: randomUUID(), archivePath: "" };
 }
 
+// Druks never sees a secret. The box holds its placeholder in an environment variable, and a
+// file refers to it as ${NAME}, the way a shell string would.
+function fillPlaceholders(content) {
+  return content.replace(/\$\{(\w+)\}/g, (_, name) => {
+    if (!(name in process.env)) throw new Error(`The sandbox environment lacks ${name}.`);
+    return process.env[name];
+  });
+}
+
 function readEvents(filename) {
   if (!fs.existsSync(filename)) return [];
   return fs.readFileSync(filename, "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line));
@@ -117,12 +126,7 @@ class Conversation {
     }
     for (const [filename, content] of Object.entries(request.files)) {
       fs.mkdirSync(path.dirname(filename), { recursive: true });
-      // The box holds each secret as a placeholder in its environment, so a file names the variable.
-      const filled = content.replace(/\$\{(\w+)\}/g, (_, name) => {
-        if (!(name in process.env)) throw new Error(`The sandbox environment lacks ${name}.`);
-        return process.env[name];
-      });
-      fs.writeFileSync(filename, filled, { mode: 0o600 });
+      fs.writeFileSync(filename, fillPlaceholders(content), { mode: 0o600 });
     }
     const [command, ...args] = request.command;
     const child = spawn(command, args, { cwd: this.root, env: { ...process.env, ...request.env }, stdio: ["pipe", "pipe", "pipe"] });
