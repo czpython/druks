@@ -108,11 +108,11 @@ class GitHubChannel(Channel):
 
     @classmethod
     async def get_prompt_context(cls, session: AsyncSession, conversation: Conversation) -> dict:
-        """Whether the repository is private: the prompt tells the agent who can read
-        its reply."""
+        """Whether the repository is private, so the agent knows who can read its reply,
+        and the login of the person it answers."""
         repo = conversation.thread_id.partition("#")[0]
         repository = await (await Github.get_client()).get_repository(repo)
-        return {"is_private": repository["private"]}
+        return {"is_private": repository["private"], "user_name": conversation.user_name}
 
     @classmethod
     async def read_thread(cls, session: AsyncSession, conversation: Conversation) -> list[dict]:
