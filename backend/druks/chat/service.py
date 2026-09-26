@@ -4,6 +4,7 @@ import json
 import logging
 from contextlib import suppress
 from datetime import timedelta
+from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
 import asyncssh
@@ -286,7 +287,7 @@ async def send_turn(
             "prompt",
             conversationId=conversation.id,
             messageId=delivered_messages[-1].id,
-            content=await get_turn_content(delivered_messages),
+            content=await get_turn_content(host, conversation_root, delivered_messages),
             timeout=timeout,
         )
         await publish(conversation.id, {"type": "messages"})
@@ -294,22 +295,39 @@ async def send_turn(
     return
 
 
-async def get_turn_content(messages: list[Message]) -> list[dict]:
-    """The ACP content blocks the agent reads: each message's text, then its image."""
+async def get_turn_content(
+    host: Host, conversation_root: str, messages: list[Message]
+) -> list[dict]:
+    """The ACP content blocks the agent reads: each message's text, then its file. An
+    image travels in the prompt. Audio adds nothing. Any other file goes to the
+    conversation's folder in the sandbox, and the agent gets a link to it."""
     content = []
     for message in messages:
         if message.body:
             content.append({"type": "text", "text": message.body})
-        file = message.file
-        if file and file.content_type.startswith("image/") and file.size <= MAX_UPLOAD_BYTES:
-            image = await asyncio.to_thread(get_file_storage().open, file.id)
-            content.append(
-                {
-                    "type": "image",
-                    "data": base64.b64encode(image).decode(),
-                    "mimeType": file.content_type,
-                }
-            )
+        if file := message.file:
+            if file.content_type.startswith("image/") and file.size <= MAX_UPLOAD_BYTES:
+                image = get_file_storage().open(file.id)
+                content.append(
+                    {
+                        "type": "image",
+                        "data": base64.b64encode(image).decode(),
+                        "mimeType": file.content_type,
+                    }
+                )
+            elif not file.content_type.startswith("audio/"):
+                # The sender names the file. Only the base name joins the sandbox path.
+                name = PurePosixPath(file.name).name
+                remote = f"{conversation_root}/files/{file.id}/{name}"
+                await host.upload_file(local=get_file_storage().path(file.id), remote=remote)
+                content.append(
+                    {
+                        "type": "resource_link",
+                        "uri": PurePosixPath(remote).as_uri(),
+                        "name": name,
+                        "mimeType": file.content_type,
+                    }
+                )
     return content
 
 

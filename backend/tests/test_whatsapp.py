@@ -169,6 +169,10 @@ def message_event(chat, body, *, key="MSG1", from_me=False, session_name="sessio
     }
 
 
+def waha_media(name, mimetype):
+    return {"url": f"http://waha.test/api/files/{name}", "mimetype": mimetype}
+
+
 def status_event(me_id=NUMBER, session_name="session_one", status="WORKING", engine="GOWS"):
     return {
         "id": "evt_status",
@@ -341,11 +345,16 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
     monkeypatch.setattr(WahaClient, "download", AsyncMock(return_value=b"\x89PNG"))
     connection = await link(druks_db, await bot_account(druks_db))
     photo = message_event(ANA, "", key="M2")
-    media = {"url": "http://waha.test/api/files/photo.png", "mimetype": "image/png"}
-    photo["payload"].update(hasMedia=True, media=media)
+    photo["payload"].update(hasMedia=True, media=waha_media("photo.png", "image/png"))
+    form = message_event(ANA, "Here is the form", key="M4")
+    form["payload"].update(hasMedia=True, media=waha_media("form.pdf", "application/pdf"))
+    note = message_event(ANA, "", key="M5")
+    note["payload"].update(hasMedia=True, media=waha_media("note.oga", "audio/ogg"))
     await receive(connection, message_event(ANA, "Hello", key="M1"))
     await receive(connection, photo)
     await receive(connection, message_event(ANA, "And the second one?", key="M3"))
+    await receive(connection, form)
+    await receive(connection, note)
     [conversation] = await Conversation.list_for_connection(druks_db, connection.id)
     config = SimpleNamespace(
         harness_class=ClaudeHarness,
@@ -361,7 +370,9 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
         "druks.mcp.inbound.load_settings",
         lambda: SimpleNamespace(urls=Urls(webhook_host="hooks.test", endpoint="")),
     )
-    host = SimpleNamespace(id="bot-sandbox", ssh_username="druks", aclose=AsyncMock())
+    host = SimpleNamespace(
+        id="bot-sandbox", ssh_username="druks", aclose=AsyncMock(), upload_file=AsyncMock()
+    )
     monkeypatch.setattr(service, "get_sandbox", AsyncMock(return_value=(host, SimpleNamespace())))
     monkeypatch.setattr(service, "sandbox_client", SimpleNamespace(set_expiry=AsyncMock()))
     monkeypatch.setattr(Bridge, "reply", AsyncMock(return_value=("Your ticket is open.", [])))
@@ -392,19 +403,29 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
 
     await service.deliver_pending(druks_db, conversation)
 
+    await druks_db.refresh(conversation, ["messages"])
+    *asked, reply = conversation.messages
+    copy = f"/home/druks/work/chat/{conversation.id}/files/{asked[3].file.id}/form.pdf"
     [prompt] = [values for method, values in requests if method == "prompt"]
     assert prompt["content"] == [
         {"type": "text", "text": "Hello"},
         {"type": "image", "data": base64.b64encode(b"\x89PNG").decode(), "mimeType": "image/png"},
         {"type": "text", "text": "And the second one?"},
+        {"type": "text", "text": "Here is the form"},
+        {
+            "type": "resource_link",
+            "uri": f"file://{copy}",
+            "name": "form.pdf",
+            "mimeType": "application/pdf",
+        },
     ]
     assert prompt["timeout"] == 60
+    [upload] = host.upload_file.await_args_list
+    assert (upload.kwargs["local"].is_file(), upload.kwargs["remote"]) == (True, copy)
     [start] = [values for method, values in requests if method == "start"]
     assert start["headers"] == [{"name": CONVERSATION_HEADER, "value": conversation.id}]
     assert start["meta"]["claudeCode"]["options"]["systemPrompt"] == "Be kind."
-    await druks_db.refresh(conversation, ["messages"])
-    *asked, reply = conversation.messages
-    assert [message.state for message in asked] == [MessageState.REPLIED] * 3
+    assert [message.state for message in asked] == [MessageState.REPLIED] * 5
     assert reply.source_id == "REPLY1"
     sends = [body for method, path, body in waha.calls if path == "/api/sendText"]
     assert sends == [
