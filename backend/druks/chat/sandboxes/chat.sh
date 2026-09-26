@@ -10,5 +10,7 @@ if ! command -v node >/dev/null 2>&1 || ! node -e 'process.exit(+(Number(process
     $as_root apt-get install -y nodejs
 fi
 $as_root mkdir -p /opt/druks-chat
+# The Codex adapter bundles its own Codex, so chat and runs carry two Codex versions.
 $as_root npm install --prefix /opt/druks-chat --omit=dev --no-audit --no-fund \
-    @agentclientprotocol/claude-agent-acp@0.79.0 @agentclientprotocol/sdk@1.4.0
+    @agentclientprotocol/claude-agent-acp@0.79.0 @agentclientprotocol/codex-acp@1.13.1 \
+    @agentclientprotocol/sdk@1.4.0

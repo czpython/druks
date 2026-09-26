@@ -13,6 +13,7 @@ from typing import Any
 from drukbox_sdk import Secret
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from druks.accounts.enums import AccountKind
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
@@ -161,7 +162,7 @@ def _auth_file(identity: dict) -> str:
             "OPENAI_API_KEY": None,
             "tokens": {
                 "id_token": ".".join((*segments, "unsigned")),
-                "access_token": f"${_SUBSCRIPTION_TOKEN.upper()}",
+                "access_token": f"${{{_SUBSCRIPTION_TOKEN.upper()}}}",
                 # The one refresh Codex attempts after a 401 fails fast on this
                 # value, and the turn ends. Druks refreshes; the box never does.
                 "refresh_token": "druks-placeholder",
@@ -305,6 +306,50 @@ class CodexHarness(Harness):
     billing_options = frozenset({"subscription", "api_key"})
     default_model = "openai/gpt-5.5"
     command = "codex"
+    adapter_command = ("/opt/druks-chat/node_modules/.bin/codex-acp",)
+    reply_command = (command, "exec", "--skip-git-repo-check")
+
+    @classmethod
+    def get_acp_session(
+        cls,
+        account_type: AccountKind,
+        model: str,
+        prompt: str,
+        identity: dict,
+        sandbox_home: str,
+        conversation_root: str,
+    ) -> dict:
+        """The adapter reads no _meta: the config rides CODEX_CONFIG and the starting mode
+        INITIAL_AGENT_MODE. The login goes to auth.json, which the adapter reads at start."""
+        model_id = model.partition("/")[2]
+        if identity:
+            login = _auth_file(identity)
+        else:
+            login = json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": "${CODEX_API_KEY}"})
+        files = {f"{sandbox_home}/.codex/auth.json": login}
+        if account_type == AccountKind.OPERATOR:
+            config: dict[str, object] = {"model": model_id, "developer_instructions": prompt}
+            mode = "agent-full-access"
+        else:
+            files[f"{conversation_root}/instructions.md"] = prompt
+            config = {
+                "model": model_id,
+                "model_instructions_file": f"{conversation_root}/instructions.md",
+                "features": {"shell_tool": False},
+                "web_search": "disabled",
+                "tools": {"view_image": False},
+                "sandbox_mode": "read-only",
+            }
+            mode = "read-only"
+        return {
+            "meta": {},
+            "env": {"CODEX_CONFIG": json.dumps(config), "INITIAL_AGENT_MODE": mode},
+            "files": files,
+            "mode": mode,
+            "model": model_id,
+            "options": {"model": "model", "effort": "reasoning_effort", "fast": "fast-mode"},
+            "sessionFiles": [f"{sandbox_home}/.codex/sessions/**/rollout-*{{sessionId}}.jsonl"],
+        }
 
     # The CLI's terminal {"type":"error"} event carries prose, not status
     # shapes: stream drops after its internal retries, usage windows, 429s.

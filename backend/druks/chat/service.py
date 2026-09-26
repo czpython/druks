@@ -238,11 +238,11 @@ async def send_turn(
     status = await bridge.request("status", conversationId=conversation.id)
     if status["status"] == "running":
         raise ChatBridgeError("The bridge has a turn that Druks did not expect.")
-    home = get_remote_home(host.ssh_username)
-    root = f"{get_work_root(host.ssh_username)}/chat/{conversation.id}"
+    sandbox_home = get_remote_home(host.ssh_username)
+    conversation_root = f"{get_work_root(host.ssh_username)}/chat/{conversation.id}"
     archive_path = ""
     if not status["sessionId"] and conversation.session_file:
-        archive_path = f"{root}/restore.tar.gz"
+        archive_path = f"{conversation_root}/restore.tar.gz"
         await host.upload_file(
             local=get_file_storage().path(conversation.session_file.id),
             remote=archive_path,
@@ -264,7 +264,9 @@ async def send_turn(
         mcpUrl=server.url,
         bearerVariable=get_bearer_token_env_var(server.name),
         headers=headers,
-        **config.harness_class.get_acp_session(account_type, config.model, prompt, home, root),
+        **config.harness_class.get_acp_session(
+            account_type, config.model, prompt, config.identity, sandbox_home, conversation_root
+        ),
     )
     expires_at = Base.utc_now() + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
     await sandbox_client.set_expiry(host_id=host.id, expires_at=expires_at)

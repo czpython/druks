@@ -45,7 +45,13 @@ class ClaudeHarness(Harness):
 
     @classmethod
     def get_acp_session(
-        cls, account_type: AccountKind, model: str, prompt: str, home: str, root: str
+        cls,
+        account_type: AccountKind,
+        model: str,
+        prompt: str,
+        identity: dict,
+        sandbox_home: str,
+        conversation_root: str,
     ) -> dict:
         """Chat has no asks, and the model goes in the _meta because the adapter's model
         option takes only the models its CLI lists."""
@@ -68,8 +74,8 @@ class ClaudeHarness(Harness):
             "model": model_id,
             "options": {"model": "model", "effort": "effort", "fast": "fast"},
             "sessionFiles": [
-                f"{home}/.claude/projects/*/{{sessionId}}.jsonl",
-                f"{home}/.claude/projects/*/{{sessionId}}",
+                f"{sandbox_home}/.claude/projects/*/{{sessionId}}.jsonl",
+                f"{sandbox_home}/.claude/projects/*/{{sessionId}}",
             ],
         }
 

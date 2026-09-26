@@ -100,10 +100,16 @@ class Harness(ABC):
 
     @classmethod
     def get_acp_session(
-        cls, account_type: AccountKind, model: str, prompt: str, home: str, root: str
+        cls,
+        account_type: AccountKind,
+        model: str,
+        prompt: str,
+        identity: dict,
+        sandbox_home: str,
+        conversation_root: str,
     ) -> dict:
-        """The ACP session of an ``account_type`` conversation under ``root``: what the
-        bridge spawns the adapter with, and the session's file patterns, as absolute paths."""
+        """The ACP session of an ``account_type`` conversation: what the bridge spawns
+        the adapter with, and the session's file patterns, as absolute paths."""
         raise exceptions.HarnessError(f"{cls.name} has no ACP adapter.")
 
     @classmethod

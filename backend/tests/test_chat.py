@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from types import SimpleNamespace
@@ -19,6 +20,7 @@ from druks.database import get_session
 from druks.files.datastructures import File
 from druks.files.models import FileRecord
 from druks.harnesses.claude import ClaudeHarness
+from druks.harnesses.codex import CodexHarness
 from druks.mcp.enums import Toolkit
 from druks.mcp.inbound import get_druks_account_token, get_druks_mcp_server
 from druks.models import Base
@@ -32,6 +34,8 @@ from druks.testing import asgi_client, configure_app_for_test, make_settings, se
 from druks.user_settings.models import SettingsOverride
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy import delete
+
+CODEX_KEY_LOGIN = json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": "${CODEX_API_KEY}"})
 
 
 @pytest.fixture
@@ -69,7 +73,11 @@ async def sandbox(druks_db, conversation, monkeypatch):
     monkeypatch.setattr(service, "get_sandbox", AsyncMock(return_value=(host, identity)))
     monkeypatch.setattr(service, "get_running_sandbox", AsyncMock(return_value=host))
     config = SimpleNamespace(
-        harness_class=ClaudeHarness, model="anthropic/claude-opus-4-7", effort="", fast_mode=False
+        harness_class=ClaudeHarness,
+        model="anthropic/claude-opus-4-7",
+        identity={},
+        effort="",
+        fast_mode=False,
     )
     monkeypatch.setattr(service, "get_agent", AsyncMock(return_value=(config, "", Toolkit.ALL)))
     monkeypatch.setattr(service, "sandbox_client", SimpleNamespace(set_expiry=AsyncMock()))
@@ -471,15 +479,73 @@ async def test_new_sandbox_restores_archive_and_drains_pending_messages(
                 ],
             },
         ),
+        (
+            CodexHarness,
+            AccountKind.OPERATOR,
+            {
+                "meta": {},
+                "env": {
+                    "CODEX_CONFIG": json.dumps(
+                        {"model": "gpt-5.5", "developer_instructions": "Be kind."}
+                    ),
+                    "INITIAL_AGENT_MODE": "agent-full-access",
+                },
+                "files": {"/home/druks/.codex/auth.json": CODEX_KEY_LOGIN},
+                "mode": "agent-full-access",
+                "model": "gpt-5.5",
+                "options": {"model": "model", "effort": "reasoning_effort", "fast": "fast-mode"},
+                "sessionFiles": ["/home/druks/.codex/sessions/**/rollout-*{sessionId}.jsonl"],
+            },
+        ),
+        (
+            CodexHarness,
+            AccountKind.BOT,
+            {
+                "meta": {},
+                "env": {
+                    "CODEX_CONFIG": json.dumps(
+                        {
+                            "model": "gpt-5.5",
+                            "model_instructions_file": "/home/druks/work/chat/one/instructions.md",
+                            "features": {"shell_tool": False},
+                            "web_search": "disabled",
+                            "tools": {"view_image": False},
+                            "sandbox_mode": "read-only",
+                        }
+                    ),
+                    "INITIAL_AGENT_MODE": "read-only",
+                },
+                "files": {
+                    "/home/druks/.codex/auth.json": CODEX_KEY_LOGIN,
+                    "/home/druks/work/chat/one/instructions.md": "Be kind.",
+                },
+                "mode": "read-only",
+                "model": "gpt-5.5",
+                "options": {"model": "model", "effort": "reasoning_effort", "fast": "fast-mode"},
+                "sessionFiles": ["/home/druks/.codex/sessions/**/rollout-*{sessionId}.jsonl"],
+            },
+        ),
     ],
 )
 def test_the_harness_answers_the_chat_contract_for_an_operator_and_a_bot(
     harness, account_type, expected
 ):
-    home = "/home/druks"
-    root = f"{home}/work/chat/one"
-    session = harness.get_acp_session(account_type, harness.default_model, "Be kind.", home, root)
+    sandbox_home = "/home/druks"
+    conversation_root = f"{sandbox_home}/work/chat/one"
+    session = harness.get_acp_session(
+        account_type, harness.default_model, "Be kind.", {}, sandbox_home, conversation_root
+    )
     assert session == expected
+
+
+def test_a_codex_subscription_writes_its_login_before_the_spawn():
+    identity = {"email": "op@example.com", "account_id": "acc-1", "plan": "pro"}
+    session = CodexHarness.get_acp_session(
+        AccountKind.OPERATOR, "openai/gpt-5.5", "Be kind.", identity, "/home/druks", "/root/one"
+    )
+    login = json.loads(session["files"]["/home/druks/.codex/auth.json"])
+    assert login["tokens"]["access_token"] == "${CODEX_SUBSCRIPTION_TOKEN}"
+    assert login["tokens"]["account_id"] == "acc-1"
 
 
 async def test_a_bot_on_a_harness_with_no_adapter_fails_at_the_first_turn(druks_db, conversation):
@@ -489,7 +555,7 @@ async def test_a_bot_on_a_harness_with_no_adapter_fails_at_the_first_turn(druks_
         druks_db, Audience.provider("anthropic"), "sk-key", pasted_by=conversation.account
     )
 
-    with pytest.raises(ChatHarnessError, match="Chat runs on claude. The Bot's settings select pi"):
+    with pytest.raises(ChatHarnessError, match="Chat runs on claude, codex. The Bot's settings"):
         await service.deliver_pending(druks_db, conversation)
 
 
