@@ -4,7 +4,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type { AppSettings, CallNumber } from '../api/types'
 import { appLabel } from '../apps/registry'
+import { dur } from '../lib/format'
+import { useFormatters } from '../lib/preferences'
 import { Select } from './Control'
+import '../chat.css'
 
 /** The phone numbers of an app's open Bot. */
 export function CallsPane({ app }: { app: AppSettings }) {
@@ -114,10 +117,81 @@ function CallNumbersPane({ app }: { app: string }) {
                   </button>
                 </div>
               )}
+              <NumberCalls numberId={number.id} />
             </div>
           ))}
         </div>
       )}
     </div>
+  )
+}
+
+function NumberCalls({ numberId }: { numberId: string }) {
+  const format = useFormatters()
+  const calls = useQuery({ queryKey: ['calls', numberId], queryFn: () => api.calls(numberId) })
+  const [openCallId, setOpenCallId] = useState<string | null>(null)
+
+  if (calls.isPending) return <p role="status">Loading calls…</p>
+  if (calls.isError)
+    return (
+      <p className="mcp-error" role="alert">
+        Could not load calls.{' '}
+        <button className="set-btn ghost" onClick={() => void calls.refetch()}>
+          Try again
+        </button>
+      </p>
+    )
+  if (!calls.data.length) return null
+  return (
+    <ul className="call-list" aria-label="Calls">
+      {calls.data.map((call) => (
+        <li key={call.id}>
+          <button
+            className="call-row"
+            aria-expanded={call.id === openCallId}
+            onClick={() => setOpenCallId(call.id === openCallId ? null : call.id)}
+          >
+            <span className="connection-name">{call.caller}</span>
+            <time dateTime={call.createdAt} title={format.absTime(call.createdAt)}>
+              {format.absTimeCompact(call.createdAt)}
+            </time>
+            <span>{dur((Date.parse(call.lastLineAt) - Date.parse(call.createdAt)) / 1000)}</span>
+          </button>
+          {call.id === openCallId && <CallTranscript numberId={numberId} callId={call.id} />}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function CallTranscript({ numberId, callId }: { numberId: string; callId: string }) {
+  const lines = useQuery({
+    queryKey: ['callLines', callId],
+    queryFn: () => api.callLines(numberId, callId),
+  })
+
+  if (lines.isPending) return <p role="status">Loading transcript…</p>
+  if (lines.isError)
+    return (
+      <p className="mcp-error" role="alert">
+        Could not load the transcript.{' '}
+        <button className="set-btn ghost" onClick={() => void lines.refetch()}>
+          Try again
+        </button>
+      </p>
+    )
+  return (
+    <section className="call-transcript" aria-label="Transcript">
+      {lines.data.map((line) => (
+        <article className="chat-user" key={line.id}>
+          <div className="chat-message-meta">{line.role === 'user' ? 'Caller' : 'Assistant'}</div>
+          {line.role === 'user' ? (
+            <div className="chat-user-body chat-user-transcript">{line.transcript}</div>
+          ) : (
+            <div className="chat-user-body">{line.body}</div>
+          )}
+        </article>
+      ))}
+    </section>
   )
 }

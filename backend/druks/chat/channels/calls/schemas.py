@@ -16,3 +16,12 @@ class NumberResponse(Schema):
 class TwilioNumberResponse(Schema):
     sid: str
     number: str = Field(validation_alias="phone_number")
+
+
+class CallResponse(Schema):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    caller: str
+    created_at: datetime
+    last_line_at: datetime

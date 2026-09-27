@@ -222,10 +222,14 @@ async def test_a_pickup_needs_a_valid_token_and_twilios_signature(druks_db, druk
     assert [answer.status_code for answer in answers] == [401, 401, 401]
 
 
-async def test_the_lines_of_a_call_land_in_the_order_they_were_said(druks_db, druks_client, twilio):
+async def test_an_operator_reads_the_lines_of_a_call_in_the_order_they_were_said(
+    druks_db, druks_client, twilio
+):
     connection = await link(druks_db)
+    earlier_call = await call(druks_db, connection, "CA0")
     conversation = await call(druks_db, connection)
     token = webhooks.get_call_token(connection, conversation)
+    await conversation.create_message(druks_db, "[Internal: Run r1 failed.]", is_internal=True)
     # The caller's second sentence reaches Druks before the first.
     lines = [
         (2, "user", "The one from Monday."),
@@ -239,16 +243,21 @@ async def test_the_lines_of_a_call_land_in_the_order_they_were_said(druks_db, dr
         await druks_client.post(VOICE_EVENTS, json={**line, "token": token})
     await druks_client.post(VOICE_EVENTS, json={"action": "ended", "token": token})
 
-    await druks_db.refresh(conversation, ["messages"])
-    transcript = sorted(conversation.messages, key=lambda message: message.source_id)
-    said = [(message.transcript or message.body, message.state) for message in transcript]
+    number = f"/api/chat/services/calls/numbers/{connection.id}"
+    calls = (await druks_client.get(f"{number}/calls")).json()
+    assert [(listed["id"], listed["caller"]) for listed in calls] == [
+        (conversation.id, CALLER),
+        (earlier_call.id, CALLER),
+    ]
+    transcript = (await druks_client.get(f"{number}/calls/{conversation.id}")).json()
+    said = [(line["transcript"] or line["body"], line["state"]) for line in transcript]
     assert said == [
         ("Is my ticket open?", MessageState.REPLIED),
         ("The one from Monday.", MessageState.REPLIED),
         ("It is open.", None),
         ("Thanks, and", MessageState.INTERRUPTED),
     ]
-    assert transcript[2].reply_to == transcript[1].id
+    assert transcript[2]["replyTo"] == transcript[1]["id"]
 
 
 async def test_a_failed_run_from_a_call_waits_for_the_callers_next_call(
