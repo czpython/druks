@@ -421,3 +421,23 @@ A number has no admin, and no agent turn runs on its calls. An operator answers
 the questions of the runs that its calls start, on the dashboard. **Remove**
 clears the number's voice URL at Twilio. The connection and its calls stay as
 history, and each new link is a new connection.
+
+### A call
+
+Twilio posts each call to Druks. Druks checks Twilio's signature, starts a new
+conversation for the caller, and answers with TwiML that tells Twilio to stream
+the call's audio to the voice server. Druks rejects a call to a number that no
+live connection holds.
+
+The voice model answers with the Bot's prompt and Druks's lines for a call. Its
+first words say that it is an automated assistant and that the call is
+transcribed. It calls the tools in the Bot's `user_tools` as the number's bot
+account, as often as the call needs, and it offers only what those tools can do.
+It knows the caller's number, the number called, the local time, the last 20
+lines of the caller's earlier calls to the number, and what Druks reported to
+those calls after they ended.
+
+Each line goes into the call's conversation as it is said: the caller's words
+as a transcript, and the assistant's words as its reply. A run that a call's
+tool starts reports back like a run that a chat starts, but nothing answers the
+report during the call. The caller hears the outcome on their next call.

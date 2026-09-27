@@ -75,16 +75,15 @@ async def publish(conversation_id: str, event: dict) -> None:
 
 async def get_agent(
     session: AsyncSession, conversation: Conversation
-) -> tuple[AgentConfig, str, AllowedTools]:
-    """How the conversation's agent runs: its settings, its system prompt, and the
-    tools its key allows."""
+) -> tuple[str, str, AllowedTools]:
+    """The conversation's agent: its Bot's id, its system prompt, and the tools its key
+    allows."""
     account_type = conversation.account.kind
     # A web conversation and an operator's own connection belong to Chat.
     app = "chat"
     if conversation.connection:
         app = conversation.connection.identity.get("app", app)
     bot = get_app(app).bot
-    config = await get_config(session, bot.id, conversation.account_id)
     template, tools = bot.prompt, Toolkit.ALL
     if account_type == AccountKind.BOT:
         tools = tuple(get_tool_name(name, [bot.app], {bot.app}) for name in bot.user_tools)
@@ -97,7 +96,7 @@ async def get_agent(
         channel = channels.get(conversation.source)
         context.update(await channel.get_prompt_context(session, conversation))
     prompt = await render_prompt(template, **context)
-    return config, f"{prompt}\n\n{INTERNAL_MESSAGES_PROMPT}", tools
+    return bot.id, f"{prompt}\n\n{INTERNAL_MESSAGES_PROMPT}", tools
 
 
 async def get_sandbox(
@@ -197,7 +196,8 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                 if await conversation.is_held(session):
                     return
                 await reset_live_stream(conversation.id)
-                config, prompt, tools = await get_agent(session, conversation)
+                bot_id, prompt, tools = await get_agent(session, conversation)
+                config = await get_config(session, bot_id, conversation.account_id)
                 if not config.harness_class.adapter_command:
                     adapters = ", ".join(
                         harness.name for harness in get_harnesses() if harness.adapter_command

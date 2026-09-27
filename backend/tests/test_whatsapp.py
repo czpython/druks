@@ -332,16 +332,13 @@ async def test_a_message_reaches_the_bot_of_its_numbers_app(druks_db, helpdesk, 
     [conversation] = await Conversation.list_for_connection(druks_db, connection.id)
     assert conversation.account_id == owner.id
     assert (conversation.user_id, conversation.user_phone) == (ANA, "+41700000001")
-    get_config = AsyncMock(return_value="config")
-    monkeypatch.setattr(service, "get_config", get_config)
     monkeypatch.setattr(service, "render_prompt", AsyncMock(return_value="Be kind."))
 
     assert await service.get_agent(druks_db, conversation) == (
-        "config",
+        "helpdesk.bot",
         f"Be kind.\n\n{INTERNAL_MESSAGES_PROMPT}",
         ("helpdesk_get_ticket",),
     )
-    assert get_config.await_args.args[1] == "helpdesk.bot"
 
 
 async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
@@ -377,7 +374,10 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
         timeout=60,
     )
     tools = ("helpdesk_get_ticket",)
-    monkeypatch.setattr(service, "get_agent", AsyncMock(return_value=(config, "Be kind.", tools)))
+    monkeypatch.setattr(
+        service, "get_agent", AsyncMock(return_value=("helpdesk.bot", "Be kind.", tools))
+    )
+    monkeypatch.setattr(service, "get_config", AsyncMock(return_value=config))
     monkeypatch.setattr(
         "druks.mcp.inbound.load_settings",
         lambda: SimpleNamespace(urls=Urls(webhook_host="hooks.test", endpoint="")),
@@ -765,9 +765,7 @@ async def test_operator_turns_use_the_apps_prompt_and_settings_without_a_timeout
         fast_mode=False,
         timeout=30,
     )
-    get_config = AsyncMock(return_value=config)
     render_prompt = AsyncMock(return_value="Operator prompt")
-    monkeypatch.setattr(service, "get_config", get_config)
     monkeypatch.setattr(service, "render_prompt", render_prompt)
     monkeypatch.setattr(
         "druks.mcp.inbound.load_settings",
@@ -779,13 +777,13 @@ async def test_operator_turns_use_the_apps_prompt_and_settings_without_a_timeout
     host = SimpleNamespace(id="operator-sandbox", ssh_username="druks")
     message = await conversation.get_unanswered_message(druks_db)
 
-    resolved_config, prompt, tools = await service.get_agent(druks_db, conversation)
+    bot_id, prompt, tools = await service.get_agent(druks_db, conversation)
     await service.send_turn(
-        druks_db, conversation, message, Bridge(host), SimpleNamespace(), resolved_config, prompt
+        druks_db, conversation, message, Bridge(host), SimpleNamespace(), config, prompt
     )
 
     bot = helpdesk.bot if app == "helpdesk" else Chat.bot
-    get_config.assert_awaited_once_with(druks_db, bot.id, operator.id)
+    assert bot_id == bot.id
     render_prompt.assert_awaited_once_with(bot.prompt, source=source, thread_id="")
     assert tools == Toolkit.ALL
     [start] = [call.kwargs for call in request.await_args_list if call.args[0] == "start"]

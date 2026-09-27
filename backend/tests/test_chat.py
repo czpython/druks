@@ -85,7 +85,8 @@ async def sandbox(druks_db, conversation, monkeypatch):
         effort="",
         fast_mode=False,
     )
-    monkeypatch.setattr(service, "get_agent", AsyncMock(return_value=(config, "", Toolkit.ALL)))
+    monkeypatch.setattr(service, "get_agent", AsyncMock(return_value=("chat.bot", "", Toolkit.ALL)))
+    monkeypatch.setattr(service, "get_config", AsyncMock(return_value=config))
     monkeypatch.setattr(service, "sandbox_client", SimpleNamespace(set_expiry=AsyncMock()))
     return host, identity
 
