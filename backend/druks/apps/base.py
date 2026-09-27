@@ -417,13 +417,15 @@ class App:
         from druks.ui import Page
 
         operations = cls.operations()
+        declarations = cls.pages()
+        landing = {declaration.route: declaration for declaration in declarations}.get("/")
         router = APIRouter(prefix="/pages", tags=[f"{cls.name}:pages"])
-        for declaration in cls.pages():
+        for declaration in declarations:
             router.add_api_route(
                 # The landing page's route is "/", and its snapshot answers at
                 # the bare /pages.
                 declaration.route.rstrip("/"),
-                cls._page_endpoint(declaration, operations),
+                cls._page_endpoint(declaration, operations, back=declaration.parent or landing),
                 methods=["GET"],
                 response_model=Page,
                 response_model_by_alias=True,
@@ -432,17 +434,28 @@ class App:
         return router
 
     @classmethod
-    def _page_endpoint(cls, declaration: "PageRoute", operations: "dict[str, Operation]"):
+    def _page_endpoint(
+        cls,
+        declaration: "PageRoute",
+        operations: "dict[str, Operation]",
+        *,
+        back: "PageRoute | None",
+    ):
         """``wraps`` keeps the page function's signature, so FastAPI still
-        validates every route parameter."""
-        from druks.ui import EmptyState, Page
+        validates every route parameter. A page whose subject is missing answers
+        an empty state that links ``back``."""
+        from druks.ui import EmptyState, Link, Page
+
+        controls = []
+        if back and back is not declaration:
+            controls.append(Link(back.label, page=back.name))
 
         @wraps(declaration.function)
         async def read_page(**parameters):
             try:
                 page = await declaration.function(**parameters)
             except ObjectNotFound as error:
-                return Page(str(error), blocks=[EmptyState(str(error))])
+                return Page(str(error), blocks=[EmptyState(str(error), controls=controls)])
             except Exception as error:
                 raise PageReadError(
                     cls.name, declaration.name, f"its own code raised {type(error).__name__}"

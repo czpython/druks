@@ -126,7 +126,7 @@ class ProjectRepo(StoredSubject):
         stmt = select(cls).where(cls.id == repo_id, cls.project_id == project_id).limit(1)
         return (await db_session().scalars(stmt)).first()
 
-    def get_key(self) -> str:
+    def __str__(self) -> str:
         return self.full_name
 
     def get_summary(self) -> "ProjectRepoSummary":
@@ -234,8 +234,8 @@ class WorkItem(StoredSubject):
     # The time of the GitHub verdict, or of the cancel reaction.
     resolved_at: Mapped[datetime | None] = mapped_column(default=None)
 
-    def get_key(self) -> str:
-        return self.ticket_key
+    def __str__(self) -> str:
+        return f"{self.ticket_key} {self.title}".strip()
 
     def get_summary(self) -> WorkItemSummary:
         return WorkItemSummary.model_validate(self)

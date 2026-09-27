@@ -10,10 +10,6 @@ class PullRequest(Subject):
     and its status carries the lifecycle."""
 
     @classmethod
-    def get(cls, repo: str, number: int) -> Self:
-        return cls(id=f"{repo}#{number}")
-
-    @classmethod
     async def get_or_none(cls, id: str) -> Self | None:
         # Ids reach the read side as free text off a URL, so a shape that names no
         # pull request is a miss rather than a crashed read.

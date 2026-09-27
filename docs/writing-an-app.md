@@ -859,7 +859,7 @@ A workflow with a subject starts with an instance of that class. A workflow
 without a subject passes `subject=None`.
 
 When the subject is a row you keep — one you list, edit, and show fields from —
-subclass `StoredSubject` instead of `Base`. The class name is the subject type:
+subclass `StoredSubject` instead of `Model`. The class name is the subject type:
 `Repository` becomes `repository`.
 
 ```python
@@ -870,34 +870,20 @@ from sqlalchemy.orm import Mapped
 class Repository(StoredSubject):
     full_name: Mapped[str]
 
-    def get_key(self) -> str:
+    def __str__(self) -> str:
         return self.full_name
 ```
 
-Druks supplies the rest: the table `night_watch_repository`, an `id`,
-`created_at` and `updated_at`, `create()`, `save()`, `delete()`, and a board of
-the newest hundred rows by `updated_at`. Each subject already supplies its ID
-and `key`. The key is its stable work key. The summary has an optional
-descriptive `title`; a subject without one leaves it absent. For a title or more
-fields, add a custom summary:
-
-```python
-from druks.workflows import SubjectSummary
-
-
-class RepositorySummary(SubjectSummary):
-    open_findings: int
-
-
-class Repository(StoredSubject):
-    summary_class = RepositorySummary
-```
-
-To scope the board by caller, or to select other rows, override
-`list_summaries()`.
+A subject's `__str__` is its name on runs, the Activity feed, and its board. The
+default is its type and id, such as `repository 7`. Its type and id identify it,
+so the name need not be unique. Druks supplies the rest: the table
+`night_watch_repository`, an `id`, `created_at` and `updated_at`, `create()`,
+`save()`, `delete()`, and a board of the newest hundred rows by `updated_at`, or
+in the class's declared ordering. To scope the board by caller, or to select
+other rows, override `list_summaries()`.
 
 If you keep no row for a subject, subclass `Subject`. The platform requires only
-an identity. The ID is the full record and its label:
+an identity. The ID is the full record and its name:
 
 ```python
 from druks.workflows import Subject, SubjectSummary
@@ -911,7 +897,10 @@ class PullRequest(Subject):
 
 Each ID names one of these subjects, so a detail read always answers. Override
 `get_or_none(id)` to reject an invalid shape. For example,
-`owner/repo#7` is a pull request and `nonsense` returns a 404.
+`owner/repo#7` is a pull request and `nonsense` returns a 404:
+`await PullRequest.get(id=subject_id)` raises `ObjectNotFound` for it, the same
+as `Model.get`. Code that already knows the parts builds the subject directly:
+`PullRequest(id=f"{repo}#{number}")`.
 
 An identity-only `Subject` a workflow declares must implement
 `list_summaries()`; a `StoredSubject` has a board by default. The board reads
@@ -994,15 +983,14 @@ Druks records these workflow facts without app calls:
 An external owner can announce an outcome after the run stops. Record that
 outcome when the owner reports it. Do not infer it from the run state.
 
-Each Activity row keeps its recorded work key and optional descriptive title.
-`start()` reads only the title from the supplied subject's `get_summary()`. It
-stores the title beside the key in the workflow attributes. Admission,
-transitions, workflow announcements, output artifacts, and operator cancellation
-use that run's recorded title. A rename during the run applies to the next run.
-A subject announcement reads its own summary when it records the event.
+Each Activity row keeps the subject's name as it was recorded. `start()` stores
+`str(subject)` in the workflow attributes. Admission, transitions, workflow
+announcements, output artifacts, and operator cancellation use that run's
+recorded name. A rename during the run applies to the next run. A subject
+announcement records the subject's name when it records the event.
 
-Druks records `payload.title`, `payload.run`, and `payload.kind`. An announcement
-that names one of them raises `WorkflowError`. A missing title leaves the key available.
+Druks records `payload.run` and `payload.kind`. An announcement that names one of
+them raises `WorkflowError`.
 A later rename or deletion does not change history. Search matches a literal,
 case-insensitive part of the recorded key or title. It does not search current
 subjects, failure text, or artifacts.
@@ -1106,14 +1094,32 @@ await report.delete()
 page with an empty state, so a route or page that names a row by id never
 spells either. `get_or_none` answers None instead. Both expect one row: two
 raise SQLAlchemy's `MultipleResultsFound`, so back the fields they read with a
-unique constraint. `filter` returns the matching rows in primary key order. A
-text value is read as its column's type, so an id straight off a URL finds its
-row. A read that needs another order, a limit, or anything but equality writes
-`select()`.
+unique constraint. `filter` returns the matching rows in primary key order, or in
+the order the class declares on its class line, in Django's form:
 
-A `Mapped[datetime]` column stores UTC. A `Mapped[SomeStrEnum]` column stores
-the member's value as text under a CHECK constraint named after the enum. A
-`Mapped[list]` or `Mapped[dict]` column is JSONB. Encrypted columns come from
+```python
+class Report(Model, ordering=("-created_at",)):
+    ...
+```
+
+A text value is read as its column's type, so an id straight off a URL finds its
+row. A read that needs a limit, a different order, or anything but equality
+writes `select()`:
+
+```python
+reports = await db_session().scalars(
+    select(Report).where(Report.status != "closed").order_by(Report.created_at).limit(20)
+)
+```
+
+A page that names a missing row by id answers an empty state that links back to
+its parent page, or to the app's landing page.
+
+A `Mapped[datetime]` column stores UTC. A `Mapped[SomeStrEnum]` or
+`Mapped[SomeLiteral]` column stores its value as text under a CHECK constraint of
+the allowed values. A `Mapped[list]` or `Mapped[dict]` column is JSONB; a typed
+one such as `Mapped[list[dict[str, Any]]]` names the type,
+`mapped_column(JSONB)`. Encrypted columns come from
 `druks.db.fields`: `EncryptedTextField` and `EncryptedJsonField`, with their
 value types `Secret` and `SecretsMapping`.
 

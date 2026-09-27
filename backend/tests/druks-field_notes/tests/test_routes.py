@@ -38,15 +38,9 @@ async def test_repository_board_and_detail_read_the_subject(druks_client):
     detail = await druks_client.get(f"/api/field_notes/repository/{repository.id}")
 
     assert board.status_code == 200
-    assert [row["summary"]["repo"] for row in board.json()["rows"]] == [newer.repo, repository.repo]
+    assert [row["summary"]["key"] for row in board.json()["rows"]] == [newer.repo, repository.repo]
     assert detail.status_code == 200
-    assert detail.json()["summary"] == {
-        "id": str(repository.id),
-        "key": "acme/widgets",
-        "title": None,
-        "repo": "acme/widgets",
-        "gist": None,
-    }
+    assert detail.json()["summary"] == {"id": str(repository.id), "key": "acme/widgets"}
 
 
 async def test_a_missing_note_is_a_404_on_a_route_and_an_empty_state_on_a_page(druks_client):
@@ -57,4 +51,6 @@ async def test_a_missing_note_is_a_404_on_a_route_and_an_empty_state_on_a_page(d
     assert route.json() == {"error": "HTTP_404", "detail": "No note with id 999"}
     assert page.status_code == 200
     assert page.json()["title"] == "No note with id 999"
-    assert page.json()["blocks"][0]["block"] == "empty_state"
+    [empty_state] = page.json()["blocks"]
+    assert empty_state["block"] == "empty_state"
+    assert [control["page"] for control in empty_state["controls"]] == ["notes"]

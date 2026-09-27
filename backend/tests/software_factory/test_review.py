@@ -36,7 +36,7 @@ def client(tmp_path: Path, druks_db, monkeypatch):
 def test_a_pull_requests_identity_is_its_handle():
     # This spelling is the dedup key, the route, the event identity and the replay
     # lookup all at once — normalising or rearranging it splits one review in two.
-    pull_request = PullRequest.get("acme/app", 7)
+    pull_request = PullRequest(id="acme/app#7")
 
     assert pull_request.identity == {"type": "pull_request", "id": "acme/app#7"}
     assert (pull_request.repo, pull_request.number) == ("acme/app", 7)
@@ -59,7 +59,7 @@ async def test_a_pull_request_heads_its_own_page():
 async def test_the_pull_request_board_and_page_mount(client: TestClient, druks_db):
     # PullRequestReview declares PullRequest, so the app mounts its board and
     # page — keyed by a handle that carries both a path separator and a `#`.
-    pull_request = PullRequest.get("acme/app", 7)
+    pull_request = PullRequest(id="acme/app#7")
     await seed_run(druks_db, kind=PullRequestReview.kind, subject=pull_request, state="running")
 
     (row,) = client.get("/api/software_factory/pull_request").json()["rows"]
@@ -84,7 +84,7 @@ async def test_a_queued_run_replays_through_its_subject():
     # separately, so the body binds and reads the pull request off the declaration.
     instance, run_kwargs = _bind_instance(
         PullRequestReview,
-        PullRequest.get("acme/app", 7).identity,
+        PullRequest(id="acme/app#7").identity,
         {"repo": "acme/app", "pr_number": 7, "requested_by": "dev@example.com"},
         account_id="review-account",
     )
@@ -96,7 +96,7 @@ async def test_a_queued_run_replays_through_its_subject():
 
 async def test_the_reviewer_prompt_names_the_pull_request_it_is_about():
     workflow = SimpleNamespace(
-        subject=PullRequest.get("acme/app", 7),
+        subject=PullRequest(id="acme/app#7"),
         input=SimpleNamespace(note=""),
     )
     workspace = SimpleNamespace(
@@ -121,7 +121,7 @@ async def test_comment_mode_reviews_publish_as_comments():
     # Unset review identity: the operator authors druks's own pull requests, so
     # its reviews publish as comments — the prompt carries that rule.
     workflow = SimpleNamespace(
-        subject=PullRequest.get("acme/app", 7),
+        subject=PullRequest(id="acme/app#7"),
         input=SimpleNamespace(note=""),
     )
     workspace = SimpleNamespace(
@@ -163,7 +163,7 @@ async def test_the_requester_goes_by_their_github_login_once_linked(druks_db, mo
     monkeypatch.setattr(ProjectRepo, "siblings", AsyncMock(return_value=[]))
     dev = await Account.get_or_create(druks_db, "dev@example.com")
     review, _ = _bind_instance(
-        PullRequestReview, PullRequest.get("acme/app", 7).identity, {}, account_id=dev.id
+        PullRequestReview, PullRequest(id="acme/app#7").identity, {}, account_id=dev.id
     )
 
     assert (await review.get_prompt_context())["requested_by"] == "dev@example.com"

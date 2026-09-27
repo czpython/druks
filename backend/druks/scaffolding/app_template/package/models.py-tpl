@@ -4,11 +4,12 @@ from druks.db import Model, StoredSubject
 # app and the class ("{{ name }}_report" for ``Report``), keeps the app's own migration
 # history in ``alembic_version_{{ name }}``, and enforces the "{{ name }}_" prefix at boot.
 # A model reads by field (``get``, ``get_or_none``, ``filter``) and writes with
-# ``create``, ``save``, and ``delete``.
+# ``create``, ``save``, and ``delete``; ``class Report(Model, ordering=("-created_at",))``
+# sets the order ``filter`` reads in.
 # One of these models is usually the thing your runs work on — a note, a repo, a
 # ticket. Subclass ``StoredSubject`` for that one and point a workflow at it with
 # ``subject = ThatModel``: it also gets an id, created_at, updated_at, a board, and a
-# page. Set ``summary_class`` to put its own fields on the board, and override
+# page. Its ``__str__`` is its name on runs and the Activity feed. Override
 # ``list_summaries()`` to scope the board by caller. Something you keep no row for
 # subclasses ``druks.workflows.Subject`` instead and implements ``list_summaries()``
 # itself.

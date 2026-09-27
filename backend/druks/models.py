@@ -2,10 +2,20 @@ import enum
 import re
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 
 from pydantic import TypeAdapter
-from sqlalchemy import DateTime, Enum, Integer, Select, cast, false, select
+from sqlalchemy import (
+    DateTime,
+    Enum,
+    Integer,
+    Select,
+    UnaryExpression,
+    cast,
+    desc,
+    false,
+    select,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession, async_object_session
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -26,6 +36,17 @@ def snake_name(name: str) -> str:
     return _CAMEL_BOUNDARY.sub("_", name).lower()
 
 
+# A StrEnum or Literal column stores its value as text under a CHECK of the allowed
+# values, so the database refuses what the Python type refuses.
+_CHOICES = Enum(
+    enum.StrEnum,
+    native_enum=False,
+    create_constraint=True,
+    length=64,
+    values_callable=lambda members: [member.value for member in members],
+)
+
+
 class _UtcDateTime(TypeDecorator):
     impl = DateTime(timezone=True)
     cache_ok = True
@@ -36,16 +57,11 @@ class _UtcDateTime(TypeDecorator):
 
 class Base(AsyncAttrs, DeclarativeBase):
     # A model declares the Python type and no column type: datetimes are tz-aware
-    # UTC, a StrEnum is text under a CHECK named after the enum, list and dict are JSONB.
+    # UTC, a StrEnum or Literal is checked text, and list and dict are JSONB.
     type_annotation_map = {
         datetime: _UtcDateTime(),
-        enum.StrEnum: Enum(
-            enum.StrEnum,
-            native_enum=False,
-            create_constraint=True,
-            length=64,
-            values_callable=lambda members: [member.value for member in members],
-        ),
+        enum.StrEnum: _CHOICES,
+        Literal: _CHOICES,
         list: JSONB,
         dict: JSONB,
     }
@@ -68,7 +84,13 @@ class Model(Base):
 
     __abstract__ = True
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:
+    # The order ``filter`` and a subject's board read rows in, as the class declared
+    # it: ``class Report(Model, ordering=("-created_at",))`` is newest first.
+    _ordering: ClassVar[tuple[str, ...]] = ()
+
+    def __init_subclass__(cls, ordering: tuple[str, ...] = (), **kwargs: Any) -> None:
+        if ordering:
+            cls._ordering = ordering
         # A table is named for its app and its class unless the class names it.
         if "__tablename__" not in cls.__dict__ and not cls.__dict__.get("__abstract__"):
             # Cycle: the loader is built on this module's Base.
@@ -114,11 +136,20 @@ class Model(Base):
 
     @classmethod
     async def filter(cls, **fields: object) -> list[Self]:
-        """The rows whose fields hold these values, in primary key order."""
+        """The rows whose fields hold these values, in the class's ordering, or in
+        primary key order when it declares none."""
         from druks.db import db_session
 
-        statement = cls._select_matching(fields).order_by(*cls.__mapper__.primary_key)
+        ordering = cls._get_order_by() or cls.__mapper__.primary_key
+        statement = cls._select_matching(fields).order_by(*ordering)
         return list(await db_session().scalars(statement))
+
+    @classmethod
+    def _get_order_by(cls) -> list[str | UnaryExpression[object]]:
+        # Django's form: a leading "-" sorts that column descending.
+        return [
+            desc(name.removeprefix("-")) if name.startswith("-") else name for name in cls._ordering
+        ]
 
     @classmethod
     def _select_matching(cls, fields: dict[str, object]) -> Select[tuple[Self]]:
@@ -143,9 +174,6 @@ class StoredSubject(Model):
     __abstract__ = True
 
     subject_type: ClassVar[str]
-    # The header its board and page show it under. Set a ``SubjectSummary``
-    # subclass to add the app's own fields and a descriptive ``title``.
-    summary_class: ClassVar["type[SubjectSummary]"]
 
     id: Mapped[int] = mapped_column(primary_key=True)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -153,11 +181,6 @@ class StoredSubject(Model):
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         cls.subject_type = snake_name(cls.__name__)
-        if "summary_class" not in cls.__dict__:
-            # Cycle: the durable read side is built on this module's Base.
-            from druks.durable.schemas import SubjectSummary
-
-            cls.summary_class = SubjectSummary
         super().__init_subclass__(**kwargs)
 
     @property
@@ -168,14 +191,14 @@ class StoredSubject(Model):
             return {"type": self.subject_type, "id": self.id}
         raise ValueError(f"unsaved {type(self).__name__} has no identity — flush it first")
 
-    def get_key(self) -> str:
-        """The stable work key, such as a ticket key or PR number. Events record
-        the descriptive title from get_summary() beside this key."""
+    def __str__(self) -> str:
+        """How the subject shows itself on runs, events, the Activity feed, and its
+        board. Its type and id identify it, so the name need not be unique."""
         return f"{self.subject_type.replace('_', ' ')} {self.id}"
 
     @property
     def key(self) -> str:
-        return self.get_key()
+        return str(self)
 
     async def announce(self, topic: str, **facts: Any) -> None:
         """Record and deliver a domain fact in the current transaction."""
@@ -186,18 +209,24 @@ class StoredSubject(Model):
         await Event.announce(db_session(), self, topic, facts)
 
     def get_summary(self) -> "SubjectSummary":
-        return self.summary_class.model_validate(self)
+        """The header the platform's own screens show. An app with its own frontend
+        overrides it to add the fields that frontend reads."""
+        # Cycle: the durable read side is built on this module's Base.
+        from druks.durable.schemas import SubjectSummary
+
+        return SubjectSummary.model_validate(self)
 
     @classmethod
     async def list_summaries(cls, account_id: str | None) -> "Sequence[SubjectSummary]":
-        """The rows on this class's board, newest movement first, each as its domain
-        summary. ``account_id`` is the caller, or None outside a request; this shared
-        board ignores it. Override to scope the board by caller or to select
-        differently."""
+        """The rows on this class's board, in the class's ordering or newest movement
+        first, each as its summary. ``account_id`` is the caller, or None outside a
+        request; this shared board ignores it. Override to scope the board by caller
+        or to select differently."""
         from druks.db import db_session
 
-        # The newest hundred cover a board; a bigger one selects for itself.
-        statement = select(cls).order_by(cls.updated_at.desc(), cls.id.desc()).limit(100)
+        ordering = cls._get_order_by() or [cls.updated_at.desc(), cls.id.desc()]
+        # The first hundred cover a board; a bigger one selects for itself.
+        statement = select(cls).order_by(*ordering).limit(100)
         return [row.get_summary() for row in await db_session().scalars(statement)]
 
     async def get_status(self, *, workflow: "type[Workflow] | None" = None) -> "SubjectStatus":

@@ -19,11 +19,11 @@ async def test_note_create_list_and_save_gist(druks_db):
     assert (await Note.get(id=first.id)).gist == "The pump ran hot."
 
 
-async def test_rows_read_by_field(druks_db):
+async def test_rows_read_by_field_in_the_declared_order(druks_db):
     first = await Note.create(body="the pump ran hot")
     second = await Note.create(body="the pump ran hot")
 
-    assert await Note.filter(body="the pump ran hot") == [first, second]
+    assert await Note.filter(body="the pump ran hot") == [second, first]
     assert await Note.get(id=str(second.id)) == second
     assert await Note.get_or_none(id="not an id") is None
     with pytest.raises(ObjectNotFound, match="No note with id 0"):

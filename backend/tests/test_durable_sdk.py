@@ -91,7 +91,7 @@ STEP_RETRY_ATTEMPTS = 0
 class Widget(StoredSubject):
     __tablename__ = "test_widgets"
 
-    def get_key(self) -> str:
+    def __str__(self) -> str:
         return f"W-{self.id}"
 
 
@@ -428,7 +428,6 @@ async def test_attribution_rides_the_run_and_survives_resume(runtime):
         "subject_type": "widget",
         "subject_id": "878787",
         "subject_key": "W-878787",
-        "subject_title": None,
     }
     assert parked.account_id == account_id
     assert f"acct-before:{account_id}" in SINK
@@ -651,7 +650,6 @@ async def test_subject_gate_parks_unchanged(runtime):
         "subject_type": "widget",
         "subject_id": "636363",
         "subject_key": "W-636363",
-        "subject_title": None,
     }
 
     await parked.resume(action="go")

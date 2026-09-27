@@ -531,7 +531,7 @@ class PullRequestReview(Workflow):
         # reviewer is connected. The lookup raises a clear error before the run starts a VM.
         await Github.get()
         return await cls.start(
-            subject=PullRequest.get(repo, pr_number), account_id=account.id, note=note
+            subject=PullRequest(id=f"{repo}#{pr_number}"), account_id=account.id, note=note
         )
 
     async def run(self, note: str = "") -> None:

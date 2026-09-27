@@ -309,11 +309,11 @@ it('shows a classified failure and preserves its original message in a disclosur
   const failure = 'codex exited with 1. You hit your spend cap set by the owner of your workspace.'
   history.mockResolvedValue({ items: [{ ...result, app: 'software_factory', topic: 'workflow.failed',
     subjectType: 'work_item', subjectId: '42', subjectKey: 'DRU-42', payload: {
-      kind: 'software_factory.build', run: 'failed-attempt', title: 'Keep the recorded title', failure_code: 'spend_limit', failure,
+      kind: 'software_factory.build', run: 'failed-attempt', failure_code: 'spend_limit', failure,
     },
   }], cursor: '10:20:10', nextCursor: null })
   mount()
-  fireEvent.click(await screen.findByRole('button', { name: /DRU-42.*Keep the recorded title.*Build failed/ }))
+  fireEvent.click(await screen.findByRole('button', { name: /DRU-42.*Build failed/ }))
   const details = screen.getByRole('complementary', { name: 'Activity details' })
   expect(within(details).getByText('Spend limit reached')).toBeTruthy()
   expect(within(details).getByText('Ask the account owner to raise the spend limit before continuing.')).toBeTruthy()
@@ -416,16 +416,14 @@ it('groups consecutive rows by the account day across daylight saving and pagina
   expect(screen.getByText('23:30')).toBeTruthy()
 })
 
-it('keeps the full recorded title and failure in details when the row uses an excerpt', async () => {
-  const title = 'Keep all of this recorded title '.repeat(8)
+it('keeps the full failure in details when the row uses an excerpt', async () => {
   const failure = 'The repository cannot be opened. '.repeat(16)
-  history.mockResolvedValue({ items: [{ ...result, topic: 'workflow.failed', payload: { title, failure } }], cursor: '10:20:10', nextCursor: null })
+  history.mockResolvedValue({ items: [{ ...result, topic: 'workflow.failed', payload: { failure } }], cursor: '10:20:10', nextCursor: null })
   mount()
-  const row = await screen.findByRole('button', { name: /Pump A.*Keep all of this recorded title/ })
+  const row = await screen.findByRole('button', { name: /Pump A/ })
   expect(row.textContent).not.toContain(failure)
   fireEvent.click(row)
   const details = screen.getByRole('complementary')
-  expect(within(details).getByText(title.trim())).toBeTruthy()
   const technical = within(details).getByText('Technical details').closest('details')!
   expect(technical.textContent).toContain(failure)
   expect(technical.open).toBe(false)

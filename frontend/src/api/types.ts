@@ -69,12 +69,11 @@ export interface DashboardSchedules {
   rows: DashboardSchedule[]
 }
 
-// The base every app's subject summary satisfies; ``id`` keys its status,
-// timeline, and detail URL.
+// The header the platform shows a subject under; ``id`` keys its status,
+// timeline, and detail URL, and ``key`` is its name.
 export interface SubjectSummary {
   id: string
   key: string
-  title?: string | null
 }
 
 export interface SubjectStatus {
@@ -870,7 +869,6 @@ export interface FeedItem {
   subjectKey?: string | null
   payload: {
     [fact: string]: unknown
-    title?: string | null
     kind?: string | null
     run?: string | null
     gate?: string | null

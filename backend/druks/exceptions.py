@@ -43,7 +43,7 @@ class SessionNotBoundError(DruksError):
 
 
 class ObjectNotFound(DruksError):
-    """No row holds the values a read asked for."""
+    """Nothing matches the values a read asked for."""
 
     def __init__(self, model: str, fields: dict[str, object]) -> None:
         match = ", ".join(f"{name} {value}" for name, value in fields.items())

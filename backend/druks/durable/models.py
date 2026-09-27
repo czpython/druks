@@ -77,9 +77,6 @@ class Run(Base):
     subject_key: Mapped[str | None] = column_property(
         subject_attribute_expression(id, "subject_key")
     )
-    subject_title: Mapped[str | None] = column_property(
-        subject_attribute_expression(id, "subject_title")
-    )
     retry_from: Mapped[str | None] = column_property(retry_from_expression(id))
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     account: Mapped[Account] = relationship(lazy="joined", foreign_keys=[account_id])
@@ -183,11 +180,18 @@ class Run(Base):
 
     @classmethod
     async def get_latest_for_subject(
-        cls, session: AsyncSession, subject_type: str, subject_id: str, kind: str | None = None
+        cls,
+        session: AsyncSession,
+        subject_type: str,
+        subject_id: str,
+        kind: str | None = None,
+        *,
+        gate: str | None = None,
     ) -> "Run | None":
         """The run that speaks for the subject: a subject holds at most one active
         run per kind (queue dedup) and the next starts only once the last is
-        terminal, so the newest is the live one whenever anything is live."""
+        terminal, so the newest is the live one whenever anything is live. ``gate``
+        narrows to the newest run parked on that gate."""
         stmt = (
             select(cls)
             .where(subject_filter(cls.id, subject_type, subject_id))
@@ -197,6 +201,8 @@ class Run(Base):
         )
         if kind:
             stmt = stmt.where(cls.kind == kind)
+        if gate:
+            stmt = stmt.where(cls.input_gate == gate, cls.state == RunState.PARKED.value)
         return (await session.scalars(stmt)).first()
 
     @classmethod
@@ -734,7 +740,6 @@ class Artifact(Base, Uuid7Pk):
                 type=event["topic"],
                 subject=await run.get_subject(),
                 key=run.subject_key,
-                title=run.subject_title,
                 run=run.id,
                 kind=run.kind,
                 facts=facts,

@@ -5,7 +5,7 @@ from druks.workflows import WorkflowError
 from druks_field_notes.models import Repository
 
 
-async def test_recorded_titles_and_facts_survive_rename_and_deletion(druks_db, druks_client):
+async def test_recorded_names_and_facts_survive_rename_and_deletion(druks_db, druks_client):
     db_session.registry.set(druks_db)
     project = await Project.create(name="Pumps")
     item = await WorkItem.create(
@@ -25,8 +25,8 @@ async def test_recorded_titles_and_facts_survive_rename_and_deletion(druks_db, d
     page = (await druks_client.get("/api/events", params={**filters, "limit": 1})).json()
     [recorded] = page["items"]
     assert page["nextCursor"] is None
-    assert recorded["subjectKey"] == "PUMP-1"
-    assert recorded["payload"] == {**facts, "title": "Pump 50%_ hot"}
+    assert recorded["subjectKey"] == "PUMP-1 Pump 50%_ hot"
+    assert recorded["payload"] == facts
     assert set(recorded) == {
         "id",
         "seq",
@@ -44,7 +44,7 @@ async def test_recorded_titles_and_facts_survive_rename_and_deletion(druks_db, d
     ]
 
 
-async def test_a_summary_without_a_title_keeps_the_work_key_and_facts(druks_db, druks_client):
+async def test_an_announcement_records_the_subject_name_and_facts(druks_db, druks_client):
     db_session.registry.set(druks_db)
     repository = await Repository.create(repo="acme/observations")
     await repository.announce("repository.inspected", branch_name="main")
@@ -57,5 +57,5 @@ async def test_a_summary_without_a_title_keeps_the_work_key_and_facts(druks_db, 
 async def test_an_announcement_cannot_supply_what_druks_records(druks_db):
     db_session.registry.set(druks_db)
     repository = await Repository.create(repo="acme/observations")
-    with pytest.raises(WorkflowError, match="title"):
-        await repository.announce("repository.inspected", title="Forged title")
+    with pytest.raises(WorkflowError, match="kind"):
+        await repository.announce("repository.inspected", kind="forged.kind")

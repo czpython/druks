@@ -400,15 +400,9 @@ async def seed_run(
     await session.refresh(run, ["account"])
     identity = None
     if subject:
-        identity = {
-            **subject.identity,
-            "key": subject.key,
-            "title": subject.get_summary().title,
-        }
+        identity = {**subject.identity, "key": subject.key}
     await seed_dbos_status(session, run.id, state, subject=identity)
-    await session.refresh(
-        run, ["state", "updated_at", "subject_key", "subject_title", "retry_from"]
-    )
+    await session.refresh(run, ["state", "updated_at", "subject_key", "retry_from"])
     return run
 
 
@@ -437,7 +431,6 @@ async def seed_dbos_status(
             # start() always stamps a key; an identity dict without one is named
             # by its id, Subject.key's own rule.
             "subject_key": subject.get("key") or str(subject["id"]),
-            "subject_title": subject.get("title"),
         }
     await session.execute(
         workflow_status.insert().values(

@@ -1,13 +1,10 @@
 from druks.db import StoredSubject, db_session
+from druks.workflows import SubjectSummary
 from sqlalchemy import select
 from sqlalchemy.orm import Mapped, mapped_column
 
-from druks_field_notes.schemas import NoteSummary, RepositorySummary
 
-
-class Note(StoredSubject):
-    summary_class = NoteSummary
-
+class Note(StoredSubject, ordering=("-created_at", "-id")):
     # What the note is about — the raw observation an operator jotted down. A run's
     # agent reads this and writes back its gist.
     body: Mapped[str]
@@ -24,7 +21,7 @@ class Note(StoredSubject):
         await self.save()
 
     @classmethod
-    async def list_summaries(cls, account_id: str | None) -> list[NoteSummary]:
+    async def list_summaries(cls, account_id: str | None) -> list[SubjectSummary]:
         # How many the board shows is an operator knob, so it lives on the app.
         from druks_field_notes.app import FieldNotes
 
@@ -33,8 +30,6 @@ class Note(StoredSubject):
 
 
 class Repository(StoredSubject):
-    summary_class = RepositorySummary
-
     # ``owner/name``; a Survey run's RepoWorkspace clones it.
     repo: Mapped[str] = mapped_column(unique=True)
     gist: Mapped[str | None]
@@ -43,5 +38,5 @@ class Repository(StoredSubject):
         self.gist = gist
         await self.save()
 
-    def get_key(self) -> str:
+    def __str__(self) -> str:
         return self.repo
