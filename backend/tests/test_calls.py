@@ -28,8 +28,8 @@ from druks.testing import seed_run
 from sqlalchemy import func, select
 
 CALLER = "+15550199"
-VOICE_URL = "https://hooks.test/_external/twilio/calls/"
-VOICE_EVENTS = "/_external/voice/events/"
+CALLS_URL = "https://hooks.test/_external/twilio/calls/"
+CALLS_EVENTS = "/_external/calls/events/"
 
 
 @pytest.fixture
@@ -76,7 +76,11 @@ async def voice(druks_db, helpdesk, monkeypatch):
     bind_ambient_session(druks_db)
     await connect_service(
         "voice",
-        identity={"model": "openai/gpt-realtime-mini", "voice_name": ""},
+        identity={
+            "model": "openai/gpt-realtime-mini",
+            "voice_name": "",
+            "transcription_model": "gpt-4o-mini-transcribe",
+        },
         secrets={"key": "sk-voice"},
     )
     monkeypatch.setattr(service, "render_prompt", AsyncMock(return_value="Help with tickets."))
@@ -91,7 +95,7 @@ async def link(session):
     bind_ambient_session(session)
     await connect_service("twilio", identity={"account_sid": "AC1"}, secrets={"auth_token": "t"})
     owner = await Account.create_for_bot(session, AccountKind.BOT)
-    connection = await Twilio.link(session, owner, app="helpdesk", sid="PN1", voice_url=VOICE_URL)
+    connection = await Twilio.link(session, owner, app="helpdesk", sid="PN1", calls_url=CALLS_URL)
     await session.refresh(connection, ["account"])
     return connection
 
@@ -110,7 +114,7 @@ async def call(session, connection, call_sid="CA1"):
 
 
 async def ring(client, **fields):
-    signature = twilio_signature(VOICE_URL, fields)
+    signature = twilio_signature(CALLS_URL, fields)
     return await client.post(
         "/_external/twilio/calls/", data=fields, headers={"X-Twilio-Signature": signature}
     )
@@ -119,7 +123,7 @@ async def ring(client, **fields):
 async def pick_up(client, token):
     signature = twilio_signature(webhooks.get_stream_url(token), {})
     return await client.post(
-        VOICE_EVENTS, json={"action": "pickup", "token": token, "signature": signature}
+        CALLS_EVENTS, json={"action": "pickup", "token": token, "signature": signature}
     )
 
 
@@ -141,8 +145,8 @@ async def test_a_linked_number_sends_its_calls_to_druks_until_it_is_removed(
     assert not await druks_db.scalar(
         select(func.count()).select_from(Account).where(Account.kind == AccountKind.BOT_ADMIN)
     )
-    voice_url = {"VoiceUrl": VOICE_URL, "VoiceMethod": "POST"}
-    assert twilio[-1] == ("POST", "/IncomingPhoneNumbers/PN1.json", voice_url)
+    url_fields = {"VoiceUrl": CALLS_URL, "VoiceMethod": "POST"}
+    assert twilio[-1] == ("POST", "/IncomingPhoneNumbers/PN1.json", url_fields)
     again = await druks_client.post(
         "/api/chat/services/twilio/numbers", json={"app": "helpdesk", "sid": "PN1"}
     )
@@ -170,7 +174,17 @@ async def test_disconnecting_twilio_removes_its_numbers_first(druks_db, druks_cl
     assert not await Twilio.is_connected()
 
 
-async def test_a_call_to_a_linked_number_streams_to_the_voice_server(
+async def test_the_voice_card_refuses_a_model_of_another_vendor(druks_db, druks_client):
+    bind_ambient_session(druks_db)
+
+    answer = await druks_client.post(
+        "/api/services/voice", json={"model": "gpt-realtime-mini", "key": "sk-voice"}
+    )
+
+    assert answer.status_code == 422
+
+
+async def test_a_call_to_a_linked_number_streams_to_the_calls_server(
     druks_db, druks_client, twilio, voice
 ):
     connection = await link(druks_db)
@@ -187,7 +201,7 @@ async def test_a_call_to_a_linked_number_streams_to_the_voice_server(
     assert (conversation.account_id, conversation.source) == (connection.account_id, "call")
     assert (conversation.user_phone, conversation.thread_id) == (CALLER, "CA1")
     stream_url = re.search(r'<Stream url="([^"]+)"/>', stream_answer.text)[1]
-    assert stream_url.startswith("wss://hooks.test/_voice/calls/")
+    assert stream_url.startswith("wss://hooks.test/_calls/")
     assert await webhooks.get_call(druks_db, stream_url.rpartition("/")[2]) == conversation
 
 
@@ -198,9 +212,9 @@ async def test_callers_who_hide_their_number_share_no_history(
     tokens = []
     for call_sid in ("CA1", "CA2"):
         answer = await ring(druks_client, CallSid=call_sid, From="anonymous", To="+15550100")
-        tokens.append(re.search(r'/calls/([^"]+)"', answer.text)[1])
+        tokens.append(re.search(r'/_calls/([^"]+)"', answer.text)[1])
     line = {"action": "line", "sequence": 1, "role": "user", "text": "Is my refund done?"}
-    await druks_client.post(VOICE_EVENTS, json={**line, "token": tokens[0]})
+    await druks_client.post(CALLS_EVENTS, json={**line, "token": tokens[0]})
 
     pickup = (await pick_up(druks_client, tokens[1])).json()
 
@@ -212,7 +226,7 @@ async def test_a_pickup_hands_over_the_call_once(druks_db, druks_client, twilio,
     first_token = webhooks.get_call_token(await call(druks_db, connection, "CA1"))
     for sequence, role, text in [(1, "user", "Is my ticket open?"), (2, "assistant", "It is.")]:
         line = {"action": "line", "sequence": sequence, "role": role, "text": text}
-        await druks_client.post(VOICE_EVENTS, json={**line, "token": first_token})
+        await druks_client.post(CALLS_EVENTS, json={**line, "token": first_token})
     second_call = await call(druks_db, connection, "CA2")
     token = webhooks.get_call_token(second_call)
 
@@ -232,6 +246,7 @@ async def test_a_pickup_hands_over_the_call_once(druks_db, druks_client, twilio,
     assert pickup["voice"] == {
         "model": "openai/gpt-realtime-mini",
         "voice_name": "",
+        "transcription_model": "gpt-4o-mini-transcribe",
         "key": "sk-voice",
     }
     assert second_pickup.status_code == 409
@@ -249,7 +264,7 @@ async def test_a_pickup_needs_a_valid_token_and_twilios_signature(druks_db, druk
     answers = [
         await pick_up(druks_client, expired),
         await pick_up(druks_client, forged),
-        await druks_client.post(VOICE_EVENTS, json=unsigned_pickup),
+        await druks_client.post(CALLS_EVENTS, json=unsigned_pickup),
     ]
 
     assert [answer.status_code for answer in answers] == [401, 401, 401]
@@ -268,8 +283,8 @@ async def test_the_lines_of_a_call_land_in_the_order_they_were_said(druks_db, dr
 
     for sequence, role, text in lines:
         line = {"action": "line", "sequence": sequence, "role": role, "text": text}
-        await druks_client.post(VOICE_EVENTS, json={**line, "token": token})
-    await druks_client.post(VOICE_EVENTS, json={"action": "ended", "token": token})
+        await druks_client.post(CALLS_EVENTS, json={**line, "token": token})
+    await druks_client.post(CALLS_EVENTS, json={"action": "ended", "token": token})
 
     await druks_db.refresh(conversation, ["messages"])
     transcript = sorted(conversation.messages, key=attrgetter("source_id"))

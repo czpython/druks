@@ -1,0 +1,25 @@
+[project]
+name = "druks-calls"
+version = "0.0.1"
+description = "The server that carries phone calls for Druks."
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    # Pinned: the realtime services and the MCP client change between releases.
+    "pipecat-ai[google,mcp,openai,websocket]==1.12.0",
+    "httpx>=0.28.0",
+    "uvicorn>=0.38.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["calls"]

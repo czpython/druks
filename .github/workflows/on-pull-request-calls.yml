@@ -1,0 +1,55 @@
+name: On Pull Request Calls
+
+# The calls server is its own package, with its own lock, Python, and image. These
+# checks run only when it changes.
+on:
+  pull_request:
+    branches: [main, "codex/**"]
+    paths:
+      - "druks-calls/**"
+      - "deploy/calls/**"
+      - ".github/workflows/on-pull-request-calls.yml"
+
+concurrency:
+  group: on-pull-request-calls-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          python-version: "3.11"
+      - run: uv run --locked pytest
+        working-directory: druks-calls
+
+  # amd64 only and without pushing, so a broken Dockerfile fails the PR instead of
+  # the deploy. arm64 stays covered by the publish build.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: druks-calls
+          file: deploy/calls/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: druks-calls:pr
+          cache-from: type=gha,scope=calls
+      - uses: ./.github/actions/dgoss
+        with:
+          image: druks-calls:pr
+          files-path: deploy/calls

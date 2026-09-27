@@ -27,6 +27,15 @@ http://:8000 {
 		reverse_proxy {$DRUKS_UPSTREAM}
 	}
 
+	# Twilio streams a call's audio to the calls server. The call token in the path
+	# authenticates the stream, so it rides in front of the identity gate too.
+	@calls {
+		path /_calls/*
+	}
+	handle @calls {
+		reverse_proxy 127.0.0.1:8002
+	}
+
 	# Agents reach /mcp with personal access tokens checked by the app, so it
 	# rides in front of the identity gate like webhooks do. flush_interval -1
 	# streams the endpoint's SSE frames unbuffered.
@@ -68,8 +77,9 @@ http://:8000 {
 
 # Public integrations ingress — set DRUKS_WEBHOOK_HOST to a hostname with an
 # A-record at this box and Caddy auto-provisions TLS for it. Serves the
-# HMAC-verified /_external/* paths and the PAT-authenticated /mcp endpoint
-# (this host is the canonical MCP address) and nothing else: no dashboard
+# HMAC-verified /_external/* paths, the PAT-authenticated /mcp endpoint
+# (this host is the canonical MCP address), and the token-authenticated call
+# streams at /_calls/*. Nothing else: no dashboard
 # routes, and nothing served here resolves the DRUKS_AUTH_HEADER assertion,
 # so edge identity stays unforgeable from the public side. Unset → an inert
 # loopback listener; deployments whose edge already carries webhooks (exe.dev
@@ -105,6 +115,12 @@ http://:8000 {
 		reverse_proxy {$DRUKS_UPSTREAM} {
 			flush_interval -1
 		}
+	}
+	@calls {
+		path /_calls/*
+	}
+	handle @calls {
+		reverse_proxy 127.0.0.1:8002
 	}
 	handle {
 		respond 404

@@ -1,0 +1,13 @@
+# The boot contract of the calls image: the calls server runs and answers its
+# health check on loopback.
+process:
+  uvicorn:
+    running: true
+port:
+  tcp:8002:
+    listening: true
+    ip:
+      - 127.0.0.1
+http:
+  http://127.0.0.1:8002/healthz:
+    status: 200

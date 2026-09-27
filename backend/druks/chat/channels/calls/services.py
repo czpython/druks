@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, SecretStr
 
-from druks.services import Service
+from druks.services import Service, ServiceConnectError
 
 
 class Voice(Service):
@@ -20,4 +20,21 @@ class Voice(Service):
             "",
             title="Voice name",
             description="The vendor's voice, for example marin or Kore. Empty uses the default.",
+        )
+        transcription_model: str = Field(
+            "gpt-4o-mini-transcribe",
+            title="Transcription model",
+            description=(
+                "Only an OpenAI model uses it. It writes the caller's words as text. Empty "
+                "uses gpt-4o-mini-transcribe."
+            ),
+        )
+
+    @classmethod
+    async def verify(cls, settings: Settings) -> dict:
+        if settings.model.partition("/")[0] in ("openai", "google"):
+            return {}
+        raise ServiceConnectError(
+            "The calls server runs OpenAI and Google models. Write the model as "
+            "openai/<model> or google/<model>."
         )

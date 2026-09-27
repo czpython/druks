@@ -62,7 +62,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --locked --dev
-      - run: uv run ruff check backend
+      - run: uv run ruff check backend druks-calls
       # The proof app is a standalone distribution that depends on druks;
       # it installs the way an author's would, so druks never depends on it.
       - run: uv pip install -e backend/tests/druks-field_notes

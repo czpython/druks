@@ -5,7 +5,7 @@ CALLS_KEY_NAME = f"{DRUKS_SERVER_NAME}.calls"
 MAX_CALL_SECONDS = 300
 # The call ends when the caller says nothing for this long.
 NO_SPEECH_SECONDS = 15
-# A call token outlives the longest call by a minute: the voice server reports the end
+# A call token outlives the longest call by a minute: the calls server reports the end
 # after the call.
 CALL_TOKEN_SECONDS = MAX_CALL_SECONDS + 60
 # How many lines of the caller's earlier calls the voice model gets.

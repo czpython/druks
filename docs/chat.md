@@ -462,7 +462,7 @@ removes every linked number first.
 
 1. Twilio sends the call to Druks. Druks checks Twilio's signature and starts a
    new conversation for the caller.
-2. Druks tells Twilio to stream the call's audio to the voice server.
+2. Druks tells Twilio to stream the call's audio to the calls server.
 3. The voice model answers. It starts by saying that it is an automated
    assistant and that the call is transcribed.
 
@@ -480,3 +480,6 @@ them.
 Druks saves each line of the call in the conversation as it is said. If a tool
 starts a run, the run reports back to the conversation, but nothing reads the
 report during the call. The caller hears the outcome on their next call.
+
+A call ends when the caller hangs up, when the voice model ends it, after 15
+seconds of silence, or after 5 minutes.

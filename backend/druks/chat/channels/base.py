@@ -15,7 +15,7 @@ class Channel:
     name: ClassVar[str]
     service: ClassVar[type[Service]]
     # Whether chat runs agent turns on the channel's conversations. False when something
-    # else answers the people on the channel, such as a voice server.
+    # outside chat answers the people on the channel.
     has_turns: ClassVar[bool] = True
 
     def __init_subclass__(cls) -> None:

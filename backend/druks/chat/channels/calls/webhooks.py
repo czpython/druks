@@ -37,8 +37,8 @@ from .services import Voice
 
 
 def get_stream_url(token: str) -> str:
-    """Where Twilio streams a call's audio: the voice server, behind the webhook host."""
-    return f"wss://{urlsplit(load_settings().urls.webhook_base).netloc}/_voice/calls/{token}"
+    """Where Twilio streams a call's audio: the calls server, behind the webhook host."""
+    return f"wss://{urlsplit(load_settings().urls.webhook_base).netloc}/_calls/{token}"
 
 
 def sign_claim(connection: VaultSecret, claim: str) -> str:
@@ -75,7 +75,7 @@ async def get_call(session: AsyncSession, token: str) -> Conversation | None:
 
 class TwilioCalls(TwilioWebhook):
     """Twilio's call to a linked number. Druks answers with TwiML that streams the audio to
-    the voice server."""
+    the calls server."""
 
     category = "calls"
 
@@ -84,7 +84,7 @@ class TwilioCalls(TwilioWebhook):
 
     async def on_call(self) -> Response:
         """Start the caller's conversation for the call, and tell Twilio to stream its audio
-        to the voice server. Twilio strips a query string from a stream URL, so the call
+        to the calls server. Twilio strips a query string from a stream URL, so the call
         token goes in the path."""
         session = db_session()
         connection = await Twilio.get_for_number(session, self.data["To"])
@@ -109,10 +109,10 @@ class TwilioCalls(TwilioWebhook):
         return Response(content="<Response><Reject/></Response>", media_type="text/xml")
 
 
-class VoiceEvents(Webhook):
-    """The voice server's requests for a call. Each one carries the call's token."""
+class CallsEvents(Webhook):
+    """The calls server's requests for a call. Each one carries the call's token."""
 
-    provider = "voice"
+    provider = "calls"
     category = "events"
 
     def get_action(self) -> str:
@@ -122,7 +122,7 @@ class VoiceEvents(Webhook):
         session = db_session()
         self.conversation = await get_call(session, self.data["token"])
         if self.conversation and self.get_action() == "pickup":
-            # The voice server forwards the signature of Twilio's stream handshake.
+            # The calls server forwards the signature of Twilio's stream handshake.
             card = await Twilio.get()
             verify_twilio_signature(
                 url=get_stream_url(self.data["token"]),
@@ -133,7 +133,7 @@ class VoiceEvents(Webhook):
         return bool(self.conversation)
 
     async def on_pickup(self) -> Response:
-        """Give the voice server what the call needs, once: the prompt, the caller's facts,
+        """Give the calls server what the call needs, once: the prompt, the caller's facts,
         the Bot's key, the Voice card, and the timers."""
         session = db_session()
         conversation = self.conversation
@@ -142,7 +142,7 @@ class VoiceEvents(Webhook):
             name=f"calls:{conversation.id}:pickup", value="1", nx=True, ex=CALL_TOKEN_SECONDS
         )
         if not is_first_pickup:
-            raise HTTPException(409, "The voice server picked up this call already.")
+            raise HTTPException(409, "The calls server picked up this call already.")
         _, prompt, tools = await get_agent(session, conversation)
         key = await get_druks_account_token(
             session, account_id=conversation.account_id, allowed_tools=tools, name=CALLS_KEY_NAME
@@ -216,7 +216,7 @@ class VoiceEvents(Webhook):
         return sorted(outcomes, key=attrgetter("created_at", "id"))
 
     async def on_line(self) -> Response:
-        """Save a line of the call under its sequence. The voice server numbers the lines
+        """Save a line of the call under its sequence. The calls server numbers the lines
         in the order they were said, so the call reads in that order when a line arrives
         late. A caller line waits for the assistant's next line."""
         session = db_session()

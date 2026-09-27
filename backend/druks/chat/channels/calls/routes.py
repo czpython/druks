@@ -56,8 +56,8 @@ async def link_number(
     if sid in await Twilio.list_linked_sids(session):
         raise CallsLinkError("This number is already linked. Remove it first.")
     owner = await Account.create_for_bot(session, AccountKind.BOT)
-    voice_url = f"{webhook_base}/_external/twilio/calls/"
-    return await Twilio.link(session, owner, app=app, sid=sid, voice_url=voice_url)
+    calls_url = f"{webhook_base}/_external/twilio/calls/"
+    return await Twilio.link(session, owner, app=app, sid=sid, calls_url=calls_url)
 
 
 @router.delete("/numbers/{number_id}", status_code=204)

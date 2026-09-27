@@ -335,9 +335,9 @@ class Twilio(Service):
 
     @classmethod
     async def link(
-        cls, session: AsyncSession, owner: Account, *, app: str, sid: str, voice_url: str
+        cls, session: AsyncSession, owner: Account, *, app: str, sid: str, calls_url: str
     ) -> VaultSecret:
-        """Save the number with a new signing secret, then point its calls at ``voice_url``.
+        """Save the number with a new signing secret, then point its calls at ``calls_url``.
         If Twilio refuses the URL, the caller's rollback removes the row."""
         client = await cls.get_client(session)
         number = await client.get_number(sid)
@@ -351,7 +351,7 @@ class Twilio(Service):
         )
         session.add(connection)
         await session.flush()
-        await client.set_voice_url(sid, voice_url)
+        await client.set_voice_url(sid=sid, url=calls_url)
         return connection
 
     @classmethod
@@ -360,7 +360,7 @@ class Twilio(Service):
         client = await cls.get_client(session)
         # The account may have released the number. Then there is no URL to clear.
         with suppress(TwilioNotFoundError):
-            await client.set_voice_url(connection.identity["sid"], "")
+            await client.set_voice_url(sid=connection.identity["sid"], url="")
         await connection.revoke(reason)
 
     @classmethod

@@ -84,6 +84,9 @@ For app-surface changes, inspect the proof app at
   packaged proof app.
 - **Frontend:** `frontend/` contains the React 19 and Vite shared SPA. The
   backend image includes its repository-root `dist/` output.
+- **Calls server:** `druks-calls/` contains `calls`, the Pipecat program that
+  carries phone calls, with its own `pyproject.toml` and lock. Its image builds
+  from `deploy/calls/` and has its own release workflow.
 - **Deployment:** `deploy/` contains Compose files, Caddy configuration, and
   sandbox image inputs. The public runbook is `docs/deployment.md`.
 - **Documentation:** `docs/` contains the public and contributor guides.
@@ -104,8 +107,8 @@ docker compose -f deploy/compose.dev.yaml up -d
 Run the backend gates:
 
 ```bash
-uv run ruff check backend
-uv run ruff format --check backend
+uv run ruff check backend druks-calls
+uv run ruff format --check backend druks-calls
 uv pip install -e backend/tests/druks-field_notes
 uv run pytest backend/
 ```
@@ -122,6 +125,12 @@ Run the frontend gates:
 npm --prefix frontend run lint
 npm --prefix frontend test
 npm --prefix frontend run build
+```
+
+Run the calls server's tests from `druks-calls/`:
+
+```bash
+uv run --locked pytest
 ```
 
 The PR workflows in `.github/workflows/on-pull-request-*.yml` are the source of

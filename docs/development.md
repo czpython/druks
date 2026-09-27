@@ -135,8 +135,8 @@ Backend checks:
 
 ```bash
 uv pip install -e backend/tests/druks-field_notes   # once per environment
-uv run ruff check backend
-uv run ruff format --check backend
+uv run ruff check backend druks-calls
+uv run ruff format --check backend druks-calls
 uv run pytest backend/
 ```
 

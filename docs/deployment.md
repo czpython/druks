@@ -164,9 +164,9 @@ Configure public webhook access:
 4. Run the installer again.
 
 Caddy provisions a Let's Encrypt certificate for that hostname. It serves only
-`POST /_external/*` and the PAT-authenticated `/mcp` endpoint. It does not serve
-dashboard routes or the identity header. Thus, a public client cannot forge the
-SSO gate.
+`POST /_external/*`, the PAT-authenticated `/mcp` endpoint, and the call streams
+at `/_calls/*`. It does not serve dashboard routes or the identity header. Thus,
+a public client cannot forge the SSO gate.
 
 Webhook URLs become
 `https://druks.example.com/_external/<provider>/events/`. Agents connect at
@@ -195,8 +195,37 @@ The application and Caddy require different values for this deployment shape.
 
 The external proxy must route `/mcp` to the Druks web listener without SSO.
 It must preserve the bearer header and strip the trusted identity header.
-The MCP route authenticates its own bearer. The dashboard routes remain
-behind the identity edge.
+The MCP route authenticates its own bearer. With the calls server on, it must
+also route `/_calls/*` to `127.0.0.1:8002` with the WebSocket upgrade. The
+dashboard routes remain behind the identity edge.
+
+## The calls server
+
+The calls server carries phone calls. Twilio streams a call's audio to it, and
+it holds the call with the Voice card's model. Most installs do not need it, so
+it is not in the default stack. To run it, add this service to
+`compose.override.yaml`, and then run `docker compose up -d`:
+
+```yaml
+services:
+  calls:
+    image: ghcr.io/czpython/druks-calls:latest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DRUKS_URL: http://127.0.0.1:${DRUKS_WEB_PORT:-8001}
+```
+
+It listens on `127.0.0.1:8002`. Its one setting is `DRUKS_URL`, the address
+where it reaches Druks. It keeps no files and no keys: Druks gives it what each
+call needs when the call starts.
+
+Caddy passes `/_calls/*` to the calls server, on the webhook host and on the
+`:8000` listener, with the WebSocket upgrade. The call token in the path
+authenticates each stream.
+
+The image changes only when the calls server changes. A Druks upgrade therefore
+restarts it, and ends its live calls, only when a new calls image exists.
 
 ## The secrets exchange and the secrets proxy
 
@@ -361,6 +390,9 @@ image, host network, port `:8000`, and the Caddyfile from the installer:
   registers them at import time.
 - **MCP:** Druks exposes `/mcp` publicly. A personal access token authenticates
   each request inside Druks. Caddy does not buffer this route, so its SSE frames stream.
+- **Calls:** Druks exposes `/_calls/*` publicly. Twilio streams a call's audio
+  there, and Caddy proxies it to the calls server on `127.0.0.1:8002`. The
+  calls server asks Druks to check the call token in the path.
 - **Dashboard:** Everything else requires a nonempty trusted identity header. The exe.dev
   login supplies this header. Caddy proxies the request to `web` at
   `127.0.0.1:8001`. This service supplies the API, SPA, and app frontends. Druks

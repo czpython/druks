@@ -537,7 +537,10 @@ Druks answers phone calls on your Twilio numbers. Calls need two cards in
   one. Write the model with its vendor, for example `openai/gpt-realtime-mini`
   or `google/gemini-2.5-flash-native-audio`. A voice name is the vendor's name
   for a voice, such as `marin` or `Kore`. Leave it empty to use the vendor's
-  default. Druks does not check these values when you save the card.
+  default. With an OpenAI model you can also name the transcription model,
+  which writes the caller's words as text. Leave it empty to use
+  `gpt-4o-mini-transcribe`. Druks checks only that the model's vendor is
+  `openai` or `google`, the two that the calls server runs.
 
 When you link a number, Druks sets the number's voice URL in Twilio:
 
@@ -546,6 +549,9 @@ Voice URL:
 
 Set `urls.webhook_host` or `urls.endpoint` before you link a number. To link
 one, see [Chat](chat.md#calls).
+
+The calls server carries the calls. It is not in the default stack. To add it,
+see [the calls server](deployment.md#the-calls-server).
 
 ## Harnesses
 
