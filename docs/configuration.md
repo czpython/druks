@@ -714,7 +714,7 @@ Druks gives OAuth discovery and client registration 30 seconds in total.
 A timeout names the stage that was pending. Retry the connection.
 
 Druks delivers enabled servers through the selected harness unless an app
-workspace owns a required server with the same name. Each OAuth bearer and
+workspace declares a server with the same name. Each OAuth bearer and
 each secret header is a Drukbox entry behind a vault row. The sandbox holds a
 placeholder under a derived variable, and the harness configuration names that
 variable. The secrets proxy swaps the placeholder only for the server's host.

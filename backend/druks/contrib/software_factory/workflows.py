@@ -17,9 +17,8 @@ from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.core.services import Github
 from druks.db import db_session
 from druks.mcp.inbound import get_druks_mcp_server
-from druks.sandbox.datastructures import RequiredMcpServer
+from druks.sandbox import SandboxMcpServer, SandboxSecret
 from druks.sandbox.layout import get_related_root, get_work_root
-from druks.sandbox.models import SecretRef
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.settings import load_settings
 from druks.skills.models import Skill
@@ -49,10 +48,10 @@ class BuildWorkspace(RepoWorkspace):
         return get_work_root(self.host.ssh_username)
 
     @classmethod
-    async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
+    async def get_mcp_servers(cls, subject: Any) -> tuple[SandboxMcpServer, ...]:
         # GitHub MCP acts as the review actor. The clone acts as the operator.
         actor = await get_review_actor()
-        github = RequiredMcpServer(
+        github = SandboxMcpServer(
             name=GITHUB_MCP_NAME,
             url=GITHUB_MCP_URL,
             secret_id=(await actor.service.get()).id,
@@ -480,11 +479,11 @@ class ReviewWorkspace(RepoWorkspace):
     # A checkout of the default branch, with room beside it for siblings. The reviewer
     # checks out the PR itself. The add_dirs grant needs the directory to exist.
     @classmethod
-    async def get_secret_refs(cls, subject: Any) -> list[SecretRef]:
+    async def get_secrets(cls, subject: Any) -> list[SandboxSecret]:
         # The review is authored under the review actor's identity.
         actor = await get_review_actor()
         return [
-            SecretRef(
+            SandboxSecret(
                 name=Github.secret_name,
                 secret_id=(await actor.service.get()).id,
                 resource=cls.get_repo(subject),
@@ -492,10 +491,10 @@ class ReviewWorkspace(RepoWorkspace):
         ]
 
     @classmethod
-    async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
+    async def get_mcp_servers(cls, subject: Any) -> tuple[SandboxMcpServer, ...]:
         actor = await get_review_actor()
         return (
-            RequiredMcpServer(
+            SandboxMcpServer(
                 name=GITHUB_MCP_NAME,
                 url=GITHUB_MCP_URL,
                 secret_id=(await actor.service.get()).id,

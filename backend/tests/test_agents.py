@@ -827,8 +827,8 @@ async def test_reused_host_retry_presents_a_stable_idempotency_key(monkeypatch, 
 
     config = SimpleNamespace(secrets={}, secret_refs=[], secrets_id="")
     with pytest.raises(HarnessSandboxProvisioningError):
-        await current_run._lease_host(db_session(), config)
-    host_id = await current_run._lease_host(db_session(), config)
+        await current_run._lease_host(db_session(), config, [])
+    host_id = await current_run._lease_host(db_session(), config, [])
 
     assert host_id == "warm-host"
     assert keys == ["wf-9:workflow", "wf-9:workflow"]

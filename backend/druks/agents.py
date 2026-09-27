@@ -29,7 +29,7 @@ from druks.harnesses.exceptions import (
 from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import provisioning_key, sandbox_client
-from druks.sandbox.models import SandboxIdentity
+from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
 from druks.settings import load_settings
 from druks.usage.models import UsageScrape
@@ -54,13 +54,14 @@ async def _runner(
     workflow_id: str,
     step: str,
     config: AgentConfig,
+    refs: list[SecretRef],
 ) -> AsyncIterator["Workspace"]:
     # The agent always runs in a Workspace. A warm run attaches the run's held VM; the
     # rest get a fresh ephemeral VM. Either way workflow.get_workspace() turns the VM into
     # the runner — fresh per call, so nothing (connection or credential) is held across steps.
     if host_id:
         vm = sandbox_client.attach(host_id=host_id)
-    elif (refs := [*config.secret_refs, *await workflow.get_secret_refs(session)]) and (
+    elif refs and (
         identity := await SandboxIdentity.lookup(
             session,
             account_id=workflow.account_id,
@@ -329,14 +330,36 @@ class Agent:
         )
         async with gate:
             await set_run_phase("provisioning_vm")
-            host_id = await workflow._lease_host(session, config)
+            # Resolved once: the box's entries and the harness config name the
+            # same servers.
+            subject = await workflow.subject
+            workspace_class = workflow.workspace_class
+            mcp_servers, mcp_refs = await workspace_class.get_all_mcp_servers(
+                session, subject, workflow.account_id
+            )
+            refs = [
+                *config.secret_refs,
+                *(
+                    SecretRef(
+                        name=secret.name,
+                        secret_id=secret.secret_id,
+                        resource=secret.resource,
+                        host=secret.host,
+                    )
+                    for secret in await workspace_class.get_secrets(subject)
+                ),
+                *mcp_refs,
+            ]
+            host_id = await workflow._lease_host(session, config, refs)
 
             # Record the call RUNNING once it has a host to run on (its id names
             # the on-disk transcript dir) so the live step shows while the agent
             # works, then finish it — or fail it if the run raised after
             # starting. A provisioning failure happens before this and records
             # no call.
-            async with _runner(session, workflow, host_id, workflow_id, self.id, config) as runner:
+            async with _runner(
+                session, workflow, host_id, workflow_id, self.id, config, refs
+            ) as runner:
                 context = await runner.prepare_context(session, context, agent_call_id=call_id)
                 # Templates read the live workflow + the workspace the agent runs in,
                 # alongside whatever the workflow's get_prompt_context composes.
@@ -365,6 +388,7 @@ class Agent:
                         artifact_dir=artifact_dir,
                         call_id=call_id,
                         include_plugins=self.include_plugins,
+                        mcp_servers=mcp_servers,
                     )
                 except BaseException as error:
                     await AgentCall.fail(engine, call_id=call_id, error=error)

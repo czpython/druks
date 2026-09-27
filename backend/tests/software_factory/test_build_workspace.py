@@ -16,6 +16,7 @@ from druks.contrib.software_factory.constants import (
 from druks.contrib.software_factory.workflows import Build, BuildWorkspace, ReviewWorkspace
 from druks.core.services import Github
 from druks.mcp.helpers import get_bearer_token_env_var
+from druks.sandbox import SandboxSecret
 from druks.sandbox.host import Host
 from druks.sandbox.layout import get_related_root, get_repo_root
 from druks.settings import Urls
@@ -78,13 +79,13 @@ async def test_build_workspace_declares_its_github_mcp_as_the_review_actor(druks
     )
     subject = SimpleNamespace(repo="o/main")
 
-    [github], [ref] = await BuildWorkspace.get_mcp_delivery(druks_db, subject, None)
+    [github], [ref] = await BuildWorkspace.get_all_mcp_servers(druks_db, subject, None)
 
     assert github.url == GITHUB_MCP_URL
     assert github.bearer_token_env_var == get_bearer_token_env_var(GITHUB_MCP_NAME)
     assert ref.key == ("mcp_github_token", reviewer.id, "o/main", "api.githubcopilot.com")
-    [clone] = await BuildWorkspace.get_secret_refs(subject)
-    assert clone.key == ("github", operator.id, "o/main", "")
+    [clone] = await BuildWorkspace.get_secrets(subject)
+    assert clone == SandboxSecret(name="github", secret_id=operator.id, resource="o/main")
 
 
 async def test_get_workspace_kwargs_carries_the_build_fields():
@@ -114,7 +115,7 @@ async def _required_servers(monkeypatch: pytest.MonkeyPatch, tracker: str):
     )
     settings = SoftwareFactory.Settings(tracker=tracker)
     monkeypatch.setattr(SoftwareFactory, "settings", AsyncMock(return_value=settings))
-    return await BuildWorkspace.get_required_mcp_servers(SimpleNamespace(repo="o/main"))
+    return await BuildWorkspace.get_mcp_servers(SimpleNamespace(repo="o/main"))
 
 
 async def test_a_board_build_requires_the_appliance_mcp(druks_db, monkeypatch):
@@ -150,13 +151,13 @@ async def test_review_mcp_and_gh_use_the_review_actor(druks_db):
     )
     subject = SimpleNamespace(repo="o/app")
 
-    [github], [ref] = await ReviewWorkspace.get_mcp_delivery(druks_db, subject, None)
+    [github], [ref] = await ReviewWorkspace.get_all_mcp_servers(druks_db, subject, None)
 
     assert github.url == GITHUB_MCP_URL
     assert github.bearer_token_env_var == get_bearer_token_env_var(GITHUB_MCP_NAME)
     assert ref.key == ("mcp_github_token", reviewer.id, "o/app", "api.githubcopilot.com")
-    [clone] = await ReviewWorkspace.get_secret_refs(subject)
-    assert clone.key == ("github", reviewer.id, "o/app", "")
+    [clone] = await ReviewWorkspace.get_secrets(subject)
+    assert clone == SandboxSecret(name="github", secret_id=reviewer.id, resource="o/app")
 
 
 class _IdentitySandbox:

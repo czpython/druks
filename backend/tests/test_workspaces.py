@@ -8,6 +8,7 @@ from druks import workspaces as workspace_mod
 from druks.contrib.software_factory.services import GithubReviewer
 from druks.core.apis.github import GitHubClient
 from druks.core.services import Github
+from druks.sandbox import SandboxSecret
 from druks.sandbox.layout import get_repo_root
 from druks.secrets.models import VaultSecret
 from druks.workspaces import RepoWorkspace, Workspace
@@ -60,10 +61,10 @@ async def test_repo_workspace_names_its_github_secret_and_repo_before_the_box_ex
     row = await _connect()
     subject = SimpleNamespace(repo="acme/widgets")
 
-    [secret] = await RepoWorkspace.get_secret_refs(subject)
+    [secret] = await RepoWorkspace.get_secrets(subject)
 
-    assert secret.key == ("github", row.id, "acme/widgets", "")
-    assert await Workspace.get_secret_refs(subject) == []
+    assert secret == SandboxSecret(name="github", secret_id=row.id, resource="acme/widgets")
+    assert await Workspace.get_secrets(subject) == []
 
 
 async def test_a_workspace_selects_its_github_identity_by_service(druks_db):
@@ -72,7 +73,7 @@ async def test_a_workspace_selects_its_github_identity_by_service(druks_db):
     class Reviewing(RepoWorkspace):
         github = GithubReviewer
 
-    [secret] = await Reviewing.get_secret_refs(SimpleNamespace(repo="o/r"))
+    [secret] = await Reviewing.get_secrets(SimpleNamespace(repo="o/r"))
 
     assert (secret.secret_id, secret.resource) == (row.id, "o/r")
 

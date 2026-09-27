@@ -919,19 +919,13 @@ class Workflow:
         # Built per agent call, so nothing is held across steps.
         return self.workspace_class(**await self.get_workspace_kwargs(host))
 
-    async def get_secret_refs(self, session: AsyncSession) -> list[SecretRef]:
-        # The secrets a box of this run fetches beyond its config's: the
-        # workspace's and its MCP servers', read before the box exists.
-        subject = await self.subject
-        _, mcp = await self.workspace_class.get_mcp_delivery(session, subject, self.account_id)
-        return [*await self.workspace_class.get_secret_refs(subject), *mcp]
-
-    async def _lease_host(self, session: AsyncSession, config: "AgentConfig") -> str | None:
+    async def _lease_host(
+        self, session: AsyncSession, config: "AgentConfig", refs: list[SecretRef]
+    ) -> str | None:
         # The warm VM, provisioned once per segment; state is carried in git, so
         # only the host-id matters across steps — held-across-steps never fights replay.
         if not self.steps_reuse_sandbox:
             return
-        refs = [*config.secret_refs, *await self.get_secret_refs(session)]
         # A crashed process left its box behind. Its identity finds it again.
         if not self._host and refs:
             identity = await SandboxIdentity.lookup(

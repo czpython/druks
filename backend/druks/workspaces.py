@@ -26,7 +26,7 @@ from druks.mcp.exceptions import MissingGrantError, MissingTokenError
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
 from druks.mcp.inbound import get_druks_account_token
 from druks.sandbox import repo as checkout
-from druks.sandbox.datastructures import AgentResult, McpServer, RequiredMcpServer
+from druks.sandbox.datastructures import AgentResult, McpServer, SandboxMcpServer, SandboxSecret
 from druks.sandbox.exceptions import ExecFailed
 from druks.sandbox.layout import get_repo_root, get_work_root
 from druks.sandbox.models import SecretRef
@@ -51,13 +51,13 @@ class Workspace:
         return kwargs
 
     @classmethod
-    async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
-        # Override to declare the servers this workspace requires and the vault
-        # row each one issues through. Read before the box exists. Base: none.
+    async def get_mcp_servers(cls, subject: Any) -> tuple[SandboxMcpServer, ...]:
+        # Override to declare this workspace's servers and the vault row each
+        # one issues through. Read before the box exists. Base: none.
         return ()
 
     @classmethod
-    async def get_secret_refs(cls, subject: Any) -> list[SecretRef]:
+    async def get_secrets(cls, subject: Any) -> list[SandboxSecret]:
         # The secrets a box of this workspace fetches, beyond its profile's.
         # Read before the box exists, so from the subject alone. Base: none.
         return []
@@ -154,45 +154,34 @@ class Workspace:
         return remote
 
     async def run_agent(self, *, account_id: str | None, **kwargs: Any) -> AgentResult:
-        run_kwargs = await self.with_mcp_servers(
-            db_session(), account_id, **self.get_agent_run_kwargs(**kwargs)
-        )
-        # with_mcp_servers is the run's last DB read; commit so the step's
-        # connection isn't held idle through the minutes the agent runs.
+        run_kwargs = self.get_agent_run_kwargs(**kwargs)
+        # Commit so the step's connection isn't held idle through the minutes
+        # the agent runs.
         await db_session().commit()
         return await self.host.run_agent(db_session(), **run_kwargs)
 
-    async def with_mcp_servers(
-        self, session: AsyncSession, account_id: str | None, **kwargs: Any
-    ) -> dict[str, Any]:
-        # The harness names each server's url, variables, and plain headers.
-        # Every credential is a box entry, so nothing rides ``extra_env``.
-        wire, _ = await self.get_mcp_delivery(session, self.subject, account_id)
-        if wire:
-            kwargs["mcp_servers"] = wire
-        return kwargs
-
     @classmethod
-    async def get_mcp_delivery(
+    async def get_all_mcp_servers(
         cls, session: AsyncSession, subject: Any, account_id: str | None
     ) -> tuple[tuple[McpServer, ...], list[SecretRef]]:
-        """The MCP servers a box of this workspace reaches: the wire shapes for
-        the harness and the secret refs for the box's entries, one per bearer
-        and per secret header. The workspace's required servers come first
-        and own their names: a same-named registry entry is neither resolved
-        nor delivered. A server that cannot authenticate fails here, before
-        the box."""
-        required = await cls.get_required_mcp_servers(subject)
-        required_names = {server.name for server in required}
-        if len(required_names) != len(required):
+        """The MCP servers a box of this workspace reaches, as the harness names
+        them, and the secret refs for the box's entries, one per bearer and per
+        secret header. The workspace's servers come first and own their names:
+        a same-named registry entry is neither resolved nor delivered. A server
+        that cannot authenticate fails here, before the box."""
+        workspace_servers = await cls.get_mcp_servers(subject)
+        workspace_names = {server.name for server in workspace_servers}
+        if len(workspace_names) != len(workspace_servers):
             # One config key per name in the emitted harness config — a dupe
             # would break the VM's config parse mid-run.
-            raise ValueError(f"duplicate required MCP server names: {sorted(required_names)}")
-        wire = []
+            raise ValueError(f"duplicate workspace MCP server names: {sorted(workspace_names)}")
+        servers = []
         refs = []
-        for server in required:
+        for server in workspace_servers:
             variable = get_bearer_token_env_var(server.name)
-            wire.append(McpServer(name=server.name, url=server.url, bearer_token_env_var=variable))
+            servers.append(
+                McpServer(name=server.name, url=server.url, bearer_token_env_var=variable)
+            )
             if server.secret_id:
                 secret_id = server.secret_id
             else:
@@ -213,7 +202,7 @@ class Workspace:
         run_account = owner.id if owner else None
         for server in await mcp_models.McpServer.list_enabled(session):
             name = server["name"]
-            if name in required_names:
+            if name in workspace_names:
                 continue
             host = urlsplit(server["url"]).hostname
             # An OAuth server mints its bearer from the stored grant, loud when
@@ -236,7 +225,7 @@ class Workspace:
                 variable = f"{TOKEN_ENV_PREFIX}{name.upper()}_HEADER_{index}"
                 env_headers[header] = variable
                 refs.append(SecretRef(name=variable.lower(), secret_id=secret.id, host=host))
-            wire.append(
+            servers.append(
                 McpServer(
                     name=name,
                     url=server["url"],
@@ -245,7 +234,7 @@ class Workspace:
                     env_headers=env_headers,
                 )
             )
-        return tuple(wire), refs
+        return tuple(servers), refs
 
 
 @dataclass(frozen=True)
@@ -265,11 +254,11 @@ class RepoWorkspace(Workspace):
         return subject.repo
 
     @classmethod
-    async def get_secret_refs(cls, subject: Any) -> list[SecretRef]:
+    async def get_secrets(cls, subject: Any) -> list[SandboxSecret]:
         # The identity's vault row and the repo: the whole selection the
         # issuer reads. A service that is not connected fails here, before the box.
         return [
-            SecretRef(
+            SandboxSecret(
                 name=cls.github.secret_name,
                 secret_id=(await cls.github.get()).id,
                 resource=cls.get_repo(subject),

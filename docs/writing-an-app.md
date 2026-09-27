@@ -668,20 +668,52 @@ those two, so a request cannot select another repo or identity.
 
 Override `Workflow.get_workspace_kwargs()` to pass `branch` or the fields a
 subclass adds. Extend `RepoWorkspace` by adding fields, not by cloning again.
-Override `run_agent()` to prepare the VM before the call, `get_agent_run_kwargs()`
-to grant directories or skills, and `get_required_mcp_servers(subject)` to
-require an MCP server with its own vault row:
+Override `run_agent()` to prepare the VM before the call, and
+`get_agent_run_kwargs()` to grant directories or skills.
+
+Override `get_secrets(subject)` to give the sandbox a secret of its own:
 
 ```python
-from druks.sandbox.datastructures import RequiredMcpServer
+from druks.sandbox import SandboxSecret
+from druks.workspaces import Workspace
+
+from .services import BillingApi
+
+
+class InvoiceWorkspace(Workspace):
+    @classmethod
+    async def get_secrets(cls, subject) -> list[SandboxSecret]:
+        return [
+            SandboxSecret(
+                name="billing_token",
+                secret_id=(await BillingApi.get()).id,
+                host="api.billing.example",
+            )
+        ]
+```
+
+The secret names the vault row the issuer answers from. With a `host`, it is a
+custom entry. The sandbox holds a placeholder in `BILLING_TOKEN`, the name in
+upper case. The secrets proxy puts the value in a request header only for that
+host. A header row supplies its own header. Any other row goes out as
+`Authorization: Bearer <token>`. Without a `host`, the name is a Drukbox
+catalog entry such as `github`, and Drukbox sets its variable and hosts.
+`resource` tells the issuer what the token is for, such as a repo. Druks reads
+the secrets before the sandbox exists, so read them from the subject alone.
+
+Override `get_mcp_servers(subject)` to give the sandbox an MCP server with its
+own vault row:
+
+```python
+from druks.sandbox import SandboxMcpServer
 
 
 class BuildWorkspace(RepoWorkspace):
     @classmethod
-    async def get_required_mcp_servers(cls, subject) -> tuple[RequiredMcpServer, ...]:
+    async def get_mcp_servers(cls, subject) -> tuple[SandboxMcpServer, ...]:
         actor = await get_review_actor()
         return (
-            RequiredMcpServer(
+            SandboxMcpServer(
                 name="github",
                 url="https://api.githubcopilot.com/mcp/",
                 secret_id=(await actor.service.get()).id,
@@ -694,10 +726,11 @@ The server names the vault row the issuer answers from and what the token is
 for: here a connected GitHub service and its repo. Druks binds the server's
 host and the variable `MCP_GITHUB_TOKEN` to the entry when it creates the
 sandbox. The harness configuration names the variable, and the sandbox never
-holds the token. A required server owns its name, so a same-named registry
-server is not delivered. `Workspace.get_mcp_delivery(subject, account_id)`
-returns the wire shapes and the secret refs for every MCP server of a sandbox.
-Override it to deliver none.
+holds the token. A workspace server owns its name, so a same-named registry
+server is not delivered. `Workspace.get_all_mcp_servers(subject, account_id)`
+returns the harness shapes and the secret refs for every MCP server of a
+sandbox: the workspace's servers and the enabled registry servers. Override it
+to give the sandbox none.
 
 Keep durable state outside the VM. A workflow can set
 `steps_reuse_sandbox = True` to retain one host across a segment. Druks releases
@@ -1847,7 +1880,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.services` | `Service`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
 | `druks.agents` | `Agent`, `AgentOutput`, `Bot`, `BotUser` |
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
-| `druks.sandbox` | `Sandbox` |
+| `druks.sandbox` | `Sandbox`, `SandboxMcpServer`, `SandboxSecret` |
 | `druks.workspaces` | `Workspace`, `RepoWorkspace` |
 | `druks.db` | `Model`, `StoredSubject`, `db_session` |
 | `druks.db.fields` | `EncryptedJsonField`, `EncryptedTextField`, `Secret`, `SecretsMapping` |

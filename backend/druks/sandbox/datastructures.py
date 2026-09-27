@@ -149,10 +149,23 @@ class McpServer:
 
 
 @dataclass(frozen=True)
-class RequiredMcpServer:
-    """An MCP server a workspace requires for its runs. ``secret_id`` names the
-    vault row the box's entry issues from and ``resource`` what its token is for;
-    no ``secret_id`` names this appliance, whose token Druks mints for the run's
+class SandboxSecret:
+    """A secret a workspace's box holds as a placeholder. ``secret_id`` names the
+    vault row the issuer answers from and ``resource`` what its token is for. A
+    ``host`` makes it a custom entry: the proxy swaps the placeholder in the
+    request header at that host, and the box reads it from ``name.upper()``."""
+
+    name: str
+    secret_id: str
+    resource: str = ""
+    host: str = ""
+
+
+@dataclass(frozen=True)
+class SandboxMcpServer:
+    """An MCP server a workspace's box reaches. ``secret_id`` names the vault row
+    the box's entry issues from and ``resource`` what its token is for; no
+    ``secret_id`` names this appliance, whose token Druks mints for the run's
     account, limited to ``allowed_tools``. It owns its name: a same-named
     registry entry is not delivered."""
 
