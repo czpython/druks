@@ -81,6 +81,7 @@ __all__ = [
     "AgentCallStatus",
     "FatalError",
     "Gate",
+    "GateTimeout",
     "Journal",
     "OperatorReply",
     "RunResponse",

@@ -111,8 +111,15 @@ function BlockContent({ block }: { block: Block }) {
         />
       )
     case 'gate_controls':
-      if (target && target.run !== block.run) return null
-      return <GateControls run={block.run} expected={target?.parkedAt} onAnswer={target && clearTarget} />
+      if (!block.status.gate || !block.status.run) return null
+      if (target && target.run !== block.status.run) return null
+      return (
+        <GateControls
+          run={block.status.run}
+          expected={target?.parkedAt}
+          onAnswer={target && clearTarget}
+        />
+      )
     case 'timeline':
       return <Timeline title={block.title} items={block.items} />
     case 'progress':
@@ -153,7 +160,7 @@ function BlockContent({ block }: { block: Block }) {
           title={block.title}
           columns={block.columns}
           rows={block.rows}
-          emptyText={block.emptyText}
+          empty={block.empty && <BlockContent block={block.empty} />}
           select={block.select}
           actions={block.actions}
         />
@@ -200,7 +207,9 @@ function BlockContent({ block }: { block: Block }) {
       if (!block.drop) return <CardsStatic block={block} />
       return <CardsDrop block={block} drop={block.drop} />
     case 'section': {
-      const decision = block.blocks.some((insideBlock) => insideBlock.block === 'gate_controls')
+      const decision = block.blocks.some(
+        (insideBlock) => insideBlock.block === 'gate_controls' && insideBlock.status.gate,
+      )
       return (
         <section
           className={`dui-section${decision ? ' dui-decision' : ''}`}

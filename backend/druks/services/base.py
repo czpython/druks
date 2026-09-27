@@ -78,6 +78,12 @@ class ScopedService:
     def label(self) -> str:
         return f"{self.owner.name}.{self.name}"
 
+    @property
+    def connect_url(self) -> str:
+        """Where an operator connects an account to this service. The provider
+        sends them back to the app."""
+        return f"/api/oauth/{self.service.slug}/connect?next=/{self.owner.name}"
+
     async def list_for_account(self, account_id: str) -> list[Connection]:
         return [
             Connection(self.service, row)

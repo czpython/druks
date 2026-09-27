@@ -181,10 +181,33 @@
           }
         },
         {
+          "label": "Subject status",
+          "value": {
+            "value": "subject_status",
+            "subject": {
+              "subjectType": "note",
+              "subjectId": "7"
+            },
+            "working": "summarizing",
+            "status": {
+              "state": "failed",
+              "run": "run-1",
+              "kind": "field_notes.summarize",
+              "agent": null,
+              "gate": null,
+              "failure": "The scout could not reach the repository.",
+              "reason": null,
+              "triggeredAt": null,
+              "accountUsername": null
+            }
+          }
+        },
+        {
           "label": "Time",
           "value": {
             "value": "time",
-            "when": "2026-08-29T09:14:02Z"
+            "when": "2026-08-29T09:14:02Z",
+            "empty": ""
           }
         }
       ]
@@ -232,7 +255,12 @@
           "key": "one"
         }
       ],
-      "emptyText": "No notes yet.",
+      "empty": {
+        "block": "empty_state",
+        "title": "No notes yet.",
+        "description": "",
+        "controls": []
+      },
       "select": "note_ids",
       "actions": [
         {
@@ -361,7 +389,21 @@
       "blocks": [
         {
           "block": "gate_controls",
-          "run": "run-example"
+          "subject": {
+            "subjectType": "note",
+            "subjectId": "7"
+          },
+          "status": {
+            "state": "parked",
+            "run": "run-example",
+            "kind": "field_notes.summarize",
+            "agent": null,
+            "gate": "review",
+            "failure": null,
+            "reason": null,
+            "triggeredAt": null,
+            "accountUsername": null
+          }
         }
       ],
       "title": "Decision",

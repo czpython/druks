@@ -5,7 +5,7 @@ import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
 
 import { api } from '../api/client'
-import type { Action, Block, Operation, PageEntry, Value } from '../api/types'
+import type { Action, Block, Operation, PageEntry, SubjectStatus, SubjectStatusValue, Value } from '../api/types'
 import { Blocks } from './Blocks'
 import { PagesContext } from './pages'
 
@@ -44,7 +44,31 @@ function renderBlocks(blocks: Block[], operations: Operation[] = []) {
 const TEXT: Value = { value: 'text', text: 'peer-7', description: '', link: null }
 const NUMBER: Value = { value: 'number', number: 1234, unit: 'ms', tone: 'neutral' }
 const STATUS: Value = { value: 'status', label: 'parked', tone: 'warning', link: null }
-const TIME: Value = { value: 'time', when: '2026-08-29T09:14:02Z' }
+const TIME: Value = { value: 'time', when: '2026-08-29T09:14:02Z', empty: '' }
+
+function status(facts: Partial<SubjectStatus>): SubjectStatus {
+  return {
+    state: null,
+    run: null,
+    kind: null,
+    agent: null,
+    gate: null,
+    failure: null,
+    reason: null,
+    triggeredAt: null,
+    accountUsername: null,
+    ...facts,
+  }
+}
+
+function subjectStatus(facts: Partial<SubjectStatus>): SubjectStatusValue {
+  return {
+    value: 'subject_status',
+    subject: { subjectType: 'note', subjectId: '7' },
+    working: 'auditing',
+    status: status(facts),
+  }
+}
 
 describe('values', () => {
   it('read the same way in facts, metrics, a list, and a table', () => {
@@ -62,7 +86,7 @@ describe('values', () => {
         title: '',
         columns: cells.map((_value, index) => ({ label: `c${index}`, align: 'start' as const })),
         rows: [{ cells, detail: '', key: '' }],
-        emptyText: '',
+        empty: null,
         select: '',
         actions: [],
       },
@@ -100,7 +124,7 @@ describe('values', () => {
             key: '',
           },
         ],
-        emptyText: '',
+        empty: null,
         select: '',
         actions: [],
       },
@@ -169,7 +193,7 @@ describe('values', () => {
               key: '',
             },
           ],
-          emptyText: '',
+          empty: null,
           select: '',
           actions: [],
         },
@@ -208,7 +232,7 @@ describe('values', () => {
               key: '9',
             },
           ],
-          emptyText: '',
+          empty: null,
           select: 'peer_ids',
           actions: [action],
         },
@@ -269,10 +293,49 @@ describe('values', () => {
     expect(screen.getByText('1,234,567.25')).toBeTruthy()
   })
 
+  it('writes the words for where the work on a subject stands', () => {
+    renderBlocks([
+      {
+        block: 'list',
+        title: '',
+        items: [
+          subjectStatus({ state: 'parked', gate: 'review', run: 'run-1' }),
+          subjectStatus({ state: 'failed', run: 'run-2', failure: 'The crawl timed out.' }),
+          subjectStatus({ state: 'running', run: 'run-3' }),
+          subjectStatus({ state: 'finished', run: 'run-4' }),
+        ],
+      },
+    ])
+
+    expect(screen.getByText('needs you')).toBeTruthy()
+    expect(screen.getByText('failed')).toBeTruthy()
+    expect(screen.getByText('The crawl timed out.')).toBeTruthy()
+    expect(screen.getByText('auditing')).toBeTruthy()
+    expect(screen.getByText('idle')).toBeTruthy()
+  })
+
+  it('shows the app word for a time that has no moment', () => {
+    renderBlocks([{ block: 'list', title: '', items: [{ value: 'time', when: null, empty: 'never' }] }])
+
+    expect(screen.getByText('never')).toBeTruthy()
+  })
+
+  it('shows no gate controls while no gate is parked', () => {
+    const { container } = renderBlocks([
+      {
+        block: 'gate_controls',
+        subject: { subjectType: 'note', subjectId: '7' },
+        status: status({ state: 'running', run: 'run-3' }),
+      },
+    ])
+
+    expect(container.textContent).toBe('')
+  })
+
   it('shows a time still to come as still to come', () => {
     // Mid-bucket, so the minutes elapsed while the test runs change nothing.
     const ahead = new Date(Date.now() + 90 * 60 * 1000).toISOString()
-    renderBlocks([{ block: 'list', title: '', items: [{ value: 'time', when: ahead }] }])
+    renderBlocks([{ block: 'list', title: '', items: [{ value: 'time', when: ahead, empty: '' }] }])
 
     expect(screen.getByTitle(ahead).textContent).toBe('in 1h')
   })
@@ -336,7 +399,7 @@ describe('Table', () => {
         title: 'Peers',
         columns: [{ label: 'Peer', align: 'start' }],
         rows: [],
-        emptyText: 'No peers yet.',
+        empty: { block: 'empty_state', title: 'No peers yet.', description: '', controls: [] },
         select: '',
         actions: [],
       },
@@ -353,7 +416,7 @@ describe('Table', () => {
         title: 'Peers',
         columns: [{ label: 'Peer', align: 'start' }],
         rows: [],
-        emptyText: '',
+        empty: null,
         select: '',
         actions: [],
       },
@@ -370,7 +433,7 @@ describe('Table', () => {
         title: 'Peers',
         columns: [{ label: 'Peer', align: 'start' }],
         rows: [{ cells: [TEXT], detail: '', key: '' }],
-        emptyText: '',
+        empty: null,
         select: '',
         actions: [],
       },
@@ -394,7 +457,7 @@ describe('Table', () => {
           { label: 'Answers', align: 'end' },
         ],
         rows: [{ cells: [TEXT, NUMBER], detail: '', key: '' }],
-        emptyText: '',
+        empty: null,
         select: '',
         actions: [],
       },
@@ -422,7 +485,7 @@ describe('Table', () => {
             key: '',
           },
         ],
-        emptyText: '',
+        empty: null,
         select: '',
         actions: [],
       },

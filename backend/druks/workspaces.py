@@ -50,6 +50,10 @@ class Workspace:
         # Override to add what the run needs on this workspace (add_dirs, skills).
         return kwargs
 
+    def get_env(self) -> dict[str, str]:
+        """Environment variables every agent call on this workspace gets."""
+        return {}
+
     @classmethod
     async def get_mcp_servers(cls, subject: Any) -> tuple[SandboxMcpServer, ...]:
         # Override to declare this workspace's servers and the vault row each
@@ -154,7 +158,7 @@ class Workspace:
         return remote
 
     async def run_agent(self, *, account_id: str | None, **kwargs: Any) -> AgentResult:
-        run_kwargs = self.get_agent_run_kwargs(**kwargs)
+        run_kwargs = self.get_agent_run_kwargs(extra_env=self.get_env(), **kwargs)
         # Commit so the step's connection isn't held idle through the minutes
         # the agent runs.
         await db_session().commit()

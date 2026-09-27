@@ -77,14 +77,12 @@ def test_a_table_cell_can_reach_another_page():
             rows=[
                 TableRow(
                     [
-                        TextValue(
-                            "peer-7", link=Link("peer-7", page="peer", arguments={"peer_id": "7"})
-                        ),
+                        TextValue("peer-7", link=Link(page="peer", arguments={"peer_id": 7})),
                         NumberValue(12),
                     ]
                 )
             ],
-            empty_text="No peers yet.",
+            empty=EmptyState("No peers yet."),
         )
     )
 
@@ -93,7 +91,8 @@ def test_a_table_cell_can_reach_another_page():
         {"label": "Answers", "align": "end"},
     ]
     assert block["rows"][0]["cells"][0]["link"]["page"] == "peer"
-    assert block["emptyText"] == "No peers yet."
+    assert block["rows"][0]["cells"][0]["link"]["arguments"] == {"peer_id": "7"}
+    assert block["empty"]["title"] == "No peers yet."
 
 
 def test_a_table_can_select_rows_for_its_actions():
@@ -238,7 +237,11 @@ def test_every_value_carries_its_own_discriminator():
         "unit": "ms",
         "tone": "neutral",
     }
-    assert facts["facts"][3]["value"] == {"value": "time", "when": "2026-08-29T09:14:02Z"}
+    assert facts["facts"][3]["value"] == {
+        "value": "time",
+        "when": "2026-08-29T09:14:02Z",
+        "empty": "",
+    }
 
 
 def test_metrics_hold_metrics_and_a_list_holds_values():
@@ -286,10 +289,12 @@ def test_cards_finds_an_action_in_a_card_and_in_its_empty_state():
         drop=Action(label="Move", operation="move_peer"),
     )
 
-    assert [action.operation for action in block.iter_actions()] == [
-        "move_peer",
+    page = Page("x", blocks=[block])
+
+    assert [action.operation for action in page.iter_parts(Action)] == [
         "retire_peer",
         "scan",
+        "move_peer",
     ]
 
 
@@ -304,7 +309,9 @@ def test_a_callout_carries_its_next_step():
     )
 
     assert wire(block)[0]["controls"][0]["url"] == "/settings/connections"
-    assert [action.operation for action in block.iter_actions()] == ["retry_connect"]
+    page = Page("x", blocks=[block])
+
+    assert [action.operation for action in page.iter_parts(Action)] == ["retry_connect"]
 
 
 def test_cards_drop_cannot_collect_fields_or_confirm():

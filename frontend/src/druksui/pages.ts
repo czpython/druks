@@ -225,7 +225,9 @@ function replaceRegions(blocks: Block[], replacements: Map<string, Region>): Blo
 /** Runs with a decision control in this page, including nested cards and regions. */
 export function gateRuns(blocks: Block[]): string[] {
   return blocks.flatMap((block) => {
-    if (block.block === 'gate_controls') return [block.run]
+    if (block.block === 'gate_controls') {
+      return block.status.gate && block.status.run ? [block.status.run] : []
+    }
     if (block.block === 'cards') return gateRuns(block.cards)
     const nested = inside(block)
     return nested ? gateRuns(nested) : []

@@ -59,7 +59,7 @@ Chart  ChartSeries  ImageGallery           rich data blocks
 Metrics  Metric  Facts  Fact  Table
 TableColumn  TableRow  List
 TextValue  NumberValue  StatusValue        values
-TimeValue  ControlsValue
+SubjectStatus  TimeValue  ControlsValue
 Option  TextField  TextAreaField           fields
 NumberField  SelectField  MultiSelectField
 RadioField  CheckboxField  UploadField  MultiUploadField
@@ -322,11 +322,6 @@ A `Page` or a named region declares what it watches:
 @ui.page("/peers/{peer_id}")
 async def peer(peer_id: int):
     watched = await Peer.get(id=peer_id)
-    status = await watched.get_status()
-    if status.gate:
-        decision = [ui.GateControls(status.run)]
-    else:
-        decision = [ui.Text("No decision is waiting.")]
     return ui.Page(
         title=watched.name,
         blocks=[
@@ -334,7 +329,7 @@ async def peer(peer_id: int):
                 name="decision",
                 title="Decision",
                 follows=watched,
-                blocks=decision,
+                blocks=[ui.GateControls(watched)],
             )
         ],
     )
@@ -386,21 +381,22 @@ The shell owns the `EventSource`, the reconnect, the retry, and the
 stale-response protection. A response from an older read never replaces a
 newer one.
 
-A `follows=` on the `Page` itself replaces the whole page body.
+A `follows=` on the `Page` itself replaces the whole page body. When the page
+follows one subject, the shell also links it to that subject's own page, where
+the timeline of every run lives.
 
 ## Gates
 
-`GateControls` declares only the run:
+`GateControls` takes the subject that waits on the operator:
 
 ```python
-status = await peer.get_status()
-if status.gate:
-    decision = ui.GateControls(status.run)
+ui.GateControls(peer)
 ```
 
-The shell derives everything else from the parked run: the questions, the
-options, the recommended choice, the context, the controls, the note, and the
-artifact. The note box shows only when the gate declares `note`.
+The shell shows nothing while the subject waits on nothing. Otherwise it shows
+the questions, the options, the recommended choice, the context, the controls,
+the note, and the artifact. The note box shows only when the gate declares
+`note`.
 
 - The shell reads `GET /api/gates/{run}`.
 - The shell submits `POST /api/gates/{run}/answer`.
@@ -414,7 +410,24 @@ that follows a subject. Druks rejects a `GateControls` block with no such
 ancestor when it builds the page. Without the follow, an answered gate would
 stay on screen.
 
-When the run resumes, the followed region refreshes and the controls go away.
+When the operator answers, the followed region refreshes and the controls go
+away.
+
+## Where the work stands
+
+`SubjectStatus` shows where the work on one subject stands:
+
+```python
+ui.TableRow([ui.TextValue(target.name), ui.SubjectStatus(target, working="auditing")])
+```
+
+When Druks serves the page, one read gets the status of every subject on it,
+whatever their types. The shell writes the word:
+
+- "needs you" while the subject waits on the operator,
+- "failed", "cancelled", or "orphaned" when the work stopped, with its message,
+- the `working` word while Druks works on the subject,
+- "idle" otherwise.
 
 ## Actions and links
 
@@ -536,7 +549,17 @@ ui.Link("Provider status", url="https://status.example.com")
 ```
 
 A `Link` sets `page` or `url`, never both and never neither. Druks rejects a
-`Link` that sets neither or both when it builds the page.
+`Link` that sets neither or both when it builds the page. An argument can be a
+number, and the link carries it as text.
+
+A link on a value shows the value's words, so it needs no label:
+
+```python
+ui.TextValue(peer.name, link=ui.Link(page="peer", arguments={"peer_id": peer.id}))
+```
+
+A link that stands on its own needs a label. Druks rejects one without a label
+when it builds the page.
 
 A `page` names a declared page of the same app, and `arguments` fills that
 page's route parameters. The shell resolves both against the page table. It
@@ -588,7 +611,10 @@ Block = Annotated[
     Discriminator("block"),
 ]
 
-Value = Annotated[TextValue | NumberValue | StatusValue | TimeValue | ControlsValue, Discriminator("value")]
+Value = Annotated[
+    TextValue | NumberValue | StatusValue | SubjectStatus | TimeValue | ControlsValue,
+    Discriminator("value"),
+]
 
 Field = Annotated[
     TextField | TextAreaField | NumberField | SelectField | MultiSelectField
@@ -771,7 +797,7 @@ ui.Cards(
         ui.Card(
             title=peer.name,
             blocks=[...],
-            link=ui.Link(peer.name, page="peer", arguments={"peer_id": str(peer.id)}),
+            link=ui.Link(peer.name, page="peer", arguments={"peer_id": peer.id}),
         )
         for peer in peers
     ],
@@ -848,7 +874,7 @@ class EmptyState:
 ```python
 class Link:
     block: Literal["link"] = "link"
-    label: str
+    label: str = ""
     page: str = ""
     arguments: dict[str, str] = {}
     url: str = ""
@@ -865,6 +891,15 @@ full story of what druks did about it, which no app page recomposes:
 
 ```python
 ui.Link("Everything druks did", subject=found)
+```
+
+The shell adds that link to every page that follows one subject.
+
+A service an app declares with `with_scopes()` knows where an operator
+connects it, and the provider sends the operator back to the app:
+
+```python
+ui.Link("Add an account", url=FieldNotes.calendar.connect_url)
 ```
 
 ### Action
@@ -1124,12 +1159,15 @@ The shell previews an image. Every file gets a download through
 ```python
 class GateControls:
     block: Literal["gate_controls"] = "gate_controls"
-    run: str
+    subject: Follows
 ```
 
 ```json
-{"block": "gate_controls", "run": "run-6f0a"}
+{"block": "gate_controls", "subject": {"subjectType": "peer", "subjectId": "7"}, "status": {"state": "parked", "run": "run-6f0a", "kind": "reports.audit", "agent": null, "gate": "review", "failure": null, "reason": null, "triggeredAt": "2026-08-29T09:14:02Z", "accountUsername": "operator"}}
 ```
+
+The author writes `ui.GateControls(peer)`. Druks adds `status`, the status the
+board reads, when it serves the page.
 
 The name is `GateControls`. `druks.ui` has no type named `Gate`. `Gate` is the
 workflow-side declaration in `druks.workflows`.
@@ -1263,7 +1301,7 @@ class Table:
     title: str = ""
     columns: list[TableColumn] = []
     rows: list[TableRow] = []
-    empty_text: str = ""
+    empty: EmptyState | None = None
     select: str = ""
     actions: list[Action] = []
 ```
@@ -1281,12 +1319,12 @@ class Table:
       ]
     }
   ],
-  "emptyText": "No peers yet."
+  "empty": {"block": "empty_state", "title": "No peers yet.", "description": "", "controls": []}
 }
 ```
 
 Every row must have one cell for each column. With no rows the shell shows
-`empty_text`, and nothing of its own. A wide table scrolls inside its own
+`empty`, and nothing of its own. A wide table scrolls inside its own
 container, on a narrow screen as well: a stacked row would lose the header each
 cell belongs to.
 
@@ -1409,20 +1447,41 @@ The app writes the word. The tone selects the presentation. The contract has
 no type named `Status`. `active` reads as work in flight, so a settled fact
 takes another tone. `link` reaches the thing it names.
 
+### SubjectStatus
+
+```python
+class SubjectStatus:
+    value: Literal["subject_status"] = "subject_status"
+    subject: Follows
+    working: str = "working"
+```
+
+```json
+{"value": "subject_status", "subject": {"subjectType": "target", "subjectId": "7"}, "working": "auditing", "status": {"state": "failed", "run": "run-6f0a", "kind": "reports.audit", "agent": null, "gate": null, "failure": "The crawl timed out.", "reason": null, "triggeredAt": "2026-08-29T09:14:02Z", "accountUsername": "operator"}}
+```
+
+The author writes `ui.SubjectStatus(target, working="auditing")`. Druks adds
+`status`, the status the board reads, when it serves the page.
+
 ### TimeValue
 
 ```python
 class TimeValue:
     value: Literal["time"] = "time"
-    when: AwareDatetime
+    when: AwareDatetime | None
+    empty: str = ""
 ```
 
 ```json
-{"value": "time", "when": "2026-08-29T09:14:02Z"}
+{"value": "time", "when": "2026-08-29T09:14:02Z", "empty": ""}
 ```
 
 `when` must name an offset. The shell shows a relative time, and the exact
-time in the title attribute.
+time in the title attribute. With no `when`, it shows `empty`:
+
+```python
+ui.TimeValue(target.last_audit_at, empty="never")
+```
 
 ### ControlsValue
 

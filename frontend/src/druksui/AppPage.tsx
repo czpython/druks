@@ -12,6 +12,7 @@ import { AppSurface } from './AppSurface'
 import { Blocks } from './Blocks'
 import { Controls } from './DataBlocks'
 import { Fields } from './Fields'
+import { LinkControl } from './LinkControl'
 import {
   followedSubjects,
   gateRuns,
@@ -160,9 +161,21 @@ export function AppPage({ app, page }: { app: string; page: string }) {
             <p role="alert">This input request is unavailable. Return to the Dashboard to open the current request.</p>
           )}
           <Blocks blocks={snapshot.data.blocks} />
+          {snapshot.data.follows?.subjectId && <TimelineLink subject={snapshot.data.follows} />}
         </Page>
       </PagesContext.Provider>
     </AppSurface>
+  )
+}
+
+// Every page about one subject reaches that subject's own page, where the
+// timeline of its runs lives.
+function TimelineLink({ subject }: { subject: Follows }) {
+  const label = `Everything Druks did about this ${subject.subjectType.replaceAll('_', ' ')}`
+  return (
+    <LinkControl
+      link={{ block: 'link', label, page: '', arguments: {}, url: '', subject }}
+    />
   )
 }
 

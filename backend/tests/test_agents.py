@@ -17,6 +17,7 @@ from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.usage.models import UsageScrape
 from druks.user_settings.models import SettingsOverride
+from druks.workspaces import Workspace
 from sqlalchemy import select
 
 
@@ -194,6 +195,26 @@ async def test_declared_plugin_choice_is_forwarded(druks_db, tmp_path, monkeypat
     await agent._run(db_session(), workflow_id="wf-9")
 
     assert sandbox.run_agent.await_args.kwargs["include_plugins"] is False
+
+
+async def test_an_agent_without_mcp_resolves_no_server(
+    druks_db, tmp_path, monkeypatch, current_run
+):
+    agent = agents.Agent(
+        id="sealed_probe",
+        prompt="dummy/agent.md",
+        contract=DummyOutput,
+        include_mcp=False,
+    )
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    _patch_ephemeral(monkeypatch, sandbox)
+    resolve = AsyncMock()
+    monkeypatch.setattr(Workspace, "get_all_mcp_servers", resolve)
+
+    await agent._run(db_session(), workflow_id="wf-9")
+
+    resolve.assert_not_awaited()
+    assert sandbox.run_agent.await_args.kwargs["mcp_servers"] == ()
 
 
 async def test_runner_comes_from_workflow_workspace_factory(

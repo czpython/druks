@@ -296,7 +296,18 @@ export interface NumberValue {
 
 export interface TimeValue {
   value: 'time'
-  when: string
+  when: string | null
+  // The word the shell shows when there is no moment.
+  empty: string
+}
+
+// Where the work on one subject stands. Druks reads the status when it serves
+// the page; the shell writes the word.
+export interface SubjectStatusValue {
+  value: 'subject_status'
+  subject: Follows
+  working: string
+  status: SubjectStatus
 }
 
 export interface ControlsValue {
@@ -305,7 +316,13 @@ export interface ControlsValue {
 }
 
 // One rendered datum. It reads the same way in Facts, Metrics, List, and Table.
-export type Value = TextValue | NumberValue | StatusValue | TimeValue | ControlsValue
+export type Value =
+  | TextValue
+  | NumberValue
+  | StatusValue
+  | SubjectStatusValue
+  | TimeValue
+  | ControlsValue
 
 export interface ChartSeries {
   label: string
@@ -438,7 +455,7 @@ export type Block =
       blocks: Block[]
       follows: Follows | null
     }
-  | { block: 'gate_controls'; run: string }
+  | { block: 'gate_controls'; subject: Follows; status: SubjectStatus }
   | { block: 'timeline'; title: string; items: TimelineItem[] }
   | {
       block: 'progress'
@@ -466,7 +483,7 @@ export type Block =
       title: string
       columns: TableColumn[]
       rows: TableRow[]
-      emptyText: string
+      empty: EmptyStateBlock | null
       select: string
       actions: Action[]
     }

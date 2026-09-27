@@ -391,6 +391,12 @@ class App:
                 name = getattr(route, "operation_id", "") or ""
                 if not name:
                     continue
+                if name.startswith(f"{cls.name}_"):
+                    raise AppRouteConflict(
+                        f"app {cls.name!r} declares operation {name!r}. Druks adds the app "
+                        f"name to every operation id. Declare "
+                        f"{name.removeprefix(f'{cls.name}_')!r}."
+                    )
                 # An APIRoute's own path already carries its router's prefix.
                 path = f"/api/{cls.name}{getattr(route, 'path', '')}"
                 if name in found:
@@ -443,8 +449,12 @@ class App:
     ):
         """``wraps`` keeps the page function's signature, so FastAPI still
         validates every route parameter. A page whose subject is missing answers
-        an empty state that links ``back``."""
-        from druks.ui import EmptyState, Link, Page
+        an empty state that links ``back``. The page serializes with where the
+        work on each of its subjects stands, from one read."""
+        from fastapi.responses import JSONResponse
+
+        from druks.durable import reads
+        from druks.ui import Action, EmptyState, GateControls, Link, Page, SubjectStatus
 
         controls = []
         if back and back is not declaration:
@@ -467,11 +477,18 @@ class App:
                     f"it answered with {type(page).__name__}, not a Page",
                 )
             try:
-                for action in page.iter_actions():
+                for action in page.iter_parts(Action):
                     action.check_operation(cls.name, operations)
             except ValueError as error:
                 raise PageContractError(cls.name, declaration.name, str(error)) from error
-            return page
+            subjects = [
+                (part.subject.subject_type, part.subject.subject_id)
+                for part in page.iter_parts(SubjectStatus, GateControls)
+            ]
+            statuses = await reads.get_statuses_for_subjects(db_session(), subjects)
+            return JSONResponse(
+                page.model_dump(mode="json", by_alias=True, context={"statuses": statuses})
+            )
 
         return read_page
 

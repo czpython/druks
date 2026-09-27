@@ -8,6 +8,7 @@ AUTHOR_SURFACE = {
     "druks.apps": {"App", "AppSettings", "Choices", "Secret"},
     "druks.browser": {"BrowserSession", "BrowserSessionSignedOutError", "BrowserSessionStatus"},
     "druks.services": {
+        "Connection",
         "OauthClient",
         "OauthExchangeError",
         "OauthRefreshError",
@@ -23,6 +24,7 @@ AUTHOR_SURFACE = {
         "AgentCallStatus",
         "FatalError",
         "Gate",
+        "GateTimeout",
         "Journal",
         "OperatorReply",
         "RunResponse",
@@ -82,6 +84,7 @@ AUTHOR_SURFACE = {
         "SelectField",
         "Stack",
         "StatusValue",
+        "SubjectStatus",
         "Table",
         "TableColumn",
         "TableRow",

@@ -327,7 +327,7 @@ def test_a_form_that_submits_on_change_cannot_have_extra_actions():
 
 
 def check(page: Page) -> None:
-    for action in page.iter_actions():
+    for action in page.iter_parts(Action):
         action.check_operation("field_notes", OPERATIONS)
 
 
@@ -362,7 +362,7 @@ def test_every_action_on_the_page_is_checked():
         ],
     )
 
-    assert [action.operation for action in page.iter_actions()] == [
+    assert [action.operation for action in page.iter_parts(Action)] == [
         "write_note",
         "write_note",
         "write_note",
@@ -397,6 +397,19 @@ def test_two_routes_cannot_share_one_operation(monkeypatch):
         app.operations()
 
 
+def test_an_operation_id_leaves_the_app_name_to_druks(monkeypatch):
+    async def stub() -> dict[str, str]:
+        return {}
+
+    app = load_app("field_notes")
+    router = APIRouter(prefix="/prefixed")
+    router.post("/one", operation_id="field_notes_write_note")(stub)
+    monkeypatch.setattr(app, "_declared_routers", classmethod(lambda cls, modules=None: [router]))
+
+    with pytest.raises(AppRouteConflict, match="Declare 'write_note'"):
+        app.operations()
+
+
 def test_an_action_that_refreshes_its_region_needs_one():
     with pytest.raises(ValueError, match="refreshes its region, and it sits in none"):
         Page("x", blocks=[Action(label="Go", operation="write_note", refresh="region")])
@@ -415,7 +428,7 @@ def test_a_named_section_is_a_region_an_action_can_refresh():
         ],
     )
 
-    assert [action.label for action in page.iter_actions()] == ["Go"]
+    assert [action.label for action in page.iter_parts(Action)] == ["Go"]
 
 
 def test_a_section_action_belongs_to_its_region():
@@ -431,7 +444,7 @@ def test_a_section_action_belongs_to_its_region():
         ],
     )
 
-    assert list(page.iter_actions()) == [action]
+    assert list(page.iter_parts(Action)) == [action]
     section = page.model_dump(by_alias=True, mode="json")["blocks"][0]
     (control,) = section["controls"]
     assert control["label"] == "Go"
@@ -458,7 +471,7 @@ def test_a_table_bulk_action_is_checked():
         ],
     )
 
-    assert [action.operation for action in page.iter_actions()] == ["nowhere"]
+    assert [action.operation for action in page.iter_parts(Action)] == ["nowhere"]
     with pytest.raises(ValueError, match="nowhere"):
         check(page)
 
@@ -474,7 +487,7 @@ def test_a_table_cell_action_is_checked():
         ],
     )
 
-    assert [action.operation for action in page.iter_actions()] == ["nowhere"]
+    assert [action.operation for action in page.iter_parts(Action)] == ["nowhere"]
     with pytest.raises(ValueError, match="nowhere"):
         check(page)
 
@@ -530,4 +543,4 @@ def test_a_named_section_can_refresh_from_a_table_cell():
         ],
     )
 
-    assert [action.label for action in page.iter_actions()] == ["Go"]
+    assert [action.label for action in page.iter_parts(Action)] == ["Go"]

@@ -22,6 +22,23 @@ class _RecordingHost:
         self.events: list[tuple[Any, ...]] = []
 
 
+async def test_every_agent_call_gets_the_workspace_env(druks_db):
+    class DeployWorkspace(Workspace):
+        def get_env(self) -> dict[str, str]:
+            return {"DEPLOY_TOKEN": "token"}
+
+    calls: list[dict[str, Any]] = []
+
+    class _Host:
+        async def run_agent(self, session, **kwargs: Any) -> str:
+            calls.append(kwargs)
+            return "result"
+
+    await DeployWorkspace(host=_Host()).run_agent(account_id=None, prompt="p")  # type: ignore[arg-type]
+
+    assert calls == [{"extra_env": {"DEPLOY_TOKEN": "token"}, "prompt": "p"}]
+
+
 async def test_repo_workspace_clones_before_every_agent_call_and_writes_no_token(
     monkeypatch: pytest.MonkeyPatch,
 ):

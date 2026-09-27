@@ -41,6 +41,7 @@ webhooks, and the dashboard.
 ## Verify
 
 ```bash
+uv run druks check-app {{ name }}
 uv run pytest
 ```
 

@@ -35,7 +35,21 @@ const OPERATIONS: Operation[] = [
 
 const CATALOG: Block[] = [
   ...(catalog as PageSnapshot).blocks,
-  { block: 'gate_controls', run: 'run-6f0a' },
+  {
+    block: 'gate_controls',
+    subject: { subjectType: 'note', subjectId: '7' },
+    status: {
+      state: 'parked',
+      run: 'run-6f0a',
+      kind: 'field_notes.summarize',
+      agent: null,
+      gate: 'review',
+      failure: null,
+      reason: null,
+      triggeredAt: null,
+      accountUsername: null,
+    },
+  },
 ]
 
 vi.mocked(api.getGate).mockImplementation(async (run) => ({

@@ -8,7 +8,7 @@ from druks.apps.base import App
 from druks.db import db_session
 from druks.durable import AgentCall, Run
 from druks.durable.datastructures import Subject
-from druks.durable.reads import get_subject_statuses
+from druks.durable.reads import get_statuses_for_subjects, get_subject_statuses
 from druks.durable.schemas import SubjectSummary
 from druks.models import StoredSubject
 from druks.testing import asgi_client, seed_dbos_status
@@ -277,6 +277,20 @@ async def test_the_board_status_read_answers_for_every_id_it_is_given(druks_db):
     assert set(statuses) == {"1", "2"}
     assert statuses["1"].run == live.id
     assert statuses["2"].run is None
+
+
+async def test_one_status_read_answers_for_subjects_of_every_type(druks_db):
+    # A page can show two subject types, and one id under each names two subjects.
+    thing = await _seed_run(druks_db, subject_id="1", state="running")
+    ticket = await _seed_run(druks_db, subject_type="ticket", subject_id="1", state="parked")
+
+    statuses = await get_statuses_for_subjects(
+        druks_db, [("ticket", "1"), ("thing", "1"), ("thing", "2")]
+    )
+
+    assert statuses[("ticket", "1")].run == ticket.id
+    assert statuses[("thing", "1")].run == thing.id
+    assert statuses[("thing", "2")].run is None
 
 
 async def test_a_page_reads_a_whole_board_through_the_subject_class(druks_db):

@@ -59,17 +59,18 @@ async def _runner(
     # The agent always runs in a Workspace. A warm run attaches the run's held VM; the
     # rest get a fresh ephemeral VM. Either way workflow.get_workspace() turns the VM into
     # the runner — fresh per call, so nothing (connection or credential) is held across steps.
-    if host_id:
-        vm = sandbox_client.attach(host_id=host_id)
-    elif refs and (
-        identity := await SandboxIdentity.lookup(
+    identity = None
+    if refs and not host_id:
+        identity = await SandboxIdentity.lookup(
             session,
             account_id=workflow.account_id,
             run_id=workflow_id,
             scoped_to=step,
             secret_refs=refs,
         )
-    ):
+    if host_id:
+        vm = sandbox_client.attach(host_id=host_id)
+    elif identity:
         # A crashed attempt left its box behind. Its identity finds it again.
         vm = sandbox_client.resume(host_id=identity.host_id)
     else:
@@ -146,6 +147,9 @@ class Agent:
     # ``include_plugins=False`` skips the operator's plugin state for prompts
     # that hit no MCP server.
     include_plugins: bool = True
+    # ``include_mcp=False`` gives the call no MCP server and its sandbox no
+    # server entry, for an agent that reads untrusted content.
+    include_mcp: bool = True
     # ``id`` is the agent's durable key (settings, timeline, registry, step name):
     # ``<app>.<attribute>`` for an agent declared on an App, or the explicit ``id=``
     # of a standalone agent (a test, a one-off). ``app`` is the owning App's name,
@@ -334,9 +338,11 @@ class Agent:
             # same servers.
             subject = await workflow.subject
             workspace_class = workflow.workspace_class
-            mcp_servers, mcp_refs = await workspace_class.get_all_mcp_servers(
-                session, subject, workflow.account_id
-            )
+            mcp_servers, mcp_refs = (), []
+            if self.include_mcp:
+                mcp_servers, mcp_refs = await workspace_class.get_all_mcp_servers(
+                    session, subject, workflow.account_id
+                )
             refs = [
                 *config.secret_refs,
                 *(

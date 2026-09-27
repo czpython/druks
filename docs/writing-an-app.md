@@ -454,6 +454,22 @@ class NightWatch(App):
 The app name and the attribute name form the agent's id: `night_watch.report`.
 Settings overrides, the timeline, and the step name use that id.
 
+An agent that reads untrusted content, such as email or a web page, gets no
+plugin state and no MCP server:
+
+```python
+    triage = Agent(
+        prompt="triage.md",
+        contract=TriageOutput,
+        include_plugins=False,
+        include_mcp=False,
+    )
+```
+
+A workflow that sets `steps_reuse_sandbox = True` keeps one sandbox for all its
+agents, and the sandbox takes its entries from the agent call that creates it.
+Give such a workflow agents that all include MCP servers, or none that do.
+
 Call it only inside a workflow:
 
 ```python
@@ -668,8 +684,18 @@ those two, so a request cannot select another repo or identity.
 
 Override `Workflow.get_workspace_kwargs()` to pass `branch` or the fields a
 subclass adds. Extend `RepoWorkspace` by adding fields, not by cloning again.
-Override `run_agent()` to prepare the VM before the call, and
-`get_agent_run_kwargs()` to grant directories or skills.
+Override `run_agent()` to prepare the VM before the call,
+`get_agent_run_kwargs()` to grant directories or skills, and `get_env()` to give
+every agent call environment variables:
+
+```python
+@dataclass(frozen=True, kw_only=True)
+class DeployWorkspace(RepoWorkspace):
+    deploy_token: str
+
+    def get_env(self) -> dict[str, str]:
+        return {"DEPLOY_TOKEN": self.deploy_token}
+```
 
 Override `get_secrets(subject)` to give the sandbox a secret of its own:
 
@@ -729,8 +755,8 @@ sandbox. The harness configuration names the variable, and the sandbox never
 holds the token. A workspace server owns its name, so a same-named registry
 server is not delivered. `Workspace.get_all_mcp_servers(subject, account_id)`
 returns the harness shapes and the secret refs for every MCP server of a
-sandbox: the workspace's servers and the enabled registry servers. Override it
-to give the sandbox none.
+sandbox: the workspace's servers and the enabled registry servers. An agent
+declared with `include_mcp=False` gets none of them.
 
 Keep durable state outside the VM. A workflow can set
 `steps_reuse_sandbox = True` to retain one host across a segment. Druks releases
@@ -992,6 +1018,11 @@ statuses = await Repository.get_statuses([summary.id for summary in summaries])
 This is the read the platform's own board uses, so a declared page listing
 fifty rows costs one query rather than fifty.
 
+A page needs neither read to show where the work stands.
+`ui.SubjectStatus(repository)` takes the subject, and Druks reads every status
+on the page when it serves the page. See
+[Where the work stands](druks-ui.md#where-the-work-stands).
+
 ## Activity facts and signals
 
 Use [announcements](#announcing-domain-events) for facts the app owns.
@@ -1200,10 +1231,14 @@ def list_reviews() -> list[ReviewResponse]:
     return Review.list_for_account(current_account_id.get())
 ```
 
+Druks prefixes every operation id of an app with the app name, so write the
+bare verb. For example, `operation_id="write_note"` in `field_notes` becomes
+`field_notes_write_note` in the OpenAPI document. Startup refuses an id that
+already starts with the app name. An `Action` names the bare id.
+
 Tag a route with `agent` to create an MCP tool from it. Give the route an
-explicit `operation_id`. Druks prefixes this value with the app name. For
-example, `operation_id="add_peer"` in `peer_tracker` becomes
-`peer_tracker_add_peer`. The docstring supplies the description.
+explicit `operation_id`, and the tool takes the prefixed name. The docstring
+supplies the description.
 
 A `GET` route is read-only. If a write is non-destructive, declare
 `x-destructive: false`. If a write is idempotent, declare `x-idempotent: true`.
@@ -1584,6 +1619,14 @@ fixtures directly without a `conftest.py` or `pytest_plugins` declaration:
 The fixtures are not autouse. A test that requests `druks_client` also gets
 `druks_db`. A test accesses Redis only if it requests `druks_redis`.
 
+`druks check-app` loads one installed app and checks its subjects, pages,
+operations, and routers. It needs no database and no configured install, so an
+app's CI can run it. It exits non-zero on the first contract the app breaks:
+
+```bash
+druks check-app field_notes
+```
+
 Run a workflow's body against a subject with no durable engine — no checkpoints,
 no lifecycle events, no retries:
 
@@ -1725,14 +1768,16 @@ shell rereads the page on each snapshot:
 @ui.page("/notes/{note_id}")
 async def note(note_id: int):
     found = await Note.get(id=note_id)
-    status = await found.get_status()
-    if status.gate:
-        decision = [ui.GateControls(status.run)]
-    else:
-        decision = [ui.Text("Nothing is waiting on you.")]
     return ui.Page(
         title=f"Note {note_id}",
-        blocks=[ui.Section(title="Your decision", name="decision", follows=found, blocks=decision)],
+        blocks=[
+            ui.Section(
+                title="Your decision",
+                name="decision",
+                follows=found,
+                blocks=[ui.GateControls(found)],
+            )
+        ],
     )
 ```
 
@@ -1740,10 +1785,11 @@ The shell replaces the named region and leaves the rest of the page alone, so
 scroll position, focus, and half-filled inputs outside it survive. A region
 that follows a subject must have a name. That is how the shell finds it.
 
-`GateControls` names only the run. The shell reads the ask, its options, its
-context, and its artifact from the parked run, and submits the operator's
-answer with the run's `parkedAt`. A `GateControls` block must sit inside
-something that follows a subject, or an answered gate would stay on screen.
+`GateControls` takes the subject. The shell shows nothing while the subject
+waits on nothing. Otherwise it shows the ask, its options, its context, and its
+artifact, and sends the operator's answer. A `GateControls` block must sit
+inside something that follows a subject, or an answered gate would stay on
+screen.
 
 ### Let an operator act
 
@@ -1877,16 +1923,17 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | --- | --- |
 | `druks.accounts` | `current_account_id` |
 | `druks.apps` | `App`, `AppSettings`, `Choices`, `Secret` |
-| `druks.services` | `Service`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
+| `druks.services` | `Service`, `Connection`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
+| `druks.browser` | `BrowserSession`, `BrowserSessionSignedOutError`, `BrowserSessionStatus` |
 | `druks.agents` | `Agent`, `AgentOutput`, `Bot`, `BotUser` |
-| `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
+| `druks.workflows` | `Workflow`, `Gate`, `GateTimeout`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox`, `SandboxMcpServer`, `SandboxSecret` |
 | `druks.workspaces` | `Workspace`, `RepoWorkspace` |
 | `druks.db` | `Model`, `StoredSubject`, `db_session` |
 | `druks.db.fields` | `EncryptedJsonField`, `EncryptedTextField`, `Secret`, `SecretsMapping` |
 | `druks.exceptions` | `DruksError`, `ObjectNotFound` |
 | `druks.schemas` | `Schema` |
-| `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `ControlsValue`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `MultiUploadField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `Quote`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |
+| `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `ControlsValue`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `MultiUploadField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `Quote`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `SubjectStatus`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |
 | `druks.files` | `File`, `FileField` |

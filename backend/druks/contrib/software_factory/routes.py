@@ -274,7 +274,7 @@ async def list_work_items_history(
 @work_items_router.post(
     "/{ticket}/start",
     status_code=status.HTTP_202_ACCEPTED,
-    operation_id="software_factory_start",
+    operation_id="start",
     tags=["agent"],
     responses=agent_error_responses(TicketNotFound("ENG-9999", "Linear"), TrackerNotConfigured()),
 )

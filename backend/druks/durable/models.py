@@ -5,7 +5,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from dbos import DBOS
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Select, String, func, select, update
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Select,
+    String,
+    func,
+    select,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -207,38 +217,39 @@ class Run(Base):
 
     @classmethod
     async def get_latest_for_subjects(
-        cls, session: AsyncSession, subject_type: str, subject_ids: list[str]
-    ) -> dict[str, "Run"]:
-        """The driving run of each subject, keyed by subject id — get_latest_for_subject
-        for a whole board in one statement. Agent calls come with it: the status read
-        needs the latest agent of every running row."""
+        cls, session: AsyncSession, identities: list[tuple[str, str]]
+    ) -> dict[tuple[str, str], "Run"]:
+        """The driving run of each subject, keyed by its ``(subject_type, subject_id)``:
+        get_latest_for_subject for subjects of any type in one statement. Agent calls
+        come with it: the status read needs the latest agent of every running row."""
+        subject_type = (
+            workflow_status.c.attributes["subject_type"].as_string().label("subject_type")
+        )
         subject_id = workflow_status.c.attributes["subject_id"].as_string().label("subject_id")
         driving = (
             select(
+                subject_type,
                 subject_id,
                 cls.id.label("run_id"),
                 func.row_number()
                 .over(
-                    partition_by=subject_id,
+                    partition_by=(subject_type, subject_id),
                     order_by=(cls.created_at.desc(), cls.id.desc()),
                 )
                 .label("rank"),
             )
             .join_from(cls, workflow_status, workflow_status.c.workflow_uuid == cls.id)
-            .where(
-                workflow_status.c.attributes["subject_type"].as_string() == subject_type,
-                subject_id.in_(subject_ids),
-            )
+            .where(tuple_(subject_type, subject_id).in_(identities))
             .subquery()
         )
         stmt = (
-            select(driving.c.subject_id, cls)
+            select(driving.c.subject_type, driving.c.subject_id, cls)
             .join_from(cls, driving, driving.c.run_id == cls.id)
             .where(driving.c.rank == 1)
             .options(selectinload(cls.agent_calls))
         )
         rows = await session.execute(stmt)
-        return {found_id: run for found_id, run in rows}
+        return {(found_type, found_id): run for found_type, found_id, run in rows}
 
     @classmethod
     def open_subject_ids(cls, subject_type: str) -> Select:
