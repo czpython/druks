@@ -153,14 +153,19 @@ main() {
   # also layers the overlay, which connects drukbox to the host sandboxd, and
   # enables the SSH gateway. compose.override.yaml loads last, so operator
   # additions win over the repo files, and the installer never overwrites them.
+  # druks setup adds the `voice` profile when druks.toml has [voice] enabled = true.
+  VOICE_PROFILE=""
+  if grep -Eq '^COMPOSE_PROFILES=(.*,)?voice(,|$)' .env; then
+    VOICE_PROFILE=",voice"
+  fi
   set_env_var COMPOSE_FILE "compose.yaml:compose.override.yaml"
   case "$PROVIDER" in
     docker)
-      set_env_var COMPOSE_PROFILES "proxy"
+      set_env_var COMPOSE_PROFILES "proxy$VOICE_PROFILE"
       ;;
     docker-sbx)
       set_env_var COMPOSE_FILE "compose.yaml:compose.docker-sbx.yaml:compose.override.yaml"
-      set_env_var COMPOSE_PROFILES "hosted,gateway"
+      set_env_var COMPOSE_PROFILES "hosted,gateway$VOICE_PROFILE"
       # The sbx mounts live in the home directory of the daemon owner. Write
       # the path to .env, and each compose command renders the same mounts,
       # also from sudo or systemd. Create the writable bind source now. The
@@ -179,7 +184,7 @@ main() {
       fi
       ;;
     *)
-      set_env_var COMPOSE_PROFILES "hosted,proxy"
+      set_env_var COMPOSE_PROFILES "hosted,proxy$VOICE_PROFILE"
       ;;
   esac
 

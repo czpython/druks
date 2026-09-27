@@ -169,6 +169,17 @@ services:
     depends_on:
       - drukbox-exchange
 
+  # The voice server, on loopback port 8002. Twilio streams a call's audio to it
+  # through Caddy, and it holds the call with the Voice card's model. It runs only
+  # with [voice] enabled = true in druks.toml: druks setup then adds the profile.
+  voice:
+    image: ghcr.io/czpython/druks/voice:${DRUKS_TAG:-latest}
+    profiles: ["voice"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DRUKS_URL: http://127.0.0.1:8001
+
   # The identity edge and webhook TLS. Only hosted installs run it. A local
   # box gets the dashboard directly on 127.0.0.1:8001. Stock image with no
   # baked configuration. install.sh fetches the Caddyfile next to this file.

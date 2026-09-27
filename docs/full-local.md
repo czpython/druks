@@ -205,6 +205,11 @@ keep the exact public paths:
 The tunnel must preserve request bodies and signature headers. Do not expose
 the rest of the local dashboard without adding an authentication edge.
 
+Phone calls need the tunnel too. Twilio posts each call to
+`/_external/twilio/calls/` on `127.0.0.1:8001`, and it streams the call's audio
+to `/_voice/*`, which must go to the voice server on `127.0.0.1:8002` with the
+WebSocket upgrade.
+
 For changing Druks itself, use the host-run development topology in
 [Development](development.md) rather than repeatedly rebuilding the production
 image.
