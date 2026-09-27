@@ -34,7 +34,7 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "alembic>=1.13",
     # 3.0 forbids Queue() at import; druks still constructs queues that way.
-    "dbos>=2.30,<3",
+    "dbos>=2.30,<4",
     "croniter>=6.2.2",
     "redis>=8",
     "tomlkit>=0.13",
