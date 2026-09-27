@@ -3,9 +3,9 @@ from druks.db import Model, StoredSubject
 # SQLAlchemy models for this app — subclass ``Model``. Druks names each table for the
 # app and the class ("{{ name }}_report" for ``Report``), keeps the app's own migration
 # history in ``alembic_version_{{ name }}``, and enforces the "{{ name }}_" prefix at boot.
-# A model reads by field (``get``, ``get_or_none``, ``filter``) and writes with
+# A model reads with ``all``, ``filter``, ``get``, and ``get_or_none`` and writes with
 # ``create``, ``save``, and ``delete``; ``class Report(Model, ordering=("-created_at",))``
-# sets the order ``filter`` reads in.
+# sets the order ``all`` and ``filter`` read in.
 # One of these models is usually the thing your runs work on — a note, a repo, a
 # ticket. Subclass ``StoredSubject`` for that one and point a workflow at it with
 # ``subject = ThatModel``: it also gets an id, created_at, updated_at, a board, and a

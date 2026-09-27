@@ -1084,6 +1084,7 @@ A model reads and writes by field:
 report = await Report.create(repo="acme/widgets", status="open")
 report = await Report.get(id=report_id)
 report = await Report.get_or_none(repo="acme/widgets")
+reports = await Report.all()
 open_reports = await Report.filter(status="open")
 report.status = "closed"
 await report.save()
@@ -1094,8 +1095,9 @@ await report.delete()
 page with an empty state, so a route or page that names a row by id never
 spells either. `get_or_none` answers None instead. Both expect one row: two
 raise SQLAlchemy's `MultipleResultsFound`, so back the fields they read with a
-unique constraint. `filter` returns the matching rows in primary key order, or in
-the order the class declares on its class line, in Django's form:
+unique constraint. `all` returns every row and `filter` the rows that match at
+least one field, both in primary key order, or in the order the class declares
+on its class line, in Django's form:
 
 ```python
 class Report(Model, ordering=("-created_at",)):

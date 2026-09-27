@@ -135,9 +135,23 @@ class Model(Base):
         return (await db_session().scalars(cls._select_matching(fields))).one_or_none()
 
     @classmethod
+    async def all(cls) -> list[Self]:
+        """Every row, in the class's ordering, or in primary key order when it
+        declares none."""
+        return await cls._list_matching({})
+
+    @classmethod
     async def filter(cls, **fields: object) -> list[Self]:
-        """The rows whose fields hold these values, in the class's ordering, or in
-        primary key order when it declares none."""
+        """The rows whose fields hold these values, ordered like ``all()``."""
+        if fields:
+            return await cls._list_matching(fields)
+        raise TypeError(
+            f"{cls.__name__}.filter() needs a field to match. "
+            f"Call {cls.__name__}.all() to read every row."
+        )
+
+    @classmethod
+    async def _list_matching(cls, fields: dict[str, object]) -> list[Self]:
         from druks.db import db_session
 
         ordering = cls._get_order_by() or cls.__mapper__.primary_key
