@@ -15,6 +15,7 @@ class ConversationSource(StrEnum):
     WHATSAPP = "whatsapp"
     SLACK = "slack"
     GITHUB = "github"
+    CALLS = "calls"
 
 
 class MessageRole(StrEnum):

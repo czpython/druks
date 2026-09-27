@@ -398,3 +398,26 @@ An inline comment also names its file and line. Every agent posts as the one
 App, so Druks tells an agent's own replies by the GitHub ids it recorded. The
 prompt treats only the comment of the person the agent answers as instructions.
 Everything else in the thread is context.
+
+## Calls
+
+A person calls a number of an app's open Bot, and each call is a conversation of
+that caller. Connect the Twilio card and the Voice card first: see
+[Calls](configuration.md#calls).
+
+### Link a number
+
+A linked number is a connection. Its bot account holds the number and the
+secret that Druks makes for it. In the app's settings, open **Channels**. The
+tab shows the app's phone numbers while the Voice card is connected and the app
+declares an open [Bot](writing-an-app.md#answer-whatsapp-with-a-bot). Pick one of
+the Twilio account's numbers that no linked number holds, and select **Add
+number**. Druks creates the number's bot account, which never signs in, and
+sets the number's voice URL at Twilio to Druks. The list leaves out a number
+that a TwiML App or a SIP trunk handles: Twilio ignores the voice URL of such a
+number.
+
+A number has no admin, and no agent turn runs on its calls. An operator answers
+the questions of the runs that its calls start, on the dashboard. **Remove**
+clears the number's voice URL at Twilio. The connection and its calls stay as
+history, and each new link is a new connection.
