@@ -42,6 +42,7 @@ host-run development template for that environment plane.
 | `[paths]` | Host data and harness configuration paths |
 | `[sandbox]` | Drukbox provider, service URL and token, image override, and the proxy and issuer addresses |
 | `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
+| `[voice]` | Whether the install runs the voice server, which carries phone calls |
 | `[env]` | Additional deployment environment settings rendered verbatim |
 
 A blank string means unset, and the renderer omits it from `.env`. Use `[env]` for settings
@@ -515,6 +516,17 @@ Voice URL:
 
 Set `urls.webhook_host`, or `urls.endpoint`, before you link a number. See
 [Chat](chat.md#calls) for linking numbers.
+
+The voice server carries the calls. Turn it on in `druks.toml`, and then run the
+installer again:
+
+```toml
+[voice]
+enabled = true
+```
+
+`druks setup` adds the `voice` Compose profile, and the stack runs the `voice`
+service. See [the voice server](deployment.md#the-voice-server).
 
 ## Harnesses
 

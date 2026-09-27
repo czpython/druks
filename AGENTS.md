@@ -84,6 +84,9 @@ For app-surface changes, inspect the proof app at
   packaged proof app.
 - **Frontend:** `frontend/` contains the React 19 and Vite shared SPA. The
   backend image includes its repository-root `dist/` output.
+- **Voice server:** `voice/` contains `druks_voice`, the Pipecat program that
+  carries phone calls, with its own `pyproject.toml` and lock. Its image builds
+  from `deploy/voice/`.
 - **Deployment:** `deploy/` contains Compose files, Caddy configuration, and
   sandbox image inputs. The public runbook is `docs/deployment.md`.
 - **Documentation:** `docs/` contains the public and contributor guides.
@@ -122,6 +125,12 @@ Run the frontend gates:
 npm --prefix frontend run lint
 npm --prefix frontend test
 npm --prefix frontend run build
+```
+
+Run the voice server's tests from `voice/`:
+
+```bash
+uv run --locked pytest
 ```
 
 The PR workflows in `.github/workflows/on-pull-request-*.yml` are the source of

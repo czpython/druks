@@ -90,6 +90,7 @@ _KNOWN_TOML_KEYS = {
         "browser_login_tz",
         "timeout",
     ),
+    "voice": ("enabled",),
     "env": (),
 }
 
@@ -224,6 +225,10 @@ timeout = 180
 # to remote stacks verbatim; the local docker shape renders no provider table.
 # Provider reference: https://github.com/czpython/drukbox (docs/deploy.md).
 
+# The voice server, which carries phone calls. true runs its Compose service.
+[voice]
+enabled = false
+
 # Raw environment for processes druks does not model (drukbox, Caddy, libraries
 # reading os.environ); keys render verbatim unless owned by druks.
 [env]
@@ -303,6 +308,10 @@ def _canonical_config(raw: dict[str, Any]) -> dict[str, Any]:
             if table_name == "sandbox" and key == "timeout":
                 if type(value) not in (str, int, float):
                     raise ValueError("druks.toml: sandbox.timeout must be a number or string")
+            elif table_name == "voice" and key == "enabled":
+                # --set writes the string form.
+                if not isinstance(value, bool) and value not in ("", "true", "false"):
+                    raise ValueError("druks.toml: voice.enabled must be true or false")
             elif not isinstance(value, str):
                 raise ValueError(f"druks.toml: {table_name}.{key} must be a string")
 
@@ -479,6 +488,16 @@ def _render_env(
             )
         )
 
+    # The voice profile follows [voice] enabled, whatever profiles the installer chose.
+    profiles = [
+        profile
+        for profile in extras.get("COMPOSE_PROFILES", "").split(",")
+        if profile and profile != "voice"
+    ]
+    if config["voice"]["enabled"] in (True, "true"):
+        profiles.append("voice")
+    if profiles or "COMPOSE_PROFILES" in extras:
+        extras = {**extras, "COMPOSE_PROFILES": ",".join(profiles)}
     compose_extras = {key: value for key, value in extras.items() if key not in deployment_env}
     if compose_extras:
         lines.extend(

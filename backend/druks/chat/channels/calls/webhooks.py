@@ -227,9 +227,8 @@ class VoiceEvents(Webhook):
         )
 
     async def on_utterance(self) -> Response:
-        """Save a line of the call under its sequence. The voice server numbers the lines
-        in the order they were said, and posts them in that order. A caller line waits
-        for the assistant's next line."""
+        """Save a line of the call under its sequence: the voice server numbers the lines
+        in the order they were said. A caller line waits for the assistant's next line."""
         session = db_session()
         conversation = self.conversation
         words = self.data["text"]

@@ -1,7 +1,7 @@
 name: PR Images
 
-# The sandbox and browser images publish only on push to main, so a change to
-# their build contexts reached main with no pre-merge check. This builds them on
+# The sandbox, browser, and voice images publish only on push to main, so a change
+# to their build contexts reached main with no pre-merge check. This builds them on
 # the pull request — amd64 only and without pushing, so a broken Dockerfile
 # fails the PR instead of the deploy. arm64 stays covered by the publish build.
 on:
@@ -10,6 +10,8 @@ on:
     paths:
       - "deploy/sandbox/**"
       - "deploy/browser/**"
+      - "deploy/voice/**"
+      - "voice/**"
       - ".github/workflows/on-pull-request-images.yml"
 
 concurrency:
@@ -104,3 +106,24 @@ jobs:
         with:
           image: druks-browser:pr
           files-path: deploy/browser
+
+  voice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: voice
+          file: deploy/voice/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: druks-voice:pr
+          cache-from: type=gha,scope=voice
+      - uses: ./.github/actions/dgoss
+        with:
+          image: druks-voice:pr
+          files-path: deploy/voice

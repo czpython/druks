@@ -33,6 +33,9 @@ Prepare the host first. Install `docker-sbx`. Put the service user in the `kvm` 
 `sbx login`. Then run `sbx daemon start -d --policy balanced`. The installer stops
 with a clear message when the daemon socket is missing.
 
+Every shape adds the `voice` profile when `druks.toml` has `[voice] enabled =
+true`. The profile runs the voice server: see [The voice server](#the-voice-server).
+
 Before this layout, each shape had its own overlay file. Those files are
 retired. `compose.local.yaml` is the base with no profiles.
 `compose.remote.yaml` is the base with `COMPOSE_PROFILES=hosted`. Deployments
@@ -163,9 +166,9 @@ Configure public webhook access:
 4. Run the installer again.
 
 Caddy provisions a Let's Encrypt certificate for that hostname. It serves only
-`POST /_external/*` and the PAT-authenticated `/mcp` endpoint. It does not serve
-dashboard routes or the identity header. Thus, a public client cannot forge the
-SSO gate.
+`POST /_external/*`, the PAT-authenticated `/mcp` endpoint, and the call streams
+at `/_voice/*`. It does not serve dashboard routes or the identity header. Thus,
+a public client cannot forge the SSO gate.
 
 Webhook URLs become
 `https://druks.example.com/_external/<provider>/events/`. Agents connect at
@@ -194,8 +197,24 @@ The application and Caddy require different values for this deployment shape.
 
 The external proxy must route `/mcp` to the Druks web listener without SSO.
 It must preserve the bearer header and strip the trusted identity header.
-The MCP route authenticates its own bearer. The dashboard routes remain
-behind the identity edge.
+The MCP route authenticates its own bearer. With the voice server on, it must
+also route `/_voice/*` to `127.0.0.1:8002` with the WebSocket upgrade. The
+dashboard routes remain behind the identity edge.
+
+## The voice server
+
+The `voice` service carries phone calls: Twilio streams a call's audio to it,
+and it holds the call with the Voice card's model. It runs on the host network,
+on `127.0.0.1:8002`, and its one setting is `DRUKS_URL`, the address where it
+reaches Druks. It keeps no files and no keys: Druks hands it what each call
+needs at the start of the call. Turn it on with `[voice] enabled = true` in
+`druks.toml`, and then run the installer again. `druks setup` adds the `voice`
+profile to `COMPOSE_PROFILES`.
+
+Caddy passes `/_voice/*` to the voice server, on the webhook host and on the
+`:8000` listener, with the WebSocket upgrade. The call token in the path
+authenticates each stream. The voice server runs outside `web`, so a redeploy
+of `web` does not drop a live call.
 
 ## The secrets exchange and the secrets proxy
 
@@ -360,6 +379,9 @@ image, host network, port `:8000`, and the Caddyfile from the installer:
   registers them at import time.
 - **MCP:** Druks exposes `/mcp` publicly. A personal access token authenticates
   each request inside Druks. Caddy does not buffer this route, so its SSE frames stream.
+- **Calls:** Druks exposes `/_voice/*` publicly. Twilio streams a call's audio
+  there, and Caddy proxies it to the voice server on `127.0.0.1:8002`. The
+  voice server asks Druks to check the call token in the path.
 - **Dashboard:** Everything else requires a nonempty trusted identity header. The exe.dev
   login supplies this header. Caddy proxies the request to `web` at
   `127.0.0.1:8001`. This service supplies the API, SPA, and app frontends. Druks
