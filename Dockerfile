@@ -3,7 +3,7 @@
 # The backend serves the SPA itself (app.frontend on repo-root dist/), so the
 # image carries its own frontend build — one artifact, no tag-sync with a
 # separately-shipped UI.
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS spa
+FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS spa
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci
