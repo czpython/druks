@@ -4,6 +4,7 @@ import type {
   AgentCallFiles,
   ArtifactContent,
   BrowserSession,
+  Call,
   CallNumber,
   ConnectChallenge,
   Connection,
@@ -47,6 +48,7 @@ import type {
   TwilioNumber,
   WahaSession,
 } from './types'
+import type { Message } from '../chat/state'
 
 // A 401 means the request's identity did not resolve: typed to branch on,
 // broadcast so the IdentityBootstrap rechecks /api/auth/me — never converted
@@ -356,6 +358,12 @@ export const api = {
     postJSON<CallNumber>('/api/chat/services/calls/numbers', { app, sid }),
   removeCallNumber: (id: string) =>
     deleteRequest(`/api/chat/services/calls/numbers/${encodeURIComponent(id)}`),
+  calls: (numberId: string) =>
+    getJSON<Call[]>(`/api/chat/services/calls/numbers/${encodeURIComponent(numberId)}/calls`),
+  callLines: (numberId: string, callId: string) =>
+    getJSON<Message[]>(
+      `/api/chat/services/calls/numbers/${encodeURIComponent(numberId)}/calls/${encodeURIComponent(callId)}`,
+    ),
   browserSessions: () => getJSON<BrowserSession[]>('/api/browser-sessions'),
   deleteBrowserSession: (name: string) =>
     deleteRequest(`/api/browser-sessions/${encodeURIComponent(name)}`),

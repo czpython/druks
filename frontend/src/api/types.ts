@@ -679,6 +679,14 @@ export interface CallNumber {
   revokedAt: string | null
 }
 
+/** A call to a linked number. It lasts from the ring to its last line. */
+export interface Call {
+  id: string
+  caller: string
+  createdAt: string
+  lastLineAt: string
+}
+
 /** A number of the Twilio account that no linked number holds. */
 export interface TwilioNumber {
   sid: string

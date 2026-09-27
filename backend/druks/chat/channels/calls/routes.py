@@ -1,16 +1,19 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException
+from sqlalchemy import Row, func, select
 
 from druks.accounts.dependencies import current_session_account
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.apps.loader import get_app
-from druks.chat.enums import BotAccess
+from druks.chat.enums import BotAccess, ConversationSource
+from druks.chat.models import Conversation, Message
+from druks.chat.schemas import MessageResponse
 from druks.secrets.models import VaultSecret
 
-from .schemas import NumberResponse, TwilioNumberResponse
+from .schemas import CallResponse, NumberResponse, TwilioNumberResponse
 from .services import Twilio
 
 router = APIRouter(prefix="/services/calls", dependencies=[Depends(current_session_account)])
@@ -56,3 +59,51 @@ async def remove_number(session: SessionDep, number_id: str) -> None:
         await Twilio.unlink(session, connection)
         return
     raise HTTPException(404, "Number not found.")
+
+
+@router.get(
+    "/numbers/{number_id}/calls", response_model=list[CallResponse], response_model_by_alias=True
+)
+async def list_calls(session: SessionDep, number_id: str) -> list[Row]:
+    """The number's bot account owns its calls, and any operator reads them, as any
+    operator manages an app's numbers."""
+    if connection := await Twilio.get_connection(session, number_id):
+        last_line_at = func.coalesce(func.max(Message.created_at), Conversation.created_at)
+        return list(
+            await session.execute(
+                select(
+                    Conversation.id,
+                    Conversation.user_phone.label("caller"),
+                    Conversation.created_at,
+                    last_line_at.label("last_line_at"),
+                )
+                # A run's outcome can arrive after the call ends, so only the lines count.
+                .outerjoin(
+                    Message, (Message.conversation_id == Conversation.id) & ~Message.is_internal
+                )
+                .where(Conversation.connection_id == connection.id)
+                .group_by(Conversation.id)
+                .order_by(Conversation.created_at.desc(), Conversation.id.desc())
+            )
+        )
+    raise HTTPException(404, "Number not found.")
+
+
+@router.get(
+    "/numbers/{number_id}/calls/{call_id}",
+    response_model=list[MessageResponse],
+    response_model_by_alias=True,
+)
+async def list_lines(session: SessionDep, number_id: str, call_id: str) -> list[Message]:
+    """A call's transcript: the caller's lines and the assistant's, in the order they were
+    said."""
+    call = await session.get(Conversation, call_id)
+    if call and call.source == ConversationSource.CALLS and call.connection_id == number_id:
+        return list(
+            await session.scalars(
+                select(Message)
+                .where(Message.conversation_id == call.id, ~Message.is_internal)
+                .order_by(Message.source_id)
+            )
+        )
+    raise HTTPException(404, "Call not found.")
