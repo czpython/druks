@@ -41,8 +41,10 @@ import type {
   Skill,
   SkillCollection,
   InstallationSettings,
+  LinkedNumber,
   DashboardOverview,
   DashboardSchedules,
+  UnlinkedNumber,
   WahaSession,
 } from './types'
 
@@ -349,6 +351,14 @@ export const api = {
     ),
   unpair: (connectionId: string) =>
     deleteRequest(`/api/chat/connections/${encodeURIComponent(connectionId)}/pairing`),
+  linkedNumbers: (app: string) =>
+    getJSON<LinkedNumber[]>(`/api/chat/services/twilio/numbers?app=${encodeURIComponent(app)}`),
+  unlinkedNumbers: () =>
+    getJSON<UnlinkedNumber[]>('/api/chat/services/twilio/numbers/unlinked'),
+  linkNumber: (app: string, sid: string) =>
+    postJSON<LinkedNumber>('/api/chat/services/twilio/numbers', { app, sid }),
+  removeNumber: (id: string) =>
+    deleteRequest(`/api/chat/services/twilio/numbers/${encodeURIComponent(id)}`),
   browserSessions: () => getJSON<BrowserSession[]>('/api/browser-sessions'),
   deleteBrowserSession: (name: string) =>
     deleteRequest(`/api/browser-sessions/${encodeURIComponent(name)}`),

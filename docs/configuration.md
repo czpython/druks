@@ -529,6 +529,27 @@ key shows up on the first voice note. Druks sends a note of at most 25 MiB and
 refuses a bigger one without a call. Without the card, the agent tells the
 person to write instead. See [Chat](chat.md#whatsapp) for what the agent gets.
 
+## Calls
+
+Druks answers phone calls on your Twilio numbers. Calls need two cards in
+**Settings → Connections → Services**:
+
+- **Twilio.** Enter your account SID and auth token. Druks checks them with
+  Twilio when you save the card.
+- **Voice.** Enter the voice model, its API key, and a voice name if you want
+  one. Write the model with its vendor, for example `openai/gpt-realtime-mini`
+  or `google/gemini-2.5-flash-native-audio`. A voice name is the vendor's name
+  for a voice, such as `marin` or `Kore`. Leave it empty to use the vendor's
+  default. Druks does not check these values when you save the card.
+
+When you link a number, Druks sets the number's voice URL in Twilio:
+
+Voice URL:
+`https://<webhook-host>/_external/twilio/calls/`
+
+Set `urls.webhook_host` or `urls.endpoint` before you link a number. To link
+one, see [Chat](chat.md#calls).
+
 ## Harnesses
 
 Druks registers two subscription providers, `anthropic` and `openai`. Each

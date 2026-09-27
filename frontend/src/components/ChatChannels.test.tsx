@@ -7,6 +7,7 @@ import { Router } from 'wouter'
 import { SettingsPages } from './SettingsPages'
 
 const account = { id: 'operator', username: 'ana@example.com', isDefault: true }
+let channels = ['whatsapp']
 
 function mount(path: string, appName?: string) {
   window.history.replaceState(null, '', path)
@@ -17,6 +18,7 @@ function mount(path: string, appName?: string) {
 }
 
 beforeEach(() => {
+  channels = ['whatsapp']
   vi.stubGlobal('matchMedia', vi.fn(() => ({
     matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn(),
   })))
@@ -28,7 +30,7 @@ beforeEach(() => {
     }
     if (url === '/api/settings/personal') response = { timezone: 'UTC', gateParkDestinationId: null }
     if (url === '/api/settings/apps') response = {
-      allowedEfforts: [], channels: ['whatsapp'], apps: [{
+      allowedEfforts: [], channels, apps: [{
         name: 'chat', description: 'Live agent conversations.', icon: 'messages-square',
         builtin: true, bot: 'chat.bot', botAccess: 'paired', agents: [], workflows: [], settings: [],
       }, {
@@ -57,6 +59,14 @@ it.each(['chat', 'helpdesk'])('uses paired access for the number options in %s C
   expect(screen.getByRole('link', { name: 'Bots' }).getAttribute('href'))
     .toBe(`/apps/${app}/settings/bots`)
   expect(screen.queryByRole('link', { name: 'Agents' })).toBeNull()
+})
+
+it('shows no Channels tab on a paired Bot when calls are the only channel', async () => {
+  channels = ['call']
+  mount('/apps/chat/settings/bots', 'chat')
+
+  expect(await screen.findByRole('link', { name: 'Bots' })).toBeTruthy()
+  expect(screen.queryByRole('link', { name: 'Channels' })).toBeNull()
 })
 
 it('keeps WhatsApp setup out of Connections Accounts', async () => {

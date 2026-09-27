@@ -28,6 +28,7 @@ import { harnessColors } from '../lib/harnessColors'
 import { Page } from './Page'
 import { Sidebar } from './Sidebar'
 import { BrowserProfilesPane } from './BrowserProfilesPane'
+import { CallsPane } from './CallsPane'
 import { GitHubPane } from './GitHubPane'
 import { SlackPane } from './SlackPane'
 import { WhatsAppChannelPane } from './WhatsAppNumbersPane'
@@ -71,6 +72,7 @@ const CONNECTION_TABS = [
 
 // One pane for each chat channel, by the channel's name.
 const CHANNEL_PANES: Record<string, ComponentType<{ app: AppSettings }>> = {
+  call: CallsPane,
   github: GitHubPane,
   slack: SlackPane,
   whatsapp: WhatsAppChannelPane,
@@ -203,7 +205,10 @@ export function SettingsPages({
   const dirty = dirtyPages.includes(section)
   const app = appName ? apps.find((entry) => entry.name === appName) : undefined
   const hasAgents = Boolean(app?.agents.some((agent) => agent.name !== app.bot))
-  const channels = appsQuery.data?.channels ?? []
+  // Only an open Bot takes calls.
+  const channels = (appsQuery.data?.channels ?? []).filter(
+    (channel) => channel !== 'call' || app?.botAccess === 'open',
+  )
   const hasChannels = Boolean(app?.bot && channels.length)
   const appTab = ['agents', 'bots', 'channels'].find((tab) => location.endsWith(`/${tab}`)) ?? 'options'
   const validAppPage =

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
 from druks.apps.loader import get_app
-from druks.apps.registry import channels, services
+from druks.apps.registry import services
 from druks.durable.engine import step_session
 from druks.durable.models import Run
 from druks.files.constants import MAX_UPLOAD_BYTES
@@ -99,8 +99,7 @@ async def get_agent(
         tools = (*admin_tools, *ADMIN_TOOLS)
     context = {"source": conversation.source, "thread_id": conversation.thread_id}
     if conversation.connection:
-        channel = channels.get(conversation.source)
-        context.update(await channel.get_prompt_context(session, conversation))
+        context.update(await conversation.channel.get_prompt_context(session, conversation))
     prompt = await render_prompt(template, **context)
     return config, f"{prompt}\n\n{INTERNAL_MESSAGES_PROMPT}", tools
 
@@ -224,7 +223,7 @@ async def deliver(conversation_id: str) -> None:
         async with step_session() as session:
             conversation = await session.get(Conversation, conversation_id)
             reply = await session.get(Message, reply_id)
-            await channels.get(conversation.source).send_reply(session, conversation, reply)
+            await conversation.channel.send_reply(session, conversation, reply)
 
     async def record_failed(detail: str) -> None:
         reply_id = await DBOS.run_step_async(StepOptions(name="chat.deliver.failed"), end_turns)
@@ -544,7 +543,7 @@ async def finish_turn(
     if conversation.connection:
         # A person who took the chat over during the turn answers it instead.
         if state == MessageState.REPLIED and body and not await conversation.is_held(session):
-            await channels.get(conversation.source).send_reply(session, conversation, reply)
+            await conversation.channel.send_reply(session, conversation, reply)
     elif not conversation.title:
         harness = get_harness(status["harness"])
         await name_conversation(session, conversation, bridge.host, message, body, harness)
@@ -552,23 +551,28 @@ async def finish_turn(
 
 async def report_result(session: AsyncSession, run: Run, *, result) -> str | None:
     """Report a run's result to the chat that started it, once the run waited for an
-    answer. Returns that conversation."""
+    answer. Returns the conversation to deliver."""
     if run.input_requested_at:
         body = RESULT_MESSAGE.format(run=run.id, result=to_json(result, fallback=str).decode())
         return await report_outcome(session, run, body)
     return
 
 
-async def report_failure(session: AsyncSession, run: Run, *, failure: str) -> str:
+async def report_failure(session: AsyncSession, run: Run, *, failure: str) -> str | None:
     """Report a run's failure to the chat that started it, whether or not the run waited
-    for an answer. Returns that conversation."""
+    for an answer. Returns the conversation to deliver."""
     return await report_outcome(session, run, FAILURE_MESSAGE.format(run=run.id, failure=failure))
 
 
-async def report_outcome(session: AsyncSession, run: Run, body: str) -> str:
+async def report_outcome(session: AsyncSession, run: Run, body: str) -> str | None:
+    """Keep the outcome in the run's chat. Returns the conversation to deliver, unless its
+    channel runs no turns."""
     conversation = await session.get(Conversation, run.conversation_id)
     await conversation.create_message(session, body, is_internal=True)
-    return conversation.id
+    channel = conversation.channel
+    if not channel or channel.has_turns:
+        return conversation.id
+    return
 
 
 async def name_conversation(

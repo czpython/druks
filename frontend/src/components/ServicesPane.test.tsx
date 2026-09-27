@@ -9,13 +9,14 @@ const PEM = '-----BEGIN RSA PRIVATE KEY-----\nline-one\nline-two\n-----END RSA P
 const SECRET = 'hook-secret-value'
 
 const githubFields = [
-  { name: 'app_id', label: 'App ID', help: '', type: 'str', multiline: false },
+  { name: 'app_id', label: 'App ID', help: '', type: 'str', multiline: false, isRequired: true },
   {
     name: 'private_key',
     label: 'Private key (PEM)',
     help: '',
     type: 'secret',
     multiline: true,
+    isRequired: true,
   },
   {
     name: 'webhook_secret',
@@ -23,6 +24,7 @@ const githubFields = [
     help: '',
     type: 'secret',
     multiline: false,
+    isRequired: true,
   },
 ]
 
@@ -64,6 +66,7 @@ const pasteOnly: Service = {
       help: '',
       type: 'str',
       multiline: false,
+      isRequired: true,
     },
     {
       name: 'client_secret',
@@ -71,6 +74,7 @@ const pasteOnly: Service = {
       help: '',
       type: 'secret',
       multiline: false,
+      isRequired: true,
     },
   ],
   createUrl: '',

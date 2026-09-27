@@ -41,3 +41,11 @@ class UnknownTicketError(DruksError):
         super().__init__(f"{key} doesn't exist in {tracker}")
         self.key = key
         self.tracker = tracker
+
+
+class TwilioError(DruksError):
+    """Twilio did not accept a request. The message names the request and Twilio's status."""
+
+
+class TwilioNotFoundError(TwilioError):
+    """The Twilio account has no such resource."""

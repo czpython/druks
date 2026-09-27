@@ -10,7 +10,6 @@ from druks.accounts.context import current_conversation_id
 from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
-from druks.apps.registry import channels
 
 from .enums import MessageState
 from .exceptions import ChannelHasNoThreadsError, ChatSandboxGone
@@ -185,7 +184,7 @@ async def read_thread(
         )
     conversation = await session.get(Conversation, conversation_id)
     try:
-        return await channels.get(conversation.source).read_thread(session, conversation)
+        return await conversation.channel.read_thread(session, conversation)
     except ChannelHasNoThreadsError as error:
         raise HTTPException(409, str(error)) from error
     except (SlackApiError, RequestFailed) as error:

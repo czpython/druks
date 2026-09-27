@@ -24,8 +24,10 @@ from druks.apps.loader import iter_apps, load
 from druks.apps.routes import router as apps_router
 from druks.browser.exceptions import BrowserApiError
 from druks.browser.routes import router as browser_sessions_router
+from druks.chat.channels.calls.exceptions import CallsLinkError
 from druks.chat.channels.whatsapp.exceptions import WahaError, WhatsAppLinkError
 from druks.chat.sockets import router as chat_sockets_router
+from druks.core.apis.exceptions import TwilioError
 from druks.core.templates import render_page
 from druks.database import (
     configure_session,
@@ -205,6 +207,16 @@ async def _whatsapp_link_handler(request: Request, exc: WhatsAppLinkError) -> JS
 
 @app.exception_handler(WahaError)
 async def _waha_error_handler(request: Request, exc: WahaError) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"error": "HTTP_502", "detail": str(exc)})
+
+
+@app.exception_handler(CallsLinkError)
+async def _calls_link_handler(request: Request, exc: CallsLinkError) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"error": "HTTP_409", "detail": str(exc)})
+
+
+@app.exception_handler(TwilioError)
+async def _twilio_error_handler(request: Request, exc: TwilioError) -> JSONResponse:
     return JSONResponse(status_code=502, content={"error": "HTTP_502", "detail": str(exc)})
 
 
