@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import hmac
 import secrets
 from contextlib import suppress
 
@@ -14,6 +17,7 @@ from druks.services.exceptions import ServiceNotConnectedError
 from druks.settings import load_settings
 
 from .client import TwilioClient
+from .constants import VOICE_URL_PATH
 from .exceptions import CallsLinkError, TwilioError, TwilioNotFoundError
 
 
@@ -38,6 +42,17 @@ class Twilio(Service):
                 "Twilio Console."
             ) from error
         return {}
+
+    @classmethod
+    async def is_signed(
+        cls, session: AsyncSession, signature: str, url: str, fields: dict[str, str]
+    ) -> bool:
+        """Whether Twilio signed a request to ``url`` with these form fields."""
+        if card := await VaultSecret.lookup(session, cls.secret_kind, Audience.service(cls.slug)):
+            payload = url + "".join(f"{name}{fields[name]}" for name in sorted(fields))
+            digest = hmac.new(card.secrets["auth_token"].encode(), payload.encode(), hashlib.sha1)
+            return hmac.compare_digest(base64.b64encode(digest.digest()).decode(), signature)
+        return False
 
     @classmethod
     async def get_client(cls, session: AsyncSession) -> TwilioClient:
@@ -70,7 +85,7 @@ class Twilio(Service):
         )
         session.add(connection)
         await session.flush()
-        await client.set_voice_url(sid, f"{base}/_external/twilio/calls/")
+        await client.set_voice_url(sid, f"{base}{VOICE_URL_PATH}")
         return connection
 
     @classmethod
@@ -94,6 +109,18 @@ class Twilio(Service):
                     VaultSecret.identity["app"].astext == app,
                 )
                 .order_by(VaultSecret.created_at, VaultSecret.id)
+            )
+        )
+
+    @classmethod
+    async def get_for_number(cls, session: AsyncSession, number: str) -> VaultSecret | None:
+        """The live connection that holds a phone number."""
+        return await session.scalar(
+            select(VaultSecret).where(
+                VaultSecret.kind == SecretKind.SESSION,
+                VaultSecret.audience == Audience.service(cls.slug),
+                VaultSecret.revoked_at.is_(None),
+                VaultSecret.identity["number"].astext == number,
             )
         )
 

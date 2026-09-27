@@ -135,6 +135,7 @@ ignore = ["SIM108"]
 "backend/druks/chat/channels/slack/subscribers.py" = ["TID251"]
 "backend/druks/chat/channels/github/subscribers.py" = ["TID251"]
 "backend/druks/chat/channels/whatsapp/webhooks.py" = ["TID251"]
+"backend/druks/chat/channels/calls/webhooks.py" = ["TID251"]
 "backend/druks/contrib/**" = ["TID251"]
 "backend/tests/**" = ["TID251"]
 
