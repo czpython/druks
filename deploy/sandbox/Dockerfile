@@ -22,7 +22,7 @@
 ARG BASE=docker-base
 
 FROM ghcr.io/czpython/drukbox/sandbox:latest@sha256:cccf324cada9c1b0df409858dac8188e0ed2591ed88ee3d5fb59db9055a75244 AS docker-base
-FROM ghcr.io/czpython/drukbox/sbx-sandbox:latest@sha256:ab08421818ad21ed7a8a9db6f5c184a754c4ab6c85c26877983c245dbcd34bcf AS sbx-base
+FROM ghcr.io/czpython/drukbox/sbx-sandbox:latest@sha256:c9bed75fe6ae7620219d4f5155d8942d084bbd4a92595bfffa1d0db5a9c435fd AS sbx-base
 
 FROM ${BASE} AS toolchain
 
