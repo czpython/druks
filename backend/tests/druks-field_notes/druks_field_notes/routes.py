@@ -32,6 +32,6 @@ async def jot_note(body: Annotated[str, Body(embed=True)], user: BotUser) -> dic
 
 @router.post("/{note_id}/gist", operation_id="clear_gist")
 async def clear_gist(note_id: int) -> dict[str, str]:
-    note = await Note.get_for_id(note_id, raise_on_missing=True)
+    note = await Note.get(id=note_id)
     await note.save_gist("")
     return {"result": "cleared"}

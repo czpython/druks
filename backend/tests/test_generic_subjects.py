@@ -41,9 +41,9 @@ class Ticket(Subject):
     separators a URL path is cut on."""
 
     @classmethod
-    async def get_for_id(cls, subject_id: str) -> "Ticket | None":
-        if "#" in subject_id:
-            return cls(id=subject_id)
+    async def get_or_none(cls, id: str) -> "Ticket | None":
+        if "#" in id:
+            return cls(id=id)
         return
 
     def get_summary(self) -> _ThingSummary:

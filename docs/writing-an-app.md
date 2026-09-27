@@ -910,7 +910,7 @@ class PullRequest(Subject):
 ```
 
 Each ID names one of these subjects, so a detail read always answers. Override
-`get_for_id()` to reject an invalid shape. For example,
+`get_or_none(id)` to reject an invalid shape. For example,
 `owner/repo#7` is a pull request and `nonsense` returns a 404.
 
 An identity-only `Subject` a workflow declares must implement
@@ -1074,20 +1074,42 @@ claim so the provider can retry.
 
 ## Models and migrations
 
-Models subclass `druks.db.Base`. Druks names the table for the app and the
+Models subclass `druks.db.Model`. Druks names the table for the app and the
 class: `Report` in `night_watch` is the table `night_watch_report`. A class that
 sets `__tablename__` keeps it, and every app table starts with `<name>_`:
 
 ```python
 from sqlalchemy.orm import Mapped, mapped_column
 
-from druks.db import Base
+from druks.db import Model
 
 
-class Report(Base):
+class Report(Model):
     id: Mapped[int] = mapped_column(primary_key=True)
-    body: Mapped[str]
+    repo: Mapped[str] = mapped_column(unique=True)
+    status: Mapped[str]
 ```
+
+A model reads and writes by field:
+
+```python
+report = await Report.create(repo="acme/widgets", status="open")
+report = await Report.get(id=report_id)
+report = await Report.get_or_none(repo="acme/widgets")
+open_reports = await Report.filter(status="open")
+report.status = "closed"
+await report.save()
+await report.delete()
+```
+
+`get` raises `ObjectNotFound` on a miss; the API answers it with 404 and a
+page with an empty state, so a route or page that names a row by id never
+spells either. `get_or_none` answers None instead. Both expect one row: two
+raise SQLAlchemy's `MultipleResultsFound`, so back the fields they read with a
+unique constraint. `filter` returns the matching rows in primary key order. A
+text value is read as its column's type, so an id straight off a URL finds its
+row. A read that needs another order, a limit, or anything but equality writes
+`select()`.
 
 A `Mapped[datetime]` column stores UTC. A `Mapped[SomeStrEnum]` column stores
 the member's value as text under a CHECK constraint named after the enum. A
@@ -1107,17 +1129,6 @@ Druks scopes autogeneration to the table prefix, names the revisions
 `alembic_version_night_watch`. Never write a revision by hand. The one change
 Alembic does not detect is a new member of an enum: that is one
 `drop_constraint` and one `create_check_constraint`.
-
-A route or a page that names a subject by id reads it with
-`raise_on_missing=True`. A miss raises `SubjectNotFound`; the API answers 404
-and a page answers an empty state, so neither spells it:
-
-```python
-@router.post("/reports/{report_id}/close", operation_id="close_report")
-async def close_report(report_id: int) -> None:
-    report = await Report.get_for_id(report_id, raise_on_missing=True)
-    await report.close()
-```
 
 Query through `druks.db.db_session()` inside an
 HTTP request, durable step, or other platform-bound session. Outside those,
@@ -1672,7 +1683,7 @@ shell rereads the page on each snapshot:
 ```python
 @ui.page("/notes/{note_id}")
 async def note(note_id: int):
-    found = await Note.get_for_id(note_id, raise_on_missing=True)
+    found = await Note.get(id=note_id)
     status = await found.get_status()
     if status.gate:
         decision = [ui.GateControls(status.run)]
@@ -1830,9 +1841,9 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox` |
 | `druks.workspaces` | `Workspace`, `RepoWorkspace` |
-| `druks.db` | `Base`, `StoredSubject`, `db_session` |
+| `druks.db` | `Model`, `StoredSubject`, `db_session` |
 | `druks.db.fields` | `EncryptedJsonField`, `EncryptedTextField`, `Secret`, `SecretsMapping` |
-| `druks.exceptions` | `DruksError`, `SubjectNotFound` |
+| `druks.exceptions` | `DruksError`, `ObjectNotFound` |
 | `druks.schemas` | `Schema` |
 | `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `ControlsValue`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `MultiUploadField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `Quote`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |
 | `druks.signals` | `subscribe` |

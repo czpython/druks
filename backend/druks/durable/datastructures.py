@@ -49,10 +49,10 @@ class Subject:
         await Event.announce(db_session(), self, topic, facts)
 
     @classmethod
-    async def get_for_id(cls, subject_id: str) -> Self | None:
+    async def get_or_none(cls, id: str) -> Self | None:
         """The subject this id names. Ids reach the read side as free text off a URL,
         so override to return None for a shape this subject could never wear."""
-        return cls(id=subject_id)
+        return cls(id=id)
 
     def get_summary(self) -> SubjectSummary:
         return self.summary_class.model_validate(self)

@@ -4,7 +4,7 @@ from druks.contrib.software_factory.enums import Resolution, Status
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Build, Profile
-from druks.db import Base
+from druks.models import Base
 from druks.signals import subscribe
 from druks.workflows import WorkflowEvent
 

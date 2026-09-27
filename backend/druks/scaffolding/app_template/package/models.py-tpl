@@ -1,13 +1,15 @@
-from druks.db import Base, StoredSubject
+from druks.db import Model, StoredSubject
 
-# SQLAlchemy models for this app — subclass ``Base``. Druks names each table for the
+# SQLAlchemy models for this app — subclass ``Model``. Druks names each table for the
 # app and the class ("{{ name }}_report" for ``Report``), keeps the app's own migration
 # history in ``alembic_version_{{ name }}``, and enforces the "{{ name }}_" prefix at boot.
+# A model reads by field (``get``, ``get_or_none``, ``filter``) and writes with
+# ``create``, ``save``, and ``delete``.
 # One of these models is usually the thing your runs work on — a note, a repo, a
 # ticket. Subclass ``StoredSubject`` for that one and point a workflow at it with
-# ``subject = ThatModel``: it gets an id, created_at, updated_at, create(), save(),
-# delete(), a board, and a page. Set ``summary_class`` to put its own fields on the
-# board, and override ``list_summaries()`` to scope the board by caller. Something you
-# keep no row for subclasses ``druks.workflows.Subject`` instead and implements
-# ``list_summaries()`` itself.
+# ``subject = ThatModel``: it also gets an id, created_at, updated_at, a board, and a
+# page. Set ``summary_class`` to put its own fields on the board, and override
+# ``list_summaries()`` to scope the board by caller. Something you keep no row for
+# subclasses ``druks.workflows.Subject`` instead and implements ``list_summaries()``
+# itself.
 # After adding a model: ``druks makemigrations {{ name }} -m "..." && druks init-db``.

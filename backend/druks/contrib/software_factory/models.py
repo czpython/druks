@@ -14,7 +14,8 @@ from druks.contrib.software_factory.policy import RepoPolicy
 from druks.contrib.software_factory.schemas import ProjectRepoSummary, WorkItemSummary
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.core.services import Github
-from druks.db import Base, StoredSubject, db_session
+from druks.db import StoredSubject, db_session
+from druks.models import Base
 from druks.signals import publish
 from druks.workflows import FatalError
 
@@ -112,10 +113,6 @@ class ProjectRepo(StoredSubject):
     profile: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 
     project: Mapped[Project] = relationship(back_populates="repos", lazy="joined")
-
-    @classmethod
-    async def get(cls, repo_id: int) -> "ProjectRepo | None":
-        return await db_session().get(cls, repo_id)
 
     @classmethod
     async def list_all(cls) -> list["ProjectRepo"]:
@@ -251,10 +248,6 @@ class WorkItem(StoredSubject):
             select(cls).where(cls.resolution.is_(None)).order_by(cls.updated_at.desc()).limit(500)
         )
         return [item.get_summary() for item in await db_session().scalars(stmt)]
-
-    @classmethod
-    async def get(cls, work_item_id: int) -> "WorkItem | None":
-        return await db_session().get(cls, work_item_id)
 
     @classmethod
     async def get_for_pr(cls, *, repo: str, pr_number: int) -> "WorkItem | None":

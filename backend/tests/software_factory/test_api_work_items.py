@@ -71,7 +71,7 @@ async def test_subject_list_shows_active_and_excludes_resolved(client: TestClien
     await _seed_op(druks_db, building, state="running")
     # Merged → History, not the active board.
     done = (await make_test_work_item(title="merged one", repo=repo)).id
-    await (await WorkItem.get(done)).update(pr_number=1)
+    await (await WorkItem.get_or_none(id=done)).update(pr_number=1)
     await _seed_op(druks_db, done, state="finished")
     await _resolve(repo, 1)
 
@@ -93,7 +93,7 @@ async def test_subject_detail_composes_summary_status_and_timeline(client: TestC
         ticket_key="ACME-5",
         ticket_url="https://linear.app/acme/issue/ACME-5/detail",
     )
-    await (await WorkItem.get(item.id)).update(pr_number=8)
+    await (await WorkItem.get_or_none(id=item.id)).update(pr_number=8)
     run = await seed_build_run(
         druks_db,
         work_item_id=item.id,
@@ -160,7 +160,7 @@ async def test_history_returns_only_done_work_items(client: TestClient, druks_db
     repo = "ClawHaven/acme-app"
     # Merged → history.
     done_id = (await make_test_work_item(title="merged one", repo=repo)).id
-    await (await WorkItem.get(done_id)).update(pr_number=1)
+    await (await WorkItem.get_or_none(id=done_id)).update(pr_number=1)
     await _seed_op(druks_db, done_id, state="finished")
     await _resolve(repo, 1)
     # Running → active.
@@ -168,7 +168,7 @@ async def test_history_returns_only_done_work_items(client: TestClient, druks_db
     await _seed_op(druks_db, running_id, state="running")
     # Failed (no merge) → active "needs you", NOT history (the whole point).
     failed_id = (await make_test_work_item(title="broke", repo=repo)).id
-    await (await WorkItem.get(failed_id)).update(pr_number=2)
+    await (await WorkItem.get_or_none(id=failed_id)).update(pr_number=2)
     await _seed_op(druks_db, failed_id, state="failed")
 
     items = (await client.get("/api/software_factory/work-items/history")).json()["items"]
@@ -184,7 +184,7 @@ async def test_pr_closed_without_merge_is_closed_in_history(client: TestClient, 
     repo = "ClawHaven/acme-app"
     # A build parked on the operator, whose PR was then closed without merging.
     wid = (await make_test_work_item(title="abandoned", repo=repo)).id
-    await (await WorkItem.get(wid)).update(pr_number=7)
+    await (await WorkItem.get_or_none(id=wid)).update(pr_number=7)
     await _seed_op(druks_db, wid, state="finished")
     await _resolve(repo, 7, merged=False)
 
@@ -192,13 +192,15 @@ async def test_pr_closed_without_merge_is_closed_in_history(client: TestClient, 
     row = next(it for it in items if it["title"] == "abandoned")
     assert row["resolution"] == "closed"
     # History's time column is the verdict's, not the row's last touch.
-    assert datetime.fromisoformat(row["updatedAt"]) == (await WorkItem.get(wid)).resolved_at
+    assert (
+        datetime.fromisoformat(row["updatedAt"]) == (await WorkItem.get_or_none(id=wid)).resolved_at
+    )
 
 
 async def test_history_clamps_limit(client: TestClient, druks_db):
     for i in range(3):
         wid = (await make_test_work_item(title=f"merged {i}", repo="ClawHaven/acme-app")).id
-        await (await WorkItem.get(wid)).update(pr_number=i + 1)
+        await (await WorkItem.get_or_none(id=wid)).update(pr_number=i + 1)
         await _seed_op(druks_db, wid, state="finished")
         await _resolve("ClawHaven/acme-app", i + 1)
 

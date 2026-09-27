@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.db import db_session
-from druks.exceptions import SubjectNotFound
+from druks.exceptions import ObjectNotFound
 from druks.models import StoredSubject
 from druks.ui.exceptions import PageContractError, PageReadError, PageRouteError
 from druks.user_settings.models import SettingsOverride
@@ -441,7 +441,7 @@ class App:
         async def read_page(**parameters):
             try:
                 page = await declaration.function(**parameters)
-            except SubjectNotFound as error:
+            except ObjectNotFound as error:
                 return Page(str(error), blocks=[EmptyState(str(error))])
             except Exception as error:
                 raise PageReadError(
@@ -628,7 +628,7 @@ class App:
         async def subject_response(
             session: AsyncSession, subject_id: str
         ) -> SubjectResponse | None:
-            if subject := await subject_class.get_for_id(subject_id):
+            if subject := await subject_class.get_or_none(id=subject_id):
                 return await reads.get_subject_response(
                     session, subject_type, subject_id, summary=subject.get_summary()
                 )

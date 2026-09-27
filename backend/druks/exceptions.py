@@ -42,8 +42,9 @@ class SessionNotBoundError(DruksError):
         )
 
 
-class SubjectNotFound(DruksError):
-    """An id names no subject."""
+class ObjectNotFound(DruksError):
+    """No row holds the values a read asked for."""
 
-    def __init__(self, subject_type: str, subject_id: int | str) -> None:
-        super().__init__(f"No {subject_type} {subject_id}")
+    def __init__(self, model: str, fields: dict[str, object]) -> None:
+        match = ", ".join(f"{name} {value}" for name, value in fields.items())
+        super().__init__(f"No {model} with {match}")

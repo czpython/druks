@@ -1,18 +1,18 @@
 import enum
 import re
 from collections.abc import Sequence
-from contextlib import suppress
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
-from sqlalchemy import DateTime, Enum, Integer, cast, select
+from pydantic import TypeAdapter
+from sqlalchemy import DateTime, Enum, Integer, Select, cast, false, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession, async_object_session
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 from druks.core.utils.time import ensure_utc
-from druks.exceptions import DetachedRowError, SubjectNotFound
+from druks.exceptions import DetachedRowError, ObjectNotFound
 
 if TYPE_CHECKING:
     from druks.durable.schemas import SubjectStatus, SubjectSummary
@@ -50,16 +50,6 @@ class Base(AsyncAttrs, DeclarativeBase):
         dict: JSONB,
     }
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        # A table is named for its app and its class unless the class names it.
-        if "__tablename__" not in cls.__dict__ and not cls.__dict__.get("__abstract__"):
-            # Cycle: the loader is built on this module's Base.
-            from druks.apps.loader import resolve_workflow_app
-
-            app = resolve_workflow_app(cls.__module__)
-            cls.__tablename__ = f"{app}_{snake_name(cls.__name__)}"
-        super().__init_subclass__(**kwargs)
-
     @property
     def session(self) -> AsyncSession:
         """The session this row is loaded in; a mutation writes through it."""
@@ -72,9 +62,82 @@ class Base(AsyncAttrs, DeclarativeBase):
         return datetime.now(UTC).replace(microsecond=0)
 
 
-class StoredSubject(Base):
+class Model(Base):
+    """A table an app keeps. Druks names the table for the app and the class, and a
+    row reads and writes through the session of the request or step it runs in."""
+
+    __abstract__ = True
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        # A table is named for its app and its class unless the class names it.
+        if "__tablename__" not in cls.__dict__ and not cls.__dict__.get("__abstract__"):
+            # Cycle: the loader is built on this module's Base.
+            from druks.apps.loader import resolve_workflow_app
+
+            app = resolve_workflow_app(cls.__module__)
+            cls.__tablename__ = f"{app}_{snake_name(cls.__name__)}"
+        super().__init_subclass__(**kwargs)
+
+    @classmethod
+    async def create(cls, **fields: object) -> Self:
+        """A saved row, flushed so it carries its id."""
+        # Cycle: the session seam is built on this module's Base.
+        from druks.db import db_session
+
+        row = cls(**fields)
+        db_session().add(row)
+        await db_session().flush()
+        return row
+
+    async def save(self) -> None:
+        await self.session.flush()
+
+    async def delete(self) -> None:
+        await self.session.delete(self)
+        await self.session.flush()
+
+    @classmethod
+    async def get(cls, **fields: object) -> Self:
+        """The one row whose fields hold these values. A miss raises ``ObjectNotFound``,
+        which a route answers with 404 and a page with an empty state."""
+        if row := await cls.get_or_none(**fields):
+            return row
+        raise ObjectNotFound(snake_name(cls.__name__).replace("_", " "), fields)
+
+    @classmethod
+    async def get_or_none(cls, **fields: object) -> Self | None:
+        """The one row whose fields hold these values, or None. Two rows raise
+        SQLAlchemy's ``MultipleResultsFound``."""
+        from druks.db import db_session
+
+        return (await db_session().scalars(cls._select_matching(fields))).one_or_none()
+
+    @classmethod
+    async def filter(cls, **fields: object) -> list[Self]:
+        """The rows whose fields hold these values, in primary key order."""
+        from druks.db import db_session
+
+        statement = cls._select_matching(fields).order_by(*cls.__mapper__.primary_key)
+        return list(await db_session().scalars(statement))
+
+    @classmethod
+    def _select_matching(cls, fields: dict[str, object]) -> Select[tuple[Self]]:
+        # Ids arrive as text off a URL or an event, so a text value is read as its
+        # column's type, and one the column could never hold matches no row.
+        values = dict(fields)
+        for name, value in fields.items():
+            if type(value) is str and name in cls.__table__.columns:
+                column_type = cls.__table__.columns[name].type.python_type
+                try:
+                    values[name] = TypeAdapter(column_type).validate_python(value)
+                except ValueError:
+                    return select(cls).where(false())
+        return select(cls).filter_by(**values)
+
+
+class StoredSubject(Model):
     """A row an app's runs are about — a work item, a repo, a document.
-    Subclass it instead of ``Base``: the class name is the subject type, so
+    Subclass it instead of ``Model``: the class name is the subject type, so
     ``WorkItem`` is ``work_item``."""
 
     __abstract__ = True
@@ -114,24 +177,6 @@ class StoredSubject(Base):
     def key(self) -> str:
         return self.get_key()
 
-    @classmethod
-    async def create(cls, **fields: object) -> Self:
-        """A saved row, flushed so it carries its id."""
-        # Cycle: the session seam is built on this module's Base.
-        from druks.db import db_session
-
-        row = cls(**fields)
-        db_session().add(row)
-        await db_session().flush()
-        return row
-
-    async def save(self) -> None:
-        await self.session.flush()
-
-    async def delete(self) -> None:
-        await self.session.delete(self)
-        await self.session.flush()
-
     async def announce(self, topic: str, **facts: Any) -> None:
         """Record and deliver a domain fact in the current transaction."""
         # The event log is built on this module's Base.
@@ -139,23 +184,6 @@ class StoredSubject(Base):
         from druks.events.models import Event
 
         await Event.announce(db_session(), self, topic, facts)
-
-    @classmethod
-    async def get_for_id(
-        cls, subject_id: int | str, *, raise_on_missing: bool = False
-    ) -> Self | None:
-        """The row this subject id names. A subject id is free text and reaches the
-        read-side straight off a URL, so an id this table could never hold is a miss
-        rather than an error. ``raise_on_missing`` makes a miss ``SubjectNotFound``:
-        the API answers it with 404 and a page with an empty state."""
-        from druks.db import db_session
-
-        row = None
-        with suppress(ValueError):
-            row = await db_session().get(cls, int(subject_id))
-        if row or not raise_on_missing:
-            return row
-        raise SubjectNotFound(cls.subject_type, subject_id)
 
     def get_summary(self) -> "SubjectSummary":
         return self.summary_class.model_validate(self)

@@ -14,13 +14,13 @@ class PullRequest(Subject):
         return cls(id=f"{repo}#{number}")
 
     @classmethod
-    async def get_for_id(cls, subject_id: str) -> Self | None:
+    async def get_or_none(cls, id: str) -> Self | None:
         # Ids reach the read side as free text off a URL, so a shape that names no
         # pull request is a miss rather than a crashed read.
-        repo, _, number = subject_id.partition("#")
+        repo, _, number = id.partition("#")
         owner, _, name = repo.partition("/")
         if owner and name and number.isdigit() and int(number) > 0:
-            return cls(id=subject_id)
+            return cls(id=id)
         return
 
     @property

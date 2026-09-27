@@ -72,8 +72,8 @@ def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
                     return
             delivered = {key: value for key, value in published.items() if key not in _ROUTING}
             if subject_class:
-                subject = await subject_class.get_for_id(str(published["subject"]["id"]))
-                if subject is None:
+                subject = await subject_class.get_or_none(id=published["subject"]["id"])
+                if not subject:
                     return
                 delivered["subject"] = subject
             await fn(**delivered)

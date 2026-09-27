@@ -62,7 +62,7 @@ async def test_first_delivery_records_its_pr_and_work_title(druks_db, druks_clie
     await workflow.implement()
     await workflow.implement()
     db_session().expunge_all()
-    item = await WorkItem.get(item.id)
+    item = await WorkItem.get_or_none(id=item.id)
     assert item.pr_number == 42
     await item.start_attempt()
     await item.update(pr_number=43, branch="agent/next")
@@ -198,7 +198,7 @@ async def test_owner_outcome_and_announcement_roll_back_together(druks_db):
             )
             raise RuntimeError("Roll back the delivery")
     druks_db.expunge_all()
-    assert not (await WorkItem.get(item_id)).resolution
+    assert not (await WorkItem.get_or_none(id=item_id)).resolution
     assert not list(await druks_db.scalars(select(Event)))
 
 
@@ -228,7 +228,7 @@ async def test_operator_stop_records_no_owner_close(druks_db, druks_client, pr_n
     events = list(await druks_db.scalars(select(Event).where(Event.subject_id == str(item.id))))
     assert [event.type for event in events] == ["workflow.cancelled"]
     druks_db.expunge_all()
-    assert (await WorkItem.get(item.id)).resolution == Resolution.CANCELLED
+    assert (await WorkItem.get_or_none(id=item.id)).resolution == Resolution.CANCELLED
 
 
 @pytest.mark.parametrize("state", ["parked", "failed"])
@@ -284,4 +284,4 @@ async def test_owner_merge_replaces_an_operator_cancel(druks_db, druks_client):
         "title": "Merged after a cancel",
     }
     druks_db.expunge_all()
-    assert (await WorkItem.get(item.id)).resolution == Resolution.MERGED
+    assert (await WorkItem.get_or_none(id=item.id)).resolution == Resolution.MERGED

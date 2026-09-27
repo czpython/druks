@@ -159,7 +159,7 @@ async def new_note():
 
 @ui.page("/notes/{note_id}", subject=Note)
 async def note(note_id: int):
-    found = await Note.get_for_id(note_id, raise_on_missing=True)
+    found = await Note.get(id=note_id)
     status = await found.get_status()
     # The region follows the note, so answering the gate refreshes it and
     # the controls go away.
@@ -192,7 +192,7 @@ async def note(note_id: int):
 
 @note.child("/history")
 async def note_history(note_id: int):
-    found = await Note.get_for_id(note_id, raise_on_missing=True)
+    found = await Note.get(id=note_id)
     return ui.Page(
         f"Note {note_id} history",
         blocks=[

@@ -444,7 +444,7 @@ class Profile(Workflow):
         )
 
     async def run(self, repo_id: int, refresh_only: bool = False) -> None:
-        project_repo = await ProjectRepo.get(repo_id)
+        project_repo = await ProjectRepo.get_or_none(id=repo_id)
 
         if refresh_only:
             baseline = project_repo.profile.get("baseline") or {}
@@ -467,7 +467,7 @@ class Profile(Workflow):
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         return {
-            "repo": (await ProjectRepo.get(self.input.repo_id)).full_name,
+            "repo": (await ProjectRepo.get_or_none(id=self.input.repo_id)).full_name,
             "skills_catalog": [
                 {"name": skill.name, "description": skill.description}
                 for skill in await Skill.list_enabled(db_session())
