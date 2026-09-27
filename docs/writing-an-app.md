@@ -641,10 +641,10 @@ async def request_access(system: Annotated[str, Body(embed=True)], user: BotUser
 
 | Field | Value |
 | --- | --- |
-| `id` | The person's WhatsApp id. It is always set. |
-| `name` | The person's WhatsApp profile name. |
-| `phone` | The person's number, or empty when WhatsApp hides it. |
-| `source` | `whatsapp` |
+| `id` | The person's id on the channel, such as a WhatsApp id or a caller's number. It is always set. |
+| `name` | The person's name, or empty when the channel does not know it. |
+| `phone` | The person's phone number, or empty when the channel does not know it. |
+| `source` | The channel of the conversation, such as `whatsapp` or `call`. |
 
 Druks fills `user` from the conversation that the tool call came from, so it
 never appears in the tool's input schema. A route that takes `BotUser` refuses a

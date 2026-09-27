@@ -394,6 +394,18 @@ class Twilio(Service):
         )
 
     @classmethod
+    async def get_for_number(cls, session: AsyncSession, number: str) -> VaultSecret | None:
+        """The live connection of a phone number."""
+        return await session.scalar(
+            select(VaultSecret).where(
+                VaultSecret.kind == SecretKind.SESSION,
+                VaultSecret.audience == Audience.service(cls.slug),
+                VaultSecret.revoked_at.is_(None),
+                VaultSecret.identity["number"].astext == number,
+            )
+        )
+
+    @classmethod
     async def get_connection(cls, session: AsyncSession, connection_id: str) -> VaultSecret | None:
         """A number's connection, live or removed."""
         connection = await session.get(VaultSecret, connection_id)

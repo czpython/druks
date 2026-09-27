@@ -214,6 +214,7 @@ class Conversation(Base, Uuid7Pk):
         is_internal: bool = False,
         source_id: str | None = None,
         file: File | None = None,
+        transcript: str = "",
     ) -> Message:
         """A message in the conversation. The person's message starts pending."""
         message = Message(
@@ -226,6 +227,7 @@ class Conversation(Base, Uuid7Pk):
             is_internal=is_internal,
             source_id=source_id,
             file=file,
+            transcript=transcript,
         )
         session.add(message)
         await session.flush()

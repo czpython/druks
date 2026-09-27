@@ -457,3 +457,26 @@ the number's bot account.
 its calls. The number and its calls stay as history. If you link the number
 again, it gets a new connection. If you disconnect the Twilio card, Druks
 removes every linked number first.
+
+### What happens on a call
+
+1. Twilio sends the call to Druks. Druks checks Twilio's signature and starts a
+   new conversation for the caller.
+2. Druks tells Twilio to stream the call's audio to the voice server.
+3. The voice model answers. It starts by saying that it is an automated
+   assistant and that the call is transcribed.
+
+Druks rejects a call to a number that is not linked, and a call while the Voice
+card is disconnected.
+
+The voice model works from the Bot's prompt. It can call the tools in the Bot's
+`user_tools`, as often as the call needs, and it offers only what those tools
+can do. It also knows the caller's number, the number they called, the local
+time, the last 20 lines of the caller's earlier calls to that number, and what
+Druks reported after those calls ended. A caller who hides their number is a
+new person on each call, so the voice model gets no number and no history for
+them.
+
+Druks saves each line of the call in the conversation as it is said. If a tool
+starts a run, the run reports back to the conversation, but nothing reads the
+report during the call. The caller hears the outcome on their next call.
