@@ -146,7 +146,7 @@ caches, and the sandbox provisioning gate.
 
 | TOML key | Purpose |
 | --- | --- |
-| `urls.endpoint` | Browser-visible dashboard URL and MCP OAuth callback base. It is also the `/mcp` base when `urls.webhook_host` is empty |
+| `urls.endpoint` | Browser-visible dashboard URL and MCP OAuth callback base. It is also the `/mcp` base when `urls.webhook_host` is empty. WebSocket upgrades must come from its host. When it is empty, they must come from the request's `Host` |
 | `urls.webhook_host` | Public webhook hostname and the HTTPS host for this installation's `/mcp` endpoint |
 | `identity.mode` | `none` (default, no authentication, single operator), `header` (edge-asserted identity), or `jwt` (validated edge-signed assertion) |
 | `identity.header` | The trusted identity header. The shipped Caddy edge also uses it. Header and JWT modes have no default and require it |
