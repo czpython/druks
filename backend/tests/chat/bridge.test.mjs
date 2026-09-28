@@ -60,7 +60,7 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     "initialize: async () => ({protocolVersion: PROTOCOL_VERSION, agentCapabilities: {loadSession: true}}),",
     "newSession: async p => { cwd=p.cwd; sessionId=randomUUID();",
     " if (p._meta.harness !== 'options') throw Error('meta');",
-    " if (p.mcpServers[0].headers[0].value !== 'Bearer placeholder') throw Error('token');",
+    " if (p.mcpServers[0].headers[0].value !== 'placeholder') throw Error('token');",
     " fs.writeFileSync(path.join(cwd, 'setup.json'), JSON.stringify(p.mcpServers[0].headers));",
     " return {sessionId, configOptions: [{id: 'model'}, {id: 'effort'}, {id: 'fast'}]}; },",
     "loadSession: async p => { cwd=p.cwd; sessionId=p.sessionId; memory=fs.readFileSync(transcript(), 'utf8');",
