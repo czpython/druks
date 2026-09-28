@@ -4,9 +4,10 @@ import json
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import asyncssh
 import pytest
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
@@ -14,7 +15,12 @@ from druks.chat import service, sockets
 from druks.chat.bridge import Bridge
 from druks.chat.constants import CHAT_KEY_NAME
 from druks.chat.enums import ConversationSource, MessageRole, MessageState
-from druks.chat.exceptions import ChatBridgeError, ChatHarnessError, ChatSandboxGone
+from druks.chat.exceptions import (
+    ChatBridgeError,
+    ChatBridgeUnavailable,
+    ChatHarnessError,
+    ChatSandboxGone,
+)
 from druks.chat.models import Conversation, Message
 from druks.database import get_session
 from druks.files.datastructures import File
@@ -354,14 +360,42 @@ async def test_recovery_reads_live_events_then_saves_reply_and_replaces_archive(
     assert host.upload_file.await_count == 0
 
 
-async def test_bridge_start_uploads_the_bridge_only_when_none_answers(monkeypatch):
+def channel(answer: bytes) -> tuple[asyncio.StreamReader, MagicMock]:
+    """A loopback channel that sends one answer and ends."""
+    reader = asyncio.StreamReader()
+    reader.feed_data(answer)
+    reader.feed_eof()
+    return reader, MagicMock(drain=AsyncMock(), wait_closed=AsyncMock())
+
+
+@pytest.mark.parametrize(
+    ("opened", "error"),
+    [
+        (
+            asyncssh.ChannelOpenError(asyncssh.OPEN_CONNECT_FAILED, "Connection refused"),
+            ChatBridgeUnavailable,
+        ),
+        (lambda *address: channel(b""), ChatBridgeUnavailable),
+        (lambda *address: channel(b"not json\n"), ChatBridgeError),
+    ],
+)
+async def test_bridge_is_unavailable_only_when_it_sends_no_answer(opened, error):
+    host = SimpleNamespace(open_tcp_connection=AsyncMock(side_effect=opened))
+
+    with pytest.raises(error) as raised:
+        await Bridge(host).request("ping")
+
+    assert raised.type is error
+
+
+async def test_bridge_start_uploads_the_bridge_only_when_none_answers():
+    pong = b'{"ok": true}\n'
     host = SimpleNamespace(
         ssh_username="druks",
+        open_tcp_connection=AsyncMock(side_effect=[channel(b""), channel(pong), channel(pong)]),
         upload_file=AsyncMock(),
         exec=AsyncMock(return_value=SimpleNamespace(ok=True)),
     )
-    answers = iter([False, True, True])
-    monkeypatch.setattr(Bridge, "is_running", AsyncMock(side_effect=lambda: next(answers)))
 
     await Bridge(host).start()
     await Bridge(host).start()
