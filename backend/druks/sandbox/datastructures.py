@@ -147,6 +147,15 @@ class McpServer:
     # Secret declared headers: header name -> the env var carrying its value.
     env_headers: dict[str, str] = field(default_factory=dict)
 
+    def get_request_headers(self) -> dict[str, str]:
+        """The headers a request to the server carries, each secret one as a ${VAR} placeholder."""
+        headers = dict(self.headers)
+        if self.bearer_token_env_var:
+            headers["Authorization"] = f"Bearer ${{{self.bearer_token_env_var}}}"
+        for header, env_var in self.env_headers.items():
+            headers[header] = f"${{{env_var}}}"
+        return headers
+
 
 @dataclass(frozen=True)
 class SandboxSecret:

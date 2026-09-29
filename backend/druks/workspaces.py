@@ -166,13 +166,19 @@ class Workspace:
 
     @classmethod
     async def get_all_mcp_servers(
-        cls, session: AsyncSession, subject: Any, account_id: str | None
+        cls,
+        session: AsyncSession,
+        subject: Any,
+        account_id: str | None,
+        *,
+        skip_unauthenticated: bool = False,
     ) -> tuple[tuple[McpServer, ...], list[SecretRef]]:
         """The MCP servers a box of this workspace reaches, as the harness names
         them, and the secret refs for the box's entries, one per bearer and per
         secret header. The workspace's servers come first and own their names:
-        a same-named registry entry is neither resolved nor delivered. A server
-        that cannot authenticate fails here, before the box."""
+        a same-named registry entry is neither resolved nor delivered. A registry
+        server that cannot authenticate fails here, before the box, unless
+        ``skip_unauthenticated`` leaves it out."""
         workspace_servers = await cls.get_mcp_servers(subject)
         workspace_names = {server.name for server in workspace_servers}
         if len(workspace_names) != len(workspace_servers):
@@ -204,7 +210,11 @@ class Workspace:
             )
         owner = await Account.get_secrets_owner(session, account_id)
         run_account = owner.id if owner else None
-        for server in await mcp_models.McpServer.list_enabled(session):
+        registry = await mcp_models.McpServer.list_enabled(session)
+        if skip_unauthenticated:
+            resolved = await mcp_models.McpServer.get_resolved(session, run_account)
+            registry = [server for server in registry if resolved[server["name"]]["has_token"]]
+        for server in registry:
             name = server["name"]
             if name in workspace_names:
                 continue

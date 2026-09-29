@@ -338,9 +338,9 @@ class Agent:
             # same servers.
             subject = await workflow.subject
             workspace_class = workflow.workspace_class
-            mcp_servers, mcp_refs = (), []
+            mcp_servers, mcp_secret_refs = (), []
             if self.include_mcp:
-                mcp_servers, mcp_refs = await workspace_class.get_all_mcp_servers(
+                mcp_servers, mcp_secret_refs = await workspace_class.get_all_mcp_servers(
                     session, subject, workflow.account_id
                 )
             refs = [
@@ -354,7 +354,7 @@ class Agent:
                     )
                     for secret in await workspace_class.get_secrets(subject)
                 ),
-                *mcp_refs,
+                *mcp_secret_refs,
             ]
             host_id = await workflow._lease_host(session, config, refs)
 

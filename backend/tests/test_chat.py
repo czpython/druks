@@ -30,6 +30,7 @@ from druks.harnesses.codex import CodexHarness
 from druks.harnesses.opencode import OpenCodeHarness
 from druks.mcp.enums import Toolkit
 from druks.mcp.inbound import get_druks_account_token, get_druks_mcp_server
+from druks.mcp.models import McpServer
 from druks.models import Base
 from druks.redis import get_client
 from druks.sandbox.exceptions import IdentityDenied
@@ -90,6 +91,7 @@ async def sandbox(druks_db, conversation, monkeypatch):
         identity={},
         effort="",
         fast_mode=False,
+        timeout=600,
     )
     monkeypatch.setattr(service, "get_agent", AsyncMock(return_value=(config, "", Toolkit.ALL)))
     monkeypatch.setattr(service, "sandbox_client", SimpleNamespace(set_expiry=AsyncMock()))
@@ -200,17 +202,29 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
     )
     config = SimpleNamespace(secret_refs=[], secrets={})
     first_host, _identity = await service.get_sandbox(
-        druks_db, conversation.account_id, config, Toolkit.ALL
+        druks_db,
+        conversation.account_id,
+        config=config,
+        allowed_tools=Toolkit.ALL,
+        mcp_secret_refs=[],
     )
     second_host, _identity = await service.get_sandbox(
-        druks_db, second.account_id, config, Toolkit.ALL
+        druks_db,
+        second.account_id,
+        config=config,
+        allowed_tools=Toolkit.ALL,
+        mcp_secret_refs=[],
     )
     login = await get_druks_account_token(druks_db, conversation.account_id, (), name="login")
     moved = SimpleNamespace(
         secret_refs=[SecretRef(name="claude_token", secret_id=login.id)], secrets={}
     )
     moved_host, _identity = await service.get_sandbox(
-        druks_db, second.account_id, moved, Toolkit.ALL
+        druks_db,
+        second.account_id,
+        config=moved,
+        allowed_tools=Toolkit.ALL,
+        mcp_secret_refs=[],
     )
 
     assert first_host.id == second_host.id
@@ -459,6 +473,48 @@ async def test_new_sandbox_restores_archive_and_drains_pending_messages(
     assert starts[1]["archivePath"] == ""
     assert host.upload_file.await_count == 1
     assert previous.deleted_at
+
+
+LINEAR = {
+    "name": "linear",
+    "url": "https://mcp.linear.app/mcp",
+    "headers": {"Authorization": "${MCP_LINEAR_HEADER_0}"},
+}
+
+
+@pytest.mark.parametrize(
+    "kind, expected", [(AccountKind.OPERATOR, [LINEAR]), (AccountKind.BOT, [])]
+)
+async def test_only_the_operator_reaches_the_connected_mcp_servers(
+    druks_db, conversation, sandbox, monkeypatch, kind, expected
+):
+    await McpServer.create(
+        druks_db,
+        name="linear",
+        url="https://mcp.linear.app/mcp",
+        secret_headers={"Authorization": "Bearer lin_secret"},
+    )
+    await McpServer.create(druks_db, name="sentry", url="https://mcp.sentry.dev/mcp", is_oauth=True)
+    conversation.account.kind = kind
+    starts = []
+
+    async def request(self, method, **values):
+        if method == "start":
+            starts.append(values)
+        return {"status": "idle", "sessionId": "one"}
+
+    async def follow_turn(session, conversation, message, bridge):
+        message.state = MessageState.REPLIED
+        await session.commit()
+
+    monkeypatch.setattr(Bridge, "request", request)
+    monkeypatch.setattr(service, "follow_turn", follow_turn)
+
+    await service.deliver_pending(druks_db, conversation)
+
+    [refs] = [call.kwargs["mcp_secret_refs"] for call in service.get_sandbox.await_args_list]
+    assert len(refs) == len(expected)
+    assert starts[0]["mcpServers"] == expected
 
 
 @pytest.mark.parametrize(
@@ -883,7 +939,7 @@ async def test_stop_during_startup_keeps_the_sandbox_and_sends_only_the_next_mes
     sandbox_requests = 0
     prompts = []
 
-    async def get_sandbox(session, account_id, config, allowed_tools):
+    async def get_sandbox(session, account_id, *, config, allowed_tools, mcp_secret_refs):
         nonlocal sandbox_requests
         sandbox_requests += 1
         await session.commit()

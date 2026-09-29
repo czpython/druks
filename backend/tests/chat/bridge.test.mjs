@@ -61,7 +61,7 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     "newSession: async p => { cwd=p.cwd; sessionId=randomUUID();",
     " if (p._meta.harness !== 'options') throw Error('meta');",
     " if (p.mcpServers[0].headers[0].value !== 'placeholder') throw Error('token');",
-    " fs.writeFileSync(path.join(cwd, 'setup.json'), JSON.stringify(p.mcpServers[0].headers));",
+    " fs.writeFileSync(path.join(cwd, 'setup.json'), JSON.stringify(p.mcpServers));",
     " return {sessionId, configOptions: [{id: 'model'}, {id: 'effort'}, {id: 'fast'}]}; },",
     "loadSession: async p => { cwd=p.cwd; sessionId=p.sessionId; memory=fs.readFileSync(transcript(), 'utf8');",
     " await client.sessionUpdate({sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'replay'}}}); return {configOptions: [{id: 'model'}, {id: 'effort'}, {id: 'fast'}]}; },",
@@ -115,16 +115,19 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     mode: "bypassPermissions", model: "claude-opus-4-7", meta: { harness: "options" }, env: {}, files: {},
     options: { model: "model", effort: "effort", fast: "fast" },
     effort: "high", fastMode: true, bearerVariable: "MCP_DRUKS_TOKEN", mcpUrl: "https://hooks.example.com/mcp",
-    headers: [],
+    headers: [], mcpServers: [],
   });
   const status = conversation => request(port, { method: "status", conversationId: conversation });
   const first = await launch(home);
   assert.equal((await request(port, start(id(1)))).ok, true);
   const conversationHeader = { name: "X-Druks-Conversation", value: id(2) };
   const login = path.join(home, ".fake/login.json");
-  assert.equal((await request(port, { ...start(id(2)), headers: [conversationHeader], files: { [login]: '{"token": "${MCP_DRUKS_TOKEN}"}' } })).ok, true);
-  const headers = JSON.parse(await fs.readFile(path.join(home, "work", "chat", id(2), "setup.json"), "utf8"));
-  assert.deepEqual(headers[1], conversationHeader);
+  const linear = { name: "linear", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer ${MCP_DRUKS_TOKEN}" } };
+  assert.equal((await request(port, { ...start(id(2)), headers: [conversationHeader], mcpServers: [linear], files: { [login]: '{"token": "${MCP_DRUKS_TOKEN}"}' } })).ok, true);
+  const servers = JSON.parse(await fs.readFile(path.join(home, "work", "chat", id(2), "setup.json"), "utf8"));
+  assert.deepEqual(servers[0].headers[1], conversationHeader);
+  // A registry server's header names its placeholder, and the bridge fills it the same way.
+  assert.deepEqual(servers[1], { name: "linear", type: "http", url: linear.url, headers: [{ name: "Authorization", value: "Bearer placeholder" }] });
   // A file names a placeholder variable, and the bridge fills it from the sandbox environment.
   assert.equal(await fs.readFile(login, "utf8"), '{"token": "placeholder"}');
   assert.equal((await request(port, { ...start(id(1)), model: "claude-sonnet-5", effort: "low", fastMode: false })).ok, true);

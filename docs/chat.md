@@ -102,6 +102,12 @@ An operator's Chat key permits every tool of the Druks toolkit: the routes tagge
 tool list lists and calls only those tools. The agents of a WhatsApp number have
 such keys: see [WhatsApp](#whatsapp).
 
+An operator's agent also reaches every MCP server that is enabled in
+**Settings → MCP servers**, with the same credentials as a workflow agent. Chat
+leaves out a server that cannot authenticate for you, such as an OAuth server
+that you have not connected. A Bot's agent reaches only the Druks server. When
+you enable, disable, or connect a server, the next turn replaces the sandbox.
+
 The agent can change Druks through those tools. Chat has no permission dialog
 or proposal mode. Claude runs in bypass mode and cannot call `AskUserQuestion`.
 Codex runs in full-access mode for an operator. For a Bot it runs in read-only

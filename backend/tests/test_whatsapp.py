@@ -781,7 +781,14 @@ async def test_operator_turns_use_the_apps_prompt_and_settings_without_a_timeout
 
     resolved_config, prompt, tools = await service.get_agent(druks_db, conversation)
     await service.send_turn(
-        druks_db, conversation, message, Bridge(host), SimpleNamespace(), resolved_config, prompt
+        druks_db,
+        conversation,
+        message,
+        bridge=Bridge(host),
+        identity=SimpleNamespace(),
+        config=resolved_config,
+        prompt=prompt,
+        mcp_servers=(),
     )
 
     bot = helpdesk.bot if app == "helpdesk" else Chat.bot

@@ -211,20 +211,16 @@ class ClaudeHarness(Harness):
         Claude expands ``${VAR}`` refs in header values from the run env at
         connect time, so no secret — the bearer or a secret header — ever
         lands in the emitted config; only non-secret values ride inline."""
-        if not servers:
-            return ()
-        entries = {}
-        for server in servers:
-            headers = dict(server.headers)
-            if server.bearer_token_env_var:
-                headers["Authorization"] = f"Bearer ${{{server.bearer_token_env_var}}}"
-            for header, env_var in server.env_headers.items():
-                headers[header] = f"${{{env_var}}}"
-            entry: dict[str, object] = {"type": "http", "url": server.url}
-            if headers:
-                entry["headers"] = headers
-            entries[server.name] = entry
-        return ("--mcp-config", json.dumps({"mcpServers": entries}))
+        if servers:
+            entries = {}
+            for server in servers:
+                headers = server.get_request_headers()
+                entry: dict[str, object] = {"type": "http", "url": server.url}
+                if headers:
+                    entry["headers"] = headers
+                entries[server.name] = entry
+            return ("--mcp-config", json.dumps({"mcpServers": entries}))
+        return ()
 
     @classmethod
     def get_secret_refs(cls, subscription: VaultSecret) -> list[SecretRef]:

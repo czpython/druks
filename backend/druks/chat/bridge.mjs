@@ -160,7 +160,15 @@ class Conversation {
       if (!bearer) throw new Error("The Druks MCP placeholder is missing.");
       const setup = {
         cwd: this.root,
-        mcpServers: [{ name: "druks", type: "http", url: request.mcpUrl, headers: [{ name: "Authorization", value: bearer }, ...request.headers] }],
+        mcpServers: [
+          { name: "druks", type: "http", url: request.mcpUrl, headers: [{ name: "Authorization", value: bearer }, ...request.headers] },
+          ...request.mcpServers.map(server => ({
+            name: server.name,
+            type: "http",
+            url: server.url,
+            headers: Object.entries(server.headers).map(([name, value]) => ({ name, value: fillPlaceholders(value) })),
+          })),
+        ],
         _meta: request.meta,
       };
       const session = this.state.sessionId
