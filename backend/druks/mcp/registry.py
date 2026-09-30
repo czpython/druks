@@ -7,8 +7,10 @@ import httpx
 from druks.mcp.constants import (
     NAME_PATTERN,
     REGISTRY_CACHE_TTL_SECONDS,
+    REGISTRY_PAGE_LIMIT,
     REGISTRY_SEARCH_CACHE_PREFIX,
     REGISTRY_SEARCH_URL,
+    REGISTRY_TIMEOUT_SECONDS,
 )
 from druks.mcp.exceptions import RegistryUnavailableError
 from druks.mcp.oauth import _http
@@ -37,29 +39,34 @@ def derive_server_name(registry_name: str) -> str:
     return name
 
 
-async def search_registry(query: str) -> list[dict]:
-    """The latest version of every server matching ``query``, verbatim from
-    the official registry, briefly cached in Redis. Raises
+async def search_registry(query: str) -> tuple[list[dict], bool]:
+    """The latest version of the servers matching ``query``, verbatim from the
+    official registry's first page, and whether the registry holds more
+    matches than that page. Briefly cached in Redis. Raises
     RegistryUnavailableError on any failure — an unreachable registry must
     never read as an empty result."""
     redis = get_client()
     cache_key = f"{REGISTRY_SEARCH_CACHE_PREFIX}{query}"
 
     if cached := await redis.get(cache_key):
-        return json.loads(cached)
+        entries, has_more = json.loads(cached)
+        return entries, has_more
     try:
-        async with _http() as client:
+        async with _http(timeout=REGISTRY_TIMEOUT_SECONDS) as client:
             response = await client.get(
-                REGISTRY_SEARCH_URL, params={"search": query, "version": "latest"}
+                REGISTRY_SEARCH_URL,
+                params={"search": query, "version": "latest", "limit": REGISTRY_PAGE_LIMIT},
             )
             response.raise_for_status()
-        entries = response.json()["servers"]
+        page = response.json()
+        entries = page["servers"]
+        has_more = bool(page.get("metadata", {}).get("nextCursor"))
     except httpx.HTTPError as error:
         raise RegistryUnavailableError(query, str(error)) from error
     except (ValueError, KeyError, TypeError) as error:
         raise RegistryUnavailableError(query, "malformed registry response") from error
-    await redis.set(cache_key, json.dumps(entries), ex=REGISTRY_CACHE_TTL_SECONDS)
-    return entries
+    await redis.set(cache_key, json.dumps([entries, has_more]), ex=REGISTRY_CACHE_TTL_SECONDS)
+    return entries, has_more
 
 
 def resolve_candidates(entries: list[dict], pins: dict[str, str]) -> dict[str, dict]:

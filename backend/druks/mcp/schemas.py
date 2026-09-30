@@ -45,6 +45,12 @@ class McpRegistryCandidateResponse(Schema):
     headers: list[dict]
 
 
+class McpRegistrySearchResponse(Schema):
+    candidates: list[McpRegistryCandidateResponse]
+    # The registry holds more matches than one search returns.
+    has_more: bool
+
+
 class CreateMcpServerRequest(BaseModel):
     name: str
     url: str

@@ -1027,6 +1027,12 @@ export interface McpRegistryCandidate {
   headers: RegistryHeader[]
 }
 
+export interface McpRegistrySearch {
+  candidates: McpRegistryCandidate[]
+  // The registry holds more matches than one search returns.
+  hasMore: boolean
+}
+
 // A personal access token an agent presents as `Authorization: Bearer …` to
 // call this same API. Only the prefix ever appears here; the plaintext is
 // returned once, at mint, and nowhere else.

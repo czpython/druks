@@ -195,30 +195,49 @@ def test_derive_server_name_strips_noise_and_stays_identifier_safe():
 # --- the client: one GET, cached in Redis, loud on failure ------------------
 
 
-def _client_returning(handler):
-    return lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler))
+def _client_returning(handler, timeouts=None):
+    def build(timeout=10.0):
+        if timeouts is not None:
+            timeouts.append(timeout)
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    return build
 
 
 async def test_search_registry_fetches_latest_and_caches(monkeypatch):
-    requests = []
+    requests, timeouts = [], []
 
     def handler(request):
         requests.append(request)
         return httpx.Response(200, json={"servers": [_GRAFANA], "metadata": {"count": 1}})
 
-    monkeypatch.setattr(registry, "_http", _client_returning(handler))
+    monkeypatch.setattr(registry, "_http", _client_returning(handler, timeouts))
 
     first = await search_registry("grafana")
     second = await search_registry("grafana")
 
-    assert first == [_GRAFANA]
-    assert second == [_GRAFANA]
+    assert first == ([_GRAFANA], False)
+    assert second == ([_GRAFANA], False)
     # One GET total — the second resolve reads the Redis cache; and that one
     # GET asked for latest versions only (the registry otherwise returns
-    # every version of every server).
+    # every version of every server), a full page, and waited for a slow
+    # registry.
     assert len(requests) == 1
     assert requests[0].url.params["search"] == "grafana"
     assert requests[0].url.params["version"] == "latest"
+    assert requests[0].url.params["limit"] == "100"
+    assert timeouts == [30.0]
+
+
+async def test_search_registry_reports_more_matches_than_a_page(monkeypatch):
+    payload = {"servers": [_GRAFANA], "metadata": {"count": 1, "nextCursor": "io.github.x:1.0"}}
+    monkeypatch.setattr(
+        registry, "_http", _client_returning(lambda _r: httpx.Response(200, json=payload))
+    )
+
+    assert await search_registry("grafana") == ([_GRAFANA], True)
+    # The cached page keeps the flag.
+    assert await search_registry("grafana") == ([_GRAFANA], True)
 
 
 async def test_search_registry_raises_typed_errors(monkeypatch):
@@ -241,7 +260,8 @@ async def test_search_registry_result_feeds_the_resolver(monkeypatch):
         _client_returning(lambda _r: httpx.Response(200, text=json.dumps(payload))),
     )
 
-    candidates = resolve_candidates(await search_registry("observability"), _PINS)
+    entries, _ = await search_registry("observability")
+    candidates = resolve_candidates(entries, _PINS)
 
     assert [(c["name"], c["official"]) for c in candidates.values()] == [
         ("grafana", True),
@@ -290,7 +310,8 @@ def test_registry_search_route_projects_resolved_candidates(tmp_path, monkeypatc
         response = client.get("/api/mcp-servers/registry", params={"query": "observability"})
 
         assert response.status_code == 200
-        grafana, sentry = response.json()
+        assert response.json()["hasMore"] is False
+        grafana, sentry = response.json()["candidates"]
         assert grafana["name"] == "grafana"
         assert grafana["registryName"] == "io.github.grafana/mcp-grafana"
         assert grafana["official"] is True

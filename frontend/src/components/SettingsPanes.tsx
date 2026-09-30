@@ -9,7 +9,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
 
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import { TextInput } from './Control'
 import { Menu } from './Menu'
 import { SettingField } from './SettingField'
@@ -2271,6 +2271,14 @@ function CollectionCard({
   )
 }
 
+// A 502 is the registry not answering in time, not a Druks fault.
+function describeRegistryError(error: unknown): string {
+  if (error instanceof ApiError && error.status === 502) {
+    return 'The MCP registry is not answering. Try again in a moment.'
+  }
+  return error instanceof Error ? error.message : String(error)
+}
+
 export function McpServersPane() {
   const queryClient = useQueryClient()
   const serversQuery = useQuery({
@@ -2289,6 +2297,8 @@ export function McpServersPane() {
   const [registryQuery, setRegistryQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [candidates, setCandidates] = useState<McpRegistryCandidate[] | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [registryError, setRegistryError] = useState<string | null>(null)
   const [selected, setSelected] = useState<McpRegistryCandidate | null>(null)
   const [headerValues, setHeaderValues] = useState<Record<string, string>>({})
   const [connectingName, setConnectingName] = useState<string | null>(null)
@@ -2314,13 +2324,15 @@ export function McpServersPane() {
   async function searchRegistry() {
     if (!registryQuery.trim()) return
     setSearching(true)
-    setError(null)
+    setRegistryError(null)
     setSelected(null)
     try {
-      setCandidates(await api.searchMcpRegistry(registryQuery.trim()))
+      const search = await api.searchMcpRegistry(registryQuery.trim())
+      setCandidates(search.candidates)
+      setHasMore(search.hasMore)
     } catch (e) {
       setCandidates(null)
-      setError(e instanceof Error ? e.message : String(e))
+      setRegistryError(describeRegistryError(e))
     } finally {
       setSearching(false)
     }
@@ -2329,12 +2341,12 @@ export function McpServersPane() {
   function select(candidate: McpRegistryCandidate) {
     setSelected(candidate)
     setHeaderValues({})
-    setError(null)
+    setRegistryError(null)
   }
 
   async function install(candidate: McpRegistryCandidate) {
     setBusy(true)
-    setError(null)
+    setRegistryError(null)
     try {
       await api.installMcpServer({
         name: candidate.name,
@@ -2346,7 +2358,7 @@ export function McpServersPane() {
       setRegistryQuery('')
       await refresh()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setRegistryError(describeRegistryError(e))
     } finally {
       setBusy(false)
     }
@@ -2552,6 +2564,22 @@ export function McpServersPane() {
             {searching ? 'Searching…' : 'Search'}
           </button>
         </div>
+        {searching && (
+          <p className="mcp-help" role="status">
+            Searching the MCP registry…
+          </p>
+        )}
+        {registryError && (
+          <div className="mcp-error" role="alert">
+            {registryError}
+          </div>
+        )}
+        {candidates && hasMore && (
+          <p className="mcp-help">
+            The registry has more matches than one search shows. Search for the server&apos;s full
+            name to find it.
+          </p>
+        )}
         {candidates && candidates.length === 0 && (
           <p className="mcp-help">
             No matching servers with a hosted (HTTP) endpoint in the registry.

@@ -26,6 +26,7 @@ from druks.mcp.schemas import (
     CreateMcpServerRequest,
     InstallMcpServerRequest,
     McpRegistryCandidateResponse,
+    McpRegistrySearchResponse,
     McpServerConnectionResponse,
     McpServerResponse,
 )
@@ -47,17 +48,21 @@ async def list_mcp_servers(session: SessionDep) -> list[McpServerResponse]:
     ]
 
 
-@router.get("/registry", response_model=list[McpRegistryCandidateResponse])
-async def search_mcp_registry(query: str, request: Request) -> list[McpRegistryCandidateResponse]:
+@router.get("/registry", response_model=McpRegistrySearchResponse)
+async def search_mcp_registry(query: str, request: Request) -> McpRegistrySearchResponse:
     pins = json.loads(request.app.state.settings.mcp_trusted_path.read_text())
     try:
-        entries = await registry.search_registry(query)
+        entries, has_more = await registry.search_registry(query)
     except RegistryUnavailableError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     candidates = registry.resolve_candidates(entries, pins)
-    return [
-        McpRegistryCandidateResponse.model_validate(candidate) for candidate in candidates.values()
-    ]
+    return McpRegistrySearchResponse(
+        candidates=[
+            McpRegistryCandidateResponse.model_validate(candidate)
+            for candidate in candidates.values()
+        ],
+        has_more=has_more,
+    )
 
 
 @router.post("", response_model=McpServerResponse)
@@ -111,7 +116,7 @@ async def install_mcp_server(
     # entry, never the client.
     pins = json.loads(request.app.state.settings.mcp_trusted_path.read_text())
     try:
-        entries = await registry.search_registry(body.registry)
+        entries, _ = await registry.search_registry(body.registry)
     except RegistryUnavailableError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     candidate = registry.resolve_candidates(entries, pins).get(body.registry)
