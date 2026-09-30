@@ -684,7 +684,8 @@ class AnthropicProvider(Provider):
     label = "Anthropic"
     billing_options = frozenset({"subscription", "api_key"})
 
-    REFRESH_MARGIN = timedelta(hours=2)
+    # Longer than one call, so a busy subscription can wait for idle before its token is urgent.
+    REFRESH_MARGIN = timedelta(seconds=MAX_AGENT_TIMEOUT_SECONDS, hours=1)
     _TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
     # Public Claude-Code OAuth client id.
     _CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"

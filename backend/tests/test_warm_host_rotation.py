@@ -7,7 +7,7 @@ import pytest
 from drukbox_sdk import Secret
 from druks.accounts.models import Account
 from druks.db import db_session
-from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
+from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS, SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.workflows import Workflow
 
 
@@ -33,7 +33,7 @@ class _FakeSandbox:
 
 
 class _FakeSandboxClient:
-    def __init__(self, *, lease: timedelta) -> None:
+    def __init__(self, *, lease: timedelta = timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)) -> None:
         self.lease = lease
         self.provisions: list[str] = []
         self.secrets: list[dict[str, Secret]] = []
@@ -78,7 +78,7 @@ def _warm_workflow(*, reuse: bool = True) -> Workflow:
 @pytest.mark.asyncio
 async def test_warm_host_reused_while_lease_covers_another_call(monkeypatch):
     """A warm host with lease to spare is reused across calls, never re-provisioned."""
-    fake = _FakeSandboxClient(lease=timedelta(hours=2))
+    fake = _FakeSandboxClient()
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
@@ -110,7 +110,7 @@ async def test_warm_host_rotates_when_lease_cannot_cover_a_call(monkeypatch):
 @pytest.mark.asyncio
 async def test_warm_host_keeps_its_entries_across_calls(monkeypatch):
     """Calls with the same entries keep the host created with those entries."""
-    fake = _FakeSandboxClient(lease=timedelta(hours=2))
+    fake = _FakeSandboxClient()
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
@@ -129,7 +129,7 @@ async def test_warm_host_keeps_its_entries_across_calls(monkeypatch):
 async def test_warm_host_rotates_when_a_call_needs_other_entries(monkeypatch):
     """A host holds only the entries it was created with. A call that needs other
     entries gets a fresh host under a new provisioning key."""
-    fake = _FakeSandboxClient(lease=timedelta(hours=2))
+    fake = _FakeSandboxClient()
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
@@ -147,7 +147,7 @@ async def test_warm_host_rotates_when_a_call_needs_other_entries(monkeypatch):
 async def test_provisioning_key_names_the_pasted_key(monkeypatch):
     """A replay after a crash starts with no held host and presents its key again.
     The same pasted key finds the host. A replaced key asks for a fresh host."""
-    fake = _FakeSandboxClient(lease=timedelta(hours=2))
+    fake = _FakeSandboxClient()
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     replaced = _config({"anthropic": _ENTRY}, "anthropic.20260907T120000")
 
@@ -166,7 +166,7 @@ async def test_provisioning_key_names_the_pasted_key(monkeypatch):
 async def test_no_warm_host_when_reuse_disabled(monkeypatch):
     """Without steps_reuse_sandbox, each call gets its own throwaway VM, so the
     workflow never provisions or holds one."""
-    fake = _FakeSandboxClient(lease=timedelta(hours=2))
+    fake = _FakeSandboxClient()
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow(reuse=False)
 
@@ -196,7 +196,7 @@ async def test_a_replay_finds_the_warm_box_through_its_identity(
         secret_refs=secrets,
     )
     await identity.bind("host-crashed")
-    client = _FakeSandboxClient(lease=timedelta(hours=2))
+    client = _FakeSandboxClient()
     monkeypatch.setattr(sdk, "sandbox_client", client)
     flow = _warm_workflow()
     config = SimpleNamespace(secrets={}, secret_refs=secrets, secrets_id=subscription.id)
