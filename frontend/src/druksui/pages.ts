@@ -48,6 +48,14 @@ export function hrefForLink(link: Link, app: string, pages: PageEntry[]): string
   return target ? fillPath(target.path, link.arguments) : ''
 }
 
+export function isOutbound(url: string): boolean {
+  return /^https?:\/\//i.test(url)
+}
+
+export function isServerHref(href: string): boolean {
+  return href.startsWith('/api/')
+}
+
 /** The tab strip a page belongs to: its family root first, then the root's
  * static children in declaration order. A child is static when the path it
  * adds to its parent carries no route parameter. No family, no tabs. */

@@ -6,9 +6,9 @@ import { Markdown } from '../components/Markdown'
 import { GateControls } from './GateControls'
 import { Chart, Controls, Facts, ImageGallery, List, Metrics, Table } from './DataBlocks'
 import { ActionButton, Form, useAction } from './Form'
-import { isOutbound, isServerHref, LinkControl } from './LinkControl'
+import { LinkControl } from './LinkControl'
 import { Files, Image, Progress, Timeline } from './RunBlocks'
-import { hrefForLink, PagesContext, RegionContext } from './pages'
+import { hrefForLink, isOutbound, isServerHref, PagesContext, RegionContext } from './pages'
 
 const CardsZoneContext = createContext('')
 
