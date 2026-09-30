@@ -2637,9 +2637,10 @@ export function McpServersPane() {
                         {header.description && <p className="mcp-help">{header.description}</p>}
                       </div>
                     ))}
-                    {!selected.headers.some((header) => header.isSecret) && (
+                    {!selected.headers.some((header) => header.isSecret && header.isRequired) && (
                       <p className="mcp-help">
-                        Uses OAuth — use <b>Connect</b> on the added server to authorize it.
+                        Without a secret value it uses OAuth — use <b>Connect</b> on the added
+                        server to authorize it.
                       </p>
                     )}
                     <div>
@@ -2807,6 +2808,9 @@ export function McpServersPane() {
 }
 
 function tokenStatusLabel(server: McpServer): string {
+  if (server.credential === 'service_login') {
+    return `${server.service} login`
+  }
   if (server.isOauth) {
     return server.hasToken ? 'Connected' : 'Not connected'
   }
@@ -2859,7 +2863,18 @@ function McpServerRow({
           <span className="mcp-enable-label">Enabled</span>
         </span>
         <div className="mcp-actions">
-          {server.isOauth &&
+          {server.credential === 'service_connection' && (
+            // The account signs in through the service; the connection belongs to it.
+            <button
+              className={'set-btn ' + (server.hasToken ? 'ghost' : 'primary')}
+              onClick={() => void onConnect(server.name, 'per_user')}
+              disabled={busy}
+              title={`Opens the ${server.service} sign-in.`}
+            >
+              {server.hasToken ? 'Reconnect' : 'Connect'}
+            </button>
+          )}
+          {server.credential === 'grant' &&
             (claimedMode === null ? (
               // The first connect claims how this server's credential is held;
               // afterwards the choice is fixed until the last grant is dropped.

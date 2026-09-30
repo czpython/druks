@@ -156,6 +156,9 @@ class Service:
     # The one host a sandbox may send this service's secrets to. The secrets
     # proxy swaps a placeholder for the secret on requests to it only.
     host: ClassVar[str] = ""
+    # The host of the MCP server that this identity also signs in to. That
+    # server uses the service's credential instead of registering its own client.
+    mcp_host: ClassVar[str] = ""
     # Set both endpoints when the registered app is an OAuth client;
     # ``get_oauth_client()`` then hands back the connected identity as a
     # configured ``OauthClient``. Scopes are not declared here — the
@@ -337,6 +340,16 @@ class Service:
         """The token a sandbox fetches for this identity, and its expiry. A
         service without one raises."""
         raise NotImplementedError(f"{cls.slug} issues no sandbox token")
+
+    @classmethod
+    def get_authorization(cls, login: VaultSecret) -> str:
+        """The ``Authorization`` value of the connected row, which the default account
+        sends to the server at ``mcp_host``. A service without a pasted login raises."""
+        raise NotImplementedError(f"{cls.slug} has no pasted login")
+
+    @classmethod
+    def get_for_mcp_host(cls, host: str | None) -> "type[Service] | None":
+        return next((service for service in services.all() if service.mcp_host == host), None)
 
     @classmethod
     async def is_connected(cls) -> bool:

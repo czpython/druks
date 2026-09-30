@@ -710,6 +710,21 @@ is one of:
   `Authorization` header spelled out; the form's Bearer field composes it.
 - An OAuth connection, which requires `urls.endpoint`.
 
+A registry install is an OAuth server when its secret headers are empty.
+
+A service can own the host of an OAuth server: GitHub owns
+`api.githubcopilot.com`, Jira owns `mcp.atlassian.com`, and Linear owns
+`mcp.linear.app`. Such a server uses the service's credential:
+
+- GitHub has sign-ins. Each account uses its own GitHub sign-in, and **Connect**
+  opens it. Druks refuses a connection for everyone.
+- Jira and Linear hold a pasted login. When the service is connected, the runs
+  of the default account send that login. A run that no person starts uses the
+  default account, so scheduled runs act as the service's login. Every other
+  account connects its own OAuth grant. Atlassian accepts the Jira login only
+  after an organization admin turns on API token authentication for its MCP
+  server.
+
 Druks gives OAuth discovery and client registration 30 seconds in total.
 A timeout names the stage that was pending. Retry the connection.
 

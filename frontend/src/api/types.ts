@@ -1059,7 +1059,13 @@ export interface McpServer {
   // The raw token never leaves the backend; ``hasToken`` says whether one is
   // configured without revealing it.
   hasToken: boolean
+  // Where this account's credential for the server comes from.
+  credential: McpCredential
+  // The service that owns the server's host.
+  service: string | null
 }
+
+export type McpCredential = 'headers' | 'grant' | 'service_connection' | 'service_login'
 
 export interface McpServerConnection {
   // Null identifies the shared connection every account uses.

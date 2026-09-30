@@ -14,6 +14,7 @@ it.each(['success', 'failure'])('shows pending sign-in and handles %s', async (o
   vi.spyOn(api, 'mcpServers').mockResolvedValue([{
     name: 'jira', url: 'https://jira.test/mcp', isEnabled: true,
     isOauth: true, identityMode: 'shared', builtin: false, hasToken: false,
+    credential: 'grant' as const, service: null,
   }])
   let resolve!: (value: { authorizationUrl: string }) => void
   let reject!: (error: Error) => void
@@ -47,4 +48,17 @@ it.each(['success', 'failure'])('shows pending sign-in and handles %s', async (o
     expect(popup.close).toHaveBeenCalledOnce()
     expect(screen.getByRole('alert').textContent).toContain('client registration timed out')
   }
+})
+
+it('shows the service login without a Connect button', async () => {
+  vi.spyOn(api, 'mcpServers').mockResolvedValue([{
+    name: 'atlassian', url: 'https://mcp.atlassian.com/v2/mcp', isEnabled: true,
+    isOauth: true, identityMode: 'per_user', builtin: false, hasToken: true,
+    credential: 'service_login' as const, service: 'jira',
+  }])
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={client}><McpServersPane /></QueryClientProvider>)
+
+  expect(await screen.findByText('jira login')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: /connect/i })).toBeNull()
 })

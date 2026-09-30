@@ -1374,6 +1374,26 @@ provider (`Google`). A second integration on the same provider declares its own
 service. The operator decides whether each card uses a shared or narrow
 registration. This choice controls scope and the effect of a credential problem.
 
+If the provider runs an MCP server that the service's identity also signs in to,
+set `mcp_host` to the host of that server. An OAuth MCP server at that host then
+uses the service's credential. If the service has OAuth endpoints, each account
+uses its own sign-in at the service, with no second consent. If not, the
+default account sends the service's pasted login, and every other account
+connects its own grant. Override `get_authorization` to turn the connected row
+into the `Authorization` value:
+
+```python
+class Acme(Service):
+    mcp_host = "mcp.acme.example"
+
+    class Settings(BaseModel):
+        api_key: SecretStr = Field(title="API key")
+
+    @classmethod
+    def get_authorization(cls, login) -> str:
+        return f"Bearer {login.secrets['api_key']}"
+```
+
 ## Connect provider accounts (OAuth)
 
 Declare the OAuth endpoints on the service that holds the client

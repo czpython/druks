@@ -292,6 +292,21 @@ _ACME_ENTRY = _entry(
 )
 
 
+_GITHUB_ENTRY = _entry(
+    "io.github.github/github-mcp-server",
+    description="GitHub's official MCP server",
+    remotes=[
+        {
+            "type": "streamable-http",
+            "url": "https://api.githubcopilot.com/mcp/",
+            "headers": [
+                {"name": "Authorization", "description": "A personal token", "isSecret": True}
+            ],
+        }
+    ],
+)
+
+
 def _client_with_registry(tmp_path, monkeypatch, *entries):
     payload = {"servers": list(entries)}
     monkeypatch.setattr(
@@ -418,6 +433,31 @@ async def test_add_from_registry_oauth_candidate_ships_dark_and_connects(
 
     row = await McpServer.get_for_name(druks_db, "grafana")
     assert row.headers == {"X-Grafana-URL": "https://acme.grafana.net"}
+
+
+async def test_an_empty_secret_header_installs_oauth_that_connects_through_the_service(
+    tmp_path, monkeypatch, druks_db
+):
+    with _client_with_registry(tmp_path, monkeypatch, _GITHUB_ENTRY) as client:
+        created = client.post(
+            "/api/mcp-servers/registry",
+            json={"name": "github", "registry": "io.github.github/github-mcp-server"},
+        )
+
+        body = created.json()
+        assert (body["isOauth"], body["isEnabled"]) == (True, False)
+        assert (body["credential"], body["service"]) == ("service_connection", "github")
+        connect = client.post(
+            "/api/mcp-servers/github/connect", json={"identity_mode": IdentityMode.PER_USER}
+        )
+        assert connect.json()["authorizationUrl"] == (
+            "http://druks.test/api/oauth/github/connect?next=/settings/mcp"
+        )
+        assert client.get("/api/mcp-servers").json()[0]["isEnabled"] is True
+        shared = client.post(
+            "/api/mcp-servers/github/connect", json={"identity_mode": IdentityMode.SHARED}
+        )
+        assert shared.status_code == 409
 
 
 async def test_add_from_registry_rejects_missing_required_and_unknown_headers(

@@ -1,3 +1,4 @@
+import base64
 import logging
 from datetime import datetime
 from typing import Any
@@ -11,6 +12,7 @@ from druks.core.apis.github import GITHUB_AUTHORITY, GitHubClient
 from druks.core.apis.linear import LINEAR_GRAPHQL_URL
 from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
 from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.services import Service, ServiceConnectError
 from druks.settings import load_settings
 
@@ -32,6 +34,7 @@ class Github(Service):
     )
     authorization_endpoint = "https://github.com/login/oauth/authorize"
     token_endpoint = "https://github.com/login/oauth/access_token"
+    mcp_host = "api.githubcopilot.com"
     # A fresh sign-in by the same GitHub user updates their row.
     identity_key = "subject"
     # What the created App is: the single operator identity documented in
@@ -116,10 +119,15 @@ class Linear(Service):
         "secret verifies inbound deliveries."
     )
     required = False
+    mcp_host = "mcp.linear.app"
 
     class Settings(BaseModel):
         api_key: SecretStr = Field(title="API key")
         webhook_secret: SecretStr = Field(title="Webhook secret")
+
+    @classmethod
+    def get_authorization(cls, login: VaultSecret) -> str:
+        return f"Bearer {login.secrets['api_key']}"
 
     @classmethod
     async def verify(cls, settings: Settings) -> dict[str, Any]:
@@ -145,12 +153,18 @@ class Jira(Service):
         "secret authenticates Automation deliveries."
     )
     required = False
+    mcp_host = "mcp.atlassian.com"
 
     class Settings(BaseModel):
         base_url: str = Field(title="Base URL", description="Base URL of the Jira Cloud site.")
         email: str = Field(title="Email")
         api_token: SecretStr = Field(title="API token")
         webhook_secret: SecretStr = Field(title="Webhook secret")
+
+    @classmethod
+    def get_authorization(cls, login: VaultSecret) -> str:
+        credentials = f"{login.identity['email']}:{login.secrets['api_token']}"
+        return f"Basic {base64.b64encode(credentials.encode()).decode()}"
 
     @classmethod
     async def verify(cls, settings: Settings) -> dict[str, Any]:

@@ -19,11 +19,10 @@ from druks.files.exceptions import FileUnavailableError
 from druks.files.models import FileRecord
 from druks.files.storage import get_file_storage
 from druks.mcp import models as mcp_models
-from druks.mcp import oauth
 from druks.mcp.constants import TOKEN_ENV_PREFIX
-from druks.mcp.enums import Toolkit
+from druks.mcp.enums import Credential, Toolkit
 from druks.mcp.exceptions import MissingGrantError, MissingTokenError
-from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
+from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.inbound import get_druks_account_token
 from druks.sandbox import repo as checkout
 from druks.sandbox.datastructures import AgentResult, McpServer, SandboxMcpServer, SandboxSecret
@@ -210,41 +209,47 @@ class Workspace:
             )
         owner = await Account.get_secrets_owner(session, account_id)
         run_account = owner.id if owner else None
-        registry = await mcp_models.McpServer.list_enabled(session)
+        accesses = await mcp_models.McpServer.list_access(session, run_account)
+        accesses = [access for access in accesses if access.is_enabled]
         if skip_unauthenticated:
-            resolved = await mcp_models.McpServer.get_resolved(session, run_account)
-            registry = [server for server in registry if resolved[server["name"]]["has_token"]]
-        for server in registry:
-            name = server["name"]
+            accesses = [access for access in accesses if access.has_token]
+        for access in accesses:
+            name = access.name
             if name in workspace_names:
                 continue
-            host = urlsplit(server["url"]).hostname
-            # An OAuth server mints its bearer from the stored grant, loud when
-            # it cannot authenticate. Every other server rides its header rows,
-            # loud when it has none.
+            host = urlsplit(access.url).hostname
+            # A service login rides as a header row and a grant as a bearer, each
+            # loud when the account has none. A server without OAuth rides its
+            # header rows, loud when it has none.
             bearer_token_env_var = ""
-            if server["is_oauth"]:
-                grant_account = get_grant_account(server["identity_mode"], run_account)
-                secret = await oauth.get_connection(session, name, grant_account)
-                if not secret:
-                    raise MissingGrantError(name, grant_account)
+            secret_headers = access.secret_headers
+            if access.credential == Credential.SERVICE_LOGIN:
+                login = await mcp_models.McpServer.store_login(
+                    session, name, access.secret, run_account
+                )
+                secret_headers = {login.header: login}
+            elif access.secret:
                 bearer_token_env_var = get_bearer_token_env_var(name)
                 refs.append(
-                    SecretRef(name=bearer_token_env_var.lower(), secret_id=secret.id, host=host)
+                    SecretRef(
+                        name=bearer_token_env_var.lower(), secret_id=access.secret.id, host=host
+                    )
                 )
-            elif not server["secret_headers"]:
+            elif access.credential != Credential.HEADERS:
+                raise MissingGrantError(name, run_account)
+            elif not secret_headers:
                 raise MissingTokenError(name)
             env_headers = {}
-            for index, (header, secret) in enumerate(server["secret_headers"].items()):
+            for index, (header, secret) in enumerate(secret_headers.items()):
                 variable = f"{TOKEN_ENV_PREFIX}{name.upper()}_HEADER_{index}"
                 env_headers[header] = variable
                 refs.append(SecretRef(name=variable.lower(), secret_id=secret.id, host=host))
             servers.append(
                 McpServer(
                     name=name,
-                    url=server["url"],
+                    url=access.url,
                     bearer_token_env_var=bearer_token_env_var,
-                    headers=dict(server["headers"]),
+                    headers=dict(access.headers),
                     env_headers=env_headers,
                 )
             )
