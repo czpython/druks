@@ -398,19 +398,25 @@ class VaultSecret(Base, Uuid7Pk):
         self.revoked_reason = self.revoked_reason or reason
         self.secrets = {}
 
-    async def issue_token(self, resource: str, *, host_id: str = "") -> tuple[str, datetime | None]:
-        """The token a box fetches, and its expiry. A rotation skips the refresh
-        request for ``host_id``, the box that asks."""
+    async def issue_token(
+        self, resource: str, *, name: str = "", host_id: str = ""
+    ) -> tuple[str, datetime | None]:
+        """The token a box fetches under ``name``, and its expiry. A rotation skips
+        the refresh request for ``host_id``, the box that asks."""
         if not self.is_live:
             raise SecretRevokedError(self.audience)
-        is_service = self.audience.startswith("service:")
-        if self.kind == SecretKind.APP_KEY or (self.kind == SecretKind.STATIC and is_service):
-            # A service's own row: the service says what a box gets from it.
+        if self.kind == SecretKind.STATIC:
+            # A service's entry is named ``<slug>_<field>``. Under any other name
+            # a row issues the one secret it holds.
+            field = name.removeprefix(f"{self.audience_name}_")
+            if field in self.secrets:
+                return self.secrets[field], None
+            [secret] = self.secrets.values()
+            return secret, None
+        if self.kind == SecretKind.APP_KEY:
             from druks.apps.registry import services
 
             return await services.get(self.audience_name).issue_token(resource)
-        if self.kind == SecretKind.STATIC:
-            return self.secrets["value"], None
         if self.kind == SecretKind.OAUTH:
             from druks.apps.registry import services
 

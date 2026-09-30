@@ -35,7 +35,7 @@ async def secret(
         # Nothing in the request can pick another.
         ref = identity.get_secret_ref(name)
         value, expires_at = await ref.secret.issue_token(
-            ref.resource, host_id=identity.host_id or ""
+            ref.resource, name=ref.name, host_id=identity.host_id or ""
         )
         # The identity can die during the source I/O.
         await SandboxIdentity.authenticate(session, identity_id, credential, name)

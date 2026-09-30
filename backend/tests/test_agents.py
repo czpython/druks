@@ -217,6 +217,50 @@ async def test_an_agent_without_mcp_resolves_no_server(
     assert sandbox.run_agent.await_args.kwargs["mcp_servers"] == ()
 
 
+async def test_an_agent_holds_its_declared_service_secrets(
+    druks_db, tmp_path, monkeypatch, current_run, declared_services
+):
+    from conftest import connect_service
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    class Acme(Service):
+        host = "api.acme.test"
+
+        class Settings(BaseModel):
+            api_key: SecretStr
+
+    class Spare(Service):
+        required = False
+        host = "api.spare.test"
+
+        class Settings(BaseModel):
+            api_key: SecretStr
+
+    card = await connect_service("acme", identity={}, secrets={"api_key": "key-1"})
+    agent = agents.Agent(
+        id="keyed_probe",
+        prompt="dummy/agent.md",
+        contract=DummyOutput,
+        secrets=(Acme.fields.api_key, Spare.fields.api_key),
+    )
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    _patch_ephemeral(monkeypatch, sandbox)
+
+    await agent._run(db_session(), workflow_id="wf-9")
+
+    [identity] = await _identities("wf-9")
+    refs = await db_session().scalars(
+        select(SecretRef).where(
+            SecretRef.identity_id == identity.id, SecretRef.name.like("%_api_key")
+        )
+    )
+    # The optional service is not connected, so its secret stays out.
+    [ref] = list(refs)
+    assert (ref.name, ref.secret_id, ref.host) == ("acme_api_key", card.id, "api.acme.test")
+    assert await ref.secret.issue_token(ref.resource, name=ref.name) == ("key-1", None)
+
+
 async def test_runner_comes_from_workflow_workspace_factory(
     druks_db, tmp_path, monkeypatch, current_run
 ):

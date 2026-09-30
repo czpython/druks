@@ -529,6 +529,46 @@ Codex. A nested CLI reads it from the environment. The
 [configuration guide](configuration.md#harnesses) lists the variable, host, and
 header per harness.
 
+### Give an agent a service's secret
+
+An agent that calls a provider from its sandbox lists the secret it needs. The
+[service](#declare-a-service) declares the one host that its secrets can go to:
+
+```python
+class Acme(Service):
+    host = "api.acme.example"
+
+    class Settings(BaseModel):
+        api_key: SecretStr = Field(title="API key")
+        webhook_secret: SecretStr = Field(title="Webhook secret")
+
+
+class NightWatch(App):
+    name = "night_watch"
+
+    report = Agent(
+        prompt="night_watch/report.md",
+        contract=ReportOutput,
+        secrets=(Acme.fields.api_key,),
+    )
+```
+
+`Acme.fields` holds the fields of `Settings` by name. The sandbox of each
+`report` call holds a placeholder in `ACME_API_KEY`: the service slug and the
+field name, in upper case. The secrets proxy puts the key in an
+`Authorization: Bearer` header only on requests to `host`. The sandbox never
+holds the key, and it never holds `webhook_secret`, which no agent lists.
+
+Druks refuses to load an agent that lists a field that is not a secret, or a
+field of a service with no `host`. If a service with `required = False` is not
+connected, the sandbox gets no variable for it, so the prompt must handle that.
+
+A workflow that sets `steps_reuse_sandbox = True` binds the secrets of the call
+that creates the sandbox. Give the agents of such a workflow the same `secrets`.
+
+For a credential that depends on the subject, such as one account's connection,
+override [`get_secrets(subject)`](#customize-the-workspace) on the workspace.
+
 Do not ask the framework to infer domain side effects from agent prose.
 The prompt or a subsequent explicit step owns those actions.
 
@@ -727,9 +767,9 @@ catalog entry such as `github`, and Drukbox sets its variable and hosts.
 `resource` tells the issuer what the token is for, such as a repo. Druks reads
 the secrets before the sandbox exists, so read them from the subject alone.
 
-A service with one secret field issues that field, whatever its name. A service
-with several secret fields overrides `issue_token(resource)` to return the one a
-sandbox gets, with its expiry or None.
+A vault row with one secret issues it under any name. For the secret of a
+service that does not depend on the subject,
+[list it on the agent](#give-an-agent-a-services-secret) instead.
 
 Override `get_mcp_servers(subject)` to give the sandbox an MCP server with its
 own vault row:

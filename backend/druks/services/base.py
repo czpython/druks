@@ -1,5 +1,7 @@
 import re
+from dataclasses import dataclass
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, ValidationError
@@ -58,6 +60,26 @@ class Connection:
 
     async def disconnect(self) -> None:
         await OauthClient(provider=self.service.slug).disconnect(self.row, reason="user")
+
+
+@dataclass(frozen=True)
+class ServiceField:
+    """One field of a service's ``Settings``, named before any value exists:
+    ``Currents.fields.api_key``. An agent lists a secret field in ``secrets`` to
+    hold it in its sandbox."""
+
+    service: "type[Service]"
+    name: str
+
+    @property
+    def is_secret(self) -> bool:
+        return field_kind(self.service.settings_model.model_fields[self.name]) == "secret"
+
+    @property
+    def secret_name(self) -> str:
+        """The sandbox's name for the secret. Its variable is this name in upper
+        case, and the issuer reads the field back out of it."""
+        return f"{self.service.slug}_{self.name}"
 
 
 class ScopedService:
@@ -129,6 +151,11 @@ class Service:
     # True marks a shared provider base. It never registers; its subclasses do.
     abstract: ClassVar[bool] = False
     settings_model: ClassVar[type[BaseModel]]
+    # The ``Settings`` fields by name, each a ``ServiceField``.
+    fields: ClassVar[SimpleNamespace]
+    # The one host a sandbox may send this service's secrets to. The secrets
+    # proxy swaps a placeholder for the secret on requests to it only.
+    host: ClassVar[str] = ""
     # Set both endpoints when the registered app is an OAuth client;
     # ``get_oauth_client()`` then hands back the connected identity as a
     # configured ``OauthClient``. Scopes are not declared here — the
@@ -194,6 +221,9 @@ class Service:
         cls.slug = slug
         cls.title = slug.replace("_", " ").title()
         cls.settings_model = declared
+        cls.fields = SimpleNamespace(
+            **{name: ServiceField(cls, name) for name in declared.model_fields}
+        )
         services.register(cls)
 
     @classmethod
@@ -303,13 +333,9 @@ class Service:
         )
 
     @classmethod
-    async def issue_token(cls, resource: str) -> tuple[str, datetime | None]:
-        """The token a sandbox fetches for this identity, and its expiry. A service
-        with one secret field issues that field. A service with several overrides
-        this to pick one."""
-        secrets = (await cls.get()).secrets
-        if len(secrets) == 1:
-            return next(iter(secrets.values())), None
+    async def issue_token(cls, resource: str) -> tuple[str, datetime]:
+        """The token a sandbox fetches for this identity, and its expiry. A
+        service without one raises."""
         raise NotImplementedError(f"{cls.slug} issues no sandbox token")
 
     @classmethod

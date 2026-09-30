@@ -36,6 +36,7 @@ from druks.usage.models import UsageScrape
 from druks.workflows import _in_step, current_workflow
 
 if TYPE_CHECKING:
+    from druks.services.base import ServiceField
     from druks.workflows import Workflow
     from druks.workspaces import Workspace
 
@@ -150,6 +151,9 @@ class Agent:
     # ``include_mcp=False`` gives the call no MCP server and its sandbox no
     # server entry, for an agent that reads untrusted content.
     include_mcp: bool = True
+    # The service secrets the call's sandbox holds, ``(Currents.fields.api_key,)``.
+    # Each is a placeholder that the secrets proxy swaps at the service's host.
+    secrets: "tuple[ServiceField, ...]" = ()
     # ``id`` is the agent's durable key (settings, timeline, registry, step name):
     # ``<app>.<attribute>`` for an agent declared on an App, or the explicit ``id=``
     # of a standalone agent (a test, a one-off). ``app`` is the owning App's name,
@@ -159,6 +163,15 @@ class Agent:
     app: str = field(init=False, compare=False, default="")
 
     def __post_init__(self) -> None:
+        for secret in self.secrets:
+            declared = f"{secret.service.__name__}.fields.{secret.name}"
+            if not secret.is_secret:
+                raise TypeError(f"{declared} is not a secret field, so no sandbox holds it")
+            if not secret.service.host:
+                raise TypeError(
+                    f"{declared} goes to a sandbox, so {secret.service.__name__} must declare "
+                    "`host`: the one host the secret may be sent to"
+                )
         if self.id:  # an explicit id means a standalone agent — it registers itself now
             agents.register(self)
 
@@ -343,8 +356,20 @@ class Agent:
                 mcp_servers, mcp_secret_refs = await workspace_class.get_all_mcp_servers(
                     session, subject, workflow.account_id
                 )
+            service_refs = []
+            for secret in self.secrets:
+                # An optional service that is not connected leaves its secrets out.
+                if secret.service.required or await secret.service.is_connected():
+                    service_refs.append(
+                        SecretRef(
+                            name=secret.secret_name,
+                            secret_id=(await secret.service.get()).id,
+                            host=secret.service.host,
+                        )
+                    )
             refs = [
                 *config.secret_refs,
+                *service_refs,
                 *(
                     SecretRef(
                         name=secret.name,
