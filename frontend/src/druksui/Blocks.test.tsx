@@ -360,23 +360,23 @@ describe('Cards', () => {
     renderBlocks([
       {
         block: 'card',
-        title: 'Renewal quote',
-        description: 'Northgate Supply',
+        title: 'Ship the board',
+        description: 'DRU-1',
         blocks: [],
         controls: [],
         link: {
           block: 'link',
-          label: 'Renewal quote',
+          label: 'Ship the board',
           page: '',
           arguments: {},
-          url: '/inbox_manager?thread=1',
+          url: '/field_notes/notes/7',
           subject: null,
         },
       },
     ])
 
-    const card = screen.getByText('Renewal quote').closest('a')
-    expect(card?.getAttribute('href')).toBe('/inbox_manager?thread=1')
+    const card = screen.getByText('Ship the board').closest('a')
+    expect(card?.getAttribute('href')).toBe('/field_notes/notes/7')
     expect(card?.getAttribute('target')).toBeNull()
   })
 
