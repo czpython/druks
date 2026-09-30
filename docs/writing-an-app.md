@@ -727,6 +727,10 @@ catalog entry such as `github`, and Drukbox sets its variable and hosts.
 `resource` tells the issuer what the token is for, such as a repo. Druks reads
 the secrets before the sandbox exists, so read them from the subject alone.
 
+A service with one secret field issues that field, whatever its name. A service
+with several secret fields overrides `issue_token(resource)` to return the one a
+sandbox gets, with its expiry or None.
+
 Override `get_mcp_servers(subject)` to give the sandbox an MCP server with its
 own vault row:
 

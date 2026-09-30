@@ -303,9 +303,13 @@ class Service:
         )
 
     @classmethod
-    async def issue_token(cls, resource: str) -> tuple[str, datetime]:
-        """The token a sandbox fetches for this identity, and its expiry. A
-        service without one raises."""
+    async def issue_token(cls, resource: str) -> tuple[str, datetime | None]:
+        """The token a sandbox fetches for this identity, and its expiry. A service
+        with one secret field issues that field. A service with several overrides
+        this to pick one."""
+        secrets = (await cls.get()).secrets
+        if len(secrets) == 1:
+            return next(iter(secrets.values())), None
         raise NotImplementedError(f"{cls.slug} issues no sandbox token")
 
     @classmethod

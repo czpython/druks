@@ -403,12 +403,14 @@ class VaultSecret(Base, Uuid7Pk):
         request for ``host_id``, the box that asks."""
         if not self.is_live:
             raise SecretRevokedError(self.audience)
-        if self.kind == SecretKind.STATIC:
-            return self.secrets["value"], None
-        if self.kind == SecretKind.APP_KEY:
+        is_service = self.audience.startswith("service:")
+        if self.kind == SecretKind.APP_KEY or (self.kind == SecretKind.STATIC and is_service):
+            # A service's own row: the service says what a box gets from it.
             from druks.apps.registry import services
 
             return await services.get(self.audience_name).issue_token(resource)
+        if self.kind == SecretKind.STATIC:
+            return self.secrets["value"], None
         if self.kind == SecretKind.OAUTH:
             from druks.apps.registry import services
 

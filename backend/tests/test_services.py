@@ -516,6 +516,36 @@ async def test_get_oauth_client_reads_the_connected_identity(declared_services, 
     assert client.extra_authorize_params == {"access_type": "offline"}
 
 
+async def test_a_service_with_one_secret_issues_it_to_a_box(declared_services, druks_db):
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    class Acme(Service):
+        class Settings(BaseModel):
+            api_key: SecretStr
+
+    row = await connect_service("acme", identity={}, secrets={"api_key": "key-1"})
+
+    assert await row.issue_token("") == ("key-1", None)
+
+
+async def test_a_service_with_several_secrets_issues_none_to_a_box(declared_services, druks_db):
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    class Acme(Service):
+        class Settings(BaseModel):
+            api_token: SecretStr
+            webhook_secret: SecretStr
+
+    row = await connect_service(
+        "acme", identity={}, secrets={"api_token": "token-1", "webhook_secret": "hook-1"}
+    )
+
+    with pytest.raises(NotImplementedError, match="acme issues no sandbox token"):
+        await row.issue_token("")
+
+
 async def test_oauth_service_declarations_fail_loudly(declared_services):
     from druks.services import Service
     from pydantic import BaseModel, SecretStr
