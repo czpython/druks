@@ -323,6 +323,27 @@ describe('the parent link', () => {
 
     await waitFor(() => expect(readPage).toHaveBeenCalledWith('field_notes', '', 'status=todo'))
   })
+
+  it('pins the chrome and fills the body when the page is a split', async () => {
+    const { container } = renderAt('/field_notes', 'notes', {
+      ...NOTES,
+      blocks: [
+        {
+          block: 'columns',
+          layout: 'split',
+          blocks: [
+            { block: 'text', text: 'threads' },
+            { block: 'text', text: 'reading' },
+          ],
+        },
+      ],
+    })
+
+    await waitFor(() => expect(screen.getByText('threads')).toBeTruthy())
+    expect(container.querySelector('.dui-page-split')?.getAttribute('data-scroll')).toBe('internal')
+    expect(container.querySelector('.page-shell-header')?.textContent).toContain('Notes')
+    expect(container.querySelector('.dui-columns-split')).toBeTruthy()
+  })
 })
 
 describe('a page snapshot the renderer cannot walk', () => {

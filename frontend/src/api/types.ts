@@ -489,7 +489,7 @@ export type Block =
     }
   | { block: 'list'; title: string; items: Value[] }
   | { block: 'stack'; gap: 'small' | 'medium' | 'large'; blocks: Block[] }
-  | { block: 'columns'; layout?: 'even' | 'sidebar'; blocks: Block[] }
+  | { block: 'columns'; layout?: 'even' | 'sidebar' | 'split'; blocks: Block[] }
   | Action
   | {
       block: 'form'
@@ -507,7 +507,7 @@ export type Block =
       title: string
       cards: CardBlock[]
       empty: EmptyStateBlock | null
-      layout?: 'wrap' | 'stack'
+      layout?: 'wrap' | 'stack' | 'tiles'
       drop?: Action | null
     }
   | {

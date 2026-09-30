@@ -356,6 +356,30 @@ describe('Cards', () => {
     expect(screen.queryByText('Open')).toBeNull()
   })
 
+  it('keeps a relative card url in this tab', () => {
+    renderBlocks([
+      {
+        block: 'card',
+        title: 'Renewal quote',
+        description: 'Northgate Supply',
+        blocks: [],
+        controls: [],
+        link: {
+          block: 'link',
+          label: 'Renewal quote',
+          page: '',
+          arguments: {},
+          url: '/inbox_manager?thread=1',
+          subject: null,
+        },
+      },
+    ])
+
+    const card = screen.getByText('Renewal quote').closest('a')
+    expect(card?.getAttribute('href')).toBe('/inbox_manager?thread=1')
+    expect(card?.getAttribute('target')).toBeNull()
+  })
+
   it('puts the link on the title when the card also has controls', () => {
     renderBlocks([
       {
@@ -398,6 +422,14 @@ describe('Cards', () => {
     ])
 
     expect(container.querySelector('ul.dui-cards')?.className).toContain('dui-cards-stack')
+  })
+
+  it('marks a wrap of squares when layout is tiles', () => {
+    const { container } = renderBlocks([
+      { block: 'cards', title: 'Sites', layout: 'tiles', cards: [card('Ada Cafe')], empty: null },
+    ])
+
+    expect(container.querySelector('ul.dui-cards')?.className).toContain('dui-cards-tiles')
   })
 
   it('posts the drop action with the card drag merged in', async () => {

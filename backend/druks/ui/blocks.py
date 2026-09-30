@@ -742,13 +742,22 @@ class Stack(BlockParent):
 
 class Columns(BlockParent):
     """Blocks across the page. ``even`` shares the width. ``sidebar`` keeps
-    the last column a rail. They stack on a narrow screen."""
+    the last column a rail. ``split`` is two independently scrolling panes —
+    a list and what it opened. They stack on a narrow screen."""
 
     block: Literal["columns"] = "columns"
-    layout: Literal["even", "sidebar"] = "even"
+    layout: Literal["even", "sidebar", "split"] = "even"
 
     def __init__(self, blocks=(), **data):
         super().__init__(blocks=blocks, **data)
+
+    @model_validator(mode="after")
+    def _split_is_two_panes(self) -> "Columns":
+        if self.layout == "split" and len(self.blocks) != 2:
+            raise ValueError(
+                "Columns layout='split' takes exactly two panes — a list and what it opened."
+            )
+        return self
 
 
 class Card(BlockParent):
@@ -771,14 +780,15 @@ class Card(BlockParent):
 
 class Cards(PageBlock):
     """One card for each of a set of things. ``wrap`` lets the shell fit as
-    many across as the screen takes. ``stack`` is one column. ``drop`` is the
-    action a dragged card submits onto this list."""
+    many across as the screen takes. ``stack`` is one column. ``tiles`` is a
+    wrap of squares: an image fills each card and is cropped rather than shown
+    in full. ``drop`` is the action a dragged card submits onto this list."""
 
     block: Literal["cards"] = "cards"
     title: str = ""
     cards: list[Card] = Field(default_factory=list)
     empty: EmptyState | None = None
-    layout: Literal["wrap", "stack"] = "wrap"
+    layout: Literal["wrap", "stack", "tiles"] = "wrap"
     drop: Action | None = None
 
     @model_validator(mode="after")

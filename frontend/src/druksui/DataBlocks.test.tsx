@@ -634,4 +634,20 @@ describe('layout', () => {
     expect(screen.getByText('left')).toBeTruthy()
     expect(screen.getByText('right')).toBeTruthy()
   })
+
+  it('marks a split as two independently scrolling panes', () => {
+    const { container } = renderBlocks([
+      {
+        block: 'columns',
+        layout: 'split',
+        blocks: [
+          { block: 'text', text: 'threads' },
+          { block: 'text', text: 'reading' },
+        ],
+      },
+    ])
+
+    expect(container.querySelector('.dui-columns-split')).toBeTruthy()
+    expect(container.querySelectorAll('.dui-column')).toHaveLength(2)
+  })
 })

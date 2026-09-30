@@ -177,7 +177,13 @@ function BlockContent({ block }: { block: Block }) {
     case 'columns':
       if (!block.blocks.length) return null
       return (
-        <div className={`dui-columns${block.layout === 'sidebar' ? ' dui-columns-sidebar' : ''}`}>
+        <div
+          className={
+            block.layout === 'split'
+              ? 'dui-columns-split'
+              : `dui-columns${block.layout === 'sidebar' ? ' dui-columns-sidebar' : ''}`
+          }
+        >
           {block.blocks.map((column, index) => (
             <div key={index} className="dui-column">
               <BlockContent block={column} />
@@ -259,7 +265,7 @@ function CardPanel({ block }: { block: CardBlock }) {
     </>
   )
   if (wrapHref && block.link) {
-    if (block.link.url) {
+    if (block.link.url && /^https?:\/\//i.test(block.link.url)) {
       return (
         <a className="dui-card" href={wrapHref} target="_blank" rel="noreferrer" draggable={false}>
           {inner}
@@ -275,8 +281,10 @@ function CardPanel({ block }: { block: CardBlock }) {
   return <div className="dui-card">{inner}</div>
 }
 
-function cardsClass(layout: 'wrap' | 'stack' | undefined) {
-  return `dui-cards${layout === 'stack' ? ' dui-cards-stack' : ''}`
+function cardsClass(layout: 'wrap' | 'stack' | 'tiles' | undefined) {
+  if (layout === 'stack') return 'dui-cards dui-cards-stack'
+  if (layout === 'tiles') return 'dui-cards dui-cards-tiles'
+  return 'dui-cards'
 }
 
 function CardsStatic({

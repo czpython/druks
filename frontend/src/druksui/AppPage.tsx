@@ -4,7 +4,7 @@ import { Link as RouteLink, useLocation } from 'wouter'
 
 import { appLabel } from '../apps/registry'
 import { api } from '../api/client'
-import type { Action, Field, Follows, Link, PageEntry, PageSnapshot } from '../api/types'
+import type { Action, Block, Field, Follows, Link, PageEntry, PageSnapshot } from '../api/types'
 import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
 import { useRawLocation } from '../lib/useRawLocation'
@@ -131,6 +131,17 @@ export function AppPage({ app, page }: { app: string; page: string }) {
     return appError(app, detail, () => snapshot.refetch())
   }
 
+  const split = hasSplit(snapshot.data.blocks)
+  const heading = (
+    <PageChrome
+      {...chrome}
+      title={snapshot.data.title}
+      description={snapshot.data.description}
+      controls={snapshot.data.controls}
+      filters={snapshot.data.filters ?? []}
+    />
+  )
+
   return (
     <AppSurface
       fallback={(clear) =>
@@ -149,14 +160,13 @@ export function AppPage({ app, page }: { app: string; page: string }) {
         />
       ))}
       <PagesContext.Provider value={{ app, pages, operations, target, clearTarget }}>
-        <Page inset className="dui-page">
-          <PageChrome
-            {...chrome}
-            title={snapshot.data.title}
-            description={snapshot.data.description}
-            controls={snapshot.data.controls}
-            filters={snapshot.data.filters ?? []}
-          />
+        <Page
+          inset
+          scroll={split ? 'internal' : 'page'}
+          className={split ? 'dui-page dui-page-split' : 'dui-page'}
+          header={split ? heading : undefined}
+        >
+          {split ? null : heading}
           {target && !gateRuns(snapshot.data.blocks).includes(target.run) && (
             <p role="alert">This input request is unavailable. Return to the Dashboard to open the current request.</p>
           )}
@@ -269,6 +279,10 @@ function PageFilters({ fields }: { fields: Field[] }) {
       />
     </div>
   )
+}
+
+function hasSplit(blocks: Block[]): boolean {
+  return blocks.some((block) => block.block === 'columns' && block.layout === 'split')
 }
 
 function appError(app: string, detail: string, retry: () => void): ReactNode {

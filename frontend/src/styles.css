@@ -1899,6 +1899,61 @@ a.dui-status:hover { text-decoration: underline; }
 .dui-column { flex: 1 1 0; min-width: 0; }
 .dui-columns-sidebar { align-items: start; }
 .dui-columns-sidebar > .dui-column:last-child { flex: 0 0 280px; }
+.dui-columns-split {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+  flex: 1 1 0;
+  min-height: 0;
+  margin: 16px 0 0;
+  border: 1px solid var(--border);
+  border-radius: var(--dui-radius-large);
+  overflow: hidden;
+  background: var(--surface);
+}
+.dui-columns-split > .dui-column {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  gap: 0;
+}
+.dui-columns-split > .dui-column:first-child {
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+.dui-columns-split > .dui-column:last-child {
+  background: var(--bg);
+  padding: 20px 24px 32px;
+}
+.dui-columns-split > .dui-column:last-child .dui-section { margin-top: 0; }
+.dui-page-split[data-scroll="internal"] .page-shell-body { overflow: hidden; }
+.dui-page-split > .page-shell-body > .dui-columns-split { margin-top: 16px; flex: 1 1 0; }
+.dui-columns-split > .dui-column:first-child .dui-section { margin-top: 0; gap: 0; }
+.dui-columns-split > .dui-column:first-child .dui-list-block { margin: 0; }
+.dui-columns-split > .dui-column:first-child .dui-cards { margin: 0; gap: 0; }
+.dui-columns-split > .dui-column:first-child .dui-card {
+  margin: 0;
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  border-radius: 0;
+  background: transparent;
+}
+.dui-columns-split > .dui-column:first-child a.dui-card:hover {
+  background: var(--surface-2);
+  border-color: transparent;
+}
+.dui-columns-split > .dui-column:first-child .dui-card:not(a) { background: var(--surface-2); }
+.dui-columns-split > .dui-column:first-child .dui-empty { margin: 24px 16px; }
+@media (max-width: 940px) {
+  .dui-columns-split {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(160px, 36vh) minmax(0, 1fr);
+  }
+  .dui-columns-split > .dui-column:first-child {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
 
 .dui-metric-row { display: flex; flex-wrap: wrap; gap: 32px; margin: 16px 0; }
 .dui-metric { margin: 0; }
@@ -1957,6 +2012,54 @@ a.dui-status:hover { text-decoration: underline; }
 
 .dui-cards { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 16px 0; position: relative; }
 .dui-cards-stack { display: flex; flex-direction: column; }
+.dui-cards-tiles { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.dui-cards-tiles .dui-card {
+  position: relative;
+  aspect-ratio: 1;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+.dui-cards-tiles .dui-image { position: absolute; inset: 0; z-index: 0; margin: 0; }
+.dui-cards-tiles .dui-image img {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: cover;
+  object-position: top center;
+  border: 0;
+  border-radius: 0;
+}
+.dui-cards-tiles .dui-image-missing {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0;
+}
+.dui-cards-tiles .dui-image-caption { display: none; }
+.dui-cards-tiles .dui-card-title,
+.dui-cards-tiles .dui-card-desc,
+.dui-cards-tiles .dui-facts,
+.dui-cards-tiles .dui-links {
+  position: relative;
+  z-index: 1;
+  padding-left: 14px;
+  padding-right: 14px;
+  background: color-mix(in oklch, var(--surface) 92%, transparent);
+}
+.dui-cards-tiles .dui-card-title { padding-top: 12px; }
+.dui-cards-tiles .dui-card-desc { margin-top: 0; }
+.dui-cards-tiles .dui-facts,
+.dui-cards-tiles .dui-links { padding-bottom: 12px; }
+.dui-cards-tiles .dui-fact-list { margin: 0; gap: 4px 12px; }
+.dui-cards-tiles .dui-links { margin-top: 0; }
 .dui-cards > li { display: grid; }
 /* A board column stretches to the tallest neighbor. The drop target has to
    fill that height, or an empty column only accepts a drop on its empty copy.

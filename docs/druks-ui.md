@@ -773,7 +773,7 @@ class Cards:
     title: str = ""
     cards: list[Card] = []
     empty: EmptyState | None = None
-    layout: Literal["wrap", "stack"] = "wrap"
+    layout: Literal["wrap", "stack", "tiles"] = "wrap"
     drop: Action | None = None
 ```
 
@@ -806,7 +806,8 @@ ui.Cards(
 ```
 
 `wrap` (the default) fits as many cards across as the screen takes. `stack`
-is one column, for a board of statuses.
+is one column, for a board of statuses. `tiles` is a wrap of squares: an
+image fills each card and is cropped to cover it, rather than shown in full.
 
 `drop` is the action a dragged card submits onto this list. The shell merges
 the card's `drag` into the action arguments and runs the operation. The drop
@@ -1372,7 +1373,7 @@ class Stack:
 ```python
 class Columns:
     block: Literal["columns"] = "columns"
-    layout: Literal["even", "sidebar"] = "even"
+    layout: Literal["even", "sidebar", "split"] = "even"
     blocks: list[Block] = []
 ```
 
@@ -1381,7 +1382,9 @@ class Columns:
 ```
 
 Each child block is one column. `even` shares the width. `sidebar` keeps the
-last column a rail. On a narrow screen they stack.
+last column a rail. `split` is exactly two panes that scroll on their own —
+the first a list, the second what that list opened. On a narrow screen they
+stack.
 
 `Stack` and `Columns` hold every V1 block, including each other. They have no
 special cases.
