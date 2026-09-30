@@ -742,8 +742,8 @@ class Stack(BlockParent):
 
 class Columns(BlockParent):
     """Blocks across the page. ``even`` shares the width. ``sidebar`` keeps
-    the last column a rail. ``split`` is two independently scrolling panes —
-    a list and what it opened. They stack on a narrow screen."""
+    the last column a rail. ``split`` is the page: two independently scrolling
+    panes, a list and what it opened. They stack on a narrow screen."""
 
     block: Literal["columns"] = "columns"
     layout: Literal["even", "sidebar", "split"] = "even"

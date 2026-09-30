@@ -5,8 +5,12 @@ import { Link as RouteLink } from 'wouter'
 import type { Link } from '../api/types'
 import { hrefForLink, PagesContext } from './pages'
 
-function isOutbound(url: string): boolean {
+export function isOutbound(url: string): boolean {
   return /^https?:\/\//i.test(url)
+}
+
+export function isServerHref(href: string): boolean {
+  return href.startsWith('/api/')
 }
 
 /** A control that navigates. It is a block of its own, or the link on a value,
@@ -39,7 +43,7 @@ export function LinkControl({
       </a>
     )
   }
-  if (href.startsWith('/api/')) {
+  if (isServerHref(href)) {
     return (
       <a className={className} href={href}>
         {label}

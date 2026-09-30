@@ -5,7 +5,7 @@ from pydantic import Field, model_validator
 
 from druks.schemas import Schema
 
-from .blocks import Action, Block, Link, Watched
+from .blocks import Action, Block, Columns, Link, Watched
 from .fields import Field as PageField
 
 Part = TypeVar("Part", bound=Schema)
@@ -32,6 +32,13 @@ class Page(Schema):
             control.check_placement(followed=bool(self.follows), regions=regions)
         for block in self.blocks:
             block.check_placement(followed=bool(self.follows), regions=regions)
+        splits = [part for part in self.iter_parts(Columns) if part.layout == "split"]
+        sole = self.blocks[0] if len(self.blocks) == 1 else None
+        if splits and not (len(splits) == 1 and sole is splits[0]):
+            raise ValueError(
+                "Columns layout='split' is the page: two panes, a list and what it opened. "
+                "It cannot sit beside another block or inside one."
+            )
         return self
 
     def iter_parts(self, *kinds: type[Part]) -> Iterator[Part]:

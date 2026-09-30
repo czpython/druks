@@ -282,7 +282,8 @@ function PageFilters({ fields }: { fields: Field[] }) {
 }
 
 function hasSplit(blocks: Block[]): boolean {
-  return blocks.some((block) => block.block === 'columns' && block.layout === 'split')
+  const [sole] = blocks
+  return blocks.length === 1 && sole?.block === 'columns' && sole.layout === 'split'
 }
 
 function appError(app: string, detail: string, retry: () => void): ReactNode {

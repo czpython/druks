@@ -1926,7 +1926,6 @@ a.dui-status:hover { text-decoration: underline; }
 }
 .dui-columns-split > .dui-column:last-child .dui-section { margin-top: 0; }
 .dui-page-split[data-scroll="internal"] .page-shell-body { overflow: hidden; }
-.dui-page-split > .page-shell-body > .dui-columns-split { margin-top: 16px; flex: 1 1 0; }
 .dui-columns-split > .dui-column:first-child .dui-section { margin-top: 0; gap: 0; }
 .dui-columns-split > .dui-column:first-child .dui-list-block { margin: 0; }
 .dui-columns-split > .dui-column:first-child .dui-cards { margin: 0; gap: 0; }
@@ -1942,7 +1941,6 @@ a.dui-status:hover { text-decoration: underline; }
   background: var(--surface-2);
   border-color: transparent;
 }
-.dui-columns-split > .dui-column:first-child .dui-card:not(a) { background: var(--surface-2); }
 .dui-columns-split > .dui-column:first-child .dui-empty { margin: 24px 16px; }
 @media (max-width: 940px) {
   .dui-columns-split {
@@ -2044,10 +2042,7 @@ a.dui-status:hover { text-decoration: underline; }
   border-radius: 0;
 }
 .dui-cards-tiles .dui-image-caption { display: none; }
-.dui-cards-tiles .dui-card-title,
-.dui-cards-tiles .dui-card-desc,
-.dui-cards-tiles .dui-facts,
-.dui-cards-tiles .dui-links {
+.dui-cards-tiles .dui-card > :not(.dui-image) {
   position: relative;
   z-index: 1;
   padding-left: 14px;

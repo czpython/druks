@@ -356,7 +356,7 @@ describe('Cards', () => {
     expect(screen.queryByText('Open')).toBeNull()
   })
 
-  it('keeps a relative card url in this tab', () => {
+    it('keeps a relative card url in this tab', () => {
     renderBlocks([
       {
         block: 'card',
@@ -377,6 +377,33 @@ describe('Cards', () => {
 
     const card = screen.getByText('Ship the board').closest('a')
     expect(card?.getAttribute('href')).toBe('/field_notes/notes/7')
+    expect(card?.getAttribute('target')).toBeNull()
+  })
+
+  it('leaves an /api/ card url to the browser in this tab', () => {
+    renderBlocks([
+      {
+        block: 'card',
+        title: 'Connect',
+        description: '',
+        blocks: [],
+        controls: [],
+        link: {
+          block: 'link',
+          label: 'Connect',
+          page: '',
+          arguments: {},
+          url: '/api/oauth/acme/connect',
+          subject: null,
+        },
+      },
+    ])
+
+    const card = screen.getByText('Connect').closest('a')
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    card?.dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(false)
+    expect(card?.getAttribute('href')).toBe('/api/oauth/acme/connect')
     expect(card?.getAttribute('target')).toBeNull()
   })
 
@@ -424,12 +451,24 @@ describe('Cards', () => {
     expect(container.querySelector('ul.dui-cards')?.className).toContain('dui-cards-stack')
   })
 
-  it('marks a wrap of squares when layout is tiles', () => {
+    it('marks a wrap of squares when layout is tiles', () => {
     const { container } = renderBlocks([
-      { block: 'cards', title: 'Sites', layout: 'tiles', cards: [card('Ada Cafe')], empty: null },
+      {
+        block: 'cards',
+        title: 'Sites',
+        layout: 'tiles',
+        cards: [
+          {
+            ...card('Ada Cafe'),
+            blocks: [{ block: 'text', text: 'Open late on Fridays.' }],
+          },
+        ],
+        empty: null,
+      },
     ])
 
     expect(container.querySelector('ul.dui-cards')?.className).toContain('dui-cards-tiles')
+    expect(screen.getByText('Open late on Fridays.')).toBeTruthy()
   })
 
   it('posts the drop action with the card drag merged in', async () => {

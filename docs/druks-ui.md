@@ -1382,12 +1382,12 @@ class Columns:
 ```
 
 Each child block is one column. `even` shares the width. `sidebar` keeps the
-last column a rail. `split` is exactly two panes that scroll on their own —
-the first a list, the second what that list opened. On a narrow screen they
-stack.
+last column a rail. `split` is the page: it is the only block, exactly two
+panes that scroll on their own — the first a list, the second what that list
+opened. On a narrow screen they stack.
 
-`Stack` and `Columns` hold every V1 block, including each other. They have no
-special cases.
+`Stack` and `Columns` hold every V1 block, including each other. `split` is
+the exception: it is the page, not a region inside one.
 
 `Columns` is geometry. Each child is one column, however many there are. For a
 collection of cards, use `Cards`: the shell chooses how many fit across.

@@ -344,6 +344,27 @@ describe('the parent link', () => {
     expect(container.querySelector('.page-shell-header')?.textContent).toContain('Notes')
     expect(container.querySelector('.dui-columns-split')).toBeTruthy()
   })
+
+  it('does not pin the chrome when a split sits beside another block', async () => {
+    const { container } = renderAt('/field_notes', 'notes', {
+      ...NOTES,
+      blocks: [
+        { block: 'text', text: 'above' },
+        {
+          block: 'columns',
+          layout: 'split',
+          blocks: [
+            { block: 'text', text: 'threads' },
+            { block: 'text', text: 'reading' },
+          ],
+        },
+      ],
+    })
+
+    await waitFor(() => expect(screen.getByText('threads')).toBeTruthy())
+    expect(container.querySelector('.dui-page-split')).toBeNull()
+    expect(container.querySelector('.dui-columns-split')).toBeTruthy()
+  })
 })
 
 describe('a page snapshot the renderer cannot walk', () => {

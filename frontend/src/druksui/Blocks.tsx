@@ -6,7 +6,7 @@ import { Markdown } from '../components/Markdown'
 import { GateControls } from './GateControls'
 import { Chart, Controls, Facts, ImageGallery, List, Metrics, Table } from './DataBlocks'
 import { ActionButton, Form, useAction } from './Form'
-import { LinkControl } from './LinkControl'
+import { isOutbound, isServerHref, LinkControl } from './LinkControl'
 import { Files, Image, Progress, Timeline } from './RunBlocks'
 import { hrefForLink, PagesContext, RegionContext } from './pages'
 
@@ -265,9 +265,16 @@ function CardPanel({ block }: { block: CardBlock }) {
     </>
   )
   if (wrapHref && block.link) {
-    if (block.link.url && /^https?:\/\//i.test(block.link.url)) {
+    if (block.link.url && isOutbound(block.link.url)) {
       return (
         <a className="dui-card" href={wrapHref} target="_blank" rel="noreferrer" draggable={false}>
+          {inner}
+        </a>
+      )
+    }
+    if (isServerHref(wrapHref)) {
+      return (
+        <a className="dui-card" href={wrapHref} draggable={false}>
           {inner}
         </a>
       )

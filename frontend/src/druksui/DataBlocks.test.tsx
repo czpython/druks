@@ -635,7 +635,7 @@ describe('layout', () => {
     expect(screen.getByText('right')).toBeTruthy()
   })
 
-  it('marks a split as two independently scrolling panes', () => {
+  it('marks split columns as two panes', () => {
     const { container } = renderBlocks([
       {
         block: 'columns',
