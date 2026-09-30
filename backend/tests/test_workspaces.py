@@ -80,7 +80,9 @@ async def test_repo_workspace_names_its_github_secret_and_repo_before_the_box_ex
 
     [secret] = await RepoWorkspace.get_secrets(subject)
 
-    assert secret == SandboxSecret(name="github", secret_id=row.id, resource="acme/widgets")
+    assert secret == SandboxSecret(
+        name="github", secret_id=row.id, resource="acme/widgets", host="github.com"
+    )
     assert await Workspace.get_secrets(subject) == []
 
 

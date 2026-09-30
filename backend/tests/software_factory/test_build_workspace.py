@@ -85,7 +85,9 @@ async def test_build_workspace_declares_its_github_mcp_as_the_review_actor(druks
     assert github.bearer_token_env_var == get_bearer_token_env_var(GITHUB_MCP_NAME)
     assert ref.key == ("mcp_github_token", reviewer.id, "o/main", "api.githubcopilot.com")
     [clone] = await BuildWorkspace.get_secrets(subject)
-    assert clone == SandboxSecret(name="github", secret_id=operator.id, resource="o/main")
+    assert clone == SandboxSecret(
+        name="github", secret_id=operator.id, resource="o/main", host="github.com"
+    )
 
 
 async def test_get_workspace_kwargs_carries_the_build_fields():
@@ -157,7 +159,9 @@ async def test_review_mcp_and_gh_use_the_review_actor(druks_db):
     assert github.bearer_token_env_var == get_bearer_token_env_var(GITHUB_MCP_NAME)
     assert ref.key == ("mcp_github_token", reviewer.id, "o/app", "api.githubcopilot.com")
     [clone] = await ReviewWorkspace.get_secrets(subject)
-    assert clone == SandboxSecret(name="github", secret_id=reviewer.id, resource="o/app")
+    assert clone == SandboxSecret(
+        name="github_reviewer", secret_id=reviewer.id, resource="o/app", host="github.com"
+    )
 
 
 class _IdentitySandbox:

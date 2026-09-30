@@ -199,7 +199,7 @@ async def test_an_unconnected_reviewer_borrows_the_operator_in_comment_mode(druk
 
 def test_the_reviewer_is_an_optional_service_the_app_declares():
     assert (GithubReviewer.slug, GithubReviewer.required) == ("github_reviewer", False)
-    assert GithubReviewer.secret_name == "github"
+    assert GithubReviewer.host == "github.com"
     fields = GithubReviewer.Settings.model_fields
     assert set(fields) == {"app_id", "private_key"}
     assert field_kind(fields["private_key"]) == "secret"

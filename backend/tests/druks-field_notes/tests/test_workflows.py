@@ -48,4 +48,6 @@ async def test_survey_workspace_clones_the_subject_repo(druks_db):
         "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
     )
     [secret] = await workflow.workspace_class.get_secrets(await workflow.subject)
-    assert secret == SandboxSecret(name="github", secret_id=row.id, resource="acme/widgets")
+    assert secret == SandboxSecret(
+        name="github", secret_id=row.id, resource="acme/widgets", host="github.com"
+    )

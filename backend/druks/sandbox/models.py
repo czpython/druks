@@ -46,7 +46,8 @@ class SecretRef(Base):
     # What the token is for: the repo. Empty for a subscription.
     resource: Mapped[str] = mapped_column(default="")
     # The host the box's placeholder is swapped at, for a custom entry such
-    # as an MCP server. Empty for a Drukbox catalog entry.
+    # as an MCP server, or ``github.com`` for Drukbox's GitHub service. Empty
+    # for a Drukbox catalog entry.
     host: Mapped[str] = mapped_column(default="")
 
     identity: Mapped["SandboxIdentity"] = relationship(back_populates="secret_refs", lazy="raise")

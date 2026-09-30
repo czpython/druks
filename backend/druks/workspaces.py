@@ -278,9 +278,10 @@ class RepoWorkspace(Workspace):
         # issuer reads. A service that is not connected fails here, before the box.
         return [
             SandboxSecret(
-                name=cls.github.secret_name,
+                name=cls.github.slug,
                 secret_id=(await cls.github.get()).id,
                 resource=cls.get_repo(subject),
+                host=cls.github.host,
             )
         ]
 

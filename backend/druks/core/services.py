@@ -26,8 +26,8 @@ class Github(Service):
     person's sign-in through it links their GitHub account to their Druks account."""
 
     secret_kind = SecretKind.APP_KEY
-    # The Drukbox catalog name a box holds this identity's token under.
-    secret_name = "github"
+    # Drukbox knows this host: a token for it reaches git and gh.
+    host = "github.com"
     description = (
         "The GitHub App druks acts as. Create it from here, or paste an existing "
         "App's credentials from the GitHub developer settings page."
@@ -104,6 +104,11 @@ class Github(Service):
     async def issue_token(cls, resource: str) -> tuple[str, datetime]:
         """The installation token for the repo, and the expiry GitHub gave it."""
         return await (await cls.get_client()).token_for_repo(resource)
+
+    @classmethod
+    def is_grant_revoked(cls, status: int, tokens: dict[str, Any]) -> bool:
+        # GitHub answers a dead refresh token with a 200.
+        return tokens.get("error") == "bad_refresh_token"
 
     @classmethod
     async def get_identity(cls, access_token: str) -> dict[str, Any]:

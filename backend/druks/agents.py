@@ -31,6 +31,7 @@ from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import provisioning_key, sandbox_client
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
+from druks.secrets.enums import SecretKind
 from druks.settings import load_settings
 from druks.usage.models import UsageScrape
 from druks.workflows import _in_step, current_workflow
@@ -171,6 +172,10 @@ class Agent:
                 raise TypeError(
                     f"{declared} goes to a sandbox, so {secret.service.__name__} must declare "
                     "`host`: the one host the secret may be sent to"
+                )
+            if secret.service.secret_kind != SecretKind.STATIC:
+                raise TypeError(
+                    f"{declared} belongs to an App key, which issues tokens; no sandbox holds it"
                 )
         if self.id:  # an explicit id means a standalone agent — it registers itself now
             agents.register(self)

@@ -206,14 +206,14 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
         conversation.account_id,
         config=config,
         allowed_tools=Toolkit.ALL,
-        mcp_secret_refs=[],
+        secret_refs=[],
     )
     second_host, _identity = await service.get_sandbox(
         druks_db,
         second.account_id,
         config=config,
         allowed_tools=Toolkit.ALL,
-        mcp_secret_refs=[],
+        secret_refs=[],
     )
     login = await get_druks_account_token(druks_db, conversation.account_id, (), name="login")
     moved = SimpleNamespace(
@@ -224,7 +224,7 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
         second.account_id,
         config=moved,
         allowed_tools=Toolkit.ALL,
-        mcp_secret_refs=[],
+        secret_refs=[],
     )
 
     assert first_host.id == second_host.id
@@ -485,7 +485,7 @@ LINEAR = {
 @pytest.mark.parametrize(
     "kind, expected", [(AccountKind.OPERATOR, [LINEAR]), (AccountKind.BOT, [])]
 )
-async def test_only_the_operator_reaches_the_connected_mcp_servers(
+async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_their_sign_in(
     druks_db, conversation, sandbox, monkeypatch, kind, expected
 ):
     await McpServer.create(
@@ -495,6 +495,13 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers(
         secret_headers={"Authorization": "Bearer lin_secret"},
     )
     await McpServer.create(druks_db, name="sentry", url="https://mcp.sentry.dev/mcp", is_oauth=True)
+    sign_in = await VaultSecret.connect(
+        druks_db,
+        Audience.service("github"),
+        account_id=conversation.account_id,
+        refresh_token="ghr_one",
+        scopes=[],
+    )
     conversation.account.kind = kind
     starts = []
 
@@ -512,8 +519,11 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers(
 
     await service.deliver_pending(druks_db, conversation)
 
-    [refs] = [call.kwargs["mcp_secret_refs"] for call in service.get_sandbox.await_args_list]
-    assert len(refs) == len(expected)
+    [refs] = [call.kwargs["secret_refs"] for call in service.get_sandbox.await_args_list]
+    assert [ref.name for ref in refs] == ["mcp_linear_header_0", "github"] * len(expected)
+    assert [ref.key for ref in refs if ref.name == "github"] == [
+        ("github", sign_in.id, "", "github.com")
+    ] * len(expected)
     assert starts[0]["mcpServers"] == expected
 
 
@@ -939,7 +949,7 @@ async def test_stop_during_startup_keeps_the_sandbox_and_sends_only_the_next_mes
     sandbox_requests = 0
     prompts = []
 
-    async def get_sandbox(session, account_id, *, config, allowed_tools, mcp_secret_refs):
+    async def get_sandbox(session, account_id, *, config, allowed_tools, secret_refs):
         nonlocal sandbox_requests
         sandbox_requests += 1
         await session.commit()

@@ -569,6 +569,11 @@ that creates the sandbox. Give the agents of such a workflow the same `secrets`.
 For a credential that depends on the subject, such as one account's connection,
 override [`get_secrets(subject)`](#customize-the-workspace) on the workspace.
 
+A person's own sign-in needs no list. If a service has OAuth endpoints and a
+`host`, the Chat sandbox of each operator holds that operator's sign-in under
+the service slug, the way it holds a listed field. An operator with no sign-in
+gets no variable.
+
 Do not ask the framework to infer domain side effects from agent prose.
 The prompt or a subsequent explicit step owns those actions.
 
@@ -762,8 +767,9 @@ The secret names the vault row the issuer answers from. With a `host`, it is a
 custom entry. The sandbox holds a placeholder in `BILLING_TOKEN`, the name in
 upper case. The secrets proxy puts the value in a request header only for that
 host. A header row supplies its own header. Any other row goes out as
-`Authorization: Bearer <token>`. Without a `host`, the name is a Drukbox
-catalog entry such as `github`, and Drukbox sets its variable and hosts.
+`Authorization: Bearer <token>`. An entry for `github.com` is Drukbox's GitHub
+service under any name: `GH_TOKEN`, with git and `gh` set up. Without a `host`,
+the name is a Drukbox catalog entry, and Drukbox sets its variable and hosts.
 `resource` tells the issuer what the token is for, such as a repo. Druks reads
 the secrets before the sandbox exists, so read them from the subject alone.
 

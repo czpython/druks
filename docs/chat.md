@@ -108,6 +108,14 @@ leaves out a server that cannot authenticate for you, such as an OAuth server
 that you have not connected. A Bot's agent reaches only the Druks server. When
 you enable, disable, or connect a server, the next turn replaces the sandbox.
 
+An operator's sandbox also holds their own sign-in at each service that names a
+host, so the command line acts as that person. With a GitHub sign-in, git and
+`gh` act as you: your name is on the issues and comments, and the token permits
+only what both you and the App can do. Druks refreshes the token before it
+expires. Without a sign-in the sandbox has no access to that service: see
+[GitHub](#github). A Bot's sandbox never holds a sign-in.
+A build still acts as the App: see [GitHub](configuration.md#github).
+
 The agent can change Druks through those tools. Chat has no permission dialog
 or proposal mode. Claude runs in bypass mode and cannot call `AskUserQuestion`.
 Codex runs in full-access mode for an operator. For a Bot it runs in read-only
@@ -369,8 +377,8 @@ while the GitHub card is connected: see [GitHub](configuration.md#github).
 
 Druks knows you by your GitHub account. Select **Connect GitHub** on the GitHub
 pane. GitHub asks you to authorize the App, and Druks saves your GitHub sign-in
-under your account, like a Gmail connection. Other apps can use that grant.
-**Disconnect** revokes it.
+under your account, like a Gmail connection. Other apps can use that grant, and
+your Chat sandbox acts on GitHub with it. **Disconnect** revokes it.
 
 When you tag the App before you connect, the App answers once in the thread:
 connect GitHub in Druks, then tag it again. It holds nothing.

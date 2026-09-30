@@ -566,6 +566,8 @@ def test_an_agent_holds_only_a_secret_of_a_service_with_a_host(declared_services
     Acme.host = "api.acme.test"
     with pytest.raises(TypeError, match="Acme.fields.base_url is not a secret field"):
         Agent(contract=AgentOutput, secrets=(Acme.fields.base_url,))
+    with pytest.raises(TypeError, match="Github.fields.private_key belongs to an App key"):
+        Agent(contract=AgentOutput, secrets=(Github.fields.private_key,))
 
 
 async def test_oauth_service_declarations_fail_loudly(declared_services):

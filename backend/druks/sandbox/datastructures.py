@@ -162,7 +162,8 @@ class SandboxSecret:
     """A secret a workspace's box holds as a placeholder. ``secret_id`` names the
     vault row the issuer answers from and ``resource`` what its token is for. A
     ``host`` makes it a custom entry: the proxy swaps the placeholder in the
-    request header at that host, and the box reads it from ``name.upper()``."""
+    request header at that host, and the box reads it from ``name.upper()``.
+    Drukbox knows ``github.com``: that entry is its GitHub service."""
 
     name: str
     secret_id: str

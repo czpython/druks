@@ -484,9 +484,10 @@ class ReviewWorkspace(RepoWorkspace):
         actor = await get_review_actor()
         return [
             SandboxSecret(
-                name=Github.secret_name,
+                name=actor.service.slug,
                 secret_id=(await actor.service.get()).id,
                 resource=cls.get_repo(subject),
+                host=actor.service.host,
             )
         ]
 

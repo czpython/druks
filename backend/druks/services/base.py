@@ -16,7 +16,7 @@ from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 
 from .exceptions import OauthExchangeError, ServiceConnectError, ServiceNotConnectedError
-from .oauth import OauthClient, fetch_identity
+from .oauth import OauthClient, fetch_identity, is_grant_revoked
 
 # GoogleCalendar -> google_calendar, HTTPServer -> http_server.
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
@@ -318,6 +318,12 @@ class Service:
         }
 
     @classmethod
+    def is_grant_revoked(cls, status: int, tokens: dict[str, Any]) -> bool:
+        """Whether the token endpoint's answer to a refresh says the provider revoked
+        the grant. Override for a provider that reports it otherwise than RFC 6749."""
+        return is_grant_revoked(status, tokens)
+
+    @classmethod
     async def get_oauth_client(cls) -> OauthClient:
         """The connected identity as a configured ``OauthClient``, keyed by
         the service slug. Raises ``ServiceNotConnectedError`` until the
@@ -333,6 +339,7 @@ class Service:
             client_secret=connected.secrets["client_secret"],
             basic_auth=cls.basic_auth,
             extra_authorize_params=cls.extra_authorize_params,
+            is_grant_revoked=cls.is_grant_revoked,
         )
 
     @classmethod

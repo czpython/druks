@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
 from druks.apps.loader import get_app
-from druks.apps.registry import channels
+from druks.apps.registry import channels, services
 from druks.durable.engine import step_session
 from druks.durable.models import Run
 from druks.files.constants import MAX_UPLOAD_BYTES
@@ -39,6 +39,8 @@ from druks.sandbox.host import Host
 from druks.sandbox.layout import get_remote_home, get_work_root
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.workspaces import Workspace
 
@@ -107,7 +109,7 @@ async def get_sandbox(
     *,
     config: AgentConfig,
     allowed_tools: AllowedTools,
-    mcp_secret_refs: list[SecretRef],
+    secret_refs: list[SecretRef],
 ) -> tuple[Host, SandboxIdentity]:
     """The account's sandbox for a new turn: a live sandbox that holds the Chat
     agent's current secrets, or a new one."""
@@ -115,7 +117,7 @@ async def get_sandbox(
     token = await get_druks_account_token(session, account_id, allowed_tools, name=CHAT_KEY_NAME)
     refs = [
         *config.secret_refs,
-        *mcp_secret_refs,
+        *secret_refs,
         SecretRef(
             name=get_bearer_token_env_var(server.name).lower(),
             secret_id=token.id,
@@ -208,19 +210,32 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                         f"Chat runs on {adapters}. The Bot's settings select "
                         f"{config.harness_class.name}. Set its harness to one of them."
                     )
-                # A bot serves outside people, so only the operator reaches the enabled MCP servers.
-                mcp_servers, mcp_secret_refs = (), []
+                # A bot serves outside people, so only the operator reaches the enabled MCP
+                # servers and holds their own sign-ins.
+                mcp_servers, secret_refs = (), []
                 if conversation.account.kind == AccountKind.OPERATOR:
                     # A server the operator has not connected must not stop the chat.
-                    mcp_servers, mcp_secret_refs = await Workspace.get_all_mcp_servers(
+                    mcp_servers, secret_refs = await Workspace.get_all_mcp_servers(
                         session, None, conversation.account_id, skip_unauthenticated=True
                     )
+                    for service in services.all():
+                        if service.host and service.token_endpoint:
+                            sign_ins = await VaultSecret.list_account_connections(
+                                session, Audience.service(service.slug), conversation.account_id
+                            )
+                            # A sandbox has one variable per service, so it holds one sign-in.
+                            secret_refs += [
+                                SecretRef(
+                                    name=service.slug, secret_id=sign_in.id, host=service.host
+                                )
+                                for sign_in in sign_ins[:1]
+                            ]
                 host, identity = await get_sandbox(
                     session,
                     conversation.account_id,
                     config=config,
                     allowed_tools=tools,
-                    mcp_secret_refs=mcp_secret_refs,
+                    secret_refs=secret_refs,
                 )
                 try:
                     bridge = Bridge(host)
