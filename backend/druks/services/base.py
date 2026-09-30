@@ -65,7 +65,7 @@ class Connection:
 @dataclass(frozen=True)
 class ServiceField:
     """One field of a service's ``Settings``, named before any value exists:
-    ``Currents.fields.api_key``. An agent lists a secret field in ``secrets`` to
+    ``Acme.fields.api_key``. An agent lists a secret field in ``secrets`` to
     hold it in its sandbox."""
 
     service: "type[Service]"

@@ -14,27 +14,27 @@ async def _lookup(**signals):
 
 
 async def test_project_name_wins_over_labels(druks_db):
-    await _register(druks_db, "acme/widget", "octo/alfred")
-    row = await _lookup(project_name="widget", labels=["alfred"])
+    await _register(druks_db, "acme/widget", "octo/gadget")
+    row = await _lookup(project_name="widget", labels=["gadget"])
     assert row.full_name == "acme/widget"
 
 
 async def test_label_routes_when_project_name_is_not_a_repo(druks_db):
     """The org-project shape: the Jira project names the org, not a repo, and
-    SHRP tickets carry a free-form 'Alfred' label — matched case-insensitively."""
-    await _register(druks_db, "octo/alfred")
-    row = await _lookup(project_name="Octo", labels=["customer-request", "Alfred"])
-    assert row.full_name == "octo/alfred"
+    its tickets carry a free-form 'Gadget' label — matched case-insensitively."""
+    await _register(druks_db, "octo/gadget")
+    row = await _lookup(project_name="Octo", labels=["customer-request", "Gadget"])
+    assert row.full_name == "octo/gadget"
 
 
 async def test_first_matching_label_wins(druks_db):
-    await _register(druks_db, "octo/alfred", "octo/obrv2")
-    row = await _lookup(labels=["obrv2", "Alfred"])
-    assert row.full_name == "octo/obrv2"
+    await _register(druks_db, "octo/gadget", "octo/gizmo")
+    row = await _lookup(labels=["gizmo", "Gadget"])
+    assert row.full_name == "octo/gizmo"
 
 
 async def test_no_signal_matches_any_repo(druks_db):
-    await _register(druks_db, "octo/alfred")
+    await _register(druks_db, "octo/gadget")
     assert await _lookup(project_name="Octo", labels=["bug"]) is None
 
 

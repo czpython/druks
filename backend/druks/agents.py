@@ -151,7 +151,7 @@ class Agent:
     # ``include_mcp=False`` gives the call no MCP server and its sandbox no
     # server entry, for an agent that reads untrusted content.
     include_mcp: bool = True
-    # The service secrets the call's sandbox holds, ``(Currents.fields.api_key,)``.
+    # The service secrets the call's sandbox holds, ``(Acme.fields.api_key,)``.
     # Each is a placeholder that the secrets proxy swaps at the service's host.
     secrets: "tuple[ServiceField, ...]" = ()
     # ``id`` is the agent's durable key (settings, timeline, registry, step name):
