@@ -168,7 +168,7 @@ the session files from the last completed turn.
 
 Nothing renews an idle sandbox. It expires with its lease. The next message
 gets a new sandbox and reloads the saved session files. Each turn renews the
-sandbox lease and its identity expiry. The lease is 150 minutes.
+sandbox lease and its identity expiry. The lease is 270 minutes.
 
 ## WhatsApp
 

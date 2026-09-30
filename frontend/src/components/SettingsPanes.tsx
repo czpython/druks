@@ -63,7 +63,7 @@ const harnessNeedsKey = (harness: Harness, catalog: Catalog) =>
 const BILLINGS: Billing[] = ['subscription', 'api_key']
 const billingLabel = (billing: string) => (billing === 'api_key' ? 'API key' : 'subscription')
 
-const TIMEOUTS = [600, 900, 1800, 3600]
+const TIMEOUTS = [600, 900, 1800, 3600, 7200]
 
 export function Switch({
   on,
