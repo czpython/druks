@@ -3,6 +3,8 @@ from druks.mcp.constants import DRUKS_SERVER_NAME
 # The dot keeps the name outside NAME_PATTERN, so no registry server can share its vault row.
 CHAT_KEY_NAME = f"{DRUKS_SERVER_NAME}.chat"
 CHAT_BRIDGE_PORT = 43123
+# The bridge statuses with a live session and no running turn.
+BRIDGE_SETTLED_STATUSES = ("idle", "replied", "cancelled")
 TRANSCRIPTION_TIMEOUT_SECONDS = 120.0
 # The header an agent's MCP calls carry to name their conversation.
 CONVERSATION_HEADER = "X-Druks-Conversation"

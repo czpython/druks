@@ -150,8 +150,11 @@ a message that Stop cancelled while pending.
 After delivery wins, Stop sends ACP `session/cancel` through the bridge.
 The bridge matches the message ID, so a delayed Stop cannot cancel the next
 turn. Druks saves the partial reply and marks the message `cancelled`.
-Delivery remains at most once. An uncertain delivery can leave a message
-interrupted. Druks does not send it again automatically.
+The bridge records the message ID when it accepts a prompt. When a delivery
+fails, the next delivery asks the bridge for that ID. If the bridge holds the
+message, Druks follows the turn. If the bridge is idle with another ID, the
+prompt never arrived, and Druks sends the message again. The bridge refuses a
+prompt for an ID it already accepted, so a turn never runs twice.
 
 The bridge numbers the current turn's events and writes them to disk. Druks
 reads the events after its last position and streams them only to the owner's

@@ -232,17 +232,27 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
     release.assert_awaited_once_with(host_id=first_host.id)
 
 
-async def test_delivered_turn_is_never_sent_again_after_a_transport_failure(
+async def test_delivered_turn_is_sent_again_when_the_bridge_never_got_the_prompt(
     druks_db, conversation, sandbox, monkeypatch
 ):
-    state = {"status": "missing", "sessionId": "", "messageId": ""}
+    state = {"status": "idle", "sessionId": "one", "messageId": "", "harness": "claude"}
     prompts = []
 
     async def request(self, method, **values):
         if method == "prompt":
             assert not druks_db.in_transaction()
             prompts.append(values["messageId"])
-            raise ChatBridgeError("The prompt response was lost.")
+            if len(prompts) == 1:
+                raise ChatBridgeError("The prompt response was lost.")
+            state.update(
+                status="replied",
+                messageId=values["messageId"],
+                epoch="one",
+                sequence=0,
+                archivePath="",
+            )
+        elif method == "events":
+            return {"events": []}
         return state
 
     monkeypatch.setattr(Bridge, "request", request)
@@ -253,8 +263,8 @@ async def test_delivered_turn_is_never_sent_again_after_a_transport_failure(
 
     await service.deliver_pending(druks_db, conversation)
 
-    assert prompts == [message.id]
-    assert message.state == "interrupted"
+    assert prompts == [message.id, message.id]
+    assert message.state == MessageState.REPLIED
     _, identity = sandbox
     assert service.sandbox_client.set_expiry.await_args.kwargs["expires_at"] == identity.expires_at
 

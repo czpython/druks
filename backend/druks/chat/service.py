@@ -47,6 +47,7 @@ from druks.workspaces import Workspace
 from .bots.constants import ADMIN_PROMPT, ADMIN_TOOLS
 from .bridge import Bridge
 from .constants import (
+    BRIDGE_SETTLED_STATUSES,
     CHAT_KEY_NAME,
     CONVERSATION_HEADER,
     FAILURE_MESSAGE,
@@ -437,6 +438,12 @@ async def follow_turn(
     position_key = f"chat:{conversation.id}:position"
     while True:
         status = await bridge.request("status", conversationId=conversation.id)
+        if status["messageId"] != message.id and status["status"] in BRIDGE_SETTLED_STATUSES:
+            # The bridge never got the prompt: the turn's messages go back to pending,
+            # and the delivery loop sends them again.
+            await conversation.end_turn(session, MessageState.PENDING)
+            await session.commit()
+            return
         if status["messageId"] != message.id or status["status"] in ("missing", "interrupted"):
             await conversation.end_turn(session, MessageState.INTERRUPTED)
             await session.commit()
