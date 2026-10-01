@@ -401,8 +401,12 @@ export const api = {
   // response. A bearer is the Authorization header spelled out. Keyed by
   // name (a built-in has no id until an operator overlays it).
   mcpServers: () => getJSON<McpServer[]>('/api/mcp-servers'),
-  createMcpServer: (body: { name: string; url: string; secret_headers: Record<string, string> }) =>
-    postJSON<McpServer>('/api/mcp-servers', body),
+  createMcpServer: (body: {
+    name: string
+    url: string
+    secret_headers: Record<string, string>
+    per_user: boolean
+  }) => postJSON<McpServer>('/api/mcp-servers', body),
   // The vetted servers the dashboard offers. Adding one sends only its name;
   // the url never comes from the client.
   mcpServerDirectory: () => getJSON<McpServerDirectoryEntry[]>('/api/mcp-servers/directory'),
@@ -422,4 +426,12 @@ export const api = {
     ),
   disconnectMcpServer: (name: string) =>
     deleteRequest(`/api/mcp-servers/${encodeURIComponent(name)}/grant`),
+  setMcpServerHeaders: (name: string, secretHeaders: Record<string, string>) =>
+    postJSON<McpServer>(
+      `/api/mcp-servers/${encodeURIComponent(name)}/headers`,
+      { secret_headers: secretHeaders },
+      'PUT',
+    ),
+  removeMcpServerHeaders: (name: string) =>
+    deleteRequest(`/api/mcp-servers/${encodeURIComponent(name)}/headers`),
 }

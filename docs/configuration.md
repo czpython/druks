@@ -714,6 +714,10 @@ is one of:
 
 - Secret headers, which Druks keeps in the vault. A bearer token is the
   `Authorization` header spelled out; the form's Bearer field composes it.
+- Secret headers that each person sets. Add the server with **Each person uses
+  their own key**. Each account then pastes its own key on the server's row,
+  and its runs send that key. A run with no person uses the default account's
+  key. An account that has set no key gets the server left out of its sandbox.
 - An OAuth connection, which requires `urls.endpoint`.
 
 A service can own the host of an OAuth server: GitHub owns

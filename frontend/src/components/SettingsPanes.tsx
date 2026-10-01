@@ -2297,11 +2297,8 @@ export function McpServersPane() {
   })
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
-  const [token, setToken] = useState('')
-  // Header auth: an API-key-style secret header instead of a bearer.
-  const [authMode, setAuthMode] = useState<'bearer' | 'header'>('bearer')
-  const [headerName, setHeaderName] = useState('')
-  const [headerValue, setHeaderValue] = useState('')
+  const [auth, setAuth] = useState<McpAuth>(EMPTY_AUTH)
+  const [perUser, setPerUser] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -2354,36 +2351,29 @@ export function McpServersPane() {
     }
   }
 
-  const authReady =
-    authMode === 'bearer' ? token.trim() !== '' : headerName.trim() !== '' && headerValue.trim() !== ''
-
   async function add() {
     // A custom server is static — the backend requires its auth up front, so
     // gate the add on complete fields rather than let a submit 422.
-    if (!name.trim() || !url.trim() || !authReady) return
-    setBusy(true)
-    setError(null)
-    try {
-      await api.createMcpServer({
-        name: name.trim(),
-        url: url.trim(),
-        // A bearer is the Authorization header spelled out — one storage
-        // shape for every static credential.
-        secret_headers:
-          authMode === 'bearer'
-            ? { Authorization: `Bearer ${token.trim()}` }
-            : { [headerName.trim()]: headerValue.trim() },
-      })
-      setName('')
-      setUrl('')
-      setToken('')
-      setHeaderName('')
-      setHeaderValue('')
-      await refresh()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
+    if (name.trim() && url.trim() && isAuthReady(auth)) {
+      setBusy(true)
+      setError(null)
+      try {
+        await api.createMcpServer({
+          name: name.trim(),
+          url: url.trim(),
+          secret_headers: toSecretHeaders(auth),
+          per_user: perUser,
+        })
+        setName('')
+        setUrl('')
+        setAuth(EMPTY_AUTH)
+        setPerUser(false)
+        await refresh()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setBusy(false)
+      }
     }
   }
 
@@ -2460,16 +2450,46 @@ export function McpServersPane() {
   }
 
   async function disconnect(name: string) {
-    if (!window.confirm(`Disconnect ${name}? Agents lose its tools until it is connected again.`)) return
+    if (window.confirm(`Disconnect ${name}? Agents lose its tools until it is connected again.`)) {
+      setBusy(true)
+      setError(null)
+      try {
+        await api.disconnectMcpServer(name)
+        await refresh()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setBusy(false)
+      }
+    }
+  }
+
+  async function setHeaders(name: string, secretHeaders: Record<string, string>) {
     setBusy(true)
     setError(null)
     try {
-      await api.disconnectMcpServer(name)
+      await api.setMcpServerHeaders(name, secretHeaders)
       await refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      throw e
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function removeHeaders(name: string) {
+    if (window.confirm(`Remove your key for ${name}? Your agents lose its tools until you set one again.`)) {
+      setBusy(true)
+      setError(null)
+      try {
+        await api.removeMcpServerHeaders(name)
+        await refresh()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setBusy(false)
+      }
     }
   }
 
@@ -2512,6 +2532,8 @@ export function McpServersPane() {
                 onRemove={remove}
                 onConnect={connect}
                 onDisconnect={disconnect}
+                onSetHeaders={setHeaders}
+                onRemoveHeaders={removeHeaders}
               />
             ))}
           </div>
@@ -2614,101 +2636,35 @@ export function McpServersPane() {
                 disabled={busy}
               />
             </div>
-            <div className="mcp-field">
-              <span className="mcp-label">Authentication</span>
-              <div role="radiogroup" aria-label="Authentication" className="mcp-auth-mode">
-                <label>
-                  <input
-                    type="radio"
-                    name={`${fieldId}-auth`}
-                    checked={authMode === 'bearer'}
-                    onChange={() => setAuthMode('bearer')}
-                    disabled={busy}
-                  />{' '}
-                  Bearer token
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name={`${fieldId}-auth`}
-                    checked={authMode === 'header'}
-                    onChange={() => setAuthMode('header')}
-                    disabled={busy}
-                  />{' '}
-                  Header
-                </label>
-              </div>
-            </div>
-            {authMode === 'bearer' ? (
-              <div className="mcp-field">
-                <label className="mcp-label" htmlFor={`${fieldId}-token`}>
-                  Bearer token <span className="mcp-req">(required)</span>
-                </label>
-                <TextInput
-                  id={`${fieldId}-token`}
-                  type="password"
-                  required
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') void add()
-                  }}
-                  autoComplete="new-password"
-                  data-1p-ignore=""
-                  data-lpignore="true"
-                  disabled={busy}
-                />
-                <p className="mcp-help">
-                  Stored write-only — never returned or emitted in config.
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="mcp-field">
-                  <label className="mcp-label" htmlFor={`${fieldId}-header-name`}>
-                    Header name <span className="mcp-req">(required)</span>
-                  </label>
-                  <TextInput
-                    id={`${fieldId}-header-name`}
-                    placeholder="x-api-key"
-                    required
-                    value={headerName}
-                    onChange={(e) => setHeaderName(e.target.value)}
-                    autoComplete="off"
-                    data-1p-ignore=""
-                    data-lpignore="true"
-                    disabled={busy}
-                  />
-                </div>
-                <div className="mcp-field">
-                  <label className="mcp-label" htmlFor={`${fieldId}-header-value`}>
-                    Header value <span className="mcp-req">(required)</span>
-                  </label>
-                  <TextInput
-                    id={`${fieldId}-header-value`}
-                    type="password"
-                    required
-                    value={headerValue}
-                    onChange={(e) => setHeaderValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') void add()
-                    }}
-                    autoComplete="new-password"
-                    data-1p-ignore=""
-                    data-lpignore="true"
-                    disabled={busy}
-                  />
-                  <p className="mcp-help">
-                    Stored write-only — never returned or emitted in config.
-                  </p>
-                </div>
-              </>
+            <McpAuthFields
+              auth={auth}
+              onChange={setAuth}
+              onSubmit={() => void add()}
+              busy={busy}
+              fieldId={fieldId}
+            />
+          </div>
+          <div className="mcp-field">
+            <label className="mcp-check">
+              <input
+                type="checkbox"
+                checked={perUser}
+                onChange={(e) => setPerUser(e.target.checked)}
+                disabled={busy}
+              />{' '}
+              Each person uses their own key
+            </label>
+            {perUser && (
+              <p className="mcp-help">
+                This key is stored under your account. Other people set theirs on the
+                server&apos;s row.
+              </p>
             )}
           </div>
           <div>
             <button
               className="set-btn primary"
-              disabled={busy || !name.trim() || !url.trim() || !authReady}
+              disabled={busy || !name.trim() || !url.trim() || !isAuthReady(auth)}
               aria-busy={busy}
               onClick={() => void add()}
             >
@@ -2728,8 +2684,139 @@ function tokenStatusLabel(server: McpServer): string {
   if (server.isOauth) {
     return server.hasToken ? 'Connected' : 'Not connected'
   }
+  if (server.identityMode === 'per_user') {
+    return server.hasToken ? 'Your key is set' : 'No key for you'
+  }
   // Header-auth'd: its rows are the credential. A catalog entry can lack them.
   return server.hasToken ? 'Ready' : 'No secret header'
+}
+
+// A static credential as the form takes it: a bearer, or an API-key-style
+// secret header.
+interface McpAuth {
+  mode: 'bearer' | 'header'
+  token: string
+  headerName: string
+  headerValue: string
+}
+
+const EMPTY_AUTH: McpAuth = { mode: 'bearer', token: '', headerName: '', headerValue: '' }
+
+function isAuthReady(auth: McpAuth): boolean {
+  if (auth.mode === 'bearer') return auth.token.trim() !== ''
+  return auth.headerName.trim() !== '' && auth.headerValue.trim() !== ''
+}
+
+// A bearer is the Authorization header spelled out — one storage shape for
+// every static credential.
+function toSecretHeaders(auth: McpAuth): Record<string, string> {
+  if (auth.mode === 'bearer') return { Authorization: `Bearer ${auth.token.trim()}` }
+  return { [auth.headerName.trim()]: auth.headerValue.trim() }
+}
+
+function McpAuthFields({
+  auth,
+  onChange,
+  onSubmit,
+  busy,
+  fieldId,
+}: {
+  auth: McpAuth
+  onChange: (auth: McpAuth) => void
+  onSubmit: () => void
+  busy: boolean
+  fieldId: string
+}) {
+  return (
+    <>
+      <div className="mcp-field">
+        <span className="mcp-label">Authentication</span>
+        <div role="radiogroup" aria-label="Authentication" className="mcp-auth-mode">
+          <label>
+            <input
+              type="radio"
+              name={`${fieldId}-auth`}
+              checked={auth.mode === 'bearer'}
+              onChange={() => onChange({ ...auth, mode: 'bearer' })}
+              disabled={busy}
+            />{' '}
+            Bearer token
+          </label>
+          <label>
+            <input
+              type="radio"
+              name={`${fieldId}-auth`}
+              checked={auth.mode === 'header'}
+              onChange={() => onChange({ ...auth, mode: 'header' })}
+              disabled={busy}
+            />{' '}
+            Header
+          </label>
+        </div>
+      </div>
+      {auth.mode === 'bearer' ? (
+        <div className="mcp-field">
+          <label className="mcp-label" htmlFor={`${fieldId}-token`}>
+            Bearer token <span className="mcp-req">(required)</span>
+          </label>
+          <TextInput
+            id={`${fieldId}-token`}
+            type="password"
+            required
+            value={auth.token}
+            onChange={(e) => onChange({ ...auth, token: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onSubmit()
+            }}
+            autoComplete="new-password"
+            data-1p-ignore=""
+            data-lpignore="true"
+            disabled={busy}
+          />
+          <p className="mcp-help">Stored write-only — never returned or emitted in config.</p>
+        </div>
+      ) : (
+        <>
+          <div className="mcp-field">
+            <label className="mcp-label" htmlFor={`${fieldId}-header-name`}>
+              Header name <span className="mcp-req">(required)</span>
+            </label>
+            <TextInput
+              id={`${fieldId}-header-name`}
+              placeholder="x-api-key"
+              required
+              value={auth.headerName}
+              onChange={(e) => onChange({ ...auth, headerName: e.target.value })}
+              autoComplete="off"
+              data-1p-ignore=""
+              data-lpignore="true"
+              disabled={busy}
+            />
+          </div>
+          <div className="mcp-field">
+            <label className="mcp-label" htmlFor={`${fieldId}-header-value`}>
+              Header value <span className="mcp-req">(required)</span>
+            </label>
+            <TextInput
+              id={`${fieldId}-header-value`}
+              type="password"
+              required
+              value={auth.headerValue}
+              onChange={(e) => onChange({ ...auth, headerValue: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') onSubmit()
+              }}
+              autoComplete="new-password"
+              data-1p-ignore=""
+              data-lpignore="true"
+              disabled={busy}
+            />
+            <p className="mcp-help">Stored write-only — never returned or emitted in config.</p>
+          </div>
+        </>
+      )}
+    </>
+  )
 }
 
 function McpServerRow({
@@ -2740,6 +2827,8 @@ function McpServerRow({
   onRemove,
   onConnect,
   onDisconnect,
+  onSetHeaders,
+  onRemoveHeaders,
 }: {
   server: McpServer
   busy: boolean
@@ -2748,9 +2837,27 @@ function McpServerRow({
   onRemove: (name: string) => Promise<void>
   onConnect: (name: string, identityMode: string) => Promise<void>
   onDisconnect: (name: string) => Promise<void>
+  onSetHeaders: (name: string, secretHeaders: Record<string, string>) => Promise<void>
+  onRemoveHeaders: (name: string) => Promise<void>
 }) {
   const claimedMode = server.identityMode
   const isLive = server.hasToken
+  const keyFieldId = useId()
+  const [auth, setAuth] = useState<McpAuth>(EMPTY_AUTH)
+  const [editingKey, setEditingKey] = useState(false)
+
+  async function saveKey() {
+    if (isAuthReady(auth)) {
+      try {
+        await onSetHeaders(server.name, toSecretHeaders(auth))
+        setAuth(EMPTY_AUTH)
+        setEditingKey(false)
+      } catch {
+        // The pane shows the error; the typed key stays for a retry.
+      }
+    }
+  }
+
   return (
     <div className={'set-card mcp-row' + (server.isEnabled ? '' : ' is-off')}>
       <div className="mcp-id">
@@ -2777,6 +2884,28 @@ function McpServerRow({
           <span className="mcp-enable-label">Enabled</span>
         </span>
         <div className="mcp-actions">
+          {server.credential === 'headers' && claimedMode === 'per_user' && (
+            <>
+              <button
+                className={'set-btn ' + (server.hasToken ? 'ghost' : 'primary')}
+                onClick={() => setEditingKey((editing) => !editing)}
+                disabled={busy}
+                title="Paste the key this server gave you."
+              >
+                Set your key
+              </button>
+              {server.hasToken && (
+                <button
+                  className="set-btn danger"
+                  onClick={() => void onRemoveHeaders(server.name)}
+                  disabled={busy}
+                  title="Drop the key stored under your account."
+                >
+                  Remove your key
+                </button>
+              )}
+            </>
+          )}
           {server.credential === 'service_connection' && (
             // The account signs in through the service; the connection belongs to it.
             <button
@@ -2845,6 +2974,27 @@ function McpServerRow({
           )}
         </div>
       </div>
+      {editingKey && (
+        <div className="mcp-form-grid mcp-key-form">
+          <McpAuthFields
+            auth={auth}
+            onChange={setAuth}
+            onSubmit={() => void saveKey()}
+            busy={busy}
+            fieldId={keyFieldId}
+          />
+          <div>
+            <button
+              className="set-btn primary"
+              disabled={busy || !isAuthReady(auth)}
+              aria-busy={busy}
+              onClick={() => void saveKey()}
+            >
+              Save key
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

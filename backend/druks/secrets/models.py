@@ -118,6 +118,15 @@ class VaultSecret(Base, Uuid7Pk):
         )
 
     @classmethod
+    async def list_secret_headers(
+        cls, session: AsyncSession, audience: str, account_id: str | None
+    ) -> list["VaultSecret"]:
+        """One account's secret headers at one MCP server; None reads the shared ones."""
+        return await cls._list(
+            session, SecretKind.STATIC, cls.audience == audience, cls.account_id == account_id
+        )
+
+    @classmethod
     async def list_subscriptions(
         cls,
         session: AsyncSession,

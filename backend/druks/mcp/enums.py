@@ -10,7 +10,7 @@ class IdentityMode(StrEnum):
 class Credential(StrEnum):
     """Where an account's credential for an MCP server comes from."""
 
-    # The server's secret header rows, the same for every account.
+    # The server's secret header rows: the installation's, or the account's own.
     HEADERS = "headers"
     # The account's own OAuth grant at the server.
     GRANT = "grant"

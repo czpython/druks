@@ -56,6 +56,8 @@ class CreateMcpServerRequest(BaseModel):
     # header spelled out: {"Authorization": "Bearer <token>"} — the UI's Bearer
     # field composes it.
     secret_headers: dict[str, str] = {}
+    # The secret headers are the adder's own, and every account sets its own.
+    per_user: bool = False
 
 
 # The catalog file is operator input, so its entries parse through a

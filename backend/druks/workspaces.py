@@ -20,7 +20,7 @@ from druks.files.models import FileRecord
 from druks.files.storage import get_file_storage
 from druks.mcp import models as mcp_models
 from druks.mcp.constants import TOKEN_ENV_PREFIX
-from druks.mcp.enums import Credential, Toolkit
+from druks.mcp.enums import Credential, IdentityMode, Toolkit
 from druks.mcp.exceptions import MissingGrantError, MissingTokenError
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.inbound import get_druks_account_token
@@ -238,6 +238,9 @@ class Workspace:
             elif access.credential != Credential.HEADERS:
                 raise MissingGrantError(name, run_account)
             elif not secret_headers:
+                if access.identity_mode == IdentityMode.PER_USER:
+                    # The account has set no key of its own; its box goes without.
+                    continue
                 raise MissingTokenError(name)
             env_headers = {}
             for index, (header, secret) in enumerate(secret_headers.items()):

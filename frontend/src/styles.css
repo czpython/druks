@@ -921,6 +921,8 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .mcp-form-grid > .mcp-field:last-child { grid-column: 1 / -1; }
 .mcp-auth-mode { display: flex; gap: 18px; padding: 6px 0; }
 .mcp-auth-mode label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.mcp-check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.mcp-key-form { grid-column: 1 / -1; padding-top: 10px; }
 
 .mcp-pane .mcp-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px 14px; align-items: start; padding: 12px 14px; transition: border-color 120ms, background 120ms; }
 .mcp-pane .mcp-row:hover { border-color: var(--border-loud); }

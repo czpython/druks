@@ -38,6 +38,19 @@ async def _response(session: AsyncSession, name: str) -> McpServerResponse:
     return McpServerResponse.model_validate(access)
 
 
+def _valid_secret_headers(name: str, raw: dict[str, str]) -> dict[str, str]:
+    secret_headers = {header.strip(): value for header, value in raw.items()}
+    if secret_headers and all(
+        HEADER_NAME_PATTERN.match(header) and value.strip()
+        for header, value in secret_headers.items()
+    ):
+        return secret_headers
+    raise HTTPException(
+        status_code=422,
+        detail=f"MCP server {name!r} needs a secret header with a valid name and a value.",
+    )
+
+
 @router.get("", response_model=list[McpServerResponse])
 async def list_mcp_servers(session: SessionDep) -> list[McpServerResponse]:
     return [
@@ -68,22 +81,19 @@ async def add_mcp_server(session: SessionDep, body: CreateMcpServerRequest) -> M
     # Reject here rather than persist a row that fails at delivery.
     if not body.url.strip():
         raise HTTPException(status_code=422, detail=f"MCP server {body.name!r} needs a url.")
-    secret_headers = {name.strip(): value for name, value in body.secret_headers.items()}
-    if secret_headers and all(
-        HEADER_NAME_PATTERN.match(header) and value.strip()
-        for header, value in secret_headers.items()
-    ):
-        try:
-            await McpServer.create(
-                session, name=body.name, url=body.url, secret_headers=secret_headers
-            )
-        except (InvalidServerNameError, ReservedServerNameError) as error:
-            raise HTTPException(status_code=422, detail=str(error)) from error
-        return await _response(session, body.name)
-    raise HTTPException(
-        status_code=422,
-        detail=f"MCP server {body.name!r} needs a secret header with a valid name and a value.",
-    )
+    secret_headers = _valid_secret_headers(body.name, body.secret_headers)
+    account_id = current_account_id.get() if body.per_user else None
+    try:
+        await McpServer.create(
+            session,
+            name=body.name,
+            url=body.url,
+            secret_headers=secret_headers,
+            account_id=account_id,
+        )
+    except (InvalidServerNameError, ReservedServerNameError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return await _response(session, body.name)
 
 
 @router.post("/directory", response_model=McpServerResponse)
@@ -119,6 +129,28 @@ async def set_mcp_server_enabled(
     except McpServerNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return await _response(session, name)
+
+
+@router.put("/{name}/headers", response_model=McpServerResponse)
+async def set_mcp_server_secret_headers(
+    session: SessionDep, name: str, secret_headers: Annotated[dict[str, str], Body(embed=True)]
+) -> McpServerResponse:
+    server = await McpServer.get_for_name(session, name)
+    if server and not server.is_oauth and server.identity_mode == IdentityMode.PER_USER:
+        await server.set_secret_headers(
+            current_account_id.get(), _valid_secret_headers(name, secret_headers)
+        )
+        return await _response(session, name)
+    raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no key per person.")
+
+
+@router.delete("/{name}/headers", status_code=204)
+async def remove_mcp_server_secret_headers(session: SessionDep, name: str) -> None:
+    server = await McpServer.get_for_name(session, name)
+    if server and not server.is_oauth and server.identity_mode == IdentityMode.PER_USER:
+        await server.remove_secret_headers(current_account_id.get())
+        return
+    raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no key per person.")
 
 
 @router.get("/{name}/connections", response_model=list[McpServerConnectionResponse])

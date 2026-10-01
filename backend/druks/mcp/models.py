@@ -12,7 +12,7 @@ from druks.apps.registry import mcp_servers, services
 from druks.core.models import Uuid7Pk
 from druks.mcp.constants import BEARER_HEADER, DRUKS_SERVER_NAME, NAME_PATTERN
 from druks.mcp.datastructures import McpServerAccess
-from druks.mcp.enums import Credential
+from druks.mcp.enums import Credential, IdentityMode
 from druks.mcp.exceptions import (
     InvalidServerNameError,
     McpServerNotFoundError,
@@ -43,8 +43,9 @@ class McpServer(Base, Uuid7Pk):
     # like the bearer itself, is a vault row at the server's audience.
     headers: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    # The first completed OAuth connect claims the credential-sharing policy.
-    # Adding a server or setting its enable state carries no such decision.
+    # Whose credential a run uses: each account's own (per_user) or one shared.
+    # A header server takes it when added; an OAuth server's first completed
+    # connect claims it. Setting the enable state carries no such decision.
     identity_mode: Mapped[str | None]
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
@@ -105,8 +106,14 @@ class McpServer(Base, Uuid7Pk):
         for server in (await cls._merged(session)).values():
             service = Service.get_for_mcp_host(urlsplit(server["url"]).hostname)
             secret = None
+            secret_headers = server["secret_headers"]
             if not server["is_oauth"]:
                 credential = Credential.HEADERS
+                if server["identity_mode"] == IdentityMode.PER_USER:
+                    rows = await VaultSecret.list_secret_headers(
+                        session, Audience.mcp(server["name"]), account_id
+                    )
+                    secret_headers = {row.header: row for row in rows}
             elif service and service.authorization_endpoint:
                 credential = Credential.SERVICE_CONNECTION
                 connections = await VaultSecret.list_account_connections(
@@ -132,7 +139,7 @@ class McpServer(Base, Uuid7Pk):
                         credential = Credential.SERVICE_LOGIN
             accesses.append(
                 McpServerAccess(
-                    **server,
+                    **server | {"secret_headers": secret_headers},
                     service=service.slug if service else None,
                     credential=credential,
                     secret=secret,
@@ -193,7 +200,10 @@ class McpServer(Base, Uuid7Pk):
         headers: dict[str, str] | None = None,
         secret_headers: dict[str, str] | None = None,
         is_enabled: bool = True,
+        account_id: str | None = None,
     ) -> "McpServer":
+        """``account_id`` names the account that holds the secret headers. The server
+        then holds a key per person; None keeps one set for the installation."""
         if name == DRUKS_SERVER_NAME:
             raise ReservedServerNameError(name)
         if not NAME_PATTERN.match(name):
@@ -204,15 +214,33 @@ class McpServer(Base, Uuid7Pk):
             is_oauth=is_oauth,
             headers=headers or {},
             is_enabled=is_enabled,
+            identity_mode=IdentityMode.PER_USER if account_id else None,
         )
         session.add(server)
         await session.flush()
-        audience = Audience.mcp(name)
-        for header, value in (secret_headers or {}).items():
-            await VaultSecret.store(
-                session, SecretKind.STATIC, audience, header=header, secrets={"value": value}
-            )
+        await server.set_secret_headers(account_id, secret_headers or {})
         return server
+
+    async def set_secret_headers(
+        self, account_id: str | None, secret_headers: dict[str, str]
+    ) -> None:
+        """Replace the secret headers one account holds at the server. None sets the
+        shared headers every account sends."""
+        await self.remove_secret_headers(account_id)
+        for header, value in secret_headers.items():
+            await VaultSecret.store(
+                self.session,
+                SecretKind.STATIC,
+                Audience.mcp(self.name),
+                secrets={"value": value},
+                account_id=account_id,
+                header=header,
+            )
+
+    async def remove_secret_headers(self, account_id: str | None) -> None:
+        audience = Audience.mcp(self.name)
+        for secret in await VaultSecret.list_secret_headers(self.session, audience, account_id):
+            await secret.revoke("user")
 
     async def delete(self) -> None:
         for secret in await VaultSecret.list_tokens(self.session, Audience.mcp(self.name)):

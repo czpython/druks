@@ -394,6 +394,35 @@ async def test_bearerless_server_merges_with_its_headers(druks_db):
     assert grafana["secret_headers"]["X-Api-Key"].secrets["value"] == "grafana-api-secret"
 
 
+async def test_per_person_server_sends_each_account_its_own_key_or_nothing(druks_db):
+    first = await Account.get_or_create(druks_db, "first@example.com")
+    second = await Account.get_or_create(druks_db, "second@example.com")
+    third = await Account.get_or_create(druks_db, "third@example.com")
+    lusha = await McpServer.create(
+        druks_db,
+        name="lusha",
+        url="https://mcp.lusha.com/mcp",
+        secret_headers={"x-api-key": "first-key"},
+        account_id=first.id,
+    )
+    await lusha.set_secret_headers(second.id, {"x-api-key": "second-key"})
+
+    refs = {}
+    for account in (first, second):
+        _, account_refs = await Workspace.get_all_mcp_servers(db_session(), None, account.id)
+        refs[account.id] = {ref.name: ref for ref in account_refs}["mcp_lusha_header_0"]
+    servers, _ = await Workspace.get_all_mcp_servers(db_session(), None, third.id)
+
+    rows = {
+        row.account_id: row
+        for row in await VaultSecret.list_tokens(druks_db, Audience.mcp("lusha"))
+    }
+    assert set(rows) == {first.id, second.id}
+    assert refs[first.id].secret_id == rows[first.id].id
+    assert refs[second.id].secret_id == rows[second.id].id
+    assert "lusha" not in {server.name for server in servers}
+
+
 # --- API: CRUD + enable/disable + redaction ------------------------------
 
 
@@ -443,6 +472,43 @@ async def test_routes_reject_invalid_name(tmp_path, druks_db, name):
         )
         assert created.status_code == 422
         assert "MCP server name" in created.text
+
+
+async def test_routes_set_and_remove_the_signed_in_account_key(tmp_path, druks_db):
+    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        created = await client.post(
+            "/api/mcp-servers",
+            json={
+                "name": "lusha",
+                "url": "https://mcp.lusha.com/mcp",
+                "secret_headers": {"x-api-key": "op-key"},
+                "per_user": True,
+            },
+        )
+        assert (created.json()["identityMode"], created.json()["hasToken"]) == ("per_user", True)
+        assert not await VaultSecret.list_installation_tokens(druks_db)
+
+        removed = await client.delete("/api/mcp-servers/lusha/headers")
+        assert removed.status_code == 204
+        listed = await client.get("/api/mcp-servers")
+        assert listed.json()[0]["hasToken"] is False
+
+        replaced = await client.put(
+            "/api/mcp-servers/lusha/headers", json={"secret_headers": _BEARER}
+        )
+        assert replaced.json()["hasToken"] is True
+        operator = await Account.get_or_create(druks_db, "op@example.com")
+        rows = await VaultSecret.list_secret_headers(druks_db, Audience.mcp("lusha"), operator.id)
+        assert [row.header for row in rows] == [BEARER_HEADER]
+
+        await client.post(
+            "/api/mcp-servers",
+            json={"name": "linear", "url": _LINEAR_URL, "secret_headers": _BEARER},
+        )
+        shared = await client.put(
+            "/api/mcp-servers/linear/headers", json={"secret_headers": _BEARER}
+        )
+        assert shared.status_code == 404
 
 
 async def test_routes_reject_creating_an_authless_custom_server(tmp_path, druks_db):
