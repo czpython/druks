@@ -1,6 +1,7 @@
 import importlib.util
 import re
 from collections.abc import Callable, Coroutine
+from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from types import ModuleType
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     from druks.agents import Agent, Bot
     from druks.doctor import CheckResult
     from druks.durable.datastructures import Subject
+    from druks.ui import Page
     from druks.ui.page import PageRoute
     from druks.workflows import Workflow
 
@@ -421,6 +423,7 @@ class App:
         from fastapi import APIRouter
 
         from druks.ui import Page
+        from druks.ui.page import PageRoute
 
         operations = cls.operations()
         declarations = cls.pages()
@@ -437,7 +440,84 @@ class App:
                 response_model_by_alias=True,
                 name=declaration.name,
             )
+        if not landing:
+            router.add_api_route(
+                "",
+                cls._page_endpoint(PageRoute("/", cls._get_home_page), operations, back=None),
+                methods=["GET"],
+                response_model=Page,
+                response_model_by_alias=True,
+                name="home",
+            )
         return router
+
+    @classmethod
+    async def _get_home_page(cls) -> "Page":
+        """The home an app gets when it declares no landing page: one live table
+        for each subject type, with the summary's own fields as columns and where
+        the work on each subject stands."""
+        from druks import ui
+        from druks.accounts.context import current_account_id
+
+        def cell(value):
+            match value:
+                case bool():
+                    return ui.TextValue("yes" if value else "no")
+                case int() | float():
+                    return ui.NumberValue(value)
+                case datetime():
+                    return ui.TimeValue(value)
+                case str():
+                    return ui.TextValue(value)
+            return ui.TextValue("")
+
+        account_id = current_account_id.get()
+        sections = []
+        for subject_class in cls.subjects():
+            subject_type = subject_class.subject_type
+            label = subject_type.replace("_", " ")
+            summaries = await subject_class.list_summaries(account_id)
+            facts = [summary.model_dump(exclude={"id", "key"}) for summary in summaries]
+            # A nested value has no cell, so the summary's scalars are the columns.
+            fields = [
+                name
+                for name in dict.fromkeys(name for fact in facts for name in fact)
+                if all(
+                    isinstance(fact.get(name), str | bool | int | float | datetime | None)
+                    for fact in facts
+                )
+            ]
+            rows = []
+            for summary, fact in zip(summaries, facts, strict=True):
+                subject = ui.Follows(subject_type=subject_type, subject_id=str(summary.id))
+                rows.append(
+                    ui.TableRow(
+                        [
+                            ui.TextValue(summary.key, link=ui.Link(subject=subject)),
+                            *(cell(fact.get(name)) for name in fields),
+                            ui.SubjectStatus(subject),
+                        ]
+                    )
+                )
+            sections.append(
+                ui.Section(
+                    name=subject_type,
+                    title=label,
+                    follows=subject_class,
+                    blocks=[
+                        ui.Table(
+                            columns=[
+                                ui.TableColumn(label),
+                                *(ui.TableColumn(name.replace("_", " ")) for name in fields),
+                                ui.TableColumn("status"),
+                            ],
+                            rows=rows,
+                            empty=ui.EmptyState(f"No {label} yet."),
+                        )
+                    ],
+                )
+            )
+        return ui.Page(cls.name.replace("_", " "), description=cls.description, blocks=sections)
 
     @classmethod
     def _page_endpoint(

@@ -1798,7 +1798,7 @@ class NightWatch(App):
     navigation = ["reports"]
 ```
 
-Druks checks the whole table at boot. A missing landing page, a repeated page
+Druks checks the whole table at boot. Two landing pages, a repeated page
 name, a nested child, two routes a request could not tell apart, a signature
 that does not match its route, or a navigation entry that is not a static
 top-level page fails the load, with the app name and the exact cause.

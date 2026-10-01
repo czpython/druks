@@ -131,8 +131,10 @@ async def peers(): ...
 Druks checks these at boot. A break raises with the app name and the exact
 cause.
 
-- At most one page declares `/`. That page is the landing page. An app whose
-  home is a React route declares none.
+- At most one page declares `/`. That page is the landing page. An app that
+  declares none gets the platform home: one live table for each subject type,
+  with the summary's own fields as columns and where the work on each subject
+  stands. An app whose home is a React route declares none.
 - `@page` declares a top-level page.
 - `@parent.child` declares a child page.
 - One child level is allowed. A child of a child is a boot error.
