@@ -359,6 +359,11 @@ your agent too. Other people must tag it, and a top-level message with no tag
 reaches nobody. When you tag the bot before you connect Slack, the link comes as
 a message in the room that only you see.
 
+Tell the agent to answer only when you tag it, and your untagged replies in that
+thread stop reaching it. The agent records your choice with `chat_require_tag`.
+Tell it to answer your replies again, and they reach it again for the rest of the
+24 hours. Your choice holds for that thread only.
+
 The agent reads the thread with `chat_read_thread`: the newest 200 messages,
 oldest first, each with its author's id and name, whether this agent wrote it,
 and whether the person it answers wrote it. Every agent in a thread posts as the
