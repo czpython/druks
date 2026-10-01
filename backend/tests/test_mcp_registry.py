@@ -152,14 +152,15 @@ def test_official_candidates_sort_first():
     assert [c["name"] for c in candidates.values()] == ["grafana", "aardvark"]
 
 
-def test_packaged_pins_resolve_grafana_and_sentry():
-    # The shipped trusted.json, end to end: grafana by publisher pin (registry
-    # url kept), sentry by url pin (registry entry has no remote).
+def test_packaged_pins_resolve_the_shipped_entries():
+    # The shipped trusted.json, end to end: grafana and github by publisher
+    # pin (registry url kept), sentry by url pin (registry entry has no remote).
     pins = json.loads(PACKAGED_MCP_TRUSTED.read_text())
 
-    candidates = resolve_candidates([_GRAFANA, _SENTRY], pins)
+    candidates = resolve_candidates([_GRAFANA, _SENTRY, _GITHUB_ENTRY], pins)
 
     assert [(c["name"], c["official"]) for c in candidates.values()] == [
+        ("github", True),
         ("grafana", True),
         ("sentry", True),
     ]
