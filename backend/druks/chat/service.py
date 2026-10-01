@@ -180,7 +180,17 @@ async def deliver(conversation_id: str) -> None:
             await deliver_pending(session, conversation)
 
     try:
-        await DBOS.run_step_async(StepOptions(name="chat.deliver.turns"), deliver_turns)
+        await DBOS.run_step_async(
+            StepOptions(
+                name="chat.deliver.turns",
+                retries_allowed=True,
+                max_attempts=5,
+                should_retry=lambda error: getattr(error, "is_retryable", True),
+            ),
+            deliver_turns,
+        )
+    except ChatHarnessError as error:
+        await publish(conversation_id, {"type": "error", "detail": str(error)})
     except Exception:
         logger.exception("Chat delivery failed for conversation %s", conversation_id)
         detail = "The reply is unavailable. Connect again to retry."
