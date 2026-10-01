@@ -64,7 +64,7 @@ function SubjectBoard({ app, subjectType }: { app: string; subjectType: string }
         <div
           key={row.summary.id}
           className="row subject-row"
-          onClick={() => navigate(`/${app}/${subjectType}/${row.summary.id}`)}
+          onClick={() => navigate(`/${app}/${subjectType}/${encodeURIComponent(row.summary.id)}`)}
         >
           <StatusGlyph state={row.status.state} />
           <span className="row-title">{row.summary.key}</span>

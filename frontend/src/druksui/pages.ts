@@ -42,7 +42,7 @@ export function hrefForLink(link: Link, app: string, pages: PageEntry[]): string
   if (link.url) return link.url
   if (link.subject) {
     const subject = { type: link.subject.subjectType, id: link.subject.subjectId }
-    return getAppUI(app)?.subjectPath?.(subject) ?? `/${app}/${subject.type}/${subject.id}`
+    return getAppUI(app)?.subjectPath?.(subject) ?? `/${app}/${subject.type}/${encodeURIComponent(subject.id)}`
   }
   const target = pages.find((entry) => entry.name === link.page)
   return target ? fillPath(target.path, link.arguments) : ''
