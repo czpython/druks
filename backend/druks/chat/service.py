@@ -50,6 +50,7 @@ from .constants import (
     BRIDGE_SETTLED_STATUSES,
     CHAT_KEY_NAME,
     CONVERSATION_HEADER,
+    DELIVERY_FAILED_MESSAGE,
     FAILURE_MESSAGE,
     INTERNAL_MESSAGES_PROMPT,
     RESULT_MESSAGE,
@@ -196,98 +197,135 @@ async def deliver(conversation_id: str) -> None:
             conversation = await session.get(Conversation, conversation_id)
             await deliver_pending(session, conversation)
 
-    try:
-        await DBOS.run_step_async(
-            StepOptions(
-                name="chat.deliver.turns",
-                retries_allowed=True,
-                max_attempts=5,
-                should_retry=lambda error: getattr(error, "is_retryable", True),
-            ),
-            deliver_turns,
-        )
-    except ChatHarnessError as error:
-        await publish(conversation_id, {"type": "error", "detail": str(error)})
-    except Exception:
-        logger.exception("Chat delivery failed for conversation %s", conversation_id)
-        detail = "The reply is unavailable. Connect again to retry."
+    async def end_turns() -> str | None:
+        """Give the pending messages the failed state; a delivered turn runs on. On a
+        live channel, also save a reply that says so, and return its id."""
+        async with step_session() as session:
+            conversation = await session.get(Conversation, conversation_id)
+            messages = await conversation.end_pending_messages(session, MessageState.FAILED)
+            person_messages = [message for message in messages if not message.is_internal]
+            if (
+                person_messages
+                and conversation.connection
+                and not await conversation.is_held(session)
+            ):
+                newest_message = max(
+                    person_messages, key=lambda message: (message.created_at, message.id)
+                )
+                reply = await conversation.create_message(
+                    session,
+                    DELIVERY_FAILED_MESSAGE,
+                    role=MessageRole.ASSISTANT,
+                    reply_to=newest_message,
+                )
+                return reply.id
+
+    async def send_reply(reply_id: str) -> None:
+        async with step_session() as session:
+            conversation = await session.get(Conversation, conversation_id)
+            reply = await session.get(Message, reply_id)
+            await channels.get(conversation.source).send_reply(session, conversation, reply)
+
+    async def record_failed(detail: str) -> None:
+        reply_id = await DBOS.run_step_async(StepOptions(name="chat.deliver.failed"), end_turns)
+        await reset_live_stream(conversation_id)
         await publish(conversation_id, {"type": "error", "detail": detail})
+        if reply_id:
+            await DBOS.run_step_async(
+                StepOptions(name="chat.deliver.reply", retries_allowed=True, max_attempts=5),
+                send_reply,
+                reply_id,
+            )
+
+    # The lock covers the retries and the failure. Another delivery cannot take the
+    # messages between them.
+    async with lock(f"chat:{conversation_id}:delivery"):
+        try:
+            await DBOS.run_step_async(
+                StepOptions(
+                    name="chat.deliver.turns",
+                    retries_allowed=True,
+                    max_attempts=5,
+                    should_retry=lambda error: getattr(error, "is_retryable", True),
+                ),
+                deliver_turns,
+            )
+        except ChatHarnessError as error:
+            await record_failed(f"{error} Send the message again to retry.")
+        except Exception:
+            logger.exception("Chat delivery failed for conversation %s", conversation_id)
+            await record_failed(DELIVERY_FAILED_MESSAGE)
 
 
 async def deliver_pending(session: AsyncSession, conversation: Conversation) -> None:
     await session.commit()
-    async with lock(f"chat:{conversation.id}:delivery"):
-        while message := await conversation.get_unanswered_message(session):
-            if message.state == MessageState.PENDING:
-                if await conversation.is_held(session):
-                    return
-                await reset_live_stream(conversation.id)
-                config, prompt, tools = await get_agent(session, conversation)
-                if not config.harness_class.adapter_command:
-                    adapters = ", ".join(
-                        harness.name for harness in get_harnesses() if harness.adapter_command
-                    )
-                    raise ChatHarnessError(
-                        f"Chat runs on {adapters}. The Bot's settings select "
-                        f"{config.harness_class.name}. Set its harness to one of them."
-                    )
-                # A bot serves outside people, so only the operator reaches the enabled MCP
-                # servers and holds their own sign-ins.
-                mcp_servers, secret_refs = (), []
-                if conversation.account.kind == AccountKind.OPERATOR:
-                    # A server the operator has not connected must not stop the chat.
-                    mcp_servers, secret_refs = await Workspace.get_all_mcp_servers(
-                        session, None, conversation.account_id, skip_unauthenticated=True
-                    )
-                    for service in services.all():
-                        if service.host and service.token_endpoint:
-                            sign_ins = await VaultSecret.list_account_connections(
-                                session, Audience.service(service.slug), conversation.account_id
-                            )
-                            # A sandbox has one variable per service, so it holds one sign-in.
-                            secret_refs += [
-                                SecretRef(
-                                    name=service.slug, secret_id=sign_in.id, host=service.host
-                                )
-                                for sign_in in sign_ins[:1]
-                            ]
-                host, identity = await get_sandbox(
-                    session,
-                    conversation.account_id,
-                    config=config,
-                    allowed_tools=tools,
-                    secret_refs=secret_refs,
+    while message := await conversation.get_unanswered_message(session):
+        if message.state == MessageState.PENDING:
+            if await conversation.is_held(session):
+                return
+            await reset_live_stream(conversation.id)
+            config, prompt, tools = await get_agent(session, conversation)
+            if not config.harness_class.adapter_command:
+                adapters = ", ".join(
+                    harness.name for harness in get_harnesses() if harness.adapter_command
                 )
-                try:
-                    bridge = Bridge(host)
-                    turn = await send_turn(
-                        session,
-                        conversation,
-                        message,
-                        bridge=bridge,
-                        identity=identity,
-                        config=config,
-                        prompt=prompt,
-                        mcp_servers=mcp_servers,
-                    )
-                    if turn:
-                        await follow_turn(session, conversation, turn, bridge)
-                finally:
-                    await host.aclose()
-                continue
+                raise ChatHarnessError(
+                    f"Chat runs on {adapters}. The Bot's settings select "
+                    f"{config.harness_class.name}. Set its harness to one of them."
+                )
+            # A bot serves outside people, so only the operator reaches the enabled MCP
+            # servers and holds their own sign-ins.
+            mcp_servers, secret_refs = (), []
+            if conversation.account.kind == AccountKind.OPERATOR:
+                # A server the operator has not connected must not stop the chat.
+                mcp_servers, secret_refs = await Workspace.get_all_mcp_servers(
+                    session, None, conversation.account_id, skip_unauthenticated=True
+                )
+                for service in services.all():
+                    if service.host and service.token_endpoint:
+                        sign_ins = await VaultSecret.list_account_connections(
+                            session, Audience.service(service.slug), conversation.account_id
+                        )
+                        # A sandbox has one variable per service, so it holds one sign-in.
+                        secret_refs += [
+                            SecretRef(name=service.slug, secret_id=sign_in.id, host=service.host)
+                            for sign_in in sign_ins[:1]
+                        ]
+            host, identity = await get_sandbox(
+                session,
+                conversation.account_id,
+                config=config,
+                allowed_tools=tools,
+                secret_refs=secret_refs,
+            )
             try:
-                host = await get_running_sandbox(session, conversation.account_id)
-            except ChatSandboxGone:
-                await conversation.end_turn(session, MessageState.INTERRUPTED)
-                await session.commit()
-                await reset_live_stream(conversation.id)
-                continue
-            # The snapshot this asks for replaces an error a failed delivery left in the stream.
-            await publish(conversation.id, {"type": "messages"})
-            try:
-                await follow_turn(session, conversation, message, Bridge(host))
+                bridge = Bridge(host)
+                turn = await send_turn(
+                    session,
+                    conversation,
+                    message,
+                    bridge=bridge,
+                    identity=identity,
+                    config=config,
+                    prompt=prompt,
+                    mcp_servers=mcp_servers,
+                )
+                if turn:
+                    await follow_turn(session, conversation, turn, bridge)
             finally:
                 await host.aclose()
+            continue
+        try:
+            host = await get_running_sandbox(session, conversation.account_id)
+        except ChatSandboxGone:
+            await conversation.end_turn(session, MessageState.INTERRUPTED)
+            await session.commit()
+            await reset_live_stream(conversation.id)
+            continue
+        try:
+            await follow_turn(session, conversation, message, Bridge(host))
+        finally:
+            await host.aclose()
 
 
 async def send_turn(

@@ -23,6 +23,8 @@ FAILURE_MESSAGE = (
 )
 # The line between what a person typed and what they said in the same message.
 VOICE_NOTE_MARKER = "[Voice note]"
+# The person reads this, so it holds no error details.
+DELIVERY_FAILED_MESSAGE = "The reply is unavailable. Send the message again to retry."
 TRANSCRIPTION_FAILED_MESSAGE = (
     "[Internal: Druks could not turn the person's voice note into text. Tell the person "
     "in one short line to write it instead.]"

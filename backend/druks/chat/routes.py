@@ -12,6 +12,7 @@ from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.apps.registry import channels
 
+from .enums import MessageState
 from .exceptions import ChannelHasNoThreadsError, ChatSandboxGone
 from .models import Conversation, Message
 from .schemas import ConversationDetailResponse, ConversationResponse, MessageResponse
@@ -105,6 +106,46 @@ async def create_message(
     if not body.strip():
         raise HTTPException(422, "Write a message.")
     message = await conversation.create_message(session, body)
+    await session.commit()
+    await publish(conversation.id, {"type": "messages"})
+    await DBOS.start_workflow_async(deliver, conversation.id)
+    return message
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages/{message_id}/retry",
+    status_code=202,
+    response_model=MessageResponse,
+    response_model_by_alias=True,
+)
+async def retry_message(
+    conversation_id: str,
+    message_id: str,
+    session: SessionDep,
+    account: Account = Depends(current_session_account),
+) -> Message:
+    conversation = await Conversation.get_for_account(session, conversation_id, account.id)
+    if not conversation:
+        raise HTTPException(404, "Conversation not found.")
+    original_message = await conversation.get_message(session, message_id)
+    if not original_message:
+        raise HTTPException(404, "Message not found.")
+    if original_message.state not in (
+        MessageState.FAILED,
+        MessageState.INTERRUPTED,
+        MessageState.CANCELLED,
+    ):
+        raise HTTPException(
+            409,
+            f"The message is {original_message.state}. Send again only a failed, "
+            "interrupted, or cancelled message.",
+        )
+    message = await conversation.create_message(
+        session,
+        original_message.body,
+        file=original_message.file,
+        is_internal=original_message.is_internal,
+    )
     await session.commit()
     await publish(conversation.id, {"type": "messages"})
     await DBOS.start_workflow_async(deliver, conversation.id)
