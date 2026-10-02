@@ -178,40 +178,48 @@ class SoftwareFactory(App):
     generate_plan = Agent(
         description="ticket → implementation plan",
         prompt="software_factory/build/generate_plan.md",
+        allow_prompt_override=True,
         contract=PlanOutput,
     )
     review_plan = Agent(
         description="critiques the plan before any work starts",
         prompt="software_factory/build/review_plan.md",
+        allow_prompt_override=True,
         contract=ReviewOutput,
     )
     revise_contract = Agent(
         description="revises the plan contract on feedback",
         prompt="software_factory/build/revise_contract.md",
+        allow_prompt_override=True,
         contract=ContractRevisionOutput,
     )
     implement = Agent(
         description="plan → diff, in a drukbox",
         prompt="software_factory/build/implement.md",
+        allow_prompt_override=True,
         contract=ImplementationOutput,
     )
     evaluate_implementation = Agent(
         description="verification + code review of the diff, one verdict",
         prompt="software_factory/build/evaluate_implementation.md",
+        allow_prompt_override=True,
         contract=EvaluationOutput,
     )
     triage_human_feedback = Agent(
         description="routes a human's PR feedback back into the workflow",
         prompt="software_factory/build/triage_human_feedback.md",
+        allow_prompt_override=True,
         contract=TriageOutput,
     )
     repo_profiler = Agent(
         description="reads a repo once and reports its stack, verification commands, and skills",
         prompt="software_factory/profile/repo_profiler.md",
+        allow_prompt_override=True,
         contract=RepoProfilerOutput,
     )
     review_pull_request = Agent(
         description="reads a pull request and writes the review",
         prompt="software_factory/review/review_pull_request.md",
+        allow_prompt_override=True,
         contract=ReviewReport,
     )

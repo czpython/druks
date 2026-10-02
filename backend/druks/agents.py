@@ -35,6 +35,7 @@ from druks.secrets.enums import SecretKind
 from druks.settings import load_settings
 from druks.usage.models import UsageScrape
 from druks.workflows import _in_step, current_workflow
+from druks.workspaces import RepoWorkspace
 
 if TYPE_CHECKING:
     from druks.services.base import ServiceField
@@ -142,6 +143,7 @@ class Agent:
     # prompt inline and drive the harness themselves (planning) instead of
     # going through ``run``.
     prompt: str | None = None
+    allow_prompt_override: bool = False
     # Declared run timeout in seconds, overridable per agent; None inherits the
     # harness default. How long a step may take is a fact about the task; the
     # model and the effort are the operator's, set in Settings.
@@ -356,6 +358,14 @@ class Agent:
             # same servers.
             subject = await workflow.subject
             workspace_class = workflow.workspace_class
+            override_repo = None
+            if self.allow_prompt_override:
+                if not issubclass(workspace_class, RepoWorkspace):
+                    raise WorkflowError(
+                        f"agent {self.id!r} allows prompt overrides but its workflow "
+                        "does not use RepoWorkspace"
+                    )
+                override_repo = workspace_class.get_repo(subject)
             mcp_servers, mcp_secret_refs = (), []
             if self.include_mcp:
                 mcp_servers, mcp_secret_refs = await workspace_class.get_all_mcp_servers(
@@ -402,7 +412,9 @@ class Agent:
                 prompt_context = await workflow.get_prompt_context(**context)
                 prompt_context.setdefault("workflow", workflow)
                 prompt_context.setdefault("workspace", runner)
-                prompt = await render_prompt(self.prompt, **prompt_context)
+                prompt = await render_prompt(
+                    self.prompt, overrides_from=override_repo, **prompt_context
+                )
                 await set_run_phase("agent_running")
                 await AgentCall.start(
                     engine,

@@ -21,6 +21,6 @@ async def test_render_awaits_async_subject(monkeypatch):
 
     monkeypatch.setattr("druks.prompts.resolver.fetch_file", fetch_file)
     rendered = await render_prompt(
-        "software_factory/build/setup.md", repo="owner/repo", workflow=_Workflow()
+        "software_factory/build/setup.md", overrides_from="owner/repo", workflow=_Workflow()
     )
     assert rendered == "operator: paulo"
