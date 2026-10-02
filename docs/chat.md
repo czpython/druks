@@ -356,8 +356,9 @@ Each person who tags the bot gets their own conversation for the thread, so two
 people can talk to their own agents in one thread. For 24 hours after the last
 message in your conversation there, your untagged replies in the thread reach
 your agent too. Other people must tag it, and a top-level message with no tag
-reaches nobody. When you tag the bot before you connect Slack, the link comes as
-a message in the room that only you see.
+reaches nobody. When you tag the bot before you connect Slack, it answers in the
+thread that your account is not connected, and sends you the link in a direct
+message.
 
 Tell the agent to answer only when you tag it, and your untagged replies in that
 thread stop reaching it. The agent records your choice with `chat_require_tag`.

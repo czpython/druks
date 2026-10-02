@@ -26,6 +26,7 @@ from .constants import (
     LINK_TTL_SECONDS,
     REPLY_PIECE_CHARACTERS,
     THREAD_MESSAGES,
+    UNLINKED_REPLY,
 )
 
 
@@ -125,23 +126,24 @@ class SlackChannel(Channel):
 
     @classmethod
     async def send_link(cls, card: VaultSecret, message: dict) -> None:
-        """Hold the message under a private link, and send the person the link: in their
-        DM, or in the room where only they see it."""
+        """Hold the message under a private link, and send the person the link in their
+        DM. In a room, also tell them in the thread where the link is."""
         token = secrets.token_urlsafe(32)
         await get_client().set(
             LINK_KEY.format(token=token), json.dumps(message), ex=LINK_TTL_SECONDS
         )
         endpoint = load_settings().urls.endpoint.rstrip("/")
-        text = LINK_MESSAGE.format(url=f"{endpoint}/api/chat/services/slack/link/{token}")
         client = SlackClient(token=card.secrets["bot_token"])
-        if message["channel_type"] == "im":
-            await client.post_markdown(message["user"], text)
-        else:
-            await client.chat_postEphemeral(
-                channel=message["channel"],
-                user=message["user"],
-                text=text,
-                thread_ts=message.get("thread_ts"),
+        # Slack drops a message that only one person sees unless they are active in
+        # that client, so the link goes to their DM, which keeps it.
+        await client.post_markdown(
+            message["user"],
+            LINK_MESSAGE.format(url=f"{endpoint}/api/chat/services/slack/link/{token}"),
+        )
+        if thread_id := get_thread_id(message):
+            room, _, thread_ts = thread_id.partition(":")
+            await client.post_markdown(
+                room, UNLINKED_REPLY.format(user=message["user"]), thread_ts=thread_ts
             )
 
     @classmethod

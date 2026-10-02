@@ -371,15 +371,17 @@ async def test_only_a_linked_persons_untagged_reply_in_a_fresh_thread_reaches_th
     assert len(conversation.messages) == 2
 
 
-async def test_an_unlinked_person_who_tags_the_bot_gets_the_link_where_only_they_see_it(
+async def test_an_unlinked_person_who_tags_the_bot_gets_the_link_by_direct_message(
     card, druks_db, slack, delivery, endpoint
 ):
     await receive(card, room_event(ts="10.0"))
     await receive(card, room_event(text="hello?", ts="11.0", thread_ts="10.0"))
 
-    [(method, sent)] = slack
-    assert (method, sent["channel"], sent["user"]) == ("chat.postEphemeral", "C1", ANA)
-    assert "/api/chat/services/slack/link/" in sent["text"]
+    [(_, direct_message), (_, reply)] = slack
+    assert direct_message["channel"] == ANA
+    assert "/api/chat/services/slack/link/" in direct_message["text"]
+    assert (reply["channel"], reply["thread_ts"]) == ("C1", "10.0")
+    assert f"<@{ANA}>" in reply["text"] and "/link/" not in reply["text"]
     delivery.assert_not_awaited()
 
 

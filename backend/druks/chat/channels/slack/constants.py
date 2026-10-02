@@ -8,4 +8,8 @@ LINK_KEY = "chat:slack:link:{token}"
 JOINED_THREAD_SECONDS = 24 * 60 * 60
 # How much of a thread the agent reads.
 THREAD_MESSAGES = 200
-LINK_MESSAGE = "Connect your Slack account to Druks, and I answer you here: {url}"
+LINK_MESSAGE = "Connect your Slack account to Druks, and I answer your message: {url}"
+UNLINKED_REPLY = (
+    "<@{user}>, your Slack account is not connected to Druks yet. "
+    "I sent you a direct message with the link to connect it."
+)
