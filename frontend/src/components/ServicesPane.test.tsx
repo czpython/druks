@@ -85,6 +85,9 @@ function stubFetch(states: Service[][]) {
       if (url === '/api/services/github' && init?.method === 'POST') {
         return new Response(JSON.stringify(connected), { status: 200 })
       }
+      if (url === '/api/services/github' && init?.method === 'DELETE') {
+        return new Response(null, { status: 204 })
+      }
       if (url === '/api/services') {
         const state = gets.length > 1 ? gets.shift() : gets[0]
         return new Response(JSON.stringify(state), { status: 200 })
@@ -123,6 +126,22 @@ async function flush() {
 }
 
 describe('ServicesPane', () => {
+  it('confirms service removal and refreshes its connection state', async () => {
+    const fetchMock = stubFetch([[connected], [disconnected]])
+    const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true)
+    vi.stubGlobal('confirm', confirm)
+    renderPane()
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure GitHub' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect service' }))
+    expect(fetchMock.mock.calls.some(([, request]) => request?.method === 'DELETE')).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect service' }))
+
+    expect(await screen.findByText('Not connected')).toBeTruthy()
+    expect(fetchMock).toHaveBeenCalledWith('/api/services/github', expect.objectContaining({ method: 'DELETE' }))
+    expect(screen.getByRole('button', { name: 'Create GitHub App' })).toBeTruthy()
+  })
+
   it('shows compact rows with no credential fields on the overview', async () => {
     stubFetch([[disconnected, pasteOnly]])
     renderPane()

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.apps.base import NAME_RE
 from druks.apps.loader import iter_apps
@@ -413,3 +414,13 @@ class Service:
             ):
                 await client.disconnect(connection, reason="client_replaced")
         return row
+
+    @classmethod
+    async def disconnect(cls, session: AsyncSession) -> None:
+        """Revoke the card and every account's sign-in. The provider keeps its application."""
+        audience = Audience.service(cls.slug)
+        client = OauthClient(provider=cls.slug)
+        for connection in await VaultSecret.list_connections(session, audience):
+            await client.disconnect(connection, reason="service_disconnected")
+        if card := await VaultSecret.lookup(session, cls.secret_kind, audience):
+            await card.revoke("user")

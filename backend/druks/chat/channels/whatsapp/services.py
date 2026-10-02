@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
+from druks.chat.bots.service import resume
+from druks.chat.models import Conversation
 from druks.secrets.enums import IdentityStatus, SecretKind
 from druks.secrets.models import VaultSecret
 from druks.services import Service
@@ -100,6 +102,22 @@ class Waha(Service):
         await card.delete_session(connection.identity["session"])
         await card.delete_key(connection.secrets["key_id"])
         await connection.revoke(reason)
+        # The number's chats never take a turn again, so their pauses end.
+        for conversation in await Conversation.list_for_connection(session, connection.id):
+            await resume(session, conversation)
+
+    @classmethod
+    async def disconnect(cls, session: AsyncSession) -> None:
+        """Remove every linked number first, because only the card's key deletes a session."""
+        for connection in await session.scalars(
+            select(VaultSecret).where(
+                VaultSecret.kind == SecretKind.SESSION,
+                VaultSecret.audience == WAHA_AUDIENCE,
+                VaultSecret.revoked_at.is_(None),
+            )
+        ):
+            await cls.unlink(session, connection, "service_disconnected")
+        await super().disconnect(session)
 
     @classmethod
     async def relink(cls, session: AsyncSession, connection: VaultSecret) -> None:

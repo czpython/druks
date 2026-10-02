@@ -59,6 +59,14 @@ async def connect_service(slug: str, payload: dict[str, str]) -> ServiceResponse
     return ServiceResponse.from_row(service, row)
 
 
+@router.delete("/{slug}", status_code=204, dependencies=[Depends(current_session_account)])
+async def disconnect_service(session: SessionDep, slug: str) -> None:
+    service = services.get(slug)
+    if not service:
+        raise HTTPException(status_code=404, detail=f"No service {slug!r}.")
+    await service.disconnect(session)
+
+
 def _get_oauth_service(slug: str):
     service = services.get(slug)
     if not service or not service.token_endpoint:

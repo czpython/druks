@@ -23,7 +23,6 @@ from druks.chat.bots import routes as bot_routes
 from druks.chat.bots import service as bot_service
 from druks.chat.bots.constants import OPERATOR_PAIRED_MESSAGE, PAUSE_TOPIC
 from druks.chat.bridge import Bridge
-from druks.chat.channels.whatsapp import routes
 from druks.chat.channels.whatsapp.channel import WhatsAppChannel
 from druks.chat.channels.whatsapp.client import WahaClient
 from druks.chat.channels.whatsapp.constants import WAHA_AUDIENCE
@@ -926,7 +925,7 @@ async def test_removing_a_number_holds_its_chats_and_relinking_keeps_its_history
     await receive(first, message_event(ANA, "Hello", key="M1"))
     [chat] = await Conversation.list_for_connection(druks_db, first.id)
     resume = AsyncMock()
-    monkeypatch.setattr(routes, "resume", resume)
+    monkeypatch.setattr("druks.chat.channels.whatsapp.services.resume", resume)
 
     response = await druks_client.delete(f"/api/chat/services/waha/sessions/{first.id}")
     identity = {"app": "helpdesk", "admin": first.identity["admin"]}
@@ -939,6 +938,18 @@ async def test_removing_a_number_holds_its_chats_and_relinking_keeps_its_history
     sessions = await Waha.list_sessions(druks_db, app="helpdesk", account_id=owner.id)
     assert [session.id for session in sessions] == [first.id, second.id]
     assert first.identity["number"] == "+41000000000"
+
+
+async def test_disconnecting_waha_removes_its_numbers_first(druks_db, druks_client, waha):
+    connection = await link(druks_db, await bot_account(druks_db))
+
+    response = await druks_client.delete("/api/services/waha")
+
+    assert response.status_code == 204
+    assert ("DELETE", "/api/sessions/session_one", None) in waha.calls
+    await druks_db.refresh(connection)
+    assert connection.revoked_reason == "service_disconnected"
+    assert not await Waha.is_connected()
 
 
 async def test_a_number_that_lost_its_link_takes_a_new_scan_and_keeps_its_chats(

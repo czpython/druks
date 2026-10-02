@@ -7,9 +7,7 @@ from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.apps.loader import get_app
-from druks.chat.bots.service import resume
 from druks.chat.enums import BotAccess
-from druks.chat.models import Conversation
 from druks.secrets.models import VaultSecret
 
 from .schemas import QrResponse, SessionResponse
@@ -97,6 +95,3 @@ async def remove_session(
     # Removing is idempotent: a second delete finds the session removed.
     if connection.is_live:
         await Waha.unlink(session, connection, "user")
-        # The number's chats never take a turn again, so their pauses end.
-        for conversation in await Conversation.list_for_connection(session, connection.id):
-            await resume(session, conversation)

@@ -902,6 +902,21 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
       .finally(() => setBusy(false))
   }
 
+  const disconnect = () => {
+    if (!window.confirm(`Disconnect ${service.title}? Druks removes its credentials and everything connected through it. Agents lose access.`)) return
+    setBusy(true)
+    setError(null)
+    void api
+      .disconnectService(service.slug)
+      .then(() =>
+        queryClient.invalidateQueries({
+          predicate: (query) => ['services', 'connections', 'appSettingChoices', 'appSettings', 'mcpServers'].includes(String(query.queryKey[0])),
+        }),
+      )
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false))
+  }
+
   const createGithubApp = (
     <button
       className="set-btn primary"
@@ -968,6 +983,9 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
               {service.slug === 'slack' && createSlackApp}
               <button className="set-btn ghost" onClick={() => setFormOpen(true)} disabled={busy}>
                 Replace connection
+              </button>
+              <button className="set-btn danger" onClick={disconnect} disabled={busy}>
+                Disconnect service
               </button>
             </div>
           )}
@@ -1070,6 +1088,7 @@ function missingIdentityCopy(connection: Connection): { label: string; hint: str
 const revokeReasonCopy: Record<string, string> = {
   user: 'by you',
   client_replaced: 'client credentials replaced',
+  service_disconnected: 'service disconnected',
   server_removed: 'server removed',
 }
 

@@ -53,6 +53,7 @@ SESSION_ONLY_API_ROUTES = {
     ("DELETE", "/api/providers/{provider_id}/connection"),
     ("PATCH", "/api/settings/apps"),
     ("POST", "/api/services/{slug}"),
+    ("DELETE", "/api/services/{slug}"),
     ("GET", "/api/oauth/{slug}/connect"),
     ("GET", "/api/oauth/callback"),
     ("GET", "/api/core/services/github/manifest/callback"),

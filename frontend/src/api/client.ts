@@ -322,6 +322,8 @@ export const api = {
   services: () => getJSON<Service[]>('/api/services'),
   connectService: (slug: string, fields: Record<string, string>) =>
     postJSON<Service>(`/api/services/${encodeURIComponent(slug)}`, fields),
+  disconnectService: (slug: string) =>
+    deleteRequest(`/api/services/${encodeURIComponent(slug)}`),
   listConnections: () => getJSON<Connection[]>('/api/oauth/connections'),
   disconnectConnection: (connectionId: string) =>
     deleteRequest(`/api/oauth/connections/${encodeURIComponent(connectionId)}`),

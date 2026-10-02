@@ -1538,6 +1538,8 @@ It publishes `oauth.disconnected` after a user revokes a connection. A
 replacement of the service's client credentials also publishes this signal,
 and so does a token refresh that the provider answers with `invalid_grant`:
 Druks revokes that connection, because the grant is dead at the provider.
+When the operator disconnects the service in Settings, Druks publishes the
+signal for each of its connections.
 Revocation is a state, not a deletion: your subscriber can still read the
 connection it is told about. Subscribe in `subscribers.py`:
 
