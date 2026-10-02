@@ -176,9 +176,10 @@ class Build(Workflow):
             await item.announce("build.rejected", reason=str(error))
             return
         account_id = None
-        if ticket["assignee_id"] and (tracker := await SoftwareFactory.get_tracker()):
+        if tracker := await SoftwareFactory.get_tracker():
             async with tracker:
-                account_id = await tracker.get_account_id(ticket["assignee_id"])
+                account_id = await tracker.get_account_id(ticket["actor_id"])
+                account_id = account_id or await tracker.get_account_id(ticket["assignee_id"])
         return await cls.start(
             subject=item,
             account_id=account_id,

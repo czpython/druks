@@ -52,6 +52,7 @@ class LinearEvents(Webhook):
         # An issue outside a project has no project. An unassigned issue has no assignee.
         project = issue.get("project") or {}
         assignee = issue.get("assignee") or {}
+        actor = self.data.get("actor") or {}
         await publish(
             "ticket.transitioned",
             payload={
@@ -62,6 +63,7 @@ class LinearEvents(Webhook):
                 "url": issue["url"],
                 "project_name": project.get("name"),
                 "labels": [],
+                "actor_id": actor.get("id"),
                 "assignee_id": assignee.get("id"),
                 "assignee_email": assignee.get("email"),
                 "assignee_name": assignee.get("name"),
@@ -138,6 +140,7 @@ class JiraEvents(Webhook):
                 "url": f"{base_url.rstrip('/')}/browse/{key}",
                 "project_name": fields["project"]["name"],
                 "labels": fields["labels"],
+                "actor_id": self.request.headers.get("x-jira-initiator"),
                 "assignee_id": assignee.get("accountId"),
                 "assignee_email": assignee.get("emailAddress"),
                 "assignee_name": assignee.get("displayName"),

@@ -492,6 +492,7 @@ class Ticket(Base):
                 "url": f"/software_factory/tickets/{self.identifier}",
                 "project_name": self.project_repo.full_name,
                 "labels": [],
+                "actor_id": None,
                 "assignee_id": self.assignee_id,
                 "assignee_email": assignee.username if assignee else None,
                 "assignee_name": assignee.username if assignee else None,

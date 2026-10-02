@@ -49,6 +49,7 @@ def _jira_payload(*, key="IT-12", status="Open", project="acme-app", labels=None
         "url": None,
         "project_name": project,
         "labels": labels or [],
+        "actor_id": None,
         "assignee_id": None,
         "assignee_email": "dev@acme.co",
         "assignee_name": "Dev",
@@ -110,13 +111,18 @@ async def test_emits_normalized_ticket_transition(tmp_path, druks_db, monkeypatc
 
     await _connect_jira()
     monkeypatch.setattr(webhook_module, "publish", _emit)
-    await _provider(tmp_path, payload=_issue(key="IT-9", status="Ready")).on_issue_event()
+    await _provider(
+        tmp_path,
+        payload=_issue(key="IT-9", status="Ready"),
+        headers={"x-jira-initiator": "actor-1"},
+    ).on_issue_event()
 
     assert captured["event"] == "ticket.transitioned"
     payload = captured["payload"]
     assert payload["source"] == "jira"
     assert payload["identifier"] == "IT-9"
     assert payload["status"] == "Ready"
+    assert payload["actor_id"] == "actor-1"
     assert payload["assignee_email"] == "dev@acme.co"
     assert payload["url"] == "https://jira.test/browse/IT-9"
 

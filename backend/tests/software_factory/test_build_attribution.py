@@ -35,10 +35,22 @@ async def started(monkeypatch):
 
 
 @pytest.mark.parametrize(("source", "tracker"), [("jira", Jira), ("linear", Linear)])
+@pytest.mark.parametrize("actor_is_connected", [True, False])
 async def test_tracker_webhook_starts_under_the_connected_account(
-    druks_db, tmp_path, monkeypatch, started, source, tracker
+    druks_db, tmp_path, monkeypatch, started, source, tracker, actor_is_connected
 ):
     owner = await Account.get_or_create(druks_db, "github-boss")
+    actor = await Account.get_or_create(druks_db, "github-actor")
+    if actor_is_connected:
+        await VaultSecret.connect(
+            druks_db,
+            "mcp:renamed_company_tracker",
+            account_id=actor.id,
+            refresh_token="actor-token",
+            scopes=[],
+            identity={"authority": tracker.authority, "subject": "provider-actor-1"},
+            identity_status=IdentityStatus.RESOLVED,
+        )
     await VaultSecret.connect(
         druks_db,
         "mcp:renamed_company_tracker",
@@ -66,7 +78,11 @@ async def test_tracker_webhook_starts_under_the_connected_account(
             identity={"base_url": "https://company.atlassian.net", "email": "druks@company.test"},
             secrets={"api_token": "token", "webhook_secret": "hook"},
         )
-        events = JiraEvents(request=SimpleNamespace(), kwargs={}, settings=make_settings(tmp_path))
+        events = JiraEvents(
+            request=SimpleNamespace(headers={"x-jira-initiator": "provider-actor-1"}),
+            kwargs={},
+            settings=make_settings(tmp_path),
+        )
         events._data_cached = {
             "issue": {
                 "key": item.ticket_key,
@@ -91,6 +107,7 @@ async def test_tracker_webhook_starts_under_the_connected_account(
             request=SimpleNamespace(), kwargs={}, settings=make_settings(tmp_path)
         )
         events._data_cached = {
+            "actor": {"id": "provider-actor-1"},
             "data": {
                 "identifier": item.ticket_key,
                 "title": item.title,
@@ -107,10 +124,10 @@ async def test_tracker_webhook_starts_under_the_connected_account(
         await events.on_state_transition()
 
     assert len(started) == 1
-    assert started[0]["account_id"] == owner.id
+    assert started[0]["account_id"] == (actor.id if actor_is_connected else owner.id)
 
 
-async def test_unconnected_assignee_uses_the_default_account(druks_db, started):
+async def test_unconnected_actor_and_assignee_use_the_default_account(druks_db, started):
     await Account.get_or_create(druks_db, "boss@company.test")
     await connect_service(
         "linear",
@@ -128,6 +145,7 @@ async def test_unconnected_assignee_uses_the_default_account(druks_db, started):
             "url": f"https://tracker.example/{item.ticket_key}",
             "project_name": "company/app",
             "labels": [],
+            "actor_id": "unconnected-actor",
             "assignee_id": "provider-user-1",
             "assignee_email": "boss@company.test",
             "assignee_name": "Boss",

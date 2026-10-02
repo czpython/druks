@@ -13,9 +13,9 @@ class Tracker(ABC):
     # The MCP grant issuer whose subjects are this tracker's user ids.
     authority: str
 
-    async def get_account_id(self, user_id: str) -> str | None:
+    async def get_account_id(self, user_id: str | None) -> str | None:
         """The one Druks account that connected this tracker as the user."""
-        if account := await Account.lookup(db_session(), self.authority, user_id):
+        if user_id and (account := await Account.lookup(db_session(), self.authority, user_id)):
             return account.id
 
     async def __aenter__(self) -> Self:

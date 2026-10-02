@@ -412,17 +412,22 @@ Webhook URLs remain `/_external/linear/events/` and
 
 Select **Issue data (Jira format)** as its body.
 Druks accepts the REST issue JSON under `issue`. Put the shared token in the
-`x-druks-webhook-token` header. `druks doctor` treats a disconnected Linear or
-Jira identity as optional when that tracker is not selected. It reports pending
-setup if the selected tracker is Linear or Jira and that identity is missing.
+`x-druks-webhook-token` header. Put `{{initiator.accountId}}` in the
+`x-jira-initiator` header, so Druks knows who moved the ticket. See
+[Jira's user smart values](https://support.atlassian.com/cloud-automation/docs/jira-smart-values-users/).
+`druks doctor` treats a disconnected Linear or Jira identity as optional when
+that tracker is not selected. It reports pending setup if the selected tracker
+is Linear or Jira and that identity is missing.
 
 Software Factory starts a Linear or Jira build under the Druks account of the
-ticket assignee. It finds that account from the assignee ID in the webhook. The
-ID must match the [provider account](#oauth-grant-identity) of an MCP connection
-that the assignee made with **Connect your account**. A connection for everyone
-has no account, so it does not match. If no account or more than one account
-matches, the build uses the default account. A **druks** ticket build uses the
-account of the ticket assignee.
+person who moved the ticket. If that person has no account, the build uses the
+account of the ticket assignee, and then the default account. Linear sends that
+person in its webhook. Jira sends that person in the `x-jira-initiator` header.
+A person has an account when their tracker ID matches the
+[provider account](#oauth-grant-identity) of an MCP connection that they made
+with **Connect your account**. A connection for everyone has no account, so it
+does not match. Two matching accounts also do not match. A **druks** ticket
+build uses the account of the ticket assignee.
 
 ## WhatsApp
 

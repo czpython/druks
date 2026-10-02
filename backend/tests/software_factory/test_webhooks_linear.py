@@ -27,6 +27,7 @@ def _transition():
         "action": "update",
         "type": "Issue",
         "updatedFrom": {"stateId": "old-state"},
+        "actor": {"id": "actor-1", "type": "user"},
         "data": {
             "identifier": "ACME-7",
             "title": "Add an endpoint",
@@ -102,6 +103,7 @@ async def test_emits_normalized_ticket_transition(tmp_path, monkeypatch):
                 "url": "https://linear.app/acme/issue/ACME-7",
                 "project_name": "acme-app",
                 "labels": [],
+                "actor_id": "actor-1",
                 "assignee_id": "user-7",
                 "assignee_email": "dev@acme.co",
                 "assignee_name": "Dev",
