@@ -11,7 +11,13 @@ import { WorkItemPage } from '../apps/software_factory/WorkItemPage'
 import { SubjectPage } from './SubjectPage'
 
 vi.mock('../api/sse', () => ({ useSSE: vi.fn() }))
-vi.mock('../api/client', () => ({ subjectApi: { read: vi.fn(), stream: vi.fn(() => '/stream') } }))
+vi.mock('../api/client', () => ({
+  subjectApi: {
+    read: vi.fn(),
+    stream: vi.fn(() => '/stream'),
+    transcriptBase: vi.fn(() => '/transcript'),
+  },
+}))
 vi.mock('../apps/software_factory/api', () => ({
   buildApi: { workItem: vi.fn(), subjectStreamUrl: vi.fn(() => '/stream') },
 }))
@@ -95,6 +101,31 @@ afterEach(() => {
 })
 
 describe('owner navigation', () => {
+  it.each(['', '?run=newer'])('keeps the newest transcript collapsed on load: %s', async (query) => {
+    vi.mocked(subjectApi.read).mockResolvedValue({
+      ...subject,
+      timeline: [{
+        ...run('newer'),
+        agentCalls: [{
+          id: 'call-1', agent: 'summarize', label: 'Summarize', status: 'succeeded',
+          accountUsername: 'operator', startedAt: '2026-09-01T00:00:00Z',
+        }],
+      }],
+    })
+    mount('subject', `/notes/note/7${query}`)
+
+    const toggle = await screen.findByRole('button', { name: /transcript/ })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByText('Transcript')).toBeNull()
+    expect(screen.getByTestId('gate')).toBeTruthy()
+
+    fireEvent.click(toggle)
+    expect(screen.getByText('Transcript')).toBeTruthy()
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(toggle)
+    expect(screen.queryByText('Transcript')).toBeNull()
+  })
+
   it.each(['subject', 'work'] as const)(
     'opens an external request from an Activity link in the %s owner',
     async (page) => {

@@ -155,7 +155,7 @@ function RunBlock({
 }) {
   const ask = run.state === 'parked' ? run.inputRequest : null
   const call = run.agentCalls.at(-1)
-  const [open, setOpen] = useState(newest || selected)
+  const [open, setOpen] = useState(false)
   const block = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (selected) {
