@@ -257,7 +257,10 @@ async def test_newest_success_replaces_failure_and_non_requests_are_absent(clien
     note = await Note.create(body="Recovered")
     failed = await seed_run(druks_db, kind=Summarize.kind, subject=note, state="failed")
     failed.created_at = datetime(2026, 1, 1, tzinfo=UTC)
-    await seed_run(druks_db, kind=Summarize.kind, subject=note, state="finished")
+    other = await Account.get_or_create(druks_db, "another@example.invalid")
+    await seed_run(
+        druks_db, kind=Summarize.kind, subject=note, state="finished", account_id=other.id
+    )
     await seed_run(druks_db, kind=Summarize.kind, state="scheduled")
     for request, requested_at in [
         ({"presentation": "in_app"}, None),
@@ -279,12 +282,11 @@ async def test_newest_success_replaces_failure_and_non_requests_are_absent(clien
     }
 
 
-async def test_subjectless_orphans_and_other_accounts_stay_visible(client, druks_db):
-    other = await Account.get_or_create(druks_db, "another@example.invalid")
-    first = await seed_run(druks_db, kind=Summarize.kind, account_id=other.id)
-    second = await seed_run(druks_db, kind=Summarize.kind, account_id=other.id)
+async def test_subjectless_runs_and_orphans_stay_visible(client, druks_db):
+    first = await seed_run(druks_db, kind=Summarize.kind)
+    second = await seed_run(druks_db, kind=Summarize.kind)
     orphan = Run(
-        account_id=other.id,
+        account_id=first.account_id,
         id=str(uuid7()),
         kind=Summarize.kind,
         created_at=datetime.now(UTC) - timedelta(minutes=10),
@@ -302,8 +304,46 @@ async def test_subjectless_orphans_and_other_accounts_stay_visible(client, druks
     assert body["failed"]["rows"][0]["subjectId"] is None
 
 
+async def test_own_and_default_account_runs_count_before_preview_limits(client, druks_db):
+    service = await Account.get_or_create(druks_db, "service@example.invalid")
+    other = await Account.get_or_create(druks_db, "another@example.invalid")
+    operator = await Account.get_or_create(druks_db, "op@example.com")
+    my_runs = set()
+    for account in [other] * 6 + [operator] * 3 + [service] * 2:
+        run = await seed_run(druks_db, kind=Summarize.kind, account_id=account.id)
+        if account != other:
+            my_runs.add(run.id)
+
+    running = overview(client)["running"]
+
+    assert running["total"] == 5
+    assert len(running["rows"]) == 4
+    assert {row["run"] for row in running["rows"]} <= my_runs
+
+
+async def test_recorded_times_follow_the_run_account(client, druks_db):
+    operator = await Account.get_or_create(druks_db, "op@example.com")
+    other = await Account.get_or_create(druks_db, "another@example.invalid")
+    for account, day in [(operator, 1), (other, 2)]:
+        run = await seed_run(druks_db, kind=Summarize.kind, account_id=account.id, state="finished")
+        for event_type in ("workflow.finished", "workflow.failed"):
+            druks_db.add(
+                Event(
+                    app="field_notes",
+                    type=event_type,
+                    payload={"run": run.id},
+                    created_at=datetime(2026, 1, day, tzinfo=UTC),
+                )
+            )
+    await druks_db.flush()
+
+    body = overview(client)
+
+    assert body["lastFinishedAt"] == body["lastFailedAt"] == "2026-01-01T00:00:00Z"
+
+
 async def test_app_filter_scopes_counts_previews_and_recorded_times(client, druks_db):
-    await seed_run(druks_db, kind=Summarize.kind)
+    run = await seed_run(druks_db, kind=Summarize.kind)
     await seed_run(druks_db, kind="uninstalled.sweep")
     timestamp = datetime(2026, 1, 1, tzinfo=UTC)
     for app, event_type, offset in [
@@ -316,7 +356,14 @@ async def test_app_filter_scopes_counts_previews_and_recorded_times(client, druk
         ("uninstalled", "workflow.failed", 10),
         (None, "workflow.failed", 10),
     ]:
-        druks_db.add(Event(app=app, type=event_type, created_at=timestamp + timedelta(days=offset)))
+        druks_db.add(
+            Event(
+                app=app,
+                type=event_type,
+                payload={"run": run.id},
+                created_at=timestamp + timedelta(days=offset),
+            )
+        )
     await druks_db.flush()
 
     body = overview(client)

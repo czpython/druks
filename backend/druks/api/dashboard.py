@@ -5,9 +5,11 @@ from operator import attrgetter
 from zoneinfo import ZoneInfo
 
 from croniter import CroniterBadDateError, croniter
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import case, func, select
 
+from druks.accounts.dependencies import current_account
+from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.api.schemas import (
     DashboardOverview,
@@ -33,7 +35,10 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 @router.get("/overview", response_model=DashboardOverview)
 async def get_overview(
-    session: SessionDep, response: Response, app: str | None = None
+    session: SessionDep,
+    response: Response,
+    app: str | None = None,
+    account: Account = Depends(current_account),
 ) -> DashboardOverview:
     response.headers["Cache-Control"] = "no-store"
     apps = {owner.name: owner for owner in iter_apps()}
@@ -66,6 +71,11 @@ async def get_overview(
         (current_runs.c.state == RunState.PARKED, current_runs.c.input_requested_at)
     )
     request_id = case((current_runs.c.state == RunState.PARKED, current_runs.c.run_id))
+    # A run that starts with no operator takes the default account, which can be a
+    # service account that nobody signs in as. Every operator sees those runs.
+    my_runs = (
+        select(Run.id).join(Run.account).where((Account.id == account.id) | Account.is_default)
+    )
     ranked_runs = (
         select(
             current_runs,
@@ -87,6 +97,7 @@ async def get_overview(
             (current_runs.c.state != RunState.PARKED)
             | (current_runs.c.input_requested_at.is_not(None) & (current_runs.c.presentation != ""))
         )
+        .where(current_runs.c.run_id.in_(my_runs))
         .subquery()
     )
     previews = (
@@ -116,7 +127,11 @@ async def get_overview(
         .filter(Event.type == "workflow.finished")
         .label("last_finished_at"),
         func.max(Event.created_at).filter(Event.type == "workflow.failed").label("last_failed_at"),
-    ).where(Event.app.in_(list(apps)), Event.type.in_(("workflow.finished", "workflow.failed")))
+    ).where(
+        Event.app.in_(list(apps)),
+        Event.type.in_(("workflow.finished", "workflow.failed")),
+        Event.payload["run"].as_string().in_(my_runs),
+    )
     sections = {
         name: DashboardSection(total=0, rows=[]) for name in ("needs_you", "running", "failed")
     }
