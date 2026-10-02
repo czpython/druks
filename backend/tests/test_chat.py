@@ -1039,13 +1039,22 @@ async def test_cancel_route_only_changes_the_requested_pending_message(
     get_running_sandbox.assert_not_called()
 
 
-async def test_a_failed_run_reports_to_its_conversation_whether_or_not_it_parked(
-    druks_db, conversation
+@pytest.mark.parametrize("parked", [False, True])
+async def test_a_run_reports_its_result_or_failure_whether_or_not_it_parked(
+    druks_db, conversation, parked
 ):
     run = await seed_run(druks_db, kind="test", account_id=conversation.account_id)
     run.conversation_id = conversation.id
 
-    assert not await service.report_result(druks_db, run, result={"ok": True})
+    if parked:
+        run.input_requested_at = Base.utc_now()
+
+    assert await service.report_result(druks_db, run, result={"ok": True}) == conversation.id
+    *_, result = await list_messages(druks_db, conversation)
+    assert result.is_internal
+    assert run.id in result.body
+    assert '"ok":true' in result.body
+
     reported = await service.report_failure(druks_db, run, failure="the sandbox died")
     assert reported == conversation.id
 

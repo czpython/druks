@@ -652,9 +652,10 @@ call from outside a conversation.
 
 A run that a bot tool starts remembers its conversation. Ask for approval with
 an in-app question, `self.review()`. Druks then asks the connection's admin in the
-admin's own chat, and only that admin can answer. When a run that waited ends,
-Druks tells the conversation the run's result or its failure, and the Bot tells
-the person. A cancelled run tells nothing.
+admin's own chat, and only that admin can answer. When a run ends, Druks tells
+the conversation its result or failure, whether or not the run waited for input.
+The Bot tells the person through the conversation's channel, including the
+original GitHub or Slack thread. A cancelled run tells nothing.
 
 To withdraw a waiting request, cancel it in a bot tool:
 `await GrantAccess.cancel(request)`. A subject has one active run per workflow, so
