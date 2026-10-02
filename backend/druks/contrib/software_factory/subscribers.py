@@ -5,7 +5,7 @@ from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Build, Profile
 from druks.models import Base
-from druks.signals import subscribe
+from druks.signals import publish, subscribe
 from druks.workflows import WorkflowEvent
 
 
@@ -76,6 +76,31 @@ async def pr_close_settles_the_item(*, repo: str, pr_number: int, payload: dict)
     if item and item.resolution in (None, Resolution.CANCELLED):
         resolution = Resolution.MERGED if payload["merged"] else Resolution.CLOSED
         await item.resolve(resolution, at=payload["resolved_at"])
+
+
+@subscribe("issue.labeled")
+async def issue_label_transitions_the_ticket(*, repo: str, number: int, payload: dict) -> None:
+    """GitHub has no status field, so the GitHub tracker reads a label as one. Issue
+    numbers repeat across repos, so the key carries the repo. The issue's own repo is
+    the build's repo: the full name routes to exactly it, and no label routes it
+    anywhere else."""
+    await publish(
+        "ticket.transitioned",
+        payload={
+            "source": "github",
+            "identifier": f"{repo}#{number}",
+            "status": payload["label"],
+            "title": payload["title"],
+            "url": payload["url"],
+            "project_name": repo,
+            "labels": [],
+            # A login is not an address, and no grant issuer vouches for it, so it
+            # selects no account. The name is for display only.
+            "assignee_id": None,
+            "assignee_email": None,
+            "assignee_name": payload["assignee"],
+        },
+    )
 
 
 @subscribe("ticket.transitioned")

@@ -18,6 +18,7 @@ from druks.contrib.software_factory.contracts import (
 from druks.contrib.software_factory.ticketing.base import Tracker
 from druks.contrib.software_factory.ticketing.druks import DruksTracker
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
+from druks.contrib.software_factory.ticketing.github import GitHub
 from druks.contrib.software_factory.ticketing.jira import Jira
 from druks.contrib.software_factory.ticketing.linear import Linear
 from druks.core import services
@@ -37,7 +38,11 @@ async def check_tracker_identity() -> CheckResult:
         return CheckResult(name="tracker", ok=True, detail="trackerless by choice")
     if settings.tracker == "druks":
         return CheckResult(name="tracker", ok=True, detail="this appliance")
-    service = {"linear": services.Linear, "jira": services.Jira}[settings.tracker]
+    # The operator App is the GitHub tracker's identity; there is no second
+    # credential to connect.
+    service = {"linear": services.Linear, "jira": services.Jira, "github": services.Github}[
+        settings.tracker
+    ]
     if await service.is_connected():
         return CheckResult(name="tracker", ok=True, detail=f"{settings.tracker} connected")
     return CheckResult(
@@ -88,7 +93,7 @@ class SoftwareFactory(App):
     github = services.Github.with_scopes()
 
     class Settings(AppSettings):
-        tracker: Literal["none", "linear", "jira", "druks"] = Field(
+        tracker: Literal["none", "linear", "jira", "druks", "github"] = Field(
             default="linear",
             title="Tracker",
             description="Which ticket tracker this installation uses.",
@@ -99,7 +104,7 @@ class SoftwareFactory(App):
             description="A ticket entering this status opens a build.",
             json_schema_extra={
                 "section": "Statuses",
-                "visible_when": {"tracker": ["linear", "jira"]},
+                "visible_when": {"tracker": ["linear", "jira", "github"]},
             },
         )
         in_progress_status: Annotated[str, Choices(list_tracker_status_choices)] = Field(
@@ -108,7 +113,7 @@ class SoftwareFactory(App):
             description="The status of a ticket while a build works on it.",
             json_schema_extra={
                 "section": "Statuses",
-                "visible_when": {"tracker": ["linear", "jira"]},
+                "visible_when": {"tracker": ["linear", "jira", "github"]},
             },
         )
         in_review_status: Annotated[str, Choices(list_tracker_status_choices)] = Field(
@@ -118,7 +123,7 @@ class SoftwareFactory(App):
             "Empty leaves the ticket where it is.",
             json_schema_extra={
                 "section": "Statuses",
-                "visible_when": {"tracker": ["linear", "jira"]},
+                "visible_when": {"tracker": ["linear", "jira", "github"]},
             },
         )
         done_status: Annotated[str, Choices(list_tracker_status_choices)] = Field(
@@ -127,7 +132,7 @@ class SoftwareFactory(App):
             description="The status of a ticket after its pull request merges.",
             json_schema_extra={
                 "section": "Statuses",
-                "visible_when": {"tracker": ["linear", "jira"]},
+                "visible_when": {"tracker": ["linear", "jira", "github"]},
             },
         )
         resting_status: Annotated[str, Choices(list_tracker_status_choices)] = Field(
@@ -137,7 +142,7 @@ class SoftwareFactory(App):
             "Empty leaves the ticket where it is.",
             json_schema_extra={
                 "section": "Statuses",
-                "visible_when": {"tracker": ["linear", "jira"]},
+                "visible_when": {"tracker": ["linear", "jira", "github"]},
             },
         )
 
@@ -171,6 +176,11 @@ class SoftwareFactory(App):
                     api_token=row.secrets["api_token"],
                     status_names=status_names,
                 )
+            if settings.tracker == "github":
+                # Presence check only: the client resolves App credentials per
+                # repository installation, not from this row.
+                await services.Github.get()
+                return GitHub(status_names=status_names)
         except ServiceNotConnectedError:
             return
 
