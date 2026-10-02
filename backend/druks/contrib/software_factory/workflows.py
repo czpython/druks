@@ -543,7 +543,7 @@ class PullRequestReview(Workflow):
         )
         # The reviewer writes on GitHub, so the requester goes by their GitHub login.
         account = await Account.get_for_run(db_session(), self.account_id)
-        sign_ins = await SoftwareFactory.github.list_for_account(account.id)
+        sign_ins = await Github.list_for_account(account.id)
         requested_by = sign_ins[0].identity["login"] if sign_ins else account.username
         return {
             "siblings": await project_repo.siblings(),

@@ -1504,6 +1504,19 @@ for connection in await NightWatch.acme.list_for_account(account_id):
     token = await connection.get_access_token()
 ```
 
+Read existing sign-in facts directly from the service when you do not need to
+declare scopes:
+
+```python
+from druks.core.services import Github
+
+sign_ins = await Github.list_for_account(self.account_id)
+```
+
+Each connection's `identity["login"]` names the GitHub user. The direct read
+does not add the app to the service's scope declarations. An empty list means
+the account has no live sign-in. Both reads exclude revoked connections.
+
 `account_id` is the caller: `self.account_id` in a run body,
 `current_account_id.get()` in a route, the handler's argument in a
 subscriber, the platform's argument in `list_summaries`. `await NightWatch.acme.get(connection_id)` returns one connection

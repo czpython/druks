@@ -24,9 +24,8 @@ _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 class Connection:
-    """One signed-in provider account, reached through the app's
-    declared handle. ``get_access_token`` and ``disconnect`` act on this
-    sign-in only."""
+    """One signed-in provider account. ``get_access_token`` and ``disconnect``
+    act on this sign-in only."""
 
     def __init__(self, service: "type[Service]", row: VaultSecret) -> None:
         self.service = service
@@ -108,12 +107,7 @@ class ScopedService:
         return f"/api/oauth/{self.service.slug}/connect?next=/{self.owner.name}"
 
     async def list_for_account(self, account_id: str) -> list[Connection]:
-        return [
-            Connection(self.service, row)
-            for row in await VaultSecret.list_account_connections(
-                db_session(), Audience.service(self.service.slug), account_id
-            )
-        ]
+        return await self.service.list_for_account(account_id)
 
     async def get(self, connection_id: str) -> Connection | None:
         row = await db_session().get(VaultSecret, connection_id)
@@ -277,6 +271,16 @@ class Service:
         if not cls.token_endpoint:
             raise TypeError(f"{cls.__name__} declares no OAuth endpoints")
         return ScopedService(cls, scopes)
+
+    @classmethod
+    async def list_for_account(cls, account_id: str) -> list[Connection]:
+        """The account's live sign-ins, without declaring an app's scope requirements."""
+        return [
+            Connection(cls, row)
+            for row in await VaultSecret.list_account_connections(
+                db_session(), Audience.service(cls.slug), account_id
+            )
+        ]
 
     @classmethod
     def declarations(cls) -> "list[ScopedService]":
