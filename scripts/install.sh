@@ -232,8 +232,11 @@ main() {
   echo "→ drukbox alembic upgrade (idempotent)"
   docker compose run --rm drukbox .venv/bin/alembic upgrade head
 
-  echo "→ docker compose up -d"
-  docker compose up -d
+  echo "→ docker compose up -d --wait"
+  docker compose up -d --wait
+
+  echo "→ refresh sandbox images and check the stack"
+  docker compose exec -T web druks doctor
 
   cat <<MSG
 

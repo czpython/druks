@@ -103,8 +103,8 @@ curl -fsSL https://druks.ai/install.sh | bash
 The second pass creates `.env` from `druks.toml` and validates the required
 values. Then it runs `docker compose pull`. It migrates the databases with
 `docker compose run --rm web druks init-db`. A remote installation also migrates
-the Drukbox schema. Finally, it runs `docker compose up -d`. Startup does not
-run migrations.
+the Drukbox schema. It runs `docker compose up -d --wait`, then `druks doctor`
+to refresh sandbox images and check the stack. Startup does not run migrations.
 
 ### 3. Make sure that the stack operates
 
@@ -282,8 +282,21 @@ applies new migrations with `docker compose run --rm web druks init-db`. A remot
 installation also migrates Drukbox.
 
 Then the installer pulls the images and
-starts the stack. Compose replaces only changed services. To migrate without
-the installer, run `docker compose run --rm web druks init-db`.
+starts the stack. It waits for the Compose health checks, then runs
+`docker compose exec -T web druks doctor`. Compose replaces only changed services.
+To migrate without the installer, run `docker compose run --rm web druks init-db`.
+
+Doctor asks Drukbox to prepare each declared sandbox, including Chat.
+Drukbox pulls the base image and reuses a template only when its digest and
+setup script match. A changed digest starts a new template build. Docker
+Sandboxes also loads the refreshed base image into its separate image store.
+Older templates follow Drukbox's unused-template cleanup policy. Existing
+hosts keep their image until they are released.
+
+For a manual deploy, run `docker compose exec -T web druks doctor` after the
+services start. A failed image pull or store load fails this check. A template
+that is still building is pending; runs wait for it. Set `[sandbox].timeout`
+high enough for the base image download and store load (180 seconds by default).
 
 Recreating `web` interrupts in-flight execution. DBOS recovers compatible
 workflows from completed checkpoints when the process returns. Changes to

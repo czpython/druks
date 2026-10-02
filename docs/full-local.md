@@ -44,7 +44,8 @@ The local shape needs no authored values, so the first run goes all the way:
 - It creates `~/druks/.env` with `DEFAULT_HOST_PROVIDER=docker`.
 - It creates `~/.config/druks/harnesses` for optional harness configuration.
 - It generates the database password and the stored-secret key.
-- It pulls images and applies migrations.
+- It pulls images and applies migrations. After the services are ready, it runs
+  `druks doctor` to refresh sandbox images and prepare templates.
 - It starts Druks, Postgres, Redis, Drukbox, the secrets exchange, and the
   secrets proxy. Drukbox listens on `127.0.0.1:8780`. The exchange listens on
   `127.0.0.1:8781`. The proxy listens on `172.17.0.1:8880`, where sandbox
@@ -184,8 +185,10 @@ Set the image in `~/druks/druks.toml`, then re-run the installer:
 image = "druks-sandbox"
 ```
 
-Existing hosts keep their original image. New acquisitions use the updated
-value.
+A local build needs no registry. The installer refreshes the image
+and its templates through `druks doctor`. See
+[Update / redeploy](deployment.md#update--redeploy) for template reuse and cleanup.
+Existing hosts keep their original image.
 
 ## Webhook caveat
 
