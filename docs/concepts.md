@@ -209,8 +209,10 @@ not write provider-specific execution code.
 
 By default, each agent call uses an ephemeral sandbox. A workflow can retain one
 warm sandbox across a segment. Druks releases it before a gate and at workflow
-exit. Druks also rotates it before the lease becomes too short for another
-call. Store durable state in an external system such as Git, not only on the VM.
+exit. Workflow sandboxes have a ten-minute lease. Druks renews the host and its
+identity when a call starts and each minute while the workspace is in use.
+A failed renewal stops the call. An idle or abandoned host expires after its
+last lease. Store durable state in an external system such as Git, not only on the VM.
 
 A sandbox never holds a subscription token. Druks gives each sandbox that
 fetches one an identity at its issuer, before Drukbox provisions it. The

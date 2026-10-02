@@ -25,11 +25,14 @@ from druks.harnesses.config import AgentConfig, get_config
 from druks.harnesses.exceptions import (
     HarnessError,
     HarnessInvalidOutputError,
+    HarnessSandboxProvisioningError,
     Retry,
 )
 from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import provisioning_key, sandbox_client
+from druks.sandbox.constants import WORKFLOW_HOST_LEASE_SECONDS
+from druks.sandbox.exceptions import HostGone
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
 from druks.secrets.enums import SecretKind
@@ -98,9 +101,18 @@ async def _runner(
             secrets={**config.secrets, **entries},
             template=template,
             identity=identity,
+            lease_seconds=WORKFLOW_HOST_LEASE_SECONDS,
         )
-    async with vm as box:
-        yield await workflow.get_workspace(box)
+    try:
+        async with vm as box, sandbox_client.lease(host_id=box.id):
+            yield await workflow.get_workspace(box)
+    except HostGone as error:
+        await workflow._reap_run()
+        raise HarnessSandboxProvisioningError(str(error)) from error
+    except HarnessSandboxProvisioningError:
+        if host_id:
+            await workflow._reap_run()
+        raise
 
 
 class AgentOutput(BaseModel):

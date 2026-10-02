@@ -1,5 +1,5 @@
 import hashlib
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -10,6 +10,7 @@ import pytest
 from druks.db import db_session
 from druks.sandbox import datastructures, templates
 from druks.sandbox.client import Client
+from druks.sandbox.constants import WORKFLOW_HOST_LEASE_SECONDS
 from druks.sandbox.datastructures import Sandbox
 from druks.sandbox.exceptions import TemplateNotFound, TemplateUnavailable
 from druks.workflows import Workflow
@@ -250,6 +251,7 @@ async def test_warm_lease_uses_workflow_template(monkeypatch):
         secrets={},
         template="template-1",
         identity=None,
+        lease_seconds=WORKFLOW_HOST_LEASE_SECONDS,
     )
 
 
@@ -271,7 +273,7 @@ async def test_ephemeral_lease_uses_workflow_template(monkeypatch):
     monkeypatch.setattr(
         agent_module,
         "sandbox_client",
-        SimpleNamespace(ephemeral=ephemeral),
+        SimpleNamespace(ephemeral=ephemeral, lease=lambda **kwargs: nullcontext()),
     )
     monkeypatch.setattr(agent_module, "get_template_id", resolve)
 
@@ -288,6 +290,7 @@ async def test_ephemeral_lease_uses_workflow_template(monkeypatch):
             "secrets": {},
             "template": "template-1",
             "identity": None,
+            "lease_seconds": WORKFLOW_HOST_LEASE_SECONDS,
         }
     ]
 

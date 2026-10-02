@@ -66,6 +66,12 @@ def _patch_runtime(monkeypatch, tmp_path, payload):
     """Pin settings/prompt; returns a fake sandbox capturing the run_agent
     call. The agent's model/effort/timeout resolve via the override store
     against the test ``druks_db``."""
+
+    @asynccontextmanager
+    async def lease(self, *, host_id):
+        yield
+
+    monkeypatch.setattr("druks.sandbox.client.Client.lease", lease)
     settings = MagicMock()
     settings.artifacts_dir = tmp_path
     monkeypatch.setattr(agents, "load_settings", lambda: settings)

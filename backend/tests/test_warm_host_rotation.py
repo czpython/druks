@@ -7,7 +7,7 @@ import pytest
 from drukbox_sdk import Secret
 from druks.accounts.models import Account
 from druks.db import db_session
-from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS, SANDBOX_HOST_ROTATE_BEFORE_SECONDS
+from druks.sandbox.constants import WORKFLOW_HOST_LEASE_SECONDS
 from druks.workflows import Workflow
 
 
@@ -33,7 +33,9 @@ class _FakeSandbox:
 
 
 class _FakeSandboxClient:
-    def __init__(self, *, lease: timedelta = timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)) -> None:
+    def __init__(
+        self, *, lease: timedelta = timedelta(seconds=WORKFLOW_HOST_LEASE_SECONDS)
+    ) -> None:
         self.lease = lease
         self.provisions: list[str] = []
         self.secrets: list[dict[str, Secret]] = []
@@ -47,7 +49,9 @@ class _FakeSandboxClient:
         secrets: dict[str, Secret],
         template: str | None,
         identity: object = None,
+        lease_seconds: int,
     ) -> _FakeSandbox:
+        assert lease_seconds == WORKFLOW_HOST_LEASE_SECONDS
         assert template is None
         assert identity is None
         self.provisions.append(idempotency_key)
@@ -91,20 +95,17 @@ async def test_warm_host_reused_while_lease_covers_another_call(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_warm_host_rotates_when_lease_cannot_cover_a_call(monkeypatch):
-    """A host whose remaining lease can't cover another worst-case call rotates
-    to a fresh one before the call."""
-    fake = _FakeSandboxClient(lease=timedelta(seconds=SANDBOX_HOST_ROTATE_BEFORE_SECONDS - 60))
+async def test_warm_host_near_expiry_stays_available_for_renewal(monkeypatch):
+    fake = _FakeSandboxClient(lease=timedelta(seconds=30))
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
     first = await flow._lease_host(db_session(), _NONE, [])
     second = await flow._lease_host(db_session(), _NONE, [])
 
-    assert first == "host-1"
-    assert second == "host-2"
-    assert fake.released == ["host-1"]
-    assert fake.provisions == ["wf-1:workflow", "wf-1:workflow"]
+    assert first == second == "host-1"
+    assert fake.released == []
+    assert fake.provisions == ["wf-1:workflow"]
 
 
 @pytest.mark.asyncio
