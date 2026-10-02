@@ -68,7 +68,7 @@ class ClaudeHarness(Harness):
             }
         return {
             "meta": {"claudeCode": {"options": options}},
-            "env": {},
+            "env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"},
             "files": {},
             "mode": cls.no_ask_mode,
             "model": model_id,

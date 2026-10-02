@@ -547,7 +547,7 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
                         }
                     }
                 },
-                "env": {},
+                "env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"},
                 "files": {},
                 "mode": "bypassPermissions",
                 "model": "claude-opus-4-7",
@@ -574,7 +574,7 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
                         }
                     }
                 },
-                "env": {},
+                "env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"},
                 "files": {},
                 "mode": "bypassPermissions",
                 "model": "claude-opus-4-7",
