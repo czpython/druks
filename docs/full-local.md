@@ -29,6 +29,22 @@ You need no Tailscale account or remote VM provider.
 The image registry provides Druks service and sandbox images for both
 `linux/amd64` and `linux/arm64`.
 
+### macOS: enable host networking first
+
+The Compose services use `network_mode: host`. On macOS, Docker Desktop needs
+host networking for the dashboard and health endpoint at `127.0.0.1:8001`.
+Docker Desktop 4.34 or later supports this feature.
+
+Before you run the installer:
+
+1. Open Docker Desktop and sign in to your Docker account.
+2. Open **Settings → Resources → Network**.
+3. Select **Enable host networking**.
+4. Select **Apply & restart**.
+
+See [Docker's host networking guide](https://docs.docker.com/engine/network/drivers/host/#docker-desktop)
+for the platform requirements and limitations.
+
 ## 1. Install the local Druks profile
 
 ```bash
@@ -56,8 +72,7 @@ Drukbox controls sandboxes through the mounted `/var/run/docker.sock`. The
 installer records the group ID of the socket in `.env`. This value gives the
 non-root service user access to the socket. Drukbox keeps its schema in a
 `drukbox` database in the same Postgres instance. It does not require a separate
-data store. If sandbox SSH is unreachable on macOS, enable host networking in
-the Docker Desktop settings.
+data store.
 
 A sandbox holds a placeholder for each credential and sends its HTTPS through
 the secrets proxy. See
