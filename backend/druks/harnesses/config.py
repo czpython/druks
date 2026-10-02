@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from drukbox_sdk import Secret
@@ -12,6 +13,7 @@ from druks.secrets.models import VaultSecret
 from druks.user_settings.models import InstallationSettings, SettingsOverride
 
 from .base import Harness
+from .constants import CREDENTIAL_VARIABLES
 from .exceptions import AgentConfigError, HarnessNotConnectedError
 from .models import ProviderCatalog
 from .providers import get_provider, is_registered, provider_label
@@ -56,6 +58,19 @@ class AgentConfig:
     @property
     def charged_account_id(self) -> str | None:
         return self.subscription.account_id if self.subscription else None
+
+    def get_command(self, command: Sequence[str]) -> tuple[str, ...]:
+        """``command`` launched with this config's credential variable as the only one."""
+        if self.billing == "api_key":
+            provider = get_provider(self.model.partition("/")[0])
+            credential_variable = self.harness_class.api_key_variable or provider.api_key_variable
+        else:
+            credential_variable = self.harness_class.subscription_variable
+        arguments = ["env"]
+        for variable in CREDENTIAL_VARIABLES:
+            if variable != credential_variable:
+                arguments.extend(("-u", variable))
+        return (*arguments, *command)
 
 
 async def check_config(

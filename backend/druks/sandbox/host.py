@@ -4,6 +4,7 @@ import json
 import logging
 import shlex
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
@@ -255,7 +256,7 @@ class Host:
                 extra_env=extra_env,
                 mcp_servers=mcp_servers,
                 call_id=run_id,
-                identity=config.identity,
+                config=config,
             )
         except HarnessError as exc:
             error = exc
@@ -284,6 +285,7 @@ class Host:
         session: AsyncSession,
         harness: "Harness",
         *,
+        config: "AgentConfig",
         prompt: str,
         schema: dict[str, Any],
         artifact_dir: Path,
@@ -294,7 +296,6 @@ class Host:
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         call_id: str | None = None,
-        identity: dict | None = None,
     ) -> Any:
         """Drive one prompt through ``harness`` on this VM: the harness
         builds the invocation and parses the result; this sandbox executes it."""
@@ -318,11 +319,11 @@ class Host:
             skills=skills,
             extra_env=extra_env,
             mcp_servers=mcp_servers,
-            identity=identity,
+            identity=config.identity,
             timeout=timeout,
         )
         result = await self._exec(
-            invocation,
+            replace(invocation, args=config.get_command(invocation.args)),
             run_id=run_id,
             artifact_dir=artifact_dir,
             timeout=timeout,

@@ -27,6 +27,7 @@ from druks.files.datastructures import File
 from druks.files.models import FileRecord
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
+from druks.harnesses.config import AgentConfig
 from druks.harnesses.opencode import OpenCodeHarness
 from druks.mcp.enums import Toolkit
 from druks.mcp.inbound import get_druks_account_token, get_druks_mcp_server
@@ -85,13 +86,18 @@ async def sandbox(druks_db, conversation, monkeypatch):
     )
     monkeypatch.setattr(service, "get_sandbox", AsyncMock(return_value=(host, identity)))
     monkeypatch.setattr(service, "get_running_sandbox", AsyncMock(return_value=host))
-    config = SimpleNamespace(
+    config = AgentConfig(
         harness_class=ClaudeHarness,
         model="anthropic/claude-opus-4-7",
+        subscription=None,
+        api_key=None,
+        secrets={},
+        secret_refs=[],
         identity={},
+        billing="api_key",
         effort="",
-        fast_mode=False,
         timeout=600,
+        fast_mode=False,
     )
     monkeypatch.setattr(service, "get_agent", AsyncMock(return_value=(config, "", Toolkit.ALL)))
     monkeypatch.setattr(service, "sandbox_client", SimpleNamespace(set_expiry=AsyncMock()))
@@ -235,7 +241,13 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
 async def test_delivered_turn_is_sent_again_when_the_bridge_never_got_the_prompt(
     druks_db, conversation, sandbox, monkeypatch
 ):
-    state = {"status": "idle", "sessionId": "one", "messageId": "", "harness": "claude"}
+    state = {
+        "status": "idle",
+        "sessionId": "one",
+        "messageId": "",
+        "harness": "claude",
+        "replyCommand": ["claude", "-p"],
+    }
     prompts = []
 
     async def request(self, method, **values):
@@ -342,6 +354,7 @@ async def test_recovery_reads_live_events_then_saves_reply_and_replaces_archive(
                 "status": "running" if statuses == 1 else terminal_state,
                 "messageId": message.id,
                 "harness": "claude",
+                "replyCommand": ["env", "claude", "-p"],
                 "epoch": "sandbox-one",
                 "sequence": 4,
                 "archivePath": "/home/druks/work/chat/session.tar.gz",
@@ -375,6 +388,7 @@ async def test_recovery_reads_live_events_then_saves_reply_and_replaces_archive(
         }
     ]
     assert conversation.title == "Gate check"
+    assert host.exec.await_args.args[0][:3] == ["env", "claude", "-p"]
     assert await get_client().xlen(service.events_key(conversation.id)) == 2
     assert previous.deleted_at
     archive = await druks_db.get(FileRecord, conversation.session_file.id)
@@ -454,7 +468,7 @@ async def test_new_sandbox_restores_archive_and_drains_pending_messages(
     async def request(self, method, **values):
         if method == "start":
             starts.append(values)
-            state["sessionId"] = "restored"
+            state.update(sessionId="restored", replyCommand=values["replyCommand"])
         elif method == "prompt":
             prompts.append(values["messageId"])
             state.update(

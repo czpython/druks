@@ -41,6 +41,7 @@ class ClaudeHarness(Harness):
     command = "claude"
     adapter_command = ("/opt/druks-chat/node_modules/.bin/claude-agent-acp",)
     reply_command = (command, "-p")
+    subscription_variable = "ANTHROPIC_AUTH_TOKEN"
     no_ask_mode = "bypassPermissions"
 
     @classmethod

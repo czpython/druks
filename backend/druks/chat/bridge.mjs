@@ -176,6 +176,7 @@ class Conversation {
         : await connection.newSession(setup);
       this.state.sessionId ||= session.sessionId;
       this.state.harness = request.harness;
+      this.state.replyCommand = request.replyCommand;
       this.state.model = request.model;
       await this.configure(connection, request, session.configOptions ?? []);
       this.connection = connection;

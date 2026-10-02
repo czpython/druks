@@ -80,6 +80,8 @@ class Provider:
     label: ClassVar[str]
     # What this provider bills: "subscription", "api_key", or both.
     billing_options: ClassVar[frozenset[str]]
+    # The variable a box holds this provider's key placeholder in.
+    api_key_variable: ClassVar[str]
     # OAuth refresh config (set by providers that offer a subscription).
     REFRESH_MARGIN: ClassVar[timedelta]
     _TOKEN_URL: ClassVar[str]
@@ -683,6 +685,7 @@ class AnthropicProvider(Provider):
     id = "anthropic"
     label = "Anthropic"
     billing_options = frozenset({"subscription", "api_key"})
+    api_key_variable = "ANTHROPIC_API_KEY"
 
     # Longer than one call, so a busy subscription can wait for idle before its token is urgent.
     REFRESH_MARGIN = timedelta(seconds=MAX_AGENT_TIMEOUT_SECONDS, hours=1)
@@ -701,7 +704,7 @@ class AnthropicProvider(Provider):
         return Secret(
             key,
             host="api.anthropic.com",
-            auth_variable="ANTHROPIC_API_KEY",
+            auth_variable=cls.api_key_variable,
             auth_header="x-api-key",
             auth_prefix="",
         )
@@ -919,6 +922,8 @@ class OpenAiProvider(Provider):
     id = "openai"
     label = "OpenAI"
     billing_options = frozenset({"subscription", "api_key"})
+    # The catalog entry's variable.
+    api_key_variable = "OPENAI_API_KEY"
 
     REFRESH_MARGIN = timedelta(hours=24)
     _TOKEN_URL = "https://auth.openai.com/oauth/token"

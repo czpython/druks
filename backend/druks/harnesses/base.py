@@ -60,6 +60,10 @@ class Harness(ABC):
     adapter_command: ClassVar[tuple[str, ...]] = ()
     # The argv that answers one prompt and exits.
     reply_command: ClassVar[tuple[str, ...]]
+    # The variable this CLI reads a subscription's placeholder from.
+    subscription_variable: ClassVar[str]
+    # The variable this CLI reads a key's placeholder from, when it is not the provider's.
+    api_key_variable: ClassVar[str | None] = None
 
     def __init__(
         self,

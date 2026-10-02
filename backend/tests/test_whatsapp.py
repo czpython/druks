@@ -44,6 +44,7 @@ from druks.chat.enums import (
 from druks.chat.exceptions import TranscriptionError
 from druks.chat.models import Conversation
 from druks.harnesses.claude import ClaudeHarness
+from druks.harnesses.config import AgentConfig
 from druks.mcp.enums import Toolkit
 from druks.mcp.server import _is_visible, _validate_agent_tools
 from druks.models import Base
@@ -367,13 +368,18 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
     transcribe = AsyncMock(side_effect=["at six", TranscriptionError("The provider is down.")])
     monkeypatch.setattr(service.SpeechToText, "transcribe", transcribe)
     [conversation] = await Conversation.list_for_connection(druks_db, connection.id)
-    config = SimpleNamespace(
+    config = AgentConfig(
         harness_class=ClaudeHarness,
         model="anthropic/m",
+        subscription=None,
+        api_key=None,
+        secrets={},
+        secret_refs=[],
         identity={},
+        billing="api_key",
         effort="",
-        fast_mode=False,
         timeout=60,
+        fast_mode=False,
     )
     tools = ("helpdesk_get_ticket",)
     monkeypatch.setattr(service, "get_agent", AsyncMock(return_value=(config, "Be kind.", tools)))
@@ -756,13 +762,18 @@ async def test_operator_turns_use_the_apps_prompt_and_settings_without_a_timeout
             druks_db, account_id=operator.id, body="Read my runs"
         )
         await druks_db.refresh(conversation, ["account"])
-    config = SimpleNamespace(
+    config = AgentConfig(
         harness_class=ClaudeHarness,
         model="anthropic/m",
+        subscription=None,
+        api_key=None,
+        secrets={},
+        secret_refs=[],
         identity={},
+        billing="api_key",
         effort="low",
-        fast_mode=False,
         timeout=30,
+        fast_mode=False,
     )
     get_config = AsyncMock(return_value=config)
     render_prompt = AsyncMock(return_value="Operator prompt")

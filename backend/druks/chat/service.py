@@ -20,9 +20,8 @@ from druks.durable.models import Run
 from druks.files.constants import MAX_UPLOAD_BYTES
 from druks.files.datastructures import File
 from druks.files.storage import get_file_storage
-from druks.harnesses.base import Harness
 from druks.harnesses.config import AgentConfig, get_config
-from druks.harnesses.registry import get_harness, get_harnesses
+from druks.harnesses.registry import get_harnesses
 from druks.locks import lock
 from druks.mcp.enums import AllowedTools, Toolkit
 from druks.mcp.helpers import get_bearer_token_env_var
@@ -317,7 +316,8 @@ async def send_turn(
         conversationId=conversation.id,
         archivePath=archive_path,
         harness=config.harness_class.name,
-        command=config.harness_class.adapter_command,
+        command=config.get_command(config.harness_class.adapter_command),
+        replyCommand=config.get_command(config.harness_class.reply_command),
         effort=config.effort,
         fastMode=config.fast_mode,
         mcpUrl=server.url,
@@ -498,8 +498,9 @@ async def finish_turn(
         if state == MessageState.REPLIED and body and not await conversation.is_held(session):
             await channels.get(conversation.source).send_reply(session, conversation, reply)
     elif not conversation.title:
-        harness = get_harness(status["harness"])
-        await name_conversation(session, conversation, bridge.host, message, body, harness)
+        await name_conversation(
+            session, conversation, bridge.host, message, body, status["replyCommand"]
+        )
 
 
 async def report_result(session: AsyncSession, run: Run, *, result) -> str | None:
@@ -529,7 +530,7 @@ async def name_conversation(
     host: Host,
     message: Message,
     reply: str,
-    harness: type[Harness],
+    command: list[str],
 ) -> None:
     """Ask the harness for a short name. A failed call leaves the conversation unnamed,
     and the next reply asks again: a name is never worth failing a delivery."""
@@ -538,7 +539,7 @@ async def name_conversation(
         f"Message: {message.body[:2000]}\n\nReply: {reply[:2000]}"
     )
     with suppress(asyncssh.Error, OSError):
-        result = await host.exec([*harness.reply_command, prompt], timeout=30)
+        result = await host.exec([*command, prompt], timeout=30)
         if result.ok and result.stdout.strip():
             conversation.title = result.stdout.strip()[:80]
             await session.commit()

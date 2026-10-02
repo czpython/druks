@@ -287,9 +287,7 @@ async def test_sandbox_unreachable_translates_to_harness_error(
     assert downloads == []
 
 
-async def test_run_prompt_builds_executes_and_parses(
-    ctx: SimpleNamespace,
-):
+async def test_run_prompt_builds_executes_and_parses(ctx: SimpleNamespace, agent_config):
     """The harness-sandbox seam: the sandbox orchestrates build → exec → parse;
     the harness never sees the live sandbox, only ``ssh_username``."""
     run = _FakeRun(stdout_chunks=[b"streamed\n"], exit_code=0)
@@ -338,7 +336,7 @@ async def test_run_prompt_builds_executes_and_parses(
         artifact_dir=ctx.artifact_dir,
         timeout=60,
         call_id="call-7",
-        identity={"email": "op@example.com"},
+        config=agent_config,
         extra_env={"GITHUB_MCP_TOKEN": "ghs_x"},
     )
 
@@ -733,6 +731,8 @@ async def test_codex_subscription_token_stays_on_the_server(
     bundle = start.kwargs["credentials_bundle"]
     assert not any(type(entry) is HomeFile for entry in bundle.home)
     assert "${CODEX_SUBSCRIPTION_TOKEN}" in " ".join(start.kwargs["cmd"])
+    launch = config.get_command(())
+    assert tuple(start.kwargs["cmd"][: len(launch)]) == launch
     for secret in (tokens["access_token"], tokens["refresh_token"], tokens["id_token"]):
         assert secret not in " ".join(start.kwargs["cmd"])
         assert secret not in start.kwargs["stdin_data"].decode()

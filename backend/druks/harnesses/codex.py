@@ -308,6 +308,10 @@ class CodexHarness(Harness):
     command = "codex"
     adapter_command = ("/opt/druks-chat/node_modules/.bin/codex-acp",)
     reply_command = (command, "exec", "--skip-git-repo-check")
+    subscription_variable = _SUBSCRIPTION_TOKEN.upper()
+    # codex exec reads CODEX_API_KEY from the environment and ignores OPENAI_API_KEY there,
+    # so the key needs its own entry, not the catalog's.
+    api_key_variable = "CODEX_API_KEY"
 
     @classmethod
     def get_acp_session(
@@ -325,7 +329,9 @@ class CodexHarness(Harness):
         if identity:
             login = _auth_file(identity)
         else:
-            login = json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": "${CODEX_API_KEY}"})
+            login = json.dumps(
+                {"auth_mode": "apikey", "OPENAI_API_KEY": f"${{{cls.api_key_variable}}}"}
+            )
         files = {f"{sandbox_home}/.codex/auth.json": login}
         if account_type == AccountKind.OPERATOR:
             config: dict[str, object] = {"model": model_id, "developer_instructions": prompt}
@@ -590,13 +596,11 @@ class CodexHarness(Harness):
 
     @classmethod
     def get_secrets(cls, provider: str, key: str) -> dict[str, Secret]:
-        # codex exec reads CODEX_API_KEY from the environment and ignores
-        # OPENAI_API_KEY there, so the key needs its own entry, not the catalog's.
         return {
             OpenAiProvider.id: Secret(
                 key,
                 host="api.openai.com",
-                auth_variable="CODEX_API_KEY",
+                auth_variable=cls.api_key_variable,
                 auth_header="Authorization",
                 auth_prefix="Bearer ",
             )
