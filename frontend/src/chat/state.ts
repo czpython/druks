@@ -19,7 +19,7 @@ export interface Message {
   id: string
   role: 'user' | 'assistant'
   body: string
-  state: 'pending' | 'delivered' | 'replied' | 'interrupted' | 'cancelled' | null
+  state: 'pending' | 'delivered' | 'replied' | 'interrupted' | 'cancelled' | 'failed' | null
   replyTo: string | null
   createdAt: string
   deliveredAt: string | null
@@ -119,7 +119,7 @@ export function conversationReducer(state: ConversationState, action: Conversati
   switch (action.type) {
     case 'snapshot': {
       const turns = Object.fromEntries(Object.entries(state.turns).filter(([id]) =>
-        action.messages.some((message) => message.id === id && message.state !== 'replied' && message.state !== 'cancelled'),
+        action.messages.some((message) => message.id === id && message.state !== 'replied' && message.state !== 'cancelled' && message.state !== 'failed'),
       ))
       return { conversation: action, turns, error: null }
     }
@@ -137,7 +137,7 @@ export function conversationReducer(state: ConversationState, action: Conversati
     case 'error':
       return { ...state, error: { detail: action.detail } }
     case 'event': {
-      if (state.conversation?.messages.some((message) => message.id === action.messageId && (message.state === 'replied' || message.state === 'cancelled'))) return state
+      if (state.conversation?.messages.some((message) => message.id === action.messageId && (message.state === 'replied' || message.state === 'cancelled' || message.state === 'failed'))) return state
       const previous = state.turns[action.messageId]
       const sameEpoch = previous?.epoch === action.epoch
       if (sameEpoch && previous.sequence >= action.sequence) return state

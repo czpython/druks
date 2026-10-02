@@ -9,5 +9,6 @@ export const chatApi = {
   setPinned: (id: string, isPinned: boolean) => patchJSON<ConversationSummary>(`${conversations}/${id}`, { is_pinned: isPinned }),
   create: (body: string) => postJSON<Conversation>(conversations, { body }),
   send: (id: string, body: string) => postJSON<Message>(`${conversations}/${id}/messages`, { body }),
+  retry: (id: string, messageId: string) => postJSON<Message>(`${conversations}/${id}/messages/${messageId}/retry`, undefined),
   stop: (id: string, messageId: string) => postNoContent(`${conversations}/${id}/cancel`, { messageId }),
 }

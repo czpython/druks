@@ -182,6 +182,13 @@ minutes. Examine the agent call transcript and stderr first. Then examine the we
 Drukbox logs. A worker restart does not guarantee attachment to the same live
 agent process. Recovery follows the durable operation boundary.
 
+## A Chat message failed
+
+Druks tries a delivery up to five times. If every attempt fails, the message
+shows **Failed**, and Druks replies in a connected channel that it failed. To
+find the cause, search the web logs for `Chat delivery failed`. To retry, send
+the message again. See [Send, stop, and send again](chat.md#send-stop-and-send-again).
+
 ## A run waits
 
 `parked` means that DBOS suspended the workflow on a gate. The workflow did not stall.
