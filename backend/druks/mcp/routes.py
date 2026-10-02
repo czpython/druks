@@ -15,6 +15,7 @@ from druks.mcp.constants import HEADER_NAME_PATTERN
 from druks.mcp.enums import Credential, IdentityMode
 from druks.mcp.exceptions import (
     InvalidServerNameError,
+    McpServerNotFoundError,
     OauthConnectError,
     ReservedServerNameError,
 )
@@ -113,8 +114,10 @@ async def add_directory_mcp_server(
 async def set_mcp_server_enabled(
     session: SessionDep, name: str, is_enabled: bool = Body(embed=True)
 ) -> McpServerResponse:
-    if not await McpServer.set_enabled(session, name, is_enabled):
-        raise HTTPException(status_code=404, detail=f"MCP server {name!r} not found")
+    try:
+        await McpServer.set_enabled(session, name, is_enabled)
+    except McpServerNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     return await _response(session, name)
 
 
@@ -241,8 +244,7 @@ async def disconnect_mcp_server(session: SessionDep, name: str) -> None:
     if not await oauth.list_connections(session, name):
         # The last grant leaving reopens the mode choice: the next connect is
         # a first connect again.
-        server_row = await McpServer.get_for_name(session, name)
-        if server_row:
-            server_row.identity_mode = None
+        server = await McpServer.get_for_name(session, name)
+        server.identity_mode = None
     if access.identity_mode == IdentityMode.SHARED:
         await McpServer.set_enabled(session, name, is_enabled=False)

@@ -13,7 +13,11 @@ from druks.core.models import Uuid7Pk
 from druks.mcp.constants import BEARER_HEADER, DRUKS_SERVER_NAME, NAME_PATTERN
 from druks.mcp.datastructures import McpServerAccess
 from druks.mcp.enums import Credential
-from druks.mcp.exceptions import InvalidServerNameError, ReservedServerNameError
+from druks.mcp.exceptions import (
+    InvalidServerNameError,
+    McpServerNotFoundError,
+    ReservedServerNameError,
+)
 from druks.mcp.helpers import get_grant_account
 from druks.models import Base
 from druks.secrets.datastructures import Audience
@@ -40,7 +44,7 @@ class McpServer(Base, Uuid7Pk):
     headers: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # The first completed OAuth connect claims the credential-sharing policy.
-    # A registry install or enable overlay alone carries no such decision.
+    # Adding a server or setting its enable state carries no such decision.
     identity_mode: Mapped[str | None]
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
@@ -100,11 +104,6 @@ class McpServer(Base, Uuid7Pk):
         accesses = []
         for server in (await cls._merged(session)).values():
             service = Service.get_for_mcp_host(urlsplit(server["url"]).hostname)
-            login = None
-            if service and is_default:
-                login = await VaultSecret.lookup(
-                    session, service.secret_kind, Audience.service(service.slug)
-                )
             secret = None
             if not server["is_oauth"]:
                 credential = Credential.HEADERS
@@ -114,9 +113,6 @@ class McpServer(Base, Uuid7Pk):
                     session, Audience.service(service.slug), account_id
                 )
                 secret = next(iter(connections), None)
-            elif login:
-                credential = Credential.SERVICE_LOGIN
-                secret = login
             else:
                 credential = Credential.GRANT
                 if server["identity_mode"]:
@@ -125,6 +121,15 @@ class McpServer(Base, Uuid7Pk):
                         session, Audience.mcp(server["name"]), grant_account
                     )
                     secret = next(iter(connections), None)
+                # A service's pasted login is one person's token, with all their
+                # rights. Only the default account, which runs with no person act
+                # as, falls back to it; everyone else connects their own grant.
+                if not secret and service and is_default:
+                    secret = await VaultSecret.lookup(
+                        session, service.secret_kind, Audience.service(service.slug)
+                    )
+                    if secret:
+                        credential = Credential.SERVICE_LOGIN
             accesses.append(
                 McpServerAccess(
                     **server,
@@ -164,20 +169,18 @@ class McpServer(Base, Uuid7Pk):
         return [server for server in (await cls._merged(session)).values() if server["is_enabled"]]
 
     @classmethod
-    async def set_enabled(cls, session: AsyncSession, name: str, is_enabled: bool) -> bool:
+    async def set_enabled(cls, session: AsyncSession, name: str, is_enabled: bool) -> None:
         # A built-in has no row until an operator changes its state; the enable
-        # choice creates one, carrying the built-in's url. False means the name
-        # is neither a row nor a catalog entry.
+        # choice creates one, carrying the built-in's url.
         server = await cls.get_for_name(session, name)
         if server:
             server.is_enabled = is_enabled
-            return True
-        if name in mcp_servers:
+        elif name in mcp_servers:
             await cls.create(
                 session, name=name, url=mcp_servers.get(name)["url"], is_enabled=is_enabled
             )
-            return True
-        return False
+        else:
+            raise McpServerNotFoundError(name)
 
     @classmethod
     async def create(

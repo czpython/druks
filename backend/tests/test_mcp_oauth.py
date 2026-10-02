@@ -809,6 +809,33 @@ async def test_the_default_account_sends_the_service_login_and_others_their_gran
     assert ref.secret_id == grant.id
 
 
+async def test_the_default_accounts_own_grant_precedes_the_service_login(druks_db):
+    default_account = await Account.get_or_create(druks_db, "default@example.com")
+    server = await McpServer.create(
+        druks_db, name="atlassian", url="https://mcp.atlassian.com/v2/mcp", is_oauth=True
+    )
+    server.identity_mode = IdentityMode.PER_USER
+    await VaultSecret.store(
+        druks_db,
+        SecretKind.STATIC,
+        Audience.service("jira"),
+        secrets={"api_token": "jira-token", "webhook_secret": "hook"},
+        identity={"email": "svc@example.com", "base_url": "https://acme.atlassian.net"},
+    )
+    grant = await VaultSecret.connect(
+        druks_db,
+        Audience.mcp("atlassian"),
+        account_id=default_account.id,
+        refresh_token="rt",
+        scopes=[],
+    )
+
+    [entry], [ref] = await Workspace.get_all_mcp_servers(druks_db, None, default_account.id)
+
+    assert entry.bearer_token_env_var
+    assert ref.secret_id == grant.id
+
+
 async def test_a_service_owned_server_sends_the_accounts_service_sign_in(druks_db):
     await Account.get_or_create(druks_db, "default@example.com")
     person = await Account.get_or_create(druks_db, "person@example.com")

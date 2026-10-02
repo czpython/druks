@@ -35,6 +35,12 @@ class ReservedServerNameError(McpServerError):
         self.name = name
 
 
+class McpServerNotFoundError(McpServerError):
+    def __init__(self, name: str):
+        super().__init__(f"MCP server {name!r} not found")
+        self.name = name
+
+
 class MissingTokenError(McpServerError):
     # An enabled server holds no secret header, so it can't authenticate in the
     # VM. Raised loudly at delivery rather than shipping it bare — the
