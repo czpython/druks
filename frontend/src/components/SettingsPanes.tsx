@@ -2601,11 +2601,12 @@ export function McpServersPane() {
                   <span className="mcp-reg-top">
                     <span className="mcp-name">{candidate.name}</span>
                     <span className={'mcp-reg-badge' + (candidate.official ? ' official' : '')}>
-                      {candidate.official ? 'official' : 'community'}
+                      {candidate.official ? 'Verified publisher' : 'Publisher unverified'}
                     </span>
                   </span>
+                  <span className="mcp-url">{candidate.registryName}</span>
                   <span className="mcp-url">{candidate.url}</span>
-                  <span className="mcp-reg-desc" title={candidate.registryName}>
+                  <span className="mcp-reg-desc">
                     {candidate.description}
                   </span>
                 </button>

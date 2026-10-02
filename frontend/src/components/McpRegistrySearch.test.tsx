@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { api, ApiError } from '../api/client'
@@ -57,4 +57,23 @@ it('says when the registry has more matches than it returned', async () => {
 
   expect(await screen.findByText('https://api.githubcopilot.com/mcp/')).toBeTruthy()
   expect(screen.getByText(/more matches than one search shows/)).toBeTruthy()
+})
+
+it.each([true, false])('identifies the publisher without claiming vendor endorsement (%s)', async (official) => {
+  vi.spyOn(api, 'searchMcpRegistry').mockResolvedValue({
+    candidates: [{
+      name: 'jira', registryName: 'ai.waystation/jira',
+      description: 'Track issues in Jira.', url: 'https://waystation.ai/jira/mcp',
+      official, headers: [],
+    }],
+    hasMore: false,
+  })
+  renderPane()
+
+  await search('jira')
+
+  const row = await screen.findByRole('button', { name: /jira.*ai\.waystation\/jira/i })
+  expect(within(row).getByText(official ? 'Verified publisher' : 'Publisher unverified')).toBeTruthy()
+  expect(within(row).getByText('ai.waystation/jira')).toBeTruthy()
+  expect(within(row).queryByText(/official|community/i)).toBeNull()
 })
