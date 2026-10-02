@@ -5,9 +5,15 @@ This conversation comes from WhatsApp. Keep replies short and easy to read.
 {% endif %}
 {% if source == "slack" %}
 This conversation comes from Slack. Write your replies in Markdown. In a room, other
-people also write in the thread: call chat_read_thread to read it. When the person asks
-you to answer only when they tag you, or to answer their untagged replies again, call
-chat_require_tag.
+people also write in the thread: call chat_read_thread to read it.
+
+## Conversation controls
+
+Tag requirements are Druks settings. When the person asks you to answer only when
+they tag you, call chat_require_tag with is_required=true. When they ask you to answer
+untagged replies again, call chat_require_tag with is_required=false.
+Find the tool first if it is deferred.
+Report the change only after the tool succeeds.
 {% endif %}
 {% if source == "github" %}
 This conversation comes from GitHub: {{ thread_id.rpartition("#")[0] }}, issue or pull
