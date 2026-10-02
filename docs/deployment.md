@@ -114,6 +114,13 @@ docker compose ps
 curl -fsS http://127.0.0.1:8001/health
 ```
 
+Build the sandbox images. Do this after every deploy, as
+[Update / redeploy](#update--redeploy) describes:
+
+```bash
+docker compose exec web druks sandboxes build
+```
+
 Then connect the providers for your selected harnesses from
 **Settings → Providers**. Use a subscription or API key, as each provider
 supports. A subscription connection opens the provider authorization page.
@@ -284,6 +291,24 @@ installation also migrates Drukbox.
 Then the installer pulls the images and
 starts the stack. Compose replaces only changed services. To migrate without
 the installer, run `docker compose run --rm web druks init-db`.
+
+After every deploy, build the sandbox images:
+
+```bash
+docker compose exec web druks sandboxes build
+```
+
+The command asks Drukbox to prepare each declared sandbox, including Chat.
+Drukbox pulls the base image and reuses a template only when its digest and
+setup script match. A changed digest starts a new template build. Docker
+Sandboxes also loads the refreshed base image into its separate image store.
+Older templates follow Drukbox's unused-template cleanup policy. Existing
+hosts keep their image until they are released.
+
+A failed image pull or store load fails the command. `druks doctor` reports a
+template that is still building as pending; runs wait for it. Set
+`[sandbox].timeout` high enough for the base image download and store load
+(180 seconds by default).
 
 Recreating `web` interrupts in-flight execution. DBOS recovers compatible
 workflows from completed checkpoints when the process returns. Changes to

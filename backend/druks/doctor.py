@@ -30,7 +30,7 @@ from .harnesses.providers import get_providers
 from .harnesses.registry import get_harnesses
 from .sandbox.client import sandbox_client
 from .sandbox.exceptions import TemplateNotFound
-from .sandbox.templates import get_declared_sandboxes, prepare_sandbox_templates
+from .sandbox.templates import get_declared_sandboxes
 from .secrets.datastructures import Audience
 from .secrets.enums import SecretKind
 from .secrets.models import VaultSecret
@@ -304,13 +304,12 @@ async def check_sandbox_e2e(settings: Settings) -> CheckResult | list[CheckResul
 
 async def check_declared_sandboxes(settings: Settings) -> CheckResult | list[CheckResult]:
     try:
-        await prepare_sandbox_templates(CHAT_SANDBOX)
-        declared = get_declared_sandboxes(CHAT_SANDBOX)
+        declared = get_declared_sandboxes(extra=(CHAT_SANDBOX,))
     except Exception as error:  # noqa: BLE001 — doctor reports, never raises
         return CheckResult(
             name="sandbox_templates",
             ok=False,
-            detail=f"could not prepare declared sandbox templates: {error}",
+            detail=f"could not read declared sandboxes: {error}",
         )
 
     if not declared:
@@ -326,7 +325,7 @@ async def check_declared_sandboxes(settings: Settings) -> CheckResult | list[Che
             result = CheckResult(
                 name=name,
                 ok=False,
-                detail=f"{detail}; missing",
+                detail=f"{detail}; missing — run `druks sandboxes build`",
             )
         except Exception as error:  # noqa: BLE001 — one lookup failure is one result
             result = CheckResult(

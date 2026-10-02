@@ -238,9 +238,10 @@ main() {
   cat <<MSG
 
 ------------------------------------------------------------
-Stack is up. Verify with:
+Stack is up. Build the sandbox images, then verify:
 
   cd $INSTALL_DIR
+  docker compose exec web druks sandboxes build
   docker compose ps
   docker compose exec web druks doctor
 

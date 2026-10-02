@@ -38,6 +38,15 @@ def main() -> None:
             "changes; never in cron."
         ),
     )
+    sandboxes_parser = subparsers.add_parser("sandboxes", help="Manage sandbox templates.")
+    sandboxes_subparsers = sandboxes_parser.add_subparsers(dest="action", required=True)
+    sandboxes_subparsers.add_parser(
+        "build",
+        help=(
+            "Pull each declared sandbox's base image and build its template. "
+            "Run after every deploy."
+        ),
+    )
     setup_parser = subparsers.add_parser(
         "setup",
         help=(
@@ -145,6 +154,18 @@ def main() -> None:
 
     if args.command == "makemigrations":
         make_app_migration(args.app, args.message, settings.database_url)
+        return
+
+    if args.command == "sandboxes":
+        import asyncio
+
+        from .apps.loader import iter_apps
+        from .chat.sandbox import CHAT_SANDBOX
+        from .sandbox.templates import prepare_sandbox_templates
+
+        for app in iter_apps():
+            app.discover()
+        asyncio.run(prepare_sandbox_templates(extra=(CHAT_SANDBOX,)))
         return
 
     raise AssertionError(f"Unhandled command: {args.command}")

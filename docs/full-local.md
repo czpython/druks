@@ -103,10 +103,12 @@ Agent calls refuse before provisioning if their selected harness is not
 connected. `druks doctor` reports the connection and token expiry for every
 registered harness.
 
-Run the complete preflight:
+Build the sandbox images, then run the complete preflight. Build them again
+after every re-run of the installer:
 
 ```bash
 cd ~/druks
+docker compose exec web druks sandboxes build
 docker compose exec web druks doctor
 ```
 
@@ -184,8 +186,10 @@ Set the image in `~/druks/druks.toml`, then re-run the installer:
 image = "druks-sandbox"
 ```
 
-Existing hosts keep their original image. New acquisitions use the updated
-value.
+A local build needs no registry. After the installer, run
+`docker compose exec web druks sandboxes build` to refresh the image and its
+templates. See [Update / redeploy](deployment.md#update--redeploy) for template
+reuse and cleanup. Existing hosts keep their original image.
 
 ## Webhook caveat
 

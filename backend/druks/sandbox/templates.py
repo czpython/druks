@@ -12,8 +12,8 @@ from .exceptions import TemplateNotFound, TemplateUnavailable
 _TEMPLATE_POLL_SECONDS = 5
 
 
-def get_declared_sandboxes(*sandboxes: Sandbox) -> dict[str, Sandbox]:
-    declared = {sandbox.setup_script_hash: sandbox for sandbox in sandboxes}
+def get_declared_sandboxes(*, extra: tuple[Sandbox, ...] = ()) -> dict[str, Sandbox]:
+    declared = {sandbox.setup_script_hash: sandbox for sandbox in extra}
     for app in loader.iter_apps():
         for workflow in app.workflows():
             if sandbox := workflow.sandbox:
@@ -21,9 +21,9 @@ def get_declared_sandboxes(*sandboxes: Sandbox) -> dict[str, Sandbox]:
     return declared
 
 
-async def prepare_sandbox_templates(*sandboxes: Sandbox) -> None:
+async def prepare_sandbox_templates(*, extra: tuple[Sandbox, ...] = ()) -> None:
     base_image = load_settings().sandbox.image
-    for sandbox in get_declared_sandboxes(*sandboxes).values():
+    for sandbox in get_declared_sandboxes(extra=extra).values():
         app_name = sandbox.package or loader.resolve_workflow_app(sandbox.module)
         label = f"{app_name}-{PurePosixPath(sandbox.setup).stem}".replace("_", "-")
         await sandbox_client.create_template(
@@ -42,8 +42,7 @@ async def get_template_id(sandbox: Sandbox) -> str:
         )
     except TemplateNotFound as error:
         raise TemplateUnavailable(
-            f"sandbox template {setup_script_hash} is missing. "
-            "Reinstall the app or run `druks doctor`."
+            f"sandbox template {setup_script_hash} is missing. Run `druks sandboxes build`."
         ) from error
 
     if template.status == "building":
@@ -59,5 +58,5 @@ async def get_template_id(sandbox: Sandbox) -> str:
 
     raise TemplateUnavailable(
         f"sandbox template {setup_script_hash} has status {template.status!r}. "
-        "Fix its setup and run `druks doctor`."
+        "Fix its setup and run `druks sandboxes build`."
     )

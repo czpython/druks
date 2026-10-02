@@ -78,7 +78,7 @@ async def test_prepare_sandbox_templates_requests_each_declaration(monkeypatch):
     monkeypatch.setattr(
         templates,
         "get_declared_sandboxes",
-        lambda *extra: {sandbox.setup_script_hash: sandbox},
+        lambda extra: {sandbox.setup_script_hash: sandbox},
     )
     monkeypatch.setattr(
         templates,
@@ -93,6 +93,8 @@ async def test_prepare_sandbox_templates_requests_each_declaration(monkeypatch):
         base_image="base",
         label="notes-setup",
     )
+    await templates.prepare_sandbox_templates()
+    assert create_template.await_count == 2
 
 
 async def test_prepare_templates_labels_each_app_and_script(monkeypatch):
@@ -110,7 +112,7 @@ async def test_prepare_templates_labels_each_app_and_script(monkeypatch):
     monkeypatch.setattr(
         templates,
         "get_declared_sandboxes",
-        lambda *extra: {sandbox.setup_script_hash: sandbox for sandbox in sandboxes},
+        lambda extra: {sandbox.setup_script_hash: sandbox for sandbox in sandboxes},
     )
     monkeypatch.setattr(
         templates, "sandbox_client", SimpleNamespace(create_template=create_template)
@@ -191,7 +193,7 @@ async def test_get_template_id_rejects_missing_template(monkeypatch):
         SimpleNamespace(get_template=AsyncMock(side_effect=TemplateNotFound("missing"))),
     )
 
-    with pytest.raises(TemplateUnavailable, match="missing.*druks doctor"):
+    with pytest.raises(TemplateUnavailable, match="missing.*druks sandboxes build"):
         await templates.get_template_id(sandbox)
 
 
@@ -211,7 +213,7 @@ async def test_get_template_id_rejects_failed_template(monkeypatch):
         ),
     )
 
-    with pytest.raises(TemplateUnavailable, match="failed.*druks doctor"):
+    with pytest.raises(TemplateUnavailable, match="failed.*druks sandboxes build"):
         await templates.get_template_id(sandbox)
 
 
@@ -300,11 +302,14 @@ async def test_client_template_primitives_use_sdk_contract(monkeypatch):
     listed = SimpleNamespace(
         id="template-1", status="available", setup_script_hash="hash-1", base_image="base"
     )
+    previous = SimpleNamespace(
+        id="previous-digest", status="available", setup_script_hash="hash-1", base_image="base"
+    )
 
     class FakeAPI:
         def __init__(self):
             self.create_template = AsyncMock(return_value=created)
-            self.list_templates = AsyncMock(return_value=[other_base, listed])
+            self.list_templates = AsyncMock(return_value=[other_base, listed, previous])
             self.aclose = AsyncMock()
 
     api = FakeAPI()
