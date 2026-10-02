@@ -55,6 +55,8 @@ from .constants import (
     DELIVERY_FAILED_MESSAGE,
     FAILURE_MESSAGE,
     INTERNAL_MESSAGES_PROMPT,
+    NO_RESULT_MESSAGE,
+    NO_RESULT_ON_SUBJECT_MESSAGE,
     RESULT_MESSAGE,
     TRANSCRIPTION_FAILED_MESSAGE,
     VOICE_NOTE_MARKER,
@@ -583,13 +585,17 @@ async def finish_turn(
 
 
 async def report_result(session: AsyncSession, run: Run, *, result) -> str | None:
-    """Report a run's result to the chat that started it, when the run waited for an
-    answer or returned something. A run that returns nothing put its output where it
-    belongs, such as a review that it posted. Returns the conversation to deliver."""
-    if run.input_requested_at or result:
+    """Report a run's result to the chat that started it, whether or not the run waited
+    for an answer. A run that returns nothing put its output where it belongs, such as a
+    review that it posted; the chat still hears that it ended, so the agent keeps its
+    promise to report back. Returns the conversation to deliver."""
+    if result is None and run.subject_key:
+        body = NO_RESULT_ON_SUBJECT_MESSAGE.format(run=run.id, subject=run.subject_key)
+    elif result is None:
+        body = NO_RESULT_MESSAGE.format(run=run.id)
+    else:
         body = RESULT_MESSAGE.format(run=run.id, result=to_json(result, fallback=str).decode())
-        return await report_outcome(session, run, body)
-    return
+    return await report_outcome(session, run, body)
 
 
 async def report_failure(session: AsyncSession, run: Run, *, failure: str) -> str | None:
