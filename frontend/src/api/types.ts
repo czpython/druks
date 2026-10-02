@@ -154,7 +154,7 @@ export interface ArtifactContent {
 // One run on the subject's timeline, with its agent calls in execution order.
 export interface RunSummary {
   id: string
-  // The durable kind ("software_factory.build"); label is its backend display name ("Build").
+  // The durable kind ("field_notes.summarize"); label is its backend display name ("Summarize").
   kind: string
   label: string
   // The run this one was retried from; null for a run that was started.
@@ -698,6 +698,7 @@ export interface Service {
   facts: Record<string, string>
   connectedAt: string | null
   fields: ServiceField[]
+  createUrl: string
   isOauth: boolean
   scopes: string[]
   usedBy: string[]

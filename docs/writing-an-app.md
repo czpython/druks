@@ -1379,6 +1379,8 @@ async def verify(cls, settings: Settings) -> dict:
 If the appliance is healthy without the service, set `required = False` on the
 class. Doctor then reports a note instead of pending setup.
 
+The card renders `description` as Markdown, so it can link to a setup guide.
+
 Key the service for the integration that your app consumes (`Gmail`), not the
 provider (`Google`). A second integration on the same provider declares its own
 service. The operator decides whether each card uses a shared or narrow

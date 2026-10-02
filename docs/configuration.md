@@ -292,7 +292,7 @@ in Postgres. They do not come from TOML, the environment, or a PEM file.
 Until an operator connects GitHub, agent runs stop with a direct message.
 `druks doctor` reports that no GitHub connection exists.
 
-Connect it from **Settings → Connections → Services**. **Create GitHub App**
+Connect it from **Settings → Connections → Services**. **Create App**
 starts the GitHub manifest flow. Enter a GitHub organization, or leave the field empty for a
 personal account. Accept the request on GitHub. Druks stores the credentials and
 opens the installation page. Install the GitHub App on the applicable
@@ -364,13 +364,34 @@ callback URL to the App on GitHub.
 ### Review identity (optional)
 
 The bundled `software_factory` app declares an optional service, **Github
-Reviewer**: a second GitHub App, so GitHub accepts approvals on Druks-authored
-pull requests. Connect it in **Settings → Connections → Services** with the App
-ID and its PEM private key, both stored encrypted. Leave it unconnected and
-reviews publish as operator comments. Connect it and reviews publish as
-approval reviews, and a review sandbox clones as it. The reviewer App needs
-read access to metadata and contents, read/write access to pull requests, and
-no webhook.
+Reviewer**. GitHub does not let an App approve a pull request that it authored.
+Without a reviewer App, reviews publish as comments from the operator App.
+Connect a second App to let reviews approve pull requests and request changes.
+
+Open **Settings → Connections → Services → Github Reviewer** and select
+**Create App**. The flow is the same as for the operator App. Install the
+reviewer App on every repository that has the operator App, because builds also
+post their reviews through it.
+
+To register the reviewer App manually:
+
+1. In GitHub, open your account or organization settings. Select
+   **Developer settings → GitHub Apps → New GitHub App**.
+2. Enter a unique App name and your Druks homepage URL. Leave the callback URL
+   empty and clear **Active** under **Webhook**. The reviewer receives no
+   webhooks and signs in nobody.
+3. Set these repository permissions: **Metadata: Read-only**,
+   **Contents: Read-only**, and **Pull requests: Read and write**.
+4. Create the App. On its settings page, record the **App ID** and select
+   **Generate a private key**. Keep the downloaded PEM file.
+5. Select **Install App**. Install it on every repository that has the operator
+   App.
+6. On the **Github Reviewer** card, select **Connect an existing App**. Paste the
+   App ID and the full PEM private key. Druks encrypts the private key before
+   storage.
+
+See GitHub's [App registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app)
+for account and organization registration details.
 
 `GITHUB_API_URL` defaults to `https://api.github.com` and can point every
 client at another compatible GitHub API endpoint.

@@ -1,10 +1,14 @@
+import html
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from conftest import connect_service
 from druks.accounts.models import Account
+from druks.api.server import app
 from druks.apps.settings import field_kind, field_multiline
 from druks.contrib.software_factory import subscribers  # noqa: F401 — the import registers it
 from druks.contrib.software_factory.app import check_review_identity
@@ -205,6 +209,25 @@ def test_the_reviewer_is_an_optional_service_the_app_declares():
     assert field_kind(fields["private_key"]) == "secret"
     assert field_multiline(fields["private_key"])
     assert not field_multiline(fields["app_id"])
+
+
+async def test_the_reviewer_app_is_created_with_no_webhook_and_no_sign_in(
+    druks_client: httpx.AsyncClient, tmp_path
+):
+    app.state.settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
+
+    page = (await druks_client.get("/api/core/services/github_reviewer/manifest")).text
+
+    manifest = json.loads(html.unescape(page.partition('value="')[2].partition('">')[0]))
+    assert manifest["redirect_url"] == (
+        "https://druks.example/api/core/services/github_reviewer/manifest/callback"
+    )
+    assert not {"hook_attributes", "callback_urls", "default_events"} & set(manifest)
+    assert manifest["default_permissions"] == {
+        "metadata": "read",
+        "contents": "read",
+        "pull_requests": "write",
+    }
 
 
 async def test_review_identity_check_is_healthy_connected_or_not(druks_db):

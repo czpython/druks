@@ -73,6 +73,17 @@ class Github(Service):
         webhook_secret: SecretStr = Field(title="Webhook secret")
 
     @classmethod
+    def get_manifest(cls, *, endpoint: str, webhook_base: str) -> dict[str, Any]:
+        """The App to create, for GitHub's create-from-manifest page."""
+        return {
+            **cls.manifest,
+            "url": endpoint,
+            "redirect_url": f"{endpoint}{cls.get_create_url()}/callback",
+            "callback_urls": [f"{endpoint}/api/oauth/callback"],
+            "hook_attributes": {"url": f"{webhook_base}/_external/github/events/", "active": True},
+        }
+
+    @classmethod
     async def verify(cls, settings: Settings) -> dict[str, Any]:
         client = GitHubClient(
             app_id=settings.app_id,

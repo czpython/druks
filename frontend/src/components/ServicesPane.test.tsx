@@ -35,6 +35,7 @@ const disconnected: Service = {
   facts: {},
   connectedAt: null,
   fields: githubFields,
+  createUrl: '/api/core/services/github/manifest',
   isOauth: false,
   scopes: [],
   usedBy: [],
@@ -72,6 +73,7 @@ const pasteOnly: Service = {
       multiline: false,
     },
   ],
+  createUrl: '',
   isOauth: false,
   scopes: [],
   usedBy: [],
@@ -111,7 +113,7 @@ function renderPane() {
 }
 async function openGithubForm() {
   fireEvent.click(await screen.findByRole('button', { name: 'Configure GitHub' }))
-  fireEvent.click(await screen.findByText('Connect an existing GitHub App'))
+  fireEvent.click(await screen.findByText('Connect an existing App'))
 }
 
 afterEach(() => {
@@ -139,7 +141,16 @@ describe('ServicesPane', () => {
 
     expect(await screen.findByText('Not connected')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledWith('/api/services/github', expect.objectContaining({ method: 'DELETE' }))
-    expect(screen.getByRole('button', { name: 'Create GitHub App' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Create App' })).toBeTruthy()
+  })
+
+  it('renders a link in a service description', async () => {
+    stubFetch([[{ ...pasteOnly, description: 'Read [the setup guide](https://docs.example/setup).' }]])
+    renderPane()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure Google OAuth client' }))
+
+    expect(screen.getByRole('link', { name: 'the setup guide' }).getAttribute('href')).toBe('https://docs.example/setup')
   })
 
   it('shows compact rows with no credential fields on the overview', async () => {
@@ -170,15 +181,15 @@ describe('ServicesPane', () => {
     expect(screen.queryByLabelText('Client ID')).toBeNull()
   })
 
-  it('keeps Create GitHub App primary and paste behind the existing-app disclosure', async () => {
+  it('keeps Create App primary and paste behind the existing-app disclosure', async () => {
     stubFetch([[disconnected]])
     renderPane()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Configure GitHub' }))
-    expect(screen.getByText('Create GitHub App')).toBeTruthy()
+    expect(screen.getByText('Create App')).toBeTruthy()
     expect(screen.queryByLabelText('App ID')).toBeNull()
 
-    fireEvent.click(screen.getByText('Connect an existing GitHub App'))
+    fireEvent.click(screen.getByText('Connect an existing App'))
     expect(screen.getByLabelText('App ID')).toBeTruthy()
     expect(screen.getByLabelText('Private key (PEM)')).toBeTruthy()
     expect(screen.getByLabelText('Webhook secret')).toBeTruthy()
@@ -295,7 +306,7 @@ describe('ServicesPane', () => {
     renderPane()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Configure GitHub' }))
-    fireEvent.click(screen.getByText('Create GitHub App'))
+    fireEvent.click(screen.getByText('Create App'))
     expect(open).toHaveBeenCalledWith('/api/core/services/github/manifest')
 
     act(() => {

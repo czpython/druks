@@ -44,6 +44,7 @@ class ServiceResponse(Schema):
     facts: dict[str, Any]
     connected_at: datetime | None
     fields: list[ServiceFieldSpec]
+    create_url: str
     is_oauth: bool
     scopes: list[str]
     used_by: list[str]
@@ -65,6 +66,7 @@ class ServiceResponse(Schema):
             facts=row.identity if row else {},
             connected_at=row.updated_at if row else None,
             fields=[ServiceFieldSpec(**spec) for spec in service.connect_fields()],
+            create_url=service.get_create_url() if service.manifest else "",
             is_oauth=bool(service.token_endpoint),
             scopes=list(service.scopes()),
             used_by=[declaration.label for declaration in service.declarations()],

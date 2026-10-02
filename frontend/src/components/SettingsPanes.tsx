@@ -12,6 +12,7 @@ import { Plus } from 'lucide-react'
 import { api } from '../api/client'
 import { TextInput } from './Control'
 import { Menu } from './Menu'
+import { Markdown } from './Markdown'
 import { SettingField } from './SettingField'
 import { ConnectSteps, useProviderConnect } from './ProviderConnectFlow'
 import {
@@ -761,8 +762,8 @@ export function ServicesPane() {
   })
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
 
-  // A guided create flow (the GitHub App manifest tab) lands on a callback
-  // page, which broadcasts the service name once the credentials are stored.
+  // A service's create flow (its createUrl tab) lands on a callback page,
+  // which broadcasts the service name once the credentials are stored.
   useEffect(() => {
     const channel = new BroadcastChannel('druks-service-connect')
     channel.onmessage = () =>
@@ -916,13 +917,9 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
       .finally(() => setBusy(false))
   }
 
-  const createGithubApp = (
-    <button
-      className="set-btn primary"
-      onClick={() => window.open('/api/core/services/github/manifest')}
-      disabled={busy}
-    >
-      Create GitHub App
+  const createApp = (
+    <button className="set-btn primary" onClick={() => window.open(service.createUrl)} disabled={busy}>
+      Create App
     </button>
   )
   const createSlackApp = (
@@ -943,7 +940,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
           <h2 className="mcp-pane-title">{service.title}</h2>
           <ServiceStatus connected={service.connected} />
         </div>
-        <p className="mcp-pane-sub">{service.description}</p>
+        <Markdown className="mcp-pane-sub" source={service.description} />
       </header>
       {error && (
         <div className="mcp-error" role="alert">
@@ -992,11 +989,11 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
       )}
       {!service.connected && !formOpen && (
         <section className="mcp-section">
-          {service.slug === 'github' ? (
+          {service.createUrl ? (
             <>
-              <div>{createGithubApp}</div>
+              <div>{createApp}</div>
               <button type="button" className="svc-alt" onClick={() => setFormOpen(true)}>
-                Connect an existing GitHub App
+                Connect an existing App
               </button>
             </>
           ) : (
@@ -1011,9 +1008,9 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
       )}
       {formOpen && (
         <section className="mcp-section">
-          {service.slug === 'github' && service.connected && (
+          {service.createUrl && service.connected && (
             <>
-              <div>{createGithubApp}</div>
+              <div>{createApp}</div>
               <p className="mcp-help">…or paste an existing App&apos;s credentials:</p>
             </>
           )}

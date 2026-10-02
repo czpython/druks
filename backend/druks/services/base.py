@@ -181,6 +181,9 @@ class Service:
     # connection for the same owner updates that row; a revoked row becomes
     # live again. When empty, each fresh sign-in creates a new connection.
     identity_key: ClassVar[str] = ""
+    # The app that the create page registers at the provider. A service with one
+    # offers that page on its card; without one, the person pastes credentials.
+    manifest: ClassVar[dict[str, Any]] = {}
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -252,6 +255,11 @@ class Service:
             }
             for name, field in cls.settings_model.model_fields.items()
         ]
+
+    @classmethod
+    def get_create_url(cls) -> str:
+        """The page that creates the provider's app from ``manifest`` and connects it."""
+        return f"/api/core/services/{cls.slug}/manifest"
 
     @classmethod
     async def get(cls) -> VaultSecret:
