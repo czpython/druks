@@ -29,6 +29,12 @@ async def test_exec_runs_the_command_in_a_box_with_the_repo_cloned(druks_db, mon
         yield box
 
     monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", ephemeral)
+
+    @asynccontextmanager
+    async def lease(self, *, host_id):
+        yield
+
+    monkeypatch.setattr("druks.sandbox.client.Client.lease", lease)
     clone = AsyncMock()
     monkeypatch.setattr("druks.workspaces.checkout.ensure", clone)
     run = await seed_run(druks_db, kind=Survey.kind, run_id="wf-9")

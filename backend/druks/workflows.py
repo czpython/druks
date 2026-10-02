@@ -65,12 +65,13 @@ from druks.durable.schemas import (
     SubjectSummary,
 )
 from druks.events.models import Event
-from druks.harnesses.exceptions import HarnessError
+from druks.harnesses.exceptions import HarnessError, HarnessSandboxProvisioningError
 from druks.models import StoredSubject, snake_name
 from druks.notifications.outbox import send_notification
 from druks.sandbox.client import provisioning_key, sandbox_client
-from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
+from druks.sandbox.constants import WORKFLOW_HOST_LEASE_SECONDS
 from druks.sandbox.datastructures import Sandbox
+from druks.sandbox.exceptions import HostGone
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
 from druks.signals import publish
@@ -854,8 +855,6 @@ class Workflow:
         # The chat conversation whose tool call started the run, if one did.
         self.conversation_id: str | None = None
         self.journal = self.journal_class()
-        # The run's warm VM, provisioned lazily and reaped at segment boundaries;
-        # its lease expiry decides when it must rotate.
         self._host: Host | None = None
         self._host_secrets_hash = ""
 
@@ -975,9 +974,18 @@ class Workflow:
                 secrets={**secrets, **entries},
                 template=template,
                 identity=identity,
+                lease_seconds=WORKFLOW_HOST_LEASE_SECONDS,
             )
-        async with vm as box:
-            yield await self.get_workspace(box)
+        try:
+            async with vm as box, sandbox_client.lease(host_id=box.id):
+                yield await self.get_workspace(box)
+        except HostGone as error:
+            await self._reap_run()
+            raise HarnessSandboxProvisioningError(str(error)) from error
+        except HarnessSandboxProvisioningError:
+            if host_id:
+                await self._reap_run()
+            raise
 
     async def exec(
         self, command: list[str], *, timeout: float = 600.0
@@ -1011,13 +1019,6 @@ class Workflow:
             if identity:
                 self._host = await sandbox_client.reattach(host_id=identity.host_id)
                 self._host_secrets_hash = config.secrets_hash
-        if self._host and self._host.expires_at:
-            remaining = (self._host.expires_at - datetime.now(UTC)).total_seconds()
-            if remaining < SANDBOX_HOST_ROTATE_BEFORE_SECONDS:
-                # The lease can't cover another worst-case call; rotate to a fresh
-                # host. Safe because each call rebuilds its workspace on whatever
-                # host it lands on (state lives in git), so a bare VM is fine.
-                await self._reap_run()
         if self._host and self._host_secrets_hash != config.secrets_hash:
             # Drukbox binds entries at creation.
             await self._reap_run()
@@ -1045,6 +1046,7 @@ class Workflow:
                 secrets={**config.secrets, **entries},
                 template=template,
                 identity=identity,
+                lease_seconds=WORKFLOW_HOST_LEASE_SECONDS,
             )
             self._host_secrets_hash = config.secrets_hash
         return self._host.id
