@@ -21,7 +21,7 @@ from druks.harnesses.exceptions import HarnessSandboxProvisioningError
 from druks.settings import load_settings
 
 from .constants import SANDBOX_HOST_LEASE_SECONDS
-from .exceptions import HostGone, SandboxError, TemplateNotFound
+from .exceptions import HostGone, SandboxError, SandboxReleaseError, TemplateNotFound
 from .host import Host
 from .layout import get_helper_script_path
 from .models import SandboxIdentity
@@ -305,19 +305,29 @@ class Client:
         finally:
             await api.aclose()
 
-    async def release(self, *, host_id: str) -> None:
-        """Terminate the VM; never raises. The identity dies first, so the
-        denial never waits on the VM."""
+    async def release(self, *, host_id: str, require_deleted: bool = False) -> None:
+        """Revoke the identity and delete the sandbox.
+
+        Cleanup logs failures. Recovery sets ``require_deleted`` to stop until
+        the control plane confirms deletion.
+        """
         api = self._api()
         settings = load_settings()
 
         try:
-            await self._revoke_identity(host_id)
+            if require_deleted:
+                await SandboxIdentity.revoke_for_host(_step_engine(), host_id)
+            else:
+                await self._revoke_identity(host_id)
             try:
                 await api.delete_host(host_id)
             except SandboxNotFoundError:
                 pass
-            except Exception:  # noqa: BLE001 — never raises
+            except Exception as error:  # noqa: BLE001 — cleanup logs; recovery refuses
+                if require_deleted:
+                    raise SandboxReleaseError(
+                        f"Could not delete abandoned sandbox {host_id}: {error}"
+                    ) from error
                 logger.exception("failed to delete sandbox host %s", host_id)
             key_path = settings.sandbox_keys_dir / host_id
             try:

@@ -9,6 +9,10 @@ class SandboxDownloadError(SandboxError):
     pass
 
 
+class SandboxReleaseError(SandboxError):
+    """The control plane could not confirm that a sandbox was deleted."""
+
+
 class SetupScriptError(SandboxError):
     """A declared setup path cannot resolve to package bytes."""
 
