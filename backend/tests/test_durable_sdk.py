@@ -99,6 +99,13 @@ class Gadget(Subject):
     pass
 
 
+@pytest.fixture(autouse=True)
+def sandbox_lease(monkeypatch):
+    monkeypatch.setattr(
+        "druks.sandbox.client.Client.lease", lambda self, **kwargs: contextlib.nullcontext()
+    )
+
+
 @pytest.fixture(scope="module", autouse=True)
 async def runtime():
     original_database_url = os.environ.get("DRUKS_DATABASE_URL")

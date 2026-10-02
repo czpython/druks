@@ -83,7 +83,7 @@ async def test_recovery_deletes_the_orphan_before_preparing_a_new_workspace(
             SandboxNotFoundError("gone") if already_deleted else None,
         ]
     )
-    api = SimpleNamespace(delete_host=delete, aclose=AsyncMock())
+    api = SimpleNamespace(delete_host=delete, renew_host=AsyncMock(), aclose=AsyncMock())
     monkeypatch.setattr(Client, "_api", lambda self: api)
     monkeypatch.setattr(Client, "provision", provision)
     monkeypatch.setattr(Client, "ephemeral", ephemeral)

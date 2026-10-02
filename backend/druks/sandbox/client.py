@@ -20,7 +20,11 @@ from druks.durable.engine import _step_engine
 from druks.harnesses.exceptions import HarnessSandboxProvisioningError
 from druks.settings import load_settings
 
-from .constants import SANDBOX_HOST_LEASE_SECONDS
+from .constants import (
+    SANDBOX_HOST_LEASE_SECONDS,
+    WORKFLOW_HOST_LEASE_SECONDS,
+    WORKFLOW_HOST_RENEW_SECONDS,
+)
 from .exceptions import HostGone, SandboxError, SandboxReleaseError, TemplateNotFound
 from .host import Host
 from .layout import get_helper_script_path
@@ -55,6 +59,7 @@ class Client:
         secrets: dict[str, Secret | Issuer] | None = None,
         template: str | None = None,
         identity: SandboxIdentity | None = None,
+        lease_seconds: int = SANDBOX_HOST_LEASE_SECONDS,
     ) -> AsyncIterator[Host]:
         """Acquire, yield, release: for a sandbox bound to one context manager body."""
         host_id: str | None = None
@@ -68,6 +73,7 @@ class Client:
                 secrets=secrets,
                 template=template,
                 identity=identity,
+                lease_seconds=lease_seconds,
             ) as host:
                 host_id = host.id
                 yield host
@@ -86,6 +92,7 @@ class Client:
         secrets: dict[str, Secret | Issuer] | None = None,
         template: str | None = None,
         identity: SandboxIdentity | None = None,
+        lease_seconds: int = SANDBOX_HOST_LEASE_SECONDS,
     ) -> AsyncIterator[Host]:
         """Create a host and yield it with SSH connected. Exit closes SSH, not
         the VM. ``identity`` binds to the box, or dies when no box comes."""
@@ -99,7 +106,7 @@ class Client:
             else:
                 image = image_override or settings.sandbox.image
             # drukbox reaps the host at lease end, so a dead worker still frees its VM.
-            expires_at = datetime.now(UTC) + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
+            expires_at = datetime.now(UTC) + timedelta(seconds=lease_seconds)
             try:
                 try:
                     record = await api.create_host(
@@ -124,7 +131,7 @@ class Client:
                 raise
             logger.info("sandbox host created id=%s", record.id)
             if identity:
-                await identity.bind(record.id)
+                await identity.bind(record.id, expires_at=expires_at)
             key_path = settings.sandbox_keys_dir / record.id
             if record.private_key:
                 settings.sandbox_keys_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -239,6 +246,7 @@ class Client:
         secrets: dict[str, Secret | Issuer] | None = None,
         template: str | None = None,
         identity: SandboxIdentity | None = None,
+        lease_seconds: int = SANDBOX_HOST_LEASE_SECONDS,
     ) -> Host:
         """Create a host and return a handle that connects lazily. The caller
         owns ``release``."""
@@ -250,6 +258,7 @@ class Client:
             secrets=secrets,
             template=template,
             identity=identity,
+            lease_seconds=lease_seconds,
         ) as host:
             return host
 
@@ -304,6 +313,42 @@ class Client:
             await api.renew_host(host_id, expires_at=expires_at)
         finally:
             await api.aclose()
+
+    @asynccontextmanager
+    async def lease(self, *, host_id: str) -> AsyncIterator[None]:
+        """Keep a workflow sandbox and its identity live while the caller uses it."""
+        finished = asyncio.Event()
+
+        async def renew() -> None:
+            expires_at = datetime.now(UTC) + timedelta(seconds=WORKFLOW_HOST_LEASE_SECONDS)
+            try:
+                await self.set_expiry(host_id=host_id, expires_at=expires_at)
+            except (SandboxAPIError, SandboxUnavailableError) as error:
+                raise HarnessSandboxProvisioningError(
+                    f"sandbox host {host_id} lease renewal failed: {error}"
+                ) from error
+            await SandboxIdentity.set_expiry_for_host(_step_engine(), host_id, expires_at)
+
+        async def renew_while_active() -> None:
+            while True:
+                try:
+                    await asyncio.wait_for(finished.wait(), WORKFLOW_HOST_RENEW_SECONDS)
+                    return
+                except TimeoutError:
+                    await renew()
+
+        await renew()
+        try:
+            async with asyncio.TaskGroup() as tasks:
+                tasks.create_task(renew_while_active())
+                try:
+                    yield
+                finally:
+                    finished.set()
+        except ExceptionGroup as errors:
+            if len(errors.exceptions) == 1:
+                raise errors.exceptions[0] from None
+            raise
 
     async def release(self, *, host_id: str, require_deleted: bool = False) -> None:
         """Revoke the identity and delete the sandbox.
