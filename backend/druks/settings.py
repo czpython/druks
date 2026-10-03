@@ -178,6 +178,10 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://druks:druks@localhost:5432/druks",
         alias="DRUKS_DATABASE_URL",
     )
+    # SQLAlchemy reads a pool size of 0 as unbounded.
+    database_pool_size: int = Field(default=20, gt=0, alias="DRUKS_DATABASE_POOL_SIZE")
+    database_max_overflow: int = Field(default=30, ge=0, alias="DRUKS_DATABASE_MAX_OVERFLOW")
+    dbos_pool_size: int = Field(default=20, gt=0, alias="DRUKS_DBOS_POOL_SIZE")
 
     # Transport only — GitHub credentials live on the service-identity row,
     # not in Settings; this points every client at a compatible API endpoint.

@@ -131,12 +131,20 @@ rejects execution settings. The installation API rejects timezone changes.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DRUKS_DATABASE_URL` | local `druks` Postgres | Runtime and DBOS database |
+| `DRUKS_DATABASE_POOL_SIZE` | `20` | Connections each process keeps open for requests and workflow steps |
+| `DRUKS_DATABASE_MAX_OVERFLOW` | `30` | Extra connections each process opens under load and closes after use |
+| `DRUKS_DBOS_POOL_SIZE` | `20` | Connections each process keeps for DBOS |
 | `DRUKS_TEST_DATABASE_URL` | local `druks_test` Postgres | What the shipped pytest fixtures use — never the runtime's |
 | `DRUKS_TEST_REDIS_URL` | `redis://127.0.0.1:6379/15` | What the shipped pytest fixtures flush |
 | `DRUKS_REDIS_URL` | `redis://127.0.0.1:6379/0` | Short-lived coordination and caches |
 | `DRUKS_DATA_DIR` | `/var/lib/druks` | Logs, artifacts, installed skills |
 | `DRUKS_HARNESS_CONFIG_ROOT` | `~/.config/druks/harnesses` | Optional harness configuration copied into sandboxes |
 | `DRUKS_LOG_LEVEL` | `INFO` | Python and DBOS log level |
+
+Each Druks process can open up to `DRUKS_DATABASE_POOL_SIZE` +
+`DRUKS_DATABASE_MAX_OVERFLOW` + `DRUKS_DBOS_POOL_SIZE` + 1 Postgres connections.
+The extra connection is the DBOS notification listener. With the defaults, this
+is 71 of the 100 connections that Postgres allows by default.
 
 Postgres stores durable state. Redis does not store workflow state. It supports
 short-lived concerns including webhook delivery claims, OAuth state and token
@@ -181,8 +189,8 @@ order:
    can access Druks. Account values are case-insensitive.
 3. **JWT mode (`jwt`).** This mode uses the assertion channel from `header` mode, but
    its value is a signed JWT. Druks validates the RS256 signature against
-   `identity.jwks_url`. It caches keys for five minutes and gets new keys after
-   rotation.
+   `identity.jwks_url`. It caches keys for one hour. A token signed with an
+   unknown key ID makes Druks fetch the keys again at once.
 
    The `exp`, `iss`, and `aud` claims must match the configuration.
    Druks resolves `identity.jwt_identity_claim` in the verified payload and maps

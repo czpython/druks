@@ -44,6 +44,7 @@ def init_dbos() -> None:
     config: DBOSConfig = {
         "name": "druks",
         "system_database_url": url,
+        "sys_db_pool_size": settings.dbos_pool_size,
         "dbos_system_schema": DBOS_SYSTEM_SCHEMA,
         "log_level": settings.log_level,
         # One constant application version. DBOS recovers only the runs whose version

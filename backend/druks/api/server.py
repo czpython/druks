@@ -32,7 +32,7 @@ from druks.database import (
     create_async_engine_from_url,
     session_scope,
 )
-from druks.durable.engine import init_dbos, launch, shutdown
+from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.durable.exceptions import AgentCallNotFound
 from druks.events.routes import router as events_router
 from druks.exceptions import ObjectNotFound
@@ -67,6 +67,8 @@ def configure_state(app: FastAPI, settings: Settings) -> None:
     # Bind the ambient (``scoped_session``) factory to this engine so
     # request handlers can use ``db_session()`` without per-call setup.
     configure_session(app.state.engine)
+    # Steps run on the serving loop, so they share the request pool.
+    configure_engine(app.state.engine)
 
 
 @asynccontextmanager

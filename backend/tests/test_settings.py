@@ -2,6 +2,8 @@ import re
 from pathlib import Path
 
 import pytest
+from druks import database
+from druks.durable import engine as durable_engine
 from druks.settings import Settings, ensure_data_dirs
 from druks.testing import make_settings
 from pydantic import ValidationError
@@ -184,3 +186,20 @@ def test_development_example_pins_the_installation_timezone(tmp_path, monkeypatc
     monkeypatch.setenv("DRUKS_CONFIG", str(config))
     monkeypatch.setenv("TIMEZONE", "Asia/Tokyo")
     assert Settings(secrets={"secrets_key": _SECRETS_KEY}).timezone == "UTC"
+
+
+def test_pool_settings_reach_the_app_engine_and_dbos(tmp_path, monkeypatch):
+    settings = make_settings(
+        tmp_path, database_pool_size=3, database_max_overflow=4, dbos_pool_size=5
+    )
+    monkeypatch.setattr(database, "load_settings", lambda: settings)
+    monkeypatch.setattr(durable_engine, "load_settings", lambda: settings)
+    monkeypatch.setattr(durable_engine, "_initialized", False)
+    configs = []
+    monkeypatch.setattr(durable_engine, "DBOS", lambda config: configs.append(config))
+
+    pool = database.create_async_engine_from_url(settings.database_url).pool
+    durable_engine.init_dbos()
+
+    assert (pool.size(), pool._max_overflow) == (3, 4)
+    assert configs[0]["sys_db_pool_size"] == 5

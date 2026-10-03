@@ -98,7 +98,7 @@ services:
         "--host",
         "${DRUKS_WEB_BIND_HOST:-127.0.0.1}",
         "--port",
-        "8001",
+        "${DRUKS_WEB_PORT:-8001}",
       ]
 
   drukbox:
@@ -206,7 +206,7 @@ services:
     network_mode: host
     environment:
       POSTGRES_USER: ${DRUKS_POSTGRES_USER:-druks}
-      POSTGRES_PASSWORD: ${DRUKS_POSTGRES_PASSWORD:?set DRUKS_POSTGRES_PASSWORD in .env — druks setup generates one}
+      POSTGRES_PASSWORD: ${DRUKS_POSTGRES_PASSWORD}
       POSTGRES_DB: ${DRUKS_POSTGRES_DB:-druks}
     volumes:
       - postgres_data:/var/lib/postgresql/data

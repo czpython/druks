@@ -114,14 +114,14 @@ def create_async_engine_from_url(database_url: str):
     # it. The pool serves every concurrent run's steps plus request handling
     # at once: a modest steady pool, with overflow doing the burst work —
     # overflow connections open on demand and close on return, so the ceiling
-    # is high while idle cost is not. Ceiling 50 keeps the appliance (with
-    # DBOS's two engines at 20 each) inside Postgres's default 100 connections.
+    # is high while idle cost is not.
+    settings = load_settings()
     return create_async_engine(
         database_url,
         pool_pre_ping=True,
         pool_timeout=5,
-        pool_size=20,
-        max_overflow=30,
+        pool_size=settings.database_pool_size,
+        max_overflow=settings.database_max_overflow,
     )
 
 
