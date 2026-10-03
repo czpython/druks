@@ -1,3 +1,4 @@
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -17,10 +18,11 @@ from druks.db import db_session
 from druks.durable.models import AgentCall
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
-from druks.harnesses.config import check_config, get_config, get_default_config
+from druks.harnesses.config import AgentConfig, check_config, get_config, get_default_config
 from druks.harnesses.exceptions import AgentConfigError, HarnessNotConnectedError
 from druks.harnesses.models import ProviderCatalog
 from druks.harnesses.opencode import OpenCodeHarness
+from druks.harnesses.pi import PiHarness
 from druks.harnesses.providers import OpenAiProvider
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.secrets.datastructures import Audience
@@ -204,7 +206,7 @@ async def test_a_subscription_agent_refuses_without_the_actors_own_subscription(
 
 async def test_a_key_agent_runs_on_the_installations_key_for_anyone(druks_db):
     actor = await connect_anthropic_subscription("a@example.com")
-    pasted = await _key()
+    await _key()
     await SettingsOverride.set_agent_billing(druks_db, CONFIG_PROBE.id, "api_key")
 
     as_actor = await get_config(druks_db, CONFIG_PROBE.id, actor.account_id)
@@ -214,10 +216,39 @@ async def test_a_key_agent_runs_on_the_installations_key_for_anyone(druks_db):
     assert (as_actor.secrets, as_actor.subscription) == ({"anthropic": _SHARED_ENTRY}, None)
     assert (unattended.secrets, unattended.identity) == ({"anthropic": _SHARED_ENTRY}, {})
     # The entries' identity is the pasted key, with no secret material.
-    assert as_actor.secrets_id == f"anthropic.{pasted.updated_at:%Y%m%dT%H%M%S}"
     assert "sk-shared" not in as_actor.secrets_id
     # The key is nobody's, so its calls are charged to the installation.
     assert as_actor.charged_account_id is None
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "provider", "is_shared"),
+    [
+        (PiHarness, CodexHarness, "openai", False),
+        (ClaudeHarness, OpenCodeHarness, "anthropic", True),
+    ],
+)
+def test_a_key_box_serves_another_harness_only_when_it_reads_the_same_variable(
+    first, second, provider, is_shared
+):
+    key = SimpleNamespace(audience_name=provider, updated_at=datetime(2026, 10, 1))
+    first_id, second_id = (
+        AgentConfig(
+            harness_class=harness,
+            model=f"{provider}/model",
+            subscription=None,
+            api_key=key,
+            secrets=harness.get_secrets(provider, "sk-key"),
+            secret_refs=[],
+            identity={},
+            billing="api_key",
+            effort="high",
+            timeout=60,
+            fast_mode=False,
+        ).secrets_id
+        for harness in (first, second)
+    )
+    assert (first_id == second_id) is is_shared
 
 
 async def test_a_key_agent_refuses_without_the_key(druks_db):

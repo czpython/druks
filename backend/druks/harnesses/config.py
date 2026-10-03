@@ -1,3 +1,5 @@
+import hashlib
+import json
 from dataclasses import dataclass
 
 from drukbox_sdk import Secret
@@ -47,10 +49,15 @@ class AgentConfig:
 
     @property
     def secrets_id(self) -> str:
-        """What a box created for this config holds: the pasted key, or the
-        subscriptions it fetches."""
+        """What a box created for this config holds: a digest of the pasted key's version
+        and its entries without the value, or the subscriptions it fetches."""
         if self.secrets:
-            return f"{self.api_key.audience_name}.{self.api_key.updated_at:%Y%m%dT%H%M%S}"
+            # Harnesses can read one key from different variables, and a box keeps the
+            # entries it was created with.
+            version = f"{self.api_key.audience_name}.{self.api_key.updated_at:%Y%m%dT%H%M%S}"
+            entries = {name: entry.get_service() for name, entry in self.secrets.items()}
+            canonical = json.dumps([version, entries], sort_keys=True)
+            return hashlib.sha256(canonical.encode()).hexdigest()
         return ".".join(ref.secret_id for ref in self.secret_refs)
 
     @property
