@@ -82,7 +82,7 @@ async def _runner(
             await set_run_phase("provisioning_vm")
         # A box that fetches gets its own identity, and the key names it. A
         # replay finds the box through the identity, above.
-        identity, entries, key = None, {}, config.secrets_id
+        identity, entries, key = None, {}, config.secrets_hash
         if refs:
             identity, entries = await SandboxIdentity.create(
                 session,
@@ -90,6 +90,7 @@ async def _runner(
                 run_id=workflow_id,
                 scoped_to=step,
                 secret_refs=refs,
+                secrets_hash=config.secrets_hash,
             )
             key = identity.id
         vm = sandbox_client.ephemeral(

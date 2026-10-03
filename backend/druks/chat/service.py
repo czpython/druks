@@ -128,7 +128,12 @@ async def get_sandbox(
     await session.commit()
     async with lock(f"chat:account:{account_id}"):
         identity = await SandboxIdentity.lookup(
-            session, account_id=account_id, run_id=None, scoped_to="chat", secret_refs=refs
+            session,
+            account_id=account_id,
+            run_id=None,
+            scoped_to="chat",
+            secret_refs=refs,
+            secrets_hash=config.secrets_hash,
         )
         if identity:
             with suppress(ChatSandboxGone):
@@ -140,7 +145,12 @@ async def get_sandbox(
             await sandbox_client.release(host_id=previous.host_id)
         template = await get_template_id(CHAT_SANDBOX)
         identity, entries = await SandboxIdentity.create(
-            session, account_id=account_id, run_id=None, scoped_to="chat", secret_refs=refs
+            session,
+            account_id=account_id,
+            run_id=None,
+            scoped_to="chat",
+            secret_refs=refs,
+            secrets_hash=config.secrets_hash,
         )
         host = await sandbox_client.provision(
             idempotency_key=f"chat:{account_id}:{identity.id}",

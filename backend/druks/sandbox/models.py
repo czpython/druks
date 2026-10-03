@@ -81,6 +81,9 @@ class SandboxIdentity(Base, Uuid7Pk):
     secret_refs: Mapped[list[SecretRef]] = relationship(
         back_populates="identity", cascade="all, delete-orphan", lazy="selectin"
     )
+    # The secrets hash of the agent config that created the box. Drukbox binds a pasted
+    # key's entries at creation, so another hash needs another box.
+    secrets_hash: Mapped[str]
 
     @classmethod
     async def create(
@@ -91,6 +94,7 @@ class SandboxIdentity(Base, Uuid7Pk):
         run_id: str | None,
         scoped_to: str,
         secret_refs: list[SecretRef],
+        secrets_hash: str,
     ) -> tuple["SandboxIdentity", dict[str, Issuer]]:
         """The committed identity and the issuer entries for its box. Committed
         before the box exists: Drukbox fetches an issuer during provisioning."""
@@ -109,6 +113,7 @@ class SandboxIdentity(Base, Uuid7Pk):
                 )
                 for ref in secret_refs
             ],
+            secrets_hash=secrets_hash,
             token_hash=hashlib.sha256(bearer.encode()).digest(),
             created_at=now,
             # The box lease bounds the identity: a box never outlives it.
@@ -149,10 +154,11 @@ class SandboxIdentity(Base, Uuid7Pk):
         run_id: str | None,
         scoped_to: str,
         secret_refs: list[SecretRef] | None = None,
+        secrets_hash: str | None = None,
     ) -> "SandboxIdentity | None":
         """Find a live box for this account, run, and scope.
 
-        Omit secret_refs to accept the box's current secrets.
+        Omit secret_refs and secrets_hash to accept the box's current secrets.
         """
         rows = await session.scalars(
             select(cls)
@@ -174,6 +180,7 @@ class SandboxIdentity(Base, Uuid7Pk):
                 if row.is_live
                 and (not row.run or row.run.is_active)
                 and (wanted is None or {ref.key for ref in row.secret_refs} == wanted)
+                and (secrets_hash is None or row.secrets_hash == secrets_hash)
             ),
             None,
         )

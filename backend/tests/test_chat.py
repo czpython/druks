@@ -4,7 +4,7 @@ import json
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 from uuid import uuid4
 
 import asyncssh
@@ -72,7 +72,12 @@ async def list_messages(session, conversation):
 @pytest.fixture
 async def sandbox(druks_db, conversation, monkeypatch):
     identity, _ = await SandboxIdentity.create(
-        druks_db, account_id=conversation.account_id, run_id=None, scoped_to="chat", secret_refs=[]
+        druks_db,
+        account_id=conversation.account_id,
+        run_id=None,
+        scoped_to="chat",
+        secret_refs=[],
+        secrets_hash="",
     )
     await identity.bind("chat-sandbox")
     host = SimpleNamespace(
@@ -157,6 +162,7 @@ async def test_chat_identity_authenticates_until_lease_expiry_and_is_not_an_orph
         secret_refs=[
             SecretRef(name="mcp_druks_token", secret_id=token.id, host="hooks.example.com")
         ],
+        secrets_hash="",
     )
     await identity.bind("chat-sandbox")
     bearer = entries["mcp_druks_token"].headers["Authorization"].removeprefix("Bearer ")
@@ -200,7 +206,7 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
     second = await Conversation.create(
         druks_db, account_id=conversation.account_id, body="another conversation"
     )
-    config = SimpleNamespace(secret_refs=[], secrets={})
+    config = SimpleNamespace(secret_refs=[], secrets={}, secrets_hash="key-one")
     first_host, _identity = await service.get_sandbox(
         druks_db,
         conversation.account_id,
@@ -217,7 +223,9 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
     )
     login = await get_druks_account_token(druks_db, conversation.account_id, (), name="login")
     moved = SimpleNamespace(
-        secret_refs=[SecretRef(name="claude_token", secret_id=login.id)], secrets={}
+        secret_refs=[SecretRef(name="claude_token", secret_id=login.id)],
+        secrets={},
+        secrets_hash=login.id,
     )
     moved_host, _identity = await service.get_sandbox(
         druks_db,
@@ -226,10 +234,19 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
         allowed_tools=Toolkit.ALL,
         secret_refs=[],
     )
+    # A pasted key's entries are bound when the box is created, so another key needs a new box.
+    rekeyed_host, _identity = await service.get_sandbox(
+        druks_db,
+        second.account_id,
+        config=SimpleNamespace(secret_refs=moved.secret_refs, secrets={}, secrets_hash="key-two"),
+        allowed_tools=Toolkit.ALL,
+        secret_refs=[],
+    )
 
     assert first_host.id == second_host.id
     assert moved_host.id != first_host.id
-    release.assert_awaited_once_with(host_id=first_host.id)
+    assert rekeyed_host.id != moved_host.id
+    assert release.await_args_list == [call(host_id=first_host.id), call(host_id=moved_host.id)]
 
 
 async def test_delivered_turn_is_sent_again_when_the_bridge_never_got_the_prompt(

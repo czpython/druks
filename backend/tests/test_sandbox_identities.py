@@ -52,6 +52,7 @@ async def _bound_identity(subscription, *, state: str = "running") -> tuple[Sand
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=[_anthropic(subscription)],
+        secrets_hash="",
     )
     await identity.bind("host-1")
     return identity, entries["anthropic"].headers["Authorization"].removeprefix("Bearer ")
@@ -98,6 +99,7 @@ async def test_an_identity_keeps_the_hash_and_puts_the_bearer_in_the_issuer_entr
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=[_anthropic(subscription)],
+        secrets_hash="",
     )
 
     [entry] = entries.values()
@@ -132,6 +134,7 @@ async def test_one_box_holds_one_identity(druks_db):
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=[_anthropic(subscription)],
+        secrets_hash="",
     )
     second, _ = await SandboxIdentity.create(
         db_session(),
@@ -139,6 +142,7 @@ async def test_one_box_holds_one_identity(druks_db):
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=[_anthropic(subscription)],
+        secrets_hash="",
     )
 
     await first.bind("host-1")
@@ -156,6 +160,7 @@ async def test_an_identity_needs_its_run(druks_db):
             run_id="no-such-run",
             scoped_to="workflow",
             secret_refs=[_anthropic(subscription)],
+            secrets_hash="",
         )
 
 
@@ -176,6 +181,7 @@ async def test_a_ref_names_a_vault_row_that_exists(druks_db, source):
             run_id="run-1",
             scoped_to="workflow",
             secret_refs=[secret],
+            secrets_hash="",
         )
 
 
@@ -261,6 +267,7 @@ async def test_lookup_finds_the_live_bound_identity_of_a_scope(druks_db) -> None
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=secrets,
+        secrets_hash="",
     )
     revoked, _ = await SandboxIdentity.create(
         db_session(),
@@ -268,6 +275,7 @@ async def test_lookup_finds_the_live_bound_identity_of_a_scope(druks_db) -> None
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=secrets,
+        secrets_hash="",
     )
     await revoked.bind("host-revoked")
     await revoked.revoke()
@@ -277,6 +285,7 @@ async def test_lookup_finds_the_live_bound_identity_of_a_scope(druks_db) -> None
         run_id="run-1",
         scoped_to="reviewer",
         secret_refs=secrets,
+        secrets_hash="",
     )
     await other_scope.bind("host-reviewer")
     other_secrets, _ = await SandboxIdentity.create(
@@ -285,6 +294,7 @@ async def test_lookup_finds_the_live_bound_identity_of_a_scope(druks_db) -> None
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=[_anthropic(two)],
+        secrets_hash="",
     )
     await other_secrets.bind("host-other")
     live, _ = await SandboxIdentity.create(
@@ -293,6 +303,7 @@ async def test_lookup_finds_the_live_bound_identity_of_a_scope(druks_db) -> None
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=secrets,
+        secrets_hash="",
     )
     await live.bind("host-live")
 
@@ -346,6 +357,7 @@ async def _github_identity() -> tuple[SandboxIdentity, str]:
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=[SecretRef(name="github", secret_id=secret_id, resource="acme/widgets")],
+        secrets_hash="",
     )
     await identity.bind("host-1")
     return identity, entries["github"].headers["Authorization"].removeprefix("Bearer ")
@@ -412,6 +424,7 @@ async def _mcp_identity() -> tuple[SandboxIdentity, str, dict]:
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=[ref],
+        secrets_hash="",
     )
     await identity.bind("host-1")
     bearer = entries[ref.name].headers["Authorization"].removeprefix("Bearer ")
@@ -483,6 +496,7 @@ async def test_the_gateway_key_entry_sends_its_bearer_verbatim(druks_db):
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=[SecretRef(name="mcp_druks_token", secret_id=row.id, host="hooks.test")],
+        secrets_hash="",
     )
 
     entry = entries["mcp_druks_token"].entry()

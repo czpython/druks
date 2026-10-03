@@ -643,6 +643,7 @@ async def _bound_identity(
         run_id=run_id,
         scoped_to="workflow",
         secret_refs=[SecretRef(name=name, secret_id=subscription.id, host=host)],
+        secrets_hash="",
     )
     await identity.bind(host_id)
     return identity
@@ -771,6 +772,7 @@ async def test_a_rotation_requests_a_refresh_for_every_other_live_bound_identity
         run_id="run-unbound",
         scoped_to="workflow",
         secret_refs=[SecretRef(name="anthropic", secret_id=connection.id)],
+        secrets_hash="",
     )
     revoked = await _bound_identity(connection, host_id="host-revoked", run_id="run-revoked")
     await revoked.revoke()

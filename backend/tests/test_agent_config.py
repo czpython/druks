@@ -149,7 +149,7 @@ async def test_a_subscription_agent_runs_as_its_actor_or_the_default_account(dru
     assert as_actor.charged_account_id == actor.account_id
     assert unattended.subscription.id == default_subscription.id
     assert as_actor.identity == {"email": "b@example.com"}
-    assert (as_actor.secrets, as_actor.secrets_id) == ({}, actor.id)
+    assert not as_actor.secrets
     [secret] = as_actor.secret_refs
     assert secret.key == ("anthropic", actor.id, "", "")
     assert as_actor.harness_class is ClaudeHarness
@@ -191,7 +191,6 @@ async def test_a_codex_subscription_config_carries_its_login_facts_and_its_ref(d
     assert config.identity == {"email": "a@example.com", "account_id": "acc-1", "plan": "pro"}
     [ref] = config.secret_refs
     assert ref.key == ("codex_subscription_token", subscription.id, "", "chatgpt.com")
-    assert config.secrets_id == subscription.id
 
 
 async def test_a_subscription_agent_refuses_without_the_actors_own_subscription(druks_db):
@@ -216,7 +215,7 @@ async def test_a_key_agent_runs_on_the_installations_key_for_anyone(druks_db):
     assert (as_actor.secrets, as_actor.subscription) == ({"anthropic": _SHARED_ENTRY}, None)
     assert (unattended.secrets, unattended.identity) == ({"anthropic": _SHARED_ENTRY}, {})
     # The entries' identity is the pasted key, with no secret material.
-    assert "sk-shared" not in as_actor.secrets_id
+    assert "sk-shared" not in as_actor.secrets_hash
     # The key is nobody's, so its calls are charged to the installation.
     assert as_actor.charged_account_id is None
 
@@ -245,7 +244,7 @@ def test_a_key_box_serves_another_harness_only_when_it_reads_the_same_variable(
             effort="high",
             timeout=60,
             fast_mode=False,
-        ).secrets_id
+        ).secrets_hash
         for harness in (first, second)
     )
     assert (first_id == second_id) is is_shared

@@ -784,6 +784,7 @@ async def _identity() -> SandboxIdentity:
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],
+        secrets_hash="",
     )
     return identity
 

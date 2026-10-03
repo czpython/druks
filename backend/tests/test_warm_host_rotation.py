@@ -11,8 +11,8 @@ from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS, SANDBOX_HOST_ROT
 from druks.workflows import Workflow
 
 
-def _config(secrets: dict[str, Secret], secrets_id: str = "") -> SimpleNamespace:
-    return SimpleNamespace(secrets=secrets, secret_refs=[], secrets_id=secrets_id)
+def _config(secrets: dict[str, Secret], secrets_hash: str = "") -> SimpleNamespace:
+    return SimpleNamespace(secrets=secrets, secret_refs=[], secrets_hash=secrets_hash)
 
 
 _ENTRY = Secret(
@@ -116,7 +116,7 @@ async def test_warm_host_keeps_its_entries_across_calls(monkeypatch):
 
     first = await flow._lease_host(db_session(), _ANTHROPIC, [])
     second = await flow._lease_host(
-        db_session(), _config({"anthropic": _ENTRY}, _ANTHROPIC.secrets_id), []
+        db_session(), _config({"anthropic": _ENTRY}, _ANTHROPIC.secrets_hash), []
     )
 
     assert first == second == "host-1"
@@ -194,12 +194,13 @@ async def test_a_replay_finds_the_warm_box_through_its_identity(
         run_id="wf-1",
         scoped_to="workflow",
         secret_refs=secrets,
+        secrets_hash="",
     )
     await identity.bind("host-crashed")
     client = _FakeSandboxClient()
     monkeypatch.setattr(sdk, "sandbox_client", client)
     flow = _warm_workflow()
-    config = SimpleNamespace(secrets={}, secret_refs=secrets, secrets_id=subscription.id)
+    config = SimpleNamespace(secrets={}, secret_refs=secrets, secrets_hash=subscription.id)
     flow.account_id = identity.account_id
 
     assert await flow._lease_host(db_session(), config, secrets) == "host-crashed"

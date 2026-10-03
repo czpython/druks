@@ -48,17 +48,19 @@ class AgentConfig:
         return self.model.partition("/")[2]
 
     @property
-    def secrets_id(self) -> str:
-        """What a box created for this config holds: a digest of the pasted key's version
+    def secrets_hash(self) -> str:
+        """A digest of what a box created for this config holds: the pasted key's version
         and its entries without the value, or the subscriptions it fetches."""
         if self.secrets:
             # Harnesses can read one key from different variables, and a box keeps the
             # entries it was created with.
             version = f"{self.api_key.audience_name}.{self.api_key.updated_at:%Y%m%dT%H%M%S}"
             entries = {name: entry.get_service() for name, entry in self.secrets.items()}
-            canonical = json.dumps([version, entries], sort_keys=True)
-            return hashlib.sha256(canonical.encode()).hexdigest()
-        return ".".join(ref.secret_id for ref in self.secret_refs)
+            contents = [version, entries]
+        else:
+            contents = [ref.secret_id for ref in self.secret_refs]
+        canonical = json.dumps(contents, sort_keys=True)
+        return hashlib.sha256(canonical.encode()).hexdigest()
 
     @property
     def charged_account_id(self) -> str | None:

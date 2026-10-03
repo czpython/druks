@@ -854,7 +854,7 @@ class Workflow:
         # The run's warm VM, provisioned lazily and reaped at segment boundaries;
         # its lease expiry decides when it must rotate.
         self._host: Host | None = None
-        self._host_secrets_id = ""
+        self._host_secrets_hash = ""
 
     async def announce(self, topic: str, **facts: Any) -> None:
         """Record a domain fact, then notify subscribers in a separate checkpoint."""
@@ -939,7 +939,7 @@ class Workflow:
             )
             if identity:
                 self._host = await sandbox_client.reattach(host_id=identity.host_id)
-                self._host_secrets_id = config.secrets_id
+                self._host_secrets_hash = config.secrets_hash
         if self._host and self._host.expires_at:
             remaining = (self._host.expires_at - datetime.now(UTC)).total_seconds()
             if remaining < SANDBOX_HOST_ROTATE_BEFORE_SECONDS:
@@ -947,7 +947,7 @@ class Workflow:
                 # host. Safe because each call rebuilds its workspace on whatever
                 # host it lands on (state lives in git), so a bare VM is fine.
                 await self._reap_run()
-        if self._host and self._host_secrets_id != config.secrets_id:
+        if self._host and self._host_secrets_hash != config.secrets_hash:
             # Drukbox binds entries at creation.
             await self._reap_run()
         if not self._host:
@@ -958,7 +958,7 @@ class Workflow:
             # The key names the pasted key the VM holds, so a replay finds its VM.
             # A box that fetches gets its own identity, and the key names that
             # instead. A replay finds the box through the identity, above.
-            identity, entries, key = None, {}, config.secrets_id
+            identity, entries, key = None, {}, config.secrets_hash
             if refs:
                 identity, entries = await SandboxIdentity.create(
                     session,
@@ -966,6 +966,7 @@ class Workflow:
                     run_id=self._workflow_id,
                     scoped_to="workflow",
                     secret_refs=refs,
+                    secrets_hash=config.secrets_hash,
                 )
                 key = identity.id
             self._host = await sandbox_client.provision(
@@ -974,7 +975,7 @@ class Workflow:
                 template=template,
                 identity=identity,
             )
-            self._host_secrets_id = config.secrets_id
+            self._host_secrets_hash = config.secrets_hash
         return self._host.id
 
     async def _reap_run(self) -> None:

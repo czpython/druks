@@ -890,7 +890,7 @@ async def test_reused_host_retry_presents_a_stable_idempotency_key(monkeypatch, 
 
     monkeypatch.setattr("druks.sandbox.client.Client.provision", fake_provision)
 
-    config = SimpleNamespace(secrets={}, secret_refs=[], secrets_id="")
+    config = SimpleNamespace(secrets={}, secret_refs=[], secrets_hash="")
     with pytest.raises(HarnessSandboxProvisioningError):
         await current_run._lease_host(db_session(), config, [])
     host_id = await current_run._lease_host(db_session(), config, [])
@@ -966,7 +966,7 @@ async def test_api_key_billing_hands_claude_a_placeholder(
     ]
     config = sandbox.run_agent.await_args.kwargs["config"]
     # The VM's key names the pasted key, never its value.
-    assert keys == [f"wf-9:dummy:{config.secrets_id}"]
+    assert keys == [f"wf-9:dummy:{config.secrets_hash}"]
     assert (config.billing, config.subscription) == ("api_key", None)
     [call] = await AgentCall.list_for_run(db_session(), "wf-9")
     assert (call.subscription_id, call.api_key.audience_name) == (None, "anthropic")
@@ -1061,6 +1061,7 @@ async def test_a_replay_resumes_the_ephemeral_box_through_its_identity(
         run_id="wf-9",
         scoped_to="dummy",
         secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],
+        secrets_hash="",
     )
     await identity.bind("host-crashed")
     resumed: list[str] = []

@@ -23,6 +23,7 @@ async def _identity(run_id: str, *, state: str = "running", host_id: str = "") -
         run_id=run_id,
         scoped_to="workflow",
         secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],
+        secrets_hash="",
     )
     if host_id:
         await identity.bind(host_id)

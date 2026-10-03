@@ -227,6 +227,7 @@ async def test_a_codex_subscription_binds_a_custom_entry_on_chatgpt(druks_db):
         run_id="run-1",
         scoped_to="workflow",
         secret_refs=[ref],
+        secrets_hash="",
     )
     entry = entries["codex_subscription_token"].entry()
 
