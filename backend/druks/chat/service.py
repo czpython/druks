@@ -512,13 +512,10 @@ async def finish_turn(
         await name_conversation(session, conversation, bridge.host, message, body, harness)
 
 
-async def report_result(session: AsyncSession, run: Run, *, result) -> str | None:
-    """Report a run's result to the chat that started it, once the run waited for an
-    answer. Returns that conversation."""
-    if run.input_requested_at:
-        body = RESULT_MESSAGE.format(run=run.id, result=to_json(result, fallback=str).decode())
-        return await report_outcome(session, run, body)
-    return
+async def report_result(session: AsyncSession, run: Run, *, result) -> str:
+    """Report a run's result to the conversation that started it."""
+    body = RESULT_MESSAGE.format(run=run.id, result=to_json(result, fallback=str).decode())
+    return await report_outcome(session, run, body)
 
 
 async def report_failure(session: AsyncSession, run: Run, *, failure: str) -> str:
