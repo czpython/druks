@@ -16,6 +16,7 @@ it.each(['success', 'failure'])('shows pending sign-in and handles %s', async (o
     isOauth: true, identityMode: 'shared', builtin: false, hasToken: false,
     credential: 'grant' as const, service: null,
   }])
+  vi.spyOn(api, 'mcpServerDirectory').mockResolvedValue([])
   let resolve!: (value: { authorizationUrl: string }) => void
   let reject!: (error: Error) => void
   const pending = new Promise<{ authorizationUrl: string }>((yes, no) => { resolve = yes; reject = no })

@@ -9,7 +9,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
 
-import { api, ApiError } from '../api/client'
+import { api } from '../api/client'
 import { TextInput } from './Control'
 import { Menu } from './Menu'
 import { SettingField } from './SettingField'
@@ -22,7 +22,6 @@ import {
   type AppSettingChoices,
   type AppSettings,
   type Billing,
-  type McpRegistryCandidate,
   type McpServer,
   type Pat,
   type Provider,
@@ -2271,14 +2270,6 @@ function CollectionCard({
   )
 }
 
-// A 502 is the registry not answering in time, not a Druks fault.
-function describeRegistryError(error: unknown): string {
-  if (error instanceof ApiError && error.status === 502) {
-    return 'The MCP registry is not answering. Try again in a moment.'
-  }
-  return error instanceof Error ? error.message : String(error)
-}
-
 export function McpServersPane() {
   const queryClient = useQueryClient()
   const serversQuery = useQuery({
@@ -2294,16 +2285,25 @@ export function McpServersPane() {
   const [headerValue, setHeaderValue] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [registryQuery, setRegistryQuery] = useState('')
-  const [searching, setSearching] = useState(false)
-  const [candidates, setCandidates] = useState<McpRegistryCandidate[] | null>(null)
-  const [hasMore, setHasMore] = useState(false)
-  const [registryError, setRegistryError] = useState<string | null>(null)
-  const [selected, setSelected] = useState<McpRegistryCandidate | null>(null)
-  const [headerValues, setHeaderValues] = useState<Record<string, string>>({})
+  const [filter, setFilter] = useState('')
+  const [directoryError, setDirectoryError] = useState<string | null>(null)
   const [connectingName, setConnectingName] = useState<string | null>(null)
   const fieldId = useId()
   const servers = serversQuery.data ?? []
+  const directoryQuery = useQuery({
+    queryKey: ['mcpServerDirectory'],
+    queryFn: () => api.mcpServerDirectory(),
+    staleTime: Infinity,
+  })
+  const installed = new Set(servers.map((server) => server.name))
+  const filterText = filter.trim().toLowerCase()
+  const offered = (directoryQuery.data ?? []).filter(
+    (server) =>
+      !installed.has(server.name) &&
+      [server.name, server.title, server.description].some((field) =>
+        field.toLowerCase().includes(filterText),
+      ),
+  )
 
   const refresh = () =>
     queryClient.invalidateQueries({
@@ -2321,44 +2321,15 @@ export function McpServersPane() {
     return () => channel.close()
   }, [queryClient])
 
-  async function searchRegistry() {
-    if (!registryQuery.trim()) return
-    setSearching(true)
-    setRegistryError(null)
-    setSelected(null)
-    try {
-      const search = await api.searchMcpRegistry(registryQuery.trim())
-      setCandidates(search.candidates)
-      setHasMore(search.hasMore)
-    } catch (e) {
-      setCandidates(null)
-      setRegistryError(describeRegistryError(e))
-    } finally {
-      setSearching(false)
-    }
-  }
-
-  function select(candidate: McpRegistryCandidate) {
-    setSelected(candidate)
-    setHeaderValues({})
-    setRegistryError(null)
-  }
-
-  async function install(candidate: McpRegistryCandidate) {
+  async function addFromDirectory(serverName: string) {
     setBusy(true)
-    setRegistryError(null)
+    setDirectoryError(null)
     try {
-      await api.installMcpServer({
-        name: candidate.name,
-        registry: candidate.registryName,
-        headers: headerValues,
-      })
-      setSelected(null)
-      setCandidates(null)
-      setRegistryQuery('')
+      await api.addDirectoryMcpServer(serverName)
+      setFilter('')
       await refresh()
     } catch (e) {
-      setRegistryError(describeRegistryError(e))
+      setDirectoryError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
     }
@@ -2483,10 +2454,6 @@ export function McpServersPane() {
     }
   }
 
-  const missingRequired = (selected?.headers ?? []).some(
-    (header) => header.isRequired && !(headerValues[header.name] ?? '').trim(),
-  )
-
   return (
     <div className="set-pane mcp-pane">
       {serversQuery.isPending && <p role="status">Loading MCP servers…</p>}
@@ -2536,125 +2503,53 @@ export function McpServersPane() {
       )}
 
       <section className="mcp-section">
-        <h3 className="mcp-h">Add from registry</h3>
-        <p className="mcp-help">Search the official MCP registry for a hosted server.</p>
-        <div className="mcp-reg-search">
-          <label className="mcp-sr-only" htmlFor={`${fieldId}-search`}>
-            Search the MCP registry
-          </label>
-          <TextInput
-            id={`${fieldId}-search`}
-            placeholder="grafana, sentry, …"
-            value={registryQuery}
-            onChange={(e) => setRegistryQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void searchRegistry()
-            }}
-            autoComplete="off"
-            data-1p-ignore=""
-            data-lpignore="true"
-            disabled={searching}
-          />
-          <button
-            className="set-btn primary"
-            disabled={searching || !registryQuery.trim()}
-            aria-busy={searching}
-            onClick={() => void searchRegistry()}
-          >
-            {searching ? 'Searching…' : 'Search'}
-          </button>
-        </div>
-        {searching && (
-          <p className="mcp-help" role="status">
-            Searching the MCP registry…
-          </p>
-        )}
-        {registryError && (
+        <h3 className="mcp-h">Add a server</h3>
+        <p className="mcp-help">
+          Vendor-hosted servers that Druks has checked. Each one signs in with OAuth: add it, then
+          use <b>Connect</b> to authorize it.
+        </p>
+        <label className="mcp-sr-only" htmlFor={`${fieldId}-filter`}>
+          Filter MCP servers
+        </label>
+        <TextInput
+          id={`${fieldId}-filter`}
+          placeholder="grafana, sentry, …"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          autoComplete="off"
+          data-1p-ignore=""
+          data-lpignore="true"
+        />
+        {directoryQuery.isError && (
           <div className="mcp-error" role="alert">
-            {registryError}
+            {directoryQuery.error.message}
           </div>
         )}
-        {candidates && hasMore && (
-          <p className="mcp-help">
-            The registry has more matches than one search shows. Search for the server&apos;s full
-            name to find it.
-          </p>
+        {directoryError && (
+          <div className="mcp-error" role="alert">
+            {directoryError}
+          </div>
         )}
-        {candidates && candidates.length === 0 && (
-          <p className="mcp-help">
-            No matching servers with a hosted (HTTP) endpoint in the registry.
-          </p>
+        {directoryQuery.isSuccess && offered.length === 0 && (
+          <p className="mcp-help">No listed server matches. Add it as a custom server below.</p>
         )}
-        {candidates && candidates.length > 0 && (
-          <div className="mcp-reg-results">
-            {candidates.map((candidate) => (
-              <div key={candidate.registryName}>
-                <button
-                  className={
-                    'set-card mcp-reg-row' +
-                    (selected?.registryName === candidate.registryName ? ' is-selected' : '')
-                  }
-                  aria-expanded={selected?.registryName === candidate.registryName}
-                  onClick={() => select(candidate)}
-                  disabled={busy}
-                >
-                  <span className="mcp-reg-top">
-                    <span className="mcp-name">{candidate.name}</span>
-                    <span className={'mcp-reg-badge' + (candidate.official ? ' official' : '')}>
-                      {candidate.official ? 'official' : 'community'}
-                    </span>
-                  </span>
-                  <span className="mcp-url">{candidate.url}</span>
-                  <span className="mcp-reg-desc" title={candidate.registryName}>
-                    {candidate.description}
-                  </span>
-                </button>
-                {selected?.registryName === candidate.registryName && (
-                  <div className="mcp-reg-form">
-                    {selected.headers.map((header) => (
-                      <div className="mcp-field" key={header.name}>
-                        <label className="mcp-label tech" htmlFor={`${fieldId}-${header.name}`}>
-                          {header.name}
-                          {header.isRequired && <span className="mcp-req"> (required)</span>}
-                        </label>
-                        <TextInput
-                          id={`${fieldId}-${header.name}`}
-                          type={header.isSecret ? 'password' : 'text'}
-                          placeholder={header.placeholder}
-                          required={header.isRequired}
-                          value={headerValues[header.name] ?? ''}
-                          onChange={(e) =>
-                            setHeaderValues((values) => ({
-                              ...values,
-                              [header.name]: e.target.value,
-                            }))
-                          }
-                          autoComplete={header.isSecret ? 'new-password' : 'off'}
-                          data-1p-ignore=""
-                          data-lpignore="true"
-                          disabled={busy}
-                        />
-                        {header.description && <p className="mcp-help">{header.description}</p>}
-                      </div>
-                    ))}
-                    {!selected.headers.some((header) => header.isSecret && header.isRequired) && (
-                      <p className="mcp-help">
-                        Without a secret value it uses OAuth — use <b>Connect</b> on the added
-                        server to authorize it.
-                      </p>
-                    )}
-                    <div>
-                      <button
-                        className="set-btn primary"
-                        disabled={busy || missingRequired}
-                        aria-busy={busy}
-                        onClick={() => void install(selected)}
-                      >
-                        {busy ? 'Installing…' : 'Install'}
-                      </button>
-                    </div>
-                  </div>
-                )}
+        {offered.length > 0 && (
+          <div className="mcp-offers">
+            {offered.map((server) => (
+              <div key={server.name} className="set-card mcp-offer">
+                <span className="mcp-offer-head">
+                  <span className="mcp-name">{server.title}</span>
+                  <button
+                    className="set-btn"
+                    disabled={busy}
+                    aria-label={`Add ${server.title}`}
+                    onClick={() => void addFromDirectory(server.name)}
+                  >
+                    Add
+                  </button>
+                </span>
+                <span className="mcp-offer-desc">{server.description}</span>
+                <span className="mcp-url">{server.url}</span>
               </div>
             ))}
           </div>
@@ -2665,7 +2560,7 @@ export function McpServersPane() {
         <summary className="mcp-custom-summary">Add a custom server</summary>
         <div className="mcp-custom-body">
           <p className="mcp-help">
-            For a server that isn&apos;t in the registry. Every field is required.
+            For a server that isn&apos;t listed above. Every field is required.
           </p>
           <div className="mcp-form-grid">
             <div className="mcp-field">

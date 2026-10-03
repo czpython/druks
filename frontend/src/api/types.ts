@@ -1003,34 +1003,12 @@ export interface SkillCollection {
   skills: Skill[]
 }
 
-export interface RegistryHeader {
-  // One declared input of a registry remote, verbatim from the registry —
-  // only the name is guaranteed, the rest is omitted freely.
+export interface McpServerDirectoryEntry {
+  // One server the dashboard offers to add; name is the installed row's name.
   name: string
-  description?: string
-  placeholder?: string
-  isRequired?: boolean
-  isSecret?: boolean
-  format?: string
-}
-
-export interface McpRegistryCandidate {
-  // The druks-side name an install will use (the row's config key); display
-  // identity is registryName.
-  name: string
-  registryName: string
+  title: string
   description: string
   url: string
-  // Trust badge: the publisher provably owns the endpoint's domain, or a
-  // druks pin vouches for it.
-  official: boolean
-  headers: RegistryHeader[]
-}
-
-export interface McpRegistrySearch {
-  candidates: McpRegistryCandidate[]
-  // The registry holds more matches than one search returns.
-  hasMore: boolean
 }
 
 // A personal access token an agent presents as `Authorization: Bearer …` to

@@ -42,35 +42,20 @@ class ConnectMcpServerResponse(Schema):
     authorization_url: str
 
 
-class McpRegistryCandidateResponse(Schema):
+class McpServerDirectoryResponse(Schema):
     name: str
-    registry_name: str
+    title: str
     description: str
     url: str
-    official: bool
-    # The remote's declared inputs, verbatim — the registry owns their shape.
-    headers: list[dict]
-
-
-class McpRegistrySearchResponse(Schema):
-    candidates: list[McpRegistryCandidateResponse]
-    # The registry holds more matches than one search returns.
-    has_more: bool
 
 
 class CreateMcpServerRequest(BaseModel):
     name: str
     url: str
-    # Each entry becomes a vault row delivered as that header, exactly like a
-    # registry entry's isSecret headers. A bearer is the header spelled out:
-    # {"Authorization": "Bearer <token>"} — the UI's Bearer field composes it.
+    # Each entry becomes a vault row delivered as that header. A bearer is the
+    # header spelled out: {"Authorization": "Bearer <token>"} — the UI's Bearer
+    # field composes it.
     secret_headers: dict[str, str] = {}
-
-
-class InstallMcpServerRequest(BaseModel):
-    name: str
-    registry: str
-    headers: dict[str, str] = {}
 
 
 # The catalog file is operator input, so its entries parse through a

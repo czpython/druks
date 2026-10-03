@@ -22,9 +22,9 @@ DEFAULT_DATA_DIR = Path("/var/lib/druks")
 # unconditionally, so the file stays even though it declares nothing.
 PACKAGED_MCP_CATALOG = Path(__file__).with_name("mcp") / "catalog.json"
 
-# Trust pins for the registry picker's official badge; ``mcp_trusted_path``
-# points a deployment at its own file.
-PACKAGED_MCP_TRUSTED = Path(__file__).with_name("mcp") / "trusted.json"
+# The MCP servers the dashboard offers to add; ``mcp_directory_path`` points a
+# deployment at its own file.
+PACKAGED_MCP_DIRECTORY = Path(__file__).with_name("mcp") / "directory.json"
 
 
 def _expand_path(value: Any) -> Any:
@@ -207,11 +207,11 @@ class Settings(BaseSettings):
         default=PACKAGED_MCP_CATALOG,
         alias="DRUKS_MCP_CATALOG",
     )
-    # The trust-pins file the registry picker's official badge reads; a
-    # deployment can point this at its own curated file.
-    mcp_trusted_path: ExpandedPath = Field(
-        default=PACKAGED_MCP_TRUSTED,
-        alias="DRUKS_MCP_TRUSTED",
+    # The MCP servers the dashboard offers to add; a deployment can point this
+    # at its own curated file.
+    mcp_directory_path: ExpandedPath = Field(
+        default=PACKAGED_MCP_DIRECTORY,
+        alias="DRUKS_MCP_DIRECTORY",
     )
 
     log_level: str = Field(default="INFO", alias="DRUKS_LOG_LEVEL")

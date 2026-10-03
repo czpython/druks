@@ -28,10 +28,10 @@ import type {
   UsageTodayResponse,
   Gate,
   GateAnswer,
-  McpRegistrySearch,
   PageSnapshot,
   McpServer,
   McpServerConnection,
+  McpServerDirectoryEntry,
   Service,
   Provider,
   ProviderCatalog,
@@ -394,20 +394,18 @@ export const api = {
   revokePat: (id: string) =>
     deleteJSON<Pat>(`/api/auth/personal-tokens/${encodeURIComponent(id)}`),
 
-  // MCP servers — a backend-owned registry, delivered into every agent VM. The
-  // Secret header values are write-only: sent on create, redacted in every
+  // MCP servers — owned by the backend, delivered into every agent VM. Secret
+  // header values are write-only: sent on create, redacted in every
   // response. A bearer is the Authorization header spelled out. Keyed by
   // name (a built-in has no id until an operator overlays it).
   mcpServers: () => getJSON<McpServer[]>('/api/mcp-servers'),
   createMcpServer: (body: { name: string; url: string; secret_headers: Record<string, string> }) =>
     postJSON<McpServer>('/api/mcp-servers', body),
-  // The official-registry picker: resolved candidates (badge + declared
-  // inputs), then an install that sends only the druks name, the registry
-  // name, and the filled header values — the url never comes from the client.
-  searchMcpRegistry: (query: string) =>
-    getJSON<McpRegistrySearch>(`/api/mcp-servers/registry?query=${encodeURIComponent(query)}`),
-  installMcpServer: (body: { name: string; registry: string; headers: Record<string, string> }) =>
-    postJSON<McpServer>('/api/mcp-servers/registry', body),
+  // The vetted servers the dashboard offers. Adding one sends only its name;
+  // the url never comes from the client.
+  mcpServerDirectory: () => getJSON<McpServerDirectoryEntry[]>('/api/mcp-servers/directory'),
+  addDirectoryMcpServer: (name: string) =>
+    postJSON<McpServer>('/api/mcp-servers/directory', { name }),
   setMcpServerEnabled: (name: string, isEnabled: boolean) =>
     patchJSON<McpServer>(`/api/mcp-servers/${encodeURIComponent(name)}`, { is_enabled: isEnabled }),
   mcpServerConnections: (name: string) =>

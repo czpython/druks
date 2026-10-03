@@ -1518,6 +1518,7 @@ describe('settings resource read failures', () => {
     'retries a failed %s read from %s without claiming an empty result',
     async (section, method, label) => {
       stubFetch(false)
+      vi.spyOn(api, 'mcpServerDirectory').mockResolvedValue([])
       const request = vi
         .spyOn(api, method)
         .mockRejectedValueOnce(new Error('Offline'))

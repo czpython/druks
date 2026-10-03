@@ -24,19 +24,6 @@ DRUKS_SERVER_NAME = "druks"
 BEARER_HEADER = "Authorization"
 BEARER_PREFIX = "Bearer "
 
-# The official MCP registry the picker resolves against; search results
-# cache briefly in Redis so typing in the picker doesn't hammer it.
-REGISTRY_SEARCH_URL = "https://registry.modelcontextprotocol.io/v0/servers"
-# A cached value is one page: its entries and whether more exist.
-REGISTRY_SEARCH_CACHE_PREFIX = "mcp:registry:page:"
-REGISTRY_CACHE_TTL_SECONDS = 300
-# The registry answers some searches in tens of seconds; the OAuth probe
-# timeout would fail a search the registry is still answering.
-REGISTRY_TIMEOUT_SECONDS = 30.0
-# The registry's largest page. A broad query ("github") matches thousands of
-# entries, more than any page holds.
-REGISTRY_PAGE_LIMIT = 100
-
 # Every dynamically-registered client pins this path as a redirect_uri, so
 # renaming it orphans existing registrations.
 OAUTH_CALLBACK_PATH = "/api/mcp-servers/oauth/callback"

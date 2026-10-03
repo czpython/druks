@@ -1,0 +1,402 @@
+{
+  "apify": {
+    "title": "Apify",
+    "description": "Actors and scraped datasets in Apify.",
+    "url": "https://mcp.apify.com"
+  },
+  "apollo": {
+    "title": "Apollo.io",
+    "description": "People and company data in Apollo.",
+    "url": "https://mcp.apollo.io/mcp"
+  },
+  "atlassian": {
+    "title": "Atlassian",
+    "description": "Jira issues and Confluence pages in Atlassian.",
+    "url": "https://mcp.atlassian.com/v1/mcp"
+  },
+  "attio": {
+    "title": "Attio",
+    "description": "Records, lists, and notes in your Attio CRM.",
+    "url": "https://mcp.attio.com/mcp"
+  },
+  "axiom": {
+    "title": "Axiom",
+    "description": "Logs and events in Axiom.",
+    "url": "https://mcp.axiom.co/mcp"
+  },
+  "beehiiv": {
+    "title": "beehiiv",
+    "description": "Newsletter posts, subscribers, and stats in beehiiv.",
+    "url": "https://mcp.beehiiv.com/mcp"
+  },
+  "betterstack": {
+    "title": "Better Stack",
+    "description": "Uptime monitors, incidents, and logs in Better Stack.",
+    "url": "https://mcp.betterstack.com"
+  },
+  "buildkite": {
+    "title": "Buildkite",
+    "description": "Pipelines, builds, and job logs in Buildkite.",
+    "url": "https://mcp.buildkite.com/mcp"
+  },
+  "calendly": {
+    "title": "Calendly",
+    "description": "Event types and scheduled meetings in Calendly.",
+    "url": "https://mcp.calendly.com"
+  },
+  "canva": {
+    "title": "Canva",
+    "description": "Designs in Canva.",
+    "url": "https://mcp.canva.com/mcp"
+  },
+  "circleci": {
+    "title": "CircleCI",
+    "description": "Pipelines, workflows, and build failures in CircleCI.",
+    "url": "https://mcp.circleci.com/v1/mcp"
+  },
+  "clickup": {
+    "title": "ClickUp",
+    "description": "Tasks, lists, and docs in ClickUp.",
+    "url": "https://mcp.clickup.com/mcp"
+  },
+  "cloudflare": {
+    "title": "Cloudflare",
+    "description": "Every product in your Cloudflare account, through the Cloudflare API.",
+    "url": "https://mcp.cloudflare.com/mcp"
+  },
+  "cloudflare_bindings": {
+    "title": "Cloudflare Bindings",
+    "description": "Workers, KV, R2, and D1 resources in Cloudflare.",
+    "url": "https://bindings.mcp.cloudflare.com/mcp"
+  },
+  "cloudflare_browser": {
+    "title": "Cloudflare Browser Rendering",
+    "description": "Page fetches, screenshots, and Markdown from Cloudflare Browser Rendering.",
+    "url": "https://browser.mcp.cloudflare.com/mcp"
+  },
+  "cloudflare_builds": {
+    "title": "Cloudflare Builds",
+    "description": "Workers Builds and their logs in Cloudflare.",
+    "url": "https://builds.mcp.cloudflare.com/mcp"
+  },
+  "cloudflare_observability": {
+    "title": "Cloudflare Observability",
+    "description": "Workers logs and analytics in Cloudflare.",
+    "url": "https://observability.mcp.cloudflare.com/mcp"
+  },
+  "cloudinary": {
+    "title": "Cloudinary",
+    "description": "Media assets and transformations in Cloudinary.",
+    "url": "https://asset-management.mcp.cloudinary.com/mcp"
+  },
+  "coda": {
+    "title": "Coda",
+    "description": "Docs, pages, and tables in Coda.",
+    "url": "https://coda.io/apis/mcp"
+  },
+  "comfy_cloud": {
+    "title": "Comfy Cloud",
+    "description": "ComfyUI workflows on Comfy Cloud.",
+    "url": "https://cloud.comfy.org/mcp"
+  },
+  "craft": {
+    "title": "Craft",
+    "description": "Documents and notes in Craft.",
+    "url": "https://mcp.craft.do/my/mcp"
+  },
+  "datadog": {
+    "title": "Datadog",
+    "description": "Metrics, logs, monitors, and incidents in Datadog.",
+    "url": "https://mcp.datadoghq.com/api/unstable/mcp-server/mcp"
+  },
+  "dropbox": {
+    "title": "Dropbox",
+    "description": "Files and folders in Dropbox.",
+    "url": "https://mcp.dropbox.com/mcp"
+  },
+  "egnyte": {
+    "title": "Egnyte",
+    "description": "Files and folders in Egnyte.",
+    "url": "https://mcp-server.egnyte.com/mcp"
+  },
+  "fathom": {
+    "title": "Fathom",
+    "description": "Meeting recordings, transcripts, and summaries in Fathom.",
+    "url": "https://api.fathom.ai/mcp"
+  },
+  "figma": {
+    "title": "Figma",
+    "description": "Design context, components, and variables in Figma files.",
+    "url": "https://mcp.figma.com/mcp"
+  },
+  "fireflies": {
+    "title": "Fireflies.ai",
+    "description": "Meeting transcripts and summaries in Fireflies.",
+    "url": "https://api.fireflies.ai/mcp"
+  },
+  "github": {
+    "title": "GitHub",
+    "description": "Repositories, issues, and pull requests on GitHub.",
+    "url": "https://api.githubcopilot.com/mcp/"
+  },
+  "gitlab": {
+    "title": "GitLab",
+    "description": "Projects, issues, and merge requests on GitLab.com.",
+    "url": "https://gitlab.com/api/v4/mcp"
+  },
+  "globalping": {
+    "title": "Globalping",
+    "description": "Ping, traceroute, DNS, and HTTP checks from Globalping probes worldwide.",
+    "url": "https://mcp.globalping.dev/mcp"
+  },
+  "grafana": {
+    "title": "Grafana Cloud",
+    "description": "Dashboards, metrics, logs, traces, and alerts in Grafana Cloud.",
+    "url": "https://mcp.grafana.com/mcp"
+  },
+  "granola": {
+    "title": "Granola",
+    "description": "Meeting notes in Granola.",
+    "url": "https://mcp.granola.ai/mcp"
+  },
+  "hex": {
+    "title": "Hex",
+    "description": "Projects and data analysis in Hex.",
+    "url": "https://app.hex.tech/mcp"
+  },
+  "honeycomb": {
+    "title": "Honeycomb",
+    "description": "Traces and events in Honeycomb.",
+    "url": "https://mcp.honeycomb.io/mcp"
+  },
+  "instant": {
+    "title": "InstantDB",
+    "description": "Apps, schemas, and data in InstantDB.",
+    "url": "https://mcp.instantdb.com/mcp"
+  },
+  "intercom": {
+    "title": "Intercom",
+    "description": "Conversations, contacts, and tickets in Intercom.",
+    "url": "https://mcp.intercom.com/mcp"
+  },
+  "jam": {
+    "title": "Jam",
+    "description": "Bug reports in Jam, with console logs, network requests, and replays.",
+    "url": "https://mcp.jam.dev/mcp"
+  },
+  "kernel": {
+    "title": "Kernel",
+    "description": "Cloud browsers for agents on Kernel.",
+    "url": "https://mcp.onkernel.com/mcp"
+  },
+  "klaviyo": {
+    "title": "Klaviyo",
+    "description": "Profiles, campaigns, and flows in Klaviyo.",
+    "url": "https://mcp.klaviyo.com/mcp"
+  },
+  "linear": {
+    "title": "Linear",
+    "description": "Issues, projects, and cycles in Linear.",
+    "url": "https://mcp.linear.app/mcp"
+  },
+  "mercury": {
+    "title": "Mercury",
+    "description": "Accounts and transactions in Mercury.",
+    "url": "https://mcp.mercury.com/mcp"
+  },
+  "miro": {
+    "title": "Miro",
+    "description": "Boards and their content in Miro.",
+    "url": "https://mcp.miro.com/"
+  },
+  "mixpanel": {
+    "title": "Mixpanel",
+    "description": "Product analytics in Mixpanel.",
+    "url": "https://mcp.mixpanel.com/mcp"
+  },
+  "monday": {
+    "title": "monday.com",
+    "description": "Boards, items, and updates in monday.com.",
+    "url": "https://mcp.monday.com/mcp"
+  },
+  "motherduck": {
+    "title": "MotherDuck",
+    "description": "DuckDB databases in MotherDuck.",
+    "url": "https://api.motherduck.com/mcp"
+  },
+  "mux": {
+    "title": "Mux",
+    "description": "Video assets, live streams, and playback data in Mux.",
+    "url": "https://mcp.mux.com"
+  },
+  "neon": {
+    "title": "Neon",
+    "description": "Postgres projects, branches, and databases in Neon.",
+    "url": "https://mcp.neon.tech/mcp"
+  },
+  "netlify": {
+    "title": "Netlify",
+    "description": "Sites, deploys, and project settings on Netlify.",
+    "url": "https://netlify-mcp.netlify.app/mcp"
+  },
+  "new_relic": {
+    "title": "New Relic",
+    "description": "Observability data in New Relic.",
+    "url": "https://mcp.newrelic.com/mcp/"
+  },
+  "notion": {
+    "title": "Notion",
+    "description": "Pages and databases in Notion.",
+    "url": "https://mcp.notion.com/mcp"
+  },
+  "oreilly": {
+    "title": "O'Reilly",
+    "description": "Books, courses, and videos on O'Reilly.",
+    "url": "https://api.oreilly.com/api/content-discovery/v1/mcp/"
+  },
+  "paypal": {
+    "title": "PayPal",
+    "description": "Invoices, orders, and transactions in PayPal.",
+    "url": "https://mcp.paypal.com/mcp"
+  },
+  "plaid": {
+    "title": "Plaid",
+    "description": "Integration status and usage in the Plaid dashboard.",
+    "url": "https://api.dashboard.plaid.com/mcp/"
+  },
+  "plain": {
+    "title": "Plain",
+    "description": "Customer support threads and customers in Plain.",
+    "url": "https://mcp.plain.com/mcp"
+  },
+  "planetscale": {
+    "title": "PlanetScale",
+    "description": "Databases, branches, and queries in PlanetScale.",
+    "url": "https://mcp.pscale.dev/mcp/planetscale"
+  },
+  "polar": {
+    "title": "Polar",
+    "description": "Products, orders, and subscriptions in Polar.",
+    "url": "https://mcp.polar.sh/mcp/polar-mcp"
+  },
+  "posthog": {
+    "title": "PostHog",
+    "description": "Product analytics, feature flags, and errors in PostHog.",
+    "url": "https://mcp.posthog.com/mcp"
+  },
+  "postman": {
+    "title": "Postman",
+    "description": "Workspaces, collections, and APIs in Postman.",
+    "url": "https://mcp.postman.com/mcp"
+  },
+  "prisma": {
+    "title": "Prisma Postgres",
+    "description": "Databases, backups, and connection strings in Prisma Postgres.",
+    "url": "https://mcp.prisma.io/mcp"
+  },
+  "railway": {
+    "title": "Railway",
+    "description": "Projects, services, and deployments on Railway.",
+    "url": "https://mcp.railway.com"
+  },
+  "ramp": {
+    "title": "Ramp",
+    "description": "Spend, transactions, and bills in Ramp.",
+    "url": "https://mcp.ramp.com/mcp"
+  },
+  "salesforce": {
+    "title": "Salesforce",
+    "description": "Records in your Salesforce org, read-only.",
+    "url": "https://api.salesforce.com/platform/mcp/v1/platform/sobject-reads"
+  },
+  "sanity": {
+    "title": "Sanity",
+    "description": "Documents, schemas, and content in Sanity.",
+    "url": "https://mcp.sanity.io"
+  },
+  "sentry": {
+    "title": "Sentry",
+    "description": "Errors, issues, and performance data in Sentry.",
+    "url": "https://mcp.sentry.dev/mcp"
+  },
+  "shortcut": {
+    "title": "Shortcut",
+    "description": "Stories, epics, and iterations in Shortcut.",
+    "url": "https://mcp.shortcut.com/mcp"
+  },
+  "sourcegraph": {
+    "title": "Sourcegraph",
+    "description": "Code search across your repositories in Sourcegraph.",
+    "url": "https://sourcegraph.com/.api/mcp"
+  },
+  "square": {
+    "title": "Square",
+    "description": "Payments, orders, catalog, and customers in Square.",
+    "url": "https://mcp.squareup.com/mcp"
+  },
+  "stripe": {
+    "title": "Stripe",
+    "description": "Customers, payments, and subscriptions in Stripe.",
+    "url": "https://mcp.stripe.com"
+  },
+  "supabase": {
+    "title": "Supabase",
+    "description": "Projects, databases, and edge functions in Supabase.",
+    "url": "https://mcp.supabase.com/mcp"
+  },
+  "supermemory": {
+    "title": "Supermemory",
+    "description": "Memories stored in Supermemory.",
+    "url": "https://mcp.supermemory.ai/mcp"
+  },
+  "todoist": {
+    "title": "Todoist",
+    "description": "Tasks and projects in Todoist.",
+    "url": "https://ai.todoist.net/mcp"
+  },
+  "twelve_data": {
+    "title": "Twelve Data",
+    "description": "Stock, forex, and crypto market data from Twelve Data.",
+    "url": "https://mcp.twelvedata.com/mcp"
+  },
+  "vercel": {
+    "title": "Vercel",
+    "description": "Projects, deployments, and logs on Vercel.",
+    "url": "https://mcp.vercel.com"
+  },
+  "vidiq": {
+    "title": "vidIQ",
+    "description": "YouTube channel and video analytics in vidIQ.",
+    "url": "https://mcp.vidiq.com/mcp"
+  },
+  "webflow": {
+    "title": "Webflow",
+    "description": "Sites, pages, and CMS collections in Webflow.",
+    "url": "https://mcp.webflow.com/mcp"
+  },
+  "wix": {
+    "title": "Wix",
+    "description": "Sites and business data in Wix.",
+    "url": "https://mcp.wix.com/mcp"
+  },
+  "wordpress": {
+    "title": "WordPress.com",
+    "description": "Sites, posts, and pages on WordPress.com.",
+    "url": "https://public-api.wordpress.com/wpcom/v2/mcp/v1"
+  },
+  "you": {
+    "title": "You.com",
+    "description": "Web search and research from You.com.",
+    "url": "https://api.you.com/mcp"
+  },
+  "zapier": {
+    "title": "Zapier",
+    "description": "Actions in the apps you connected to Zapier.",
+    "url": "https://mcp.zapier.com/api/mcp"
+  },
+  "zep": {
+    "title": "Zep",
+    "description": "Agent memory and knowledge graphs in Zep.",
+    "url": "https://api.getzep.com/mcp"
+  }
+}

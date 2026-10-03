@@ -906,17 +906,10 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .mcp-pane button:disabled { opacity: 0.45; cursor: default; }
 .mcp-pane input:disabled { opacity: 0.6; cursor: default; }
 
-.mcp-reg-search { display: flex; gap: 10px; }
-.mcp-reg-search input { flex: 1; min-width: 0; }
-.mcp-reg-results { display: flex; flex-direction: column; gap: 8px; }
-.mcp-reg-row { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 10px 13px; cursor: pointer; text-align: left; font: inherit; }
-.mcp-reg-row:hover { border-color: var(--border-loud); background: var(--surface-3); }
-.mcp-reg-row.is-selected { border-color: color-mix(in oklch, var(--accent) 50%, transparent); border-radius: 7px 7px 0 0; background: var(--surface-3); }
-.mcp-reg-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.mcp-reg-badge { flex-shrink: 0; font-family: var(--font-mono); font-size: 10px; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-dim); }
-.mcp-reg-badge.official { color: var(--accent-violet); border-color: color-mix(in oklch, var(--accent-violet) 40%, transparent); }
-.mcp-reg-desc { font-size: 12px; color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mcp-reg-form { display: flex; flex-direction: column; gap: 13px; padding: 14px; border: 1px solid color-mix(in oklch, var(--accent) 50%, transparent); border-top: none; border-radius: 0 0 7px 7px; background: var(--surface); }
+.mcp-offers { display: flex; flex-direction: column; gap: 8px; max-height: 440px; overflow-y: auto; }
+.mcp-offer { display: flex; flex-direction: column; gap: 3px; padding: 10px 13px; }
+.mcp-offer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.mcp-offer-desc { font-size: 12px; color: var(--text-mid); }
 
 .mcp-custom-summary { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-radius: 7px; font-size: 13px; color: var(--text-mid); cursor: pointer; list-style: none; }
 .mcp-custom-summary::-webkit-details-marker { display: none; }

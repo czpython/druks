@@ -65,15 +65,6 @@ class InvalidCatalogError(McpServerError):
         self.reason = reason
 
 
-class RegistryUnavailableError(McpServerError):
-    # The registry couldn't answer — network trouble, a non-2xx, or an
-    # undocumented payload shape.
-    def __init__(self, query: str, reason: str):
-        super().__init__(f"MCP registry search for {query!r} failed: {reason}")
-        self.query = query
-        self.reason = reason
-
-
 class OauthConnectError(McpServerError):
     # The connect flow (discovery, client registration, code exchange) failed —
     # surfaced to the operator who clicked Connect, with the step that broke.

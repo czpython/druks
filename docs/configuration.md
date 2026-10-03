@@ -686,24 +686,20 @@ this catalog at startup. The packaged catalog contains an empty `mcpServers`
 map. Thus, a new installation has no built-in servers. A deployment can point
 `DRUKS_MCP_CATALOG` to a mounted file with its defaults.
 
-Druks always loads a
-catalog. A missing catalog stops startup. Catalogs contain definitions, not
-tokens.
+Druks always loads a catalog. A missing catalog stops startup. Catalogs
+contain definitions, not tokens.
 
-`DRUKS_MCP_TRUSTED` points to the trust-pins JSON for the official registry
-badge. Druks calculates the badge. An entry is official if its reversed
-publisher namespace matches the remote host. For example, `com.grafana` matches
-`*.grafana.com`. A pin covers a value that this rule cannot derive. The value
-shape selects one of two pin types:
+`DRUKS_MCP_DIRECTORY` points to the directory of MCP servers that the dashboard
+offers to add: a JSON file that maps each server name to the server's `title`,
+`description`, and `url`. The packaged directory lists vendor-hosted servers:
 
-- A publisher namespace (`"grafana": "io.github.grafana"`) identifies a
-  publisher that the rule cannot match. The entry URL stays live from the
-  registry.
-- An `http…` URL (`"sentry": "https://mcp.sentry.dev/mcp"`) supplies a hosted
-  endpoint that the registry entry omits.
+```json
+{"grafana": {"title": "Grafana Cloud", "description": "Dashboards and alerts.", "url": "https://mcp.grafana.com/mcp"}}
+```
 
-If the registry entry declares the hosted URL, pin the publisher. If it does
-not declare the URL, pin the URL.
+Every listed server signs in with OAuth. The server must support dynamic
+client registration, or a Druks service must own its host, such as GitHub. To
+add a server that is not listed, add a custom server.
 
 The dashboard can enable catalog entries and add custom servers. Authentication
 is one of:
@@ -711,8 +707,6 @@ is one of:
 - Secret headers, which Druks keeps in the vault. A bearer token is the
   `Authorization` header spelled out; the form's Bearer field composes it.
 - An OAuth connection, which requires `urls.endpoint`.
-
-A registry install is an OAuth server when its secret headers are empty.
 
 A service can own the host of an OAuth server: GitHub owns
 `api.githubcopilot.com`, Jira owns `mcp.atlassian.com`, and Linear owns

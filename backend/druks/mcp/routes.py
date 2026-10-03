@@ -10,13 +10,12 @@ from druks.accounts.dependencies import current_session_account
 from druks.api.dependencies import SessionDep
 from druks.apps.registry import mcp_servers
 from druks.core.templates import render_page
-from druks.mcp import oauth, registry
+from druks.mcp import oauth
 from druks.mcp.constants import HEADER_NAME_PATTERN
 from druks.mcp.enums import Credential, IdentityMode
 from druks.mcp.exceptions import (
     InvalidServerNameError,
     OauthConnectError,
-    RegistryUnavailableError,
     ReservedServerNameError,
 )
 from druks.mcp.helpers import get_grant_account
@@ -24,10 +23,8 @@ from druks.mcp.models import McpServer
 from druks.mcp.schemas import (
     ConnectMcpServerResponse,
     CreateMcpServerRequest,
-    InstallMcpServerRequest,
-    McpRegistryCandidateResponse,
-    McpRegistrySearchResponse,
     McpServerConnectionResponse,
+    McpServerDirectoryResponse,
     McpServerResponse,
 )
 from druks.secrets.models import VaultSecret
@@ -48,21 +45,10 @@ async def list_mcp_servers(session: SessionDep) -> list[McpServerResponse]:
     ]
 
 
-@router.get("/registry", response_model=McpRegistrySearchResponse)
-async def search_mcp_registry(query: str, request: Request) -> McpRegistrySearchResponse:
-    pins = json.loads(request.app.state.settings.mcp_trusted_path.read_text())
-    try:
-        entries, has_more = await registry.search_registry(query)
-    except RegistryUnavailableError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    candidates = registry.resolve_candidates(entries, pins)
-    return McpRegistrySearchResponse(
-        candidates=[
-            McpRegistryCandidateResponse.model_validate(candidate)
-            for candidate in candidates.values()
-        ],
-        has_more=has_more,
-    )
+@router.get("/directory", response_model=list[McpServerDirectoryResponse])
+async def list_mcp_server_directory(request: Request) -> list[dict]:
+    directory = json.loads(request.app.state.settings.mcp_directory_path.read_text())
+    return [{"name": name, **entry} for name, entry in directory.items()]
 
 
 @router.post("", response_model=McpServerResponse)
@@ -99,66 +85,28 @@ async def add_mcp_server(session: SessionDep, body: CreateMcpServerRequest) -> M
     )
 
 
-@router.post("/registry", response_model=McpServerResponse)
-async def install_mcp_server(
-    session: SessionDep, body: InstallMcpServerRequest, request: Request
+@router.post("/directory", response_model=McpServerResponse)
+async def add_directory_mcp_server(
+    session: SessionDep, request: Request, name: str = Body(embed=True)
 ) -> McpServerResponse:
-    if body.name in mcp_servers:
+    if name in mcp_servers:
         raise HTTPException(
             status_code=409,
-            detail=f"MCP server {body.name!r} is built-in; configure it instead of adding it.",
+            detail=f"MCP server {name!r} is built-in; configure it instead of adding it.",
         )
-    if await McpServer.get_for_name(session, body.name):
+    if await McpServer.get_for_name(session, name):
         raise HTTPException(
-            status_code=409, detail=f"MCP server {body.name!r} already exists; remove it first."
+            status_code=409, detail=f"MCP server {name!r} already exists; remove it first."
         )
-    # url, auth shape and header secrecy come from the re-resolved registry
-    # entry, never the client.
-    pins = json.loads(request.app.state.settings.mcp_trusted_path.read_text())
-    try:
-        entries, _ = await registry.search_registry(body.registry)
-    except RegistryUnavailableError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    candidate = registry.resolve_candidates(entries, pins).get(body.registry)
-    if not candidate:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Registry entry {body.registry!r} is not installable over HTTP.",
-        )
-    declared = {spec["name"] for spec in candidate["headers"]}
-    unknown = sorted(set(body.headers) - declared)
-    if unknown:
-        raise HTTPException(
-            status_code=422,
-            detail=f"{body.registry!r} declares no header(s): {', '.join(unknown)}.",
-        )
-    filled = {}
-    for header, value in body.headers.items():
-        if stripped := value.strip():
-            filled[header] = stripped
-    required = {spec["name"] for spec in candidate["headers"] if spec.get("isRequired")}
-    missing = sorted(required - set(filled))
-    if missing:
-        raise HTTPException(
-            status_code=422, detail=f"Missing required header value(s): {', '.join(missing)}."
-        )
-    secret = {spec["name"] for spec in candidate["headers"] if spec.get("isSecret")}
-    # A filled secret header carries the auth itself. Without one the server is
-    # OAuth and ships dark until its Connect lands.
-    is_oauth = not secret.intersection(filled)
-    try:
+    directory = json.loads(request.app.state.settings.mcp_directory_path.read_text())
+    if name in directory:
+        # Every directory server signs in with OAuth, so it ships dark until its
+        # Connect lands.
         await McpServer.create(
-            session,
-            name=body.name,
-            url=candidate["url"],
-            is_oauth=is_oauth,
-            headers={h: v for h, v in filled.items() if h not in secret},
-            secret_headers={h: v for h, v in filled.items() if h in secret},
-            is_enabled=not is_oauth,
+            session, name=name, url=directory[name]["url"], is_oauth=True, is_enabled=False
         )
-    except (InvalidServerNameError, ReservedServerNameError) as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    return await _response(session, body.name)
+        return await _response(session, name)
+    raise HTTPException(status_code=404, detail=f"{name!r} is not in the MCP server directory.")
 
 
 @router.patch("/{name}", response_model=McpServerResponse)
