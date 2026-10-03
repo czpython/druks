@@ -51,10 +51,10 @@ async def render_prompt(
     name: str,
     /,
     *,
-    repo: str | None = None,
+    overrides_from: str | None = None,
     **context: object,
 ) -> str:
-    """Render a prompt template through the override hierarchy.
+    """Render a bundled prompt, with optional overrides from a named repository.
 
     Resolution order (first found wins), always against default branches:
 
@@ -66,32 +66,13 @@ async def render_prompt(
     failures propagate — those are real misconfigurations and the
     caller should decide whether to retry, fall back, or fail.
     """
-    # Templates routinely reference ``{{ repo }}``; the kwarg drives
-    # override resolution AND lands in the render context so callers
-    # don't pass it twice.
-    if repo:
-        context.setdefault("repo", repo)
-    override = await _resolve_override(name, repo=repo)
-    if override:
-        return await _environment().from_string(override).render_async(**context)
+    if overrides_from:
+        app, _, rest = name.partition("/")
+        if rest:
+            owner = overrides_from.partition("/")[0]
+            path = f"{app}/prompts/{rest}"
+            override = await fetch_file(repo=overrides_from, path=f".druks/{path}")
+            override = override or await fetch_file(repo=f"{owner}/.druks", path=path)
+            if override:
+                return await _environment().from_string(override).render_async(**context)
     return await _environment().get_template(name).render_async(**context)
-
-
-async def _resolve_override(name: str, *, repo: str | None) -> str | None:
-    namespaced = _app_prompt_path(name)
-    if repo and namespaced:
-        owner = repo.partition("/")[0]
-        body = await fetch_file(repo=repo, path=f".druks/{namespaced}")
-        return body or await fetch_file(repo=f"{owner}/.druks", path=namespaced)
-    return
-
-
-def _app_prompt_path(name: str) -> str | None:
-    """Where a bundled template's repo override lives. Bundled prompts are
-    namespaced by app (``<app>/<rest>``), and an app owns ``.druks/<app>/``,
-    so the override is ``<app>/prompts/<rest>`` — derived from the name, no table
-    to keep in sync. A name with no app segment (no ``/``) isn't overridable."""
-    app, _, rest = name.partition("/")
-    if rest:
-        return f"{app}/prompts/{rest}"
-    return
