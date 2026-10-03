@@ -31,12 +31,13 @@ class Bridge:
         finally:
             writer.close()
             await writer.wait_closed()
+        # A docker-sbx gateway accepts a channel to a closed port and then ends it.
+        if not line:
+            raise ChatBridgeUnavailable("The Chat bridge is not available.")
         try:
             response = json.loads(line)
         except ValueError as error:
-            raise ChatBridgeError(
-                "The Chat bridge closed the request without an answer."
-            ) from error
+            raise ChatBridgeError("The Chat bridge sent an answer that is not JSON.") from error
         if response["ok"]:
             return response
         raise ChatBridgeError(response["error"])

@@ -74,6 +74,16 @@ async def installation_key() -> VaultSecret:
     )
 
 
+@pytest.fixture
+def declared_services():
+    # Service subclasses self-register at class definition; tests declare
+    # inside this fixture and leave the registry as found.
+    saved = dict(services._items)
+    yield
+    services._items.clear()
+    services._items.update(saved)
+
+
 @pytest.fixture(autouse=True)
 async def _redis(druks_redis):
     yield

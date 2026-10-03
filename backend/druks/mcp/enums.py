@@ -7,6 +7,19 @@ class IdentityMode(StrEnum):
     PER_USER = "per_user"
 
 
+class Credential(StrEnum):
+    """Where an account's credential for an MCP server comes from."""
+
+    # The server's secret header rows, the same for every account.
+    HEADERS = "headers"
+    # The account's own OAuth grant at the server.
+    GRANT = "grant"
+    # The account's sign-in at the service that owns the server's host.
+    SERVICE_CONNECTION = "service_connection"
+    # The pasted login of that service, which only the default account sends.
+    SERVICE_LOGIN = "service_login"
+
+
 class Toolkit(Enum):
     """What a Druks key allows when it has no tool list: the whole API."""
 

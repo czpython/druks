@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from conftest import connect_service
+from druks.sandbox import SandboxSecret
 from druks.sandbox.layout import get_repo_root
 from druks.testing import run_workflow
 from druks_field_notes.app import FieldNotes
@@ -29,7 +30,7 @@ async def test_survey_writes_the_repository_gist(druks_db, monkeypatch):
     await run_workflow(Survey, subject=repository)
 
     survey.assert_awaited_once_with()
-    assert (await Repository.get_for_id(repository.id)).gist == "Widgets for every shelf."
+    assert (await Repository.get(id=repository.id)).gist == "Widgets for every shelf."
 
 
 async def test_survey_workspace_clones_the_subject_repo(druks_db):
@@ -46,5 +47,7 @@ async def test_survey_workspace_clones_the_subject_repo(druks_db):
     row = await connect_service(
         "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
     )
-    [secret] = await workflow.get_secret_refs(druks_db)
-    assert secret.key == ("github", row.id, "acme/widgets", "")
+    [secret] = await workflow.workspace_class.get_secrets(await workflow.subject)
+    assert secret == SandboxSecret(
+        name="github", secret_id=row.id, resource="acme/widgets", host="github.com"
+    )

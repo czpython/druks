@@ -16,7 +16,7 @@ from druks.chat.constants import CONVERSATION_HEADER
 from druks.chat.enums import ConversationSource, MessageRole
 from druks.chat.exceptions import ChannelHasNoThreadsError
 from druks.chat.models import Conversation
-from druks.chat.routes import read_thread
+from druks.chat.routes import read_thread, require_tag
 from druks.core.apis.slack import SlackClient
 from druks.core.services import Slack
 from druks.core.webhooks.slack import SlackEvents
@@ -444,6 +444,42 @@ async def test_chat_read_thread_reads_the_callers_own_conversation(
     assert [(message["ts"], message["is_from_user"]) for message in thread.json()] == [
         ("10.0", True)
     ]
+
+
+async def test_a_person_who_requires_a_tag_is_answered_only_when_they_tag(
+    card, druks_db, slack, delivery, tmp_path
+):
+    configure_app_for_test(settings=make_settings(tmp_path), authenticated=False)
+    api = FastAPI(dependencies=[Depends(request_session)])
+    api.add_api_route("/thread/tag", require_tag, methods=["PUT"], status_code=204)
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    await link_person(druks_db, ana)
+    await receive(card, room_event())
+    [conversation] = await Conversation.list_for_connection(druks_db, card.id)
+    direct = await thread_conversation(druks_db, card, ana, thread_id="")
+    _, token = await PersonalAccessToken.create(druks_db, account_id=ana.id, name="chat")
+    await druks_db.commit()
+    headers = {"Authorization": f"Bearer {token}", CONVERSATION_HEADER: conversation.id}
+
+    async def bodies():
+        await druks_db.refresh(conversation, ["messages"])
+        return [message.body for message in conversation.messages]
+
+    async with asgi_client(api) as client:
+        required = await client.put("/thread/tag", json={"is_required": True}, headers=headers)
+        await receive(card, room_event(text="more", ts="12.0", thread_ts="10.0"))
+        await receive(card, room_event(ts="13.0", thread_ts="10.0"))
+        assert await bodies() == ["read my runs", "read my runs"]
+        optional = await client.put("/thread/tag", json={"is_required": False}, headers=headers)
+        await receive(card, room_event(text="and more", ts="14.0", thread_ts="10.0"))
+        assert await bodies() == ["read my runs", "read my runs", "and more"]
+        no_thread = await client.put(
+            "/thread/tag",
+            json={"is_required": True},
+            headers={**headers, CONVERSATION_HEADER: direct.id},
+        )
+
+    assert (required.status_code, optional.status_code, no_thread.status_code) == (204, 204, 409)
 
 
 def shared_file(file_id="F1", name="plan.pdf"):

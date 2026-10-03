@@ -144,7 +144,7 @@ async def test_trigger_status_dispatches_build_with_the_webhook_payload(tmp_path
 
 async def test_trigger_status_does_not_redispatch_a_merged_item(druks_db, monkeypatch):
     item = await make_test_work_item(
-        repo="octo/alfred",
+        repo="octo/gadget",
         source="jira",
         ticket_key="IT-12",
         title="Add an endpoint",
@@ -167,7 +167,7 @@ async def test_trigger_status_redispatches_a_closed_item(druks_db, monkeypatch):
         secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},
     )
     item = await make_test_work_item(
-        repo="octo/alfred",
+        repo="octo/gadget",
         source="jira",
         ticket_key="IT-12",
         title="Add an endpoint",
@@ -185,8 +185,8 @@ async def test_trigger_status_redispatches_a_closed_item(druks_db, monkeypatch):
 
 async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, druks_db, monkeypatch):
     """A new ticket has no work item. Its label names the repo, and the registry routes it."""
-    project = await Project.create(name="octo/alfred")
-    await ProjectRepo.create(project_id=project.id, full_name="octo/alfred")
+    project = await Project.create(name="octo/gadget")
+    await ProjectRepo.create(project_id=project.id, full_name="octo/gadget")
     await druks_db.flush()
     _pin_settings(monkeypatch, trigger_status="Ready")
     await seed_run(druks_db, kind=Build.kind, run_id="run-new")
@@ -197,11 +197,11 @@ async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, druks_db, m
     monkeypatch.setattr(subs.Build, "start", classmethod(fake_start))
 
     await subs.ticket_transition_drives_the_funnel(
-        payload=_jira_payload(key="SHRP-1", status="Ready", project="Octo", labels=["Alfred"]),
+        payload=_jira_payload(key="OCTO-1", status="Ready", project="Octo", labels=["Gadget"]),
     )
 
-    item = await WorkItem.get_for_ticket_key(source="jira", ticket_key="SHRP-1")
-    assert item.repo == "octo/alfred"
+    item = await WorkItem.get_for_ticket_key(source="jira", ticket_key="OCTO-1")
+    assert item.repo == "octo/gadget"
     assert item.project_id == project.id
 
 
@@ -212,7 +212,7 @@ async def test_trigger_status_ignores_an_unroutable_ticket(tmp_path, druks_db, m
     monkeypatch.setattr(subs.Build, "start", start)
 
     await subs.ticket_transition_drives_the_funnel(
-        payload=_jira_payload(key="SHRP-2", status="Ready", project="Octo"),
+        payload=_jira_payload(key="OCTO-2", status="Ready", project="Octo"),
     )
 
     start.assert_not_called()

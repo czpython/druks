@@ -697,7 +697,9 @@ async def test_two_fetches_inside_the_margin_rotate_once_request_once_and_answer
 async def test_a_fetch_on_a_busy_subscription_answers_the_current_token(monkeypatch, druks_db):
     # Inside the margin, above the call horizon: the call in flight keeps its token.
     connection = await _seed_claude(
-        access="current", refresh="R0", expires_at=_in(timedelta(minutes=90))
+        access="current",
+        refresh="R0",
+        expires_at=_in(AnthropicProvider.REFRESH_MARGIN - timedelta(minutes=1)),
     )
     calls = _mock_post(monkeypatch, _resp(200, _REFRESHED))
 

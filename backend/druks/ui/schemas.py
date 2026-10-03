@@ -1,11 +1,14 @@
-from collections.abc import Iterable
+from collections.abc import Iterator
+from typing import TypeVar
 
 from pydantic import Field, model_validator
 
 from druks.schemas import Schema
 
-from .blocks import Action, Block, Link, Watched
+from .blocks import Action, Block, Columns, Link, Watched
 from .fields import Field as PageField
+
+Part = TypeVar("Part", bound=Schema)
 
 
 class Page(Schema):
@@ -29,10 +32,25 @@ class Page(Schema):
             control.check_placement(followed=bool(self.follows), regions=regions)
         for block in self.blocks:
             block.check_placement(followed=bool(self.follows), regions=regions)
+        splits = [part for part in self.iter_parts(Columns) if part.layout == "split"]
+        sole = self.blocks[0] if len(self.blocks) == 1 else None
+        if splits and not (len(splits) == 1 and sole is splits[0]):
+            raise ValueError(
+                "Columns layout='split' is the page: two panes, a list and what it opened. "
+                "It cannot sit beside another block or inside one."
+            )
         return self
 
-    def iter_actions(self) -> "Iterable[Action]":
-        for control in self.controls:
-            yield from control.iter_actions()
-        for block in self.blocks:
-            yield from block.iter_actions()
+    def iter_parts(self, *kinds: type[Part]) -> Iterator[Part]:
+        """Every block, value, and control of ``kinds`` on the page, however deep,
+        in the order the page holds them."""
+
+        def walk(part: Schema) -> Iterator[Part]:
+            for _, value in part:
+                for child in value if isinstance(value, list) else [value]:
+                    if isinstance(child, Schema):
+                        if isinstance(child, kinds):
+                            yield child
+                        yield from walk(child)
+
+        return walk(self)

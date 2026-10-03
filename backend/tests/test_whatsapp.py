@@ -411,7 +411,7 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
     monkeypatch.setattr(Bridge, "request", request)
     waha.handlers[("POST", "/api/sendText")] = copy_arrives_first
     pause = AsyncMock()
-    monkeypatch.setattr(bot_service.pause_queue, "enqueue_async", pause)
+    monkeypatch.setattr(bot_service.DBOS, "enqueue_workflow_async", pause)
 
     await service.deliver_pending(druks_db, conversation)
 
@@ -781,7 +781,14 @@ async def test_operator_turns_use_the_apps_prompt_and_settings_without_a_timeout
 
     resolved_config, prompt, tools = await service.get_agent(druks_db, conversation)
     await service.send_turn(
-        druks_db, conversation, message, Bridge(host), SimpleNamespace(), resolved_config, prompt
+        druks_db,
+        conversation,
+        message,
+        bridge=Bridge(host),
+        identity=SimpleNamespace(),
+        config=resolved_config,
+        prompt=prompt,
+        mcp_servers=(),
     )
 
     bot = helpdesk.bot if app == "helpdesk" else Chat.bot
@@ -867,7 +874,7 @@ async def test_a_phone_message_pauses_its_chat_and_the_next_one_restarts_the_clo
 ):
     connection = await link(druks_db, await bot_account(druks_db))
     enqueue, send = AsyncMock(), AsyncMock()
-    monkeypatch.setattr(bot_service.pause_queue, "enqueue_async", enqueue)
+    monkeypatch.setattr(bot_service.DBOS, "enqueue_workflow_async", enqueue)
     monkeypatch.setattr(bot_service.DBOS, "send_async", send)
     typed = message_event(ANA, "I'll call you.", key="PHONE1", from_me=True)
 
@@ -880,7 +887,7 @@ async def test_a_phone_message_pauses_its_chat_and_the_next_one_restarts_the_clo
     await druks_db.refresh(conversation, ["messages"])
     assert [message.is_internal for message in conversation.messages] == [True, True]
     assert "I'll call you." in conversation.messages[0].body
-    enqueue.assert_awaited_once_with(bot_service.pause, conversation.id)
+    enqueue.assert_awaited_once_with(bot_service.PAUSE_QUEUE, bot_service.pause, conversation.id)
     send.assert_awaited_once_with("PHONE1", PauseSignal.EXTEND, topic=PAUSE_TOPIC)
 
 

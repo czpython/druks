@@ -240,7 +240,7 @@ async def test_warm_lease_uses_workflow_template(monkeypatch):
 
     assert (
         await workflow._lease_host(
-            db_session(), SimpleNamespace(secrets={}, secret_refs=[], secrets_id="")
+            db_session(), SimpleNamespace(secrets={}, secret_refs=[], secrets_id=""), []
         )
         == "host-1"
     )
@@ -266,7 +266,6 @@ async def test_ephemeral_lease_uses_workflow_template(monkeypatch):
     workflow = SimpleNamespace(
         sandbox=sandbox,
         get_workspace=AsyncMock(return_value="workspace"),
-        get_secret_refs=AsyncMock(return_value=[]),
     )
     resolve = AsyncMock(return_value="template-1")
     monkeypatch.setattr(
@@ -278,7 +277,7 @@ async def test_ephemeral_lease_uses_workflow_template(monkeypatch):
 
     config = SimpleNamespace(secrets={}, secret_refs=[], secrets_id="")
     async with agent_module._runner(
-        db_session(), workflow, None, "run-1", "summarize", config
+        db_session(), workflow, None, "run-1", "summarize", config, []
     ) as runner:
         assert runner == "workspace"
 

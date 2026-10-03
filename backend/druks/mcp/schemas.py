@@ -2,14 +2,17 @@ from typing import Annotated, Literal
 
 from pydantic import AliasPath, BaseModel, ConfigDict, Field, StringConstraints
 
+from druks.mcp.enums import Credential
 from druks.schemas import Schema
 
 NonBlank = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class McpServerResponse(Schema):
-    # A pure projection of one account's ``McpServer.get_resolved()`` item — the
-    # dict's ``token`` is a vault row, not a field here, so no secret serializes.
+    # A pure projection of one ``McpServerAccess``. Its ``secret`` is a vault
+    # row, not a field here, so no secret serializes.
+    model_config = ConfigDict(from_attributes=True)
+
     name: str
     url: str
     is_enabled: bool
@@ -18,6 +21,10 @@ class McpServerResponse(Schema):
     builtin: bool
     # Whether the server can authenticate at delivery — never the token itself.
     has_token: bool
+    # Where the account's credential for the server comes from.
+    credential: Credential
+    # The service that owns the server's host.
+    service: str | None
 
 
 class McpServerConnectionResponse(Schema):
@@ -43,6 +50,12 @@ class McpRegistryCandidateResponse(Schema):
     official: bool
     # The remote's declared inputs, verbatim — the registry owns their shape.
     headers: list[dict]
+
+
+class McpRegistrySearchResponse(Schema):
+    candidates: list[McpRegistryCandidateResponse]
+    # The registry holds more matches than one search returns.
+    has_more: bool
 
 
 class CreateMcpServerRequest(BaseModel):

@@ -93,8 +93,19 @@ async def get_subject_statuses(
 ) -> dict[str, SubjectStatus]:
     """The status of every subject on a board, keyed by subject id — one driving-run
     read for the whole page."""
-    driving_runs = await Run.get_latest_for_subjects(session, subject_type, subject_ids)
-    return {subject_id: await _status(driving_runs.get(subject_id)) for subject_id in subject_ids}
+    statuses = await get_statuses_for_subjects(
+        session, [(subject_type, subject_id) for subject_id in subject_ids]
+    )
+    return {subject_id: statuses[(subject_type, subject_id)] for subject_id in subject_ids}
+
+
+async def get_statuses_for_subjects(
+    session: AsyncSession, identities: list[tuple[str, str]]
+) -> dict[tuple[str, str], SubjectStatus]:
+    """The status of each ``(subject_type, subject_id)``, keyed by it — one
+    driving-run read for subjects of any type."""
+    driving_runs = await Run.get_latest_for_subjects(session, identities)
+    return {identity: await _status(driving_runs.get(identity)) for identity in identities}
 
 
 async def get_subject_phase(

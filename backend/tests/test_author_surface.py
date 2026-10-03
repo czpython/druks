@@ -8,6 +8,7 @@ AUTHOR_SURFACE = {
     "druks.apps": {"App", "AppSettings", "Choices", "Secret"},
     "druks.browser": {"BrowserSession", "BrowserSessionSignedOutError", "BrowserSessionStatus"},
     "druks.services": {
+        "Connection",
         "OauthClient",
         "OauthExchangeError",
         "OauthRefreshError",
@@ -15,7 +16,7 @@ AUTHOR_SURFACE = {
         "ServiceConnectError",
         "ServiceNotConnectedError",
     },
-    "druks.sandbox": {"Sandbox"},
+    "druks.sandbox": {"Sandbox", "SandboxMcpServer", "SandboxSecret"},
     "druks.agents": {"Agent", "AgentOutput", "Bot", "BotUser"},
     "druks.workflows": {
         "AgentCall",
@@ -23,6 +24,7 @@ AUTHOR_SURFACE = {
         "AgentCallStatus",
         "FatalError",
         "Gate",
+        "GateTimeout",
         "Journal",
         "OperatorReply",
         "RunResponse",
@@ -36,7 +38,7 @@ AUTHOR_SURFACE = {
         "step",
         "task",
     },
-    "druks.db": {"Base", "StoredSubject", "db_session"},
+    "druks.db": {"Model", "StoredSubject", "db_session"},
     "druks.db.fields": {"EncryptedJsonField", "EncryptedTextField", "Secret", "SecretsMapping"},
     "druks.schemas": {"Schema"},
     "druks.ui": {
@@ -82,6 +84,7 @@ AUTHOR_SURFACE = {
         "SelectField",
         "Stack",
         "StatusValue",
+        "SubjectStatus",
         "Table",
         "TableColumn",
         "TableRow",

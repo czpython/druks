@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 process.env.DISPLAY ||= ":99";
-process.env.PLAYWRIGHT_BROWSERS_PATH ||= "/ms-playwright";
 
 const fs = require("node:fs");
+const http = require("node:http");
+const https = require("node:https");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 
 const { chromium } = require("/opt/druks-browser/node_modules/playwright");
 
@@ -13,6 +14,10 @@ const META_PATH = path.join(SESSION_ROOT, "state.meta.json");
 const PROFILE_ARCHIVE_PATH = path.join(SESSION_ROOT, "state.tar.gz");
 const STORAGE_STATE_PATH = path.join(SESSION_ROOT, "state.json");
 const PROFILE_PATH = path.join(SESSION_ROOT, "profile");
+// Real Google Chrome, spawned with no driver. A login gate reads the
+// Chromium-vs-Chrome brand split, and the switches and debugger of a driver.
+const CHROME_PATH = "/opt/google/chrome/chrome";
+const CDP_URL = "http://127.0.0.1:9222";
 // The proxy for the login only. druks sets it only when the operator gives one.
 // If it is empty, the browser uses the box IP.
 const loginProxy = process.env.DRUKS_BROWSER_LOGIN_PROXY;
@@ -23,20 +28,6 @@ const CLOSED_PATH = path.join(RUNTIME_PATH, "closed");
 // Chrome drops session-only cookies when it closes, and a login often lives in
 // one. They ride in the profile so the export carries them to the next launch.
 const SESSION_COOKIES_PATH = path.join(PROFILE_PATH, "druks-session-cookies.json");
-
-// Chrome's --proxy-server cannot carry a password. Playwright authenticates the
-// proxy when you give it a user name and password. So a proxy URL with a user
-// name and password (http://user:pass@host:port) works with no external relay.
-// A URL with no user name and password gives a server-only proxy.
-function proxyFromUrl(raw) {
-  const url = new URL(raw);
-  const option = { server: `${url.protocol}//${url.host}` };
-  if (url.username) option.username = decodeURIComponent(url.username);
-  if (url.password) option.password = decodeURIComponent(url.password);
-  return option;
-}
-
-const proxyOption = loginProxy ? proxyFromUrl(loginProxy) : undefined;
 
 const [mode] = process.argv.slice(2);
 if (!mode || process.argv.length !== 3 || !["--headed", "--headless"].includes(mode)) {
@@ -90,6 +81,79 @@ function unpackProfileArchive(meta) {
   }
 }
 
+// Chrome's --proxy-server cannot carry a password. This loopback relay passes
+// the browser's requests to the proxy and adds the credentials.
+function startProxyRelay(proxy) {
+  if (!["http:", "https:"].includes(proxy.protocol)) {
+    throw new Error(
+      `Chrome cannot send a password to a ${proxy.protocol}// proxy. Use an http or https login proxy.`,
+    );
+  }
+  const client = proxy.protocol === "https:" ? https : http;
+  const credentials = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
+  const authorization = `Basic ${Buffer.from(credentials).toString("base64")}`;
+  const forward = (request) =>
+    client.request({
+      host: proxy.hostname,
+      port: proxy.port,
+      method: request.method,
+      path: request.url,
+      headers: [...request.rawHeaders, "Proxy-Authorization", authorization],
+    });
+
+  const relay = http.createServer((request, response) => {
+    const upstream = forward(request);
+    upstream.on("response", (reply) => {
+      response.writeHead(reply.statusCode, reply.rawHeaders);
+      reply.pipe(response);
+    });
+    upstream.on("error", () => response.destroy());
+    request.pipe(upstream);
+  });
+  relay.on("connect", (request, browserSocket, head) => {
+    const upstream = forward(request);
+    upstream.on("connect", (reply, proxySocket, proxyHead) => {
+      browserSocket.write(`HTTP/1.1 ${reply.statusCode} ${reply.statusMessage}\r\n\r\n`);
+      browserSocket.write(proxyHead);
+      proxySocket.write(head);
+      proxySocket.pipe(browserSocket);
+      browserSocket.pipe(proxySocket);
+      proxySocket.on("error", () => browserSocket.destroy());
+      browserSocket.on("error", () => proxySocket.destroy());
+    });
+    upstream.on("error", () => browserSocket.destroy());
+    browserSocket.on("error", () => upstream.destroy());
+    upstream.end();
+  });
+  return new Promise((resolve) => {
+    relay.listen(0, "127.0.0.1", () => resolve(relay));
+  });
+}
+
+async function debuggerVersion(chrome) {
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline && chrome.exitCode === null && chrome.signalCode === null) {
+    const response = await fetch(`${CDP_URL}/json/version`).catch(() => undefined);
+    if (response?.ok) {
+      return response.json();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Chrome did not open its debugger on 127.0.0.1:9222");
+}
+
+// One command on its own CDP socket. It enables no domain, so a page cannot read it.
+function sendCdp(webSocketUrl, method, params) {
+  return new Promise((resolve) => {
+    const socket = new WebSocket(webSocketUrl);
+    socket.addEventListener("open", () => socket.send(JSON.stringify({ id: 1, method, params })));
+    socket.addEventListener("message", () => socket.close());
+    socket.addEventListener("close", resolve);
+    // A connection that Chrome refuses gives an error and no close.
+    socket.addEventListener("error", resolve);
+  });
+}
+
 async function main() {
   const meta = readSessionMeta();
 
@@ -103,72 +167,109 @@ async function main() {
     unpackProfileArchive(meta);
   }
 
-  let context;
+  let relay;
+  let chrome;
+  let chromeExit;
+  let version;
   let isReady = false;
   try {
-    context = await chromium.launchPersistentContext(PROFILE_PATH, {
-      // Real Google Chrome. The image installs it on amd64 and arm64; a login gate
-      // reads the Chromium-vs-Chrome brand split, so the login browser must be Chrome.
-      channel: "chrome",
-      proxy: proxyOption,
-      args: [
-        "--remote-debugging-address=127.0.0.1",
-        "--remote-debugging-port=9222",
-        "--window-size=1920,1080",
-        // Clears navigator.webdriver, the automation flag a logged-in site
-        // reads to challenge the session. The operator drives a real login
-        // here, so the browser must not announce itself as driven.
-        "--disable-blink-features=AutomationControlled",
-        // WebRTC gathers ICE candidates over raw UDP, which bypasses an HTTP
-        // proxy and would reveal the box's real address. Only matters with a
-        // login proxy set.
-        ...(loginProxy ? ["--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] : []),
-      ],
-      handleSIGHUP: false,
-      handleSIGINT: false,
-      handleSIGTERM: false,
-      headless,
-      viewport: null,
-    });
-    context.on("close", requestShutdown);
+    const args = [
+      `--user-data-dir=${PROFILE_PATH}`,
+      "--remote-debugging-address=127.0.0.1",
+      "--remote-debugging-port=9222",
+      "--window-size=1920,1080",
+      "--no-first-run",
+      "--no-default-browser-check",
+      // Docker's default seccomp blocks the sandbox's namespace syscalls.
+      "--no-sandbox",
+      "--disable-dev-shm-usage",
+      // The box has no GPU. Without this, Chrome gives a page no WebGL context.
+      "--enable-unsafe-swiftshader",
+      // Without these, Chrome downloads about 150 MB into the profile in a few
+      // minutes, and each saved session carries it. A page cannot read them.
+      "--disable-background-networking",
+      "--disable-component-update",
+      "--disable-features=OptimizationHints",
+    ];
+    if (headless) {
+      args.push("--headless=new");
+    }
+    if (loginProxy) {
+      const proxy = new URL(loginProxy);
+      let proxyServer = `${proxy.protocol}//${proxy.host}`;
+      if (proxy.username || proxy.password) {
+        relay = await startProxyRelay(proxy);
+        proxyServer = `http://127.0.0.1:${relay.address().port}`;
+      }
+      // WebRTC gathers ICE candidates over raw UDP, which bypasses an HTTP
+      // proxy and would reveal the box's real address.
+      args.push(
+        `--proxy-server=${proxyServer}`,
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+      );
+    }
 
+    chrome = spawn(CHROME_PATH, [...args, "about:blank"], {
+      stdio: ["ignore", "ignore", "inherit"],
+    });
+    chromeExit = new Promise((resolve) => {
+      chrome.once("exit", resolve);
+    });
+    chromeExit.then(requestShutdown);
+    version = await debuggerVersion(chrome);
+
+    // Playwright attaches here, before a site opens, and again at shutdown.
+    // Between the two, the window has no driver for a site to read.
+    const browser = await chromium.connectOverCDP(CDP_URL);
+    const [context] = browser.contexts();
     if (meta.format === "storage_state") {
       await context.setStorageState(STORAGE_STATE_PATH);
     }
     if (fs.existsSync(SESSION_COOKIES_PATH)) {
       await context.addCookies(JSON.parse(fs.readFileSync(SESSION_COOKIES_PATH, "utf8")));
     }
+    await browser.close();
 
     // Open on the session's own site so the operator lands where they log in,
     // not on a blank tab. Best-effort: a slow or blocked site still yields a
     // usable window the operator can steer by hand.
     const startUrl = process.env.DRUKS_BROWSER_URL;
     if (startUrl) {
-      const page = context.pages()[0] || (await context.newPage());
-      await page
-        .goto(startUrl, { waitUntil: "domcontentloaded", timeout: 15000 })
-        .catch(() => {});
+      const targets = await (await fetch(`${CDP_URL}/json/list`)).json();
+      const tab = targets.find((target) => target.type === "page");
+      sendCdp(tab.webSocketDebuggerUrl, "Page.navigate", { url: startUrl });
     }
 
     fs.writeFileSync(
       READY_PATH,
-      `${JSON.stringify({ cdp: "http://127.0.0.1:9222", headless })}\n`,
+      `${JSON.stringify({ cdp: CDP_URL, headless })}\n`,
       { mode: 0o600 },
     );
     isReady = true;
 
     await shutdownRequested;
   } finally {
-    if (context) {
-      // A window the operator already closed has no cookies left to read.
-      const cookies = await context.cookies().catch(() => []);
+    if (version) {
+      let cookies = [];
+      try {
+        const browser = await chromium.connectOverCDP(CDP_URL);
+        cookies = await browser.contexts()[0].cookies();
+        await browser.close();
+      } catch {
+        // A window the operator already closed has no cookies left to read.
+      }
       fs.writeFileSync(
         SESSION_COOKIES_PATH,
         JSON.stringify(cookies.filter((cookie) => cookie.expires === -1)),
         { mode: 0o600 },
       );
-      await context.close();
+      // Chrome writes its cookie store on Browser.close. It does not on SIGTERM.
+      await sendCdp(version.webSocketDebuggerUrl, "Browser.close");
+      await chromeExit;
+    } else {
+      chrome?.kill();
     }
+    relay?.close();
     if (isReady) {
       fs.writeFileSync(CLOSED_PATH, "\n", { mode: 0o600 });
     }

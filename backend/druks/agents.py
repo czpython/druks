@@ -29,13 +29,15 @@ from druks.harnesses.exceptions import (
 from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import provisioning_key, sandbox_client
-from druks.sandbox.models import SandboxIdentity
+from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
+from druks.secrets.enums import SecretKind
 from druks.settings import load_settings
 from druks.usage.models import UsageScrape
 from druks.workflows import _in_step, current_workflow
 
 if TYPE_CHECKING:
+    from druks.services.base import ServiceField
     from druks.workflows import Workflow
     from druks.workspaces import Workspace
 
@@ -54,21 +56,23 @@ async def _runner(
     workflow_id: str,
     step: str,
     config: AgentConfig,
+    refs: list[SecretRef],
 ) -> AsyncIterator["Workspace"]:
     # The agent always runs in a Workspace. A warm run attaches the run's held VM; the
     # rest get a fresh ephemeral VM. Either way workflow.get_workspace() turns the VM into
     # the runner — fresh per call, so nothing (connection or credential) is held across steps.
-    if host_id:
-        vm = sandbox_client.attach(host_id=host_id)
-    elif (refs := [*config.secret_refs, *await workflow.get_secret_refs(session)]) and (
-        identity := await SandboxIdentity.lookup(
+    identity = None
+    if refs and not host_id:
+        identity = await SandboxIdentity.lookup(
             session,
             account_id=workflow.account_id,
             run_id=workflow_id,
             scoped_to=step,
             secret_refs=refs,
         )
-    ):
+    if host_id:
+        vm = sandbox_client.attach(host_id=host_id)
+    elif identity:
         # A crashed attempt left its box behind. Its identity finds it again.
         vm = sandbox_client.resume(host_id=identity.host_id)
     else:
@@ -145,6 +149,12 @@ class Agent:
     # ``include_plugins=False`` skips the operator's plugin state for prompts
     # that hit no MCP server.
     include_plugins: bool = True
+    # ``include_mcp=False`` gives the call no MCP server and its sandbox no
+    # server entry, for an agent that reads untrusted content.
+    include_mcp: bool = True
+    # The service secrets the call's sandbox holds, ``(Acme.fields.api_key,)``.
+    # Each is a placeholder that the secrets proxy swaps at the service's host.
+    secrets: "tuple[ServiceField, ...]" = ()
     # ``id`` is the agent's durable key (settings, timeline, registry, step name):
     # ``<app>.<attribute>`` for an agent declared on an App, or the explicit ``id=``
     # of a standalone agent (a test, a one-off). ``app`` is the owning App's name,
@@ -154,6 +164,19 @@ class Agent:
     app: str = field(init=False, compare=False, default="")
 
     def __post_init__(self) -> None:
+        for secret in self.secrets:
+            declared = f"{secret.service.__name__}.fields.{secret.name}"
+            if not secret.is_secret:
+                raise TypeError(f"{declared} is not a secret field, so no sandbox holds it")
+            if not secret.service.host:
+                raise TypeError(
+                    f"{declared} goes to a sandbox, so {secret.service.__name__} must declare "
+                    "`host`: the one host the secret may be sent to"
+                )
+            if secret.service.secret_kind != SecretKind.STATIC:
+                raise TypeError(
+                    f"{declared} belongs to an App key, which issues tokens; no sandbox holds it"
+                )
         if self.id:  # an explicit id means a standalone agent — it registers itself now
             agents.register(self)
 
@@ -329,14 +352,50 @@ class Agent:
         )
         async with gate:
             await set_run_phase("provisioning_vm")
-            host_id = await workflow._lease_host(session, config)
+            # Resolved once: the box's entries and the harness config name the
+            # same servers.
+            subject = await workflow.subject
+            workspace_class = workflow.workspace_class
+            mcp_servers, mcp_secret_refs = (), []
+            if self.include_mcp:
+                mcp_servers, mcp_secret_refs = await workspace_class.get_all_mcp_servers(
+                    session, subject, workflow.account_id
+                )
+            service_refs = []
+            for secret in self.secrets:
+                # An optional service that is not connected leaves its secrets out.
+                if secret.service.required or await secret.service.is_connected():
+                    service_refs.append(
+                        SecretRef(
+                            name=secret.secret_name,
+                            secret_id=(await secret.service.get()).id,
+                            host=secret.service.host,
+                        )
+                    )
+            refs = [
+                *config.secret_refs,
+                *service_refs,
+                *(
+                    SecretRef(
+                        name=secret.name,
+                        secret_id=secret.secret_id,
+                        resource=secret.resource,
+                        host=secret.host,
+                    )
+                    for secret in await workspace_class.get_secrets(subject)
+                ),
+                *mcp_secret_refs,
+            ]
+            host_id = await workflow._lease_host(session, config, refs)
 
             # Record the call RUNNING once it has a host to run on (its id names
             # the on-disk transcript dir) so the live step shows while the agent
             # works, then finish it — or fail it if the run raised after
             # starting. A provisioning failure happens before this and records
             # no call.
-            async with _runner(session, workflow, host_id, workflow_id, self.id, config) as runner:
+            async with _runner(
+                session, workflow, host_id, workflow_id, self.id, config, refs
+            ) as runner:
                 context = await runner.prepare_context(session, context, agent_call_id=call_id)
                 # Templates read the live workflow + the workspace the agent runs in,
                 # alongside whatever the workflow's get_prompt_context composes.
@@ -365,6 +424,7 @@ class Agent:
                         artifact_dir=artifact_dir,
                         call_id=call_id,
                         include_plugins=self.include_plugins,
+                        mcp_servers=mcp_servers,
                     )
                 except BaseException as error:
                     await AgentCall.fail(engine, call_id=call_id, error=error)

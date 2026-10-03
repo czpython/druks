@@ -1,3 +1,4 @@
+import base64
 import logging
 from datetime import datetime
 from typing import Any
@@ -11,6 +12,7 @@ from druks.core.apis.github import GITHUB_AUTHORITY, GitHubClient
 from druks.core.apis.linear import LINEAR_GRAPHQL_URL
 from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
 from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.services import Service, ServiceConnectError
 from druks.settings import load_settings
 
@@ -24,14 +26,15 @@ class Github(Service):
     person's sign-in through it links their GitHub account to their Druks account."""
 
     secret_kind = SecretKind.APP_KEY
-    # The Drukbox catalog name a box holds this identity's token under.
-    secret_name = "github"
+    # Drukbox knows this host: a token for it reaches git and gh.
+    host = "github.com"
     description = (
         "The GitHub App druks acts as. Create it from here, or paste an existing "
         "App's credentials from the GitHub developer settings page."
     )
     authorization_endpoint = "https://github.com/login/oauth/authorize"
     token_endpoint = "https://github.com/login/oauth/access_token"
+    mcp_host = "api.githubcopilot.com"
     # A fresh sign-in by the same GitHub user updates their row.
     identity_key = "subject"
     # What the created App is: the single operator identity documented in
@@ -103,6 +106,11 @@ class Github(Service):
         return await (await cls.get_client()).token_for_repo(resource)
 
     @classmethod
+    def is_grant_revoked(cls, status: int, tokens: dict[str, Any]) -> bool:
+        # GitHub answers a dead refresh token with a 200.
+        return tokens.get("error") == "bad_refresh_token"
+
+    @classmethod
     async def get_identity(cls, access_token: str) -> dict[str, Any]:
         """The person behind a user token, keyed the way ``Account.lookup`` finds them."""
         async with GitHub(access_token, base_url=load_settings().github_api_url) as github:
@@ -116,10 +124,15 @@ class Linear(Service):
         "secret verifies inbound deliveries."
     )
     required = False
+    mcp_host = "mcp.linear.app"
 
     class Settings(BaseModel):
         api_key: SecretStr = Field(title="API key")
         webhook_secret: SecretStr = Field(title="Webhook secret")
+
+    @classmethod
+    def get_authorization(cls, login: VaultSecret) -> str:
+        return f"Bearer {login.secrets['api_key']}"
 
     @classmethod
     async def verify(cls, settings: Settings) -> dict[str, Any]:
@@ -145,12 +158,18 @@ class Jira(Service):
         "secret authenticates Automation deliveries."
     )
     required = False
+    mcp_host = "mcp.atlassian.com"
 
     class Settings(BaseModel):
         base_url: str = Field(title="Base URL", description="Base URL of the Jira Cloud site.")
         email: str = Field(title="Email")
         api_token: SecretStr = Field(title="API token")
         webhook_secret: SecretStr = Field(title="Webhook secret")
+
+    @classmethod
+    def get_authorization(cls, login: VaultSecret) -> str:
+        credentials = f"{login.identity['email']}:{login.secrets['api_token']}"
+        return f"Basic {base64.b64encode(credentials.encode()).decode()}"
 
     @classmethod
     async def verify(cls, settings: Settings) -> dict[str, Any]:

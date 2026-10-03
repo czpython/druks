@@ -1,5 +1,7 @@
 import re
+from dataclasses import dataclass
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, ValidationError
@@ -14,7 +16,7 @@ from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 
 from .exceptions import OauthExchangeError, ServiceConnectError, ServiceNotConnectedError
-from .oauth import OauthClient, fetch_identity
+from .oauth import OauthClient, fetch_identity, is_grant_revoked
 
 # GoogleCalendar -> google_calendar, HTTPServer -> http_server.
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
@@ -60,6 +62,26 @@ class Connection:
         await OauthClient(provider=self.service.slug).disconnect(self.row, reason="user")
 
 
+@dataclass(frozen=True)
+class ServiceField:
+    """One field of a service's ``Settings``, named before any value exists:
+    ``Acme.fields.api_key``. An agent lists a secret field in ``secrets`` to
+    hold it in its sandbox."""
+
+    service: "type[Service]"
+    name: str
+
+    @property
+    def is_secret(self) -> bool:
+        return field_kind(self.service.settings_model.model_fields[self.name]) == "secret"
+
+    @property
+    def secret_name(self) -> str:
+        """The sandbox's name for the secret. Its variable is this name in upper
+        case, and the issuer reads the field back out of it."""
+        return f"{self.service.slug}_{self.name}"
+
+
 class ScopedService:
     """A service seen through one app's declared scopes
     (``gmail = Gmail.with_scopes("gmail.readonly")``). The declaration
@@ -77,6 +99,12 @@ class ScopedService:
     @property
     def label(self) -> str:
         return f"{self.owner.name}.{self.name}"
+
+    @property
+    def connect_url(self) -> str:
+        """Where an operator connects an account to this service. The provider
+        sends them back to the app."""
+        return f"/api/oauth/{self.service.slug}/connect?next=/{self.owner.name}"
 
     async def list_for_account(self, account_id: str) -> list[Connection]:
         return [
@@ -123,6 +151,14 @@ class Service:
     # True marks a shared provider base. It never registers; its subclasses do.
     abstract: ClassVar[bool] = False
     settings_model: ClassVar[type[BaseModel]]
+    # The ``Settings`` fields by name, each a ``ServiceField``.
+    fields: ClassVar[SimpleNamespace]
+    # The one host a sandbox may send this service's secrets to. The secrets
+    # proxy swaps a placeholder for the secret on requests to it only.
+    host: ClassVar[str] = ""
+    # The host of the MCP server that this identity also signs in to. That
+    # server uses the service's credential instead of registering its own client.
+    mcp_host: ClassVar[str] = ""
     # Set both endpoints when the registered app is an OAuth client;
     # ``get_oauth_client()`` then hands back the connected identity as a
     # configured ``OauthClient``. Scopes are not declared here — the
@@ -188,6 +224,9 @@ class Service:
         cls.slug = slug
         cls.title = slug.replace("_", " ").title()
         cls.settings_model = declared
+        cls.fields = SimpleNamespace(
+            **{name: ServiceField(cls, name) for name in declared.model_fields}
+        )
         services.register(cls)
 
     @classmethod
@@ -279,6 +318,12 @@ class Service:
         }
 
     @classmethod
+    def is_grant_revoked(cls, status: int, tokens: dict[str, Any]) -> bool:
+        """Whether the token endpoint's answer to a refresh says the provider revoked
+        the grant. Override for a provider that reports it otherwise than RFC 6749."""
+        return is_grant_revoked(status, tokens)
+
+    @classmethod
     async def get_oauth_client(cls) -> OauthClient:
         """The connected identity as a configured ``OauthClient``, keyed by
         the service slug. Raises ``ServiceNotConnectedError`` until the
@@ -294,6 +339,7 @@ class Service:
             client_secret=connected.secrets["client_secret"],
             basic_auth=cls.basic_auth,
             extra_authorize_params=cls.extra_authorize_params,
+            is_grant_revoked=cls.is_grant_revoked,
         )
 
     @classmethod
@@ -301,6 +347,16 @@ class Service:
         """The token a sandbox fetches for this identity, and its expiry. A
         service without one raises."""
         raise NotImplementedError(f"{cls.slug} issues no sandbox token")
+
+    @classmethod
+    def get_authorization(cls, login: VaultSecret) -> str:
+        """The ``Authorization`` value of the connected row, which the default account
+        sends to the server at ``mcp_host``. A service without a pasted login raises."""
+        raise NotImplementedError(f"{cls.slug} has no pasted login")
+
+    @classmethod
+    def get_for_mcp_host(cls, host: str | None) -> "type[Service] | None":
+        return next((service for service in services.all() if service.mcp_host == host), None)
 
     @classmethod
     async def is_connected(cls) -> bool:

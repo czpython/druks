@@ -3,11 +3,7 @@ import { useContext } from 'react'
 import { Link as RouteLink } from 'wouter'
 
 import type { Link } from '../api/types'
-import { hrefForLink, PagesContext } from './pages'
-
-function isOutbound(url: string): boolean {
-  return /^https?:\/\//i.test(url)
-}
+import { hrefForLink, isOutbound, isServerHref, PagesContext } from './pages'
 
 /** A control that navigates. It is a block of its own, or the link on a value,
     which shows the value's own text. A relative `url` stays in this tab; only
@@ -39,7 +35,7 @@ export function LinkControl({
       </a>
     )
   }
-  if (href.startsWith('/api/')) {
+  if (isServerHref(href)) {
     return (
       <a className={className} href={href}>
         {label}

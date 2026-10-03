@@ -17,7 +17,7 @@ from typing import (
 )
 
 from croniter import croniter
-from dbos import DBOS, Queue, SetEnqueueOptions, SetWorkflowAttributes, SetWorkflowID, StepOptions
+from dbos import DBOS, SetEnqueueOptions, SetWorkflowAttributes, SetWorkflowID, StepOptions
 from dbos._dbos import _get_or_create_dbos_registry
 from dbos._error import (
     DBOSAwaitedWorkflowCancelledError,
@@ -42,12 +42,13 @@ from druks.chat.service import deliver, report_failure, report_result
 from druks.database import get_session
 from druks.db import db_session
 from druks.durable.activity import set_run_phase
+from druks.durable.constants import NOTIFICATIONS_QUEUE, RUN_QUEUE, TASK_QUEUE
 from druks.durable.datastructures import Subject
 from druks.durable.engine import (
     _step_engine,
     bound_session,
     register_schedule,
-    run_queue,
+    register_task_schedule,
     step_session,
 )
 from druks.durable.enums import AgentCallStatus, RunState, WorkflowEvent
@@ -62,7 +63,7 @@ from druks.durable.schemas import (
 from druks.events.models import Event
 from druks.harnesses.exceptions import HarnessError
 from druks.models import StoredSubject, snake_name
-from druks.notifications.outbox import notifications_queue, send_notification
+from druks.notifications.outbox import send_notification
 from druks.sandbox.client import provisioning_key, sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.sandbox.datastructures import Sandbox
@@ -81,6 +82,7 @@ __all__ = [
     "AgentCallStatus",
     "FatalError",
     "Gate",
+    "GateTimeout",
     "Journal",
     "OperatorReply",
     "RunResponse",
@@ -117,8 +119,6 @@ current_workflow: ContextVar["Workflow"] = ContextVar("current_workflow")
 # True while a @step body runs. An agent run inside one is already memoized by that
 # step, so it skips wrapping itself; outside, it wraps itself in its own step.
 _in_step: ContextVar[bool] = ContextVar("_in_step", default=False)
-
-task_queue = Queue("druks_tasks")
 
 # Reserved so _entry's arity and old checkpoints stay untouched; a body
 # parameter may not claim either.
@@ -179,7 +179,7 @@ class _DeclaredSubject:
                     return run.__dict__["subject"]
                 if run._subject:
                     async with bound_session():
-                        return await self.subject_class.get_for_id(str(run._subject["id"]))
+                        return await self.subject_class.get_or_none(id=run._subject["id"])
 
             return resolve()
         return self.subject_class
@@ -294,9 +294,9 @@ class Gate(BaseModel):
                 f"{cls.__name__}.answer() takes the subject whose run is parked on it, "
                 f"not {type(subject).__name__}"
             )
-        runs = await Run.list_for_subject(db_session(), subject.subject_type, str(subject.id))
-        parked = next((run for run in runs if run.is_parked and run.input_gate == cls.name), None)
-        if parked:
+        if parked := await Run.get_latest_for_subject(
+            db_session(), subject.subject_type, str(subject.id), gate=cls.name
+        ):
             await parked.resume(**reply)
             return
         raise WorkflowError(
@@ -407,11 +407,10 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
     notification_id = await DBOS.run_step_async(
         StepOptions(name="notifications.gate_park", **_IO_RETRIES), _create
     )
-    if not notification_id:
-        return
-    # The step memoized the row (one per parked round); this body-level enqueue
-    # is DBOS's deterministic child-start, so a replayed park never double-sends.
-    await notifications_queue.enqueue_async(send_notification, notification_id)
+    if notification_id:
+        # The step memoized the row (one per parked round); this body-level enqueue
+        # is DBOS's deterministic child-start, so a replayed park never double-sends.
+        await DBOS.enqueue_workflow_async(NOTIFICATIONS_QUEUE, send_notification, notification_id)
 
 
 async def _post_to_chat(workflow_id: str, name: str, post: Callable) -> None:
@@ -495,12 +494,14 @@ class _Task:
 
         if every:
 
-            @DBOS.scheduled(every)
             @DBOS.workflow(name=f"{self.name}.scheduled")
-            async def _scheduled_entry(scheduled_at: datetime, started_at: datetime | None) -> None:
+            async def _scheduled_entry(
+                _scheduled_at: datetime, _context: dict[str, Any] | None = None
+            ) -> None:
                 await self._run({})
 
             self._scheduled_entry = _scheduled_entry
+            register_task_schedule(f"{self.name}.scheduled", every, _scheduled_entry)
 
     async def enqueue(self, **input: Any) -> None:
         if _in_step.get():
@@ -512,7 +513,7 @@ class _Task:
             wire = self._input_model.model_validate(input).model_dump(mode="json")
         elif input:
             raise WorkflowError(f"task {self.name} takes no input")
-        await task_queue.enqueue_async(self._entry, wire)
+        await DBOS.enqueue_workflow_async(TASK_QUEUE, self._entry, wire)
 
     async def _run(self, input: dict[str, Any]) -> None:
         kwargs: dict[str, Any] = {}
@@ -592,7 +593,7 @@ async def _emit_run_event(
             run = await session.get(Run, workflow_id)
             # Read before the flush: flushing the update unloads the row's
             # computed columns, and reading one back would be implicit IO.
-            key, title = run.subject_key, run.subject_title
+            key = run.subject_key
             gate = run.input_gate if state == RunState.RUNNING and result else None
             if facts:
                 for field, value in facts.items():
@@ -604,7 +605,7 @@ async def _emit_run_event(
                     "kind": run.kind,
                     "subject": subject,
                     "payload": await _log_run_event(
-                        session, run, state, subject, key, title, result, gate
+                        session, run, state, subject, key, result, gate
                     ),
                 }
 
@@ -634,7 +635,6 @@ async def _log_run_event(
     state: RunState,
     subject: dict[str, Any],
     key: str | None,
-    title: str | None,
     result: Any = None,
     gate: str | None = None,
 ) -> dict[str, Any]:
@@ -662,7 +662,6 @@ async def _log_run_event(
         type=WorkflowEvent.for_state(state),
         subject=subject,
         key=key,
-        title=title,
         run=run.id,
         kind=run.kind,
         facts=facts,
@@ -870,7 +869,6 @@ class Workflow:
                     type=topic,
                     subject=self._subject,
                     key=run.subject_key,
-                    title=run.subject_title,
                     run=self.workflow_id,
                     kind=self.kind,
                     facts=facts,
@@ -923,35 +921,25 @@ class Workflow:
         # Built per agent call, so nothing is held across steps.
         return self.workspace_class(**await self.get_workspace_kwargs(host))
 
-    async def get_secret_refs(self, session: AsyncSession) -> list[SecretRef]:
-        # The secrets a box of this run fetches beyond its config's: the
-        # workspace's and its MCP servers', read before the box exists.
-        subject = await self.subject
-        _, mcp = await self.workspace_class.get_mcp_delivery(session, subject, self.account_id)
-        return [*await self.workspace_class.get_secret_refs(subject), *mcp]
-
-    async def _lease_host(self, session: AsyncSession, config: "AgentConfig") -> str | None:
+    async def _lease_host(
+        self, session: AsyncSession, config: "AgentConfig", refs: list[SecretRef]
+    ) -> str | None:
         # The warm VM, provisioned once per segment; state is carried in git, so
         # only the host-id matters across steps — held-across-steps never fights replay.
         if not self.steps_reuse_sandbox:
             return
-        refs = [*config.secret_refs, *await self.get_secret_refs(session)]
         # A crashed process left its box behind. Its identity finds it again.
-        if (
-            not self._host
-            and refs
-            and (
-                identity := await SandboxIdentity.lookup(
-                    session,
-                    account_id=self.account_id,
-                    run_id=self._workflow_id,
-                    scoped_to="workflow",
-                    secret_refs=refs,
-                )
+        if not self._host and refs:
+            identity = await SandboxIdentity.lookup(
+                session,
+                account_id=self.account_id,
+                run_id=self._workflow_id,
+                scoped_to="workflow",
+                secret_refs=refs,
             )
-        ):
-            self._host = await sandbox_client.reattach(host_id=identity.host_id)
-            self._host_secrets_id = config.secrets_id
+            if identity:
+                self._host = await sandbox_client.reattach(host_id=identity.host_id)
+                self._host_secrets_id = config.secrets_id
         if self._host and self._host.expires_at:
             remaining = (self._host.expires_at - datetime.now(UTC)).total_seconds()
             if remaining < SANDBOX_HOST_ROTATE_BEFORE_SECONDS:
@@ -990,10 +978,9 @@ class Workflow:
         return self._host.id
 
     async def _reap_run(self) -> None:
-        if not self._host:
-            return
-        host, self._host = self._host, None
-        await sandbox_client.release(host_id=host.id)
+        if self._host:
+            host, self._host = self._host, None
+            await sandbox_client.release(host_id=host.id)
 
     @property
     def workflow_id(self) -> str:
@@ -1062,11 +1049,10 @@ class Workflow:
     @classmethod
     async def cancel(cls, subject: Subject | StoredSubject, *, failure: str | None = None) -> None:
         cls._validate_subject(subject)
-        runs = await Run.list_for_subject(
+        run = await Run.get_latest_for_subject(
             db_session(), subject.subject_type, str(subject.id), kind=cls.kind
         )
-        run = next((run for run in runs if run.is_active), None)
-        if run:
+        if run and run.is_active:
             await run.cancel(failure=failure)
 
     @classmethod
@@ -1124,7 +1110,6 @@ class Workflow:
                     "subject_type": subject.subject_type,
                     "subject_id": str(subject.id),
                     "subject_key": subject.key,
-                    "subject_title": subject.get_summary().title,
                 }
             subject_record = subject.identity if subject else None
             with (
@@ -1132,7 +1117,9 @@ class Workflow:
                 SetWorkflowAttributes(attributes),
                 enqueue_options,
             ):
-                handle = await run_queue.enqueue_async(cls._entry, subject_record, wire)
+                handle = await DBOS.enqueue_workflow_async(
+                    RUN_QUEUE, cls._entry, subject_record, wire
+                )
             if handle.workflow_id == workflow_id:
                 # The body also creates its row (idempotently) — this one just makes it
                 # visible before an executor picks the workflow up.
@@ -1151,7 +1138,6 @@ class Workflow:
                             type=WorkflowEvent.SCHEDULED,
                             subject=subject.identity,
                             key=attributes["subject_key"],
-                            title=attributes["subject_title"],
                             run=workflow_id,
                             kind=cls.kind,
                             app=cls.app,

@@ -7,7 +7,7 @@ from druks_field_notes.workflows import Summarize
 class Crate(StoredSubject):
     __tablename__ = "faketest_crates"
 
-    def get_key(self) -> str:
+    def __str__(self) -> str:
         return f"CRATE-{self.id}"
 
 

@@ -6,7 +6,8 @@ from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
 from druks.contrib.software_factory.enums import Priority, Status
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket, WorkItem
-from druks.db import Base, db_session
+from druks.db import db_session
+from druks.models import Base
 
 PRIORITY_LABELS: dict[Priority, str] = {
     Priority.NONE: "No priority",

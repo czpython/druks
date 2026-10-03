@@ -8,7 +8,7 @@ import { Chart, Controls, Facts, ImageGallery, List, Metrics, Table } from './Da
 import { ActionButton, Form, useAction } from './Form'
 import { LinkControl } from './LinkControl'
 import { Files, Image, Progress, Timeline } from './RunBlocks'
-import { hrefForLink, PagesContext, RegionContext } from './pages'
+import { hrefForLink, isOutbound, isServerHref, PagesContext, RegionContext } from './pages'
 
 const CardsZoneContext = createContext('')
 
@@ -111,8 +111,15 @@ function BlockContent({ block }: { block: Block }) {
         />
       )
     case 'gate_controls':
-      if (target && target.run !== block.run) return null
-      return <GateControls run={block.run} expected={target?.parkedAt} onAnswer={target && clearTarget} />
+      if (!block.status.gate || !block.status.run) return null
+      if (target && target.run !== block.status.run) return null
+      return (
+        <GateControls
+          run={block.status.run}
+          expected={target?.parkedAt}
+          onAnswer={target && clearTarget}
+        />
+      )
     case 'timeline':
       return <Timeline title={block.title} items={block.items} />
     case 'progress':
@@ -153,7 +160,7 @@ function BlockContent({ block }: { block: Block }) {
           title={block.title}
           columns={block.columns}
           rows={block.rows}
-          emptyText={block.emptyText}
+          empty={block.empty && <BlockContent block={block.empty} />}
           select={block.select}
           actions={block.actions}
         />
@@ -170,7 +177,13 @@ function BlockContent({ block }: { block: Block }) {
     case 'columns':
       if (!block.blocks.length) return null
       return (
-        <div className={`dui-columns${block.layout === 'sidebar' ? ' dui-columns-sidebar' : ''}`}>
+        <div
+          className={
+            block.layout === 'split'
+              ? 'dui-columns-split'
+              : `dui-columns${block.layout === 'sidebar' ? ' dui-columns-sidebar' : ''}`
+          }
+        >
           {block.blocks.map((column, index) => (
             <div key={index} className="dui-column">
               <BlockContent block={column} />
@@ -200,7 +213,9 @@ function BlockContent({ block }: { block: Block }) {
       if (!block.drop) return <CardsStatic block={block} />
       return <CardsDrop block={block} drop={block.drop} />
     case 'section': {
-      const decision = block.blocks.some((insideBlock) => insideBlock.block === 'gate_controls')
+      const decision = block.blocks.some(
+        (insideBlock) => insideBlock.block === 'gate_controls' && insideBlock.status.gate,
+      )
       return (
         <section
           className={`dui-section${decision ? ' dui-decision' : ''}`}
@@ -250,9 +265,16 @@ function CardPanel({ block }: { block: CardBlock }) {
     </>
   )
   if (wrapHref && block.link) {
-    if (block.link.url) {
+    if (block.link.url && isOutbound(block.link.url)) {
       return (
         <a className="dui-card" href={wrapHref} target="_blank" rel="noreferrer" draggable={false}>
+          {inner}
+        </a>
+      )
+    }
+    if (isServerHref(wrapHref)) {
+      return (
+        <a className="dui-card" href={wrapHref} draggable={false}>
           {inner}
         </a>
       )
@@ -266,8 +288,10 @@ function CardPanel({ block }: { block: CardBlock }) {
   return <div className="dui-card">{inner}</div>
 }
 
-function cardsClass(layout: 'wrap' | 'stack' | undefined) {
-  return `dui-cards${layout === 'stack' ? ' dui-cards-stack' : ''}`
+function cardsClass(layout: 'wrap' | 'stack' | 'tiles' | undefined) {
+  if (layout === 'stack') return 'dui-cards dui-cards-stack'
+  if (layout === 'tiles') return 'dui-cards dui-cards-tiles'
+  return 'dui-cards'
 }
 
 function CardsStatic({

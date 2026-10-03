@@ -30,7 +30,7 @@ async def test_new_build_claims_the_item(druks_db):
 
     await publish(WorkflowEvent.SCHEDULED, subject=item.identity, kind=Build.kind)
 
-    refreshed = await WorkItem.get(item.id)
+    refreshed = await WorkItem.get_or_none(id=item.id)
     assert (refreshed.branch, refreshed.pr_number) == (None, None)
     assert (refreshed.resolution, refreshed.resolved_at) == (None, None)
 
@@ -47,7 +47,7 @@ async def test_cancelled_build_settles_the_item(druks_db):
         failure="operator cancelled",
     )
 
-    refreshed = await WorkItem.get(item.id)
+    refreshed = await WorkItem.get_or_none(id=item.id)
     assert refreshed.resolution == Resolution.CANCELLED
     assert refreshed.resolved_at
     druks_db.expunge_all()
@@ -69,7 +69,7 @@ async def test_cancelled_build_preserves_an_existing_resolution(druks_db, resolu
         failure="operator cancelled",
     )
 
-    refreshed = await WorkItem.get(item.id)
+    refreshed = await WorkItem.get_or_none(id=item.id)
     assert refreshed.resolution == resolution
     assert refreshed.resolved_at == resolved_at
 
@@ -86,7 +86,7 @@ async def test_failed_build_remains_unresolved_on_the_board(druks_db):
         failure="build failed",
     )
 
-    refreshed = await WorkItem.get(item.id)
+    refreshed = await WorkItem.get_or_none(id=item.id)
     assert (refreshed.resolution, refreshed.resolved_at) == (None, None)
     druks_db.expunge_all()
     assert str(item.id) in {summary.id for summary in await WorkItem.list_summaries(None)}
@@ -177,5 +177,5 @@ async def test_pr_open_reaches_the_work_item(druks_db):
         branch="agent/eng-8",
     )
 
-    refreshed = await WorkItem.get(item.id)
+    refreshed = await WorkItem.get_or_none(id=item.id)
     assert refreshed.pr_number == 12 and refreshed.branch == "agent/eng-8"

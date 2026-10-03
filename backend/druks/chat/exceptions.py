@@ -1,8 +1,13 @@
+from typing import ClassVar
+
 from druks.exceptions import DruksError
 
 
 class ChatError(DruksError):
     """Base for Chat service failures."""
+
+    # Whether a delivery that raised it runs again.
+    is_retryable: ClassVar[bool] = True
 
 
 class ChatBridgeError(ChatError):
@@ -11,6 +16,8 @@ class ChatBridgeError(ChatError):
 
 class ChatHarnessError(ChatError):
     """The settings select a harness with no ACP adapter for Chat."""
+
+    is_retryable = False
 
 
 class ChatSandboxGone(ChatError):

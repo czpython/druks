@@ -348,9 +348,7 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
                   onClick={() => updateParams('selected', String(event.seq))}>
                   <Icon size={16} className="activity-row-glyph" aria-hidden="true" />
                   <span className="activity-row-body">
-                    <span className="activity-row-work"><span className="activity-work-key">{line.key || 'No work recorded'}</span>
-                      {line.title && <> · <span>{line.title}</span></>}
-                    </span>
+                    <span className="activity-row-work"><span className="activity-work-key">{line.key || 'No work recorded'}</span></span>
                     <span className="activity-context"><strong>{line.label}</strong>{line.context && <> · {line.context}</>}</span>
                   </span>
                   <time dateTime={event.at} title={`${absTime(event.at)} ${timezone}`}>{clockTime(event.at)}</time>
@@ -417,7 +415,6 @@ function ActivityDetail({ event }: { event: FeedItem }) {
     <h2 ref={title} tabIndex={-1}>{line.label}</h2>
     <div className="activity-work-identity">
       <p className="activity-work-label">{line.key || 'No work recorded'}</p>
-      {line.title && <p>{line.title}</p>}
     </div>
     {event.payload.artifact_id ? <section className="activity-result" aria-label="Saved result">
       {available && !available.isArtifactAvailable ? <p role="status">This saved result is no longer available.</p> :

@@ -4,9 +4,10 @@ import json
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import asyncssh
 import pytest
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
@@ -14,7 +15,12 @@ from druks.chat import service, sockets
 from druks.chat.bridge import Bridge
 from druks.chat.constants import CHAT_KEY_NAME
 from druks.chat.enums import ConversationSource, MessageRole, MessageState
-from druks.chat.exceptions import ChatBridgeError, ChatHarnessError, ChatSandboxGone
+from druks.chat.exceptions import (
+    ChatBridgeError,
+    ChatBridgeUnavailable,
+    ChatHarnessError,
+    ChatSandboxGone,
+)
 from druks.chat.models import Conversation, Message
 from druks.database import get_session
 from druks.files.datastructures import File
@@ -24,6 +30,7 @@ from druks.harnesses.codex import CodexHarness
 from druks.harnesses.opencode import OpenCodeHarness
 from druks.mcp.enums import Toolkit
 from druks.mcp.inbound import get_druks_account_token, get_druks_mcp_server
+from druks.mcp.models import McpServer
 from druks.models import Base
 from druks.redis import get_client
 from druks.sandbox.exceptions import IdentityDenied
@@ -84,6 +91,7 @@ async def sandbox(druks_db, conversation, monkeypatch):
         identity={},
         effort="",
         fast_mode=False,
+        timeout=600,
     )
     monkeypatch.setattr(service, "get_agent", AsyncMock(return_value=(config, "", Toolkit.ALL)))
     monkeypatch.setattr(service, "sandbox_client", SimpleNamespace(set_expiry=AsyncMock()))
@@ -194,17 +202,29 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
     )
     config = SimpleNamespace(secret_refs=[], secrets={})
     first_host, _identity = await service.get_sandbox(
-        druks_db, conversation.account_id, config, Toolkit.ALL
+        druks_db,
+        conversation.account_id,
+        config=config,
+        allowed_tools=Toolkit.ALL,
+        secret_refs=[],
     )
     second_host, _identity = await service.get_sandbox(
-        druks_db, second.account_id, config, Toolkit.ALL
+        druks_db,
+        second.account_id,
+        config=config,
+        allowed_tools=Toolkit.ALL,
+        secret_refs=[],
     )
     login = await get_druks_account_token(druks_db, conversation.account_id, (), name="login")
     moved = SimpleNamespace(
         secret_refs=[SecretRef(name="claude_token", secret_id=login.id)], secrets={}
     )
     moved_host, _identity = await service.get_sandbox(
-        druks_db, second.account_id, moved, Toolkit.ALL
+        druks_db,
+        second.account_id,
+        config=moved,
+        allowed_tools=Toolkit.ALL,
+        secret_refs=[],
     )
 
     assert first_host.id == second_host.id
@@ -354,14 +374,42 @@ async def test_recovery_reads_live_events_then_saves_reply_and_replaces_archive(
     assert host.upload_file.await_count == 0
 
 
-async def test_bridge_start_uploads_the_bridge_only_when_none_answers(monkeypatch):
+def channel(answer: bytes) -> tuple[asyncio.StreamReader, MagicMock]:
+    """A loopback channel that sends one answer and ends."""
+    reader = asyncio.StreamReader()
+    reader.feed_data(answer)
+    reader.feed_eof()
+    return reader, MagicMock(drain=AsyncMock(), wait_closed=AsyncMock())
+
+
+@pytest.mark.parametrize(
+    ("opened", "error"),
+    [
+        (
+            asyncssh.ChannelOpenError(asyncssh.OPEN_CONNECT_FAILED, "Connection refused"),
+            ChatBridgeUnavailable,
+        ),
+        (lambda *address: channel(b""), ChatBridgeUnavailable),
+        (lambda *address: channel(b"not json\n"), ChatBridgeError),
+    ],
+)
+async def test_bridge_is_unavailable_only_when_it_sends_no_answer(opened, error):
+    host = SimpleNamespace(open_tcp_connection=AsyncMock(side_effect=opened))
+
+    with pytest.raises(error) as raised:
+        await Bridge(host).request("ping")
+
+    assert raised.type is error
+
+
+async def test_bridge_start_uploads_the_bridge_only_when_none_answers():
+    pong = b'{"ok": true}\n'
     host = SimpleNamespace(
         ssh_username="druks",
+        open_tcp_connection=AsyncMock(side_effect=[channel(b""), channel(pong), channel(pong)]),
         upload_file=AsyncMock(),
         exec=AsyncMock(return_value=SimpleNamespace(ok=True)),
     )
-    answers = iter([False, True, True])
-    monkeypatch.setattr(Bridge, "is_running", AsyncMock(side_effect=lambda: next(answers)))
 
     await Bridge(host).start()
     await Bridge(host).start()
@@ -425,6 +473,58 @@ async def test_new_sandbox_restores_archive_and_drains_pending_messages(
     assert starts[1]["archivePath"] == ""
     assert host.upload_file.await_count == 1
     assert previous.deleted_at
+
+
+LINEAR = {
+    "name": "linear",
+    "url": "https://mcp.linear.app/mcp",
+    "headers": {"Authorization": "${MCP_LINEAR_HEADER_0}"},
+}
+
+
+@pytest.mark.parametrize(
+    "kind, expected", [(AccountKind.OPERATOR, [LINEAR]), (AccountKind.BOT, [])]
+)
+async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_their_sign_in(
+    druks_db, conversation, sandbox, monkeypatch, kind, expected
+):
+    await McpServer.create(
+        druks_db,
+        name="linear",
+        url="https://mcp.linear.app/mcp",
+        secret_headers={"Authorization": "Bearer lin_secret"},
+    )
+    await McpServer.create(druks_db, name="sentry", url="https://mcp.sentry.dev/mcp", is_oauth=True)
+    sign_in = await VaultSecret.connect(
+        druks_db,
+        Audience.service("github"),
+        account_id=conversation.account_id,
+        refresh_token="ghr_one",
+        scopes=[],
+    )
+    conversation.account.kind = kind
+    starts = []
+
+    async def request(self, method, **values):
+        if method == "start":
+            starts.append(values)
+        return {"status": "idle", "sessionId": "one"}
+
+    async def follow_turn(session, conversation, message, bridge):
+        message.state = MessageState.REPLIED
+        await session.commit()
+
+    monkeypatch.setattr(Bridge, "request", request)
+    monkeypatch.setattr(service, "follow_turn", follow_turn)
+
+    await service.deliver_pending(druks_db, conversation)
+
+    [refs] = [call.kwargs["secret_refs"] for call in service.get_sandbox.await_args_list]
+    assert [ref.name for ref in refs] == ["mcp_linear_header_0", "github"] * len(expected)
+    assert [ref.key for ref in refs if ref.name == "github"] == [
+        ("github", sign_in.id, "", "github.com")
+    ] * len(expected)
+    assert starts[0]["mcpServers"] == expected
 
 
 @pytest.mark.parametrize(
@@ -849,7 +949,7 @@ async def test_stop_during_startup_keeps_the_sandbox_and_sends_only_the_next_mes
     sandbox_requests = 0
     prompts = []
 
-    async def get_sandbox(session, account_id, config, allowed_tools):
+    async def get_sandbox(session, account_id, *, config, allowed_tools, secret_refs):
         nonlocal sandbox_requests
         sandbox_requests += 1
         await session.commit()

@@ -92,7 +92,7 @@ async def test_external_merge_stores_githubs_verdict_and_ends_involvement(druks_
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
     # The verdict is stored with GitHub's own stamp, not druks's receipt time...
-    item = await WorkItem.get(work_item_id)
+    item = await WorkItem.get_or_none(id=work_item_id)
     assert item.resolution == "merged"
     assert item.resolved_at == datetime(2026, 7, 25, 21, 59, 9, tzinfo=UTC)
     # ...announced as the milestone...
@@ -139,7 +139,7 @@ async def test_a_redelivered_webhook_does_not_rewrite_the_verdict(druks_db, tmp_
         at="2026-07-26T13:30:30Z",
     )
 
-    item = await WorkItem.get(work_item_id)
+    item = await WorkItem.get_or_none(id=work_item_id)
     assert item.resolution == "merged"
     assert item.resolved_at == datetime(2026, 7, 25, 21, 59, 9, tzinfo=UTC)
     assert await _milestone_count(work_item_id, "merged") == 1
@@ -162,7 +162,7 @@ async def test_closed_unmerged_stores_closed_and_ends_involvement(druks_db, tmp_
         merged=False,
     )
 
-    assert (await WorkItem.get(work_item_id)).resolution == "closed"
+    assert (await WorkItem.get_or_none(id=work_item_id)).resolution == "closed"
     assert await _milestone_count(work_item_id, "closed") == 1
     assert await _milestone_count(work_item_id, "merged") == 0
     assert not (await _fresh_run(run_id)).is_active
@@ -201,7 +201,7 @@ async def test_a_merge_after_a_failed_build_still_settles_the_item(druks_db, tmp
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
-    item = await WorkItem.get(work_item_id)
+    item = await WorkItem.get_or_none(id=work_item_id)
     assert item.resolution == "merged"
     assert item.id not in {summary.id for summary in await WorkItem.list_summaries(None)}
     assert [row.id for row in await WorkItem.list_handoff()] == [item.id]
@@ -219,12 +219,12 @@ async def test_a_remerge_after_redispatch_records_a_fresh_verdict(druks_db, tmp_
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
     # Redispatched: a newer build run owns the item, and its PR is a fresh one.
     await seed_build_run(ds(), work_item_id=work_item_id, state="running")
-    await (await WorkItem.get(work_item_id)).start_attempt()
-    await (await WorkItem.get(work_item_id)).update(pr_number=pr_number, branch=branch)
+    await (await WorkItem.get_or_none(id=work_item_id)).start_attempt()
+    await (await WorkItem.get_or_none(id=work_item_id)).update(pr_number=pr_number, branch=branch)
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
-    assert (await WorkItem.get(work_item_id)).resolution == "merged"
+    assert (await WorkItem.get_or_none(id=work_item_id)).resolution == "merged"
     assert await _milestone_count(work_item_id, "merged") == 2
 
 
@@ -374,7 +374,7 @@ async def test_external_close_survives_policy_resolution_failure(druks_db, tmp_p
 
     assert deleted == []  # cleanup skipped when policy can't be resolved
     assert pushed == [TicketStatus.BACKLOG]  # ticket still reset
-    assert (await WorkItem.get(work_item_id)).resolution == "closed"
+    assert (await WorkItem.get_or_none(id=work_item_id)).resolution == "closed"
 
 
 @pytest.mark.asyncio

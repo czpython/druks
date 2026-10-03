@@ -3,6 +3,103 @@
 All notable changes to Druks. Versions follow [semantic versioning](https://semver.org);
 while Druks is pre-1.0, a minor bump may break compatibility.
 
+## [0.8.0] — 2026-09-27
+
+### Breaking changes
+
+- **App tables and subjects.** `druks.db.Model` replaces `druks.db.Base`. A
+  `StoredSubject` adds the columns `created_at` and `updated_at`, so each app
+  needs a new revision. `__str__` names a subject and replaces `get_key()`.
+  `SubjectSummary` has no `title`, and runs, events, and the Activity feed
+  record only the name. An identity-only `Subject` overrides `get_or_none(id)`
+  in place of `get_for_subject_id()`.
+- **Renamed author names.** `druks.db.fields` replaces `druks.secrets.fields`.
+  `Webhook.get_delivery_key()` replaces `delivery_key()`. `Service.scopes()`
+  replaces `required_scopes()`. `Workspace.get_secrets()` replaces
+  `get_secret_refs()` and returns `SandboxSecret`. `Workspace.get_mcp_servers()`
+  replaces `get_required_mcp_servers()` and returns `SandboxMcpServer`. Both
+  types come from `druks.sandbox`. `Workspace.get_all_mcp_servers()` replaces
+  `get_mcp_delivery()`.
+- **Pages and routes.** `ui.GateControls(subject)` takes the subject, not a run
+  id. `Table(empty=EmptyState(...))` replaces `Table(empty_text=...)`. Druks
+  adds the app name to every app operation id, so an app writes the bare verb.
+  An id that starts with the app name fails at boot.
+- **A GitHub tag goes to Chat** and does not start a review by itself. The
+  GitHub card needs the App's client ID and client secret, and the App needs the
+  callback URL `<endpoint>/api/oauth/callback`. The fact `issue.commented`
+  replaces `pr.commented`.
+- **`SLACK_SIGNING_SECRET` is gone.** The signing secret on the Slack card checks
+  the buttons in gate notifications.
+
+### Added
+
+- **Slack is a Chat source.** Write to the Druks bot in a direct message, or tag
+  it in a room, and your own agent answers there, under your account and with
+  your tools. In a room, the agent answers in the thread of the tag. For 24 hours
+  after the last message, your untagged replies in that thread reach it too. A
+  file you send becomes a Druks file on your message. Connect the Slack card
+  under Connections → Services. **Create Slack App** opens Slack with the Druks
+  manifest filled in. Each person links their Slack account under Chat →
+  Channels. The guide is `docs/chat.md`.
+- **GitHub is a Chat source.** Tag the operator GitHub App in an issue or pull
+  request comment, and your own agent answers with a comment where the tag was.
+  The agent decides what to do: it answers, opens a ticket, starts a build, or
+  starts a review. Only a person who can write to the repository reaches an
+  agent. Each person links their GitHub account under Chat → Channels, and gets
+  their own conversation for each issue or pull request. In Slack and GitHub,
+  the agent reads the thread with the `chat_read_thread` tool.
+- **Chat runs on Codex and OpenCode** as well as Claude. Select the harness in
+  Chat's row under Chat → Channels → Bots. A conversation that moves to another
+  harness starts a new agent session and keeps its messages. OpenCode ignores
+  the effort setting.
+- **The chat agent gets the files people send** on WhatsApp and Slack. An image
+  reaches the agent with its message. Any other file, except audio, reaches it as
+  a link to a copy in the sandbox. A Bot's agent has no file tools, so it sees
+  only the link and the file name. A voice note becomes text before its turn,
+  through the new **Speech To Text** card. The card takes any server that speaks
+  the OpenAI audio API, such as OpenAI, Groq, or a local server. Without the
+  card, or for a note over 25 MiB, the agent asks the person to write instead.
+- **App tables have a `Model` base.** It names the table `<app>_<class>`, and
+  has `create()`, `save()`, `delete()`, and the reads `get()`, `get_or_none()`,
+  `all()`, and `filter()` by field. `get()` raises `ObjectNotFound` from
+  `druks.exceptions`. A route answers it with 404, and a page shows an empty
+  state with a link back. A class can declare its order:
+  `class Report(Model, ordering=("-created_at",))`. A `StrEnum` or `Literal`
+  column is text with a CHECK of its values. A `list` or `dict` column is JSONB.
+  `druks makemigrations` names an app's revisions `<name>_0001`, `<name>_0002`,
+  and so on.
+- **A `StoredSubject` needs less code.** Its `__tablename__` is optional, and
+  its board shows its newest hundred rows, so `list_summaries()` is optional.
+  Its default name is its type and id, such as `note 7`.
+- **Apps need less code in other places.** `ui.SubjectStatus(subject,
+  working=...)` shows where the work on a subject stands. The shell links each
+  page that follows one subject to that subject's timeline.
+  `ScopedService.connect_url` is where an operator connects the service.
+  `Agent(include_mcp=False)` gives the call no MCP server. `Workspace.get_env()`
+  adds environment variables to every agent call. A service overrides
+  `get_consent_query()` and `read_grant()` for a provider with a different OAuth
+  shape. `druks.services` exports `Connection`, and `druks.workflows` exports
+  `GateTimeout`.
+- **`druks check-app <name>`** loads one installed app and checks its subjects,
+  pages, operations, and routers. It needs no database.
+- **A custom MCP server can authenticate with a secret header**, such as
+  `x-api-key`. The form offers Bearer token or Header. A migration moves each
+  stored bearer token to the same header storage.
+
+### Changed
+
+- **A failed run tells its conversation**, on every channel, also when the run
+  did not wait. The agent says so in one short line, without error details, and
+  does not retry.
+- **A service card keeps what you do not enter again.** On a connected card, a
+  blank secret keeps the stored one. A new paste revokes the linked accounts
+  only when the client ID changes. The error names each missing field.
+
+### Fixed
+
+- **`druks.workspaces` and `druks.sandbox.client` import on their own.** As the
+  first import in a process, each failed with a circular import.
+
 ## [0.7.0] — 2026-09-23
 
 ### Added

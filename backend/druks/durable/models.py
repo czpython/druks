@@ -5,7 +5,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from dbos import DBOS
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Select, String, func, select, update
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Select,
+    String,
+    func,
+    select,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +25,7 @@ from druks.accounts.models import Account
 from druks.apps.registry import workflows
 from druks.core.models import Uuid7Pk
 from druks.database import get_session
+from druks.durable.constants import RUN_QUEUE
 from druks.durable.dbos_state import (
     retry_from_expression,
     state_expression,
@@ -23,7 +34,7 @@ from druks.durable.dbos_state import (
     updated_at_expression,
     workflow_status,
 )
-from druks.durable.engine import _step_engine, run_queue
+from druks.durable.engine import _step_engine
 from druks.durable.enums import (
     ACTIVE_STATES,
     OPEN_STATES,
@@ -76,9 +87,6 @@ class Run(Base):
     # every event the run writes names it without a second lookup.
     subject_key: Mapped[str | None] = column_property(
         subject_attribute_expression(id, "subject_key")
-    )
-    subject_title: Mapped[str | None] = column_property(
-        subject_attribute_expression(id, "subject_title")
     )
     retry_from: Mapped[str | None] = column_property(retry_from_expression(id))
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
@@ -183,11 +191,18 @@ class Run(Base):
 
     @classmethod
     async def get_latest_for_subject(
-        cls, session: AsyncSession, subject_type: str, subject_id: str, kind: str | None = None
+        cls,
+        session: AsyncSession,
+        subject_type: str,
+        subject_id: str,
+        kind: str | None = None,
+        *,
+        gate: str | None = None,
     ) -> "Run | None":
         """The run that speaks for the subject: a subject holds at most one active
         run per kind (queue dedup) and the next starts only once the last is
-        terminal, so the newest is the live one whenever anything is live."""
+        terminal, so the newest is the live one whenever anything is live. ``gate``
+        narrows to the newest run parked on that gate."""
         stmt = (
             select(cls)
             .where(subject_filter(cls.id, subject_type, subject_id))
@@ -197,42 +212,45 @@ class Run(Base):
         )
         if kind:
             stmt = stmt.where(cls.kind == kind)
+        if gate:
+            stmt = stmt.where(cls.input_gate == gate, cls.state == RunState.PARKED.value)
         return (await session.scalars(stmt)).first()
 
     @classmethod
     async def get_latest_for_subjects(
-        cls, session: AsyncSession, subject_type: str, subject_ids: list[str]
-    ) -> dict[str, "Run"]:
-        """The driving run of each subject, keyed by subject id — get_latest_for_subject
-        for a whole board in one statement. Agent calls come with it: the status read
-        needs the latest agent of every running row."""
+        cls, session: AsyncSession, identities: list[tuple[str, str]]
+    ) -> dict[tuple[str, str], "Run"]:
+        """The driving run of each subject, keyed by its ``(subject_type, subject_id)``:
+        get_latest_for_subject for subjects of any type in one statement. Agent calls
+        come with it: the status read needs the latest agent of every running row."""
+        subject_type = (
+            workflow_status.c.attributes["subject_type"].as_string().label("subject_type")
+        )
         subject_id = workflow_status.c.attributes["subject_id"].as_string().label("subject_id")
         driving = (
             select(
+                subject_type,
                 subject_id,
                 cls.id.label("run_id"),
                 func.row_number()
                 .over(
-                    partition_by=subject_id,
+                    partition_by=(subject_type, subject_id),
                     order_by=(cls.created_at.desc(), cls.id.desc()),
                 )
                 .label("rank"),
             )
             .join_from(cls, workflow_status, workflow_status.c.workflow_uuid == cls.id)
-            .where(
-                workflow_status.c.attributes["subject_type"].as_string() == subject_type,
-                subject_id.in_(subject_ids),
-            )
+            .where(tuple_(subject_type, subject_id).in_(identities))
             .subquery()
         )
         stmt = (
-            select(driving.c.subject_id, cls)
+            select(driving.c.subject_type, driving.c.subject_id, cls)
             .join_from(cls, driving, driving.c.run_id == cls.id)
             .where(driving.c.rank == 1)
             .options(selectinload(cls.agent_calls))
         )
         rows = await session.execute(stmt)
-        return {found_id: run for found_id, run in rows}
+        return {(found_type, found_id): run for found_type, found_id, run in rows}
 
     @classmethod
     def open_subject_ids(cls, subject_type: str) -> Select:
@@ -447,7 +465,7 @@ class Run(Base):
         handle = await DBOS.fork_workflow_async(
             self.id,
             start_step,
-            queue_name=run_queue.name,
+            queue_name=RUN_QUEUE,
         )
         workflow_id = handle.workflow_id
         await Run.create_row(
@@ -734,7 +752,6 @@ class Artifact(Base, Uuid7Pk):
                 type=event["topic"],
                 subject=await run.get_subject(),
                 key=run.subject_key,
-                title=run.subject_title,
                 run=run.id,
                 kind=run.kind,
                 facts=facts,

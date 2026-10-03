@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import type {
   Action,
@@ -7,6 +7,8 @@ import type {
   ImageBlock,
   Link,
   Metric,
+  StatusValue,
+  SubjectStatusValue,
   TableColumn,
   TableRow,
   Value,
@@ -37,7 +39,10 @@ export function Datum({ value }: { value: Value }) {
       )
     case 'status':
       return <Status status={value} />
+    case 'subject_status':
+      return <SubjectStatus value={value} />
     case 'time':
+      if (!value.when) return <span className="dim">{value.empty}</span>
       return (
         <span className="mono dim" title={value.when}>
           <RelTime iso={value.when} />
@@ -52,6 +57,30 @@ export function Datum({ value }: { value: Value }) {
         </span>
       )
   }
+}
+
+const STOPPED = ['failed', 'cancelled', 'orphaned']
+const WORKING = ['scheduled', 'running']
+
+function subjectStatusWord({ status: { state, gate }, working }: SubjectStatusValue): [string, StatusValue['tone']] {
+  if (gate) return ['needs you', 'warning']
+  if (state && STOPPED.includes(state)) return [state, 'danger']
+  if (state && WORKING.includes(state)) return [working, 'active']
+  return ['idle', 'neutral']
+}
+
+/** Where the work on one subject stands: the shell's word for the run, the
+ * app's verb while it works, and the message of a run that stopped. */
+function SubjectStatus({ value }: { value: SubjectStatusValue }) {
+  const [label, tone] = subjectStatusWord(value)
+  const status = <span className={`dui-status dui-status-${tone}`}>{label}</span>
+  if (!value.status.failure) return status
+  return (
+    <span className="dui-value">
+      {status}
+      <span className="dui-value-desc dim">{value.status.failure}</span>
+    </span>
+  )
 }
 
 function TextDatum({
@@ -283,14 +312,14 @@ export function Table({
   title,
   columns,
   rows,
-  emptyText,
+  empty,
   select,
   actions,
 }: {
   title: string
   columns: TableColumn[]
   rows: TableRow[]
-  emptyText: string
+  empty: ReactNode
   select: string
   actions: Action[]
 }) {
@@ -333,11 +362,11 @@ export function Table({
   if (rows.length === 0) {
     // Nothing to show and nothing to say about it: a heading over an empty box
     // is worse than no block at all.
-    if (!emptyText) return null
+    if (!empty) return null
     return (
       <div className="dui-table-block">
         {title ? <div className="dui-table-head">{heading}</div> : null}
-        <div className="dui-table-empty dim">{emptyText}</div>
+        {empty}
       </div>
     )
   }

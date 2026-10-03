@@ -24,6 +24,7 @@ from druks.mcp.models import McpServer
 from druks.redis import close_client, get_client
 from druks.sandbox.models import SecretRef
 from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
 from druks.secrets.exceptions import SecretRevokedError
 from druks.secrets.models import VaultSecret
 from druks.testing import configure_app_for_test, make_settings
@@ -693,7 +694,7 @@ async def test_get_cache_and_refresh_lock_are_per_account(auth_server, druks_db)
 
 
 async def _ref(account_id: str | None = None) -> SecretRef:
-    _, refs = await Workspace.get_mcp_delivery(db_session(), None, account_id)
+    _, refs = await Workspace.get_all_mcp_servers(db_session(), None, account_id)
     return next(ref for ref in refs if ref.name == get_bearer_token_env_var(_NAME).lower())
 
 
@@ -703,10 +704,10 @@ async def test_delivery_binds_the_grant_and_the_row_issues_the_token(
     _register_oauth_server()
     grant = await _store_grant()
 
-    wire, refs = await Workspace.get_mcp_delivery(db_session(), None, None)
+    servers, refs = await Workspace.get_all_mcp_servers(db_session(), None, None)
 
     var = get_bearer_token_env_var(_NAME)
-    entry = next(s for s in wire if s.name == _NAME)
+    entry = next(s for s in servers if s.name == _NAME)
     assert entry.url == _SERVER_URL
     assert entry.bearer_token_env_var == var
     [ref] = refs
@@ -714,7 +715,7 @@ async def test_delivery_binds_the_grant_and_the_row_issues_the_token(
     token, expires_at = await grant.issue_token("")
     assert token == "at-1"
     assert expires_at > datetime.now(UTC)
-    assert "at-1" not in repr(wire) + repr(refs)
+    assert "at-1" not in repr(servers) + repr(refs)
 
 
 async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
@@ -725,7 +726,7 @@ async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
     server.identity_mode = IdentityMode.SHARED
 
     with pytest.raises(MissingGrantError, match=_NAME):
-        await Workspace.get_mcp_delivery(db_session(), None, None)
+        await Workspace.get_all_mcp_servers(db_session(), None, None)
 
 
 async def test_delivery_names_the_account_missing_its_per_user_grant(druks_db):
@@ -734,7 +735,7 @@ async def test_delivery_names_the_account_missing_its_per_user_grant(druks_db):
     server.identity_mode = IdentityMode.PER_USER
 
     with pytest.raises(MissingGrantError) as error:
-        await Workspace.get_mcp_delivery(db_session(), None, account.id)
+        await Workspace.get_all_mcp_servers(db_session(), None, account.id)
 
     assert error.value.name == _NAME
     assert error.value.account_id == account.id
@@ -759,7 +760,7 @@ async def test_delivery_with_a_named_account_does_not_use_the_default_account(
     await _store_grant(account_id=default_account.id, identity_mode=IdentityMode.PER_USER)
 
     with pytest.raises(MissingGrantError) as error:
-        await Workspace.get_mcp_delivery(db_session(), None, named.id)
+        await Workspace.get_all_mcp_servers(db_session(), None, named.id)
 
     assert error.value.account_id == named.id
 
@@ -776,6 +777,55 @@ async def test_the_ref_binds_the_accounts_own_grant(auth_server, druks_db):
 
     assert ref.secret_id == grant.id
     assert (await druks_db.get(VaultSecret, ref.secret_id)).account_id == first.id
+
+
+async def test_the_default_account_sends_the_service_login_and_others_their_grant(druks_db):
+    default_account = await Account.get_or_create(druks_db, "default@example.com")
+    person = await Account.get_or_create(druks_db, "person@example.com")
+    server = await McpServer.create(
+        druks_db, name="atlassian", url="https://mcp.atlassian.com/v2/mcp", is_oauth=True
+    )
+    server.identity_mode = IdentityMode.PER_USER
+    grant = await VaultSecret.connect(
+        druks_db, Audience.mcp("atlassian"), account_id=person.id, refresh_token="rt", scopes=[]
+    )
+    await VaultSecret.store(
+        druks_db,
+        SecretKind.STATIC,
+        Audience.service("jira"),
+        secrets={"api_token": "jira-token", "webhook_secret": "hook"},
+        identity={"email": "svc@example.com", "base_url": "https://acme.atlassian.net"},
+    )
+
+    [entry], [ref] = await Workspace.get_all_mcp_servers(druks_db, None, default_account.id)
+
+    assert entry.bearer_token_env_var == ""
+    assert entry.env_headers == {"Authorization": ref.name.upper()}
+    login = await druks_db.get(VaultSecret, ref.secret_id)
+    expected = base64.b64encode(b"svc@example.com:jira-token").decode()
+    assert await login.issue_token("") == (f"Basic {expected}", None)
+    [entry], [ref] = await Workspace.get_all_mcp_servers(druks_db, None, person.id)
+    assert entry.bearer_token_env_var
+    assert ref.secret_id == grant.id
+
+
+async def test_a_service_owned_server_sends_the_accounts_service_sign_in(druks_db):
+    await Account.get_or_create(druks_db, "default@example.com")
+    person = await Account.get_or_create(druks_db, "person@example.com")
+    stranger = await Account.get_or_create(druks_db, "stranger@example.com")
+    await McpServer.create(
+        druks_db, name="github", url="https://api.githubcopilot.com/mcp/", is_oauth=True
+    )
+    sign_in = await VaultSecret.connect(
+        druks_db, Audience.service("github"), account_id=person.id, refresh_token="rt", scopes=[]
+    )
+
+    [entry], [ref] = await Workspace.get_all_mcp_servers(druks_db, None, person.id)
+
+    assert entry.bearer_token_env_var
+    assert ref.secret_id == sign_in.id
+    with pytest.raises(MissingGrantError):
+        await Workspace.get_all_mcp_servers(druks_db, None, stranger.id)
 
 
 async def test_a_disconnected_grant_issues_nothing(auth_server, druks_db):

@@ -16,6 +16,21 @@ vi.mock('../api/sse', () => ({ useSSE: vi.fn() }))
 
 const parkedAt = '2026-09-06T00:00:00.123456Z'
 const run = 'run%?#é'
+const gateControls = (id: string): Block => ({
+  block: 'gate_controls',
+  subject: { subjectType: 'note', subjectId: 'a' },
+  status: {
+    state: 'parked',
+    run: id,
+    kind: 'field_notes.summarize',
+    agent: null,
+    gate: 'review',
+    failure: null,
+    reason: null,
+    triggeredAt: null,
+    accountUsername: null,
+  },
+})
 const gate: Gate = {
   run,
   gate: 'review',
@@ -64,7 +79,7 @@ afterEach(() => {
 
 it('opens the exact decision and decodes request identifiers only once', async () => {
   vi.mocked(api.getGate).mockResolvedValue(gate)
-  mount([{ block: 'gate_controls', run }])
+  mount([gateControls(run)])
   expect(await screen.findByRole('button', { name: 'Approve' })).toBeTruthy()
   expect(api.getGate).toHaveBeenCalledWith(run)
   expect(api.readPage).toHaveBeenCalledWith('notes', '/items/a%2520b%2Fc%3F%23%C3%A9')
@@ -72,14 +87,14 @@ it('opens the exact decision and decodes request identifiers only once', async (
 
 it('does not expose a new round through an old decision link', async () => {
   vi.mocked(api.getGate).mockResolvedValue({ ...gate, parkedAt: '2026-09-07T00:00:00Z' })
-  mount([{ block: 'gate_controls', run }])
+  mount([gateControls(run)])
   expect((await screen.findByRole('alert')).textContent).toContain('has changed')
   expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
 })
 
 it.each<{ blocks: Block[] }>([
   { blocks: [] },
-  { blocks: [{ block: 'gate_controls', run: 'new-run' }] },
+  { blocks: [gateControls('new-run')] },
 ])('does not substitute a missing decision with other controls: %j', async ({ blocks }) => {
   mount(blocks)
   expect((await screen.findByRole('alert')).textContent).toContain('unavailable')
@@ -94,7 +109,7 @@ it('does not report an answered decision as unavailable when its region rereads'
   })
   vi.mocked(api.getGate).mockResolvedValue(gate)
   vi.mocked(api.answerGate).mockResolvedValue({ run, parkedAt, result: 'answered' })
-  mount([decision([{ block: 'gate_controls', run }])])
+  mount([decision([gateControls(run)])])
   fireEvent.click(await screen.findByRole('button', { name: 'Approve' }))
   await screen.findByText('Answer sent.')
 
@@ -110,6 +125,6 @@ it('does not report an answered decision as unavailable when its region rereads'
 
 it('keeps direct app visits actionable', async () => {
   vi.mocked(api.getGate).mockResolvedValue(gate)
-  mount([{ block: 'gate_controls', run }], false)
+  mount([gateControls(run)], false)
   await waitFor(() => expect(screen.getByRole('button', { name: 'Approve' })).toBeTruthy())
 })

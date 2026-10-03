@@ -69,12 +69,11 @@ export interface DashboardSchedules {
   rows: DashboardSchedule[]
 }
 
-// The base every app's subject summary satisfies; ``id`` keys its status,
-// timeline, and detail URL.
+// The header the platform shows a subject under; ``id`` keys its status,
+// timeline, and detail URL, and ``key`` is its name.
 export interface SubjectSummary {
   id: string
   key: string
-  title?: string | null
 }
 
 export interface SubjectStatus {
@@ -297,7 +296,18 @@ export interface NumberValue {
 
 export interface TimeValue {
   value: 'time'
-  when: string
+  when: string | null
+  // The word the shell shows when there is no moment.
+  empty: string
+}
+
+// Where the work on one subject stands. Druks reads the status when it serves
+// the page; the shell writes the word.
+export interface SubjectStatusValue {
+  value: 'subject_status'
+  subject: Follows
+  working: string
+  status: SubjectStatus
 }
 
 export interface ControlsValue {
@@ -306,7 +316,13 @@ export interface ControlsValue {
 }
 
 // One rendered datum. It reads the same way in Facts, Metrics, List, and Table.
-export type Value = TextValue | NumberValue | StatusValue | TimeValue | ControlsValue
+export type Value =
+  | TextValue
+  | NumberValue
+  | StatusValue
+  | SubjectStatusValue
+  | TimeValue
+  | ControlsValue
 
 export interface ChartSeries {
   label: string
@@ -439,7 +455,7 @@ export type Block =
       blocks: Block[]
       follows: Follows | null
     }
-  | { block: 'gate_controls'; run: string }
+  | { block: 'gate_controls'; subject: Follows; status: SubjectStatus }
   | { block: 'timeline'; title: string; items: TimelineItem[] }
   | {
       block: 'progress'
@@ -467,13 +483,13 @@ export type Block =
       title: string
       columns: TableColumn[]
       rows: TableRow[]
-      emptyText: string
+      empty: EmptyStateBlock | null
       select: string
       actions: Action[]
     }
   | { block: 'list'; title: string; items: Value[] }
   | { block: 'stack'; gap: 'small' | 'medium' | 'large'; blocks: Block[] }
-  | { block: 'columns'; layout?: 'even' | 'sidebar'; blocks: Block[] }
+  | { block: 'columns'; layout?: 'even' | 'sidebar' | 'split'; blocks: Block[] }
   | Action
   | {
       block: 'form'
@@ -491,7 +507,7 @@ export type Block =
       title: string
       cards: CardBlock[]
       empty: EmptyStateBlock | null
-      layout?: 'wrap' | 'stack'
+      layout?: 'wrap' | 'stack' | 'tiles'
       drop?: Action | null
     }
   | {
@@ -870,7 +886,6 @@ export interface FeedItem {
   subjectKey?: string | null
   payload: {
     [fact: string]: unknown
-    title?: string | null
     kind?: string | null
     run?: string | null
     gate?: string | null
@@ -1012,6 +1027,12 @@ export interface McpRegistryCandidate {
   headers: RegistryHeader[]
 }
 
+export interface McpRegistrySearch {
+  candidates: McpRegistryCandidate[]
+  // The registry holds more matches than one search returns.
+  hasMore: boolean
+}
+
 // A personal access token an agent presents as `Authorization: Bearer …` to
 // call this same API. Only the prefix ever appears here; the plaintext is
 // returned once, at mint, and nowhere else.
@@ -1038,7 +1059,13 @@ export interface McpServer {
   // The raw token never leaves the backend; ``hasToken`` says whether one is
   // configured without revealing it.
   hasToken: boolean
+  // Where this account's credential for the server comes from.
+  credential: McpCredential
+  // The service that owns the server's host.
+  service: string | null
 }
+
+export type McpCredential = 'headers' | 'grant' | 'service_connection' | 'service_login'
 
 export interface McpServerConnection {
   // Null identifies the shared connection every account uses.

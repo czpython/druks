@@ -454,6 +454,22 @@ class NightWatch(App):
 The app name and the attribute name form the agent's id: `night_watch.report`.
 Settings overrides, the timeline, and the step name use that id.
 
+An agent that reads untrusted content, such as email or a web page, gets no
+plugin state and no MCP server:
+
+```python
+    triage = Agent(
+        prompt="triage.md",
+        contract=TriageOutput,
+        include_plugins=False,
+        include_mcp=False,
+    )
+```
+
+A workflow that sets `steps_reuse_sandbox = True` keeps one sandbox for all its
+agents, and the sandbox takes its entries from the agent call that creates it.
+Give such a workflow agents that all include MCP servers, or none that do.
+
 Call it only inside a workflow:
 
 ```python
@@ -512,6 +528,51 @@ the entry names: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `CODEX_API_KEY` for
 Codex. A nested CLI reads it from the environment. The
 [configuration guide](configuration.md#harnesses) lists the variable, host, and
 header per harness.
+
+### Give an agent a service's secret
+
+An agent that calls a provider from its sandbox lists the secret it needs. The
+[service](#declare-a-service) declares the one host that its secrets can go to:
+
+```python
+class Acme(Service):
+    host = "api.acme.example"
+
+    class Settings(BaseModel):
+        api_key: SecretStr = Field(title="API key")
+        webhook_secret: SecretStr = Field(title="Webhook secret")
+
+
+class NightWatch(App):
+    name = "night_watch"
+
+    report = Agent(
+        prompt="night_watch/report.md",
+        contract=ReportOutput,
+        secrets=(Acme.fields.api_key,),
+    )
+```
+
+`Acme.fields` holds the fields of `Settings` by name. The sandbox of each
+`report` call holds a placeholder in `ACME_API_KEY`: the service slug and the
+field name, in upper case. The secrets proxy puts the key in an
+`Authorization: Bearer` header only on requests to `host`. The sandbox never
+holds the key, and it never holds `webhook_secret`, which no agent lists.
+
+Druks refuses to load an agent that lists a field that is not a secret, or a
+field of a service with no `host`. If a service with `required = False` is not
+connected, the sandbox gets no variable for it, so the prompt must handle that.
+
+A workflow that sets `steps_reuse_sandbox = True` binds the secrets of the call
+that creates the sandbox. Give the agents of such a workflow the same `secrets`.
+
+For a credential that depends on the subject, such as one account's connection,
+override [`get_secrets(subject)`](#customize-the-workspace) on the workspace.
+
+A person's own sign-in needs no list. If a service has OAuth endpoints and a
+`host`, the Chat sandbox of each operator holds that operator's sign-in under
+the service slug, the way it holds a listed field. An operator with no sign-in
+gets no variable.
 
 Do not ask the framework to infer domain side effects from agent prose.
 The prompt or a subsequent explicit step owns those actions.
@@ -668,20 +729,67 @@ those two, so a request cannot select another repo or identity.
 
 Override `Workflow.get_workspace_kwargs()` to pass `branch` or the fields a
 subclass adds. Extend `RepoWorkspace` by adding fields, not by cloning again.
-Override `run_agent()` to prepare the VM before the call, `get_agent_run_kwargs()`
-to grant directories or skills, and `get_required_mcp_servers(subject)` to
-require an MCP server with its own vault row:
+Override `run_agent()` to prepare the VM before the call,
+`get_agent_run_kwargs()` to grant directories or skills, and `get_env()` to give
+every agent call environment variables:
 
 ```python
-from druks.sandbox.datastructures import RequiredMcpServer
+@dataclass(frozen=True, kw_only=True)
+class DeployWorkspace(RepoWorkspace):
+    deploy_token: str
+
+    def get_env(self) -> dict[str, str]:
+        return {"DEPLOY_TOKEN": self.deploy_token}
+```
+
+Override `get_secrets(subject)` to give the sandbox a secret of its own:
+
+```python
+from druks.sandbox import SandboxSecret
+from druks.workspaces import Workspace
+
+from .services import BillingApi
+
+
+class InvoiceWorkspace(Workspace):
+    @classmethod
+    async def get_secrets(cls, subject) -> list[SandboxSecret]:
+        return [
+            SandboxSecret(
+                name="billing_token",
+                secret_id=(await BillingApi.get()).id,
+                host="api.billing.example",
+            )
+        ]
+```
+
+The secret names the vault row the issuer answers from. With a `host`, it is a
+custom entry. The sandbox holds a placeholder in `BILLING_TOKEN`, the name in
+upper case. The secrets proxy puts the value in a request header only for that
+host. A header row supplies its own header. Any other row goes out as
+`Authorization: Bearer <token>`. An entry for `github.com` is Drukbox's GitHub
+service under any name: `GH_TOKEN`, with git and `gh` set up. Without a `host`,
+the name is a Drukbox catalog entry, and Drukbox sets its variable and hosts.
+`resource` tells the issuer what the token is for, such as a repo. Druks reads
+the secrets before the sandbox exists, so read them from the subject alone.
+
+A vault row with one secret issues it under any name. For the secret of a
+service that does not depend on the subject,
+[list it on the agent](#give-an-agent-a-services-secret) instead.
+
+Override `get_mcp_servers(subject)` to give the sandbox an MCP server with its
+own vault row:
+
+```python
+from druks.sandbox import SandboxMcpServer
 
 
 class BuildWorkspace(RepoWorkspace):
     @classmethod
-    async def get_required_mcp_servers(cls, subject) -> tuple[RequiredMcpServer, ...]:
+    async def get_mcp_servers(cls, subject) -> tuple[SandboxMcpServer, ...]:
         actor = await get_review_actor()
         return (
-            RequiredMcpServer(
+            SandboxMcpServer(
                 name="github",
                 url="https://api.githubcopilot.com/mcp/",
                 secret_id=(await actor.service.get()).id,
@@ -694,10 +802,11 @@ The server names the vault row the issuer answers from and what the token is
 for: here a connected GitHub service and its repo. Druks binds the server's
 host and the variable `MCP_GITHUB_TOKEN` to the entry when it creates the
 sandbox. The harness configuration names the variable, and the sandbox never
-holds the token. A required server owns its name, so a same-named registry
-server is not delivered. `Workspace.get_mcp_delivery(subject, account_id)`
-returns the wire shapes and the secret refs for every MCP server of a sandbox.
-Override it to deliver none.
+holds the token. A workspace server owns its name, so a same-named registry
+server is not delivered. `Workspace.get_all_mcp_servers(subject, account_id)`
+returns the harness shapes and the secret refs for every MCP server of a
+sandbox: the workspace's servers and the enabled registry servers. An agent
+declared with `include_mcp=False` gets none of them.
 
 Keep durable state outside the VM. A workflow can set
 `steps_reuse_sandbox = True` to retain one host across a segment. Druks releases
@@ -859,7 +968,7 @@ A workflow with a subject starts with an instance of that class. A workflow
 without a subject passes `subject=None`.
 
 When the subject is a row you keep — one you list, edit, and show fields from —
-subclass `StoredSubject` instead of `Base`. The class name is the subject type:
+subclass `StoredSubject` instead of `Model`. The class name is the subject type:
 `Repository` becomes `repository`.
 
 ```python
@@ -870,34 +979,20 @@ from sqlalchemy.orm import Mapped
 class Repository(StoredSubject):
     full_name: Mapped[str]
 
-    def get_key(self) -> str:
+    def __str__(self) -> str:
         return self.full_name
 ```
 
-Druks supplies the rest: the table `night_watch_repository`, an `id`,
-`created_at` and `updated_at`, `create()`, `save()`, `delete()`, and a board of
-the newest hundred rows by `updated_at`. Each subject already supplies its ID
-and `key`. The key is its stable work key. The summary has an optional
-descriptive `title`; a subject without one leaves it absent. For a title or more
-fields, add a custom summary:
-
-```python
-from druks.workflows import SubjectSummary
-
-
-class RepositorySummary(SubjectSummary):
-    open_findings: int
-
-
-class Repository(StoredSubject):
-    summary_class = RepositorySummary
-```
-
-To scope the board by caller, or to select other rows, override
-`list_summaries()`.
+A subject's `__str__` is its name on runs, the Activity feed, and its board. The
+default is its type and id, such as `repository 7`. Its type and id identify it,
+so the name need not be unique. Druks supplies the rest: the table
+`night_watch_repository`, an `id`, `created_at` and `updated_at`, `create()`,
+`save()`, `delete()`, and a board of the newest hundred rows by `updated_at`, or
+in the class's declared ordering. To scope the board by caller, or to select
+other rows, override `list_summaries()`.
 
 If you keep no row for a subject, subclass `Subject`. The platform requires only
-an identity. The ID is the full record and its label:
+an identity. The ID is the full record and its name:
 
 ```python
 from druks.workflows import Subject, SubjectSummary
@@ -910,8 +1005,11 @@ class PullRequest(Subject):
 ```
 
 Each ID names one of these subjects, so a detail read always answers. Override
-`get_for_id()` to reject an invalid shape. For example,
-`owner/repo#7` is a pull request and `nonsense` returns a 404.
+`get_or_none(id)` to reject an invalid shape. For example,
+`owner/repo#7` is a pull request and `nonsense` returns a 404:
+`await PullRequest.get(id=subject_id)` raises `ObjectNotFound` for it, the same
+as `Model.get`. Code that already knows the parts builds the subject directly:
+`PullRequest(id=f"{repo}#{number}")`.
 
 An identity-only `Subject` a workflow declares must implement
 `list_summaries()`; a `StoredSubject` has a board by default. The board reads
@@ -970,6 +1068,11 @@ statuses = await Repository.get_statuses([summary.id for summary in summaries])
 This is the read the platform's own board uses, so a declared page listing
 fifty rows costs one query rather than fifty.
 
+A page needs neither read to show where the work stands.
+`ui.SubjectStatus(repository)` takes the subject, and Druks reads every status
+on the page when it serves the page. See
+[Where the work stands](druks-ui.md#where-the-work-stands).
+
 ## Activity facts and signals
 
 Use [announcements](#announcing-domain-events) for facts the app owns.
@@ -994,15 +1097,14 @@ Druks records these workflow facts without app calls:
 An external owner can announce an outcome after the run stops. Record that
 outcome when the owner reports it. Do not infer it from the run state.
 
-Each Activity row keeps its recorded work key and optional descriptive title.
-`start()` reads only the title from the supplied subject's `get_summary()`. It
-stores the title beside the key in the workflow attributes. Admission,
-transitions, workflow announcements, output artifacts, and operator cancellation
-use that run's recorded title. A rename during the run applies to the next run.
-A subject announcement reads its own summary when it records the event.
+Each Activity row keeps the subject's name as it was recorded. `start()` stores
+`str(subject)` in the workflow attributes. Admission, transitions, workflow
+announcements, output artifacts, and operator cancellation use that run's
+recorded name. A rename during the run applies to the next run. A subject
+announcement records the subject's name when it records the event.
 
-Druks records `payload.title`, `payload.run`, and `payload.kind`. An announcement
-that names one of them raises `WorkflowError`. A missing title leaves the key available.
+Druks records `payload.run` and `payload.kind`. An announcement that names one of
+them raises `WorkflowError`.
 A later rename or deletion does not change history. Search matches a literal,
 case-insensitive part of the recorded key or title. It does not search current
 subjects, failure text, or artifacts.
@@ -1074,24 +1176,66 @@ claim so the provider can retry.
 
 ## Models and migrations
 
-Models subclass `druks.db.Base`. Druks names the table for the app and the
+Models subclass `druks.db.Model`. Druks names the table for the app and the
 class: `Report` in `night_watch` is the table `night_watch_report`. A class that
 sets `__tablename__` keeps it, and every app table starts with `<name>_`:
 
 ```python
 from sqlalchemy.orm import Mapped, mapped_column
 
-from druks.db import Base
+from druks.db import Model
 
 
-class Report(Base):
+class Report(Model):
     id: Mapped[int] = mapped_column(primary_key=True)
-    body: Mapped[str]
+    repo: Mapped[str] = mapped_column(unique=True)
+    status: Mapped[str]
 ```
 
-A `Mapped[datetime]` column stores UTC. A `Mapped[SomeStrEnum]` column stores
-the member's value as text under a CHECK constraint named after the enum. A
-`Mapped[list]` or `Mapped[dict]` column is JSONB. Encrypted columns come from
+A model reads and writes by field:
+
+```python
+report = await Report.create(repo="acme/widgets", status="open")
+report = await Report.get(id=report_id)
+report = await Report.get_or_none(repo="acme/widgets")
+reports = await Report.all()
+open_reports = await Report.filter(status="open")
+report.status = "closed"
+await report.save()
+await report.delete()
+```
+
+`get` raises `ObjectNotFound` on a miss; the API answers it with 404 and a
+page with an empty state, so a route or page that names a row by id never
+spells either. `get_or_none` answers None instead. Both expect one row: two
+raise SQLAlchemy's `MultipleResultsFound`, so back the fields they read with a
+unique constraint. `all` returns every row and `filter` the rows that match at
+least one field, both in primary key order, or in the order the class declares
+on its class line, in Django's form:
+
+```python
+class Report(Model, ordering=("-created_at",)):
+    ...
+```
+
+A text value is read as its column's type, so an id straight off a URL finds its
+row. A read that needs a limit, a different order, or anything but equality
+writes `select()`:
+
+```python
+reports = await db_session().scalars(
+    select(Report).where(Report.status != "closed").order_by(Report.created_at).limit(20)
+)
+```
+
+A page that names a missing row by id answers an empty state that links back to
+its parent page, or to the app's landing page.
+
+A `Mapped[datetime]` column stores UTC. A `Mapped[SomeStrEnum]` or
+`Mapped[SomeLiteral]` column stores its value as text under a CHECK constraint of
+the allowed values. A `Mapped[list]` or `Mapped[dict]` column is JSONB; a typed
+one such as `Mapped[list[dict[str, Any]]]` names the type,
+`mapped_column(JSONB)`. Encrypted columns come from
 `druks.db.fields`: `EncryptedTextField` and `EncryptedJsonField`, with their
 value types `Secret` and `SecretsMapping`.
 
@@ -1107,17 +1251,6 @@ Druks scopes autogeneration to the table prefix, names the revisions
 `alembic_version_night_watch`. Never write a revision by hand. The one change
 Alembic does not detect is a new member of an enum: that is one
 `drop_constraint` and one `create_check_constraint`.
-
-A route or a page that names a subject by id reads it with
-`raise_on_missing=True`. A miss raises `SubjectNotFound`; the API answers 404
-and a page answers an empty state, so neither spells it:
-
-```python
-@router.post("/reports/{report_id}/close", operation_id="close_report")
-async def close_report(report_id: int) -> None:
-    report = await Report.get_for_id(report_id, raise_on_missing=True)
-    await report.close()
-```
 
 Query through `druks.db.db_session()` inside an
 HTTP request, durable step, or other platform-bound session. Outside those,
@@ -1148,10 +1281,14 @@ def list_reviews() -> list[ReviewResponse]:
     return Review.list_for_account(current_account_id.get())
 ```
 
+Druks prefixes every operation id of an app with the app name, so write the
+bare verb. For example, `operation_id="write_note"` in `field_notes` becomes
+`field_notes_write_note` in the OpenAPI document. Startup refuses an id that
+already starts with the app name. An `Action` names the bare id.
+
 Tag a route with `agent` to create an MCP tool from it. Give the route an
-explicit `operation_id`. Druks prefixes this value with the app name. For
-example, `operation_id="add_peer"` in `peer_tracker` becomes
-`peer_tracker_add_peer`. The docstring supplies the description.
+explicit `operation_id`, and the tool takes the prefixed name. The docstring
+supplies the description.
 
 A `GET` route is read-only. If a write is non-destructive, declare
 `x-destructive: false`. If a write is idempotent, declare `x-idempotent: true`.
@@ -1242,6 +1379,26 @@ Key the service for the integration that your app consumes (`Gmail`), not the
 provider (`Google`). A second integration on the same provider declares its own
 service. The operator decides whether each card uses a shared or narrow
 registration. This choice controls scope and the effect of a credential problem.
+
+If the provider runs an MCP server that the service's identity also signs in to,
+set `mcp_host` to the host of that server. An OAuth MCP server at that host then
+uses the service's credential. If the service has OAuth endpoints, each account
+uses its own sign-in at the service, with no second consent. If not, the
+default account sends the service's pasted login, and every other account
+connects its own grant. Override `get_authorization` to turn the connected row
+into the `Authorization` value:
+
+```python
+class Acme(Service):
+    mcp_host = "mcp.acme.example"
+
+    class Settings(BaseModel):
+        api_key: SecretStr = Field(title="API key")
+
+    @classmethod
+    def get_authorization(cls, login) -> str:
+        return f"Bearer {login.secrets['api_key']}"
+```
 
 ## Connect provider accounts (OAuth)
 
@@ -1532,6 +1689,14 @@ fixtures directly without a `conftest.py` or `pytest_plugins` declaration:
 The fixtures are not autouse. A test that requests `druks_client` also gets
 `druks_db`. A test accesses Redis only if it requests `druks_redis`.
 
+`druks check-app` loads one installed app and checks its subjects, pages,
+operations, and routers. It needs no database and no configured install, so an
+app's CI can run it. It exits non-zero on the first contract the app breaks:
+
+```bash
+druks check-app field_notes
+```
+
 Run a workflow's body against a subject with no durable engine — no checkpoints,
 no lifecycle events, no retries:
 
@@ -1633,7 +1798,7 @@ class NightWatch(App):
     navigation = ["reports"]
 ```
 
-Druks checks the whole table at boot. A missing landing page, a repeated page
+Druks checks the whole table at boot. Two landing pages, a repeated page
 name, a nested child, two routes a request could not tell apart, a signature
 that does not match its route, or a navigation entry that is not a static
 top-level page fails the load, with the app name and the exact cause.
@@ -1672,15 +1837,17 @@ shell rereads the page on each snapshot:
 ```python
 @ui.page("/notes/{note_id}")
 async def note(note_id: int):
-    found = await Note.get_for_id(note_id, raise_on_missing=True)
-    status = await found.get_status()
-    if status.gate:
-        decision = [ui.GateControls(status.run)]
-    else:
-        decision = [ui.Text("Nothing is waiting on you.")]
+    found = await Note.get(id=note_id)
     return ui.Page(
         title=f"Note {note_id}",
-        blocks=[ui.Section(title="Your decision", name="decision", follows=found, blocks=decision)],
+        blocks=[
+            ui.Section(
+                title="Your decision",
+                name="decision",
+                follows=found,
+                blocks=[ui.GateControls(found)],
+            )
+        ],
     )
 ```
 
@@ -1688,10 +1855,11 @@ The shell replaces the named region and leaves the rest of the page alone, so
 scroll position, focus, and half-filled inputs outside it survive. A region
 that follows a subject must have a name. That is how the shell finds it.
 
-`GateControls` names only the run. The shell reads the ask, its options, its
-context, and its artifact from the parked run, and submits the operator's
-answer with the run's `parkedAt`. A `GateControls` block must sit inside
-something that follows a subject, or an answered gate would stay on screen.
+`GateControls` takes the subject. The shell shows nothing while the subject
+waits on nothing. Otherwise it shows the ask, its options, its context, and its
+artifact, and sends the operator's answer. A `GateControls` block must sit
+inside something that follows a subject, or an answered gate would stay on
+screen.
 
 ### Let an operator act
 
@@ -1825,16 +1993,17 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | --- | --- |
 | `druks.accounts` | `current_account_id` |
 | `druks.apps` | `App`, `AppSettings`, `Choices`, `Secret` |
-| `druks.services` | `Service`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
+| `druks.services` | `Service`, `Connection`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
+| `druks.browser` | `BrowserSession`, `BrowserSessionSignedOutError`, `BrowserSessionStatus` |
 | `druks.agents` | `Agent`, `AgentOutput`, `Bot`, `BotUser` |
-| `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
-| `druks.sandbox` | `Sandbox` |
+| `druks.workflows` | `Workflow`, `Gate`, `GateTimeout`, `step`, run/agent response types, lifecycle enums and workflow errors |
+| `druks.sandbox` | `Sandbox`, `SandboxMcpServer`, `SandboxSecret` |
 | `druks.workspaces` | `Workspace`, `RepoWorkspace` |
-| `druks.db` | `Base`, `StoredSubject`, `db_session` |
+| `druks.db` | `Model`, `StoredSubject`, `db_session` |
 | `druks.db.fields` | `EncryptedJsonField`, `EncryptedTextField`, `Secret`, `SecretsMapping` |
-| `druks.exceptions` | `DruksError`, `SubjectNotFound` |
+| `druks.exceptions` | `DruksError`, `ObjectNotFound` |
 | `druks.schemas` | `Schema` |
-| `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `ControlsValue`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `MultiUploadField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `Quote`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |
+| `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `ControlsValue`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `MultiUploadField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `Quote`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `SubjectStatus`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |
 | `druks.files` | `File`, `FileField` |

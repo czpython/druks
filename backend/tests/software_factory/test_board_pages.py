@@ -174,7 +174,9 @@ async def test_a_ticket_nobody_wrote_is_an_empty_state(druks_client):
 
 async def test_an_unattributed_ticket_still_reads(druks_client):
     repo = await _open_repo(druks_client)
-    ticket = await Ticket.create(project_repo=await ProjectRepo.get(int(repo["id"])), title="ghost")
+    ticket = await Ticket.create(
+        project_repo=await ProjectRepo.get_or_none(id=int(repo["id"])), title="ghost"
+    )
 
     page = (await druks_client.get(f"{_PAGES}/tickets/{ticket.identifier}")).json()
 

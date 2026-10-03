@@ -102,6 +102,20 @@ An operator's Chat key permits every tool of the Druks toolkit: the routes tagge
 tool list lists and calls only those tools. The agents of a WhatsApp number have
 such keys: see [WhatsApp](#whatsapp).
 
+An operator's agent also reaches every MCP server that is enabled in
+**Settings → MCP servers**, with the same credentials as a workflow agent. Chat
+leaves out a server that cannot authenticate for you, such as an OAuth server
+that you have not connected. A Bot's agent reaches only the Druks server. When
+you enable, disable, or connect a server, the next turn replaces the sandbox.
+
+An operator's sandbox also holds their own sign-in at each service that names a
+host, so the command line acts as that person. With a GitHub sign-in, git and
+`gh` act as you: your name is on the issues and comments, and the token permits
+only what both you and the App can do. Druks refreshes the token before it
+expires. Without a sign-in the sandbox has no access to that service: see
+[GitHub](#github). A Bot's sandbox never holds a sign-in.
+A build still acts as the App: see [GitHub](configuration.md#github).
+
 The agent can change Druks through those tools. Chat has no permission dialog
 or proposal mode. Claude runs in bypass mode and cannot call `AskUserQuestion`.
 Codex runs in full-access mode for an operator. For a Bot it runs in read-only
@@ -162,7 +176,7 @@ the session files from the last completed turn.
 
 Nothing renews an idle sandbox. It expires with its lease. The next message
 gets a new sandbox and reloads the saved session files. Each turn renews the
-sandbox lease and its identity expiry. The lease is 150 minutes.
+sandbox lease and its identity expiry. The lease is 270 minutes.
 
 ## WhatsApp
 
@@ -345,6 +359,11 @@ your agent too. Other people must tag it, and a top-level message with no tag
 reaches nobody. When you tag the bot before you connect Slack, the link comes as
 a message in the room that only you see.
 
+Tell the agent to answer only when you tag it, and your untagged replies in that
+thread stop reaching it. The agent records your choice with `chat_require_tag`.
+Tell it to answer your replies again, and they reach it again for the rest of the
+24 hours. Your choice holds for that thread only.
+
 The agent reads the thread with `chat_read_thread`: the newest 200 messages,
 oldest first, each with its author's id and name, whether this agent wrote it,
 and whether the person it answers wrote it. Every agent in a thread posts as the
@@ -363,8 +382,8 @@ while the GitHub card is connected: see [GitHub](configuration.md#github).
 
 Druks knows you by your GitHub account. Select **Connect GitHub** on the GitHub
 pane. GitHub asks you to authorize the App, and Druks saves your GitHub sign-in
-under your account, like a Gmail connection. Other apps can use that grant.
-**Disconnect** revokes it.
+under your account, like a Gmail connection. Other apps can use that grant, and
+your Chat sandbox acts on GitHub with it. **Disconnect** revokes it.
 
 When you tag the App before you connect, the App answers once in the thread:
 connect GitHub in Druks, then tag it again. It holds nothing.

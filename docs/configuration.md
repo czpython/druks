@@ -40,7 +40,7 @@ host-run development template for that environment plane.
 | `[urls]` | Dashboard callback base URL and public webhook hostname |
 | `[secrets]` | Generated deployment secrets |
 | `[paths]` | Host data and harness configuration paths |
-| `[sandbox]` | Drukbox provider, service URL and token, image override, and the proxy and issuer addresses |
+| `[sandbox]` | Drukbox provider, service URL and token, image override, registry access, and the proxy and issuer addresses |
 | `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
 | `[env]` | Additional deployment environment settings rendered verbatim |
 
@@ -146,7 +146,7 @@ caches, and the sandbox provisioning gate.
 
 | TOML key | Purpose |
 | --- | --- |
-| `urls.endpoint` | Browser-visible dashboard URL and MCP OAuth callback base. It is also the `/mcp` base when `urls.webhook_host` is empty |
+| `urls.endpoint` | Browser-visible dashboard URL and MCP OAuth callback base. It is also the `/mcp` base when `urls.webhook_host` is empty. WebSocket upgrades must come from its host. When it is empty, they must come from the request's `Host` |
 | `urls.webhook_host` | Public webhook hostname and the HTTPS host for this installation's `/mcp` endpoint |
 | `identity.mode` | `none` (default, no authentication, single operator), `header` (edge-asserted identity), or `jwt` (validated edge-signed assertion) |
 | `identity.header` | The trusted identity header. The shipped Caddy edge also uses it. Header and JWT modes have no default and require it |
@@ -606,6 +606,8 @@ before provisioning a VM if its selected credential is missing.
 | `sandbox.service_token` | Drukbox API token |
 | `sandbox.timeout` | Control-plane request timeout. The default is 180 seconds |
 | `sandbox.image` | Optional provider image override |
+| `sandbox.registry_host`, `sandbox.registry_username`, `sandbox.registry_password` | Access to private sandbox images on one registry host, for example `ghcr.io`. Set the three together. See [Drukbox](https://github.com/czpython/drukbox/blob/main/docs/deploy.md#private-image-registry) |
+| `sandbox.template_repository` | The repository path on that host where Drukbox publishes sandbox templates. The exe provider requires it |
 | `sandbox.proxy_url` | The secrets proxy, at the address a sandbox dials. The docker shape sets `http://172.17.0.1:8880`. docker-sbx leaves it empty |
 | `sandbox.issuer_url` | The issuer base URL the secrets exchange dials. The default is `http://127.0.0.1:8001`. For a Drukbox on another server, set the address of the Druks host that Drukbox reaches. The installer then serves the issuer route there ([the issuer listener](deployment.md#the-issuer-listener)) |
 | `sandbox.browser_login_proxy` | Login-window egress proxy. An empty value keeps the box IP |
@@ -710,11 +712,26 @@ is one of:
   `Authorization` header spelled out; the form's Bearer field composes it.
 - An OAuth connection, which requires `urls.endpoint`.
 
+A registry install is an OAuth server when its secret headers are empty.
+
+A service can own the host of an OAuth server: GitHub owns
+`api.githubcopilot.com`, Jira owns `mcp.atlassian.com`, and Linear owns
+`mcp.linear.app`. Such a server uses the service's credential:
+
+- GitHub has sign-ins. Each account uses its own GitHub sign-in, and **Connect**
+  opens it. Druks refuses a connection for everyone.
+- Jira and Linear hold a pasted login. When the service is connected, the runs
+  of the default account send that login. A run that no person starts uses the
+  default account, so scheduled runs act as the service's login. Every other
+  account connects its own OAuth grant. Atlassian accepts the Jira login only
+  after an organization admin turns on API token authentication for its MCP
+  server.
+
 Druks gives OAuth discovery and client registration 30 seconds in total.
 A timeout names the stage that was pending. Retry the connection.
 
 Druks delivers enabled servers through the selected harness unless an app
-workspace owns a required server with the same name. Each OAuth bearer and
+workspace declares a server with the same name. Each OAuth bearer and
 each secret header is a Drukbox entry behind a vault row. The sandbox holds a
 placeholder under a derived variable, and the harness configuration names that
 variable. The secrets proxy swaps the placeholder only for the server's host.

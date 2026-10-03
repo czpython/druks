@@ -394,9 +394,9 @@ async def test_announce_carries_the_runs_routing(druks_db):
     assert event.payload == {"pr_number": 12, "run": run.id, "kind": workflow.kind}
     with (
         mock.patch("druks.workflows.DBOS.run_step_async", side_effect=run_inline),
-        pytest.raises(WorkflowError, match="title"),
+        pytest.raises(WorkflowError, match="kind"),
     ):
-        await workflow.announce("test.announced", title="Forged title")
+        await workflow.announce("test.announced", kind="forged.kind")
 
 
 @pytest.mark.asyncio
