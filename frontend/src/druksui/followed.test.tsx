@@ -23,8 +23,7 @@ const sse = vi.mocked(useSSE)
 
 afterEach(() => {
   cleanup()
-  // Reset, not clear: a test that queues a one-shot answer must not leave it
-  // for the next one.
+  // A queued one-shot answer must not leak into the next test.
   listApps.mockReset()
   readPage.mockReset()
   sse.mockReset()
@@ -140,9 +139,9 @@ function renderPage(first: PageSnapshot) {
 }
 
 function fireSnapshot() {
-  const options = sse.mock.calls.at(-1)?.[1]
+  const [, options] = sse.mock.calls.at(-1)!
   return act(async () => {
-    options?.handlers.snapshot?.({})
+    await options.handlers.snapshot!({})
   })
 }
 
@@ -180,14 +179,28 @@ describe('a followed region', () => {
     expect(screen.getByText('outside')).toBeTruthy()
   })
 
-  it('leaves the page as it was when a read fails', async () => {
+  it('retries a failed read and shows the recovered page', async () => {
     renderPage(snapshot([region('decision', 'waiting')]))
     await waitFor(() => expect(screen.getByText('waiting')).toBeTruthy())
 
-    readPage.mockRejectedValueOnce(new Error('page function raised'))
+    readPage
+      .mockRejectedValueOnce(new Error('page function raised'))
+      .mockResolvedValue(snapshot([region('decision', 'answered')]))
+    await fireSnapshot()
+
+    await waitFor(() => expect(screen.getByText('answered')).toBeTruthy())
+    expect(readPage).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps the page after all three refresh attempts fail', async () => {
+    renderPage(snapshot([region('decision', 'waiting')]))
+    await waitFor(() => expect(screen.getByText('waiting')).toBeTruthy())
+
+    readPage.mockRejectedValue(new Error('page function raised'))
     await fireSnapshot()
 
     expect(screen.getByText('waiting')).toBeTruthy()
+    expect(readPage).toHaveBeenCalledTimes(4)
   })
 })
 
