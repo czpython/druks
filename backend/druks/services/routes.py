@@ -7,6 +7,7 @@ from druks.api.dependencies import SessionDep
 from druks.apps.registry import services
 from druks.core.templates import render_page
 from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.services.exceptions import (
     OauthExchangeError,
@@ -25,23 +26,18 @@ oauth_router = APIRouter(prefix="/api/oauth", tags=["oauth"])
 @router.get("", response_model=list[ServiceResponse], response_model_by_alias=True)
 async def list_services(session: SessionDep) -> list[ServiceResponse]:
     entries = []
+    account_connections = await VaultSecret.list_owned_by(session, current_account_id.get())
     for service in services.all():
-        try:
-            row = await service.get()
-        except ServiceNotConnectedError:
-            row = None
-        connections = []
-        if service.token_endpoint:
-            # The detail shows revoked connections as history beside the live.
-            connections = await VaultSecret.list_connections(
-                session, Audience.service(service.slug), include_revoked=True
-            )
+        audience = Audience.service(service.slug)
+        row = await VaultSecret.lookup(session, service.secret_kind, audience)
+        connections = [
+            connection for connection in account_connections if connection.audience == audience
+        ]
         entries.append(ServiceResponse.from_row(service, row, connections))
     return entries
 
 
-# Session identity only, like the settings PATCH: the appliance's own
-# credentials are never writable with an agent PAT.
+# Session identity only: an agent PAT never writes the appliance's own credentials.
 @router.post(
     "/{slug}",
     response_model=ServiceResponse,
@@ -67,18 +63,13 @@ async def disconnect_service(session: SessionDep, slug: str) -> None:
     await service.disconnect(session)
 
 
-def _get_oauth_service(slug: str):
-    service = services.get(slug)
-    if not service or not service.token_endpoint:
-        raise OauthPageError(f"No OAuth service {slug!r}.", status_code=404)
-    return service
-
-
 @oauth_router.get("/{slug}/connect", dependencies=[Depends(current_session_account)])
 async def connect_oauth_service(
     session: SessionDep, slug: str, request: Request, connection: str = "", next: str = ""
 ) -> RedirectResponse:
-    service = _get_oauth_service(slug)
+    service = services.get(slug)
+    if not service or not service.token_endpoint:
+        raise OauthPageError(f"No OAuth service {slug!r}.", status_code=404)
     account_id = current_account_id.get()
     if connection:
         row = await session.get(VaultSecret, connection)
@@ -204,9 +195,8 @@ async def list_connections(session: SessionDep) -> list[VaultSecret]:
 )
 async def disconnect_connection(session: SessionDep, connection_id: str) -> None:
     row = await session.get(VaultSecret, connection_id)
-    if not row or row.kind != "oauth":
+    if not row or row.kind != SecretKind.OAUTH or row.account_id != current_account_id.get():
         raise HTTPException(status_code=404, detail=f"No connection {connection_id!r}.")
-    if row.revoked_at:
-        # Revoking is idempotent — the second delete finds the state true.
-        return
-    await OauthClient(provider=row.audience_name).disconnect(row, reason="user")
+    # Revoking is idempotent: a second delete finds the connection revoked.
+    if row.is_live:
+        await OauthClient(provider=row.audience_name).disconnect(row, reason="user")

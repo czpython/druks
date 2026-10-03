@@ -5,29 +5,29 @@ import json
 from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlparse
 
+import druks.redis
 import httpx
 import pytest
 from conftest import connect_service
 from druks.accounts.models import Account
+from druks.agents import Agent, AgentOutput
+from druks.api.server import app
+from druks.apps.registry import services
 from druks.core.apis.github import GitHubClient
 from druks.core.services import Github
 from druks.core.webhooks.github import GitHubEvents
 from druks.db import db_session
+from druks.redis import close_client, get_client
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
+from druks.services import Service
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.services.oauth import OauthClient
-from druks.testing import make_settings
+from druks.testing import configure_app_for_test, make_settings
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from pydantic import BaseModel, SecretStr
 from sqlalchemy import text
-
-
-def _server_app():
-    from druks.api.server import app
-
-    return app
-
 
 _PEM = "-----BEGIN RSA PRIVATE KEY-----\nline-one\nline-two\n-----END RSA PRIVATE KEY-----\n"
 _SECRET = "hook-secret-value"
@@ -49,9 +49,6 @@ async def _github_entry(client) -> dict:
     return next(entry for entry in entries if entry["slug"] == "github")
 
 
-# --- The row ----------------------------------------------------------------
-
-
 async def test_secrets_round_trip_and_rest_is_ciphertext(druks_db):
     await _connect()
     druks_db.expunge_all()
@@ -59,7 +56,7 @@ async def test_secrets_round_trip_and_rest_is_ciphertext(druks_db):
     row = await Github.get()
     assert row.identity["app_id"] == "12345"
     assert row.identity["slug"] == "druks-operator"
-    assert row.updated_at is not None
+    assert row.updated_at
     assert row.secrets["private_key"] == _PEM
     assert row.secrets["webhook_secret"] == _SECRET
 
@@ -89,9 +86,6 @@ async def test_get_raises_when_the_service_is_not_connected(druks_db):
         await Github.get()
 
 
-# --- The zero-argument client factory ---------------------------------------
-
-
 async def test_client_factory_resolves_only_the_row(druks_db):
     await _connect()
 
@@ -114,15 +108,9 @@ async def test_client_factory_raises_the_typed_error_when_absent(druks_db):
         await Github.get_client()
 
 
-# --- Webhook verification ----------------------------------------------------
-
-
-def _events(body: bytes, signature: str | None, tmp_path) -> GitHubEvents:
-    headers = {}
-    if signature is not None:
-        headers["x-hub-signature-256"] = signature
+def _events(body: bytes, signature: str, tmp_path) -> GitHubEvents:
     events = GitHubEvents(
-        request=SimpleNamespace(headers=headers),  # type: ignore[arg-type]
+        request=SimpleNamespace(headers={"x-hub-signature-256": signature}),  # type: ignore[arg-type]
         kwargs={},
         settings=make_settings(tmp_path),
     )
@@ -155,9 +143,6 @@ async def test_webhook_rejects_a_missing_identity_before_dispatch(druks_db, tmp_
     assert "not connected" in raised.value.detail
 
 
-# --- The identity-gated API ---------------------------------------------------
-
-
 def _mock_authenticated_app(monkeypatch, slug: str = "druks-operator") -> None:
     async def _slug(self) -> str:
         return slug
@@ -165,13 +150,13 @@ def _mock_authenticated_app(monkeypatch, slug: str = "druks-operator") -> None:
     monkeypatch.setattr(GitHubClient, "get_authenticated_app_slug", _slug)
 
 
-async def test_list_reports_each_declared_service(druks_client: TestClient):
+async def test_list_reports_each_declared_service(druks_client: httpx.AsyncClient):
     entry = await _github_entry(druks_client)
 
     assert entry["connected"] is False
     assert entry["required"] is True
     assert entry["facts"] == {}
-    assert entry["connectedAt"] is None
+    assert not entry["connectedAt"]
     assert [field["name"] for field in entry["fields"]] == [
         "app_id",
         "client_id",
@@ -203,7 +188,7 @@ async def test_list_reports_each_declared_service(druks_client: TestClient):
 
 
 async def test_post_authenticates_then_creates_the_row(
-    druks_client: TestClient, druks_db, monkeypatch
+    druks_client: httpx.AsyncClient, druks_db, monkeypatch
 ):
     _mock_authenticated_app(monkeypatch)
 
@@ -226,7 +211,9 @@ async def test_post_authenticates_then_creates_the_row(
     assert connected["facts"]["slug"] == "druks-operator"
 
 
-async def test_post_replaces_an_existing_row(druks_client: TestClient, druks_db, monkeypatch):
+async def test_post_replaces_an_existing_row(
+    druks_client: httpx.AsyncClient, druks_db, monkeypatch
+):
     await _connect()
     _mock_authenticated_app(monkeypatch, slug="replacement-app")
 
@@ -243,14 +230,14 @@ async def test_post_replaces_an_existing_row(druks_client: TestClient, druks_db,
     }
 
 
-async def test_post_rejects_an_unknown_service(druks_client: TestClient):
+async def test_post_rejects_an_unknown_service(druks_client: httpx.AsyncClient):
     response = await druks_client.post("/api/services/nope", json={"anything": "x"})
 
     assert response.status_code == 404
 
 
 async def test_invalid_credentials_preserve_the_previous_row(
-    druks_client: TestClient, druks_db, monkeypatch
+    druks_client: httpx.AsyncClient, druks_db, monkeypatch
 ):
     await _connect()
 
@@ -277,7 +264,7 @@ async def test_invalid_credentials_preserve_the_previous_row(
 
 
 async def test_a_paste_on_a_connected_card_keeps_the_secrets_it_leaves_blank(
-    druks_client: TestClient, druks_db, monkeypatch
+    druks_client: httpx.AsyncClient, druks_db, monkeypatch
 ):
     # A card connected before the App signed people in holds no client secret, so
     # that one must be typed. The key and the webhook secret it holds stay.
@@ -308,7 +295,7 @@ async def test_a_paste_on_a_connected_card_keeps_the_secrets_it_leaves_blank(
 
 
 async def test_blank_fields_are_rejected_without_touching_github(
-    druks_client: TestClient, druks_db, monkeypatch
+    druks_client: httpx.AsyncClient, druks_db, monkeypatch
 ):
     async def _never(self) -> str:
         raise AssertionError("blank fields must not reach GitHub")
@@ -326,20 +313,15 @@ async def test_blank_fields_are_rejected_without_touching_github(
         await Github.get()
 
 
-# --- The manifest flow (dashboard-created App) -------------------------------
-
-
 def _manifest_from(page: str) -> dict:
     value = page.partition('name="manifest" value="')[2].partition('">')[0]
     return json.loads(html.unescape(value))
 
 
 async def test_manifest_page_submits_the_documented_app_to_github(
-    druks_client: TestClient, tmp_path
+    druks_client: httpx.AsyncClient, tmp_path
 ):
-    _server_app().state.settings = make_settings(
-        tmp_path, urls={"endpoint": "https://druks.example/"}
-    )
+    app.state.settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example/"})
 
     response = await druks_client.get("/api/core/services/github/manifest")
 
@@ -364,9 +346,9 @@ async def test_manifest_page_submits_the_documented_app_to_github(
 
 
 async def test_manifest_page_prefers_the_webhook_host_for_deliveries(
-    druks_client: TestClient, tmp_path
+    druks_client: httpx.AsyncClient, tmp_path
 ):
-    _server_app().state.settings = make_settings(
+    app.state.settings = make_settings(
         tmp_path,
         urls={"endpoint": "https://druks.example", "webhook_host": "hooks.druks.example"},
     )
@@ -378,12 +360,12 @@ async def test_manifest_page_prefers_the_webhook_host_for_deliveries(
     )
 
 
-async def test_manifest_page_lets_the_operator_target_an_org(druks_client: TestClient, tmp_path):
+async def test_manifest_page_lets_the_operator_target_an_org(
+    druks_client: httpx.AsyncClient, tmp_path
+):
     # The org lives on the page, not in the card: naming one reroutes the
     # form to that org's create URL, and the input itself never reaches GitHub.
-    _server_app().state.settings = make_settings(
-        tmp_path, urls={"endpoint": "https://druks.example"}
-    )
+    app.state.settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
 
     response = await druks_client.get("/api/core/services/github/manifest")
 
@@ -392,7 +374,7 @@ async def test_manifest_page_lets_the_operator_target_an_org(druks_client: TestC
     assert "this.elements.org.disabled = true" in response.text
 
 
-async def test_manifest_page_refuses_without_an_endpoint(druks_client: TestClient):
+async def test_manifest_page_refuses_without_an_endpoint(druks_client: httpx.AsyncClient):
     response = await druks_client.get("/api/core/services/github/manifest")
 
     assert response.status_code == 409
@@ -400,7 +382,7 @@ async def test_manifest_page_refuses_without_an_endpoint(druks_client: TestClien
 
 
 async def test_manifest_callback_exchanges_the_code_and_connects(
-    druks_client: TestClient, druks_db, monkeypatch
+    druks_client: httpx.AsyncClient, druks_db, monkeypatch
 ):
     # A new App is another OAuth client: the sign-ins through the old one go.
     await _connect()
@@ -455,7 +437,7 @@ async def test_manifest_callback_exchanges_the_code_and_connects(
 
 
 async def test_manifest_callback_rejects_a_dead_code(
-    druks_client: TestClient, druks_db, monkeypatch
+    druks_client: httpx.AsyncClient, druks_db, monkeypatch
 ):
     async def fake_post(self, url, **kwargs):
         return httpx.Response(404, json={"message": "Not Found"})
@@ -472,13 +454,7 @@ async def test_manifest_callback_rejects_a_dead_code(
         await Github.get()
 
 
-# --- OAuth declaration --------------------------------------------------------
-
-
 async def test_get_oauth_client_reads_the_connected_identity(declared_services, druks_db):
-    from druks.services import Service
-    from pydantic import BaseModel, SecretStr
-
     class Acme(Service):
         authorization_endpoint = "https://acme.test/authorize"
         token_endpoint = "https://acme.test/token"
@@ -505,9 +481,6 @@ async def test_get_oauth_client_reads_the_connected_identity(declared_services, 
 
 
 def test_a_service_names_its_settings_fields(declared_services):
-    from druks.services import Service
-    from pydantic import BaseModel, SecretStr
-
     class Acme(Service):
         class Settings(BaseModel):
             base_url: str
@@ -519,9 +492,6 @@ def test_a_service_names_its_settings_fields(declared_services):
 
 
 async def test_a_service_secret_issues_under_its_field_name(declared_services, druks_db):
-    from druks.services import Service
-    from pydantic import BaseModel, SecretStr
-
     class Acme(Service):
         class Settings(BaseModel):
             api_token: SecretStr
@@ -538,9 +508,6 @@ async def test_a_service_secret_issues_under_its_field_name(declared_services, d
 
 
 async def test_a_service_with_one_secret_issues_it_under_any_name(declared_services, druks_db):
-    from druks.services import Service
-    from pydantic import BaseModel, SecretStr
-
     class Acme(Service):
         class Settings(BaseModel):
             api_key: SecretStr
@@ -551,10 +518,6 @@ async def test_a_service_with_one_secret_issues_it_under_any_name(declared_servi
 
 
 def test_an_agent_holds_only_a_secret_of_a_service_with_a_host(declared_services):
-    from druks.agents import Agent, AgentOutput
-    from druks.services import Service
-    from pydantic import BaseModel, SecretStr
-
     class Acme(Service):
         class Settings(BaseModel):
             base_url: str
@@ -571,9 +534,6 @@ def test_an_agent_holds_only_a_secret_of_a_service_with_a_host(declared_services
 
 
 async def test_oauth_service_declarations_fail_loudly(declared_services):
-    from druks.services import Service
-    from pydantic import BaseModel, SecretStr
-
     with pytest.raises(TypeError, match="client_id and client_secret"):
 
         class Keyless(Service):
@@ -609,10 +569,6 @@ async def test_oauth_service_declarations_fail_loudly(declared_services):
 
 
 def test_abstract_base_shares_declarations_without_registering(declared_services):
-    from druks.apps.registry import services
-    from druks.services import Service
-    from pydantic import BaseModel, SecretStr
-
     class AcmeBase(Service):
         abstract = True
         authorization_endpoint = "https://acme.test/authorize"
@@ -637,9 +593,6 @@ def test_abstract_base_shares_declarations_without_registering(declared_services
 
 
 async def test_with_scopes_declares_the_union_and_reads_connections(declared_services, monkeypatch):
-    from druks.services import Service
-    from pydantic import BaseModel, SecretStr
-
     class Acme(Service):
         authorization_endpoint = "https://acme.test/authorize"
         token_endpoint = "https://acme.test/token"
@@ -665,9 +618,6 @@ async def test_with_scopes_declares_the_union_and_reads_connections(declared_ser
         "digest.acme",
     ]
 
-    from druks.secrets.datastructures import Audience
-    from druks.secrets.models import VaultSecret
-
     row = await VaultSecret.connect(
         db_session(),
         Audience.service("acme"),
@@ -680,7 +630,7 @@ async def test_with_scopes_declares_the_union_and_reads_connections(declared_ser
     assert [connection.id for connection in connections] == [row.id]
     assert connections[0].scopes == ["profile.read"]
     assert connections[0].identity == {"email": "night@acme.test"}
-    assert connections[0].account_id is None
+    assert not connections[0].account_id
     assert (await NightWatch.acme.get(row.id)).id == row.id
     assert not await NightWatch.acme.get("missing")
 
@@ -692,9 +642,6 @@ async def test_with_scopes_declares_the_union_and_reads_connections(declared_ser
 
 
 async def test_get_identity_without_a_declared_endpoint_is_empty(declared_services):
-    from druks.services import Service
-    from pydantic import BaseModel, SecretStr
-
     class Quiet(Service):
         authorization_endpoint = "https://quiet.test/authorize"
         token_endpoint = "https://quiet.test/token"
@@ -707,9 +654,6 @@ async def test_get_identity_without_a_declared_endpoint_is_empty(declared_servic
 
 
 def test_with_scopes_requires_oauth_endpoints(declared_services):
-    from druks.services import Service
-    from pydantic import BaseModel, SecretStr
-
     class Plain(Service):
         class Settings(BaseModel):
             api_key: SecretStr
@@ -718,14 +662,8 @@ def test_with_scopes_requires_oauth_endpoints(declared_services):
         Plain.with_scopes("profile.read")
 
 
-# --- The connect door: /api/oauth ------------------------------------------
-
-
 @pytest.fixture
 def acme(declared_services, monkeypatch):
-    from druks.services import Service
-    from pydantic import BaseModel, SecretStr
-
     class Acme(Service):
         authorization_endpoint = "https://acme.test/authorize"
         token_endpoint = "https://acme.test/token"
@@ -795,10 +733,6 @@ def _complete_oauth_sign_in(client: TestClient, provider: str = "acme") -> None:
 async def test_oauth_connect_redirects_to_consent_with_the_scope_union(
     tmp_path, acme, druks_db, monkeypatch
 ):
-    from urllib.parse import parse_qsl, urlparse
-
-    from druks.testing import configure_app_for_test
-
     await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
@@ -815,8 +749,6 @@ async def test_oauth_connect_redirects_to_consent_with_the_scope_union(
 
 
 def test_oauth_connect_guards(tmp_path, acme, druks_db):
-    from druks.testing import configure_app_for_test
-
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         assert client.get("/api/oauth/github_reviewer/connect").status_code == 404
         # No urls.endpoint configured.
@@ -831,8 +763,6 @@ def test_oauth_connect_guards(tmp_path, acme, druks_db):
 
 
 def test_a_failed_connect_renders_an_operator_page(tmp_path, acme, druks_db):
-    from druks.testing import configure_app_for_test
-
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         # The connect door is reached full-page, so a failure is a page that
         # names the fix — the dashboard chrome, not the JSON envelope.
@@ -852,26 +782,11 @@ def test_a_failed_connect_renders_an_operator_page(tmp_path, acme, druks_db):
 
 
 async def test_oauth_callback_creates_and_reconnects_a_connection(
-    tmp_path, acme, druks_db, monkeypatch
+    tmp_path, acme, druks_db, oauth_events
 ):
-    from urllib.parse import parse_qsl, urlparse
-
-    import druks.redis
-    from druks.redis import close_client, get_client
-    from druks.secrets.datastructures import Audience
-    from druks.secrets.models import VaultSecret
-    from druks.testing import configure_app_for_test
-
     await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
-    published = []
-
-    async def record(name, **kwargs):
-        published.append((name, kwargs))
-
-    monkeypatch.setattr("druks.services.routes.publish", record)
-    monkeypatch.setattr("druks.services.oauth.publish", record)
     await close_client()
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
     with TestClient(configure_app_for_test(settings=settings)) as client:
@@ -900,7 +815,6 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
         # Reconsent through the same connection replaces its tokens and
         # evicts the stale cached access token.
         stale_key = f"acme:access_token:{connection.id}"
-        client.get("/api/oauth/acme/connect?connection=zzz", follow_redirects=False)
         reconnect = client.get(
             f"/api/oauth/acme/connect?connection={connection.id}", follow_redirects=False
         )
@@ -909,8 +823,8 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
         assert finish.status_code == 200
         assert len(await VaultSecret.list_connections(db_session(), Audience.service("acme"))) == 1
 
-    assert [name for name, _ in published] == ["oauth.connected", "oauth.connected"]
-    fresh, reconsent = (kwargs for _, kwargs in published)
+    assert [name for name, _ in oauth_events] == ["oauth.connected", "oauth.connected"]
+    fresh, reconsent = (kwargs for _, kwargs in oauth_events)
     assert fresh == {
         "provider": "acme",
         "connection_id": connection.id,
@@ -926,8 +840,6 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
 async def test_oauth_connect_rejects_an_unknown_or_another_accounts_reconnect_target(
     tmp_path, acme, druks_db
 ):
-    from druks.testing import configure_app_for_test
-
     await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
@@ -947,8 +859,6 @@ async def test_oauth_connect_rejects_an_unknown_or_another_accounts_reconnect_ta
 async def test_fresh_sign_in_with_matching_identity_resurrects_revoked_connection(
     tmp_path, keyed_acme, druks_db, oauth_events
 ):
-    from druks.testing import configure_app_for_test
-
     await connect_service(
         keyed_acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
@@ -980,14 +890,7 @@ async def test_fresh_sign_in_with_matching_identity_resurrects_revoked_connectio
             db_session(), Audience.service(keyed_acme.slug)
         )
     ] == [connection_id]
-    assert (
-        len(
-            await VaultSecret.list_connections(
-                db_session(), Audience.service(keyed_acme.slug), include_revoked=True
-            )
-        )
-        == 1
-    )
+    assert len(await VaultSecret.list_owned_by(db_session(), account.id)) == 1
     assert oauth_events == [
         (
             "oauth.connected",
@@ -1004,8 +907,6 @@ async def test_fresh_sign_in_with_matching_identity_resurrects_revoked_connectio
 async def test_matching_fresh_sign_in_lands_on_live_connection_and_evicts_cached_token(
     tmp_path, keyed_acme, druks_db, oauth_events, monkeypatch
 ):
-    from druks.testing import configure_app_for_test
-
     await connect_service(
         keyed_acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
@@ -1035,14 +936,7 @@ async def test_matching_fresh_sign_in_lands_on_live_connection_and_evicts_cached
     reconnected = await db_session().get(VaultSecret, connection_id)
     assert reconnected
     assert reconnected.secrets["refresh_token"] == "rt-1"
-    assert (
-        len(
-            await VaultSecret.list_connections(
-                db_session(), Audience.service(keyed_acme.slug), include_revoked=True
-            )
-        )
-        == 1
-    )
+    assert len(await VaultSecret.list_owned_by(db_session(), account.id)) == 1
     assert evicted_connection_ids == [connection_id]
     assert oauth_events[-1][1]["connection_id"] == connection_id
     assert oauth_events[-1][1]["reconsent"] is True
@@ -1051,8 +945,6 @@ async def test_matching_fresh_sign_in_lands_on_live_connection_and_evicts_cached
 async def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_live_connection(
     tmp_path, keyed_acme, druks_db, oauth_events
 ):
-    from druks.testing import configure_app_for_test
-
     await connect_service(
         keyed_acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
@@ -1089,14 +981,7 @@ async def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_liv
     assert reconnected.secrets["refresh_token"] == "rt-1"
     assert still_revoked.revoked_at
     assert "refresh_token" not in still_revoked.secrets
-    assert (
-        len(
-            await VaultSecret.list_connections(
-                db_session(), Audience.service(keyed_acme.slug), include_revoked=True
-            )
-        )
-        == 2
-    )
+    assert len(await VaultSecret.list_owned_by(db_session(), account.id)) == 2
     assert oauth_events[-1][1]["connection_id"] == live_id
     assert oauth_events[-1][1]["reconsent"] is True
 
@@ -1104,8 +989,6 @@ async def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_liv
 async def test_fresh_sign_in_without_the_declared_identity_fact_creates_a_new_connection(
     tmp_path, acme, druks_db, oauth_events
 ):
-    from druks.testing import configure_app_for_test
-
     await connect_service(
         acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
@@ -1128,72 +1011,34 @@ async def test_fresh_sign_in_without_the_declared_identity_fact_creates_a_new_co
     db_session().expunge_all()
     [created] = await VaultSecret.list_connections(db_session(), Audience.service(acme.slug))
     assert created.id != revoked_id
-    assert (
-        len(
-            await VaultSecret.list_connections(
-                db_session(), Audience.service(acme.slug), include_revoked=True
-            )
-        )
-        == 2
-    )
+    assert len(await VaultSecret.list_owned_by(db_session(), account.id)) == 2
     assert (await db_session().get(VaultSecret, revoked_id)).revoked_at
     assert oauth_events[-1][1]["connection_id"] == created.id
     assert oauth_events[-1][1]["reconsent"] is False
 
 
 async def test_fresh_sign_in_after_revoke_creates_a_new_connection(
-    tmp_path, acme, druks_db, monkeypatch
+    tmp_path, acme, druks_db, oauth_events
 ):
-    from urllib.parse import parse_qsl, urlparse
-
-    from druks.secrets.datastructures import Audience
-    from druks.secrets.models import VaultSecret
-    from druks.testing import configure_app_for_test
-
     await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
-    published = []
-
-    async def record(name, **kwargs):
-        published.append((name, kwargs))
-
-    monkeypatch.setattr("druks.services.routes.publish", record)
-    monkeypatch.setattr("druks.services.oauth.publish", record)
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
     with TestClient(configure_app_for_test(settings=settings)) as client:
-
-        def sign_in():
-            consent = client.get("/api/oauth/acme/connect", follow_redirects=False)
-            state = dict(parse_qsl(urlparse(consent.headers["location"]).query))["state"]
-            assert (
-                client.get(
-                    "/api/oauth/callback", params={"state": state, "code": "c-1"}
-                ).status_code
-                == 200
-            )
-
-        sign_in()
+        _complete_oauth_sign_in(client)
         [first] = await VaultSecret.list_connections(db_session(), Audience.service("acme"))
         assert client.delete(f"/api/oauth/connections/{first.id}").status_code == 204
 
         # The identity facts do not include "sub", so the sign-in cannot
         # match the existing row. The revoked row stays as history.
-        sign_in()
+        _complete_oauth_sign_in(client)
         [live] = await VaultSecret.list_connections(db_session(), Audience.service("acme"))
         assert live.id != first.id
-        assert (
-            len(
-                await VaultSecret.list_connections(
-                    db_session(), Audience.service("acme"), include_revoked=True
-                )
-            )
-            == 2
-        )
+        assert len(await VaultSecret.list_owned_by(db_session(), live.account_id)) == 2
 
-    events = [name for name, _ in published]
+    events = [name for name, _ in oauth_events]
     assert events == ["oauth.connected", "oauth.disconnected", "oauth.connected"]
-    assert published[-1][1] == {
+    assert oauth_events[-1][1] == {
         "provider": "acme",
         "connection_id": live.id,
         "account_id": live.account_id,
@@ -1202,29 +1047,14 @@ async def test_fresh_sign_in_after_revoke_creates_a_new_connection(
 
 
 async def test_reconsent_returns_a_revoked_connection_to_life(
-    tmp_path, acme, druks_db, monkeypatch
+    tmp_path, acme, druks_db, oauth_events
 ):
-    from urllib.parse import parse_qsl, urlparse
-
-    from druks.secrets.datastructures import Audience
-    from druks.secrets.models import VaultSecret
-    from druks.testing import configure_app_for_test
-
     await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
-    published = []
-
-    async def record(name, **kwargs):
-        published.append((name, kwargs))
-
-    monkeypatch.setattr("druks.services.routes.publish", record)
-    monkeypatch.setattr("druks.services.oauth.publish", record)
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
     with TestClient(configure_app_for_test(settings=settings)) as client:
-        consent = client.get("/api/oauth/acme/connect", follow_redirects=False)
-        state = dict(parse_qsl(urlparse(consent.headers["location"]).query))["state"]
-        client.get("/api/oauth/callback", params={"state": state, "code": "c-1"})
+        _complete_oauth_sign_in(client)
         [connection] = await VaultSecret.list_connections(db_session(), Audience.service("acme"))
         assert client.delete(f"/api/oauth/connections/{connection.id}").status_code == 204
 
@@ -1246,7 +1076,7 @@ async def test_reconsent_returns_a_revoked_connection_to_life(
         assert not live.revoked_reason
         assert live.secrets["refresh_token"] == "rt-1"
 
-    assert published[-1][1] == {
+    assert oauth_events[-1][1] == {
         "provider": "acme",
         "connection_id": live.id,
         "account_id": live.account_id,
@@ -1254,19 +1084,7 @@ async def test_reconsent_returns_a_revoked_connection_to_life(
     }
 
 
-async def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch):
-    from druks.accounts.models import Account
-    from druks.secrets.datastructures import Audience
-    from druks.secrets.models import VaultSecret
-    from druks.testing import configure_app_for_test
-
-    published = []
-
-    async def record(name, **kwargs):
-        published.append((name, kwargs))
-
-    monkeypatch.setattr("druks.services.routes.publish", record)
-    monkeypatch.setattr("druks.services.oauth.publish", record)
+async def test_connections_list_and_revoke(tmp_path, acme, druks_db, oauth_events):
     me = await Account.get_or_create(druks_db, "op@example.com")
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         row = await VaultSecret.connect(
@@ -1280,7 +1098,7 @@ async def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch
         assert listed["id"] == row.id
         assert listed["provider"] == "acme"
         assert listed["scopes"] == ["profile.read"]
-        assert listed["revokedAt"] is None
+        assert not listed["revokedAt"]
 
         assert client.delete(f"/api/oauth/connections/{row.id}").status_code == 204
         assert not await VaultSecret.list_connections(db_session(), Audience.service("acme"))
@@ -1296,8 +1114,17 @@ async def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch
         assert listed["revokedReason"] == "user"
         # Revoking is idempotent: the second delete finds the state true.
         assert client.delete(f"/api/oauth/connections/{row.id}").status_code == 204
+        other = await Account.get_or_create(druks_db, "other@example.com")
+        theirs = await VaultSecret.connect(
+            db_session(),
+            Audience.service("acme"),
+            account_id=other.id,
+            refresh_token="rt-2",
+            scopes=[],
+        )
+        assert client.delete(f"/api/oauth/connections/{theirs.id}").status_code == 404
 
-    assert published == [
+    assert oauth_events == [
         (
             "oauth.disconnected",
             {"provider": "acme", "connection_id": row.id, "account_id": me.id},
@@ -1306,19 +1133,8 @@ async def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch
 
 
 async def test_replacing_the_client_credentials_revokes_its_connections(
-    tmp_path, acme, druks_db, monkeypatch
+    tmp_path, acme, druks_db, oauth_events
 ):
-    from druks.secrets.datastructures import Audience
-    from druks.secrets.models import VaultSecret
-    from druks.testing import configure_app_for_test
-
-    published = []
-
-    async def record(name, **kwargs):
-        published.append((name, kwargs))
-
-    monkeypatch.setattr("druks.services.routes.publish", record)
-    monkeypatch.setattr("druks.services.oauth.publish", record)
     row = await VaultSecret.connect(
         db_session(), Audience.service("acme"), account_id=None, refresh_token="rt-old", scopes=[]
     )
@@ -1332,13 +1148,11 @@ async def test_replacing_the_client_credentials_revokes_its_connections(
     # The new client can never refresh the old client's connections.
     db_session().expunge_all()
     assert not await VaultSecret.list_connections(db_session(), Audience.service("acme"))
-    [revoked] = await VaultSecret.list_connections(
-        db_session(), Audience.service("acme"), include_revoked=True
-    )
+    [revoked] = await VaultSecret.list_owned_by(db_session(), None)
     assert revoked.id == row.id
     assert revoked.revoked_reason == "client_replaced"
     assert "refresh_token" not in revoked.secrets
-    assert published == [
+    assert oauth_events == [
         (
             "oauth.disconnected",
             {"provider": "acme", "connection_id": row.id, "account_id": None},
@@ -1347,10 +1161,6 @@ async def test_replacing_the_client_credentials_revokes_its_connections(
 
 
 async def test_a_paste_with_the_same_client_keeps_its_connections(tmp_path, acme, druks_db):
-    from druks.secrets.datastructures import Audience
-    from druks.secrets.models import VaultSecret
-    from druks.testing import configure_app_for_test
-
     await connect_service("acme", identity={"client_id": "id-1"}, secrets={"client_secret": "s"})
     row = await VaultSecret.connect(
         db_session(), Audience.service("acme"), account_id=None, refresh_token="rt-old", scopes=[]
@@ -1369,29 +1179,34 @@ async def test_a_paste_with_the_same_client_keeps_its_connections(tmp_path, acme
 
 
 async def test_list_serves_the_connections_beside_the_declared_union(tmp_path, acme, druks_db):
-    from druks.secrets.datastructures import Audience
-    from druks.secrets.models import VaultSecret
-    from druks.testing import configure_app_for_test
-
-    async def entry(client, slug="acme"):
+    def entry(client, slug="acme"):
         return next(e for e in client.get("/api/services").json() if e["slug"] == slug)
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        assert (await entry(client, "github"))["isOauth"] is True
-        before = await entry(client)
+        assert entry(client, "github")["isOauth"] is True
+        before = entry(client)
         assert before["isOauth"] is True
         assert before["connections"] == []
         assert before["scopes"] == ["openid", "posts.write", "profile.read"]
         assert before["usedBy"] == ["night_watch.acme"]
 
+        me = await Account.get_or_create(druks_db, "op@example.com")
+        other = await Account.get_or_create(druks_db, "other@example.com")
         row = await VaultSecret.connect(
             db_session(),
             Audience.service("acme"),
-            account_id=None,
+            account_id=me.id,
             refresh_token="rt-1",
             scopes=["profile.read"],
         )
-        [connection] = (await entry(client))["connections"]
+        await VaultSecret.connect(
+            db_session(),
+            Audience.service("acme"),
+            account_id=other.id,
+            refresh_token="rt-2",
+            scopes=[],
+        )
+        [connection] = entry(client)["connections"]
         assert connection["id"] == row.id
         assert connection["scopes"] == ["profile.read"]
         assert connection["identity"] == {}
@@ -1399,10 +1214,6 @@ async def test_list_serves_the_connections_beside_the_declared_union(tmp_path, a
 
 
 async def test_next_lands_the_user_back_on_the_app_page(tmp_path, acme, druks_db):
-    from urllib.parse import parse_qsl, urlparse
-
-    from druks.testing import configure_app_for_test
-
     await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
@@ -1423,8 +1234,6 @@ async def test_next_lands_the_user_back_on_the_app_page(tmp_path, acme, druks_db
 
 
 async def test_next_rejects_anything_but_a_bare_path(tmp_path, acme, druks_db):
-    from druks.testing import configure_app_for_test
-
     await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )

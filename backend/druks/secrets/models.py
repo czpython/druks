@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy_encrypted_field import EncryptedJsonField
 
+from druks.apps.registry import services
 from druks.core.models import Uuid7Pk
 from druks.database import get_session
 from druks.models import Base
@@ -246,7 +247,7 @@ class VaultSecret(Base, Uuid7Pk):
         *,
         refresh_token: str,
         scopes: list[str] | None,
-        identity: dict[str, Any] | None = None,
+        identity: dict[str, Any],
         identity_status: IdentityStatus | None = None,
         identity_error: str | None = None,
         secrets: dict[str, Any] | None = None,
@@ -258,8 +259,7 @@ class VaultSecret(Base, Uuid7Pk):
         }
         self.secrets = {**kept, "refresh_token": refresh_token}
         self.scopes = scopes
-        if identity is not None:
-            self.identity = identity
+        self.identity = identity
         self.identity_status = identity_status
         self.identity_error = identity_error
         self.updated_at = Base.utc_now()
@@ -268,13 +268,11 @@ class VaultSecret(Base, Uuid7Pk):
         await self.session.flush()
 
     @classmethod
-    async def list_connections(
-        cls, session: AsyncSession, audience: str, *, include_revoked: bool = False
-    ) -> list["VaultSecret"]:
-        """Every account's OAuth connections at an audience."""
-        query = select(cls).where(cls.kind == SecretKind.OAUTH, cls.audience == audience)
-        if not include_revoked:
-            query = query.where(cls.revoked_at.is_(None))
+    async def list_connections(cls, session: AsyncSession, audience: str) -> list["VaultSecret"]:
+        """Every account's live OAuth connections at an audience."""
+        query = select(cls).where(
+            cls.kind == SecretKind.OAUTH, cls.audience == audience, cls.revoked_at.is_(None)
+        )
         return list(await session.scalars(query.order_by(cls.created_at)))
 
     @classmethod
@@ -414,12 +412,8 @@ class VaultSecret(Base, Uuid7Pk):
             [secret] = self.secrets.values()
             return secret, None
         if self.kind == SecretKind.APP_KEY:
-            from druks.apps.registry import services
-
             return await services.get(self.audience_name).issue_token(resource)
         if self.kind == SecretKind.OAUTH:
-            from druks.apps.registry import services
-
             if self.audience.startswith("mcp:"):
                 from druks.mcp import oauth
 
