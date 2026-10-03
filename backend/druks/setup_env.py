@@ -42,6 +42,10 @@ _OWNED_ENV_KEYS = frozenset(
         "REDIS_URL",
         "DRUKS_AUTH_HEADER",
         "DEFAULT_HOST_PROVIDER",
+        "REGISTRY_HOST",
+        "REGISTRY_USERNAME",
+        "REGISTRY_PASSWORD",
+        "TEMPLATE_REPOSITORY",
         "SERVICE_TOKENS",
         "DRUKS_AUTH_MODE",
         "DRUKS_AUTH_JWKS_URL",
@@ -84,6 +88,10 @@ _KNOWN_TOML_KEYS = {
         "service_url",
         "service_token",
         "image",
+        "registry_host",
+        "registry_username",
+        "registry_password",
+        "template_repository",
         "proxy_url",
         "issuer_url",
         "browser_login_proxy",
@@ -200,6 +208,13 @@ provider = ""
 service_url = ""
 service_token = ""
 image = ""
+# Access to private sandbox images on one registry host, for example ghcr.io.
+registry_host = ""
+registry_username = ""
+registry_password = ""
+# The repository path on that host where drukbox publishes sandbox templates.
+# The exe provider requires it.
+template_repository = ""
 # The secrets proxy, at the address a sandbox dials. A sandbox sends its HTTPS
 # through it. The docker shape uses the Docker bridge gateway. A remote shape
 # names the address of this host that its sandboxes reach, for example the
@@ -250,9 +265,6 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
             (("sandbox", "service_url"), "http://127.0.0.1:8780"),
             (("sandbox", "service_token"), _hex_secret()),
             (("sandbox", "exe", "EXE_API_TOKEN"), ""),
-            (("sandbox", "exe", "EXE_IMAGE_REGISTRY"), ""),
-            (("sandbox", "exe", "EXE_REGISTRY_USERNAME"), ""),
-            (("sandbox", "exe", "EXE_REGISTRY_PASSWORD"), ""),
             (("sandbox", "exe", "TAILSCALE_TAILNET"), ""),
             (("sandbox", "exe", "TAILSCALE_OAUTH_CLIENT_ID"), ""),
             (("sandbox", "exe", "TAILSCALE_OAUTH_CLIENT_SECRET"), ""),
@@ -424,6 +436,10 @@ def _render_env(
             (
                 ("DEFAULT_HOST_PROVIDER", provider),
                 ("SERVICE_TOKENS", service_tokens),
+                ("REGISTRY_HOST", _get_string(config, ("sandbox", "registry_host"))),
+                ("REGISTRY_USERNAME", _get_string(config, ("sandbox", "registry_username"))),
+                ("REGISTRY_PASSWORD", _get_string(config, ("sandbox", "registry_password"))),
+                ("TEMPLATE_REPOSITORY", _get_string(config, ("sandbox", "template_repository"))),
                 ("SECRETS_KEY", _get_string(config, ("secrets", "drukbox_secrets_key"))),
                 ("SECRETS_PROXY_URL", proxy_url),
                 # The proxy binds the address sandboxes dial and nothing else.
