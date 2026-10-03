@@ -874,10 +874,13 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // A connected card keeps a secret its box leaves blank, so only the plain fields must be typed.
+  // A connected card keeps a secret its box leaves blank, so only the required plain fields
+  // must be typed.
   const complete = service.fields.every(
     (field) =>
-      (service.connected && field.type === 'secret') || (values[field.name] ?? '').trim() !== '',
+      !field.isRequired ||
+      (service.connected && field.type === 'secret') ||
+      (values[field.name] ?? '').trim() !== '',
   )
 
   const closeForm = () => {

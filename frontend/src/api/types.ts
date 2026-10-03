@@ -649,6 +649,7 @@ export interface ServiceField {
   help: string
   type: string
   multiline: boolean
+  isRequired: boolean
 }
 
 /** One signed-in provider account, owned by the user who consented. */
@@ -685,6 +686,19 @@ export interface WahaSession {
   identityStatus: 'resolved' | 'unavailable' | 'failed' | null
   revokedAt: string | null
   revokedReason: string
+}
+
+/** A Twilio number linked to an app's Bot. A removed one keeps its calls. */
+export interface CallNumber {
+  id: string
+  number: string
+  revokedAt: string | null
+}
+
+/** A number of the Twilio account that no linked number holds. */
+export interface TwilioNumber {
+  sid: string
+  number: string
 }
 
 /** One declared service: the appliance's own registered app at an external

@@ -5,7 +5,6 @@ from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
-from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
 from druks.core.models import Uuid7Pk, uuid7_str
 from druks.durable.dbos_state import workflow_status
@@ -110,17 +109,13 @@ class Conversation(Base, Uuid7Pk):
     @property
     def admin_account_id(self) -> str | None:
         """The admin account of the app connection that the conversation arrives on."""
-        if (
-            self.account.kind in (AccountKind.BOT, AccountKind.BOT_ADMIN)
-            and self.connection
-            and self.connection.account.kind == AccountKind.BOT
-        ):
+        if self.connection and "admin" in self.connection.identity:
             return self.connection.identity["admin"]["account_id"]
         return
 
     def is_answerable_by(self, account_id: str | None) -> bool:
         """Whether the account may answer a question that the conversation's run asks.
-        On a connection with open access, only its admin may."""
+        On a connection with an admin, only its admin may."""
         if admin_account_id := self.admin_account_id:
             return account_id == admin_account_id
         return True

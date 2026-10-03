@@ -1327,7 +1327,8 @@ Put a credential that only your app uses in its app settings.
 
 Declare one class in `services.py`. The platform creates the connection card in
 Settings. It validates and stores the submitted values. It encrypts
-`SecretStr` fields and stores plain fields as identity facts.
+`SecretStr` fields and stores plain fields as identity facts. A field with a
+default can stay empty on the card.
 
 It also reports the state through `druks doctor`. The class name is the identity.
 Druks derives the slug

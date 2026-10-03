@@ -248,6 +248,7 @@ class Service:
                 "help": field.description or "",
                 "type": field_kind(field),
                 "multiline": field_multiline(field),
+                "is_required": field.is_required(),
             }
             for name, field in cls.settings_model.model_fields.items()
         ]

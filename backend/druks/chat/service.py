@@ -204,6 +204,8 @@ async def deliver(conversation_id: str) -> None:
 
 
 async def deliver_pending(session: AsyncSession, conversation: Conversation) -> None:
+    if conversation.connection and not channels.get(conversation.source).has_turns:
+        return
     await session.commit()
     async with lock(f"chat:{conversation.id}:delivery"):
         while message := await conversation.get_unanswered_message(session):

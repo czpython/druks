@@ -18,6 +18,7 @@ class ServiceFieldSpec(Schema):
     help: str
     type: str
     multiline: bool
+    is_required: bool
 
 
 class ConnectionResponse(Schema):

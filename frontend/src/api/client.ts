@@ -4,6 +4,7 @@ import type {
   AgentCallFiles,
   ArtifactContent,
   BrowserSession,
+  CallNumber,
   ConnectChallenge,
   Connection,
   App,
@@ -43,6 +44,7 @@ import type {
   InstallationSettings,
   DashboardOverview,
   DashboardSchedules,
+  TwilioNumber,
   WahaSession,
 } from './types'
 
@@ -347,6 +349,13 @@ export const api = {
     ),
   unpair: (connectionId: string) =>
     deleteRequest(`/api/chat/connections/${encodeURIComponent(connectionId)}/pairing`),
+  callNumbers: (app: string) =>
+    getJSON<CallNumber[]>(`/api/chat/services/calls/numbers?app=${encodeURIComponent(app)}`),
+  twilioNumbers: () => getJSON<TwilioNumber[]>('/api/chat/services/calls/twilio-numbers'),
+  linkCallNumber: (app: string, sid: string) =>
+    postJSON<CallNumber>('/api/chat/services/calls/numbers', { app, sid }),
+  removeCallNumber: (id: string) =>
+    deleteRequest(`/api/chat/services/calls/numbers/${encodeURIComponent(id)}`),
   browserSessions: () => getJSON<BrowserSession[]>('/api/browser-sessions'),
   deleteBrowserSession: (name: string) =>
     deleteRequest(`/api/browser-sessions/${encodeURIComponent(name)}`),
