@@ -23,7 +23,7 @@ async def create_slack_app() -> RedirectResponse:
     return RedirectResponse(f"{SLACK_CREATE_APP_URL}?{query}")
 
 
-def get_github_service(slug: str) -> type[Github]:
+def get_manifest_service(slug: str) -> type[Github]:
     service = services.get(slug)
     if service and service.manifest:
         return service
@@ -37,7 +37,7 @@ async def create_github_app(request: Request, slug: str) -> HTMLResponse:
     # operator names an org (or leaves it blank for a personal account) and
     # continues to GitHub, which walks them through creating the App, then
     # redirects to the callback below with a one-time code.
-    service = get_github_service(slug)
+    service = get_manifest_service(slug)
     settings = request.app.state.settings
     endpoint = settings.urls.endpoint.rstrip("/")
     if not endpoint:
@@ -56,7 +56,7 @@ async def create_github_app(request: Request, slug: str) -> HTMLResponse:
     dependencies=[Depends(current_session_account)],
 )
 async def github_manifest_callback(request: Request, slug: str, code: str = "") -> HTMLResponse:
-    service = get_github_service(slug)
+    service = get_manifest_service(slug)
     if not code:
         raise HTTPException(status_code=400, detail="Missing code in the GitHub redirect.")
     api_url = request.app.state.settings.github_api_url
