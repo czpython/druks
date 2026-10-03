@@ -17,6 +17,7 @@ from druks.chat.enums import BotAccess
 from druks.db import db_session
 from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, step_session
+from druks.durable.enums import AgentCallStatus
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import AgentCall, Artifact
 from druks.files.datastructures import File
@@ -341,6 +342,11 @@ class Agent:
         artifact_dir = settings.artifacts_dir / f"run-{workflow_id}"
 
         engine = _step_engine()
+        for call in await AgentCall.list_for_run(session, workflow_id):
+            if call.status == AgentCallStatus.RUNNING.value:
+                await sandbox_client.release(host_id=call.sandbox_host_id, require_deleted=True)
+                if workflow._host and workflow._host.id == call.sandbox_host_id:
+                    workflow._host = None
         call_id = config.harness_class.mint_run_id(None)
 
         # Registered for provisioning through execution — the subscription's
