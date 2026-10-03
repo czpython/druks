@@ -4,7 +4,7 @@ import { Link as RouteLink, useLocation } from 'wouter'
 
 import { appLabel } from '../apps/registry'
 import { api } from '../api/client'
-import type { Action, Field, Follows, Link, PageEntry, PageSnapshot } from '../api/types'
+import type { Action, Block, Field, Follows, Link, PageEntry, PageSnapshot } from '../api/types'
 import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
 import { useRawLocation } from '../lib/useRawLocation'
@@ -12,6 +12,7 @@ import { AppSurface } from './AppSurface'
 import { Blocks } from './Blocks'
 import { Controls } from './DataBlocks'
 import { Fields } from './Fields'
+import { LinkControl } from './LinkControl'
 import {
   followedSubjects,
   gateRuns,
@@ -130,6 +131,17 @@ export function AppPage({ app, page }: { app: string; page: string }) {
     return appError(app, detail, () => snapshot.refetch())
   }
 
+  const split = hasSplit(snapshot.data.blocks)
+  const heading = (
+    <PageChrome
+      {...chrome}
+      title={snapshot.data.title}
+      description={snapshot.data.description}
+      controls={snapshot.data.controls}
+      filters={snapshot.data.filters ?? []}
+    />
+  )
+
   return (
     <AppSurface
       fallback={(clear) =>
@@ -148,21 +160,32 @@ export function AppPage({ app, page }: { app: string; page: string }) {
         />
       ))}
       <PagesContext.Provider value={{ app, pages, operations, target, clearTarget }}>
-        <Page inset className="dui-page">
-          <PageChrome
-            {...chrome}
-            title={snapshot.data.title}
-            description={snapshot.data.description}
-            controls={snapshot.data.controls}
-            filters={snapshot.data.filters ?? []}
-          />
+        <Page
+          inset
+          scroll={split ? 'internal' : 'page'}
+          className={split ? 'dui-page dui-page-split' : 'dui-page'}
+          header={split ? heading : undefined}
+        >
+          {split ? null : heading}
           {target && !gateRuns(snapshot.data.blocks).includes(target.run) && (
             <p role="alert">This input request is unavailable. Return to the Dashboard to open the current request.</p>
           )}
           <Blocks blocks={snapshot.data.blocks} />
+          {snapshot.data.follows?.subjectId && <TimelineLink subject={snapshot.data.follows} />}
         </Page>
       </PagesContext.Provider>
     </AppSurface>
+  )
+}
+
+// Every page about one subject reaches that subject's own page, where the
+// timeline of its runs lives.
+function TimelineLink({ subject }: { subject: Follows }) {
+  const label = `Everything Druks did about this ${subject.subjectType.replaceAll('_', ' ')}`
+  return (
+    <LinkControl
+      link={{ block: 'link', label, page: '', arguments: {}, url: '', subject }}
+    />
   )
 }
 
@@ -256,6 +279,11 @@ function PageFilters({ fields }: { fields: Field[] }) {
       />
     </div>
   )
+}
+
+function hasSplit(blocks: Block[]): boolean {
+  const [sole] = blocks
+  return blocks.length === 1 && sole?.block === 'columns' && sole.layout === 'split'
 }
 
 function appError(app: string, detail: string, retry: () => void): ReactNode {

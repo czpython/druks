@@ -13,12 +13,14 @@ from druks.ui import (
     EmptyState,
     Fact,
     Facts,
+    Image,
     Link,
     List,
     Metric,
     Metrics,
     NumberValue,
     Page,
+    Section,
     Stack,
     StatusValue,
     Table,
@@ -77,14 +79,12 @@ def test_a_table_cell_can_reach_another_page():
             rows=[
                 TableRow(
                     [
-                        TextValue(
-                            "peer-7", link=Link("peer-7", page="peer", arguments={"peer_id": "7"})
-                        ),
+                        TextValue("peer-7", link=Link(page="peer", arguments={"peer_id": 7})),
                         NumberValue(12),
                     ]
                 )
             ],
-            empty_text="No peers yet.",
+            empty=EmptyState("No peers yet."),
         )
     )
 
@@ -93,7 +93,8 @@ def test_a_table_cell_can_reach_another_page():
         {"label": "Answers", "align": "end"},
     ]
     assert block["rows"][0]["cells"][0]["link"]["page"] == "peer"
-    assert block["emptyText"] == "No peers yet."
+    assert block["rows"][0]["cells"][0]["link"]["arguments"] == {"peer_id": "7"}
+    assert block["empty"]["title"] == "No peers yet."
 
 
 def test_a_table_can_select_rows_for_its_actions():
@@ -238,7 +239,11 @@ def test_every_value_carries_its_own_discriminator():
         "unit": "ms",
         "tone": "neutral",
     }
-    assert facts["facts"][3]["value"] == {"value": "time", "when": "2026-08-29T09:14:02Z"}
+    assert facts["facts"][3]["value"] == {
+        "value": "time",
+        "when": "2026-08-29T09:14:02Z",
+        "empty": "",
+    }
 
 
 def test_metrics_hold_metrics_and_a_list_holds_values():
@@ -269,6 +274,26 @@ def test_layout_blocks_hold_every_block_including_each_other():
     assert columns["blocks"][1]["blocks"][0]["text"] == "nested"
 
 
+def test_split_columns_are_exactly_two_panes():
+    (columns,) = wire(Columns([Text("threads"), Text("reading")], layout="split"))
+
+    assert columns["layout"] == "split"
+    with pytest.raises(ValueError, match="two panes"):
+        Columns([Text("only")], layout="split")
+
+
+def test_split_columns_are_the_page():
+    def panes():
+        return Columns([Text("threads"), Text("reading")], layout="split")
+
+    page = Page("Inbox", blocks=[panes()])
+    assert page.blocks[0].block == "columns"
+    with pytest.raises(ValueError, match="the page"):
+        Page("Inbox", blocks=[Text("above"), panes()])
+    with pytest.raises(ValueError, match="the page"):
+        Page("Inbox", blocks=[Section(blocks=[panes()])])
+
+
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
 def test_a_number_must_be_one_json_can_carry(bad):
     with pytest.raises(ValueError):
@@ -286,10 +311,12 @@ def test_cards_finds_an_action_in_a_card_and_in_its_empty_state():
         drop=Action(label="Move", operation="move_peer"),
     )
 
-    assert [action.operation for action in block.iter_actions()] == [
-        "move_peer",
+    page = Page("x", blocks=[block])
+
+    assert [action.operation for action in page.iter_parts(Action)] == [
         "retire_peer",
         "scan",
+        "move_peer",
     ]
 
 
@@ -304,7 +331,9 @@ def test_a_callout_carries_its_next_step():
     )
 
     assert wire(block)[0]["controls"][0]["url"] == "/settings/connections"
-    assert [action.operation for action in block.iter_actions()] == ["retry_connect"]
+    page = Page("x", blocks=[block])
+
+    assert [action.operation for action in page.iter_parts(Action)] == ["retry_connect"]
 
 
 def test_cards_drop_cannot_collect_fields_or_confirm():
@@ -337,6 +366,23 @@ def test_cards_carries_stack_layout_drop_and_card_drag():
     assert block["drop"]["operation"] == "move_peer"
     assert block["drop"]["arguments"] == {"status": "todo"}
     assert block["cards"][0]["drag"] == {"identifier": "P-7"}
+
+
+def test_cards_tiles_carry_the_image_the_shell_crops():
+    (block,) = wire(
+        Cards(
+            layout="tiles",
+            cards=[
+                Card(
+                    title="Ada Cafe",
+                    blocks=[Image(url="/api/files/shot", alternative_text="The shopfront.")],
+                )
+            ],
+        )
+    )
+
+    assert block["layout"] == "tiles"
+    assert block["cards"][0]["blocks"][0]["url"] == "/api/files/shot"
 
 
 def test_cards_with_none_and_nothing_to_say_carries_no_empty_state():

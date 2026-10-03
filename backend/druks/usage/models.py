@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
-from druks.db import Base
+from druks.models import Base
 
 if TYPE_CHECKING:
     from druks.secrets.models import VaultSecret

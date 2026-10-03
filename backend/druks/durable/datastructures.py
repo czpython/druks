@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 from druks.db import db_session
 from druks.durable.schemas import SubjectSummary
 from druks.events.models import Event
+from druks.exceptions import ObjectNotFound
 from druks.models import snake_name
 
 if TYPE_CHECKING:
@@ -22,9 +23,6 @@ class Subject:
     instead."""
 
     subject_type: ClassVar[str]
-    # The header its board and page show it under. Set a ``SubjectSummary``
-    # subclass to add the app's own fields and a descriptive ``title``.
-    summary_class: ClassVar[type[SubjectSummary]] = SubjectSummary
 
     id: str
 
@@ -38,28 +36,42 @@ class Subject:
     def identity(self) -> dict[str, Any]:
         return {"type": self.subject_type, "id": self.id}
 
+    def __str__(self) -> str:
+        """How the subject shows itself. An identity-only subject is already named by
+        its id: "owner/repo#7" is the handle, not a surrogate key."""
+        return self.id
+
     @property
     def key(self) -> str:
-        # An identity-only subject is already named by its id — "owner/repo#7" is
-        # the handle, not a surrogate key.
-        return self.id
+        return str(self)
 
     async def announce(self, topic: str, **facts: Any) -> None:
         """Record and deliver a domain fact in the current transaction."""
         await Event.announce(db_session(), self, topic, facts)
 
     @classmethod
-    async def get_for_id(cls, subject_id: str) -> Self | None:
+    async def get_or_none(cls, id: str) -> Self | None:
         """The subject this id names. Ids reach the read side as free text off a URL,
         so override to return None for a shape this subject could never wear."""
-        return cls(id=subject_id)
+        return cls(id=id)
+
+    @classmethod
+    async def get(cls, id: str) -> Self:
+        """The subject this id names. A shape it could never wear raises
+        ``ObjectNotFound``, which a route answers with 404 and a page with an empty
+        state."""
+        if subject := await cls.get_or_none(id):
+            return subject
+        raise ObjectNotFound(cls.subject_type.replace("_", " "), {"id": id})
 
     def get_summary(self) -> SubjectSummary:
-        return self.summary_class.model_validate(self)
+        """The header the platform's own screens show. An app with its own frontend
+        overrides it to add the fields that frontend reads."""
+        return SubjectSummary.model_validate(self)
 
     @classmethod
     async def list_summaries(cls, account_id: str | None) -> Sequence[SubjectSummary]:
-        """The subjects on this class's board, newest-movement first, each as its domain
+        """The subjects on this class's board, newest movement first, each as its
         summary. ``account_id`` is the caller, or None outside a request. A shared
         board ignores it. Returns a covariant ``Sequence`` so an app can return
         a ``list`` of its own ``SubjectSummary`` subclass. Required once a workflow

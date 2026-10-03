@@ -37,10 +37,10 @@ it.each([
   ['pr.opened', GitPullRequest], ['merged', GitMerge], ['closed', GitPullRequestClosed],
 ])('shows the recorded PR for %s', (topic, icon) => {
   const line = eventLine({ id: 'event:1', seq: 1, at: '2026-09-09T12:00:00Z', topic,
-    app: 'software_factory', subjectKey: 'DRU-42', payload: { title: 'Recorded work', repo: 'acme/widgets', pr_number: 42 } })
+    app: 'software_factory', subjectKey: 'DRU-42 Recorded work', payload: { repo: 'acme/widgets', pr_number: 42 } })
   expect(line.context).toBe('acme/widgets · #42')
   expect(line.icon).toBe(icon)
-  expect(line.title).toBe('Recorded work')
+  expect(line.key).toBe('DRU-42 Recorded work')
 })
 
 it.each([

@@ -73,12 +73,22 @@ describe('page routes', () => {
     ])
   })
 
-  it('falls back to the generic home when an app declares no pages', () => {
+  it('serves the platform home when an app declares no landing page', () => {
     registerInstalledApps(roster('empty_app', []))
+    registerInstalledApps(
+      roster('partial_app', [
+        { name: 'reports', label: 'Reports', path: '/partial_app/reports', parent: '', order: 0, subjectType: '' },
+      ]),
+    )
 
     expect(getAppUI('empty_app')?.routes.map((route) => route.path)).toEqual([
       '/empty_app',
       '/empty_app/:subjectType/*',
+    ])
+    expect(getAppUI('partial_app')?.routes.map((route) => route.path)).toEqual([
+      '/partial_app/reports',
+      '/partial_app',
+      '/partial_app/:subjectType/*',
     ])
   })
 })

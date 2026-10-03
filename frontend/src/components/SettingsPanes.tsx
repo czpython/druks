@@ -9,7 +9,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
 
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
 import { TextInput } from './Control'
 import { Menu } from './Menu'
 import { SettingField } from './SettingField'
@@ -63,7 +63,7 @@ const harnessNeedsKey = (harness: Harness, catalog: Catalog) =>
 const BILLINGS: Billing[] = ['subscription', 'api_key']
 const billingLabel = (billing: string) => (billing === 'api_key' ? 'API key' : 'subscription')
 
-const TIMEOUTS = [600, 900, 1800, 3600]
+const TIMEOUTS = [600, 900, 1800, 3600, 7200]
 
 export function Switch({
   on,
@@ -2271,6 +2271,14 @@ function CollectionCard({
   )
 }
 
+// A 502 is the registry not answering in time, not a Druks fault.
+function describeRegistryError(error: unknown): string {
+  if (error instanceof ApiError && error.status === 502) {
+    return 'The MCP registry is not answering. Try again in a moment.'
+  }
+  return error instanceof Error ? error.message : String(error)
+}
+
 export function McpServersPane() {
   const queryClient = useQueryClient()
   const serversQuery = useQuery({
@@ -2289,6 +2297,8 @@ export function McpServersPane() {
   const [registryQuery, setRegistryQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [candidates, setCandidates] = useState<McpRegistryCandidate[] | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [registryError, setRegistryError] = useState<string | null>(null)
   const [selected, setSelected] = useState<McpRegistryCandidate | null>(null)
   const [headerValues, setHeaderValues] = useState<Record<string, string>>({})
   const [connectingName, setConnectingName] = useState<string | null>(null)
@@ -2314,13 +2324,15 @@ export function McpServersPane() {
   async function searchRegistry() {
     if (!registryQuery.trim()) return
     setSearching(true)
-    setError(null)
+    setRegistryError(null)
     setSelected(null)
     try {
-      setCandidates(await api.searchMcpRegistry(registryQuery.trim()))
+      const search = await api.searchMcpRegistry(registryQuery.trim())
+      setCandidates(search.candidates)
+      setHasMore(search.hasMore)
     } catch (e) {
       setCandidates(null)
-      setError(e instanceof Error ? e.message : String(e))
+      setRegistryError(describeRegistryError(e))
     } finally {
       setSearching(false)
     }
@@ -2329,12 +2341,12 @@ export function McpServersPane() {
   function select(candidate: McpRegistryCandidate) {
     setSelected(candidate)
     setHeaderValues({})
-    setError(null)
+    setRegistryError(null)
   }
 
   async function install(candidate: McpRegistryCandidate) {
     setBusy(true)
-    setError(null)
+    setRegistryError(null)
     try {
       await api.installMcpServer({
         name: candidate.name,
@@ -2346,7 +2358,7 @@ export function McpServersPane() {
       setRegistryQuery('')
       await refresh()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setRegistryError(describeRegistryError(e))
     } finally {
       setBusy(false)
     }
@@ -2552,6 +2564,22 @@ export function McpServersPane() {
             {searching ? 'Searching…' : 'Search'}
           </button>
         </div>
+        {searching && (
+          <p className="mcp-help" role="status">
+            Searching the MCP registry…
+          </p>
+        )}
+        {registryError && (
+          <div className="mcp-error" role="alert">
+            {registryError}
+          </div>
+        )}
+        {candidates && hasMore && (
+          <p className="mcp-help">
+            The registry has more matches than one search shows. Search for the server&apos;s full
+            name to find it.
+          </p>
+        )}
         {candidates && candidates.length === 0 && (
           <p className="mcp-help">
             No matching servers with a hosted (HTTP) endpoint in the registry.
@@ -2609,9 +2637,10 @@ export function McpServersPane() {
                         {header.description && <p className="mcp-help">{header.description}</p>}
                       </div>
                     ))}
-                    {!selected.headers.some((header) => header.isSecret) && (
+                    {!selected.headers.some((header) => header.isSecret && header.isRequired) && (
                       <p className="mcp-help">
-                        Uses OAuth — use <b>Connect</b> on the added server to authorize it.
+                        Without a secret value it uses OAuth — use <b>Connect</b> on the added
+                        server to authorize it.
                       </p>
                     )}
                     <div>
@@ -2779,6 +2808,9 @@ export function McpServersPane() {
 }
 
 function tokenStatusLabel(server: McpServer): string {
+  if (server.credential === 'service_login') {
+    return `${server.service} login`
+  }
   if (server.isOauth) {
     return server.hasToken ? 'Connected' : 'Not connected'
   }
@@ -2831,7 +2863,18 @@ function McpServerRow({
           <span className="mcp-enable-label">Enabled</span>
         </span>
         <div className="mcp-actions">
-          {server.isOauth &&
+          {server.credential === 'service_connection' && (
+            // The account signs in through the service; the connection belongs to it.
+            <button
+              className={'set-btn ' + (server.hasToken ? 'ghost' : 'primary')}
+              onClick={() => void onConnect(server.name, 'per_user')}
+              disabled={busy}
+              title={`Opens the ${server.service} sign-in.`}
+            >
+              {server.hasToken ? 'Reconnect' : 'Connect'}
+            </button>
+          )}
+          {server.credential === 'grant' &&
             (claimedMode === null ? (
               // The first connect claims how this server's credential is held;
               // afterwards the choice is fixed until the last grant is dropped.

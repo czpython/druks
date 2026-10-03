@@ -149,3 +149,24 @@ async def read_thread(
         raise HTTPException(409, str(error)) from error
     except (SlackApiError, RequestFailed) as error:
         raise HTTPException(502, str(error)) from error
+
+
+@router.put("/thread/tag", operation_id="require_tag", status_code=204, tags=["agent"])
+async def require_tag(
+    session: SessionDep,
+    is_required: Annotated[bool, Body(embed=True)],
+    account: Account = Depends(current_account),
+) -> None:
+    """Require a tag in the thread of the conversation this call comes from, or stop
+    requiring one. While a tag is required, the person's untagged replies in the thread
+    do not reach you. Their tagged messages always do."""
+    conversation_id = current_conversation_id.get()
+    if not conversation_id:
+        raise HTTPException(
+            409, "This tool sets a channel conversation's thread. Call it from one."
+        )
+    conversation = await session.get(Conversation, conversation_id)
+    if not conversation.thread_id:
+        raise HTTPException(409, "A direct message has no thread. Every message reaches you.")
+    conversation.is_tag_required = is_required
+    await session.commit()

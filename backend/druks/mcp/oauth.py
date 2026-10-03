@@ -34,11 +34,11 @@ from druks.services.oauth import complete_connect as complete_oauth_exchange
 logger = logging.getLogger(__name__)
 
 
-def _http() -> httpx.AsyncClient:
+def _http(timeout: float = 10.0) -> httpx.AsyncClient:
     # One construction point so the suite can swap in a MockTransport client.
     # A probe times out well inside the connect deadline, so one hung well-known
     # URL still leaves time to try the next candidate.
-    return httpx.AsyncClient(timeout=10.0, follow_redirects=True)
+    return httpx.AsyncClient(timeout=timeout, follow_redirects=True)
 
 
 async def get_connection(

@@ -131,10 +131,13 @@ def _key(session_name: str) -> str:
 
 
 def is_same_origin(websocket: WebSocket) -> bool:
+    # The browser reaches Druks at urls.endpoint. An edge can rewrite Host to its
+    # upstream address, so Host is the fallback only when no endpoint is set.
     # A TLS edge leaves us seeing ws while the browser's Origin says https, so
     # only the host is comparable — and it's the boundary that matters.
+    endpoint = websocket.app.state.settings.urls.endpoint
     origins = websocket.headers.getlist("origin")
-    hosts = websocket.headers.getlist("host")
+    hosts = [urlsplit(endpoint).netloc] if endpoint else websocket.headers.getlist("host")
     return (
         len(origins) == 1
         and len(hosts) == 1

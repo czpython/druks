@@ -22,7 +22,6 @@ const LIFECYCLE_ICONS: Record<string, LucideIcon> = {
 export interface EventLine {
   label: string
   key: string
-  title?: string
   context?: string
   guidance?: string
   icon: LucideIcon
@@ -36,7 +35,6 @@ export function eventLine(event: FeedItem): EventLine {
   return {
     label: own.label || label(event),
     key: event.subjectKey ?? '',
-    title: event.payload.title || undefined,
     context: failure ? failure.context : own.context || event.payload.summary || event.payload.reason || undefined,
     guidance: failure?.guidance,
     icon: own.icon ?? LIFECYCLE_ICONS[event.topic] ?? CircleDot,

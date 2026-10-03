@@ -1,4 +1,4 @@
-from .base import Service
+from .base import Connection, Service
 from .exceptions import (
     OauthExchangeError,
     OauthRefreshError,
@@ -8,6 +8,7 @@ from .exceptions import (
 from .oauth import OauthClient
 
 __all__ = [
+    "Connection",
     "OauthClient",
     "OauthExchangeError",
     "OauthRefreshError",

@@ -29,7 +29,7 @@ async def seed_build_run(
     timeline; it finds the item through the subject it was started for."""
     if state == "parked" and not input_gate:
         input_gate = "review"  # a parked run always has a gate; derivation needs it
-    item = await WorkItem.get(work_item_id)
+    item = await WorkItem.get_or_none(id=work_item_id)
     run = await seed_run(
         session,
         kind=Build.kind,

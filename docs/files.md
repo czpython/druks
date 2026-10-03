@@ -73,13 +73,11 @@ platform `files` table and does not copy the bytes.
 ```python
 from sqlalchemy.orm import Mapped, mapped_column
 
-from druks.db import Base
+from druks.db import Model
 from druks.files import File, FileField
 
 
-class Shot(Base):
-    __tablename__ = "night_watch_shots"
-
+class Shot(Model):
     id: Mapped[int] = mapped_column(primary_key=True)
     image: Mapped[File] = FileField()
 ```

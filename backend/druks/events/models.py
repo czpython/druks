@@ -66,7 +66,7 @@ class Event(Base):
         until: datetime | None = None,
     ) -> Select[tuple["Event"]]:
         """The recorded Activity that matches these filters, as a query. Search reads the
-        recorded key and title literally; from is inclusive and until is exclusive."""
+        recorded key literally; from is inclusive and until is exclusive."""
         # The durable package imports this module.
         from druks.durable.enums import WorkflowEvent
 
@@ -90,12 +90,7 @@ class Event(Base):
         if app:
             statement = statement.where(cls.app == app)
         if search and search.strip():
-            statement = statement.where(
-                or_(
-                    cls.subject_key.icontains(search.strip(), autoescape=True),
-                    cls.payload["title"].as_string().icontains(search.strip(), autoescape=True),
-                )
-            )
+            statement = statement.where(cls.subject_key.icontains(search.strip(), autoescape=True))
         if topic:
             statement = statement.where(cls.type == topic)
         if from_at:
@@ -131,7 +126,6 @@ class Event(Base):
         type: str,
         subject: dict[str, Any] | None = None,
         key: str | None = None,
-        title: str | None = None,
         run: str | None = None,
         kind: str | None = None,
         facts: dict[str, Any] | None = None,
@@ -143,7 +137,7 @@ class Event(Base):
 
         subject = subject or {}
         facts = facts or {}
-        recorded = {"run": run, "kind": kind, "title": title}
+        recorded = {"run": run, "kind": kind}
         if taken := recorded.keys() & facts.keys():
             raise WorkflowError(f"{type} facts {sorted(taken)} belong to Druks. Rename them.")
         session.add(
@@ -184,7 +178,6 @@ class Event(Base):
             type=topic,
             subject=subject.identity,
             key=subject.key,
-            title=subject.get_summary().title,
             facts=facts,
             app=app,
         )

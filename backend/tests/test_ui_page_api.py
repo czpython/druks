@@ -127,7 +127,9 @@ async def test_a_page_carries_the_region_that_follows_its_subject(
     assert region["block"] == "section"
     assert region["name"] == "decision"
     assert region["follows"] == {"subjectType": "note", "subjectId": str(note.id)}
-    assert region["blocks"][0]["block"] == "text"
+    [controls] = region["blocks"]
+    assert controls["block"] == "gate_controls"
+    assert not controls["status"]["gate"]
 
 
 async def test_a_parked_run_puts_gate_controls_in_the_followed_region(
@@ -146,9 +148,25 @@ async def test_a_parked_run_puts_gate_controls_in_the_followed_region(
 
     page = (await druks_client.get(f"/api/field_notes/pages/notes/{note.id}")).json()
 
-    region = page["blocks"][2]
-    assert region["follows"] == {"subjectType": "note", "subjectId": str(note.id)}
-    assert region["blocks"] == [{"block": "gate_controls", "run": run.id}]
+    [controls] = page["blocks"][2]["blocks"]
+    assert controls["status"]["run"] == run.id
+    assert controls["status"]["gate"] == "review"
+
+
+async def test_a_page_shows_where_the_work_on_each_subject_stands(
+    druks_client: httpx.AsyncClient, druks_db, note: Note
+):
+    await seed_run(
+        druks_db, kind=Summarize.kind, subject=note, state="failed", failure="The model timed out."
+    )
+
+    page = (await druks_client.get("/api/field_notes/pages/recent")).json()
+
+    table = next(block for block in page["blocks"][0]["blocks"] if block["block"] == "table")
+    status = table["rows"][0]["cells"][2]
+    assert status["working"] == "summarizing"
+    assert status["status"]["state"] == "failed"
+    assert status["status"]["failure"] == "The model timed out."
 
 
 async def test_the_history_page_shows_the_domain_and_points_at_the_platform(

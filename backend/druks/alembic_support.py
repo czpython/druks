@@ -17,6 +17,10 @@ def _render_item(type_, obj, autogen_context):
         return "sa.String()"
     if type_ == "type" and isinstance(obj, EncryptedBytes | EncryptedJson | EncryptedText):
         return "sa.LargeBinary()"
+    # The column's type emits its own CHECK. SQLAlchemy 2.1 hides that from Alembic's
+    # own detection, so without this skip the revision renders the CHECK twice more.
+    if type_ == "check" and obj._type_bound:
+        return None
     return False
 
 

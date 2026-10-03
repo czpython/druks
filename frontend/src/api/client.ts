@@ -28,7 +28,7 @@ import type {
   UsageTodayResponse,
   Gate,
   GateAnswer,
-  McpRegistryCandidate,
+  McpRegistrySearch,
   PageSnapshot,
   McpServer,
   McpServerConnection,
@@ -405,7 +405,7 @@ export const api = {
   // inputs), then an install that sends only the druks name, the registry
   // name, and the filled header values — the url never comes from the client.
   searchMcpRegistry: (query: string) =>
-    getJSON<McpRegistryCandidate[]>(`/api/mcp-servers/registry?query=${encodeURIComponent(query)}`),
+    getJSON<McpRegistrySearch>(`/api/mcp-servers/registry?query=${encodeURIComponent(query)}`),
   installMcpServer: (body: { name: string; registry: string; headers: Record<string, string> }) =>
     postJSON<McpServer>('/api/mcp-servers/registry', body),
   setMcpServerEnabled: (name: string, isEnabled: boolean) =>

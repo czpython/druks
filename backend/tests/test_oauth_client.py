@@ -5,6 +5,7 @@ from urllib.parse import parse_qsl, urlparse
 
 import httpx
 import pytest
+from druks.core.services import Github
 from druks.db import db_session
 from druks.redis import get_client
 from druks.secrets.datastructures import Audience
@@ -184,6 +185,24 @@ async def test_other_refresh_failures_leave_the_connection_live(
 
     assert await VaultSecret.reload(db_session(), connection.id)
     assert not published
+
+
+async def test_a_service_reads_its_own_revoked_answer(token_endpoint, monkeypatch):
+    token_endpoint.response = {"error": "bad_refresh_token", "error_description": "expired"}
+    client = _client(is_grant_revoked=Github.is_grant_revoked)
+    published = []
+
+    async def record(name, **kwargs):
+        published.append(name)
+
+    monkeypatch.setattr("druks.services.oauth.publish", record)
+    connection = await _connection()
+
+    with pytest.raises(OauthRefreshError, match="revoked the grant"):
+        await client.get_access_token(db_session(), connection=connection)
+
+    assert not await VaultSecret.reload(db_session(), connection.id)
+    assert published == ["oauth.disconnected"]
 
 
 async def test_get_refresh_uses_basic_auth(token_endpoint):

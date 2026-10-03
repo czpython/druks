@@ -3,9 +3,9 @@ import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_scoped_session, async_sessionmaker
 
 from druks.exceptions import SessionNotBoundError
-from druks.models import Base, StoredSubject
+from druks.models import Model, StoredSubject
 
-__all__ = ["Base", "StoredSubject", "db_session"]
+__all__ = ["Model", "StoredSubject", "db_session"]
 
 
 def _task_scope() -> object | None:

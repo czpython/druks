@@ -163,13 +163,14 @@ main() {
       set_env_var COMPOSE_PROFILES "hosted,gateway"
       # The sbx mounts live in the home directory of the daemon owner. Write
       # the path to .env, and each compose command renders the same mounts,
-      # also from sudo or systemd. Create the writable bind source now. The
-      # engine would make it root-owned, and the deploy-uid services could
-      # not write the workspaces or the gateway host key.
+      # also from sudo or systemd. Create the writable bind sources now. The
+      # engine would make them root-owned, and the deploy-uid services could
+      # not write the workspaces, the gateway host key, or the sbx settings
+      # and cache.
       set_env_var DRUKS_SBX_HOME "$HOME"
-      mkdir -p "$HOME/.drukbox/sbx-workspaces" "$HOME/.config/sandboxes"
+      mkdir -p "$HOME/.drukbox/sbx-workspaces" "$HOME/.config/sandboxes" "$HOME/.cache/sandboxes"
       # sandboxd must run before the first compose command. A bind of a
-      # missing socket path makes a root-owned directory there, and that
+      # missing socket directory makes a root-owned directory there, and that
       # blocks the daemon itself.
       SBX_SOCKET="$HOME/.local/state/sandboxes/sandboxes/sandboxd/sandboxd.sock"
       if [ ! -S "$SBX_SOCKET" ]; then

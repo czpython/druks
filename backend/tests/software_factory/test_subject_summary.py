@@ -13,6 +13,6 @@ async def test_new_work_item_summary_needs_no_database_read(druks_db):
 
     summary = item.get_summary()
 
-    assert summary.key == "ACME-1"
+    assert summary.key == "ACME-1 Keep the recorded title"
     assert summary.title == "Keep the recorded title"
     assert summary.project_name == "Acme"

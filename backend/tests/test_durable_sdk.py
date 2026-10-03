@@ -91,7 +91,7 @@ STEP_RETRY_ATTEMPTS = 0
 class Widget(StoredSubject):
     __tablename__ = "test_widgets"
 
-    def get_key(self) -> str:
+    def __str__(self) -> str:
         return f"W-{self.id}"
 
 
@@ -241,7 +241,7 @@ async def runtime():
 
         @classmethod
         async def dispatch(cls) -> str:
-            return await cls.start(subject=await Widget.get_for_id("313131"))
+            return await cls.start(subject=await Widget.get(id=313131))
 
         async def run(self) -> None: ...
 
@@ -250,7 +250,7 @@ async def runtime():
 
         @classmethod
         async def dispatch(cls) -> str:
-            return await cls.start(subject=await Widget.get_for_id("616161"))
+            return await cls.start(subject=await Widget.get(id=616161))
 
         async def run(self) -> None: ...
 
@@ -428,7 +428,6 @@ async def test_attribution_rides_the_run_and_survives_resume(runtime):
         "subject_type": "widget",
         "subject_id": "878787",
         "subject_key": "W-878787",
-        "subject_title": None,
     }
     assert parked.account_id == account_id
     assert f"acct-before:{account_id}" in SINK
@@ -651,7 +650,6 @@ async def test_subject_gate_parks_unchanged(runtime):
         "subject_type": "widget",
         "subject_id": "636363",
         "subject_key": "W-636363",
-        "subject_title": None,
     }
 
     await parked.resume(action="go")
@@ -1401,7 +1399,7 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
 
     assert completed == [approved_id, approved_id]
     async with session_scope(runtime.engine):
-        assert (await Note.get_for_id(approved_note.id)).gist == "The pump ran hot."
+        assert (await Note.get(id=approved_note.id)).gist == "The pump ran hot."
         activity = list(
             await db_session().scalars(Event.get_history(app="field_notes").order_by(Event.id))
         )

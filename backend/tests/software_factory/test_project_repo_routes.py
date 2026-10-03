@@ -109,7 +109,7 @@ async def test_nested_repo_routes_are_scoped_to_their_project(client: TestClient
     assert (await client.post(f"{wrong}/profile")).status_code == 404
     assert (await client.delete(wrong)).status_code == 404
     # None of the wrong-parent calls mutated the repo or dispatched a profile run.
-    assert (await ProjectRepo.get(repo_id)).purpose is None
+    assert (await ProjectRepo.get_or_none(id=repo_id)).purpose is None
     assert profile_calls == []
 
     # Through its own project the repo mutates and deletes as normal.
@@ -118,7 +118,7 @@ async def test_nested_repo_routes_are_scoped_to_their_project(client: TestClient
     assert patched.status_code == 200
     assert patched.json()["purpose"] == "infra"
     assert (await client.delete(right)).status_code == 204
-    assert await ProjectRepo.get(repo_id) is None
+    assert await ProjectRepo.get_or_none(id=repo_id) is None
 
 
 async def _make_work_item(project_id: int, ticket_key: str, *, resolved: bool = False):
@@ -160,11 +160,11 @@ async def test_deleting_a_project_cascades_its_work_items_and_spares_others(
     # map so the reads below reflect the committed graph, not cached instances.
     db_session().expunge_all()
     assert await Project.get(target_id) is None
-    assert await WorkItem.get(doomed_id) is None
-    assert await WorkItem.get(doomed_resolved_id) is None
+    assert await WorkItem.get_or_none(id=doomed_id) is None
+    assert await WorkItem.get_or_none(id=doomed_resolved_id) is None
     # The control project and its work item are untouched.
     assert await Project.get(control_id) is not None
-    assert await WorkItem.get(survivor_id) is not None
+    assert await WorkItem.get_or_none(id=survivor_id) is not None
 
 
 async def test_the_repo_subject_read_side_mounts(client: TestClient, druks_db):

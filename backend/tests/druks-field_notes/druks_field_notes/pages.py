@@ -39,11 +39,7 @@ async def notes():
                                 description=note.gist or "Waiting for its gist.",
                                 blocks=[ui.Text(note.body)],
                                 controls=[
-                                    ui.Link(
-                                        "Open",
-                                        page="note",
-                                        arguments={"note_id": str(note.id)},
-                                    )
+                                    ui.Link("Open", page="note", arguments={"note_id": note.id})
                                 ],
                             )
                             for note in recent
@@ -96,6 +92,7 @@ async def recent_notes():
                         columns=[
                             ui.TableColumn("Note"),
                             ui.TableColumn("Gist"),
+                            ui.TableColumn("State"),
                             ui.TableColumn("Captured", align="end"),
                         ],
                         rows=[
@@ -103,22 +100,19 @@ async def recent_notes():
                                 [
                                     ui.TextValue(
                                         f"Note {note.id}",
-                                        link=ui.Link(
-                                            f"Note {note.id}",
-                                            page="note",
-                                            arguments={"note_id": str(note.id)},
-                                        ),
+                                        link=ui.Link(page="note", arguments={"note_id": note.id}),
                                     ),
                                     ui.StatusValue(
                                         "summarized" if note.gist else "waiting",
                                         tone="success" if note.gist else "warning",
                                     ),
+                                    ui.SubjectStatus(note, working="summarizing"),
                                     ui.TimeValue(note.created_at),
                                 ]
                             )
                             for note in recent
                         ],
-                        empty_text="No notes yet.",
+                        empty=ui.EmptyState("No notes yet."),
                     ),
                     ui.List([ui.TextValue(note.body) for note in recent], title="Bodies"),
                 ]
@@ -159,14 +153,7 @@ async def new_note():
 
 @ui.page("/notes/{note_id}", subject=Note)
 async def note(note_id: int):
-    found = await Note.get_for_id(note_id, raise_on_missing=True)
-    status = await found.get_status()
-    # The region follows the note, so answering the gate refreshes it and
-    # the controls go away.
-    if status.gate:
-        decision = [ui.GateControls(status.run)]
-    else:
-        decision = [ui.Text("Nothing is waiting on you.")]
+    found = await Note.get(id=note_id)
     return ui.Page(
         f"Note {note_id}",
         description=found.gist or "Waiting for its gist.",
@@ -185,14 +172,21 @@ async def note(note_id: int):
                     )
                 ],
             ),
-            ui.Section(title="Your decision", name="decision", follows=found, blocks=decision),
+            # The region follows the note, so answering the gate refreshes it and
+            # the controls go away.
+            ui.Section(
+                title="Your decision",
+                name="decision",
+                follows=found,
+                blocks=[ui.GateControls(found)],
+            ),
         ],
     )
 
 
 @note.child("/history")
 async def note_history(note_id: int):
-    found = await Note.get_for_id(note_id, raise_on_missing=True)
+    found = await Note.get(id=note_id)
     return ui.Page(
         f"Note {note_id} history",
         blocks=[

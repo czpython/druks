@@ -1,6 +1,5 @@
 import type { App } from '../api/types'
 import { AppPage } from '../druksui/AppPage'
-import { AppHomePage } from '../pages/AppHomePage'
 import { SubjectPage } from '../pages/SubjectPage'
 import { InstalledAppHost } from './InstalledAppHost'
 import { getAppUI, registerAppUI, targetQuery, type AppRoute, type AppUI } from './registry'
@@ -46,13 +45,9 @@ function installedUI(info: App): AppUI {
     path: wouterPath(entry.path),
     render: () => <AppPage app={name} page={entry.name} />,
   }))
-  if (routes.length === 0) {
-    routes.push({
-      path: `/${name}`,
-      render: () => (
-        <AppHomePage app={name} description={info.description} subjectTypes={info.subjectTypes} />
-      ),
-    })
+  // The platform serves the home when the app declares no landing page.
+  if (!info.pages.some((entry) => entry.path === `/${name}`)) {
+    routes.push({ path: `/${name}`, render: () => <AppPage app={name} page="" /> })
   }
   // Last: the subject matcher spans any path under the app, so a declared page
   // must have its chance first.

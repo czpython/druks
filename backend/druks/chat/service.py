@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
 from druks.apps.loader import get_app
-from druks.apps.registry import channels
+from druks.apps.registry import channels, services
 from druks.durable.engine import step_session
 from druks.durable.models import Run
 from druks.files.constants import MAX_UPLOAD_BYTES
@@ -33,11 +33,14 @@ from druks.prompts import render_prompt
 from druks.redis import get_client
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
+from druks.sandbox.datastructures import McpServer
 from druks.sandbox.exceptions import HostGone
 from druks.sandbox.host import Host
 from druks.sandbox.layout import get_remote_home, get_work_root
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.workspaces import Workspace
 
@@ -103,8 +106,10 @@ async def get_agent(
 async def get_sandbox(
     session: AsyncSession,
     account_id: str,
+    *,
     config: AgentConfig,
     allowed_tools: AllowedTools,
+    secret_refs: list[SecretRef],
 ) -> tuple[Host, SandboxIdentity]:
     """The account's sandbox for a new turn: a live sandbox that holds the Chat
     agent's current secrets, or a new one."""
@@ -112,6 +117,7 @@ async def get_sandbox(
     token = await get_druks_account_token(session, account_id, allowed_tools, name=CHAT_KEY_NAME)
     refs = [
         *config.secret_refs,
+        *secret_refs,
         SecretRef(
             name=get_bearer_token_env_var(server.name).lower(),
             secret_id=token.id,
@@ -180,7 +186,17 @@ async def deliver(conversation_id: str) -> None:
             await deliver_pending(session, conversation)
 
     try:
-        await DBOS.run_step_async(StepOptions(name="chat.deliver.turns"), deliver_turns)
+        await DBOS.run_step_async(
+            StepOptions(
+                name="chat.deliver.turns",
+                retries_allowed=True,
+                max_attempts=5,
+                should_retry=lambda error: getattr(error, "is_retryable", True),
+            ),
+            deliver_turns,
+        )
+    except ChatHarnessError as error:
+        await publish(conversation_id, {"type": "error", "detail": str(error)})
     except Exception:
         logger.exception("Chat delivery failed for conversation %s", conversation_id)
         detail = "The reply is unavailable. Connect again to retry."
@@ -204,11 +220,44 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                         f"Chat runs on {adapters}. The Bot's settings select "
                         f"{config.harness_class.name}. Set its harness to one of them."
                     )
-                host, identity = await get_sandbox(session, conversation.account_id, config, tools)
+                # A bot serves outside people, so only the operator reaches the enabled MCP
+                # servers and holds their own sign-ins.
+                mcp_servers, secret_refs = (), []
+                if conversation.account.kind == AccountKind.OPERATOR:
+                    # A server the operator has not connected must not stop the chat.
+                    mcp_servers, secret_refs = await Workspace.get_all_mcp_servers(
+                        session, None, conversation.account_id, skip_unauthenticated=True
+                    )
+                    for service in services.all():
+                        if service.host and service.token_endpoint:
+                            sign_ins = await VaultSecret.list_account_connections(
+                                session, Audience.service(service.slug), conversation.account_id
+                            )
+                            # A sandbox has one variable per service, so it holds one sign-in.
+                            secret_refs += [
+                                SecretRef(
+                                    name=service.slug, secret_id=sign_in.id, host=service.host
+                                )
+                                for sign_in in sign_ins[:1]
+                            ]
+                host, identity = await get_sandbox(
+                    session,
+                    conversation.account_id,
+                    config=config,
+                    allowed_tools=tools,
+                    secret_refs=secret_refs,
+                )
                 try:
                     bridge = Bridge(host)
                     turn = await send_turn(
-                        session, conversation, message, bridge, identity, config, prompt
+                        session,
+                        conversation,
+                        message,
+                        bridge=bridge,
+                        identity=identity,
+                        config=config,
+                        prompt=prompt,
+                        mcp_servers=mcp_servers,
                     )
                     if turn:
                         await follow_turn(session, conversation, turn, bridge)
@@ -234,10 +283,12 @@ async def send_turn(
     session: AsyncSession,
     conversation: Conversation,
     message: Message,
+    *,
     bridge: Bridge,
     identity: SandboxIdentity,
     config: AgentConfig,
     prompt: str,
+    mcp_servers: tuple[McpServer, ...],
 ) -> Message | None:
     """Start the agent, transcribe the pending voice notes, and send the pending
     messages. Return the turn's message, unless a Stop or pause came first."""
@@ -271,6 +322,14 @@ async def send_turn(
         mcpUrl=server.url,
         bearerVariable=get_bearer_token_env_var(server.name),
         headers=headers,
+        mcpServers=[
+            {
+                "name": mcp_server.name,
+                "url": mcp_server.url,
+                "headers": mcp_server.get_request_headers(),
+            }
+            for mcp_server in mcp_servers
+        ],
         **config.harness_class.get_acp_session(
             account_type, config.model, prompt, config.identity, sandbox_home, conversation_root
         ),

@@ -88,6 +88,12 @@ async def _park(druks_db, note, *, context: str = ""):
     return run
 
 
+def test_openapi_names_every_app_operation_for_its_app(client: TestClient):
+    operation = app.openapi()["paths"]["/api/field_notes/notes"]["post"]
+
+    assert operation["operationId"] == "field_notes_write_note"
+
+
 def test_openapi_pins_platform_and_app_agent_routes(client: TestClient):
     schema = app.openapi()
     found = {

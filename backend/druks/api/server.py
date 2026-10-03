@@ -35,7 +35,7 @@ from druks.database import (
 from druks.durable.engine import init_dbos, launch, shutdown
 from druks.durable.exceptions import AgentCallNotFound
 from druks.events.routes import router as events_router
-from druks.exceptions import SubjectNotFound
+from druks.exceptions import ObjectNotFound
 from druks.files.routes import router as files_router
 from druks.harnesses.exceptions import AgentConfigError, CatalogError
 from druks.harnesses.routes import router as providers_router
@@ -158,8 +158,8 @@ async def _agent_call_not_found_handler(request: Request, exc: AgentCallNotFound
 
 
 # A missing subject is a 404 here, as it is on the platform's own subject reads.
-@app.exception_handler(SubjectNotFound)
-async def _subject_not_found_handler(request: Request, exc: SubjectNotFound) -> JSONResponse:
+@app.exception_handler(ObjectNotFound)
+async def _object_not_found_handler(request: Request, exc: ObjectNotFound) -> JSONResponse:
     return await _http_exception_handler(request, HTTPException(404, str(exc)))
 
 

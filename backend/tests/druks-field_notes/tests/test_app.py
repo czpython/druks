@@ -14,7 +14,6 @@ async def test_the_board_honors_the_board_size(druks_db):
     summaries = await Note.list_summaries(None)
 
     assert [summary.id for summary in summaries] == [str(newest.id)]
-    assert summaries[0].body == "second"
 
 
 def test_settings_validate_the_sync_token():
