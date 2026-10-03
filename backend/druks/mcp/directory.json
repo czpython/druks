@@ -304,11 +304,6 @@
     "description": "Spend, transactions, and bills in Ramp.",
     "url": "https://mcp.ramp.com/mcp"
   },
-  "salesforce": {
-    "title": "Salesforce",
-    "description": "Records in your Salesforce org, read-only.",
-    "url": "https://api.salesforce.com/platform/mcp/v1/platform/sobject-reads"
-  },
   "sanity": {
     "title": "Sanity",
     "description": "Documents, schemas, and content in Sanity.",
