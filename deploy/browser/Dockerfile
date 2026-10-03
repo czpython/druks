@@ -18,8 +18,6 @@ ARG PINCHTAB_VERSION=0.15.1
 ARG PLAYWRIGHT_VERSION=1.62.0
 ARG TARGETARCH
 
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-
 # Package revisions differ across the base image's architectures and external
 # vendor repositories; pin the image and the tools while allowing apt fixes.
 # hadolint ignore=DL3008
@@ -38,11 +36,6 @@ RUN apt-get update \
     && install -d -m 0755 /opt/druks-browser \
     && cd /opt/druks-browser \
     && npm install --no-package-lock --omit=dev "playwright@${PLAYWRIGHT_VERSION}" \
-    && npx playwright install --with-deps chromium \
-    && rm -rf /var/lib/apt/lists/* \
-    && chromium_path="$(find /ms-playwright -type f -path '*/chrome-linux*/chrome' -print -quit)" \
-    && test -n "$chromium_path" \
-    && ln -s "$chromium_path" /usr/local/bin/chromium \
     && pinchtab_asset="pinchtab-linux-${TARGETARCH}" \
     && curl -fsSLo /tmp/pinchtab \
         "https://github.com/pinchtab/pinchtab/releases/download/v${PINCHTAB_VERSION}/${pinchtab_asset}" \
@@ -54,9 +47,9 @@ RUN apt-get update \
     && install -m 0755 /tmp/pinchtab /usr/local/bin/pinchtab \
     && rm -f /tmp/pinchtab /tmp/pinchtab-checksums.txt
 
-# Real Google Chrome, so the login browser presents Chrome's fingerprint rather
-# than the bundled chromium's — a login gate reads the difference. Google's apt
-# repo ships amd64 and arm64. Fail the build if the package is missing.
+# Real Google Chrome, so the login browser presents Chrome's fingerprint and not
+# Chromium's. A login gate reads the difference. Google's apt repo ships amd64
+# and arm64. Fail the build if the package is missing.
 # hadolint ignore=DL3008
 RUN arch="$(dpkg --print-architecture)" \
     && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
