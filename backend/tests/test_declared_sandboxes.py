@@ -7,11 +7,13 @@ from unittest.mock import AsyncMock
 import druks.agents as agent_module
 import druks.workflows as workflow_module
 import pytest
+from druks import doctor
 from druks.db import db_session
 from druks.sandbox import datastructures, templates
 from druks.sandbox.client import Client
 from druks.sandbox.datastructures import Sandbox
 from druks.sandbox.exceptions import TemplateNotFound, TemplateUnavailable
+from druks.testing import make_settings
 from druks.workflows import Workflow
 
 
@@ -93,6 +95,8 @@ async def test_prepare_sandbox_templates_requests_each_declaration(monkeypatch):
         base_image="base",
         label="notes-setup",
     )
+    await templates.prepare_sandbox_templates()
+    assert create_template.await_count == 2
 
 
 async def test_prepare_templates_labels_each_app_and_script(monkeypatch):
@@ -123,6 +127,20 @@ async def test_prepare_templates_labels_each_app_and_script(monkeypatch):
         "site-builder-preview",
     ]
     assert all(call.kwargs["base_image"] is None for call in create_template.await_args_list)
+
+
+async def test_doctor_reports_an_image_refresh_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        doctor,
+        "prepare_sandbox_templates",
+        AsyncMock(side_effect=TemplateUnavailable("registry unavailable")),
+    )
+
+    result = await doctor.check_declared_sandboxes(make_settings(tmp_path))
+
+    assert not result.ok
+    assert not result.pending
+    assert "registry unavailable" in result.detail
 
 
 async def test_get_template_id_uses_available_template(monkeypatch):
@@ -300,11 +318,14 @@ async def test_client_template_primitives_use_sdk_contract(monkeypatch):
     listed = SimpleNamespace(
         id="template-1", status="available", setup_script_hash="hash-1", base_image="base"
     )
+    previous = SimpleNamespace(
+        id="previous-digest", status="available", setup_script_hash="hash-1", base_image="base"
+    )
 
     class FakeAPI:
         def __init__(self):
             self.create_template = AsyncMock(return_value=created)
-            self.list_templates = AsyncMock(return_value=[other_base, listed])
+            self.list_templates = AsyncMock(return_value=[other_base, listed, previous])
             self.aclose = AsyncMock()
 
     api = FakeAPI()
