@@ -26,10 +26,14 @@ jobs:
             python-version: "3.11"
           - name: backend (3.14)
             python-version: "3.14"
+          # Druks supports Postgres 16 and newer; the other jobs run 16.
+          - name: backend (postgres 18)
+            python-version: "3.11"
+            postgres-image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
     # Test services use druks.testing defaults and never the runtime database.
     services:
       postgres:
-        image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        image: ${{ matrix.postgres-image || 'postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777' }}
         env:
           POSTGRES_USER: druks
           POSTGRES_PASSWORD: druks

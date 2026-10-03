@@ -1252,6 +1252,10 @@ Druks scopes autogeneration to the table prefix, names the revisions
 Alembic does not detect is a new member of an enum: that is one
 `drop_constraint` and one `create_check_constraint`.
 
+Druks supports Postgres 16 and newer, so a model or revision uses only what 16
+has. For example, do not use the SQL function `uuidv7()`, virtual generated
+columns, or `RETURNING OLD/NEW`. Make a UUIDv7 in Python, as Druks does.
+
 Query through `druks.db.db_session()` inside an
 HTTP request, durable step, or other platform-bound session. Outside those,
 `db_session()` raises. A workflow body holds no session: read inside a `@step`.

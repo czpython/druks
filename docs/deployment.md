@@ -49,7 +49,8 @@ can return SSH addresses that are directly reachable.
 
 ## First-time setup on a fresh box
 
-Prerequisites: Docker with the Compose plugin. The exe.dev shape also
+Prerequisites: Docker with the Compose plugin. Druks supports Postgres 16 and
+newer. `compose.yaml` runs Postgres 16. The exe.dev shape also
 needs `tailscaled` joined to the intended tailnet (`tailscale status` shows
 peers). Other remote providers have their own network and credential
 requirements.
