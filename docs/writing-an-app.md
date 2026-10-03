@@ -1521,6 +1521,8 @@ matches it to an existing connection for the same owner.
 
 To widen an existing connection's scopes, open
 `/api/oauth/acme/connect?connection=<id>`. Reconsent replaces its tokens.
+Only the user who owns the connection can reconsent it. For another user's
+connection, the platform answers 404.
 Reconsent names the row, so it also makes a revoked connection live again
 under its old id. A fresh sign-in that matches the `identity_key` does the
 same.

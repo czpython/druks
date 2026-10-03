@@ -923,15 +923,25 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
     assert not await get_client().get(stale_key)
 
 
-async def test_oauth_connect_rejects_an_unknown_reconnect_target(tmp_path, acme, druks_db):
+async def test_oauth_connect_rejects_an_unknown_or_another_accounts_reconnect_target(
+    tmp_path, acme, druks_db
+):
     from druks.testing import configure_app_for_test
 
     await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
+    other = await Account.get_or_create(druks_db, "other@example.com")
+    connection = await VaultSecret.connect(
+        druks_db, Audience.service("acme"), account_id=other.id, refresh_token="rt", scopes=[]
+    )
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
     with TestClient(configure_app_for_test(settings=settings)) as client:
         assert client.get("/api/oauth/acme/connect?connection=zzz").status_code == 404
+        response = client.get(
+            f"/api/oauth/acme/connect?connection={connection.id}", follow_redirects=False
+        )
+        assert response.status_code == 404
 
 
 async def test_fresh_sign_in_with_matching_identity_resurrects_revoked_connection(

@@ -82,7 +82,7 @@ async def connect_oauth_service(
     account_id = current_account_id.get()
     if connection:
         row = await session.get(VaultSecret, connection)
-        if not row or row.audience != Audience.service(slug):
+        if not row or row.audience != Audience.service(slug) or row.account_id != account_id:
             raise OauthPageError(f"No connection {connection!r} on {slug!r}.", status_code=404)
     if next and (not next.startswith("/") or next.startswith(("//", "/\\"))):
         # A bare same-origin path only — anything host-shaped is an open redirect.
