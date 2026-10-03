@@ -140,14 +140,13 @@ SubjectKey = Annotated[str, StringConstraints(strip_whitespace=True, min_length=
 
 
 class SubjectSummary(Schema):
-    # The base an app's subject header subclasses; ``id`` keys the subject's
-    # status, timeline and detail URL, and ``from_attributes`` builds the header
-    # straight off the subject.
+    # The header the platform shows a subject under: ``id`` keys its status,
+    # timeline and detail URL, ``key`` is its name, and ``from_attributes`` builds
+    # it straight off the subject. An app with its own frontend subclasses it.
     model_config = ConfigDict(from_attributes=True)
 
     id: SubjectId
     key: SubjectKey
-    title: str | None = None
 
 
 class SubjectStatus(Schema):

@@ -4,17 +4,17 @@ from druks.accounts.models import PersonalAccessToken
 from druks.mcp.constants import BEARER_HEADER, BEARER_PREFIX, DRUKS_SERVER_NAME
 from druks.mcp.enums import AllowedTools, Toolkit
 from druks.mcp.exceptions import MissingEndpointError
-from druks.sandbox.datastructures import RequiredMcpServer
+from druks.sandbox.datastructures import SandboxMcpServer
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
 
 
-def get_druks_mcp_server(*, allowed_tools: tuple[str, ...]) -> RequiredMcpServer:
-    """Druks' own `/mcp` as a workspace requires it, at the address a box reaches."""
+def get_druks_mcp_server(*, allowed_tools: tuple[str, ...]) -> SandboxMcpServer:
+    """Druks' own `/mcp` as a workspace's server, at the address a box reaches."""
     if endpoint := load_settings().urls.webhook_base:
-        return RequiredMcpServer(
+        return SandboxMcpServer(
             name=DRUKS_SERVER_NAME, url=f"{endpoint}/mcp", allowed_tools=allowed_tools
         )
     raise MissingEndpointError(DRUKS_SERVER_NAME)

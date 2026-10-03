@@ -1,6 +1,7 @@
 import argparse
 
 from .database import make_app_migration, run_migrations
+from .exceptions import DruksError
 from .settings import ensure_data_dirs, load_settings, setup_logging
 
 
@@ -14,6 +15,11 @@ def main() -> None:
     )
     makemigrations.add_argument("app", help="The installed app's name.")
     makemigrations.add_argument("-m", "--message", default="", help="Revision message (slug).")
+    check_app = subparsers.add_parser(
+        "check-app",
+        help="Load one installed app and check its contracts. Needs no database.",
+    )
+    check_app.add_argument("app", help="The installed app's name.")
     doctor_parser = subparsers.add_parser(
         "doctor",
         help=(
@@ -116,6 +122,17 @@ def main() -> None:
             raise SystemExit(f"druks create: {error}") from error
         print(f"Created {target}")
         print(f"Next: cd {target.name} && uv sync && uv run pytest")
+        return
+
+    # An app's CI checks it with no configured install.
+    if args.command == "check-app":
+        from .apps.loader import load_app
+
+        try:
+            load_app(args.app).routers()
+        except DruksError as error:
+            raise SystemExit(f"druks check-app: {error}") from error
+        print(f"{args.app}: ok")
         return
 
     settings = load_settings()

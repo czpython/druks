@@ -17,8 +17,8 @@ vi.mock('./pages/DashboardPage', () => ({ DashboardPage: () => <h1>Dashboard pag
 vi.mock('./pages/EventsPage', () => ({ EventsPage: () => <h1>Activity feed</h1> }))
 vi.mock('./pages/UsagePage', () => ({ UsagePage: () => <h1>Usage report</h1> }))
 vi.mock('./pages/SchedulesPage', () => ({ SchedulesPage: () => <h1>Schedule list</h1> }))
-vi.mock('./pages/AppHomePage', () => ({
-  AppHomePage: ({ app }: { app: string }) => <h1>{app} home</h1>,
+vi.mock('./druksui/AppPage', () => ({
+  AppPage: ({ app }: { app: string }) => <h1>{app} home</h1>,
 }))
 vi.mock('./apps/InstalledAppHost', () => ({
   InstalledAppHost: ({ name }: { name: string }) => <h1>{name} mounted</h1>,

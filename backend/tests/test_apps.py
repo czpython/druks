@@ -1,9 +1,11 @@
+from datetime import UTC, datetime
 from types import ModuleType, SimpleNamespace
 
 import pytest
 from druks.apps import App, loader
 from druks.apps.exceptions import AppSubjectContractError
 from druks.apps.loader import iter_apps, load
+from druks.durable.schemas import SubjectSummary
 from druks.workflows import Subject
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
@@ -305,3 +307,61 @@ def test_the_app_name_tags_every_route(monkeypatch):
     app = FastAPI()
     load(app)
     assert app.openapi()["paths"]["/api/tagged/parts"]["get"]["tags"] == ["tagged"]
+
+
+class GadgetSummary(SubjectSummary):
+    owner: str
+    size: int
+    opened_at: datetime
+    parts: dict[str, int]
+
+
+class Gadget(Subject):
+    @classmethod
+    async def list_summaries(cls, account_id: str | None) -> list[GadgetSummary]:
+        opened_at = datetime(2026, 9, 1, tzinfo=UTC)
+        return [
+            GadgetSummary(
+                id="7", key="gadget 7", owner="ann", size=3, opened_at=opened_at, parts={}
+            )
+        ]
+
+
+def test_an_app_without_a_landing_page_gets_the_platform_home(monkeypatch):
+    """One live table for each subject type: the summary's scalar fields are the
+    columns, the key cell opens the subject, and the last cell is where the work stands."""
+
+    class Plain(App):
+        name = "plain"
+        package = "plain"
+        subjects = classmethod(lambda cls: [Gadget])
+
+        @classmethod
+        def discover(cls) -> list[ModuleType]:
+            return []
+
+    page = _boot(Plain, monkeypatch).get("/api/plain/pages").json()
+
+    assert page["title"] == "plain"
+    (section,) = page["blocks"]
+    assert (section["name"], section["follows"]) == (
+        "gadget",
+        {"subjectType": "gadget", "subjectId": ""},
+    )
+    (table,) = section["blocks"]
+    assert [column["label"] for column in table["columns"]] == [
+        "gadget",
+        "owner",
+        "size",
+        "opened at",
+        "status",
+    ]
+    (row,) = table["rows"]
+    key, owner, size, opened, status = row["cells"]
+    assert (key["text"], key["link"]["subject"]) == (
+        "gadget 7",
+        {"subjectType": "gadget", "subjectId": "7"},
+    )
+    assert (owner["text"], size["number"]) == ("ann", 3.0)
+    assert opened["when"].startswith("2026-09-01")
+    assert not status["status"]["state"]

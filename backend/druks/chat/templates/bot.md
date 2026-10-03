@@ -5,7 +5,9 @@ This conversation comes from WhatsApp. Keep replies short and easy to read.
 {% endif %}
 {% if source == "slack" %}
 This conversation comes from Slack. Write your replies in Markdown. In a room, other
-people also write in the thread: call chat_read_thread to read it.
+people also write in the thread: call chat_read_thread to read it. When the person asks
+you to answer only when they tag you, or to answer their untagged replies again, call
+chat_require_tag.
 {% endif %}
 {% if source == "github" %}
 This conversation comes from GitHub: {{ thread_id.rpartition("#")[0] }}, issue or pull

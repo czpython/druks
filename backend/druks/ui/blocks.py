@@ -1,14 +1,17 @@
-from collections.abc import Iterable
 from typing import Annotated, Any, Literal
 
 from pydantic import (
+    AfterValidator,
     AwareDatetime,
     BeforeValidator,
     ConfigDict,
     Discriminator,
     Field,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
     StringConstraints,
     computed_field,
+    model_serializer,
     model_validator,
 )
 
@@ -21,7 +24,7 @@ def _subject_identity(value):
     """``follows=`` takes the subject a page or a region watches, or a subject
     class for every subject of that type. Druks streams what it names and
     rereads the page on every snapshot it sends."""
-    if isinstance(value, dict | Follows) or value is None:
+    if not value or isinstance(value, dict | Follows):
         return value
     if isinstance(value, type):
         subject_type = getattr(value, "subject_type", "")
@@ -48,6 +51,25 @@ class Follows(Schema):
 
 
 Watched = Annotated[Follows | None, BeforeValidator(_subject_identity)]
+
+
+def _one_subject(follows: Follows) -> Follows:
+    if follows.subject_id:
+        return follows
+    raise ValueError(
+        f"this shows the work on one {follows.subject_type}, not on every one. "
+        "Give the subject itself."
+    )
+
+
+Subject = Annotated[Follows, BeforeValidator(_subject_identity), AfterValidator(_one_subject)]
+
+
+def _get_status(subject: Follows, info: SerializationInfo) -> dict[str, Any]:
+    # The page endpoint reads where the work on every subject of the page stands,
+    # and hands it to the serialization of the page.
+    status = info.context["statuses"][(subject.subject_type, subject.subject_id)]
+    return status.model_dump(mode=info.mode, by_alias=info.by_alias)
 
 
 def _check_field_names(*, owner: str, fields: list[FormField], arguments: dict[str, Any]) -> None:
@@ -77,10 +99,6 @@ class PageBlock(Schema):
         says whether any ancestor watches a subject, ``region`` names the nearest
         one around it, and ``regions`` collects the region names already taken."""
 
-    def iter_actions(self) -> "Iterable[Action]":
-        """Every action this block offers, however deep."""
-        return ()
-
 
 class BlockParent(PageBlock):
     """A block that holds other blocks."""
@@ -91,24 +109,29 @@ class BlockParent(PageBlock):
         for block in self.blocks:
             block.check_placement(followed=followed, regions=regions, region=region)
 
-    def iter_actions(self) -> "Iterable[Action]":
-        for block in self.blocks:
-            yield from block.iter_actions()
-
 
 class Link(PageBlock):
     """A control that navigates: to another page of this app, to the subject's
-    own platform page, or outside."""
+    own platform page, or outside. A link on a value takes the value's words,
+    so it needs no label of its own."""
+
+    # A route argument travels in a URL, so an id reads as its text.
+    model_config = ConfigDict(coerce_numbers_to_str=True)
 
     block: Literal["link"] = "link"
-    label: str
+    label: str = ""
     page: str = ""
     arguments: dict[str, str] = Field(default_factory=dict)
     url: str = ""
     subject: Watched = None
 
-    def __init__(self, label: str, **data):
+    def __init__(self, label: str = "", **data):
         super().__init__(label=label, **data)
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        if self.label:
+            return
+        raise ValueError("a Link that stands on its own has no label. Give it the words it shows.")
 
     @model_validator(mode="after")
     def _one_destination(self) -> "Link":
@@ -160,9 +183,6 @@ class Action(PageBlock):
         )
         return self
 
-    def iter_actions(self) -> "Iterable[Action]":
-        yield self
-
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         if self.refresh != "region" or region:
             return
@@ -201,10 +221,6 @@ class Form(PageBlock):
     extra_actions: list[Action] = Field(default_factory=list)
     submit: Literal["button", "change"] = "button"
     layout: Literal["stack", "prose", "row"] = "stack"
-
-    def iter_actions(self) -> "Iterable[Action]":
-        yield self.action
-        yield from self.extra_actions
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         self.action.check_placement(followed=followed, regions=regions, region=region)
@@ -279,10 +295,6 @@ class Callout(PageBlock):
     text: str
     controls: list[Action | Link] = Field(default_factory=list)
 
-    def iter_actions(self) -> "Iterable[Action]":
-        for control in self.controls:
-            yield from control.iter_actions()
-
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         for control in self.controls:
             control.check_placement(followed=followed, regions=regions, region=region)
@@ -303,10 +315,6 @@ class EmptyState(PageBlock):
     description: str = ""
     controls: list[Action | Link] = Field(default_factory=list)
 
-    def iter_actions(self) -> "Iterable[Action]":
-        for control in self.controls:
-            yield from control.iter_actions()
-
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         for control in self.controls:
             control.check_placement(followed=followed, regions=regions, region=region)
@@ -315,31 +323,8 @@ class EmptyState(PageBlock):
         super().__init__(title=title, **data)
 
 
-class GateControls(PageBlock):
-    """The operator's answer to a parked run, derived from the run itself. The
-    shell reads the ask, the options, and the artifact from the gate, and
-    submits the answer with the run's ``parkedAt``."""
-
-    block: Literal["gate_controls"] = "gate_controls"
-    run: str
-
-    def __init__(self, run: str, **data):
-        super().__init__(run=run, **data)
-
-    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
-        if followed:
-            return
-        raise ValueError(
-            f"GateControls for run {self.run!r} sits in nothing that follows a subject, so an "
-            "answered gate would stay on screen. Put it in a Page or Section with follows=."
-        )
-
-
 class PageValue(Schema):
     """What every value shares."""
-
-    def iter_actions(self) -> Iterable[Action]:
-        return ()
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         """Raise when this value cannot sit where the page put it."""
@@ -381,9 +366,57 @@ class StatusValue(PageValue):
         super().__init__(label=label, **data)
 
 
+class SubjectStatus(PageValue):
+    """Where the work on one subject stands. The shell shows "needs you" when
+    the subject waits on the operator, ``working`` while Druks works on it, what
+    stopped it, or "idle"."""
+
+    value: Literal["subject_status"] = "subject_status"
+    subject: Subject
+    working: str = "working"
+
+    def __init__(self, subject, **data):
+        super().__init__(subject=subject, **data)
+
+    @model_serializer(mode="wrap")
+    def _with_status(
+        self, serialize: SerializerFunctionWrapHandler, info: SerializationInfo
+    ) -> dict[str, Any]:
+        return {**serialize(self), "status": _get_status(self.subject, info)}
+
+
+class GateControls(PageBlock):
+    """The operator's answer to what a subject waits on. The shell reads the
+    ask, the options, and the artifact, and shows nothing while the subject
+    waits on nothing."""
+
+    block: Literal["gate_controls"] = "gate_controls"
+    subject: Subject
+
+    def __init__(self, subject, **data):
+        super().__init__(subject=subject, **data)
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        if followed:
+            return
+        raise ValueError(
+            "GateControls sits in nothing that follows a subject, so an answered gate would "
+            "stay on screen. Put it in a Page or Section with follows=."
+        )
+
+    @model_serializer(mode="wrap")
+    def _with_status(
+        self, serialize: SerializerFunctionWrapHandler, info: SerializationInfo
+    ) -> dict[str, Any]:
+        return {**serialize(self), "status": _get_status(self.subject, info)}
+
+
 class TimeValue(PageValue):
+    """A moment. ``empty`` is the word the shell shows when there is none."""
+
     value: Literal["time"] = "time"
-    when: AwareDatetime
+    when: AwareDatetime | None
+    empty: str = ""
 
     def __init__(self, when, **data):
         super().__init__(when=when, **data)
@@ -398,17 +431,13 @@ class ControlsValue(PageValue):
     value: Literal["controls"] = "controls"
     controls: list[Action | Link] = Field(default_factory=list)
 
-    def iter_actions(self) -> Iterable[Action]:
-        for control in self.controls:
-            yield from control.iter_actions()
-
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         for control in self.controls:
             control.check_placement(followed=followed, regions=regions, region=region)
 
 
 Value = Annotated[
-    TextValue | NumberValue | StatusValue | TimeValue | ControlsValue,
+    TextValue | NumberValue | StatusValue | SubjectStatus | TimeValue | ControlsValue,
     Discriminator("value"),
 ]
 
@@ -569,10 +598,6 @@ class Metrics(PageBlock):
     def __init__(self, metrics=(), **data):
         super().__init__(metrics=metrics, **data)
 
-    def iter_actions(self) -> "Iterable[Action]":
-        for metric in self.metrics:
-            yield from metric.value.iter_actions()
-
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         for metric in self.metrics:
             metric.value.check_placement(followed=followed, regions=regions, region=region)
@@ -595,10 +620,6 @@ class Facts(PageBlock):
 
     def __init__(self, facts=(), **data):
         super().__init__(facts=facts, **data)
-
-    def iter_actions(self) -> "Iterable[Action]":
-        for fact in self.facts:
-            yield from fact.value.iter_actions()
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         for fact in self.facts:
@@ -625,7 +646,7 @@ class TableRow(Schema):
 
 class Table(PageBlock):
     """Rows of values under named columns. Every row carries one cell for each
-    column; with no rows the shell shows ``empty_text``. ``select`` names the
+    column; with no rows the shell shows ``empty``. ``select`` names the
     argument the selected keys fill, and ``actions`` are what run on that
     list."""
 
@@ -633,7 +654,7 @@ class Table(PageBlock):
     title: str = ""
     columns: list[TableColumn] = Field(default_factory=list)
     rows: list[TableRow] = Field(default_factory=list)
-    empty_text: str = ""
+    empty: EmptyState | None = None
     select: str = ""
     actions: list[Action] = Field(default_factory=list)
 
@@ -686,19 +707,14 @@ class Table(PageBlock):
                 )
         return self
 
-    def iter_actions(self) -> "Iterable[Action]":
-        for action in self.actions:
-            yield from action.iter_actions()
-        for row in self.rows:
-            for cell in row.cells:
-                yield from cell.iter_actions()
-
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         for action in self.actions:
             action.check_placement(followed=followed, regions=regions, region=region)
         for row in self.rows:
             for cell in row.cells:
                 cell.check_placement(followed=followed, regions=regions, region=region)
+        if self.empty:
+            self.empty.check_placement(followed=followed, regions=regions, region=region)
 
 
 class List(PageBlock):
@@ -708,10 +724,6 @@ class List(PageBlock):
 
     def __init__(self, items=(), **data):
         super().__init__(items=items, **data)
-
-    def iter_actions(self) -> "Iterable[Action]":
-        for item in self.items:
-            yield from item.iter_actions()
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         for item in self.items:
@@ -730,13 +742,22 @@ class Stack(BlockParent):
 
 class Columns(BlockParent):
     """Blocks across the page. ``even`` shares the width. ``sidebar`` keeps
-    the last column a rail. They stack on a narrow screen."""
+    the last column a rail. ``split`` is the page: two independently scrolling
+    panes, a list and what it opened. They stack on a narrow screen."""
 
     block: Literal["columns"] = "columns"
-    layout: Literal["even", "sidebar"] = "even"
+    layout: Literal["even", "sidebar", "split"] = "even"
 
     def __init__(self, blocks=(), **data):
         super().__init__(blocks=blocks, **data)
+
+    @model_validator(mode="after")
+    def _split_is_two_panes(self) -> "Columns":
+        if self.layout == "split" and len(self.blocks) != 2:
+            raise ValueError(
+                "Columns layout='split' takes exactly two panes — a list and what it opened."
+            )
+        return self
 
 
 class Card(BlockParent):
@@ -751,29 +772,23 @@ class Card(BlockParent):
     link: Link | None = None
     drag: dict[str, Any] = Field(default_factory=dict)
 
-    def iter_actions(self) -> "Iterable[Action]":
-        yield from super().iter_actions()
-        for control in self.controls:
-            yield from control.iter_actions()
-
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         super().check_placement(followed=followed, regions=regions, region=region)
         for control in self.controls:
             control.check_placement(followed=followed, regions=regions, region=region)
-        if self.link:
-            self.link.check_placement(followed=followed, regions=regions, region=region)
 
 
 class Cards(PageBlock):
     """One card for each of a set of things. ``wrap`` lets the shell fit as
-    many across as the screen takes. ``stack`` is one column. ``drop`` is the
-    action a dragged card submits onto this list."""
+    many across as the screen takes. ``stack`` is one column. ``tiles`` is a
+    wrap of squares: an image fills each card and is cropped rather than shown
+    in full. ``drop`` is the action a dragged card submits onto this list."""
 
     block: Literal["cards"] = "cards"
     title: str = ""
     cards: list[Card] = Field(default_factory=list)
     empty: EmptyState | None = None
-    layout: Literal["wrap", "stack"] = "wrap"
+    layout: Literal["wrap", "stack", "tiles"] = "wrap"
     drop: Action | None = None
 
     @model_validator(mode="after")
@@ -781,14 +796,6 @@ class Cards(PageBlock):
         if self.drop and (self.drop.fields or self.drop.confirm):
             raise ValueError("Cards.drop cannot collect fields or confirm — the drop is the submit")
         return self
-
-    def iter_actions(self) -> "Iterable[Action]":
-        if self.drop:
-            yield from self.drop.iter_actions()
-        for card in self.cards:
-            yield from card.iter_actions()
-        if self.empty:
-            yield from self.empty.iter_actions()
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         if self.drop:
@@ -829,11 +836,6 @@ class Section(BlockParent):
             regions=regions,
             region=inside,
         )
-
-    def iter_actions(self) -> "Iterable[Action]":
-        for control in self.controls:
-            yield from control.iter_actions()
-        yield from super().iter_actions()
 
     @model_validator(mode="after")
     def _named_when_followed(self) -> "Section":

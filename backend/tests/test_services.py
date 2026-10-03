@@ -475,18 +475,6 @@ async def test_manifest_callback_rejects_a_dead_code(
 # --- OAuth declaration --------------------------------------------------------
 
 
-@pytest.fixture
-def declared_services():
-    # Service subclasses self-register at class definition; tests declare
-    # inside this fixture and leave the registry as found.
-    from druks.apps.registry import services
-
-    saved = dict(services._items)
-    yield
-    services._items.clear()
-    services._items.update(saved)
-
-
 async def test_get_oauth_client_reads_the_connected_identity(declared_services, druks_db):
     from druks.services import Service
     from pydantic import BaseModel, SecretStr
@@ -514,6 +502,72 @@ async def test_get_oauth_client_reads_the_connected_identity(declared_services, 
     assert client.client_secret == "sec-1"
     assert client.basic_auth is True
     assert client.extra_authorize_params == {"access_type": "offline"}
+
+
+def test_a_service_names_its_settings_fields(declared_services):
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    class Acme(Service):
+        class Settings(BaseModel):
+            base_url: str
+            api_token: SecretStr
+
+    assert Acme.fields.api_token.is_secret
+    assert Acme.fields.api_token.secret_name == "acme_api_token"
+    assert not Acme.fields.base_url.is_secret
+
+
+async def test_a_service_secret_issues_under_its_field_name(declared_services, druks_db):
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    class Acme(Service):
+        class Settings(BaseModel):
+            api_token: SecretStr
+            webhook_secret: SecretStr
+
+    row = await connect_service(
+        "acme", identity={}, secrets={"api_token": "token-1", "webhook_secret": "hook-1"}
+    )
+
+    assert await row.issue_token("", name=Acme.fields.api_token.secret_name) == ("token-1", None)
+    # No other name says which of the two secrets a box gets.
+    with pytest.raises(ValueError):
+        await row.issue_token("", name="acme")
+
+
+async def test_a_service_with_one_secret_issues_it_under_any_name(declared_services, druks_db):
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    class Acme(Service):
+        class Settings(BaseModel):
+            api_key: SecretStr
+
+    row = await connect_service("acme", identity={}, secrets={"api_key": "key-1"})
+
+    assert await row.issue_token("", name="billing_token") == ("key-1", None)
+
+
+def test_an_agent_holds_only_a_secret_of_a_service_with_a_host(declared_services):
+    from druks.agents import Agent, AgentOutput
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    class Acme(Service):
+        class Settings(BaseModel):
+            base_url: str
+            api_key: SecretStr
+
+    with pytest.raises(TypeError, match="Acme must declare `host`"):
+        Agent(contract=AgentOutput, secrets=(Acme.fields.api_key,))
+
+    Acme.host = "api.acme.test"
+    with pytest.raises(TypeError, match="Acme.fields.base_url is not a secret field"):
+        Agent(contract=AgentOutput, secrets=(Acme.fields.base_url,))
+    with pytest.raises(TypeError, match="Github.fields.private_key belongs to an App key"):
+        Agent(contract=AgentOutput, secrets=(Github.fields.private_key,))
 
 
 async def test_oauth_service_declarations_fail_loudly(declared_services):

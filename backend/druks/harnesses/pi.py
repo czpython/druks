@@ -74,11 +74,7 @@ class PiHarness(Harness):
         extension_body = _DRUKS_OUTPUT_TEMPLATE.read_text()
         mcp = {}
         for server in mcp_servers:
-            headers = dict(server.headers)
-            if server.bearer_token_env_var:
-                headers["Authorization"] = f"Bearer ${{{server.bearer_token_env_var}}}"
-            for header, env_var in server.env_headers.items():
-                headers[header] = f"${{{env_var}}}"
+            headers = server.get_request_headers()
             # Druks owns MCP authentication, so the adapter must not start headless OAuth.
             entry: dict[str, object] = {"url": server.url, "auth": False}
             if headers:

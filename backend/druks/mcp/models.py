@@ -1,20 +1,25 @@
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy import Boolean, String, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
-from druks.apps.registry import mcp_servers
+from druks.accounts.models import Account
+from druks.apps.registry import mcp_servers, services
 from druks.core.models import Uuid7Pk
-from druks.mcp.constants import DRUKS_SERVER_NAME, NAME_PATTERN
+from druks.mcp.constants import BEARER_HEADER, DRUKS_SERVER_NAME, NAME_PATTERN
+from druks.mcp.datastructures import McpServerAccess
+from druks.mcp.enums import Credential
 from druks.mcp.exceptions import InvalidServerNameError, ReservedServerNameError
 from druks.mcp.helpers import get_grant_account
 from druks.models import Base
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
+from druks.services import Service
 
 
 class McpServer(Base, Uuid7Pk):
@@ -87,25 +92,71 @@ class McpServer(Base, Uuid7Pk):
         return servers
 
     @classmethod
-    async def get_resolved(cls, session: AsyncSession, account_id: str | None) -> dict[str, dict]:
-        servers = await cls._merged(session)
-        # has_token = nothing blocks this server's auth at delivery, read from
-        # wherever its source keeps the secret: a stored grant for a connected
-        # server, the header rows for every other; a server with neither
-        # cannot authenticate.
-        for server in servers.values():
-            if server["is_oauth"]:
-                server["has_token"] = False
+    async def list_access(
+        cls, session: AsyncSession, account_id: str | None
+    ) -> list[McpServerAccess]:
+        default_account = await Account.get_default(session)
+        is_default = bool(default_account) and default_account.id == account_id
+        accesses = []
+        for server in (await cls._merged(session)).values():
+            service = Service.get_for_mcp_host(urlsplit(server["url"]).hostname)
+            login = None
+            if service and is_default:
+                login = await VaultSecret.lookup(
+                    session, service.secret_kind, Audience.service(service.slug)
+                )
+            secret = None
+            if not server["is_oauth"]:
+                credential = Credential.HEADERS
+            elif service and service.authorization_endpoint:
+                credential = Credential.SERVICE_CONNECTION
+                connections = await VaultSecret.list_account_connections(
+                    session, Audience.service(service.slug), account_id
+                )
+                secret = next(iter(connections), None)
+            elif login:
+                credential = Credential.SERVICE_LOGIN
+                secret = login
+            else:
+                credential = Credential.GRANT
                 if server["identity_mode"]:
                     grant_account = get_grant_account(server["identity_mode"], account_id)
-                    server["has_token"] = bool(
-                        await VaultSecret.list_account_connections(
-                            session, Audience.mcp(server["name"]), grant_account
-                        )
+                    connections = await VaultSecret.list_account_connections(
+                        session, Audience.mcp(server["name"]), grant_account
                     )
-            else:
-                server["has_token"] = bool(server["secret_headers"])
-        return servers
+                    secret = next(iter(connections), None)
+            accesses.append(
+                McpServerAccess(
+                    **server,
+                    service=service.slug if service else None,
+                    credential=credential,
+                    secret=secret,
+                )
+            )
+        return accesses
+
+    @classmethod
+    async def get_access(
+        cls, session: AsyncSession, name: str, account_id: str | None
+    ) -> McpServerAccess | None:
+        accesses = await cls.list_access(session, account_id)
+        return next((access for access in accesses if access.name == name), None)
+
+    @classmethod
+    async def store_login(
+        cls, session: AsyncSession, name: str, login: VaultSecret, account_id: str | None
+    ) -> VaultSecret:
+        """Write a service's login to the account's header row for the server: the
+        issuer answers a header row verbatim, and the service's row holds only its fields."""
+        service = services.get(login.audience_name)
+        return await VaultSecret.store(
+            session,
+            SecretKind.STATIC,
+            Audience.mcp(name),
+            secrets={"value": service.get_authorization(login)},
+            account_id=account_id,
+            header=BEARER_HEADER,
+        )
 
     @classmethod
     async def list_enabled(cls, session: AsyncSession) -> list[dict]:

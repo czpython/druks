@@ -19,7 +19,7 @@ async def test_notes_routes_create_and_list_notes(druks_client, monkeypatch):
     )
 
     assert created.status_code == 201
-    note = await Note.get_for_id(created.json()["id"])
+    note = await Note.get(id=created.json()["id"])
     assert note.body == "the pump ran hot"
     assert summarized == [note.id]
 
@@ -38,15 +38,9 @@ async def test_repository_board_and_detail_read_the_subject(druks_client):
     detail = await druks_client.get(f"/api/field_notes/repository/{repository.id}")
 
     assert board.status_code == 200
-    assert [row["summary"]["repo"] for row in board.json()["rows"]] == [newer.repo, repository.repo]
+    assert [row["summary"]["key"] for row in board.json()["rows"]] == [newer.repo, repository.repo]
     assert detail.status_code == 200
-    assert detail.json()["summary"] == {
-        "id": str(repository.id),
-        "key": "acme/widgets",
-        "title": None,
-        "repo": "acme/widgets",
-        "gist": None,
-    }
+    assert detail.json()["summary"] == {"id": str(repository.id), "key": "acme/widgets"}
 
 
 async def test_a_missing_note_is_a_404_on_a_route_and_an_empty_state_on_a_page(druks_client):
@@ -54,7 +48,9 @@ async def test_a_missing_note_is_a_404_on_a_route_and_an_empty_state_on_a_page(d
     page = await druks_client.get("/api/field_notes/pages/notes/999")
 
     assert route.status_code == 404
-    assert route.json() == {"error": "HTTP_404", "detail": "No note 999"}
+    assert route.json() == {"error": "HTTP_404", "detail": "No note with id 999"}
     assert page.status_code == 200
-    assert page.json()["title"] == "No note 999"
-    assert page.json()["blocks"][0]["block"] == "empty_state"
+    assert page.json()["title"] == "No note with id 999"
+    [empty_state] = page.json()["blocks"]
+    assert empty_state["block"] == "empty_state"
+    assert [control["page"] for control in empty_state["controls"]] == ["notes"]

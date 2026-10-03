@@ -12,7 +12,7 @@ from druks.apps.registry import mcp_servers
 from druks.core.templates import render_page
 from druks.mcp import oauth, registry
 from druks.mcp.constants import HEADER_NAME_PATTERN
-from druks.mcp.enums import IdentityMode
+from druks.mcp.enums import Credential, IdentityMode
 from druks.mcp.exceptions import (
     InvalidServerNameError,
     OauthConnectError,
@@ -26,6 +26,7 @@ from druks.mcp.schemas import (
     CreateMcpServerRequest,
     InstallMcpServerRequest,
     McpRegistryCandidateResponse,
+    McpRegistrySearchResponse,
     McpServerConnectionResponse,
     McpServerResponse,
 )
@@ -35,29 +36,33 @@ router = APIRouter(prefix="/api/mcp-servers", tags=["mcp-servers"])
 
 
 async def _response(session: AsyncSession, name: str) -> McpServerResponse:
-    resolved = await McpServer.get_resolved(session, current_account_id.get())
-    return McpServerResponse.model_validate(resolved[name])
+    access = await McpServer.get_access(session, name, current_account_id.get())
+    return McpServerResponse.model_validate(access)
 
 
 @router.get("", response_model=list[McpServerResponse])
 async def list_mcp_servers(session: SessionDep) -> list[McpServerResponse]:
     return [
-        McpServerResponse.model_validate(server)
-        for server in (await McpServer.get_resolved(session, current_account_id.get())).values()
+        McpServerResponse.model_validate(access)
+        for access in await McpServer.list_access(session, current_account_id.get())
     ]
 
 
-@router.get("/registry", response_model=list[McpRegistryCandidateResponse])
-async def search_mcp_registry(query: str, request: Request) -> list[McpRegistryCandidateResponse]:
+@router.get("/registry", response_model=McpRegistrySearchResponse)
+async def search_mcp_registry(query: str, request: Request) -> McpRegistrySearchResponse:
     pins = json.loads(request.app.state.settings.mcp_trusted_path.read_text())
     try:
-        entries = await registry.search_registry(query)
+        entries, has_more = await registry.search_registry(query)
     except RegistryUnavailableError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     candidates = registry.resolve_candidates(entries, pins)
-    return [
-        McpRegistryCandidateResponse.model_validate(candidate) for candidate in candidates.values()
-    ]
+    return McpRegistrySearchResponse(
+        candidates=[
+            McpRegistryCandidateResponse.model_validate(candidate)
+            for candidate in candidates.values()
+        ],
+        has_more=has_more,
+    )
 
 
 @router.post("", response_model=McpServerResponse)
@@ -111,7 +116,7 @@ async def install_mcp_server(
     # entry, never the client.
     pins = json.loads(request.app.state.settings.mcp_trusted_path.read_text())
     try:
-        entries = await registry.search_registry(body.registry)
+        entries, _ = await registry.search_registry(body.registry)
     except RegistryUnavailableError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     candidate = registry.resolve_candidates(entries, pins).get(body.registry)
@@ -138,9 +143,9 @@ async def install_mcp_server(
             status_code=422, detail=f"Missing required header value(s): {', '.join(missing)}."
         )
     secret = {spec["name"] for spec in candidate["headers"] if spec.get("isSecret")}
-    # A secret declared header carries the auth itself; without one the server
-    # is OAuth and ships dark until its Connect lands.
-    is_oauth = not secret
+    # A filled secret header carries the auth itself. Without one the server is
+    # OAuth and ships dark until its Connect lands.
+    is_oauth = not secret.intersection(filled)
     try:
         await McpServer.create(
             session,
@@ -196,13 +201,13 @@ async def connect_mcp_server(
     request: Request,
     identity_mode: Annotated[IdentityMode, Body(embed=True)],
 ) -> ConnectMcpServerResponse:
-    server = (await McpServer.get_resolved(session, current_account_id.get())).get(name)
-    if not server or not server["is_oauth"]:
+    access = await McpServer.get_access(session, name, current_account_id.get())
+    if not access or not access.is_oauth:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} is not an OAuth server.")
-    if await oauth.list_connections(session, name) and server["identity_mode"] != identity_mode:
+    if await oauth.list_connections(session, name) and access.identity_mode != identity_mode:
         raise HTTPException(
             status_code=409,
-            detail=f"MCP server {name!r} already uses {server['identity_mode']!r} identity.",
+            detail=f"MCP server {name!r} already uses {access.identity_mode!r} identity.",
         )
     endpoint = request.app.state.settings.urls.endpoint
     if not endpoint:
@@ -213,10 +218,24 @@ async def connect_mcp_server(
             detail="Set urls.endpoint to the base URL the operator's browser reaches druks "
             "at, to connect OAuth MCP servers.",
         )
+    if access.credential == Credential.SERVICE_CONNECTION:
+        # The account's sign-in at the service is its credential here, and a
+        # sign-in belongs to one account. The service's callback knows nothing of
+        # this server, so Connect is where it becomes enabled.
+        if identity_mode == IdentityMode.PER_USER:
+            await McpServer.set_enabled(session, name, is_enabled=True)
+            return ConnectMcpServerResponse(
+                authorization_url=f"{endpoint.rstrip('/')}/api/oauth/{access.service}"
+                "/connect?next=/settings/mcp"
+            )
+        raise HTTPException(
+            status_code=409,
+            detail=f"MCP server {name!r} signs in through {access.service!r}, per account.",
+        )
     try:
         authorization_url = await oauth.begin_connect(
             name,
-            server["url"],
+            access.url,
             endpoint,
             account_id=current_account_id.get(),
             identity_mode=identity_mode,
@@ -258,12 +277,12 @@ async def oauth_callback(
 
 @router.delete("/{name}/grant", status_code=204)
 async def disconnect_mcp_server(session: SessionDep, name: str) -> None:
-    server = (await McpServer.get_resolved(session, current_account_id.get())).get(name)
-    if not server or not server["is_oauth"]:
+    access = await McpServer.get_access(session, name, current_account_id.get())
+    if not access or not access.is_oauth:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} is not an OAuth server.")
-    if not server["identity_mode"]:
+    if not access.identity_mode:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} has no grant.")
-    account_id = get_grant_account(server["identity_mode"], current_account_id.get())
+    account_id = get_grant_account(access.identity_mode, current_account_id.get())
     connection = await oauth.get_connection(session, name, account_id)
     if not connection:
         raise HTTPException(
@@ -277,5 +296,5 @@ async def disconnect_mcp_server(session: SessionDep, name: str) -> None:
         server_row = await McpServer.get_for_name(session, name)
         if server_row:
             server_row.identity_mode = None
-    if server["identity_mode"] == IdentityMode.SHARED:
+    if access.identity_mode == IdentityMode.SHARED:
         await McpServer.set_enabled(session, name, is_enabled=False)

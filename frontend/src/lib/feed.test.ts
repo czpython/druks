@@ -127,8 +127,8 @@ it('uses another app formatter for the same topic', () => {
     activity: ({ payload }) => ({ label: 'Notes combined', context: String(payload?.summary), icon: FileCheck2, tone: 'positive' }),
   })
   const line = eventLine(event({ app: 'publishing', topic: 'merged', subjectKey: 'NOTE-7',
-    payload: { title: 'Recorded note title', summary: 'Three notes combined.' } }))
-  expect(line).toMatchObject({ key: 'NOTE-7', title: 'Recorded note title', label: 'Notes combined',
+    payload: { summary: 'Three notes combined.' } }))
+  expect(line).toMatchObject({ key: 'NOTE-7', label: 'Notes combined',
     context: 'Three notes combined.', icon: FileCheck2, tone: 'positive' })
   expect(activityTypeLabel({ app: 'publishing', topic: 'merged' })).toBe('Notes combined')
 })
@@ -137,7 +137,6 @@ it('keeps generic facts useful without inventing missing context or a destinatio
   const line = eventLine(event({ app: 'unregistered', topic: 'gist.prepared',
     payload: { summary: 'The pump ran hot.' } }))
   expect(line).toMatchObject({ label: 'Gist prepared', context: 'The pump ran hot.', icon: CircleDot, tone: 'neutral' })
-  expect(line.title).toBeUndefined()
   expect(line.path).toBeUndefined()
   expect(eventLine(event({ topic: 'unknown.topic', payload: {} })).context).toBeUndefined()
 })

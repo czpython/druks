@@ -42,10 +42,18 @@ export function hrefForLink(link: Link, app: string, pages: PageEntry[]): string
   if (link.url) return link.url
   if (link.subject) {
     const subject = { type: link.subject.subjectType, id: link.subject.subjectId }
-    return getAppUI(app)?.subjectPath?.(subject) ?? `/${app}/${subject.type}/${subject.id}`
+    return getAppUI(app)?.subjectPath?.(subject) ?? `/${app}/${subject.type}/${encodeURIComponent(subject.id)}`
   }
   const target = pages.find((entry) => entry.name === link.page)
   return target ? fillPath(target.path, link.arguments) : ''
+}
+
+export function isOutbound(url: string): boolean {
+  return /^https?:\/\//i.test(url)
+}
+
+export function isServerHref(href: string): boolean {
+  return href.startsWith('/api/')
 }
 
 /** The tab strip a page belongs to: its family root first, then the root's
@@ -225,7 +233,9 @@ function replaceRegions(blocks: Block[], replacements: Map<string, Region>): Blo
 /** Runs with a decision control in this page, including nested cards and regions. */
 export function gateRuns(blocks: Block[]): string[] {
   return blocks.flatMap((block) => {
-    if (block.block === 'gate_controls') return [block.run]
+    if (block.block === 'gate_controls') {
+      return block.status.gate && block.status.run ? [block.status.run] : []
+    }
     if (block.block === 'cards') return gateRuns(block.cards)
     const nested = inside(block)
     return nested ? gateRuns(nested) : []

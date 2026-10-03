@@ -1,3 +1,3 @@
-from .datastructures import Sandbox
+from .datastructures import Sandbox, SandboxMcpServer, SandboxSecret
 
-__all__ = ["Sandbox"]
+__all__ = ["Sandbox", "SandboxMcpServer", "SandboxSecret"]

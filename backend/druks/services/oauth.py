@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import secrets
+from collections.abc import Callable
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -30,6 +31,12 @@ from .exceptions import OauthExchangeError, OauthRefreshError
 def _http() -> httpx.AsyncClient:
     # One construction point so a suite can swap in a MockTransport client.
     return httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+
+
+def is_grant_revoked(status: int, tokens: dict[str, Any]) -> bool:
+    """Whether a token endpoint's answer says the provider revoked the grant, as RFC
+    6749 reports it. A service overrides its own method for a provider that differs."""
+    return status != 200 and tokens.get("error") == "invalid_grant"
 
 
 async def _post_token(
@@ -84,6 +91,7 @@ class OauthClient:
     example RFC 8707's ``resource``. ``extra_authorize_params`` go into every
     consent query, for example Google's ``access_type=offline`` and
     ``prompt=consent``. Each ``begin_connect`` asks for its own scopes.
+    ``is_grant_revoked`` reads the token endpoint's answer to a refresh.
     """
 
     def __init__(
@@ -99,6 +107,7 @@ class OauthClient:
         extra_authorize_params: dict[str, str] | None = None,
         mint_wait_interval_seconds: float = OAUTH_MINT_WAIT_INTERVAL_SECONDS,
         mint_wait_attempts: int = OAUTH_MINT_WAIT_ATTEMPTS,
+        is_grant_revoked: Callable[[int, dict[str, Any]], bool] = is_grant_revoked,
     ) -> None:
         self.provider = provider
         self.authorization_endpoint = authorization_endpoint
@@ -110,6 +119,7 @@ class OauthClient:
         self.extra_authorize_params = dict(extra_authorize_params or {})
         self.mint_wait_interval_seconds = mint_wait_interval_seconds
         self.mint_wait_attempts = mint_wait_attempts
+        self.is_grant_revoked = is_grant_revoked
 
     async def begin_connect(
         self,
@@ -241,30 +251,33 @@ class OauthClient:
                     )
                 except httpx.HTTPError as error:
                     raise OauthRefreshError(self.provider, str(error)) from error
-            if response.status_code != 200:
-                if "invalid_grant" in response.text:
-                    # The provider withdrew the grant; presenting it again can never
-                    # succeed. The revoke commits on its own: the caller's step
-                    # session rolls back when this error propagates.
-                    async with get_session(session.bind) as own:
-                        revoked = await own.get(VaultSecret, connection.id)
-                        await self.disconnect(revoked, reason="invalid_grant")
-                        await own.commit()
+            try:
+                tokens = response.json()
+            except ValueError:
+                tokens = None
+            if not isinstance(tokens, dict):
+                if response.status_code == 200:
                     raise OauthRefreshError(
-                        self.provider,
-                        "the provider revoked the grant; sign in again to restore the connection",
+                        self.provider, "the token endpoint returned malformed JSON"
                     )
+                tokens = {}
+            if self.is_grant_revoked(response.status_code, tokens):
+                # Presenting the grant again can never succeed. The revoke commits on
+                # its own: the caller's step session rolls back when this error propagates.
+                async with get_session(session.bind) as own:
+                    revoked = await own.get(VaultSecret, connection.id)
+                    await self.disconnect(revoked, reason="invalid_grant")
+                    await own.commit()
+                raise OauthRefreshError(
+                    self.provider,
+                    "the provider revoked the grant; sign in again to restore the connection",
+                )
+            if response.status_code != 200:
                 await redis.delete(token_key)
                 raise OauthRefreshError(
                     self.provider, f"HTTP {response.status_code} from the token endpoint"
                 )
-            try:
-                tokens = response.json()
-            except ValueError as error:
-                raise OauthRefreshError(
-                    self.provider, "the token endpoint returned malformed JSON"
-                ) from error
-            if not isinstance(tokens, dict) or not tokens.get("access_token"):
+            if not tokens.get("access_token"):
                 raise OauthRefreshError(
                     self.provider, "the token endpoint returned no access token"
                 )

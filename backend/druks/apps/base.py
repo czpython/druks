@@ -1,6 +1,7 @@
 import importlib.util
 import re
 from collections.abc import Callable, Coroutine
+from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from types import ModuleType
@@ -10,7 +11,7 @@ from pydantic import BaseModel, Field, SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.db import db_session
-from druks.exceptions import SubjectNotFound
+from druks.exceptions import ObjectNotFound
 from druks.models import StoredSubject
 from druks.ui.exceptions import PageContractError, PageReadError, PageRouteError
 from druks.user_settings.models import SettingsOverride
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     from druks.agents import Agent, Bot
     from druks.doctor import CheckResult
     from druks.durable.datastructures import Subject
+    from druks.ui import Page
     from druks.ui.page import PageRoute
     from druks.workflows import Workflow
 
@@ -391,6 +393,12 @@ class App:
                 name = getattr(route, "operation_id", "") or ""
                 if not name:
                     continue
+                if name.startswith(f"{cls.name}_"):
+                    raise AppRouteConflict(
+                        f"app {cls.name!r} declares operation {name!r}. Druks adds the app "
+                        f"name to every operation id. Declare "
+                        f"{name.removeprefix(f'{cls.name}_')!r}."
+                    )
                 # An APIRoute's own path already carries its router's prefix.
                 path = f"/api/{cls.name}{getattr(route, 'path', '')}"
                 if name in found:
@@ -415,34 +423,129 @@ class App:
         from fastapi import APIRouter
 
         from druks.ui import Page
+        from druks.ui.page import PageRoute
 
         operations = cls.operations()
+        declarations = cls.pages()
+        landing = {declaration.route: declaration for declaration in declarations}.get("/")
         router = APIRouter(prefix="/pages", tags=[f"{cls.name}:pages"])
-        for declaration in cls.pages():
+        for declaration in declarations:
             router.add_api_route(
                 # The landing page's route is "/", and its snapshot answers at
                 # the bare /pages.
                 declaration.route.rstrip("/"),
-                cls._page_endpoint(declaration, operations),
+                cls._page_endpoint(declaration, operations, back=declaration.parent or landing),
                 methods=["GET"],
                 response_model=Page,
                 response_model_by_alias=True,
                 name=declaration.name,
             )
+        if not landing:
+            router.add_api_route(
+                "",
+                cls._page_endpoint(PageRoute("/", cls._get_home_page), operations, back=None),
+                methods=["GET"],
+                response_model=Page,
+                response_model_by_alias=True,
+                name="home",
+            )
         return router
 
     @classmethod
-    def _page_endpoint(cls, declaration: "PageRoute", operations: "dict[str, Operation]"):
+    async def _get_home_page(cls) -> "Page":
+        """The home an app gets when it declares no landing page: one live table
+        for each subject type, with the summary's own fields as columns and where
+        the work on each subject stands."""
+        from druks import ui
+        from druks.accounts.context import current_account_id
+
+        def cell(value):
+            match value:
+                case bool():
+                    return ui.TextValue("yes" if value else "no")
+                case int() | float():
+                    return ui.NumberValue(value)
+                case datetime():
+                    return ui.TimeValue(value)
+                case str():
+                    return ui.TextValue(value)
+            return ui.TextValue("")
+
+        account_id = current_account_id.get()
+        sections = []
+        for subject_class in cls.subjects():
+            subject_type = subject_class.subject_type
+            label = subject_type.replace("_", " ")
+            summaries = await subject_class.list_summaries(account_id)
+            facts = [summary.model_dump(exclude={"id", "key"}) for summary in summaries]
+            # A nested value has no cell, so the summary's scalars are the columns.
+            fields = [
+                name
+                for name in dict.fromkeys(name for fact in facts for name in fact)
+                if all(
+                    isinstance(fact.get(name), str | bool | int | float | datetime | None)
+                    for fact in facts
+                )
+            ]
+            rows = []
+            for summary, fact in zip(summaries, facts, strict=True):
+                subject = ui.Follows(subject_type=subject_type, subject_id=str(summary.id))
+                rows.append(
+                    ui.TableRow(
+                        [
+                            ui.TextValue(summary.key, link=ui.Link(subject=subject)),
+                            *(cell(fact.get(name)) for name in fields),
+                            ui.SubjectStatus(subject),
+                        ]
+                    )
+                )
+            sections.append(
+                ui.Section(
+                    name=subject_type,
+                    title=label,
+                    follows=subject_class,
+                    blocks=[
+                        ui.Table(
+                            columns=[
+                                ui.TableColumn(label),
+                                *(ui.TableColumn(name.replace("_", " ")) for name in fields),
+                                ui.TableColumn("status"),
+                            ],
+                            rows=rows,
+                            empty=ui.EmptyState(f"No {label} yet."),
+                        )
+                    ],
+                )
+            )
+        return ui.Page(cls.name.replace("_", " "), description=cls.description, blocks=sections)
+
+    @classmethod
+    def _page_endpoint(
+        cls,
+        declaration: "PageRoute",
+        operations: "dict[str, Operation]",
+        *,
+        back: "PageRoute | None",
+    ):
         """``wraps`` keeps the page function's signature, so FastAPI still
-        validates every route parameter."""
-        from druks.ui import EmptyState, Page
+        validates every route parameter. A page whose subject is missing answers
+        an empty state that links ``back``. The page serializes with where the
+        work on each of its subjects stands, from one read."""
+        from fastapi.responses import JSONResponse
+
+        from druks.durable import reads
+        from druks.ui import Action, EmptyState, GateControls, Link, Page, SubjectStatus
+
+        controls = []
+        if back and back is not declaration:
+            controls.append(Link(back.label, page=back.name))
 
         @wraps(declaration.function)
         async def read_page(**parameters):
             try:
                 page = await declaration.function(**parameters)
-            except SubjectNotFound as error:
-                return Page(str(error), blocks=[EmptyState(str(error))])
+            except ObjectNotFound as error:
+                return Page(str(error), blocks=[EmptyState(str(error), controls=controls)])
             except Exception as error:
                 raise PageReadError(
                     cls.name, declaration.name, f"its own code raised {type(error).__name__}"
@@ -454,11 +557,18 @@ class App:
                     f"it answered with {type(page).__name__}, not a Page",
                 )
             try:
-                for action in page.iter_actions():
+                for action in page.iter_parts(Action):
                     action.check_operation(cls.name, operations)
             except ValueError as error:
                 raise PageContractError(cls.name, declaration.name, str(error)) from error
-            return page
+            subjects = [
+                (part.subject.subject_type, part.subject.subject_id)
+                for part in page.iter_parts(SubjectStatus, GateControls)
+            ]
+            statuses = await reads.get_statuses_for_subjects(db_session(), subjects)
+            return JSONResponse(
+                page.model_dump(mode="json", by_alias=True, context={"statuses": statuses})
+            )
 
         return read_page
 
@@ -628,7 +738,7 @@ class App:
         async def subject_response(
             session: AsyncSession, subject_id: str
         ) -> SubjectResponse | None:
-            if subject := await subject_class.get_for_id(subject_id):
+            if subject := await subject_class.get_or_none(id=subject_id):
                 return await reads.get_subject_response(
                     session, subject_type, subject_id, summary=subject.get_summary()
                 )

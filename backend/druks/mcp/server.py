@@ -86,7 +86,7 @@ def _validate_agent_tools(api: FastAPI) -> None:
     # is the one view with every route's merged tags. Validation owns only the
     # two demands the author owns — an explicit operation_id and a non-empty
     # docstring; the app prefix is the framework's to derive, not the
-    # author's to repeat (see _namespace_agent_operations).
+    # author's to repeat (see _namespace_app_operations).
     mounted_tags: set[str] = set()
     bot_operations: defaultdict[str, set[str]] = defaultdict(set)
     for route in iter_route_contexts(api.routes):
@@ -117,25 +117,25 @@ def _validate_agent_tools(api: FastAPI) -> None:
 
 
 def get_tool_name(operation_id: str, tags: list[str], app_names: set[str]) -> str:
-    # An app-owned agent operation's tool is f"{app}_{operation_id}", so the
-    # author never repeats the prefix. The loader tags every app route with its
-    # app's name, so among an agent operation's tags the one naming an
-    # installed app is the owner; platform agent operations carry no such tag
-    # and keep their declared ids. An already-prefixed id passes through, so
-    # stable names like software_factory_start never double.
+    # An app-owned operation's id is f"{app}_{operation_id}", so the author
+    # never repeats the prefix. The loader tags every app route with its app's
+    # name, so among an operation's tags the one naming an installed app is the
+    # owner; platform operations carry no such tag and keep their declared ids.
+    # Boot refuses an app id that already carries the prefix, so a prefixed id
+    # here is one this derived before, and it passes through unchanged.
     app = next((tag for tag in tags if tag in app_names), None)
     if app and not operation_id.startswith(f"{app}_"):
         return f"{app}_{operation_id}"
     return operation_id
 
 
-def _namespace_agent_operations(spec: dict, app_names: set[str]) -> None:
-    # Rename each agent operation to its tool name: the provider reads the tool
-    # name off the spec. The namespace is what makes the merged document's
-    # operation ids globally unique. A derived id that would collide with another
-    # route's explicit id is rejected: before this derivation the clash was
-    # visible in the author's code, so the framework must surface it now that it
-    # owns the naming.
+def _namespace_app_operations(spec: dict, app_names: set[str]) -> None:
+    # Rename each app operation to its namespaced id: the provider reads an
+    # agent operation's tool name off the spec. The namespace is what makes the
+    # merged document's operation ids globally unique. A derived id that would
+    # collide with another route's explicit id is rejected: before this
+    # derivation the clash was visible in the author's code, so the framework
+    # must surface it now that it owns the naming.
     existing_ids = {
         op.get("operationId")
         for ops in spec.get("paths", {}).values()
@@ -144,12 +144,12 @@ def _namespace_agent_operations(spec: dict, app_names: set[str]) -> None:
     }
     for path, operations in spec.get("paths", {}).items():
         for operation in operations.values():
-            if not isinstance(operation, dict) or not _TOOL_TAGS & set(operation.get("tags", [])):
+            if not isinstance(operation, dict):
                 continue
             operation_id = operation.get("operationId")
             if not operation_id:
                 continue
-            derived = get_tool_name(operation_id, operation["tags"], app_names)
+            derived = get_tool_name(operation_id, operation.get("tags", []), app_names)
             if derived != operation_id:
                 if derived in existing_ids:
                     raise InvalidAgentToolError(
@@ -160,7 +160,7 @@ def _namespace_agent_operations(spec: dict, app_names: set[str]) -> None:
                 operation["operationId"] = derived
 
 
-def _install_agent_namespacing(api: FastAPI) -> None:
+def _install_app_namespacing(api: FastAPI) -> None:
     # The tool name comes from the spec's operation id, so the namespace must
     # land on the document api.openapi() builds — not on FastAPI's cached, merged
     # route contexts, which later generation silently discards. Wrap the app's
@@ -182,7 +182,7 @@ def _install_agent_namespacing(api: FastAPI) -> None:
 
     def namespaced() -> dict:
         spec = generate()
-        _namespace_agent_operations(spec, app_names)
+        _namespace_app_operations(spec, app_names)
         return spec
 
     api.openapi = namespaced
@@ -209,7 +209,7 @@ def _is_visible(context: AuthContext) -> bool:
 
 def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
     _validate_agent_tools(api)
-    _install_agent_namespacing(api)
+    _install_app_namespacing(api)
     # Built directly rather than via from_fastapi, which owns the transport:
     # raise_app_exceptions=False makes an app crash reach the tool as the
     # app's sanitized 500, so no masking is needed and the taxonomy travels.

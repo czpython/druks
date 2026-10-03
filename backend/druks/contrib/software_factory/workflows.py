@@ -17,9 +17,8 @@ from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.core.services import Github
 from druks.db import db_session
 from druks.mcp.inbound import get_druks_mcp_server
-from druks.sandbox.datastructures import RequiredMcpServer
+from druks.sandbox import SandboxMcpServer, SandboxSecret
 from druks.sandbox.layout import get_related_root, get_work_root
-from druks.sandbox.models import SecretRef
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.settings import load_settings
 from druks.skills.models import Skill
@@ -49,10 +48,10 @@ class BuildWorkspace(RepoWorkspace):
         return get_work_root(self.host.ssh_username)
 
     @classmethod
-    async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
+    async def get_mcp_servers(cls, subject: Any) -> tuple[SandboxMcpServer, ...]:
         # GitHub MCP acts as the review actor. The clone acts as the operator.
         actor = await get_review_actor()
-        github = RequiredMcpServer(
+        github = SandboxMcpServer(
             name=GITHUB_MCP_NAME,
             url=GITHUB_MCP_URL,
             secret_id=(await actor.service.get()).id,
@@ -444,7 +443,7 @@ class Profile(Workflow):
         )
 
     async def run(self, repo_id: int, refresh_only: bool = False) -> None:
-        project_repo = await ProjectRepo.get(repo_id)
+        project_repo = await ProjectRepo.get_or_none(id=repo_id)
 
         if refresh_only:
             baseline = project_repo.profile.get("baseline") or {}
@@ -467,7 +466,7 @@ class Profile(Workflow):
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         return {
-            "repo": (await ProjectRepo.get(self.input.repo_id)).full_name,
+            "repo": (await ProjectRepo.get_or_none(id=self.input.repo_id)).full_name,
             "skills_catalog": [
                 {"name": skill.name, "description": skill.description}
                 for skill in await Skill.list_enabled(db_session())
@@ -480,22 +479,23 @@ class ReviewWorkspace(RepoWorkspace):
     # A checkout of the default branch, with room beside it for siblings. The reviewer
     # checks out the PR itself. The add_dirs grant needs the directory to exist.
     @classmethod
-    async def get_secret_refs(cls, subject: Any) -> list[SecretRef]:
+    async def get_secrets(cls, subject: Any) -> list[SandboxSecret]:
         # The review is authored under the review actor's identity.
         actor = await get_review_actor()
         return [
-            SecretRef(
-                name=Github.secret_name,
+            SandboxSecret(
+                name=actor.service.slug,
                 secret_id=(await actor.service.get()).id,
                 resource=cls.get_repo(subject),
+                host=actor.service.host,
             )
         ]
 
     @classmethod
-    async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
+    async def get_mcp_servers(cls, subject: Any) -> tuple[SandboxMcpServer, ...]:
         actor = await get_review_actor()
         return (
-            RequiredMcpServer(
+            SandboxMcpServer(
                 name=GITHUB_MCP_NAME,
                 url=GITHUB_MCP_URL,
                 secret_id=(await actor.service.get()).id,
@@ -531,7 +531,7 @@ class PullRequestReview(Workflow):
         # reviewer is connected. The lookup raises a clear error before the run starts a VM.
         await Github.get()
         return await cls.start(
-            subject=PullRequest.get(repo, pr_number), account_id=account.id, note=note
+            subject=PullRequest(id=f"{repo}#{pr_number}"), account_id=account.id, note=note
         )
 
     async def run(self, note: str = "") -> None:

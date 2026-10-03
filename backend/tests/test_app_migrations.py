@@ -1,8 +1,13 @@
+import enum
 from pathlib import Path
+from typing import Literal
 from unittest.mock import MagicMock
 
 from alembic import command
+from alembic.autogenerate import render_python_code
 from alembic.config import Config
+from alembic.operations import ops
+from druks.alembic_support import _render_item
 from druks.database import make_app_migration
 from druks.files import File, FileField
 from druks.models import Base
@@ -22,6 +27,19 @@ class MigrationProbeFile(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     image: Mapped[File] = FileField()
+
+
+class ChoiceProbeStatus(enum.StrEnum):
+    OPEN = "open"
+    CLOSED = "closed"
+
+
+class ChoiceProbe(Base):
+    __tablename__ = "choice_probe_rows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    status: Mapped[ChoiceProbeStatus]
+    tone: Mapped[Literal["calm", "loud"]]
 
 
 _BASELINE = """\
@@ -185,3 +203,9 @@ def test_file_field_autogenerates_and_upgrades_with_the_platform_foreign_key(
                 "DROP TABLE IF EXISTS migration_probe_files, alembic_version_migration_probe"
             )
         engine.dispose()
+
+
+def test_choice_columns_render_no_check_beside_their_type():
+    """A StrEnum or Literal column's type emits its own CHECK."""
+    upgrade = ops.UpgradeOps([ops.CreateTableOp.from_table(ChoiceProbe.__table__)])
+    assert "CheckConstraint" not in render_python_code(upgrade, render_item=_render_item)

@@ -22,7 +22,7 @@ from druks.mcp.exceptions import (
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.inbound import get_druks_mcp_server
 from druks.mcp.models import McpServer
-from druks.sandbox.datastructures import RequiredMcpServer
+from druks.sandbox import SandboxMcpServer
 from druks.sandbox.models import SecretRef
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
@@ -36,10 +36,6 @@ _TOKEN = "lin_secret_value"
 _BEARER = {"Authorization": f"Bearer {_TOKEN}"}
 
 
-class _FakeSandbox:
-    ssh_username = "exedev"
-
-
 def _sandbox_config() -> SandboxSettings:
     return SandboxSettings(
         service_url="https://sb.test",
@@ -50,15 +46,16 @@ def _sandbox_config() -> SandboxSettings:
     )
 
 
-async def _delivery() -> dict:
-    # Delivery at the workspace seam: the enabled servers become wire shapes on
-    # ``mcp_servers``; their credentials are box entries, never env.
-    return await Workspace(host=_FakeSandbox()).with_mcp_servers(db_session(), None)  # type: ignore[arg-type]
+async def _servers() -> tuple:
+    # The enabled servers as the harness names them; their credentials are box
+    # entries, never env.
+    servers, _ = await Workspace.get_all_mcp_servers(db_session(), None, None)
+    return servers
 
 
 async def _refs() -> dict[str, SecretRef]:
     # The secret refs a box of a plain workspace binds, one per entry, by name.
-    _, refs = await Workspace.get_mcp_delivery(db_session(), None, None)
+    _, refs = await Workspace.get_all_mcp_servers(db_session(), None, None)
     return {ref.name: ref for ref in refs}
 
 
@@ -74,15 +71,15 @@ async def _github_row() -> VaultSecret:
     )
 
 
-def _requiring(*servers: RequiredMcpServer) -> type[Workspace]:
-    # A workspace declaring the servers it requires and the vault row each
-    # one issues through, as SoftwareFactory does.
-    class _Requiring(Workspace):
+def _declaring(*servers: SandboxMcpServer) -> type[Workspace]:
+    # A workspace declaring its servers and the vault row each one issues
+    # through, as SoftwareFactory does.
+    class _Declaring(Workspace):
         @classmethod
-        async def get_required_mcp_servers(cls, subject) -> tuple[RequiredMcpServer, ...]:
+        async def get_mcp_servers(cls, subject) -> tuple[SandboxMcpServer, ...]:
             return servers
 
-    return _Requiring
+    return _Declaring
 
 
 # --- custom servers: CRUD + enable/disable -------------------------------
@@ -155,30 +152,29 @@ async def test_delivery_names_the_variable_and_binds_the_header_row(druks_db):
     await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, secret_headers=_BEARER)
     row = await _bearer_row("linear")
 
-    kwargs = await _delivery()
+    servers = await _servers()
     refs = await _refs()
 
-    # The wire shape names only the var. The value is a box entry the issuer
+    # The harness shape names only the var. The value is a box entry the issuer
     # answers from the bound row; nothing rides the run env. A pasted bearer
     # is the Authorization header spelled out, delivered like any other.
-    linear = next(s for s in kwargs["mcp_servers"] if s.name == "linear")
+    linear = next(s for s in servers if s.name == "linear")
     assert linear.bearer_token_env_var == ""
     assert linear.env_headers == {"Authorization": "MCP_LINEAR_HEADER_0"}
-    assert "extra_env" not in kwargs
     [ref] = refs.values()
     assert ref.key == ("mcp_linear_header_0", row.id, "", "mcp.linear.app")
     assert _TOKEN not in repr(linear) + repr(refs)
     assert await row.issue_token("") == (f"Bearer {_TOKEN}", None)
 
 
-async def test_required_server_delivers_beside_the_registry(druks_db):
+async def test_workspace_server_delivers_beside_the_registry(druks_db):
     # A workspace declares a server with its own vault row and resource
-    # (SoftwareFactory's review identity and repo): wire shape + entry ride
+    # (SoftwareFactory's review identity and repo): harness shape + entry ride
     # the same seam as every registry server.
     await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, secret_headers=_BEARER)
     row = await _github_row()
-    workspace = _requiring(
-        RequiredMcpServer(
+    workspace = _declaring(
+        SandboxMcpServer(
             name="github",
             url="https://api.githubcopilot.com/mcp/",
             secret_id=row.id,
@@ -186,9 +182,9 @@ async def test_required_server_delivers_beside_the_registry(druks_db):
         )
     )
 
-    wire, refs = await workspace.get_mcp_delivery(db_session(), None, None)
+    servers, refs = await workspace.get_all_mcp_servers(db_session(), None, None)
 
-    github = next(s for s in wire if s.name == "github")
+    github = next(s for s in servers if s.name == "github")
     assert github.url == "https://api.githubcopilot.com/mcp/"
     assert github.bearer_token_env_var == "MCP_GITHUB_TOKEN"
     by_name = {ref.name: ref for ref in refs}
@@ -198,25 +194,25 @@ async def test_required_server_delivers_beside_the_registry(druks_db):
         "acme/widgets",
         "api.githubcopilot.com",
     )
-    assert "linear" in {s.name for s in wire}
+    assert "linear" in {s.name for s in servers}
     assert "mcp_linear_header_0" in by_name
 
 
-async def test_required_server_owns_its_name_against_a_registry_twin(druks_db):
-    # Exactly one wire entry per name — the workspace's — and the registry twin
+async def test_workspace_server_owns_its_name_against_a_registry_twin(druks_db):
+    # Exactly one harness entry per name — the workspace's — and the registry twin
     # is skipped whole: it is neither bound to an entry nor resolved at all (a
     # tokenless twin would otherwise raise).
     await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, secret_headers=_BEARER)
     await McpServer.create(druks_db, name="notion", url="https://mcp.notion.com/sse")
     row = await _github_row()
-    workspace = _requiring(
-        RequiredMcpServer(name="linear", url="https://required.internal/linear", secret_id=row.id),
-        RequiredMcpServer(name="notion", url="https://required.internal/notion", secret_id=row.id),
+    workspace = _declaring(
+        SandboxMcpServer(name="linear", url="https://required.internal/linear", secret_id=row.id),
+        SandboxMcpServer(name="notion", url="https://required.internal/notion", secret_id=row.id),
     )
 
-    wire, refs = await workspace.get_mcp_delivery(db_session(), None, None)
+    servers, refs = await workspace.get_all_mcp_servers(db_session(), None, None)
 
-    delivered = [s for s in wire if s.name == "linear"]
+    delivered = [s for s in servers if s.name == "linear"]
     assert len(delivered) == 1
     assert delivered[0].url == "https://required.internal/linear"
     by_name = {ref.name: ref for ref in refs}
@@ -224,16 +220,16 @@ async def test_required_server_owns_its_name_against_a_registry_twin(druks_db):
     assert by_name["mcp_notion_token"].secret_id == row.id
 
 
-async def test_duplicate_required_names_are_refused(druks_db):
+async def test_duplicate_workspace_names_are_refused(druks_db):
     # Two servers under one name would collide in the emitted harness config
     # (one TOML table / JSON key per name) — refused loudly at delivery.
-    workspace = _requiring(
-        RequiredMcpServer(name="github", url="https://a/", secret_id="one"),
-        RequiredMcpServer(name="github", url="https://b/", secret_id="two"),
+    workspace = _declaring(
+        SandboxMcpServer(name="github", url="https://a/", secret_id="one"),
+        SandboxMcpServer(name="github", url="https://b/", secret_id="two"),
     )
 
-    with pytest.raises(ValueError, match="duplicate required"):
-        await workspace.get_mcp_delivery(db_session(), None, None)
+    with pytest.raises(ValueError, match="duplicate workspace"):
+        await workspace.get_all_mcp_servers(db_session(), None, None)
 
 
 async def test_enabled_server_without_secrets_raises_loudly(druks_db):
@@ -243,13 +239,12 @@ async def test_enabled_server_without_secrets_raises_loudly(druks_db):
     await McpServer.create(druks_db, name="notion", url="https://mcp.notion.com/sse")
 
     with pytest.raises(MissingTokenError, match="notion"):
-        await _delivery()
+        await _servers()
 
 
 async def test_enabled_server_reaches_both_harness_configs_without_token(druks_db):
     await McpServer.create(druks_db, name="linear", url=_LINEAR_URL, secret_headers=_BEARER)
-    kwargs = await _delivery()
-    servers = kwargs["mcp_servers"]
+    servers = await _servers()
 
     claude_config = " ".join(
         ClaudeHarness(
@@ -271,7 +266,6 @@ async def test_enabled_server_reaches_both_harness_configs_without_token(druks_d
     assert _LINEAR_URL in codex_config
     assert "MCP_LINEAR_HEADER_0" in codex_config
     assert _TOKEN not in codex_config
-    assert "extra_env" not in kwargs
 
 
 # --- declared headers: N per server, secret values via env refs -----------
@@ -293,17 +287,16 @@ async def _grafana_shaped_server() -> None:
 async def test_declared_headers_deliver_inline_and_secret_values_are_entries(druks_db):
     await _grafana_shaped_server()
 
-    kwargs = await _delivery()
+    servers = await _servers()
     refs = await _refs()
 
-    grafana = next(s for s in kwargs["mcp_servers"] if s.name == "grafana")
-    # The wire shape names the env var behind each secret header; the value is
+    grafana = next(s for s in servers if s.name == "grafana")
+    # The harness shape names the env var behind each secret header; the value is
     # a box entry for that header on the server's host, never inline.
     assert grafana.headers == {"X-Grafana-URL": "https://acme.grafana.net"}
     assert grafana.env_headers == {"X-Api-Key": "MCP_GRAFANA_HEADER_0"}
     assert "grafana-api-secret" not in repr(grafana) + repr(refs)
-    assert "extra_env" not in kwargs
-    # No bearer: neither the wire shape nor the box carries an Authorization entry.
+    # No bearer: neither the harness shape nor the box carries an Authorization entry.
     assert grafana.bearer_token_env_var == ""
     [ref] = refs.values()
     row = await druks_db.get(VaultSecret, ref.secret_id)
@@ -323,10 +316,10 @@ async def test_three_secret_headers_bind_three_entries(druks_db):
         secret_headers={**_BEARER, "X-Api-Key": "key-secret", "X-Org": "org-secret"},
     )
 
-    kwargs = await _delivery()
+    servers = await _servers()
     refs = await _refs()
 
-    acme = next(s for s in kwargs["mcp_servers"] if s.name == "acme")
+    acme = next(s for s in servers if s.name == "acme")
     assert acme.env_headers == {
         "Authorization": "MCP_ACME_HEADER_0",
         "X-Api-Key": "MCP_ACME_HEADER_1",
@@ -342,8 +335,7 @@ async def test_three_secret_headers_bind_three_entries(druks_db):
 
 async def test_two_header_server_emits_both_headers_in_each_harness_config(druks_db):
     await _grafana_shaped_server()
-    kwargs = await _delivery()
-    servers = kwargs["mcp_servers"]
+    servers = await _servers()
     header_env_var = servers[0].env_headers["X-Api-Key"]
 
     claude_flags = ClaudeHarness(
@@ -381,8 +373,7 @@ async def test_secret_and_declared_headers_combine_on_one_server(druks_db):
         headers={"X-Region": "eu"},
     )
 
-    kwargs = await _delivery()
-    servers = kwargs["mcp_servers"]
+    servers = await _servers()
 
     claude_flags = ClaudeHarness(
         model="claude-x", fast_mode=False, effort=None, sandbox=_sandbox_config()
@@ -392,7 +383,6 @@ async def test_secret_and_declared_headers_combine_on_one_server(druks_db):
         "Authorization": "${MCP_ACME_HEADER_0}",
         "X-Region": "eu",
     }
-    assert "extra_env" not in kwargs
 
 
 async def test_bearerless_server_merges_with_its_headers(druks_db):
@@ -559,14 +549,13 @@ def _static_entry(url):
 async def test_packaged_catalog_is_empty_and_delivers_nothing(registry_state, druks_db):
     # The packaged default is an explicit empty ``mcpServers`` map: a fresh
     # install registers no built-ins and delivers no MCP servers. SoftwareFactory's github
-    # MCP is SoftwareFactory's own requirement (get_required_mcp_servers), never a catalog
+    # MCP is SoftwareFactory's own requirement (get_mcp_servers), never a catalog
     # entry.
     load_mcp_catalog(PACKAGED_MCP_CATALOG)
 
     assert not [s for s in (await McpServer._merged(druks_db)).values() if s["builtin"]]
 
-    kwargs = await _delivery()
-    assert "mcp_servers" not in kwargs
+    assert await _servers() == ()
 
 
 def test_load_catalog_tolerates_wrapper_and_is_idempotent(tmp_path, registry_state):
@@ -668,12 +657,12 @@ async def test_catalog_enabled_false_ships_the_entry_dark(tmp_path, registry_sta
 # --- druks' own server: each account's token, on first use -----------------
 
 
-def _requiring_druks(monkeypatch, allowed_tools=()) -> type[Workspace]:
+def _declaring_druks(monkeypatch, allowed_tools=()) -> type[Workspace]:
     monkeypatch.setattr(
         "druks.mcp.inbound.load_settings",
         lambda: SimpleNamespace(urls=Urls(endpoint="https://druks.test/", webhook_host="")),
     )
-    return _requiring(get_druks_mcp_server(allowed_tools=allowed_tools))
+    return _declaring(get_druks_mcp_server(allowed_tools=allowed_tools))
 
 
 async def _druks_row(account_id: str) -> VaultSecret:
@@ -699,15 +688,15 @@ def test_druks_needs_an_address_a_box_reaches(monkeypatch):
 
 async def test_delivery_mints_the_run_account_its_own_token(druks_db, monkeypatch):
     allowed_tools = ("software_factory_get_ticket",)
-    workspace = _requiring_druks(monkeypatch, allowed_tools)
+    workspace = _declaring_druks(monkeypatch, allowed_tools)
     account = await Account.get_or_create(druks_db, "op@example.com")
 
-    wire, refs = await workspace.get_mcp_delivery(db_session(), None, account.id)
+    servers, refs = await workspace.get_all_mcp_servers(db_session(), None, account.id)
 
     row = await _druks_row(account.id)
     minted = await PersonalAccessToken.authenticate(druks_db, await _druks_pat(account.id))
     assert (minted.account_id, minted.allowed_tools) == (account.id, list(allowed_tools))
-    server = next(one for one in wire if one.name == DRUKS_SERVER_NAME)
+    server = next(one for one in servers if one.name == DRUKS_SERVER_NAME)
     assert server.url == "https://druks.test/mcp"
     assert server.bearer_token_env_var == "MCP_DRUKS_TOKEN"
     assert {ref.name: ref.secret_id for ref in refs}["mcp_druks_token"] == row.id
@@ -716,32 +705,32 @@ async def test_delivery_mints_the_run_account_its_own_token(druks_db, monkeypatc
 
 
 async def test_a_later_run_reuses_the_token_and_a_retired_one_is_replaced(druks_db, monkeypatch):
-    workspace = _requiring_druks(monkeypatch)
+    workspace = _declaring_druks(monkeypatch)
     account = await Account.get_or_create(druks_db, "op@example.com")
-    await workspace.get_mcp_delivery(db_session(), None, account.id)
+    await workspace.get_all_mcp_servers(db_session(), None, account.id)
     first = await _druks_pat(account.id)
     # No tools: the token carries the account's whole API.
     assert (await PersonalAccessToken.authenticate(druks_db, first)).allowed_tools is None
 
-    await workspace.get_mcp_delivery(db_session(), None, account.id)
+    await workspace.get_all_mcp_servers(db_session(), None, account.id)
 
     assert await _druks_pat(account.id) == first
     assert len(await PersonalAccessToken.list_for_account(druks_db, account.id)) == 1
 
     await (await PersonalAccessToken.authenticate(druks_db, first)).revoke()
-    await workspace.get_mcp_delivery(db_session(), None, account.id)
+    await workspace.get_all_mcp_servers(db_session(), None, account.id)
 
     assert await _druks_pat(account.id) != first
     assert len(await PersonalAccessToken.list_for_account(druks_db, account.id)) == 2
 
 
 async def test_two_accounts_hold_their_own_tokens(druks_db, monkeypatch):
-    workspace = _requiring_druks(monkeypatch)
+    workspace = _declaring_druks(monkeypatch)
     first = await Account.get_or_create(druks_db, "first@example.com")
     second = await Account.get_or_create(druks_db, "second@example.com")
 
-    await workspace.get_mcp_delivery(db_session(), None, first.id)
-    await workspace.get_mcp_delivery(db_session(), None, second.id)
+    await workspace.get_all_mcp_servers(db_session(), None, first.id)
+    await workspace.get_all_mcp_servers(db_session(), None, second.id)
 
     holders = [
         (await PersonalAccessToken.authenticate(druks_db, await _druks_pat(account_id))).account_id

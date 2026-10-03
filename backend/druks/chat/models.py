@@ -99,6 +99,8 @@ class Conversation(Base, Uuid7Pk):
     thread_id: Mapped[str] = mapped_column(default="", server_default=text("''"))
     title: Mapped[str | None]
     is_pinned: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    # The person asked that only their tagged messages in the thread reach the agent.
+    is_tag_required: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     session_file: Mapped[File | None] = FileField()
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     messages: Mapped[list[Message]] = relationship(

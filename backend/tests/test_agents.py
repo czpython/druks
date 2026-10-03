@@ -17,6 +17,7 @@ from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.usage.models import UsageScrape
 from druks.user_settings.models import SettingsOverride
+from druks.workspaces import Workspace
 from sqlalchemy import select
 
 
@@ -194,6 +195,70 @@ async def test_declared_plugin_choice_is_forwarded(druks_db, tmp_path, monkeypat
     await agent._run(db_session(), workflow_id="wf-9")
 
     assert sandbox.run_agent.await_args.kwargs["include_plugins"] is False
+
+
+async def test_an_agent_without_mcp_resolves_no_server(
+    druks_db, tmp_path, monkeypatch, current_run
+):
+    agent = agents.Agent(
+        id="sealed_probe",
+        prompt="dummy/agent.md",
+        contract=DummyOutput,
+        include_mcp=False,
+    )
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    _patch_ephemeral(monkeypatch, sandbox)
+    resolve = AsyncMock()
+    monkeypatch.setattr(Workspace, "get_all_mcp_servers", resolve)
+
+    await agent._run(db_session(), workflow_id="wf-9")
+
+    resolve.assert_not_awaited()
+    assert sandbox.run_agent.await_args.kwargs["mcp_servers"] == ()
+
+
+async def test_an_agent_holds_its_declared_service_secrets(
+    druks_db, tmp_path, monkeypatch, current_run, declared_services
+):
+    from conftest import connect_service
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    class Acme(Service):
+        host = "api.acme.test"
+
+        class Settings(BaseModel):
+            api_key: SecretStr
+
+    class Spare(Service):
+        required = False
+        host = "api.spare.test"
+
+        class Settings(BaseModel):
+            api_key: SecretStr
+
+    card = await connect_service("acme", identity={}, secrets={"api_key": "key-1"})
+    agent = agents.Agent(
+        id="keyed_probe",
+        prompt="dummy/agent.md",
+        contract=DummyOutput,
+        secrets=(Acme.fields.api_key, Spare.fields.api_key),
+    )
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    _patch_ephemeral(monkeypatch, sandbox)
+
+    await agent._run(db_session(), workflow_id="wf-9")
+
+    [identity] = await _identities("wf-9")
+    refs = await db_session().scalars(
+        select(SecretRef).where(
+            SecretRef.identity_id == identity.id, SecretRef.name.like("%_api_key")
+        )
+    )
+    # The optional service is not connected, so its secret stays out.
+    [ref] = list(refs)
+    assert (ref.name, ref.secret_id, ref.host) == ("acme_api_key", card.id, "api.acme.test")
+    assert await ref.secret.issue_token(ref.resource, name=ref.name) == ("key-1", None)
 
 
 async def test_runner_comes_from_workflow_workspace_factory(
@@ -827,8 +892,8 @@ async def test_reused_host_retry_presents_a_stable_idempotency_key(monkeypatch, 
 
     config = SimpleNamespace(secrets={}, secret_refs=[], secrets_id="")
     with pytest.raises(HarnessSandboxProvisioningError):
-        await current_run._lease_host(db_session(), config)
-    host_id = await current_run._lease_host(db_session(), config)
+        await current_run._lease_host(db_session(), config, [])
+    host_id = await current_run._lease_host(db_session(), config, [])
 
     assert host_id == "warm-host"
     assert keys == ["wf-9:workflow", "wf-9:workflow"]

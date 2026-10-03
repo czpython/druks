@@ -8,6 +8,7 @@ from druks import workspaces as workspace_mod
 from druks.contrib.software_factory.services import GithubReviewer
 from druks.core.apis.github import GitHubClient
 from druks.core.services import Github
+from druks.sandbox import SandboxSecret
 from druks.sandbox.layout import get_repo_root
 from druks.secrets.models import VaultSecret
 from druks.workspaces import RepoWorkspace, Workspace
@@ -19,6 +20,23 @@ class _RecordingHost:
 
     def __init__(self) -> None:
         self.events: list[tuple[Any, ...]] = []
+
+
+async def test_every_agent_call_gets_the_workspace_env(druks_db):
+    class DeployWorkspace(Workspace):
+        def get_env(self) -> dict[str, str]:
+            return {"DEPLOY_TOKEN": "token"}
+
+    calls: list[dict[str, Any]] = []
+
+    class _Host:
+        async def run_agent(self, session, **kwargs: Any) -> str:
+            calls.append(kwargs)
+            return "result"
+
+    await DeployWorkspace(host=_Host()).run_agent(account_id=None, prompt="p")  # type: ignore[arg-type]
+
+    assert calls == [{"extra_env": {"DEPLOY_TOKEN": "token"}, "prompt": "p"}]
 
 
 async def test_repo_workspace_clones_before_every_agent_call_and_writes_no_token(
@@ -60,10 +78,12 @@ async def test_repo_workspace_names_its_github_secret_and_repo_before_the_box_ex
     row = await _connect()
     subject = SimpleNamespace(repo="acme/widgets")
 
-    [secret] = await RepoWorkspace.get_secret_refs(subject)
+    [secret] = await RepoWorkspace.get_secrets(subject)
 
-    assert secret.key == ("github", row.id, "acme/widgets", "")
-    assert await Workspace.get_secret_refs(subject) == []
+    assert secret == SandboxSecret(
+        name="github", secret_id=row.id, resource="acme/widgets", host="github.com"
+    )
+    assert await Workspace.get_secrets(subject) == []
 
 
 async def test_a_workspace_selects_its_github_identity_by_service(druks_db):
@@ -72,7 +92,7 @@ async def test_a_workspace_selects_its_github_identity_by_service(druks_db):
     class Reviewing(RepoWorkspace):
         github = GithubReviewer
 
-    [secret] = await Reviewing.get_secret_refs(SimpleNamespace(repo="o/r"))
+    [secret] = await Reviewing.get_secrets(SimpleNamespace(repo="o/r"))
 
     assert (secret.secret_id, secret.resource) == (row.id, "o/r")
 

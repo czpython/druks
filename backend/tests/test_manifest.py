@@ -64,7 +64,7 @@ async def test_manifest_records_the_delivered_capability_set(druks_db):
         bearer_token_env_var=get_bearer_token_env_var("github"),
     )
     # Both servers delivered with a bearer entry — github is SoftwareFactory's own
-    # requirement (get_required_mcp_servers), so it reads delivered but not declared.
+    # server (get_mcp_servers), so it reads delivered but not declared.
     manifest = await _build(mcp_servers=(linear, github), skills=("alpha",))
 
     assert manifest["schema_version"] == 2

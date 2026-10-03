@@ -182,6 +182,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
     assert list(tools)[:7] == _TOOL_NAMES
     assert list(tools)[7:] == [
         "chat_read_thread",
+        "chat_require_tag",
         "software_factory_start",
         "software_factory_review",
         "software_factory_create_ticket",
@@ -321,7 +322,7 @@ async def test_a_bot_key_calls_its_tool_for_the_person_in_its_conversation(
         toolkit = {tool.name for tool in await client.list_tools()}
 
     assert names == {"field_notes_jot_note"}
-    assert (await Note.get_for_id(jotted.structured_content["id"])).body == "Ana: The gate sticks."
+    assert (await Note.get(id=jotted.structured_content["id"])).body == "Ana: The gate sticks."
     assert "field_notes_jot_note" not in toolkit
 
 

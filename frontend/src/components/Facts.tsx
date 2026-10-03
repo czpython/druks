@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
 
 /**
- * Facts — the horizontal key/value chip row at the top of a detail
- * page (under the breadcrumb). Pair with one or more <Fact>.
+ * Facts — the key/value grid at the top of a detail page (under the
+ * breadcrumb). Pair with one or more <Fact>.
  */
 interface FactsProps {
   children: ReactNode
@@ -21,8 +21,8 @@ export function Facts({ children, className, style }: FactsProps) {
 }
 
 /**
- * Fact — one key/value chip inside <Facts>. Drop the ``k`` prop when
- * the cell content is the whole chip (e.g. a status pill).
+ * Fact — one key/value cell inside <Facts>. Drop the ``k`` prop when
+ * the content is the whole cell (e.g. a status pill).
  */
 interface FactProps {
   k?: string

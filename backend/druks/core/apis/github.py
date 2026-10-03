@@ -357,6 +357,16 @@ class GitHubClient:
         return response.parsed_data.model_dump()
 
     @_retry_on_401
+    async def create_reaction(self, repo: str, comment_id: int, content: str) -> None:
+        """React to a top-level comment. GitHub keeps one reaction per App and content,
+        so reacting again changes nothing."""
+        owner, name = repo.split("/", 1)
+        github = await self._for_repo(repo)
+        await github.rest.reactions.async_create_for_issue_comment(
+            owner, name, comment_id, content=content
+        )
+
+    @_retry_on_401
     async def reply_to_review_comment(
         self, repo: str, pr_number: int, comment_id: int, body: str
     ) -> dict[str, Any]:

@@ -277,10 +277,24 @@ async def test_websocket_identity_resolves_and_cross_origin_is_refused(druks_db,
     assert not is_same_origin(connection)
 
 
-def test_tls_origin_matches_on_host_alone():
-    assert is_same_origin(
-        _websocket([(b"host", b"druks.test"), (b"origin", b"https://druks.test")])
+@pytest.mark.parametrize(
+    ("endpoint", "host", "origin", "is_expected"),
+    [
+        ("", "druks.test", "https://druks.test", True),
+        ("https://druks.example.com", "127.0.0.1:8000", "https://druks.example.com", True),
+        ("https://druks.example.com", "druks.test", "https://druks.test", False),
+    ],
+)
+def test_origin_matches_the_endpoint_host_else_the_host_header(
+    tmp_path, endpoint, host, origin, is_expected
+):
+    settings = make_settings(tmp_path, urls={"endpoint": endpoint})
+    connection = _websocket(
+        [(b"host", host.encode()), (b"origin", origin.encode())],
+        app=SimpleNamespace(state=SimpleNamespace(settings=settings)),
     )
+
+    assert is_same_origin(connection) == is_expected
 
 
 async def test_websocket_bearer_is_refused(druks_db):

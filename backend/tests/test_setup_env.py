@@ -61,9 +61,6 @@ def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
     assert config["paths"]["harness_config_root"] == values["DRUKS_HARNESS_CONFIG_ROOT"]
     assert "EXE_API_TOKEN" not in values
     assert "TAILSCALE_TAILNET" not in values
-    for key in ("EXE_IMAGE_REGISTRY", "EXE_REGISTRY_USERNAME", "EXE_REGISTRY_PASSWORD"):
-        assert config["sandbox"]["exe"][key] == ""
-        assert key not in values
     assert len(config["secrets"]["postgres_password"]) == 64
     assert len(config["secrets"]["drukbox_secrets_key"]) == 44
     assert len(config["sandbox"]["service_token"]) == 64
@@ -581,36 +578,31 @@ def test_a_copy_of_a_secrets_setting_is_a_named_gap(tmp_path, assignment, gap):
     assert "SECRETS_PROXY_URL" not in values
 
 
-@pytest.mark.parametrize("repository", ["ghcr.io/acme/templates", "docker.io/acme/templates"])
-def test_exe_template_registry_uses_existing_provider_contract(tmp_path, repository):
+@pytest.mark.parametrize("provider", ["docker", "exe"])
+def test_registry_settings_render_for_drukbox_on_every_provider(tmp_path, provider):
     env_path = tmp_path / ".env"
     printed = []
-    assert (
-        _run(
-            env_path,
-            print_fn=printed.append,
-            set_values=(
-                "sandbox.proxy_url=http://100.64.0.10:8880",
-                "sandbox.exe.EXE_API_TOKEN=exe-token",
-                "sandbox.exe.TAILSCALE_TAILNET=tail.ts.net",
-                f"sandbox.exe.EXE_IMAGE_REGISTRY={repository}",
-                "sandbox.exe.EXE_REGISTRY_USERNAME=builder",
-                "sandbox.exe.EXE_REGISTRY_PASSWORD=registry-token",
-            ),
-        )
-        == 0
+    _run(
+        env_path,
+        provider=provider,
+        print_fn=printed.append,
+        set_values=(
+            "sandbox.registry_host=ghcr.io",
+            "sandbox.registry_username=builder",
+            "sandbox.registry_password=registry-token",
+            "sandbox.template_repository=acme/templates",
+        ),
     )
     values = read_env(env_path)
     expected = {
-        "EXE_IMAGE_REGISTRY": repository,
-        "EXE_REGISTRY_USERNAME": "builder",
-        "EXE_REGISTRY_PASSWORD": "registry-token",
+        "REGISTRY_HOST": "ghcr.io",
+        "REGISTRY_USERNAME": "builder",
+        "REGISTRY_PASSWORD": "registry-token",
+        "TEMPLATE_REPOSITORY": "acme/templates",
     }
     for key, value in expected.items():
         assert values[key] == value
         assert env_path.read_text().count(f"{key}=") == 1
-    assert "REGISTRY_HOST" not in values
-    assert "TEMPLATE_REPOSITORY" not in values
     assert "registry-token" not in "\n".join(printed)
     assert stat.S_IMODE(env_path.stat().st_mode) == 0o600
     assert stat.S_IMODE((tmp_path / "druks.toml").stat().st_mode) == 0o600

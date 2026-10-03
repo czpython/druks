@@ -47,13 +47,13 @@ def test_a_followed_region_needs_a_name(note: Note):
 
 def test_gate_controls_need_something_that_follows(note: Note):
     with pytest.raises(ValueError, match="follows a subject"):
-        Page(title="Note", blocks=[GateControls("run-6f0a")])
+        Page(title="Note", blocks=[GateControls(note)])
 
 
 def test_a_following_page_is_enough_for_gate_controls(note: Note):
-    page = Page(title="Note", follows=note, blocks=[GateControls("run-6f0a")])
+    page = Page(title="Note", follows=note, blocks=[GateControls(note)])
 
-    assert page.blocks[0].run == "run-6f0a"
+    assert page.blocks[0].subject.subject_id == str(note.id)
 
 
 def test_a_following_region_covers_the_blocks_under_it(note: Note):
@@ -63,19 +63,19 @@ def test_a_following_region_covers_the_blocks_under_it(note: Note):
             Section(
                 name="decision",
                 follows=note,
-                blocks=[Card(blocks=[GateControls("run-6f0a")])],
+                blocks=[Card(blocks=[GateControls(note)])],
             )
         ],
     )
 
-    assert page.blocks[0].blocks[0].blocks[0].run == "run-6f0a"
+    assert list(page.iter_parts(GateControls)) == [page.blocks[0].blocks[0].blocks[0]]
 
 
 def test_a_region_that_follows_nothing_does_not_cover_gate_controls(note: Note):
     with pytest.raises(ValueError, match="follows a subject"):
         Page(
             title="Note",
-            blocks=[Section(name="decision", blocks=[GateControls("run-6f0a")])],
+            blocks=[Section(name="decision", blocks=[GateControls(note)])],
         )
 
 
@@ -123,6 +123,11 @@ def test_a_link_reaches_the_subjects_own_page(note: Note):
 def test_a_link_takes_exactly_one_destination(note: Note):
     with pytest.raises(ValueError, match="exactly one"):
         Link("Everything druks did", page="notes", subject=note)
+
+
+def test_a_link_on_its_own_needs_a_label():
+    with pytest.raises(ValueError, match="has no label"):
+        Page(title="Note", controls=[Link(page="notes")])
 
 
 def test_a_link_refuses_a_subject_type():

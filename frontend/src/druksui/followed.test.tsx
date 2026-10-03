@@ -191,6 +191,22 @@ describe('a followed region', () => {
   })
 })
 
+describe('the timeline link', () => {
+  it('takes a page about one subject to that subject', async () => {
+    renderPage(snapshot([{ block: 'text', text: 'body' }], NOTE_7))
+
+    const link = await screen.findByRole('link', { name: 'Everything Druks did about this note' })
+    expect(link.getAttribute('href')).toBe('/field_notes/note/7')
+  })
+
+  it('stays off a page that follows every subject of a type', async () => {
+    renderPage(snapshot([{ block: 'text', text: 'board' }], { subjectType: 'note', subjectId: '' }))
+
+    await waitFor(() => expect(screen.getByText('board')).toBeTruthy())
+    expect(screen.queryByRole('link', { name: /Everything Druks did/ })).toBeNull()
+  })
+})
+
 describe('a snapshot from one subject', () => {
   const NOTE_9 = { subjectType: 'note', subjectId: '9' }
 

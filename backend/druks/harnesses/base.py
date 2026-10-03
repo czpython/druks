@@ -168,8 +168,8 @@ class Harness(ABC):
         capability set always hashes the same and an eval report can bucket
         calls by it."""
         # Declared = the enabled registry view; delivered = what actually
-        # reached this call (a workspace's required server owns its name — see
-        # Workspace.get_mcp_delivery). The delivered server is what
+        # reached this call (a workspace's server owns its name — see
+        # Workspace.get_all_mcp_servers). The delivered server is what
         # this harness ran against, so record its url + env var; fall back to
         # the declared values only for a declared-but-not-delivered entry.
         # token_present reads the delivered shape: it names a bearer or secret

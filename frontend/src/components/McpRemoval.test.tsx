@@ -14,6 +14,7 @@ it.each([true, false])('names affected accounts before removal, confirmed=%s', a
   vi.spyOn(api, 'mcpServers').mockResolvedValue([{
     name: 'jira', url: 'https://jira.test/mcp', isEnabled: true,
     isOauth: true, identityMode: 'per_user', builtin: false, hasToken: false,
+    credential: 'grant' as const, service: null,
   }])
   vi.spyOn(api, 'mcpServerConnections').mockResolvedValue(
     ['a', 'b', 'c', 'd', 'e', 'f'].map((accountUsername) => ({ accountUsername })),
