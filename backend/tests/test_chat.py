@@ -354,7 +354,7 @@ async def test_recovery_reads_live_events_then_saves_reply_and_replaces_archive(
         if method == "status":
             statuses += 1
             if statuses > 1:
-                assert await get_client().xlen(service.events_key(conversation.id)) == 5
+                assert await get_client().xlen(service.events_key(conversation.id)) == len(events)
             return {
                 "status": "running" if statuses == 1 else terminal_state,
                 "messageId": message.id,

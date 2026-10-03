@@ -10,7 +10,7 @@ import { appLabel } from '../apps/registry'
 import { chatApi } from '../chat/api'
 import {
   compareConversations, conversationReducer, conversationTitle, initialConversation, savedReplyRows,
-  type Conversation, type ConversationAction, type ConversationSummary, type ReplyRow,
+  type Conversation, type ConversationAction, type ConversationSummary, type Message, type ReplyRow,
 } from '../chat/state'
 import { Markdown } from '../components/Markdown'
 import { Page } from '../components/Page'
@@ -20,6 +20,11 @@ import '../chat.css'
 
 const conversationListKey = ['chat', 'conversations']
 const conversationIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const stoppedTurns: Partial<Record<NonNullable<Message['state']>, { title: string, detail: string }>> = {
+  interrupted: { title: 'Interrupted', detail: 'This turn stopped before it finished.' },
+  cancelled: { title: 'Cancelled', detail: 'You stopped this turn.' },
+  failed: { title: 'Failed', detail: 'Druks could not deliver this message.' },
+}
 
 export function ChatPage({ id }: { id?: string }) {
   const [, navigate] = useLocation()
@@ -160,7 +165,6 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
   const queryClient = useQueryClient()
   const [state, dispatch] = useReducer(conversationReducer, initialConversation)
   const [connection, setConnection] = useState<'opening' | 'connected' | 'reconnecting' | 'denied'>('opening')
-  const [reconnect, setReconnect] = useState(0)
   const [error, setError] = useState('')
   const [sending, setSending] = useState(false)
   const [stopping, setStopping] = useState(false)
@@ -247,18 +251,18 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
       clearTimeout(timer)
       socket?.close()
     }
-  }, [id, queryClient, reconnect])
+  }, [id, queryClient])
 
-  async function send(body = draft, resend = false) {
-    if (!body.trim() || sending) return
+  async function send(body = draft, originalMessage?: Message) {
+    if ((!body.trim() && !originalMessage) || sending) return
     setSending(true)
     setError('')
     try {
       if (id) {
-        const message = await chatApi.send(id, body)
+        const message = originalMessage ? await chatApi.retry(id, originalMessage.id) : await chatApi.send(id, body)
         if (!mounted.current) return
         dispatch({ type: 'saved', message })
-        if (!resend && draftRef.current === body) onDraft('')
+        if (!originalMessage && draftRef.current === body) onDraft('')
         composer.current?.focus()
         void scrollToBottom()
       } else {
@@ -319,6 +323,7 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
           const rows = reply ? savedReplyRows(reply) : state.turns[message.id]?.rows ?? []
           const isQueued = message.state === 'pending' && unansweredMessage?.id !== message.id
           const isWaiting = unansweredMessage?.id === message.id && rows.length === 0 && !state.error
+          const stoppedTurn = message.state && stoppedTurns[message.state]
           return <article className="chat-turn" key={message.id} aria-label="Message and reply">
             <div className={message.isInternal ? 'chat-user is-internal' : 'chat-user'}>
               <div className="chat-message-meta">{message.isInternal ? 'Druks' : 'You'} <time dateTime={message.createdAt} title={format.absTime(message.createdAt)}>{format.absTimeCompact(message.createdAt)}</time></div>
@@ -333,10 +338,10 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
               </div>}
               <Reply rows={rows} />
               {isWaiting && <p className="chat-waiting" role="status"><span className="chat-activity-dot" />{message.state === 'delivered' ? 'Agent is replying…' : 'Connecting…'}</p>}
-              {(message.state === 'interrupted' || message.state === 'cancelled') && <div className="chat-interrupted" role="status">
-                <strong>{message.state === 'cancelled' ? 'Cancelled' : 'Interrupted'}</strong>
-                <p>{message.state === 'cancelled' ? 'You stopped this turn.' : 'This turn stopped before it finished.'}</p>
-                <button className="chat-button" onClick={() => void send(message.body, true)} disabled={sending}>Send again</button>
+              {stoppedTurn && <div className="chat-interrupted" role="status">
+                <strong>{stoppedTurn.title}</strong>
+                <p>{stoppedTurn.detail}</p>
+                <button className="chat-button" onClick={() => void send(message.body, message)} disabled={sending}>Send again</button>
                 <span>Druks never resends by itself.</span>
               </div>}
             </div>
@@ -349,7 +354,6 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
     </div>}
     {(error || state.error) && <div className="chat-error" role="alert">
       <p>{error || state.error?.detail}</p>
-      {state.error && <button className="chat-button" onClick={() => setReconnect((attempt) => attempt + 1)}>Connect again</button>}
     </div>}
     <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send() }}>
       <div className="chat-composer-controls">

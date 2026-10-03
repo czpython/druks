@@ -327,6 +327,22 @@ class Conversation(Base, Uuid7Pk):
             .execution_options(synchronize_session="fetch")
         )
 
+    async def end_unanswered_messages(
+        self, session: AsyncSession, state: MessageState
+    ) -> list[Message]:
+        """Give every unanswered message its final state, and return those messages."""
+        return list(
+            await session.scalars(
+                update(Message)
+                .where(
+                    Message.conversation_id == self.id,
+                    Message.state.in_((MessageState.PENDING, MessageState.DELIVERED)),
+                )
+                .values(state=state)
+                .returning(Message)
+            )
+        )
+
     async def is_held(self, session: AsyncSession) -> bool:
         """Whether the chat's turns wait: a person answers it from the connection's
         phone, or its connection was removed."""

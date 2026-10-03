@@ -57,7 +57,7 @@ describe('Chat events', () => {
     expect(state.turns['2']?.rows).toEqual([{ type: 'text', text: 'New turn' }])
   })
 
-  it.each(['replied', 'cancelled'] as const)('uses stored %s replies, ignores old events, and clears an error on the next snapshot', (messageState) => {
+  it.each(['replied', 'cancelled', 'failed'] as const)('uses stored %s replies, ignores old events, and clears an error on the next snapshot', (messageState) => {
     const completed: Conversation = { ...conversation, activeMessageId: null, messages: conversation.messages.map((message) => ({ ...message, state: messageState })) }
     const state = conversationReducer(initialConversation, { type: 'snapshot', ...completed })
     expect(conversationReducer(state, event(1, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'duplicate' } }))).toBe(state)

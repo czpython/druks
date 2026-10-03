@@ -10,7 +10,7 @@ import type { Conversation, ConversationAction, Message } from '../chat/state'
 import { UserPreferencesProvider } from '../lib/preferences'
 import { ChatPage } from './ChatPage'
 
-vi.mock('../chat/api', () => ({ chatApi: { list: vi.fn(), get: vi.fn(), create: vi.fn(), send: vi.fn(), stop: vi.fn(), setPinned: vi.fn() } }))
+vi.mock('../chat/api', () => ({ chatApi: { list: vi.fn(), get: vi.fn(), create: vi.fn(), send: vi.fn(), retry: vi.fn(), stop: vi.fn(), setPinned: vi.fn() } }))
 
 class Socket {
   static instances: Socket[] = []
@@ -57,6 +57,7 @@ beforeEach(() => {
   vi.mocked(chatApi.list).mockResolvedValue([conversation])
   vi.mocked(chatApi.get).mockResolvedValue(conversation)
   vi.mocked(chatApi.send).mockResolvedValue({ ...message, id: '11', body: 'Then check failures', state: 'pending' })
+  vi.mocked(chatApi.retry).mockResolvedValue({ ...message, id: '11', state: 'pending' })
   vi.mocked(chatApi.create).mockResolvedValue(conversation)
   vi.mocked(chatApi.stop).mockResolvedValue(undefined)
   vi.mocked(chatApi.setPinned).mockImplementation(async (_id, isPinned) => ({ ...conversation, isPinned }))
@@ -322,15 +323,15 @@ describe('Chat page', () => {
     expect(tool.querySelector('time')).toBeNull()
   })
 
-  it.each(['interrupted', 'cancelled'] as const)('resends a %s turn only after Send again and preserves the current draft', async (state) => {
+  it.each(['interrupted', 'cancelled', 'failed'] as const)('resends a %s turn only after Send again and preserves the current draft', async (state) => {
     vi.mocked(chatApi.get).mockResolvedValue({ ...conversation, activeMessageId: null, messages: [{ ...message, state, deliveredAt: null }] })
     mount()
     await connected()
-    expect(screen.getByText(state === 'cancelled' ? 'Cancelled' : 'Interrupted')).toBeTruthy()
+    expect(screen.getByText(state === 'failed' ? 'Failed' : state === 'cancelled' ? 'Cancelled' : 'Interrupted')).toBeTruthy()
     expect(chatApi.send).not.toHaveBeenCalled()
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Keep this draft' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send again' }))
-    await waitFor(() => expect(chatApi.send).toHaveBeenCalledExactlyOnceWith(conversation.id, message.body))
+    await waitFor(() => expect(chatApi.retry).toHaveBeenCalledExactlyOnceWith(conversation.id, message.id))
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('Keep this draft')
   })
 

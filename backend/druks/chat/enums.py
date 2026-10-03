@@ -30,6 +30,7 @@ class MessageState(StrEnum):
     REPLIED = "replied"
     INTERRUPTED = "interrupted"
     CANCELLED = "cancelled"
+    FAILED = "failed"
 
 
 class PauseSignal(StrEnum):

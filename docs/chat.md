@@ -71,11 +71,18 @@ go next. Sandbox startup continues. The next message reuses the sandbox, or
 the sandbox expires with its lease.
 
 A cancelled turn shows **Cancelled**. Druks keeps the text that the agent
-already sent. **Send again** saves a new message with the same text.
+already sent. **Send again** saves a new message with the same text and file.
 
 If a turn dies, Druks shows **Interrupted**. Druks never sends that turn again
-by itself. **Send again** saves a new message with the same text. This action
-can cause the agent to do an external action again.
+by itself. **Send again** saves a new message with the same text and file. This
+action can cause the agent to do an external action again.
+
+Druks tries a delivery up to five times. If every attempt fails, the unanswered
+messages show **Failed**, and Druks never sends them again by itself. **Send
+again** saves a new message with the same text and file. In a Slack, GitHub, or
+WhatsApp conversation, Druks also replies in the channel that the message
+failed, unless the conversation is paused or its connection was removed. Send
+the message again in the channel to retry.
 
 A browser connection loss does not send the message again. The page connects
 again and reads the saved messages and available live events.
@@ -136,8 +143,9 @@ bridge runs in the sandbox and starts one ACP adapter per conversation. Druks
 opens an SSH channel only when it communicates with the bridge.
 
 Postgres stores conversations and messages. A reply links to the message it
-answers and keeps the tool calls it made. Your messages have five durable
-states: `pending`, `delivered`, `replied`, `interrupted`, and `cancelled`. A
+answers and keeps the tool calls it made. Your messages have six durable
+states: `pending`, `delivered`, `replied`, `interrupted`, `cancelled`, and
+`failed`. A
 `delivered` message is the one the agent is answering. Redis stores the
 delivery locks, the read positions, and the live events. The bridge determines
 whether a turn runs.
