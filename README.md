@@ -1,8 +1,7 @@
-<p align="center">
-  <img src="frontend/public/brand-mark.svg" alt="Druks" width="280" height="280" />
-</p>
-
-# Druks
+<h1 align="center">
+  <img src="frontend/public/brand-mark.svg" alt="Dragon head" width="72" height="72" align="middle" />
+  druks
+</h1>
 
 > [!WARNING]
 > Druks is under active development. Breaking changes and rough edges can occur
