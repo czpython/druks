@@ -84,8 +84,9 @@ Stay. An app without controls has no Settings destination. Backend app schemas
 supply these forms without a frontend module. Schedule controls use the
 existing workflow overrides. Channels at `/apps/<name>/settings/channels` appears
 only when the app declares a Bot. It links the Bot's WhatsApp numbers and opens
-admin codes. Chat's Channels tab also links the operator's own number, and the
-Chat page links to it.
+admin codes. While the Voice card is connected, an open Bot's tab also links
+Twilio numbers and shows their calls. Chat's Channels tab also links the
+operator's own number, and the Chat page links to it.
 
 Schedules at `/schedules` groups declared workflows by app. The `app` query
 parameter filters the list. Preset cadence and pause changes save immediately

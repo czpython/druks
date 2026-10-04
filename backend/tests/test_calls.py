@@ -298,6 +298,32 @@ async def test_the_lines_of_a_call_land_in_the_order_they_were_said(druks_db, dr
     assert transcript[2].reply_to == transcript[1].id
 
 
+async def test_an_operator_reads_a_numbers_calls_and_a_calls_transcript(
+    druks_db, druks_client, twilio
+):
+    connection = await link(druks_db)
+    earlier_call = await call(druks_db, connection, "CA0")
+    conversation = await call(druks_db, connection)
+    token = webhooks.get_call_token(conversation)
+    await conversation.create_message(druks_db, "[Internal: Run r1 failed.]", is_internal=True)
+    for sequence, role, text in [(1, "user", "Is my ticket open?"), (2, "assistant", "It is.")]:
+        line = {"action": "line", "sequence": sequence, "role": role, "text": text}
+        await druks_client.post(CALLS_EVENTS, json={**line, "token": token})
+    number = f"/api/chat/services/twilio/numbers/{connection.id}"
+
+    calls = (await druks_client.get(f"{number}/calls")).json()
+    transcript = (await druks_client.get(f"{number}/calls/{conversation.id}")).json()
+
+    assert [(listed["id"], listed["caller"]) for listed in calls] == [
+        (conversation.id, CALLER),
+        (earlier_call.id, CALLER),
+    ]
+    assert [(line["role"], line["text"]) for line in transcript] == [
+        ("user", "Is my ticket open?"),
+        ("assistant", "It is."),
+    ]
+
+
 async def test_a_failed_run_from_a_call_waits_for_the_callers_next_call(
     druks_db, druks_client, twilio, voice
 ):

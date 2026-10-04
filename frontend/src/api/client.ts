@@ -4,6 +4,8 @@ import type {
   AgentCallFiles,
   ArtifactContent,
   BrowserSession,
+  Call,
+  CallLine,
   ConnectChallenge,
   Connection,
   App,
@@ -359,6 +361,12 @@ export const api = {
     postJSON<LinkedNumber>('/api/chat/services/twilio/numbers', { app, sid }),
   removeNumber: (id: string) =>
     deleteRequest(`/api/chat/services/twilio/numbers/${encodeURIComponent(id)}`),
+  calls: (numberId: string) =>
+    getJSON<Call[]>(`/api/chat/services/twilio/numbers/${encodeURIComponent(numberId)}/calls`),
+  callLines: (numberId: string, callId: string) =>
+    getJSON<CallLine[]>(
+      `/api/chat/services/twilio/numbers/${encodeURIComponent(numberId)}/calls/${encodeURIComponent(callId)}`,
+    ),
   browserSessions: () => getJSON<BrowserSession[]>('/api/browser-sessions'),
   deleteBrowserSession: (name: string) =>
     deleteRequest(`/api/browser-sessions/${encodeURIComponent(name)}`),

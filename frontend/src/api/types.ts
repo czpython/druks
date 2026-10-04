@@ -695,6 +695,22 @@ export interface LinkedNumber {
   revokedAt: string | null
 }
 
+/** A call to a linked number. It lasts from the ring to its last line. A caller who hides
+ * their number has no `caller`. */
+export interface Call {
+  id: string
+  caller: string
+  createdAt: string
+  lastLineAt: string
+}
+
+/** A line of a call: what the caller or the assistant said. */
+export interface CallLine {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+}
+
 /** A Twilio number that is not linked yet. */
 export interface UnlinkedNumber {
   sid: string

@@ -219,3 +219,6 @@
 .channel-qr img { width: 240px; max-width: 100%; height: auto; border-radius: 6px; }
 .channel-qr figcaption, .channel-admin-code { margin: 0; color: var(--text-mid); font-size: 13px; }
 .channel-admin-code code { font: 15px var(--font-mono); color: var(--text); }
+.call-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.call-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; width: 100%; min-height: 44px; color: var(--text-mid); font-variant-numeric: tabular-nums; text-align: left; }
+.call-transcript { display: flex; flex-direction: column; gap: 16px; padding: 4px 0 16px; }
