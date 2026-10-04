@@ -636,12 +636,17 @@ export interface Identity {
   onboardingRequired: boolean
 }
 
-export interface ConnectChallenge {
-  authorizeUrl: string
-  /** Opaque id of this connect attempt; passed back on complete so
-   * concurrent connects never clobber each other's pending state. */
-  connectionId: string
-}
+/** connectionId is the opaque id of this connect attempt; passed back so
+ * concurrent connects never clobber each other's pending state. */
+export type ConnectChallenge =
+  | { method: 'code'; connectionId: string; authorizeUrl: string }
+  | {
+      method: 'device'
+      connectionId: string
+      authorizeUrl: string
+      userCode: string
+      pollInterval: number
+    }
 
 export interface ServiceField {
   name: string

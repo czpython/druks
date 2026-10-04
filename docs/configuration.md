@@ -619,6 +619,10 @@ requesting account. In a fresh `none`-mode install, the first completed
 subscription connection also creates the operator account. See
 [access control](#public-urls-and-access-control).
 
+OpenAI connects through Codex device authorization. Before you connect, open
+**Settings → Security** in ChatGPT and enable **device code authorization for
+Codex**. In a managed workspace, an administrator must allow it.
+
 A `claude` sandbox reads its placeholder from `ANTHROPIC_AUTH_TOKEN`. A
 `codex` sandbox reads its placeholder from `CODEX_SUBSCRIPTION_TOKEN`. The
 Codex run wrapper writes `~/.codex/auth.json` from that variable before the

@@ -64,6 +64,8 @@ _OPENAI_NON_CHAT_MARKERS = (
 # long — enough to authorize and paste, short enough that an abandoned attempt
 # clears.
 _CONNECT_PENDING_TTL_SECONDS = 600
+# OpenAI expires a device code after 15 minutes.
+_DEVICE_CODE_TTL_SECONDS = 15 * 60
 # How often a fetch asks again while another refresher holds the row lock.
 _LOCK_POLL_SECONDS = 0.5
 
@@ -92,9 +94,9 @@ class Provider:
         raise NotImplementedError
 
     @classmethod
-    async def connect_start(cls, *, account_id: str | None = None) -> tuple[str, str]:
-        """Mint PKCE state under a single-use flow id; return (authorize URL,
-        flow id). A flow started by a resolved operator binds ``account_id``."""
+    async def start_connection(cls, *, account_id: str | None = None) -> dict:
+        """Mint PKCE state under a single-use flow id; return the challenge the
+        operator answers. A flow started by a resolved operator binds ``account_id``."""
         verifier = _b64url(secrets.token_bytes(64))
         challenge = _b64url(hashlib.sha256(verifier.encode()).digest())
         url, state = cls.authorize_url(verifier=verifier, challenge=challenge)
@@ -109,10 +111,10 @@ class Provider:
         await get_client().set(
             f"{CONNECT_PENDING_PREFIX}{flow_id}", pending, ex=_CONNECT_PENDING_TTL_SECONDS
         )
-        return url, flow_id
+        return {"method": "code", "connection_id": flow_id, "authorize_url": url}
 
     @classmethod
-    async def connect_complete(cls, *, flow_id: str, pasted: str) -> CompletedConnect:
+    async def complete_connection(cls, *, flow_id: str, pasted: str) -> CompletedConnect:
         """Pop the flow's single-use state, parse the paste, exchange the code.
         Raises :class:`ConnectError` on failure; the state is gone either way,
         so a retry re-starts cleanly."""
@@ -129,7 +131,20 @@ class Provider:
                 "That code is from a different connect attempt — start it again."
             )
 
-        payload, provider_email = await cls.exchange(code=code, verifier=expected["verifier"])
+        return await cls._complete(
+            code=code, verifier=expected["verifier"], account_id=expected["account_id"]
+        )
+
+    @classmethod
+    async def check_connection(cls, *, flow_id: str) -> CompletedConnect | None:
+        """The connect of a device flow after the operator approves it. None until then."""
+        raise exceptions.ConnectError(f"{cls.label} does not connect with a device code.")
+
+    @classmethod
+    async def _complete(
+        cls, *, code: str, verifier: str, account_id: str | None
+    ) -> CompletedConnect:
+        payload, provider_email = await cls.exchange(code=code, verifier=verifier)
         if not provider_email:
             raise exceptions.ConnectError(
                 "The provider returned no account email — authorize with an account "
@@ -140,13 +155,13 @@ class Provider:
             payload=payload,
             provider_email=provider_email,
             expires_at=expires_at,
-            account_id=expected["account_id"],
+            account_id=account_id,
         )
 
     @classmethod
     def authorize_url(cls, *, verifier: str, challenge: str) -> tuple[str, str]:
         """Build this provider's PKCE authorize URL; return (url, state), where
-        ``state`` is what the provider echoes back so connect_complete can
+        ``state`` is what the provider echoes back so complete_connection can
         verify the round-trip."""
         raise NotImplementedError
 
@@ -735,7 +750,7 @@ class AnthropicProvider(Provider):
     @classmethod
     def authorize_url(cls, *, verifier: str, challenge: str) -> tuple[str, str]:
         # Anthropic's console flow echoes the PKCE verifier back as the OAuth
-        # state, so that's what connect_complete checks.
+        # state, so that's what complete_connection checks.
         params = {
             "code": "true",
             "client_id": cls._CLIENT_ID,
@@ -923,9 +938,9 @@ class OpenAiProvider(Provider):
     REFRESH_MARGIN = timedelta(hours=24)
     _TOKEN_URL = "https://auth.openai.com/oauth/token"
     _CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-    # Connect-flow (PKCE): authorize on auth.openai.com; the operator pastes the
-    # failed localhost redirect URL back.
-    redirect_uri = "http://localhost:1455/auth/callback"
+    # Connect-flow (device code): the operator enters a code at auth.openai.com,
+    # and Druks polls for the grant.
+    redirect_uri = "https://auth.openai.com/deviceauth/callback"
     # This additional limit is a reserve quota, not a model's own quota.
     reserve_limit_name = "gpt-reserve"
 
@@ -968,21 +983,65 @@ class OpenAiProvider(Provider):
         }
 
     @classmethod
-    def authorize_url(cls, *, verifier: str, challenge: str) -> tuple[str, str]:
-        state = secrets.token_hex(16)
-        params = {
-            "id_token_add_organizations": "true",
-            "codex_cli_simplified_flow": "true",
-            "originator": "pi",  # the only value verified against the live exchange
-            "client_id": cls._CLIENT_ID,
-            "response_type": "code",
-            "redirect_uri": cls.redirect_uri,
-            "scope": "openid profile email offline_access",
-            "code_challenge": challenge,
-            "code_challenge_method": "S256",
-            "state": state,
+    async def start_connection(cls, *, account_id: str | None = None) -> dict:
+        device = await post_token(
+            url="https://auth.openai.com/api/accounts/deviceauth/usercode",
+            body={"client_id": cls._CLIENT_ID},
+            form=False,
+        )
+        flow_id = secrets.token_urlsafe(24)
+        pending = json.dumps(
+            {
+                "device_auth_id": device["device_auth_id"],
+                "user_code": device["user_code"],
+                "account_id": account_id,
+            }
+        )
+        await get_client().set(
+            name=f"{CONNECT_PENDING_PREFIX}{flow_id}", value=pending, ex=_DEVICE_CODE_TTL_SECONDS
+        )
+        return {
+            "method": "device",
+            "connection_id": flow_id,
+            "authorize_url": "https://auth.openai.com/codex/device",
+            "user_code": device["user_code"],
+            "poll_interval": int(device["interval"]),
         }
-        return f"https://auth.openai.com/oauth/authorize?{urlencode(params)}", state
+
+    @classmethod
+    async def check_connection(cls, *, flow_id: str) -> CompletedConnect | None:
+        key = f"{CONNECT_PENDING_PREFIX}{flow_id}"
+        pending = await get_client().get(key)
+        if not pending:
+            raise exceptions.ConnectError("This connect attempt expired. Start it again.")
+        device = json.loads(pending)
+
+        try:
+            async with httpx.AsyncClient(timeout=_TOKEN_REQUEST_TIMEOUT_SECONDS) as client:
+                response = await client.post(
+                    "https://auth.openai.com/api/accounts/deviceauth/token",
+                    json={
+                        "device_auth_id": device["device_auth_id"],
+                        "user_code": device["user_code"],
+                    },
+                )
+        except httpx.HTTPError as error:
+            raise exceptions.ConnectError("The request to OpenAI failed. Try again.") from error
+        # OpenAI answers 403 or 404 until the operator approves.
+        if response.status_code in (403, 404):
+            return
+        if response.status_code != 200:
+            raise exceptions.ConnectError(
+                f"OpenAI rejected the device code (HTTP {response.status_code}). Try again."
+            )
+
+        await get_client().delete(key)
+        approval = response.json()
+        return await cls._complete(
+            code=approval["authorization_code"],
+            verifier=approval["code_verifier"],
+            account_id=device["account_id"],
+        )
 
     @classmethod
     async def exchange(cls, *, code: str, verifier: str) -> tuple[dict, str | None]:

@@ -315,6 +315,11 @@ export const api = {
       code,
       connectionId,
     }),
+  // The connected account after the operator approves a device code; null until then.
+  checkProviderConnect: (id: string, connectionId: string) =>
+    postJSON<Account | null>(`/api/providers/${encodeURIComponent(id)}/connection/check`, {
+      connectionId,
+    }),
   createProviderKey: (id: string, key: string) =>
     postJSON<ProviderKey>(`/api/providers/${encodeURIComponent(id)}/key`, { key }),
   removeProviderKey: (id: string) => deleteRequest(`/api/providers/${encodeURIComponent(id)}/key`),

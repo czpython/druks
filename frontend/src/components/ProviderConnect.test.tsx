@@ -238,6 +238,7 @@ describe('ProviderConnect', () => {
 
   it('a provider revocation keeps its facts and starts reconnect', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      method: 'code',
       authorizeUrl: 'https://example.com/authorize',
       connectionId: 'reconnect-1',
     })))
@@ -286,6 +287,7 @@ describe('ProviderConnect', () => {
   it('drives the connection flow and refreshes credentials, models, and usage', async () => {
     const responses: Record<string, unknown> = {
       '/api/providers/anthropic/connection/start': {
+        method: 'code',
         authorizeUrl: 'https://x/auth',
         connectionId: 'C1',
       },

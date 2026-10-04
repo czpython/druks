@@ -2,6 +2,7 @@ import logging
 from contextlib import suppress
 
 from fastapi import APIRouter, Body, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.dependencies import current_session_account, current_session_or_setup
 from druks.accounts.models import Account
@@ -12,10 +13,12 @@ from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 
 from . import directory
+from .datastructures import CompletedConnect
 from .exceptions import ConnectError
 from .models import ProviderCatalog
 from .providers import Provider, get_provider, get_providers, is_registered
 from .schemas import (
+    ConnectChallengeResponse,
     ProviderCatalogResponse,
     ProviderDirectoryResponse,
     ProviderKeyResponse,
@@ -89,14 +92,21 @@ def _resolve_provider(provider_id: str) -> Provider:
         raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}") from error
 
 
-@router.post("/{provider_id}/connection/start")
+@router.post(
+    "/{provider_id}/connection/start",
+    response_model=ConnectChallengeResponse,
+    response_model_by_alias=True,
+    response_model_exclude_none=True,
+)
 async def start_connection(
     provider_id: str, account: Account | None = Depends(current_session_or_setup)
-) -> dict[str, str]:
+) -> dict:
     provider = _resolve_provider(provider_id)
-    # In none/zero the flow starts unbound, and its completion creates the operator.
-    url, flow_id = await provider.connect_start(account_id=account.id if account else None)
-    return {"authorizeUrl": url, "connectionId": flow_id}
+    try:
+        # In none/zero the flow starts unbound, and its completion creates the operator.
+        return await provider.start_connection(account_id=account.id if account else None)
+    except ConnectError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @router.post(
@@ -113,9 +123,42 @@ async def complete_connection(
 ) -> AccountResponse:
     provider = _resolve_provider(provider_id)
     try:
-        completed = await provider.connect_complete(flow_id=flow_id, pasted=code)
+        completed = await provider.complete_connection(flow_id=flow_id, pasted=code)
     except ConnectError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _store_connection(session, provider=provider, completed=completed, account=account)
+
+
+@router.post(
+    "/{provider_id}/connection/check",
+    response_model=AccountResponse | None,
+    response_model_by_alias=True,
+)
+async def check_connection(
+    session: SessionDep,
+    provider_id: str,
+    account: Account | None = Depends(current_session_or_setup),
+    flow_id: str = Body(..., embed=True, alias="connectionId"),
+) -> AccountResponse | None:
+    """The connected account after the operator approves. None until then."""
+    provider = _resolve_provider(provider_id)
+    try:
+        completed = await provider.check_connection(flow_id=flow_id)
+    except ConnectError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if completed:
+        return await _store_connection(
+            session, provider=provider, completed=completed, account=account
+        )
+
+
+async def _store_connection(
+    session: AsyncSession,
+    *,
+    provider: Provider,
+    completed: CompletedConnect,
+    account: Account | None,
+) -> AccountResponse:
     if account and account.id == completed.account_id:
         resolved = account
     elif completed.account_id:

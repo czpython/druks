@@ -95,7 +95,7 @@ describe('IdentityBootstrap', () => {
       }),
       '/api/providers/anthropic/connection/start': () => ({
         status: 200,
-        body: { authorizeUrl: 'https://x/auth', connectionId: 'C1' },
+        body: { method: 'code', authorizeUrl: 'https://x/auth', connectionId: 'C1' },
       }),
       '/api/providers/anthropic/connection/complete': () => {
         // The completed connection created the operator; /me now resolves it.

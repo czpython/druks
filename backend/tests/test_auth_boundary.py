@@ -16,6 +16,7 @@ EXEMPT_API_PATHS = {
     "/api/providers",
     "/api/providers/{provider_id}/connection/start",
     "/api/providers/{provider_id}/connection/complete",
+    "/api/providers/{provider_id}/connection/check",
     "/api/secrets/{identity_id}/{name}",  # a box's identity bearer, nothing else
     "/api/{path:path}",  # the JSON-404 catch-all
 }
@@ -105,6 +106,7 @@ SETUP_CAPABLE_API_PATHS = {
     "/api/providers",
     "/api/providers/{provider_id}/connection/start",
     "/api/providers/{provider_id}/connection/complete",
+    "/api/providers/{provider_id}/connection/check",
 }
 
 

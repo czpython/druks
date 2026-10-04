@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AliasPath, BeforeValidator, ConfigDict, Field
 
@@ -15,6 +15,14 @@ class ProviderResponse(Schema):
     id: str
     label: str
     billing_options: SortedNames
+
+
+class ConnectChallengeResponse(Schema):
+    method: Literal["code", "device"]
+    connection_id: str
+    authorize_url: str
+    user_code: str | None = None
+    poll_interval: int | None = None
 
 
 class ProviderSubscriptionResponse(Schema):

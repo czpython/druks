@@ -130,7 +130,9 @@ function ConnectPanel({ entry }: { entry: OnboardingEntry }) {
         <span className="landing-chip">{entry.mark}</span>
         <span className="landing-who">
           <span className="landing-who-t">Connect {entry.title}</span>
-          <span className="landing-who-s">oauth · paste-back</span>
+          <span className="landing-who-s">
+            {flow.challenge?.method === 'device' ? 'oauth · device code' : 'oauth · paste-back'}
+          </span>
         </span>
         <span className="landing-badge">{flow.challenge ? 'authorize' : 'connecting'}</span>
       </div>

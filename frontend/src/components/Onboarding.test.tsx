@@ -51,7 +51,7 @@ describe('Onboarding', () => {
         if (path === '/api/providers') return providerListResponse(REGISTERED_PROVIDERS)
         expect(path).toBe('/api/providers/openai/connection/start')
         return new Response(
-          JSON.stringify({ authorizeUrl: 'https://x/auth', connectionId: 'C1' }),
+          JSON.stringify({ method: 'code', authorizeUrl: 'https://x/auth', connectionId: 'C1' }),
           { status: 200 },
         )
       }),

@@ -49,12 +49,18 @@ def _connect(
     email: str = "me@example.com",
     headers: dict[str, str] | None = None,
 ):
+    if provider == "openai":
+        _mock_exchange_codex(monkeypatch, email=email)
     start = client.post(f"/api/providers/{provider}/connection/start", headers=headers)
     assert start.status_code == 200
     if provider == "anthropic":
         _mock_exchange(monkeypatch, _grant(email))
     else:
-        _mock_exchange_codex(monkeypatch, email=email)
+        return client.post(
+            f"/api/providers/{provider}/connection/check",
+            json={"connectionId": start.json()["connectionId"]},
+            headers=headers,
+        )
     return client.post(
         f"/api/providers/{provider}/connection/complete",
         json={"code": "thecode", "connectionId": start.json()["connectionId"]},
@@ -70,10 +76,21 @@ def _mock_exchange_codex(monkeypatch, *, email: str):
     }
     header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
     payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
-    _mock_exchange(
-        monkeypatch,
-        {"access_token": f"{header}.{payload}.sig", "refresh_token": "RT", "id_token": "ID"},
-    )
+
+    async def fake_post(self, url, **_kwargs):
+        if url.endswith("/usercode"):
+            grant = {"device_auth_id": "device-id", "user_code": "ABCD-EFGH", "interval": "1"}
+        elif url.endswith("/deviceauth/token"):
+            grant = {"authorization_code": "approved", "code_verifier": "verifier"}
+        else:
+            grant = {
+                "access_token": f"{header}.{payload}.sig",
+                "refresh_token": "RT",
+                "id_token": "ID",
+            }
+        return httpx.Response(200, json=grant, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(providers.httpx.AsyncClient, "post", fake_post)
 
 
 async def test_header_mode_requires_exactly_one_nonblank_assertion(tmp_path, druks_db):
@@ -292,6 +309,7 @@ async def test_concurrent_setup_completions_with_one_email_converge(
     with _client(tmp_path) as client:
         # No account exists yet, so both flows start unbound.
         first = client.post("/api/providers/anthropic/connection/start")
+        _mock_exchange_codex(monkeypatch, email="me@example.com")
         second = client.post("/api/providers/openai/connection/start")
         _mock_exchange(monkeypatch, _grant("me@example.com"))
         assert (
@@ -304,8 +322,8 @@ async def test_concurrent_setup_completions_with_one_email_converge(
         _mock_exchange_codex(monkeypatch, email="me@example.com")
         assert (
             client.post(
-                "/api/providers/openai/connection/complete",
-                json={"code": "c2", "connectionId": second.json()["connectionId"]},
+                "/api/providers/openai/connection/check",
+                json={"connectionId": second.json()["connectionId"]},
             ).status_code
             == 200
         )
@@ -318,6 +336,7 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
         # The first completion creates the operator. The second, with another
         # provider email, attaches to it instead of creating a second account.
         first = client.post("/api/providers/anthropic/connection/start")
+        _mock_exchange_codex(monkeypatch, email="me@example.com")
         second = client.post("/api/providers/openai/connection/start")
         _mock_exchange(monkeypatch, _grant("a@example.com"))
         client.post(
@@ -326,8 +345,8 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
         )
         _mock_exchange_codex(monkeypatch, email="b@example.com")
         completed = client.post(
-            "/api/providers/openai/connection/complete",
-            json={"code": "c2", "connectionId": second.json()["connectionId"]},
+            "/api/providers/openai/connection/check",
+            json={"connectionId": second.json()["connectionId"]},
         )
         assert completed.status_code == 200
         assert completed.json()["username"] == "a@example.com"
