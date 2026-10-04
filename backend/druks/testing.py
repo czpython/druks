@@ -219,7 +219,6 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "secrets": {
             "secrets_key": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
         },
-        "github_api_url": "https://api.github.com",
         "redis_url": TEST_REDIS_URL,
         "log_level": "WARNING",
     }

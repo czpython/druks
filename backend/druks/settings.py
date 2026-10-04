@@ -183,10 +183,6 @@ class Settings(BaseSettings):
     database_max_overflow: int = Field(default=30, ge=0, alias="DRUKS_DATABASE_MAX_OVERFLOW")
     dbos_pool_size: int = Field(default=20, gt=0, alias="DRUKS_DBOS_POOL_SIZE")
 
-    # Transport only — GitHub credentials live on the service-identity row,
-    # not in Settings; this points every client at a compatible API endpoint.
-    github_api_url: str = Field(default="https://api.github.com", alias="GITHUB_API_URL")
-
     redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="DRUKS_REDIS_URL")
     # Per-VM SSH keys when drukbox returns them; empty otherwise.
     sandbox_keys_dir: ExpandedPath = Field(

@@ -15,6 +15,7 @@ from druks.core.utils.time import ensure_utc
 
 logger = logging.getLogger(__name__)
 
+GITHUB_API_URL = "https://api.github.com"
 # The authority of a GitHub sign-in: one GitHub, so a user id names one person.
 GITHUB_AUTHORITY = "https://github.com"
 
@@ -67,7 +68,7 @@ class GitHubClient:
         *,
         app_id: str,
         private_key: str,
-        base_url: str = "https://api.github.com",
+        base_url: str = GITHUB_API_URL,
         slug: str = "",
     ) -> None:
         self._app_id = app_id

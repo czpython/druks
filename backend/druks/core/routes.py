@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from druks.accounts.dependencies import current_session_account
 from druks.apps.registry import services
+from druks.core.apis.github import GITHUB_API_URL
 from druks.core.apis.slack import SLACK_CREATE_APP_URL
 from druks.core.services import Github, Slack
 from druks.core.templates import render_page
@@ -55,14 +56,13 @@ async def create_github_app(request: Request, slug: str) -> HTMLResponse:
     response_class=HTMLResponse,
     dependencies=[Depends(current_session_account)],
 )
-async def github_manifest_callback(request: Request, slug: str, code: str = "") -> HTMLResponse:
+async def github_manifest_callback(slug: str, code: str = "") -> HTMLResponse:
     service = get_manifest_service(slug)
     if not code:
         raise HTTPException(status_code=400, detail="Missing code in the GitHub redirect.")
-    api_url = request.app.state.settings.github_api_url
     async with httpx.AsyncClient() as client:
         converted = await client.post(
-            f"{api_url}/app-manifests/{quote(code, safe='')}/conversions",
+            f"{GITHUB_API_URL}/app-manifests/{quote(code, safe='')}/conversions",
             headers={"Accept": "application/vnd.github+json"},
         )
     if converted.is_error:

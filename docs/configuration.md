@@ -393,9 +393,6 @@ To register the reviewer App manually:
 See GitHub's [App registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app)
 for account and organization registration details.
 
-`GITHUB_API_URL` defaults to `https://api.github.com` and can point every
-client at another compatible GitHub API endpoint.
-
 ## Ticketing integrations
 
 Select the tracker in **Software Factory → Settings**. The default is Linear.

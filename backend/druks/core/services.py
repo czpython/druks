@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.models import Account
 from druks.core.apis.exceptions import TwilioError, TwilioNotFoundError
-from druks.core.apis.github import GITHUB_AUTHORITY, GitHubClient
+from druks.core.apis.github import GITHUB_API_URL, GITHUB_AUTHORITY, GitHubClient
 from druks.core.apis.linear import LINEAR_GRAPHQL_URL
 from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
 from druks.core.apis.twilio import TwilioClient
@@ -97,7 +97,6 @@ class Github(Service):
         client = GitHubClient(
             app_id=settings.app_id,
             private_key=settings.private_key.get_secret_value(),
-            base_url=load_settings().github_api_url,
         )
         try:
             slug = await client.get_authenticated_app_slug()
@@ -116,7 +115,6 @@ class Github(Service):
         return GitHubClient(
             app_id=row.identity["app_id"],
             private_key=row.secrets["private_key"],
-            base_url=load_settings().github_api_url,
             slug=row.identity["slug"],
         )
 
@@ -133,7 +131,7 @@ class Github(Service):
     @classmethod
     async def get_identity(cls, access_token: str) -> dict[str, Any]:
         """The person behind a user token, keyed the way ``Account.lookup`` finds them."""
-        async with GitHub(access_token, base_url=load_settings().github_api_url) as github:
+        async with GitHub(access_token, base_url=GITHUB_API_URL) as github:
             person = (await github.rest.users.async_get_authenticated()).parsed_data
         return {"authority": GITHUB_AUTHORITY, "subject": str(person.id), "login": person.login}
 
