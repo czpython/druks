@@ -182,7 +182,7 @@ describe('project dialogs', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save name' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(projectsApi.update).toHaveBeenCalledWith(7, { name: 'Renamed' })
-    expect(document.activeElement).toBe(screen.getByLabelText('Project actions for Target'))
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Project actions for Target')))
   })
 })
 
@@ -277,7 +277,7 @@ describe('repository selection', () => {
     fireEvent.click(await screen.findByRole('radio', { name: 'acme/docs' }))
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add repo' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(document.activeElement).toBe(screen.getByLabelText('Project actions for Target'))
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Project actions for Target')))
   })
 
   it('preserves selection and purpose after a failed addition', async () => {
