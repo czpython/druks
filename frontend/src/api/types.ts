@@ -725,6 +725,8 @@ export interface Service {
   description: string
   required: boolean
   connected: boolean
+  managed: boolean
+  managedBy: string
   facts: Record<string, string>
   connectedAt: string | null
   fields: ServiceField[]

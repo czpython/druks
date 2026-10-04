@@ -147,7 +147,9 @@ class _DotEnvSource(DotEnvSettingsSource):
 
 class _SecretsSource(NestedSecretsSettingsSource):
     def __call__(self) -> dict[str, Any]:
-        return _pick(super().__call__(), Settings.secret_keys())
+        # Each file in the table of a configured service is a secret of its card.
+        tables = tuple(f"services.{slug}" for slug in self.current_state.get("services", {}))
+        return _pick(super().__call__(), Settings.secret_keys() + tables)
 
 
 class Identity(BaseModel):
@@ -245,9 +247,14 @@ class Settings(BaseSettings):
     )
 
     timezone: Annotated[str, AfterValidator(validate_timezone)] = "UTC"
+    # Who manages this installation. The Services page names it on each managed card.
+    managed_by: str = ""
     identity: Identity = Identity()
     urls: Urls = Urls()
     sandbox: Sandbox = Sandbox()
+    # A [services.<slug>] table makes the card of that service managed. Each table holds
+    # its secrets as plain text, so no output shows the field.
+    services: dict[str, dict] = Field(default={}, repr=False, exclude=True)
 
     # Encrypts stored secrets at rest. A missing or malformed key refuses boot;
     # `druks setup` generates one.

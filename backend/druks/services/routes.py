@@ -13,10 +13,12 @@ from druks.services.exceptions import (
     OauthExchangeError,
     OauthPageError,
     ServiceConnectError,
+    ServiceManagedError,
     ServiceNotConnectedError,
 )
 from druks.services.oauth import OauthClient, complete_connect
 from druks.services.schemas import ConnectionResponse, ServiceResponse
+from druks.settings import load_settings
 from druks.signals import publish
 
 router = APIRouter(prefix="/api/services", tags=["services"])
@@ -26,6 +28,7 @@ oauth_router = APIRouter(prefix="/api/oauth", tags=["oauth"])
 @router.get("", response_model=list[ServiceResponse], response_model_by_alias=True)
 async def list_services(session: SessionDep) -> list[ServiceResponse]:
     entries = []
+    managed_by = load_settings().managed_by
     account_connections = await VaultSecret.list_owned_by(session, current_account_id.get())
     for service in services.all():
         audience = Audience.service(service.slug)
@@ -33,7 +36,11 @@ async def list_services(session: SessionDep) -> list[ServiceResponse]:
         connections = [
             connection for connection in account_connections if connection.audience == audience
         ]
-        entries.append(ServiceResponse.from_row(service, row, connections))
+        entries.append(
+            ServiceResponse.from_row(
+                service, row, connections, managed=service.is_managed(), managed_by=managed_by
+            )
+        )
     return entries
 
 
@@ -60,6 +67,8 @@ async def disconnect_service(session: SessionDep, slug: str) -> None:
     service = services.get(slug)
     if not service:
         raise HTTPException(status_code=404, detail=f"No service {slug!r}.")
+    if service.is_managed():
+        raise ServiceManagedError(slug)
     await service.disconnect(session)
 
 

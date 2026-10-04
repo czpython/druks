@@ -49,7 +49,8 @@ from druks.notifications.routes import external_router as notifications_external
 from druks.notifications.routes import router as notifications_router
 from druks.redis import close_client
 from druks.sandbox.routes import router as secrets_router
-from druks.services.exceptions import OauthPageError, ServiceNotConnectedError
+from druks.services.base import Service
+from druks.services.exceptions import OauthPageError, ServiceManagedError, ServiceNotConnectedError
 from druks.services.routes import oauth_router
 from druks.services.routes import router as service_identities_router
 from druks.settings import Settings, ensure_data_dirs, load_settings, setup_logging
@@ -97,6 +98,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # the check for drift that happens while running.
             async with session_scope(app.state.engine) as session:
                 await resolve_single_operator(session)
+        # Before DBOS launches: a recovered workflow reads a card at once.
+        async with session_scope(app.state.engine) as session:
+            await Service.sync_configuration(session)
         # DBOS runs embedded here: this process both serves HTTP and executes
         # durable workflows. Tests pre-populate app.state.settings and never
         # reach here — they drive DBOS through their own fixtures.
@@ -190,6 +194,11 @@ async def _auth_configuration_handler(
 async def _service_not_connected_handler(
     request: Request, exc: ServiceNotConnectedError
 ) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"error": "HTTP_409", "detail": str(exc)})
+
+
+@app.exception_handler(ServiceManagedError)
+async def _service_managed_handler(request: Request, exc: ServiceManagedError) -> JSONResponse:
     return JSONResponse(status_code=409, content={"error": "HTTP_409", "detail": str(exc)})
 
 

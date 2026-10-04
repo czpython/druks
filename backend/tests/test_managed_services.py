@@ -1,0 +1,192 @@
+import json
+import traceback
+
+import httpx
+import pytest
+from conftest import bind_ambient_session, connect_service
+from druks.accounts.models import Account
+from druks.chat.channels.whatsapp.services import Waha
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
+from druks.services import Service
+from druks.services.exceptions import ServiceConnectError, ServiceManagedError
+from druks.settings import Settings
+from druks.testing import asgi_client, configure_app_for_test
+from pydantic import BaseModel, SecretStr, field_validator
+from sqlalchemy import select
+
+
+@pytest.fixture
+def acme(declared_services):
+    class Acme(Service):
+        class Settings(BaseModel):
+            url: str
+            key: SecretStr
+
+            @field_validator("key")
+            @classmethod
+            def valid_key(cls, value):
+                if value.get_secret_value() == "invalid-secret":
+                    raise ValueError(f"Rejected {value.get_secret_value()}")
+                return value
+
+    return Acme
+
+
+@pytest.fixture
+def configuration(tmp_path, monkeypatch):
+    path = tmp_path / "druks.toml"
+    path.write_text('managed_by = "Druks Cloud"\n')
+    monkeypatch.setenv("DRUKS_CONFIG", str(path))
+    return path
+
+
+@pytest.fixture
+def secrets(tmp_path, monkeypatch):
+    path = tmp_path / "secrets"
+    path.mkdir()
+    monkeypatch.setenv("DRUKS_SECRETS_DIR", str(path))
+    return path
+
+
+def test_service_entry_takes_its_secrets_from_files(configuration, secrets):
+    configuration.write_text('[services.acme]\nurl = "https://acme.test"\n')
+    (secrets / "services.acme.key").write_text("acme-secret")
+    (secrets / "services.other.key").write_text("unused-secret")
+
+    settings = Settings()
+
+    assert settings.services == {"acme": {"url": "https://acme.test", "key": "acme-secret"}}
+    assert "acme-secret" not in repr(settings)
+    assert "acme-secret" not in settings.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "body, secret, message",
+    [
+        ('[services.acme]\nurl = "https://acme.test"', "invalid-secret", "services.acme.key"),
+        ('[services.acme]\nurl = ["sensitive-value"]', "safe-key", "services.acme.url"),
+        ("[services.acme]", "safe-key", "services.acme.url"),
+        ('[services.unknown]\nurl = "sensitive-value"', "safe-key", "no installed app"),
+    ],
+)
+async def test_invalid_service_entry_stops_the_sync_without_its_values(
+    acme, configuration, secrets, druks_db, caplog, body, secret, message
+):
+    configuration.write_text(body)
+    (secrets / "services.acme.key").write_text(secret)
+    with pytest.raises(ServiceConnectError, match=message) as error:
+        await Service.sync_configuration(druks_db)
+    output = "".join(traceback.format_exception(error.value)) + caplog.text
+    assert "invalid-secret" not in output
+    assert "sensitive-value" not in output
+
+
+async def test_sync_keeps_the_vault_id_and_replaces_credentials(
+    acme, configuration, secrets, druks_db
+):
+    bind_ambient_session(druks_db)
+    original = await connect_service(
+        "acme", identity={"url": "https://old.test"}, secrets={"key": "old-key"}
+    )
+    original_id = original.id
+    configuration.write_text('[services.acme]\nurl = "https://acme.test"')
+    (secrets / "services.acme.key").write_text("configured-key")
+    for _ in range(2):
+        await Service.sync_configuration(druks_db)
+        row = await acme.get()
+        assert row.id == original_id
+        assert row.identity == {"url": "https://acme.test"}
+        assert row.secrets == {"key": "configured-key"}
+        assert await row.issue_token("", name="acme_key") == ("configured-key", None)
+
+    (secrets / "services.acme.key").write_text("rotated-key")
+    await Service.sync_configuration(druks_db)
+    assert (await acme.get()).id == original_id
+    assert (await acme.get()).secrets == {"key": "rotated-key"}
+    rows = list(
+        await druks_db.scalars(
+            select(VaultSecret).where(VaultSecret.audience == Audience.service("acme"))
+        )
+    )
+    assert len(rows) == 1
+
+    configuration.write_text("")
+    await Service.sync_configuration(druks_db)
+    assert (await acme.get()).secrets == {"key": "rotated-key"}
+    pasted = await acme.connect({"url": "https://self-hosted.test", "key": "pasted-key"})
+    assert pasted.id == original_id
+
+
+async def test_managed_card_is_read_only(acme, configuration, secrets, druks_db, tmp_path, caplog):
+    configuration.write_text(
+        'managed_by = "Druks Cloud"\n[services.acme]\nurl = "https://acme.test"'
+    )
+    (secrets / "services.acme.key").write_text("configured-key")
+    settings = Settings(data_dir=tmp_path)
+    bind_ambient_session(druks_db)
+    await Service.sync_configuration(druks_db)
+    api = configure_app_for_test(settings=settings)
+    async with asgi_client(api) as client:
+        response = await client.get("/api/services")
+        [card] = [card for card in response.json() if card["slug"] == "acme"]
+        assert card["connected"] and card["managed"]
+        assert card["managedBy"] == "Druks Cloud"
+        assert card["facts"] == {"url": "https://acme.test"}
+        assert "configured-key" not in response.text
+        for method, kwargs in (
+            ("POST", {"json": {"url": "https://changed.test", "key": "other-key"}}),
+            ("DELETE", {}),
+        ):
+            response = await client.request(method, "/api/services/acme", **kwargs)
+            assert response.status_code == 409
+            assert "configured-key" not in response.text
+    with pytest.raises(ServiceManagedError):
+        await acme.connect({"url": "https://changed.test", "key": "other-key"})
+    assert (await acme.get()).secrets == {"key": "configured-key"}
+    assert "configured-key" not in caplog.text
+
+
+async def test_waha_link_uses_the_synced_card_and_keeps_the_session_key(
+    configuration, secrets, monkeypatch, druks_db, caplog
+):
+    configuration.write_text(
+        '[urls]\nendpoint = "https://instance.test"\n[services.waha]\nurl = "http://cloud.test/_instance/123/waha"'
+    )
+    (secrets / "services.waha.key").write_text("instance-key")
+    bind_ambient_session(druks_db)
+    await Service.sync_configuration(druks_db)
+    owner = await Account.get_or_create(druks_db, "operator@example.com")
+    requests = []
+    send = httpx.AsyncClient.send
+
+    async def waha_send(client, request, **kwargs):
+        if request.url.host == "cloud.test":
+            requests.append(request)
+            body = {}
+            if request.url.path.endswith("/api/sessions"):
+                body = {"name": "123-session"}
+            elif request.url.path.endswith("/api/keys"):
+                body = {"id": "key-id", "key": "session-key"}
+            return httpx.Response(200, request=request, json=body)
+        return await send(client, request, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "send", waha_send)
+    connection = await Waha.link(druks_db, owner, identity={})
+
+    assert [request.method for request in requests] == ["POST", "POST", "PUT"]
+    assert [request.headers["X-Api-Key"] for request in requests] == [
+        "instance-key",
+        "instance-key",
+        "session-key",
+    ]
+    assert connection.secrets["key"] == "session-key"
+    assert all(request.url.path.startswith("/_instance/123/waha/") for request in requests)
+    assert (
+        json.loads(requests[2].content)["config"]["webhooks"][0]["hmac"]["key"]
+        == connection.secrets["webhook_secret"]
+    )
+    assert not any(
+        secret in caplog.text
+        for secret in ("instance-key", "session-key", connection.secrets["webhook_secret"])
+    )

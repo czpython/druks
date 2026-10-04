@@ -15,8 +15,14 @@ from druks.db import db_session
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
+from druks.settings import load_settings
 
-from .exceptions import OauthExchangeError, ServiceConnectError, ServiceNotConnectedError
+from .exceptions import (
+    OauthExchangeError,
+    ServiceConnectError,
+    ServiceManagedError,
+    ServiceNotConnectedError,
+)
 from .oauth import OauthClient, fetch_identity, is_grant_revoked
 
 # GoogleCalendar -> google_calendar, HTTPServer -> http_server.
@@ -266,6 +272,57 @@ class Service:
         raise ServiceNotConnectedError(cls.slug)
 
     @classmethod
+    def is_managed(cls) -> bool:
+        """Whether druks.toml configures this service. Its card then refuses a change."""
+        return cls.slug in load_settings().services
+
+    @classmethod
+    async def sync_configuration(cls, session: AsyncSession) -> None:
+        """Store each service that druks.toml configures as its card. An entry replaces
+        the credentials of a card that exists."""
+        for slug, entry in load_settings().services.items():
+            service = services.get(slug)
+            if not service:
+                raise ServiceConnectError(
+                    f"druks.toml configures the service {slug!r}, and no installed app "
+                    f"declares it. Remove [services.{slug}]."
+                )
+            try:
+                settings = service.settings_model.model_validate(entry)
+            except ValidationError as error:
+                invalid_fields = ", ".join(
+                    f"services.{slug}.{item['loc'][0]}" for item in error.errors()
+                )
+                # The cause shows the values of the entry, and startup prints the traceback.
+                raise ServiceConnectError(
+                    f"The entry [services.{slug}] is not valid. Correct {invalid_fields}."
+                ) from None
+            await service._store(session, settings, proven={})
+
+    @classmethod
+    async def _store(cls, session: AsyncSession, settings: BaseModel, proven: dict) -> VaultSecret:
+        """Store the card from its validated ``settings``: secrets encrypted, the rest as
+        identity facts beside the ``proven`` ones."""
+        fields = cls.settings_model.model_fields
+        secrets = {
+            name: getattr(settings, name).get_secret_value()
+            for name, field in fields.items()
+            if field_kind(field) == "secret"
+        }
+        identity = {
+            name: getattr(settings, name)
+            for name, field in fields.items()
+            if field_kind(field) != "secret"
+        }
+        return await VaultSecret.store(
+            session,
+            cls.secret_kind,
+            Audience.service(cls.slug),
+            identity={**identity, **proven},
+            secrets=secrets,
+        )
+
+    @classmethod
     def with_scopes(cls, *scopes: str) -> ScopedService:
         """Declare this app's use of the service and the scopes its
         calls need."""
@@ -383,6 +440,8 @@ class Service:
         """Verify and store a paste of the service's fields: secrets encrypted, the rest as
         identity facts. On a connected card a blank secret keeps the stored one. Another
         client ID revokes the connections that belong to the old one."""
+        if cls.is_managed():
+            raise ServiceManagedError(cls.slug)
         fields = cls.settings_model.model_fields
         session = db_session()
         card = await VaultSecret.lookup(session, cls.secret_kind, Audience.service(cls.slug))
@@ -402,24 +461,7 @@ class Service:
             labels = {spec["name"]: spec["label"] for spec in cls.connect_fields()}
             missing = ", ".join(labels[err["loc"][0]] for err in error.errors())
             raise ServiceConnectError(f"Enter {missing}.") from error
-        secrets = {
-            name: getattr(settings, name).get_secret_value()
-            for name, field in fields.items()
-            if field_kind(field) == "secret"
-        }
-        identity = {
-            name: getattr(settings, name)
-            for name, field in fields.items()
-            if field_kind(field) != "secret"
-        }
-        proven = await cls.verify(settings)
-        row = await VaultSecret.store(
-            session,
-            cls.secret_kind,
-            Audience.service(cls.slug),
-            identity={**identity, **proven},
-            secrets=secrets,
-        )
+        row = await cls._store(session, settings, proven=await cls.verify(settings))
         if cls.token_endpoint and row.identity["client_id"] != previous_client_id:
             client = OauthClient(provider=cls.slug)
             for connection in await VaultSecret.list_connections(

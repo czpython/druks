@@ -822,7 +822,7 @@ export function ServicesPane() {
                     <td data-label="Setup">
                       <ServiceStatus
                         connected={service.connected}
-                        label={service.connected ? 'Configured' : 'Not configured'}
+                        label={managedLabel(service) ?? (service.connected ? 'Configured' : 'Not configured')}
                       />
                     </td>
                     <td data-label="Access">
@@ -854,6 +854,9 @@ export function ServicesPane() {
     </div>
   )
 }
+
+const managedLabel = (service: Service) =>
+  service.managed ? `Managed by ${service.managedBy || 'configuration'}` : undefined
 
 function ServiceStatus({ connected, label }: { connected: boolean; label?: string }) {
   return (
@@ -941,7 +944,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
       <header className="mcp-pane-head">
         <div className="svc-detail-head">
           <h2 className="mcp-pane-title">{service.title}</h2>
-          <ServiceStatus connected={service.connected} />
+          <ServiceStatus connected={service.connected} label={managedLabel(service)} />
         </div>
         <Markdown className="mcp-pane-sub" source={service.description} />
       </header>
@@ -980,10 +983,10 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
                 </a>
               )}
               {service.slug === 'slack' && createSlackApp}
-              <button className="set-btn ghost" onClick={() => setFormOpen(true)} disabled={busy}>
+              <button className="set-btn ghost" onClick={() => setFormOpen(true)} disabled={busy || service.managed}>
                 Replace connection
               </button>
-              <button className="set-btn danger" onClick={disconnect} disabled={busy}>
+              <button className="set-btn danger" onClick={disconnect} disabled={busy || service.managed}>
                 Disconnect service
               </button>
             </div>

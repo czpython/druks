@@ -41,6 +41,7 @@ host-run development template for that environment plane.
 | --- | --- |
 | `[identity]` | Browser identity mode and header or JWT verification inputs |
 | `[urls]` | Dashboard callback base URL and public webhook hostname |
+| `[services.<slug>]` | Service credentials managed by deployment configuration |
 | `[paths]` | Host data and harness configuration paths |
 | `[sandbox]` | Drukbox provider, service URL, image override, registry host and user name, and the proxy and issuer addresses |
 | `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
@@ -112,6 +113,32 @@ as files. Set `DRUKS_SECRETS_DIR` to the directory, for example a mounted
 `/run/secrets`. The file name is the key path: `secrets_key`, `redis_url`,
 `sandbox.service_token`. Druks does not start when a secret is in the
 environment and in a file. The installer does not use files.
+
+## Managed services
+
+A `[services.<slug>]` table makes that service managed. `druks.toml` and the
+secret files own its card, and the Services page cannot change or disconnect it.
+The table is for a platform that writes `druks.toml` itself: the installer
+refuses it. The table holds the plain fields of the card. Each secret field of
+the card is a file in `DRUKS_SECRETS_DIR`:
+
+```toml
+managed_by = "Druks Cloud"
+
+[services.waha]
+url = "http://control.example/_instance/<uuid>/waha"
+```
+
+Here the key is the file `services.waha.key`. Druks does not start when a table
+names an unknown service or holds an invalid field.
+
+`managed_by` names who manages the installation, and each managed card shows it:
+**Managed by Druks Cloud**. Without a name, the card shows **Managed by
+configuration**.
+
+Druks reads the tables at startup, so restart Druks after a change. When you
+remove a table, the card keeps its credentials, and you can change it on the
+Services page again.
 
 ## Personal and installation settings
 
@@ -338,7 +365,7 @@ through the MCP endpoint. See
 Druks acts at GitHub as one **operator GitHub App**. This app is its service
 identity. The GitHub App receives webhooks and does domain writes such as branches,
 pull requests, comments, labels, and merges. Its credentials live encrypted
-in Postgres. They do not come from TOML, the environment, or a PEM file.
+in Postgres.
 
 Until an operator connects GitHub, agent runs stop with a direct message.
 `druks doctor` reports that no GitHub connection exists.
@@ -516,6 +543,8 @@ uses this key only to create and delete a linked number's session and its
 session key. That is WAHA's admin key when you run WAHA yourself. Every other
 call uses the session key of the number. Druks checks neither value when you
 save the card, so a wrong key shows up when you link a number.
+
+For deployment-managed WAHA, use [managed services](#managed-services).
 
 Run WAHA with the NOWEB or GOWS engine: Druks takes each reply's message ID from
 WAHA before it sends the reply. Druks refuses a number that links on another
@@ -940,5 +969,4 @@ exchange. Rotate it as you rotate `secrets_key`, with the new key first.
 The envelope does **not** cover notification webhook URLs. Postgres stores
 them as ordinary fields, although the API masks their values. Treat access to
 Postgres and its backups as access to those values. GitHub App private keys,
-the operator identity's and the review identity's, are vault rows, not files
-mounted into the process.
+the operator identity's and the review identity's, are encrypted vault rows.

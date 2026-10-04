@@ -154,6 +154,8 @@ describe('Account grant groups', () => {
     vi.spyOn(api, 'services').mockResolvedValue([
       {
         slug: 'gmail',
+        managed: false,
+        managedBy: '',
         title: 'Gmail',
         description: 'Connect mailboxes.',
         required: true,

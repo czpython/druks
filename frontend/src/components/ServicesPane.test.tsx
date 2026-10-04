@@ -34,6 +34,8 @@ const disconnected: Service = {
   description: 'The GitHub App druks acts as.',
   required: true,
   connected: false,
+  managed: false,
+  managedBy: '',
   facts: {},
   connectedAt: null,
   fields: githubFields,
@@ -57,6 +59,8 @@ const pasteOnly: Service = {
   description: 'The OAuth client every mailbox authenticates against.',
   required: true,
   connected: false,
+  managed: false,
+  managedBy: '',
   facts: {},
   connectedAt: null,
   fields: [
@@ -330,5 +334,15 @@ describe('ServicesPane', () => {
     expect(link.getAttribute('href')).toBe(
       'https://github.com/apps/druks-operator/installations/new',
     )
+  })
+
+  it.each(['Druks Cloud', ''])('locks a managed service with manager %j', async (managedBy) => {
+    stubFetch([[{ ...pasteOnly, connected: true, managed: true, managedBy }]])
+    renderPane()
+
+    expect(await screen.findByText(`Managed by ${managedBy || 'configuration'}`)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: `Configure ${pasteOnly.title}` }))
+    expect(screen.getByRole('button', { name: 'Replace connection' })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('button', { name: 'Disconnect service' })).toHaveProperty('disabled', true)
   })
 })

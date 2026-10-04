@@ -42,6 +42,8 @@ class ServiceResponse(Schema):
     description: str
     required: bool
     connected: bool
+    managed: bool
+    managed_by: str
     facts: dict[str, Any]
     connected_at: datetime | None
     fields: list[ServiceFieldSpec]
@@ -57,6 +59,9 @@ class ServiceResponse(Schema):
         service: "type[Service]",
         row: "VaultSecret | None",
         connections: "list[VaultSecret] | None" = None,
+        *,
+        managed: bool = False,
+        managed_by: str = "",
     ) -> "ServiceResponse":
         return cls(
             slug=service.slug,
@@ -64,6 +69,8 @@ class ServiceResponse(Schema):
             description=service.description,
             required=service.required,
             connected=bool(row),
+            managed=managed,
+            managed_by=managed_by if managed else "",
             facts=row.identity if row else {},
             connected_at=row.updated_at if row else None,
             fields=[ServiceFieldSpec(**spec) for spec in service.connect_fields()],

@@ -17,6 +17,15 @@ class ServiceConnectError(DruksError):
     and safe to show; it never quotes anything the operator pasted."""
 
 
+class ServiceManagedError(DruksError):
+    """Configuration owns the service's credentials."""
+
+    def __init__(self, service: str) -> None:
+        super().__init__(
+            f"{service} is managed by configuration. Change druks.toml and its secrets."
+        )
+
+
 class OauthPageError(DruksError):
     """A failure on a browser-navigated OAuth door — the connect and callback
     routes, whose failures render an operator page instead of the JSON envelope."""
