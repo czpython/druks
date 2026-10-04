@@ -118,17 +118,17 @@ def pytest_configure(config) -> None:
     # import an app's workflows module before every installed package is claimed.
     iter_apps()
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as settings_file:
-        settings_file.write(
-            f'[secrets]\nsecrets_key = "{base64.b64encode(secrets.token_bytes(32)).decode()}"\n'
-        )
-    settings_path = Path(settings_file.name)
+    # An empty file, so the app under test never reads a druks.toml from the
+    # working directory.
+    with tempfile.NamedTemporaryFile(suffix=".toml", delete=False) as settings_file:
+        settings_path = Path(settings_file.name)
     os.environ.setdefault("DRUKS_CONFIG", str(settings_path))
     config.add_cleanup(settings_path.unlink)
     # Under pytest, druks IS the test instance. Infrastructure settings are read from
     # the environment wherever they're needed — the app's Redis dialer among them — so
     # overriding here keeps the code under test on the database and Redis the fixtures
     # own.
+    os.environ.setdefault("DRUKS_SECRETS_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
     os.environ["DRUKS_DATABASE_URL"] = TEST_DATABASE_URL
     os.environ["DRUKS_REDIS_URL"] = TEST_REDIS_URL
     # App commits become savepoints inside the fixture's outer transaction, which
@@ -216,9 +216,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
     defaults = {
         "data_dir": tmp_path,
         "database_url": TEST_DATABASE_URL,
-        "secrets": {
-            "secrets_key": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
-        },
+        "secrets_key": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
         "redis_url": TEST_REDIS_URL,
         "log_level": "WARNING",
     }

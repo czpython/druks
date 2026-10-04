@@ -140,11 +140,11 @@ def main() -> None:
     ensure_data_dirs(settings)
 
     if args.command == "init-db":
-        run_migrations(settings.database_url)
+        run_migrations(settings.database_url.get_secret_value())
         return
 
     if args.command == "makemigrations":
-        make_app_migration(args.app, args.message, settings.database_url)
+        make_app_migration(args.app, args.message, settings.database_url.get_secret_value())
         return
 
     raise AssertionError(f"Unhandled command: {args.command}")

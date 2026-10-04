@@ -65,7 +65,7 @@ from .routes import router as health_router
 def configure_state(app: FastAPI, settings: Settings) -> None:
     ensure_data_dirs(settings)
     app.state.settings = settings
-    app.state.engine = create_async_engine_from_url(settings.database_url)
+    app.state.engine = create_async_engine_from_url(settings.database_url.get_secret_value())
     # Bind the ambient (``scoped_session``) factory to this engine so
     # request handlers can use ``db_session()`` without per-call setup.
     configure_session(app.state.engine)

@@ -95,7 +95,7 @@ def _app_migration_dirs() -> list[tuple[str, Path]]:
 
 # Every encrypted column reads its keys from the settings at each use. The
 # HKDF info predates the library and must never change: stored rows carry it.
-configure(lambda: load_settings().secrets.secrets_key, info=b"druks-secrets-v1")
+configure(lambda: load_settings().secrets_key.get_secret_value(), info=b"druks-secrets-v1")
 
 
 def create_engine_from_url(database_url: str):

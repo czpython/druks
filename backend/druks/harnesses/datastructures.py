@@ -4,6 +4,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Self
 
+from pydantic import SecretStr
+
 # Execution-side types live with the executor; re-exported here
 # because the harness API speaks them.
 from druks.sandbox.datastructures import (  # noqa: F401
@@ -101,7 +103,7 @@ class ParsedUsage:
 @dataclass(frozen=True)
 class SandboxSettings:
     service_url: str
-    service_token: str
+    service_token: SecretStr
     service_timeout: float
     image: str
     # Each harness owns one directory under this root. Missing files are not

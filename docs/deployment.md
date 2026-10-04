@@ -71,12 +71,13 @@ curl -fsSL https://druks.ai/install.sh | DRUKS_PROVIDER=exe bash
 
 `docker` is the default provider for the local shape. A remote deployment names
 its provider. Use `exe` for exe.dev. Use another Drukbox provider name for the
-generic remote shape. The first pass writes `~/druks/druks.toml` with generated
-secrets.
+generic remote shape. The first pass writes `~/druks/druks.toml`.
 
-It creates `~/druks/.env` and exits if required values are missing.
-The output identifies each missing value. Edit `druks.toml`. For a generic
-remote shape, fill `[sandbox.<provider>]` from the Drukbox
+It creates `~/druks/.env` with generated secrets, and exits if required values
+are missing. The output identifies each missing value. Edit `druks.toml`, and
+add each missing secret to the
+[secrets section](configuration.md#secrets-of-an-installation) of `.env`. For a
+generic remote shape, fill `[sandbox.<provider>]` from the Drukbox
 [configuration reference](https://github.com/czpython/drukbox).
 The installer also creates `paths.harness_config_root`. Put optional CLI
 configuration in the harness directory under that root.
@@ -276,14 +277,14 @@ Drukbox doctor checks the exchange, and `druks doctor` shows that result in
 its `drukbox` check.
 
 Drukbox encrypts the secret entries of each sandbox with `SECRETS_KEY`. The
-installer generates `[secrets].drukbox_secrets_key` and renders it as
-`SECRETS_KEY` for the API and the exchange. Pin the proxy image with
+installer generates `SECRETS_KEY` in `.env` for the API and the exchange. Pin
+the proxy image with
 `DRUKS_SECRETS_PROXY_IMAGE` in `[env]`, at the tag of
 `DRUKS_SANDBOX_SERVICE_IMAGE`.
 
 An install from before these services has `SECRETS_KEY` in `[env]` or in
-`[sandbox.<provider>]`. Move that value to `[secrets].drukbox_secrets_key`,
-set `[sandbox].proxy_url`, and run the installer again.
+`[sandbox.<provider>]`. Move that value to the `SECRETS_KEY` line in the secrets
+section of `.env`, set `[sandbox].proxy_url`, and run the installer again.
 
 ### The issuer listener
 

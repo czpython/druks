@@ -40,7 +40,7 @@ def init_dbos() -> None:
     settings = load_settings()
     # System URL is the app database: DBOS self-migrates its bookkeeping into
     # the dbos schema there, so derived Run.state is a same-DB read.
-    url = _dbos_database_url(settings.database_url)
+    url = _dbos_database_url(settings.database_url.get_secret_value())
     config: DBOSConfig = {
         "name": "druks",
         "system_database_url": url,
@@ -164,7 +164,7 @@ def configure_engine(engine) -> None:
 def _step_engine():
     global _engine
     if not _engine:
-        _engine = create_async_engine_from_url(load_settings().database_url)
+        _engine = create_async_engine_from_url(load_settings().database_url.get_secret_value())
     return _engine
 
 

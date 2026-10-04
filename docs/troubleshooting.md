@@ -34,7 +34,8 @@ provider capacity and can take about a VM minute.
 
 Read the named field in the error. Common causes:
 
-- **Secrets key:** `secrets.secrets_key` is empty, has invalid base64, or does not decode to 32 bytes.
+- **Secrets key:** `DRUKS_SECRETS_KEY` is empty, has invalid base64, or does not decode to 32 bytes.
+- **A secret in `druks.toml`:** the error names the key. Run the installer again, and it moves the value to `.env`.
 - A `druks.toml` value creates an invalid process setting.
 
 Re-running `install.sh` renders `.env` from `druks.toml` and prints remaining

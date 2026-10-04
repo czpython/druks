@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import tomlkit
 
 from druks.core.utils.time import validate_timezone
+from druks.settings import Settings, secret_variable
 
 GAPS_EXIT_CODE = 3
 
@@ -27,8 +28,27 @@ _COMPOSE_ENV_KEYS = (
 )
 _ENV_KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
-# Env keys druks owns — setup renders them into .env, or the app reads their
-# value from druks.toml directly. [env] and provider tables may not carry them.
+# The variables of each secret that setup knows, by its druks.toml key. Setup moves
+# such a secret from druks.toml to the secrets section of .env. The secrets.* keys
+# and the env.* keys cover a druks.toml from before that section.
+_SECRET_VARIABLES = {
+    **{key: (secret_variable(key),) for key in Settings.secret_keys()},
+    "sandbox.service_token": (secret_variable("sandbox.service_token"), "SERVICE_TOKENS"),
+    "sandbox.registry_password": ("REGISTRY_PASSWORD",),
+    "sandbox.exe.EXE_API_TOKEN": ("EXE_API_TOKEN",),
+    "sandbox.exe.TAILSCALE_OAUTH_CLIENT_SECRET": ("TAILSCALE_OAUTH_CLIENT_SECRET",),
+    "secrets.secrets_key": ("DRUKS_SECRETS_KEY",),
+    "secrets.postgres_password": ("DRUKS_POSTGRES_PASSWORD",),
+    "secrets.drukbox_secrets_key": ("SECRETS_KEY",),
+    "env.DRUKS_DATABASE_URL": ("DRUKS_DATABASE_URL",),
+    "env.DRUKS_REDIS_URL": ("DRUKS_REDIS_URL",),
+}
+_KNOWN_SECRETS = frozenset(name for names in _SECRET_VARIABLES.values() for name in names)
+_SECRETS_TITLE = "SECRETS"
+
+# Env keys druks owns — setup renders them into .env, the app reads their value
+# from druks.toml directly, or they are known secrets. [env] and provider tables
+# may not carry them.
 _OWNED_ENV_KEYS = frozenset(
     {
         "DRUKS_POSTGRES_PASSWORD",
@@ -65,6 +85,7 @@ _OWNED_ENV_KEYS = frozenset(
         "SECRETS_EXCHANGE_PORT",
         "DRUKS_SECRETS_PROXY_BIND_HOST",
     }
+    | _KNOWN_SECRETS
 )
 _KNOWN_TOP_LEVEL_KEYS = frozenset({"timezone"})
 _KNOWN_TOML_KEYS = {
@@ -77,24 +98,16 @@ _KNOWN_TOML_KEYS = {
         "jwt_identity_claim",
     ),
     "urls": ("endpoint", "webhook_host"),
-    "secrets": (
-        "postgres_password",
-        "secrets_key",
-        "drukbox_secrets_key",
-    ),
     "paths": ("data_dir", "harness_config_root"),
     "sandbox": (
         "provider",
         "service_url",
-        "service_token",
         "image",
         "registry_host",
         "registry_username",
-        "registry_password",
         "template_repository",
         "proxy_url",
         "issuer_url",
-        "browser_login_proxy",
         "browser_login_tz",
         "timeout",
     ),
@@ -111,12 +124,14 @@ def _secrets_key() -> str:
 
 
 def read_env(path: Path) -> dict[str, str]:
+    return _parse_env(path.read_text()) if path.exists() else {}
+
+
+def _parse_env(text: str) -> dict[str, str]:
     values: dict[str, str] = {}
-    if path.exists():
-        for line in path.read_text().splitlines():
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
+    for line in text.splitlines():
+        key, separator, value = line.partition("=")
+        if separator and not line.startswith("#"):
             values[key.strip()] = value
     return values
 
@@ -147,24 +162,32 @@ def run_setup(
         _set_value(document, value_path, value)
         is_changed = True
 
+    existing_env = env_path.read_text() if env_path.exists() else ""
+    secrets = _read_secrets(existing_env)
+    is_changed = _move_secrets(document, secrets) or is_changed
+    _generate_secrets(secrets)
+
     provider = _get_string(document, ("sandbox", "provider"))
     print_fn(_shape_message(provider))
 
+    toml_text = tomlkit.dumps(document)
+    config = _canonical_config(tomllib.loads(toml_text))
+    extras = {key: value for key, value in read_env(env_path).items() if key in _COMPOSE_ENV_KEYS}
+    env_text = _render_env(config, extras=extras, secrets=secrets)
+    # .env holds the secrets. Replace it in one step, and before druks.toml loses
+    # a secret that this run moves.
+    partial_env_path = env_path.with_name(f"{env_path.name}.tmp")
+    _write_secure_text(partial_env_path, env_text)
+    os.replace(partial_env_path, env_path)
     if is_changed:
-        _write_toml(toml_path, document)
-    config = _read_toml(toml_path)
+        _write_secure_text(toml_path, toml_text)
     if is_fresh:
         _write_gitignore(env_path.parent / ".gitignore")
-
-    existing_env = env_path.read_text() if env_path.exists() else ""
-    extras = {key: value for key, value in read_env(env_path).items() if key in _COMPOSE_ENV_KEYS}
-    env_text = _render_env(config, extras=extras)
-    _write_secure_text(env_path, env_text)
 
     if existing_env and existing_env != env_text:
         print_fn("Rendered .env changed. Apply it with: docker compose up -d")
 
-    gaps = _collect_gaps(config)
+    gaps = _collect_gaps(config, secrets)
     _print_outcome(print_fn, env_path=env_path, provider=provider, gaps=gaps)
     return GAPS_EXIT_CODE if gaps else 0
 
@@ -172,7 +195,8 @@ def run_setup(
 _TOML_TEMPLATE = """\
 # druks.toml — the deployment. Edit this file, then re-run the installer
 # to render and apply it. `druks setup` alone re-renders .env but does
-# not restart services.
+# not restart services. This file holds no secret: the secrets are in the
+# last section of .env. See configuration.md.
 
 # Schedule timezone and initial timezone for new accounts.
 timezone = "UTC"
@@ -191,12 +215,6 @@ jwt_identity_claim = "/email"
 endpoint = ""
 webhook_host = ""
 
-# Generated on first write. Do not regenerate a deployed secret.
-[secrets]
-postgres_password = ""
-secrets_key = ""
-drukbox_secrets_key = ""
-
 # Host paths.
 [paths]
 data_dir = ""
@@ -206,12 +224,11 @@ harness_config_root = ""
 [sandbox]
 provider = ""
 service_url = ""
-service_token = ""
 image = ""
 # Access to private sandbox images on one registry host, for example ghcr.io.
+# The password is the secret REGISTRY_PASSWORD in .env.
 registry_host = ""
 registry_username = ""
-registry_password = ""
 # The repository path on that host where drukbox publishes sandbox templates.
 # The exe provider requires it.
 template_repository = ""
@@ -223,20 +240,16 @@ proxy_url = ""
 # The issuer base URL the secrets exchange dials; loopback web by default. For a
 # drukbox on another server, set the address of this host that drukbox reaches.
 issuer_url = ""
-# An HTTP proxy for the login window. The login then leaves from a different IP
-# than the box. Use it for sign-in flows that refuse the box IP. Examples:
-# http://172.17.0.1:8888, or http://user:pass@host:port for a proxy with a user
-# name and password. If it is empty, the login uses the box IP. Only the login
-# window uses it. See configuration.md.
-browser_login_proxy = ""
 # The timezone of the login browser. Use an IANA zone, for example
-# "Europe/Madrid". Set it to the region of the login proxy. If it is empty, the
-# browser keeps the container default.
+# "Europe/Madrid". Set it to the region of the login proxy, which is the secret
+# DRUKS_SANDBOX_BROWSER_LOGIN_PROXY in .env. If it is empty, the browser keeps
+# the container default.
 browser_login_tz = ""
 timeout = 180
 
 # Put drukbox environment in [sandbox.<provider>]. The table is passed through
 # to remote stacks verbatim; the local docker shape renders no provider table.
+# Put a provider secret in the secrets section of .env, not in this table.
 # Provider reference: https://github.com/czpython/drukbox (docs/deploy.md).
 
 # Raw environment for processes druks does not model (drukbox, Caddy, libraries
@@ -253,7 +266,6 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
             # matches the origin every local doc prints.
             (("urls", "endpoint"), "http://127.0.0.1:8001"),
             (("sandbox", "service_url"), "http://127.0.0.1:8780"),
-            (("sandbox", "service_token"), "dev-token"),
             (("sandbox", "image"), "ghcr.io/czpython/druks/sandbox:latest"),
             # Sandbox containers reach the host at the bridge gateway.
             (("sandbox", "proxy_url"), "http://172.17.0.1:8880"),
@@ -263,11 +275,8 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
             (("identity", "mode"), "header"),
             (("identity", "header"), "X-ExeDev-Email"),
             (("sandbox", "service_url"), "http://127.0.0.1:8780"),
-            (("sandbox", "service_token"), _hex_secret()),
-            (("sandbox", "exe", "EXE_API_TOKEN"), ""),
             (("sandbox", "exe", "TAILSCALE_TAILNET"), ""),
             (("sandbox", "exe", "TAILSCALE_OAUTH_CLIENT_ID"), ""),
-            (("sandbox", "exe", "TAILSCALE_OAUTH_CLIENT_SECRET"), ""),
             (("sandbox", "exe", "EXE_API_URL"), "https://exe.dev"),
             (("sandbox", "exe", "EXE_DEFAULT_IMAGE"), "ghcr.io/boldsoftware/exeuntu:latest"),
             (("sandbox", "exe", "TAILSCALE_ENABLED"), "true"),
@@ -278,24 +287,14 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
         shape = (
             (("identity", "mode"), "header"),
             (("sandbox", "service_url"), "http://127.0.0.1:8780"),
-            (("sandbox", "service_token"), _hex_secret()),
         )
 
     return (
         (("sandbox", "provider"), provider),
-        (("secrets", "postgres_password"), _hex_secret()),
-        (("secrets", "secrets_key"), _secrets_key()),
-        (("secrets", "drukbox_secrets_key"), _secrets_key()),
         (("paths", "data_dir"), f"{home.rstrip('/')}/druks-data"),
         (("paths", "harness_config_root"), f"{home.rstrip('/')}/.config/druks/harnesses"),
         *shape,
     )
-
-
-def _read_toml(path: Path) -> dict[str, Any]:
-    with path.open("rb") as config_file:
-        config = tomllib.load(config_file)
-    return _canonical_config(config)
 
 
 def _canonical_config(raw: dict[str, Any]) -> dict[str, Any]:
@@ -377,6 +376,47 @@ def _set_value(target: MutableMapping[str, Any], path: tuple[str, ...], value: s
     current[path[-1]] = value
 
 
+def _read_secrets(env_text: str) -> dict[str, str]:
+    """The secrets that .env holds: each variable of its secrets section, and each
+    known secret above that section."""
+    head, _, section = env_text.partition(f"\n# {_SECRETS_TITLE}\n")
+    secrets = {key: value for key, value in _parse_env(head).items() if key in _KNOWN_SECRETS}
+    for key, value in _parse_env(section).items():
+        # install.sh appends its compose keys to the end of the file.
+        if key not in _COMPOSE_ENV_KEYS:
+            secrets[key] = value
+    return {key: value for key, value in secrets.items() if value}
+
+
+def _move_secrets(document: tomlkit.TOMLDocument, secrets: dict[str, str]) -> bool:
+    """Move each known secret that druks.toml holds to ``secrets``."""
+    is_moved = False
+    for key, variables in _SECRET_VARIABLES.items():
+        *table_path, name = key.split(".")
+        table: Any = document
+        for part in table_path:
+            table = table.get(part, {}) if isinstance(table, MutableMapping) else {}
+        if isinstance(table, MutableMapping) and name in table:
+            if value := _get_string(table, (name,)):
+                secrets.update(dict.fromkeys(variables, value))
+            del table[name]
+            is_moved = True
+    if "secrets" in document and not document["secrets"]:
+        del document["secrets"]
+    return is_moved
+
+
+def _generate_secrets(secrets: dict[str, str]) -> None:
+    """Add each secret that setup can make and that ``secrets`` does not hold."""
+    secrets.setdefault("DRUKS_SECRETS_KEY", _secrets_key())
+    secrets.setdefault("SECRETS_KEY", _secrets_key())
+    secrets.setdefault("DRUKS_POSTGRES_PASSWORD", _hex_secret())
+    token = secrets.setdefault(secret_variable("sandbox.service_token"), _hex_secret())
+    # drukbox refuses to start without SERVICE_TOKENS. A compose-side default
+    # would replace that safe stop with a known token.
+    secrets.setdefault("SERVICE_TOKENS", token)
+
+
 def _parse_assignment(assignment: str) -> tuple[tuple[str, ...], str]:
     path_text, separator, value = assignment.partition("=")
     path = tuple(path_text.split("."))
@@ -389,30 +429,17 @@ def _parse_assignment(assignment: str) -> tuple[tuple[str, ...], str]:
     return path, value
 
 
-def _write_toml(path: Path, document: tomlkit.TOMLDocument) -> None:
-    text = tomlkit.dumps(document)
-    _canonical_config(tomllib.loads(text))
-    _write_secure_text(path, text)
-
-
 def _render_env(
     config: dict[str, Any],
     *,
     extras: dict[str, str],
+    secrets: dict[str, str],
 ) -> str:
     provider = _get_string(config, ("sandbox", "provider"))
-
-    # drukbox refuses to start without SERVICE_TOKENS. A compose-side default
-    # would replace that safe stop with a known token.
-    service_tokens = _get_string(config, ("sandbox", "service_token"))
     proxy_url = _get_string(config, ("sandbox", "proxy_url"))
     issuer_url = _get_string(config, ("sandbox", "issuer_url"))
 
     sections = (
-        (
-            "GENERATED SECRETS",
-            (("DRUKS_POSTGRES_PASSWORD", _get_string(config, ("secrets", "postgres_password"))),),
-        ),
         (
             "DEPLOYMENT DEFAULTS",
             (
@@ -435,12 +462,9 @@ def _render_env(
             "SANDBOX",
             (
                 ("DEFAULT_HOST_PROVIDER", provider),
-                ("SERVICE_TOKENS", service_tokens),
                 ("REGISTRY_HOST", _get_string(config, ("sandbox", "registry_host"))),
                 ("REGISTRY_USERNAME", _get_string(config, ("sandbox", "registry_username"))),
-                ("REGISTRY_PASSWORD", _get_string(config, ("sandbox", "registry_password"))),
                 ("TEMPLATE_REPOSITORY", _get_string(config, ("sandbox", "template_repository"))),
-                ("SECRETS_KEY", _get_string(config, ("secrets", "drukbox_secrets_key"))),
                 ("SECRETS_PROXY_URL", proxy_url),
                 # The proxy binds the address sandboxes dial and nothing else.
                 ("DRUKS_SECRETS_PROXY_BIND_HOST", urlsplit(proxy_url).hostname or ""),
@@ -509,6 +533,19 @@ def _render_env(
             if key in compose_extras:
                 lines.append(_env_line(key, compose_extras[key]))
         lines.append("")
+
+    # The last section, because setup reads it back to the end of the file.
+    lines.extend(
+        (
+            "# " + "=" * 60,
+            f"# {_SECRETS_TITLE}",
+            "# " + "=" * 60,
+            "# druks setup makes these values once and keeps each line of this section.",
+            "# Add your own secrets here, for example a provider token.",
+            "",
+            *(_env_line(key, value) for key, value in secrets.items()),
+        )
+    )
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -522,17 +559,13 @@ def _is_reserved_env_key(key: str) -> bool:
     return key.startswith("DRUKS_") or key in _OWNED_ENV_KEYS
 
 
-def _collect_gaps(config: dict[str, Any]) -> list[str]:
+def _collect_gaps(config: dict[str, Any], secrets: dict[str, str]) -> list[str]:
     gaps = [
         f"{'.'.join(path)} is empty"
         for path in (
-            ("secrets", "postgres_password"),
-            ("secrets", "secrets_key"),
-            ("secrets", "drukbox_secrets_key"),
             ("identity", "mode"),
             ("sandbox", "provider"),
             ("sandbox", "service_url"),
-            ("sandbox", "service_token"),
         )
         if not _get_string(config, path)
     ]
@@ -567,14 +600,22 @@ def _collect_gaps(config: dict[str, Any]) -> list[str]:
             gaps.append(f"env.{key} is reserved by druks")
 
     provider_environment = provider_tables.get(provider, {})
+    for key in sorted(secrets.keys() & (deployment_env.keys() | provider_environment.keys())):
+        gaps.append(
+            f"{key} is in druks.toml and in the secrets section of .env. Remove one of them."
+        )
+
     if provider == "exe":
-        for key in ("EXE_API_TOKEN", "TAILSCALE_TAILNET"):
-            if not _get_string(config, ("sandbox", "exe", key)):
-                gaps.append(f"sandbox.exe.{key} is empty")
+        if "EXE_API_TOKEN" not in secrets:
+            gaps.append("EXE_API_TOKEN is empty. Add it to the secrets section of .env.")
+        if not _get_string(config, ("sandbox", "exe", "TAILSCALE_TAILNET")):
+            gaps.append("sandbox.exe.TAILSCALE_TAILNET is empty")
         if not _get_string(config, ("sandbox", "proxy_url")):
             gaps.append("sandbox.proxy_url is empty")
     elif provider != "docker" and not any(
-        value for key, value in provider_environment.items() if not _is_reserved_env_key(key)
+        value
+        for key, value in (provider_environment | secrets).items()
+        if not _is_reserved_env_key(key)
     ):
         gaps.append(
             f"[sandbox.{provider}] has no configured values for remote provider {provider!r}"
@@ -627,6 +668,6 @@ def _print_outcome(
         for gap in gaps:
             print_fn(f"  - {gap}")
         print_fn("")
-        print_fn("Set the values in druks.toml, then re-run the installer.")
+        print_fn("Set the values in druks.toml and .env, then re-run the installer.")
     else:
         print_fn(f"✓ {env_path} is complete (provider: {provider}).")

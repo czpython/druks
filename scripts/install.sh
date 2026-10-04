@@ -4,7 +4,7 @@
 # Non-interactive and idempotent: re-run any time to pull a fresh
 # compose.yaml + new images; re-running is also the upgrade path.
 # Deployment configuration lives in druks.toml; ``druks setup`` (run from the
-# backend image) creates it with generated secrets and renders .env. When
+# backend image) creates it and renders .env with generated secrets. When
 # everything needed to boot is present the same run migrates the DB (out of
 # band, once — never on boot) and brings the stack up; otherwise it prints
 # the remaining checklist and exits. GitHub and the coding CLIs connect from

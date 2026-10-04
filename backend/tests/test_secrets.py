@@ -20,10 +20,8 @@ def _key() -> str:
     return base64.b64encode(os.urandom(32)).decode()
 
 
-def _set_key(monkeypatch, tmp_path, value: str) -> None:
-    config_path = tmp_path / "druks.toml"
-    config_path.write_text(f'[secrets]\nsecrets_key = "{value}"\n')
-    monkeypatch.setenv("DRUKS_CONFIG", str(config_path))
+def _set_key(monkeypatch, value: str) -> None:
+    monkeypatch.setenv("DRUKS_SECRETS_KEY", value)
 
 
 async def _store_token(token: str = _TOKEN) -> None:
@@ -82,52 +80,52 @@ async def test_grant_secret_halves_round_trip(druks_db):
     assert grant.secrets["client_secret"] == "cs-secret"
 
 
-async def test_loaded_secrets_are_lazy_and_redacted(monkeypatch, tmp_path, druks_db):
+async def test_loaded_secrets_are_lazy_and_redacted(monkeypatch, druks_db):
     await _store_token()
     druks_db.expunge_all()
 
     # Loading and logging a row never touches key material — decryption
     # happens only on a read of a value, and repr leaks nothing either way.
     row = await _get_token()
-    _set_key(monkeypatch, tmp_path, "")
+    _set_key(monkeypatch, "")
     assert repr(row.secrets) == "SecretsMapping(<redacted>)"
-    with pytest.raises(ValidationError, match="Field required"):
+    with pytest.raises(ValidationError, match="at least one"):
         row.secrets["value"]
 
 
-def test_missing_key_refuses_boot(monkeypatch, tmp_path):
+def test_missing_key_refuses_boot(monkeypatch):
     # Blank and comma-noise-only both read as "no key" — the required setting
     # refuses at construction rather than falling back to plaintext.
     for broken in ("", ",", " , "):
-        _set_key(monkeypatch, tmp_path, broken)
-        with pytest.raises(ValidationError, match="Field required|at least one"):
+        _set_key(monkeypatch, broken)
+        with pytest.raises(ValidationError, match="at least one"):
             load_settings()
 
 
-def test_key_validation_error_never_echoes_the_key(monkeypatch, tmp_path):
+def test_key_validation_error_never_echoes_the_key(monkeypatch):
     # A half-valid list fails validation, and the failure surfaces in boot
     # logs and doctor output — it must not echo the valid segment.
     good = _key()
-    _set_key(monkeypatch, tmp_path, f"{good},not-base64!!")
+    _set_key(monkeypatch, f"{good},not-base64!!")
 
     with pytest.raises(ValidationError) as error_info:
         load_settings()
     assert good not in str(error_info.value)
 
 
-def test_malformed_key_refuses_boot(monkeypatch, tmp_path):
+def test_malformed_key_refuses_boot(monkeypatch):
     for broken in ("not-base64!!", base64.b64encode(b"short").decode()):
-        _set_key(monkeypatch, tmp_path, broken)
+        _set_key(monkeypatch, broken)
         with pytest.raises(ValidationError, match="base64|32 bytes"):
             load_settings()
 
 
-async def test_undecryptable_secret_raises_the_named_error(monkeypatch, tmp_path, druks_db):
+async def test_undecryptable_secret_raises_the_named_error(monkeypatch, druks_db):
     # A key dropped from the list while rows written under it existed is the
     # usual cause — the error must say so, not surface a bare crypto traceback.
     await _store_token()
     druks_db.expunge_all()
-    _set_key(monkeypatch, tmp_path, _key())
+    _set_key(monkeypatch, _key())
 
     with pytest.raises(SecretDecryptError, match="rotated out"):
         (await _get_token()).secrets["value"]
@@ -145,15 +143,15 @@ async def test_garbled_envelope_raises_the_named_error(druks_db):
         (await _get_token()).secrets["value"]
 
 
-async def test_prepended_key_still_decrypts(monkeypatch, tmp_path, druks_db):
+async def test_prepended_key_still_decrypts(monkeypatch, druks_db):
     # Rotation is prepend-only: new writes use the first key; rows written
     # under an older key keep decrypting as long as it stays in the list.
     old_key = _key()
-    _set_key(monkeypatch, tmp_path, old_key)
+    _set_key(monkeypatch, old_key)
     await _store_token()
     await _store_grant(refresh_token="rt-secret")
 
-    _set_key(monkeypatch, tmp_path, f"{_key()},{old_key}")
+    _set_key(monkeypatch, f"{_key()},{old_key}")
     druks_db.expunge_all()
     assert (await _get_token()).secrets["value"] == _TOKEN
     [grant] = await VaultSecret.list_connections(druks_db, Audience.mcp("notion"))

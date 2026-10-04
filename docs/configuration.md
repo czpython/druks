@@ -10,13 +10,16 @@ without replacing the process.
 
 | Plane | Examples | Stored in |
 | --- | --- | --- |
-| Deployment | installation timezone, identity, ingress, Drukbox, encryption key | `~/druks/druks.toml` |
+| Deployment | installation timezone, identity, ingress, Drukbox | `~/druks/druks.toml` |
 | Dashboard | personal timezone, the GitHub connection, harness and tracker credentials, workflow and agent overrides, MCP servers, skills | Postgres |
 
 The installer creates the deployment `.env` from `druks.toml`. Compose, Druks,
-and Drukbox consume this build artifact. Do not edit `.env`. Edit `druks.toml`,
-then run the installer again to apply changes. `druks setup` creates `.env` but
-does not restart services.
+and Drukbox consume this build artifact. Edit `druks.toml`, then run the
+installer again to apply changes. `druks setup` creates `.env` but does not
+restart services.
+
+Do not edit `.env`, with one exception. Its last section holds the
+[secrets](#secrets), and the installer keeps that section.
 
 The file location determines its format. Repository files such as
 `.druks/software_factory/config.yml` use YAML. Other repository dotfiles use
@@ -38,9 +41,8 @@ host-run development template for that environment plane.
 | --- | --- |
 | `[identity]` | Browser identity mode and header or JWT verification inputs |
 | `[urls]` | Dashboard callback base URL and public webhook hostname |
-| `[secrets]` | Generated deployment secrets |
 | `[paths]` | Host data and harness configuration paths |
-| `[sandbox]` | Drukbox provider, service URL and token, image override, registry access, and the proxy and issuer addresses |
+| `[sandbox]` | Drukbox provider, service URL, image override, registry host and user name, and the proxy and issuer addresses |
 | `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
 | `[env]` | Additional deployment environment settings rendered verbatim |
 
@@ -58,9 +60,58 @@ Every other provider name selects the generic remote shape. Drukbox validates it
 The local `docker` shape does not render `[sandbox.<provider>]`. Its Drukbox
 service gets its environment from the defaults in `deploy/compose.yaml`.
 
-The installer generates secrets only when it first creates the TOML. When you move or
-recover an installation, preserve `[secrets]`. Use repeatable
-`druks setup ... --set key.path=value` arguments for explicit scripted writes.
+Use repeatable `druks setup ... --set key.path=value` arguments for explicit
+scripted writes.
+
+## Secrets
+
+`druks.toml` holds no secret. The secrets of Druks are `secrets_key`,
+`database_url`, `redis_url`, `sandbox.service_token`, and
+`sandbox.browser_login_proxy`.
+Druks takes each one from an environment variable. The name is `DRUKS_` and the
+key path, with `_` for each dot: `DRUKS_SECRETS_KEY`,
+`DRUKS_SANDBOX_SERVICE_TOKEN`. Druks does not start when `druks.toml` holds a
+secret.
+
+### Secrets of an installation
+
+The installer keeps the secrets in the last section of `~/druks/.env`:
+
+| Variable | Reader | From |
+| --- | --- | --- |
+| `DRUKS_SECRETS_KEY` | Druks | The installer. The [vault key](#credential-custody-and-secrets-at-rest) |
+| `DRUKS_SANDBOX_SERVICE_TOKEN`, `SERVICE_TOKENS` | Druks, Drukbox | The installer. One token, under the name of each reader |
+| `DRUKS_POSTGRES_PASSWORD` | Postgres, and the database URLs that Compose builds | The installer |
+| `SECRETS_KEY` | Drukbox | The installer. The Drukbox key |
+| `REGISTRY_PASSWORD` | Drukbox | You, for private sandbox images |
+| `DRUKS_SANDBOX_BROWSER_LOGIN_PROXY` | Druks | You, for a login-window proxy |
+| `DRUKS_DATABASE_URL`, `DRUKS_REDIS_URL` | Druks | You, only for a database or a Redis that Compose does not run |
+| A provider secret, for example `EXE_API_TOKEN` | Drukbox | You |
+
+The installer makes its secrets one time and does not change a value that is
+there. It keeps each line of the section when it renders `.env` again. To set a
+secret that only you know, add its line to the section. The local shape needs no
+secret from you.
+
+Druks does not enumerate providers. Put a plain provider variable in
+`[sandbox.<provider>]` and a provider secret in the secrets section. The
+installer reports a variable that is in both places. It moves a known secret
+that it finds in `druks.toml` to the section, so `druks setup ... --set` also
+sets one.
+
+Apply a changed secret with `docker compose up -d`. The exception is
+`DRUKS_POSTGRES_PASSWORD`: Postgres uses it only when it creates the database.
+
+`.env` is the only copy of these secrets. When you move or recover an
+installation, preserve it.
+
+### Secret files
+
+Druks can also read a secret from a file, for a platform that delivers secrets
+as files. Set `DRUKS_SECRETS_DIR` to the directory, for example a mounted
+`/run/secrets`. The file name is the key path: `secrets_key`, `redis_url`,
+`sandbox.service_token`. Druks does not start when a secret is in the
+environment and in a file. The installer does not use files.
 
 ## Personal and installation settings
 
@@ -130,13 +181,13 @@ rejects execution settings. The installation API rejects timezone changes.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DRUKS_DATABASE_URL` | local `druks` Postgres | Runtime and DBOS database |
+| `DRUKS_DATABASE_URL` | local `druks` Postgres | Runtime and DBOS database. A [secret](#secrets) |
 | `DRUKS_DATABASE_POOL_SIZE` | `20` | Connections each process keeps open for requests and workflow steps |
 | `DRUKS_DATABASE_MAX_OVERFLOW` | `30` | Extra connections each process opens under load and closes after use |
 | `DRUKS_DBOS_POOL_SIZE` | `20` | Connections each process keeps for DBOS |
 | `DRUKS_TEST_DATABASE_URL` | local `druks_test` Postgres | What the shipped pytest fixtures use — never the runtime's |
 | `DRUKS_TEST_REDIS_URL` | `redis://127.0.0.1:6379/15` | What the shipped pytest fixtures flush |
-| `DRUKS_REDIS_URL` | `redis://127.0.0.1:6379/0` | Short-lived coordination and caches |
+| `DRUKS_REDIS_URL` | `redis://127.0.0.1:6379/0` | Short-lived coordination and caches. A [secret](#secrets) |
 | `DRUKS_DATA_DIR` | `/var/lib/druks` | Logs, artifacts, installed skills |
 | `DRUKS_HARNESS_CONFIG_ROOT` | `~/.config/druks/harnesses` | Optional harness configuration copied into sandboxes |
 | `DRUKS_LOG_LEVEL` | `INFO` | Python and DBOS log level |
@@ -658,23 +709,23 @@ before provisioning a VM if its selected credential is missing.
 
 ## Sandboxes
 
-| TOML key | Purpose |
+| Key | Purpose |
 | --- | --- |
 | `sandbox.service_url` | Drukbox API base URL. An empty value disables sandbox-backed execution |
-| `sandbox.service_token` | Drukbox API token |
+| `sandbox.service_token` | Drukbox API token. A [secret](#secrets) |
 | `sandbox.timeout` | Control-plane request timeout. The default is 180 seconds |
 | `sandbox.image` | Optional provider image override |
-| `sandbox.registry_host`, `sandbox.registry_username`, `sandbox.registry_password` | Access to private sandbox images on one registry host, for example `ghcr.io`. Set the three together. See [Drukbox](https://github.com/czpython/drukbox/blob/main/docs/deploy.md#private-image-registry) |
+| `sandbox.registry_host`, `sandbox.registry_username`, `sandbox.registry_password` | Access to private sandbox images on one registry host, for example `ghcr.io`. Set the three together. The password is the secret [`REGISTRY_PASSWORD`](#secrets-of-an-installation). See [Drukbox](https://github.com/czpython/drukbox/blob/main/docs/deploy.md#private-image-registry) |
 | `sandbox.template_repository` | The repository path on that host where Drukbox publishes sandbox templates. The exe provider requires it |
 | `sandbox.proxy_url` | The secrets proxy, at the address a sandbox dials. The docker shape sets `http://172.17.0.1:8880`. docker-sbx leaves it empty |
 | `sandbox.issuer_url` | The issuer base URL the secrets exchange dials. The default is `http://127.0.0.1:8001`. For a Drukbox on another server, set the address of the Druks host that Drukbox reaches. The installer then serves the issuer route there ([the issuer listener](deployment.md#the-issuer-listener)) |
-| `sandbox.browser_login_proxy` | Login-window egress proxy. An empty value keeps the box IP |
+| `sandbox.browser_login_proxy` | Login-window egress proxy. A [secret](#secrets). With no value, the login uses the box IP |
 | `sandbox.browser_login_tz` | Login-window timezone (IANA zone). An empty value keeps the container default |
 
 `DRUKS_SANDBOX_KEYS_DIR` remains a process environment override for the
 per-host SSH private-key directory.
 
-`[sandbox].browser_login_proxy` sends the browser **login window** through an
+The secret `sandbox.browser_login_proxy` sends the browser **login window** through an
 HTTP proxy. The login then leaves from a different IP than the box. Use it for
 sign-in flows that refuse a login from the box IP. Only the login window uses the
 proxy. Borrowed sessions keep the box IP. This is sufficient after Druks makes
@@ -698,14 +749,16 @@ are two common types.
 4. Set `TS_USERSPACE=true`.
 5. Set `TS_OUTBOUND_HTTP_PROXY_LISTEN=:8080`.
 6. Set `TS_EXTRA_ARGS=--exit-node=<your-device>`.
-7. Set `browser_login_proxy = http://172.17.0.1:8080`.
+7. Add `DRUKS_SANDBOX_BROWSER_LOGIN_PROXY=http://172.17.0.1:8080` to the secrets
+   section of `.env`.
 
 The login then leaves from your home connection. The box keeps its own IP for all
 other traffic. This exit needs no user name or password.
 
 **A rented static-residential (ISP) proxy.** First make sure that a detection
-service does not already know the IP as a proxy. Then set the proxy with its user
-name and password: `browser_login_proxy = http://user:pass@isp-host:port`.
+service does not already know the IP as a proxy. Then set the secret to the proxy
+with its user name and password:
+`DRUKS_SANDBOX_BROWSER_LOGIN_PROXY=http://user:pass@isp-host:port`.
 An ISP IP passes the datacenter-ASN check. A detection service can still find it
 and mark it as a proxy.
 
@@ -858,7 +911,7 @@ kind, an audience, and an encrypted mapping of secrets:
 A revoked row keeps its facts and loses its secrets. An agent call keeps its
 reference to the row it billed. A reconnect revives the row.
 
-`secrets.secrets_key` encrypts the vault and the browser-session payloads with
+The secret `secrets_key` encrypts the vault and the browser-session payloads with
 AES-256-GCM. Each database column supplies authenticated associated data, and
 each value gets a derived encryption key. The setting is one or more
 comma-separated, base64-encoded 32-byte master keys:
@@ -868,11 +921,10 @@ python3 -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())'
 ```
 
 The first key encrypts new values. Each listed key can decrypt values. To rotate
-the key, put a new key first in `druks.toml`. Then run the installer again:
+the key, put a new key first in `.env`. Then run `docker compose up -d`:
 
-```toml
-[secrets]
-secrets_key = "<new>,<old>"
+```bash
+DRUKS_SECRETS_KEY=<new>,<old>
 ```
 
 While a stored row depends on the old key, keep that key. If you lose each key
@@ -881,10 +933,9 @@ subscriptions. Enter the static tokens again. Log in to the affected browser
 sessions again. Validation and API errors do not include submitted secret
 values.
 
-`secrets.drukbox_secrets_key` encrypts the secret entries of each sandbox in
-the Drukbox database. The installer generates it and renders it as
-`SECRETS_KEY` for the Drukbox API and the secrets exchange. Rotate it as you
-rotate `secrets_key`, with the new key first.
+`SECRETS_KEY` in `.env` encrypts the secret entries of each sandbox in the
+Drukbox database. The installer generates it for the Drukbox API and the secrets
+exchange. Rotate it as you rotate `secrets_key`, with the new key first.
 
 The envelope does **not** cover notification webhook URLs. Postgres stores
 them as ordinary fields, although the API masks their values. Treat access to

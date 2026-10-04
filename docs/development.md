@@ -20,7 +20,7 @@ cp .env.example .env
 python3 -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())'
 ```
 
-Paste the generated value into `secrets.secrets_key` in `druks.toml`, then
+Paste the generated value into `DRUKS_SECRETS_KEY` in `.env`, then
 initialize the development database:
 
 ```bash
@@ -181,9 +181,10 @@ Drukbox on the host from its own checkout
 ```toml
 [sandbox]
 service_url = "http://127.0.0.1:8000"
-service_token = "dev-token"
 image = "ghcr.io/czpython/druks/sandbox:latest"
 ```
+
+The token is a secret. Set `DRUKS_SANDBOX_SERVICE_TOKEN=dev-token` in `.env`.
 
 `uv run druks doctor --sandbox` creates a real host. If you require a real
 sandbox test, run this command. It is not part of the normal test suite.

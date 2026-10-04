@@ -57,7 +57,7 @@ class LoginWindow:
                 browser,
                 session.name,
                 start_url=f"https://{session.site}",
-                login_proxy=settings.sandbox.browser_login_proxy,
+                login_proxy=settings.sandbox.browser_login_proxy.get_secret_value(),
                 login_tz=settings.sandbox.browser_login_tz,
             )
         except BaseException:

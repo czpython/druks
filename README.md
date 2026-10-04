@@ -65,12 +65,13 @@ curl -fsSL https://druks.ai/install.sh | DRUKS_PROVIDER=exe bash
 ```
 
 The installer does not ask questions. The first run writes
-`~/druks/druks.toml` with generated secrets. A remote shape can require values
+`~/druks/druks.toml`, and `~/druks/.env` with generated secrets. A remote shape
+can require values
 that only you know. These values include provider credentials and identity-edge
 details.
 
 The installer prints this list and exits. Set the values in
-`druks.toml`. Then run the same command again.
+`druks.toml` and `.env`. Then run the same command again.
 
 See the [deployment runbook](https://docs.druks.ai/deployment) for
 prerequisites, access control, verification, and rollback.

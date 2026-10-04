@@ -13,9 +13,7 @@ DROPPED_RENDER_KEYS = {
     "DRUKS_AUTH_JWT_AUDIENCE": ("identity.jwt_audience", "druks"),
     "DRUKS_AUTH_JWT_IDENTITY_CLAIM": ("identity.jwt_identity_claim", "/sub"),
     "DRUKS_ENDPOINT": ("urls.endpoint", "https://druks.example"),
-    "DRUKS_SECRETS_KEY": ("secrets.secrets_key", "secrets-key"),
     "DRUKS_SANDBOX_SERVICE_URL": ("sandbox.service_url", "http://sandbox:8000"),
-    "DRUKS_SANDBOX_SERVICE_TOKEN": ("sandbox.service_token", "token"),
     "DRUKS_SANDBOX_IMAGE": ("sandbox.image", "sandbox:latest"),
 }
 
@@ -35,8 +33,9 @@ def _read_toml(path: Path) -> dict:
         return tomllib.load(config_file)
 
 
-def drukbox_key(tmp_path: Path) -> str:
-    return _read_toml(tmp_path / "druks.toml")["secrets"]["drukbox_secrets_key"]
+def _read_secrets(env_path: Path) -> str:
+    """The secrets section of .env."""
+    return env_path.read_text().partition("# SECRETS\n")[2]
 
 
 def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
@@ -52,8 +51,6 @@ def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
     assert values["EXE_API_URL"] == "https://exe.dev"
     assert values["EXE_DEFAULT_IMAGE"] == "ghcr.io/boldsoftware/exeuntu:latest"
     assert values["DRUKS_AUTH_HEADER"] == "X-ExeDev-Email"
-    assert values["SERVICE_TOKENS"] == config["sandbox"]["service_token"]
-    assert values["SECRETS_KEY"] == config["secrets"]["drukbox_secrets_key"]
     assert "SECRETS_PROXY_URL" not in values
     assert "DRUKS_SECRETS_PROXY_BIND_HOST" not in values
     assert values["DRUKS_DATA_DIR"] == "/home/op/druks-data"
@@ -61,15 +58,34 @@ def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
     assert config["paths"]["harness_config_root"] == values["DRUKS_HARNESS_CONFIG_ROOT"]
     assert "EXE_API_TOKEN" not in values
     assert "TAILSCALE_TAILNET" not in values
-    assert len(config["secrets"]["postgres_password"]) == 64
-    assert len(config["secrets"]["drukbox_secrets_key"]) == 44
-    assert len(config["sandbox"]["service_token"]) == 64
     assert (tmp_path / ".gitignore").read_text().splitlines() == [
         "druks.toml",
         ".env",
     ]
     assert stat.S_IMODE(env_path.stat().st_mode) == 0o600
     assert stat.S_IMODE((tmp_path / "druks.toml").stat().st_mode) == 0o600
+
+
+def test_setup_generates_the_secrets_in_env_and_none_in_druks_toml(tmp_path):
+    env_path = tmp_path / ".env"
+    names = [
+        "DRUKS_SECRETS_KEY",
+        "SECRETS_KEY",
+        "DRUKS_POSTGRES_PASSWORD",
+        "DRUKS_SANDBOX_SERVICE_TOKEN",
+        "SERVICE_TOKENS",
+    ]
+
+    assert _run(env_path, provider="docker") == 0
+
+    values = read_env(env_path)
+    lines = [line for line in _read_secrets(env_path).splitlines() if line[:1] not in ("", "#")]
+    assert [line.partition("=")[0] for line in lines] == names
+    assert [len(values[name]) for name in names] == [44, 44, 64, 64, 64]
+    assert values["SERVICE_TOKENS"] == values["DRUKS_SANDBOX_SERVICE_TOKEN"]
+    toml_text = (tmp_path / "druks.toml").read_text()
+    for name in names:
+        assert values[name] not in toml_text
 
 
 def test_fresh_docker_run_is_boot_ready(tmp_path):
@@ -151,10 +167,6 @@ def test_docker_shape_matches_local_wiring_and_ignores_provider_environment(tmp_
     values = read_env(env_path)
     assert values["DEFAULT_HOST_PROVIDER"] == "docker"
     assert "DRUKS_AUTH_HEADER" not in values
-    # Rendered on every shape. Without it, drukbox stops instead of falling
-    # back to a known token.
-    assert values["SERVICE_TOKENS"] == "dev-token"
-    assert values["SECRETS_KEY"] == drukbox_key(tmp_path)
     # Sandbox containers reach the host at the bridge gateway. The proxy binds
     # that address only.
     assert values["SECRETS_PROXY_URL"] == "http://172.17.0.1:8880"
@@ -261,11 +273,11 @@ def test_set_updates_toml_and_rerender_preserves_the_values(tmp_path):
 def test_generated_secrets_never_regenerate_on_rerun(tmp_path):
     env_path = tmp_path / ".env"
     _run(env_path)
-    first = _read_toml(tmp_path / "druks.toml")["secrets"]
+    first = _read_secrets(env_path)
 
     _run(env_path, set_values=("urls.endpoint=https://druks.example",))
 
-    assert _read_toml(tmp_path / "druks.toml")["secrets"] == first
+    assert _read_secrets(env_path) == first
 
 
 def test_deployment_env_addition_renders_verbatim_and_survives_rerender(tmp_path):
@@ -332,15 +344,56 @@ def test_reserved_sandbox_env_key_is_a_named_gap_and_is_not_rendered(tmp_path):
     assert read_env(env_path)["DATABASE_URL"] == "sqlite+aiosqlite:////data/drukbox.db"
 
 
-def test_deleted_env_is_regenerated_byte_identically(tmp_path):
+def test_a_secret_that_the_operator_adds_to_env_survives_a_rerender(tmp_path):
     env_path = tmp_path / ".env"
-    _run(env_path)
-    expected = env_path.read_bytes()
-    env_path.unlink()
+    set_values = ("identity.header=X-Forwarded-Email",)
+    assert _run(env_path, provider="hetzner", set_values=set_values) == GAPS_EXIT_CODE
+    env_path.write_text(env_path.read_text() + "HETZNER_API_TOKEN=hetzner-token\n")
+
+    assert _run(env_path) == 0
+
+    assert read_env(env_path)["HETZNER_API_TOKEN"] == "hetzner-token"
+
+
+def test_a_variable_in_druks_toml_and_in_the_secrets_of_env_is_a_named_gap(tmp_path):
+    env_path = tmp_path / ".env"
+    printed = []
+    _run(env_path, provider="exoscale", set_values=("identity.header=X-Forwarded-Email",))
+    env_path.write_text(env_path.read_text() + "EXOSCALE_API_SECRET=exoscale-secret\n")
+
+    rc = _run(
+        env_path,
+        set_values=("sandbox.exoscale.EXOSCALE_API_SECRET=another",),
+        print_fn=printed.append,
+    )
+
+    assert rc == GAPS_EXIT_CODE
+    gap = "EXOSCALE_API_SECRET is in druks.toml and in the secrets section of .env"
+    assert gap in "\n".join(printed)
+
+
+def test_setup_moves_a_secret_that_druks_toml_holds_to_env(tmp_path):
+    env_path = tmp_path / ".env"
+    _run(env_path, set_values=("sandbox.exe.TAILSCALE_TAILNET=tail.ts.net",))
+    toml_path = tmp_path / "druks.toml"
+    toml_path.write_text(
+        toml_path.read_text()
+        .replace("[paths]", '[secrets]\nsecrets_key = "old-vault-key"\n\n[paths]')
+        .replace("[sandbox]\n", '[sandbox]\nservice_token = "old-token"\n')
+        .replace("[sandbox.exe]\n", '[sandbox.exe]\nEXE_API_TOKEN = "old-exe-token"\n')
+    )
 
     _run(env_path)
 
-    assert env_path.read_bytes() == expected
+    values = read_env(env_path)
+    config = _read_toml(toml_path)
+    assert values["DRUKS_SECRETS_KEY"] == "old-vault-key"
+    assert values["DRUKS_SANDBOX_SERVICE_TOKEN"] == "old-token"
+    assert values["SERVICE_TOKENS"] == "old-token"
+    assert values["EXE_API_TOKEN"] == "old-exe-token"
+    assert "secrets" not in config
+    assert "service_token" not in config["sandbox"]
+    assert "EXE_API_TOKEN" not in config["sandbox"]["exe"]
 
 
 def test_compose_plane_env_additions_survive_rerender(tmp_path):
@@ -437,7 +490,7 @@ def test_legacy_github_table_still_validates(tmp_path):
     assert "GITHUB_OPERATOR_APP_ID" not in read_env(env_path)
 
 
-def test_setup_toml_is_the_settings_source(tmp_path, monkeypatch):
+def test_setup_toml_and_env_are_the_settings_source(tmp_path, monkeypatch):
     env_path = tmp_path / ".env"
 
     rc = _run(
@@ -457,13 +510,16 @@ def test_setup_toml_is_the_settings_source(tmp_path, monkeypatch):
     assert rc == 0
     toml_path = tmp_path / "druks.toml"
     config = _read_toml(toml_path)
+    values = read_env(env_path)
     monkeypatch.setenv("DRUKS_CONFIG", str(toml_path))
+    for name in ("DRUKS_SECRETS_KEY", "DRUKS_SANDBOX_SERVICE_TOKEN"):
+        monkeypatch.setenv(name, values[name])
     settings = Settings()
 
     assert settings.identity.model_dump() == config["identity"]
     assert settings.urls.model_dump() == config["urls"]
-    assert settings.secrets.secrets_key == config["secrets"]["secrets_key"]
-    assert settings.sandbox.service_token == config["sandbox"]["service_token"]
+    assert settings.secrets_key.get_secret_value() == values["DRUKS_SECRETS_KEY"]
+    assert settings.sandbox.service_token.get_secret_value() == values["SERVICE_TOKENS"]
     assert settings.sandbox.service_url == config["sandbox"]["service_url"]
     assert settings.sandbox.image == config["sandbox"]["image"]
     assert settings.sandbox.issuer_url == config["sandbox"]["issuer_url"]
@@ -574,7 +630,7 @@ def test_a_copy_of_a_secrets_setting_is_a_named_gap(tmp_path, assignment, gap):
     assert rc == GAPS_EXIT_CODE
     assert gap in "\n".join(printed)
     values = read_env(env_path)
-    assert values["SECRETS_KEY"] == drukbox_key(tmp_path)
+    assert values["SECRETS_KEY"] != "wrong"
     assert "SECRETS_PROXY_URL" not in values
 
 

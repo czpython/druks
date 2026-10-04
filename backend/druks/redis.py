@@ -8,7 +8,7 @@ _client: aioredis.Redis | None = None
 def get_client() -> aioredis.Redis:
     global _client
     if not _client:
-        _client = aioredis.from_url(load_settings().redis_url)
+        _client = aioredis.from_url(load_settings().redis_url.get_secret_value())
     return _client
 
 

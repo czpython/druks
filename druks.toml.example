@@ -1,5 +1,6 @@
 # Host-run development configuration. Copy to `druks.toml`.
-# Reference: docs/configuration.md.
+# Reference: docs/configuration.md. This file holds no secret: a host-run server
+# takes each secret from `.env` (docs/development.md).
 
 # Schedule timezone and initial timezone for new accounts.
 timezone = "UTC"
@@ -16,13 +17,8 @@ jwt_identity_claim = "/email"
 endpoint = ""
 webhook_host = ""
 
-[secrets]
-# python3 -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())'
-secrets_key = ""
-
 [sandbox]
 service_url = ""
-service_token = ""
 image = ""
 issuer_url = ""
 timeout = 180

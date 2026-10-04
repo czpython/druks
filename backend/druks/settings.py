@@ -1,13 +1,24 @@
 import logging
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import asyncssh
 from jsonpointer import JsonPointer, JsonPointerException
-from pydantic import AfterValidator, BaseModel, BeforeValidator, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    Field,
+    SecretStr,
+    model_validator,
+)
 from pydantic_settings import (
     BaseSettings,
+    DotEnvSettingsSource,
+    EnvSettingsSource,
+    NestedSecretsSettingsSource,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
     TomlConfigSettingsSource,
@@ -39,7 +50,7 @@ def _expand_optional_path(value: Any) -> Any:
     return _expand_path(value) if value else None
 
 
-SecretsKey = Annotated[str, BeforeValidator(validate_keys)]
+SecretsKey = Annotated[SecretStr, BeforeValidator(validate_keys)]
 ExpandedPath = Annotated[Path, BeforeValidator(_expand_path)]
 OptionalExpandedPath = Annotated[Path | None, BeforeValidator(_expand_optional_path)]
 
@@ -54,14 +65,89 @@ def _config_path() -> Path | None:
     return default if default.is_file() else None
 
 
-class _PrunedTomlSource(TomlConfigSettingsSource):
+def _secrets_dir() -> Path | None:
+    if configured := os.environ.get("DRUKS_SECRETS_DIR"):
+        path = Path(configured).expanduser()
+        if path.is_dir():
+            return path
+        raise ValueError(f"DRUKS_SECRETS_DIR is not a directory: {path}")
+
+
+def secret_variable(key: str) -> str:
+    """The environment variable of the secret ``key``: DRUKS_ and the key path, with
+    ``_`` for each dot."""
+    return f"DRUKS_{key.replace('.', '_').upper()}"
+
+
+def _pick(values: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
+    """The dotted ``keys`` that ``values`` sets, in the nested shape of ``values``."""
+    picked: dict[str, Any] = {}
+    for key in keys:
+        table, _, name = key.rpartition(".")
+        scope = values.get(table) if table else values
+        if isinstance(scope, dict) and name in scope:
+            target = picked.setdefault(table, {}) if table else picked
+            target[name] = scope[name]
+    return picked
+
+
+class _TomlSource(TomlConfigSettingsSource):
     def __call__(self) -> dict[str, Any]:
         def drop_blank_values(value: Any) -> Any:
             if isinstance(value, dict):
                 return {key: drop_blank_values(item) for key, item in value.items() if item != ""}
             return value
 
-        return drop_blank_values(super().__call__())
+        document = drop_blank_values(super().__call__())
+        for key in Settings.secret_keys():
+            if _pick(document, (key,)):
+                raise ValueError(
+                    f"druks.toml: {key} is a secret. Set {secret_variable(key)} in the "
+                    f"environment, or write the file {key} in DRUKS_SECRETS_DIR."
+                )
+        for name, field in Settings.model_fields.items():
+            if field.alias and (name in document or field.alias in document):
+                raise ValueError(
+                    f"druks.toml: {name} is not a druks.toml key. "
+                    f"Set {field.alias} in the environment."
+                )
+        return document
+
+
+def _pick_injected(values: dict[str, Any], variables: Mapping[str, str | None]) -> dict[str, Any]:
+    """What the environment sets: the settings that carry an alias, and each secret
+    under the name that ``secret_variable`` builds from its key. A secret in both
+    places is refused, so neither one overrides."""
+    aliases = {field.alias for field in Settings.model_fields.values() if field.alias}
+    secrets: dict[str, Any] = {}
+    secrets_dir = _secrets_dir()
+    for key in Settings.secret_keys():
+        # The sources hold each variable name in lowercase.
+        variable = secret_variable(key).lower()
+        if variable in variables:
+            if secrets_dir and (secrets_dir / key).is_file():
+                raise ValueError(
+                    f"{key} is set in the environment and in a secret file. Remove one of them."
+                )
+            table, _, name = key.rpartition(".")
+            target = secrets.setdefault(table, {}) if table else secrets
+            target[name] = variables[variable]
+    return {key: value for key, value in values.items() if key in aliases} | secrets
+
+
+class _EnvSource(EnvSettingsSource):
+    def __call__(self) -> dict[str, Any]:
+        return _pick_injected(super().__call__(), self.env_vars)
+
+
+class _DotEnvSource(DotEnvSettingsSource):
+    def __call__(self) -> dict[str, Any]:
+        return _pick_injected(super().__call__(), self.env_vars)
+
+
+class _SecretsSource(NestedSecretsSettingsSource):
+    def __call__(self) -> dict[str, Any]:
+        return _pick(super().__call__(), Settings.secret_keys())
 
 
 class Identity(BaseModel):
@@ -121,16 +207,10 @@ class Urls(BaseModel):
         return self.endpoint.rstrip("/")
 
 
-class Secrets(BaseModel):
-    # Encrypts stored secrets at rest. A missing or malformed key refuses boot;
-    # `druks setup` generates one.
-    secrets_key: SecretsKey
-
-
 class Sandbox(BaseModel):
     # The drukbox control plane. An empty service_url turns sandbox execution off.
     service_url: str = ""
-    service_token: str = ""
+    service_token: SecretStr = SecretStr("")
     # Empty → drukbox decides.
     image: str = ""
     # The issuer base URL the secrets exchange dials: the web process on the
@@ -141,7 +221,7 @@ class Sandbox(BaseModel):
     browser_sandbox_image: str = "ghcr.io/czpython/druks/browser:latest"
     # An HTTP proxy for the login window only, so the login leaves from another
     # IP. It may carry a user name and password. Empty keeps the box IP.
-    browser_login_proxy: str = ""
+    browser_login_proxy: SecretStr = SecretStr("")
     # The IANA timezone of the login window, in the login proxy's region. Empty
     # keeps the container default.
     browser_login_tz: str = ""
@@ -152,6 +232,7 @@ class Sandbox(BaseModel):
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         populate_by_name=True,
+        env_prefix="DRUKS_",
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
@@ -166,24 +247,25 @@ class Settings(BaseSettings):
     timezone: Annotated[str, AfterValidator(validate_timezone)] = "UTC"
     identity: Identity = Identity()
     urls: Urls = Urls()
-    secrets: Secrets
     sandbox: Sandbox = Sandbox()
+
+    # Encrypts stored secrets at rest. A missing or malformed key refuses boot;
+    # `druks setup` generates one.
+    secrets_key: SecretsKey
 
     # ``data_dir`` is the root for files, run artifacts, and logs (via computed
     # properties below).
     data_dir: ExpandedPath = Field(default=DEFAULT_DATA_DIR, alias="DRUKS_DATA_DIR")
 
     # Postgres connection URL. Every engine factory and Alembic read this.
-    database_url: str = Field(
-        default="postgresql+psycopg://druks:druks@localhost:5432/druks",
-        alias="DRUKS_DATABASE_URL",
-    )
+    database_url: SecretStr = SecretStr("postgresql+psycopg://druks:druks@localhost:5432/druks")
     # SQLAlchemy reads a pool size of 0 as unbounded.
     database_pool_size: int = Field(default=20, gt=0, alias="DRUKS_DATABASE_POOL_SIZE")
     database_max_overflow: int = Field(default=30, ge=0, alias="DRUKS_DATABASE_MAX_OVERFLOW")
     dbos_pool_size: int = Field(default=20, gt=0, alias="DRUKS_DBOS_POOL_SIZE")
 
-    redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="DRUKS_REDIS_URL")
+    # A secret, because the URL can carry the Redis password.
+    redis_url: SecretStr = SecretStr("redis://127.0.0.1:6379/0")
     # Per-VM SSH keys when drukbox returns them; empty otherwise.
     sandbox_keys_dir: ExpandedPath = Field(
         default=DEFAULT_DATA_DIR / "sandbox-keys",
@@ -225,12 +307,36 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Each setting has one source. druks.toml sets ``timezone`` and the tables. The
+        environment sets the settings that carry an alias. A secret comes from the
+        environment, or from its file when DRUKS_SECRETS_DIR names a directory."""
         return (
             init_settings,
-            _PrunedTomlSource(settings_cls, toml_file=_config_path()),
-            env_settings,
-            dotenv_settings,
+            _TomlSource(settings_cls, toml_file=_config_path()),
+            _EnvSource(settings_cls),
+            _DotEnvSource(settings_cls),
+            _SecretsSource(
+                file_secret_settings,
+                secrets_dir=_secrets_dir(),
+                secrets_nested_delimiter=".",
+                secrets_prefix="",
+            ),
         )
+
+    @classmethod
+    def secret_keys(cls) -> tuple[str, ...]:
+        """The dotted key of each secret: its file name in DRUKS_SECRETS_DIR."""
+        keys: list[str] = []
+        for name, field in cls.model_fields.items():
+            if field.annotation is SecretStr:
+                keys.append(name)
+            elif isinstance(field.annotation, type) and issubclass(field.annotation, BaseModel):
+                keys.extend(
+                    f"{name}.{key}"
+                    for key, table_field in field.annotation.model_fields.items()
+                    if table_field.annotation is SecretStr
+                )
+        return tuple(keys)
 
     @property
     def logs_dir(self) -> Path:

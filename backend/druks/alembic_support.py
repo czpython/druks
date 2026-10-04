@@ -36,7 +36,7 @@ def run_alembic_env(target_metadata=None) -> None:
     if target_metadata is None:
         target_metadata = config.attributes.get("target_metadata", Base.metadata)
     if not config.get_main_option("sqlalchemy.url"):
-        config.set_main_option("sqlalchemy.url", load_settings().database_url)
+        config.set_main_option("sqlalchemy.url", load_settings().database_url.get_secret_value())
 
     def include_object(obj, name, type_, reflected, compare_to):
         target = compare_to if compare_to is not None else obj

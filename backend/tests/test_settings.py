@@ -5,7 +5,7 @@ import pytest
 from druks import database
 from druks.durable import engine as durable_engine
 from druks.settings import Settings, ensure_data_dirs
-from druks.testing import make_settings
+from druks.testing import TEST_DATABASE_URL, make_settings
 from pydantic import ValidationError
 
 _SECRETS_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
@@ -60,10 +60,21 @@ def test_the_pat_slot_cannot_be_the_identity_header(tmp_path, mode):
         )
 
 
-def test_toml_populates_authored_submodels(tmp_path, monkeypatch):
+def _write_secrets(tmp_path, monkeypatch, secrets):
+    """Give Druks its secrets as files, and no secret in the environment."""
+    secrets_dir = tmp_path / "secrets"
+    secrets_dir.mkdir()
+    for name, value in {"secrets_key": _SECRETS_KEY, **secrets}.items():
+        (secrets_dir / name).write_text(value)
+    monkeypatch.setenv("DRUKS_SECRETS_DIR", str(secrets_dir))
+    for variable in ("DRUKS_SECRETS_KEY", "DRUKS_DATABASE_URL", "DRUKS_REDIS_URL"):
+        monkeypatch.delenv(variable)
+
+
+def test_toml_sets_the_tables_and_the_secrets_directory_sets_the_secrets(tmp_path, monkeypatch):
     config_path = tmp_path / "druks.toml"
     config_path.write_text(
-        f'''
+        """
 timezone = "Europe/Madrid"
 [identity]
 mode = "header"
@@ -73,18 +84,23 @@ header = "X-Edge-Email"
 endpoint = "https://druks.example.com"
 webhook_host = "hooks.example.com"
 
-[secrets]
-secrets_key = "{_SECRETS_KEY}"
-
 [sandbox]
 service_url = "https://sandbox.example.com"
-service_token = "sandbox-token"
 image = "sandbox:latest"
 timeout = 180
-'''.strip()
+""".strip()
         + "\n"
     )
     monkeypatch.setenv("DRUKS_CONFIG", str(config_path))
+    _write_secrets(
+        tmp_path,
+        monkeypatch,
+        {
+            "database_url": "postgresql+psycopg://druks:database-password@db/druks",
+            "redis_url": "redis://:redis-password@redis:6379/3",
+            "sandbox.service_token": "sandbox-token",
+        },
+    )
 
     settings = Settings()
 
@@ -92,12 +108,57 @@ timeout = 180
     assert settings.identity.header == "X-Edge-Email"
     assert settings.urls.endpoint == "https://druks.example.com"
     assert settings.urls.webhook_host == "hooks.example.com"
-    assert settings.secrets.secrets_key == _SECRETS_KEY
-    assert settings.sandbox.service_token == "sandbox-token"
+    assert settings.secrets_key.get_secret_value() == _SECRETS_KEY
+    assert settings.sandbox.service_token.get_secret_value() == "sandbox-token"
+    assert settings.redis_url.get_secret_value() == "redis://:redis-password@redis:6379/3"
     assert settings.sandbox.service_url == "https://sandbox.example.com"
     assert settings.sandbox.image == "sandbox:latest"
     assert settings.sandbox.timeout == 180.0
     assert settings.timezone == "Europe/Madrid"
+    for secret in (_SECRETS_KEY, "database-password", "redis-password", "sandbox-token"):
+        assert secret not in repr(settings)
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ('secrets_key = "key"', "secrets_key is a secret"),
+        ('[sandbox]\nservice_token = "token"', "sandbox.service_token is a secret"),
+        ('data_dir = "/home/op/druks-data"', "data_dir is not a druks.toml key"),
+    ],
+)
+def test_druks_toml_refuses_a_secret_and_a_setting_of_the_environment(
+    tmp_path, monkeypatch, body, message
+):
+    config_path = tmp_path / "druks.toml"
+    config_path.write_text(body + "\n")
+    monkeypatch.setenv("DRUKS_CONFIG", str(config_path))
+
+    with pytest.raises(ValueError, match=message):
+        Settings()
+
+
+def test_the_environment_sets_a_secret_under_its_prefixed_name(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DRUKS_SANDBOX_SERVICE_TOKEN", "environment-token")
+    monkeypatch.setenv("DRUKS_TIMEZONE", "Asia/Tokyo")
+    # Drukbox reads these names, and they share the environment file of an install.
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///drukbox")
+    monkeypatch.setenv("SECRETS_KEY", "drukbox-key")
+
+    settings = Settings()
+
+    assert settings.sandbox.service_token.get_secret_value() == "environment-token"
+    assert settings.database_url.get_secret_value() == TEST_DATABASE_URL
+    assert settings.timezone == "UTC"
+
+
+def test_a_secret_in_the_environment_and_in_a_file_refuses_construction(tmp_path, monkeypatch):
+    _write_secrets(tmp_path, monkeypatch, {})
+    monkeypatch.setenv("DRUKS_SECRETS_KEY", _SECRETS_KEY)
+
+    with pytest.raises(ValueError, match="secrets_key is set in the environment and in a secret"):
+        Settings()
 
 
 def test_only_an_explicit_issuer_url_changes_the_mint_base(tmp_path):
@@ -114,23 +175,14 @@ def test_auth_mode_environment_variable_is_ignored(tmp_path, monkeypatch):
     monkeypatch.delenv("DRUKS_CONFIG", raising=False)
     monkeypatch.setenv("DRUKS_AUTH_MODE", "header")
 
-    settings = Settings(secrets={"secrets_key": _SECRETS_KEY})
+    settings = Settings()
 
     assert settings.identity.mode == "none"
 
 
 def test_blank_toml_value_uses_submodel_default(tmp_path, monkeypatch):
     config_path = tmp_path / "druks.toml"
-    config_path.write_text(
-        f"""
-[identity]
-jwt_identity_claim = ""
-
-[secrets]
-secrets_key = "{_SECRETS_KEY}"
-""".strip()
-        + "\n"
-    )
+    config_path.write_text('[identity]\njwt_identity_claim = ""\n')
     monkeypatch.setenv("DRUKS_CONFIG", str(config_path))
 
     settings = Settings()
@@ -184,8 +236,8 @@ def test_development_example_pins_the_installation_timezone(tmp_path, monkeypatc
     config = tmp_path / "druks.toml"
     config.write_text(example.read_text())
     monkeypatch.setenv("DRUKS_CONFIG", str(config))
-    monkeypatch.setenv("TIMEZONE", "Asia/Tokyo")
-    assert Settings(secrets={"secrets_key": _SECRETS_KEY}).timezone == "UTC"
+    monkeypatch.setenv("DRUKS_TIMEZONE", "Asia/Tokyo")
+    assert Settings().timezone == "UTC"
 
 
 def test_pool_settings_reach_the_app_engine_and_dbos(tmp_path, monkeypatch):
@@ -198,7 +250,7 @@ def test_pool_settings_reach_the_app_engine_and_dbos(tmp_path, monkeypatch):
     configs = []
     monkeypatch.setattr(durable_engine, "DBOS", lambda config: configs.append(config))
 
-    pool = database.create_async_engine_from_url(settings.database_url).pool
+    pool = database.create_async_engine_from_url(settings.database_url.get_secret_value()).pool
     durable_engine.init_dbos()
 
     assert (pool.size(), pool._max_overflow) == (3, 4)

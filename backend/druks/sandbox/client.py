@@ -331,7 +331,7 @@ class Client:
         settings = load_settings()
         return SandboxAPI(
             base_url=settings.sandbox.service_url,
-            token=settings.sandbox.service_token,
+            token=settings.sandbox.service_token.get_secret_value(),
             timeout=settings.sandbox.timeout,
         )
 

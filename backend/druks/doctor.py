@@ -54,7 +54,7 @@ class CheckResult:
 @asynccontextmanager
 async def _check_engine(settings: Settings):
     # The suite patches this to hand in the fixture's connection.
-    engine = create_async_engine_from_url(settings.database_url)
+    engine = create_async_engine_from_url(settings.database_url.get_secret_value())
     try:
         yield engine
     finally:
@@ -166,7 +166,7 @@ def _credentials_check(
 def check_provider_credentials(settings: Settings) -> list[CheckResult]:
     # One result per registered provider. Doctor is a one-off, so a plain
     # session reads the rows and never binds the ambient registry.
-    engine = create_engine_from_url(settings.database_url)
+    engine = create_engine_from_url(settings.database_url.get_secret_value())
     try:
         with Session(engine) as session:
             default_account_id = session.scalar(select(Account.id).where(Account.is_default))
@@ -251,7 +251,7 @@ def check_data_dir(settings: Settings) -> CheckResult:
 
 def check_database(settings: Settings) -> CheckResult:
     try:
-        engine = create_engine_from_url(settings.database_url)
+        engine = create_engine_from_url(settings.database_url.get_secret_value())
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         engine.dispose()
@@ -273,7 +273,7 @@ async def check_drukbox(settings: Settings) -> CheckResult:
         )
     api = SandboxAPI(
         base_url=settings.sandbox.service_url,
-        token=settings.sandbox.service_token,
+        token=settings.sandbox.service_token.get_secret_value(),
         timeout=settings.sandbox.timeout,
     )
     try:
@@ -400,7 +400,7 @@ async def _doctor_exec(sandbox) -> None:
 
 
 def check_redis(settings: Settings) -> CheckResult:
-    parsed = urlparse(settings.redis_url)
+    parsed = urlparse(settings.redis_url.get_secret_value())
     host = parsed.hostname or "127.0.0.1"
     port = parsed.port or 6379
     try:
