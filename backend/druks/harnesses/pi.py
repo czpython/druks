@@ -56,12 +56,6 @@ class PiHarness(Harness):
         identity: dict | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
-        if not self.sandbox:
-            raise exceptions.HarnessError(
-                f"{self.name} harness requires sandbox settings — set "
-                "sandbox.service_url and related TOML settings.",
-            )
-
         model = self.model_id
         provider = self.model.partition("/")[0]
         in_vm_run_dir = f"{get_runs_root(ssh_username)}/{run_id}"

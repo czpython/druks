@@ -1,25 +1,13 @@
 import json
 import shlex
-from pathlib import Path
 
 from drukbox_sdk import Secret
 from druks.db import db_session
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
-from druks.harnesses.datastructures import SandboxSettings
 from druks.sandbox.datastructures import McpServer
 
 _CODEX_MODEL = CodexHarness.default_model
-
-
-def _sandbox_config():
-    return SandboxSettings(
-        service_url="https://sb.test",
-        service_token="t",
-        service_timeout=30.0,
-        image="img",
-        harness_config_root=Path("/harnesses"),
-    )
 
 
 async def test_claude_build_invocation_carries_every_flag():
@@ -30,7 +18,6 @@ async def test_claude_build_invocation_carries_every_flag():
         model="anthropic/claude-x",
         fast_mode=True,
         effort="high",
-        sandbox=_sandbox_config(),
     ).build_invocation(
         db_session(),
         identity={"email": "op@example.com"},
@@ -87,7 +74,6 @@ async def test_codex_build_invocation_carries_every_flag():
         model=_CODEX_MODEL,
         fast_mode=True,
         effort="high",
-        sandbox=_sandbox_config(),
     ).build_invocation(
         db_session(),
         identity={"email": "op@example.com", "account_id": "acc-1"},
@@ -149,7 +135,7 @@ async def test_claude_reads_its_key_from_a_placeholder_in_the_vm():
         )
     }
     inv = await ClaudeHarness(
-        model="anthropic/claude-x", fast_mode=False, effort=None, sandbox=_sandbox_config()
+        model="anthropic/claude-x", fast_mode=False, effort=None
     ).build_invocation(
         db_session(),
         prompt="hello",
@@ -175,9 +161,7 @@ async def test_codex_reads_its_key_from_a_placeholder_in_the_vm():
             auth_prefix="Bearer ",
         )
     }
-    inv = await CodexHarness(
-        model=_CODEX_MODEL, fast_mode=False, effort=None, sandbox=_sandbox_config()
-    ).build_invocation(
+    inv = await CodexHarness(model=_CODEX_MODEL, fast_mode=False, effort=None).build_invocation(
         db_session(),
         prompt="hello",
         schema={"type": "object"},

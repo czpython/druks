@@ -1,10 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import Literal, Self
-
-from pydantic import SecretStr
 
 # Execution-side types live with the executor; re-exported here
 # because the harness API speaks them.
@@ -12,7 +9,6 @@ from druks.sandbox.datastructures import (  # noqa: F401
     AgentInvocation,
     HarnessRunResult,
 )
-from druks.settings import Settings
 
 Billing = Literal["subscription", "api_key"]
 
@@ -98,34 +94,3 @@ class ParsedUsage:
     # should render "unmetered" rather than a quota that never moves.
     unlimited: bool = False
     raw: str = field(default="", repr=False)
-
-
-@dataclass(frozen=True)
-class SandboxSettings:
-    service_url: str
-    service_token: SecretStr
-    service_timeout: float
-    image: str
-    # Each harness owns one directory under this root. Missing files are not
-    # copied into the sandbox.
-    harness_config_root: Path
-    # Canonical shared-skills dir pushed into both ~/.claude/skills and
-    # ~/.codex/skills in the VM. ``None`` => per-CLI fallback (the skills
-    # subdir of each home).
-    skills_dir: Path | None = None
-
-    @classmethod
-    def from_settings(cls, settings: Settings) -> Self:
-        return cls(
-            service_url=settings.sandbox.service_url,
-            service_token=settings.sandbox.service_token,
-            service_timeout=settings.sandbox.timeout,
-            image=settings.sandbox.image,
-            harness_config_root=settings.harness_config_root,
-            skills_dir=settings.skills_dir,
-        )
-
-    @classmethod
-    def maybe_from_settings(cls, settings: Settings) -> Self | None:
-        if settings.sandbox.service_url:
-            return cls.from_settings(settings)

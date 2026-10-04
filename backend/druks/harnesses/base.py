@@ -21,7 +21,6 @@ from . import exceptions
 from .datastructures import (
     AgentInvocation,
     HarnessRunResult,
-    SandboxSettings,
 )
 from .providers import Provider, get_provider, is_registered
 
@@ -67,14 +66,10 @@ class Harness(ABC):
         model: str | None,
         fast_mode: bool,
         effort: str | None,
-        sandbox: SandboxSettings | None = None,
     ) -> None:
         self.model = model
         self.fast_mode = fast_mode
         self.effort = effort
-        # Optional only so argv-shape unit tests can build the harness without a
-        # sandbox-configured Settings; every real run needs it and raises when None.
-        self.sandbox = sandbox
 
     @abstractmethod
     async def build_invocation(self, session: AsyncSession, **kwargs: object) -> AgentInvocation:

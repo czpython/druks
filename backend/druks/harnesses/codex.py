@@ -24,14 +24,13 @@ from druks.sandbox.datastructures import (
 from druks.sandbox.layout import get_runs_root, get_work_root
 from druks.sandbox.models import SecretRef
 from druks.secrets.models import VaultSecret
+from druks.settings import load_settings
 from druks.skills.models import Skill
 
 from .artifacts import write_cost
 from .base import Harness
-from .datastructures import SandboxSettings
 from .exceptions import (
     HarnessAuthError,
-    HarnessError,
     HarnessOverloadedError,
     HarnessRateLimitError,
     HarnessSpendLimitError,
@@ -466,13 +465,6 @@ class CodexHarness(Harness):
         identity: dict | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
-        sandbox = self.sandbox
-        if not sandbox:
-            raise HarnessError(
-                f"{self.name} harness requires sandbox settings — set "
-                "sandbox.service_url and related TOML settings.",
-            )
-
         cmd = self._build_codex_wrapper(
             ssh_username=ssh_username,
             schema=schema,
@@ -491,7 +483,7 @@ class CodexHarness(Harness):
             name=self.name,
             args=tuple(cmd),
             stdin=_with_final_message_note(prompt).encode("utf-8"),
-            credentials=await self._get_credentials(session, sandbox, skills=skills),
+            credentials=await self._get_credentials(session, skills=skills),
             env=extra_env,
             extra_artifact_filenames=("output.json", "session.jsonl"),
         )
@@ -566,17 +558,17 @@ class CodexHarness(Harness):
         return args
 
     async def _get_credentials(
-        self, session: AsyncSession, sandbox: SandboxSettings, *, skills: tuple[str, ...] = ()
+        self, session: AsyncSession, *, skills: tuple[str, ...] = ()
     ) -> Credentials:
-        config_dir = sandbox.harness_config_root / self.name
-        skills_dir = sandbox.skills_dir or config_dir / "skills"
+        settings = load_settings()
+        config_dir = settings.harness_config_root / self.name
         return Credentials(
             home=(
                 HomeCopy(".codex/config.toml", config_dir / "config.toml"),
                 HomeCopy(".codex/AGENTS.md", config_dir / "AGENTS.md"),
                 HomeCopy(
                     ".codex/skills",
-                    skills_dir,
+                    settings.skills_dir,
                     excludes=await Skill.delivery_excludes(session, skills),
                 ),
             )

@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from druks.core.utils.time import ensure_utc
 from druks.durable.enums import AgentCallStatus
 from druks.harnesses.artifacts import persist_manifest, persist_prompt, read_cost
-from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import (
     HarnessError,
     HarnessFirstByteTimeoutError,
@@ -231,7 +230,6 @@ class Host:
             model=model,
             fast_mode=config.fast_mode,
             effort=config.effort,
-            sandbox=SandboxSettings.maybe_from_settings(load_settings()),
         )
 
         # Names the artifact subdir and is the AgentCall.id — supplied by the

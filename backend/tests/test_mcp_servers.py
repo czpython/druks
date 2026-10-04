@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +8,6 @@ from druks.apps.registry import mcp_servers
 from druks.db import db_session
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
-from druks.harnesses.datastructures import SandboxSettings
 from druks.mcp.catalog import load_mcp_catalog
 from druks.mcp.constants import BEARER_HEADER, DRUKS_SERVER_NAME
 from druks.mcp.exceptions import (
@@ -34,16 +32,6 @@ from druks.workspaces import Workspace
 _LINEAR_URL = "https://mcp.linear.app/mcp"
 _TOKEN = "lin_secret_value"
 _BEARER = {"Authorization": f"Bearer {_TOKEN}"}
-
-
-def _sandbox_config() -> SandboxSettings:
-    return SandboxSettings(
-        service_url="https://sb.test",
-        service_token="t",
-        service_timeout=30.0,
-        image="img",
-        harness_config_root=Path("/harnesses"),
-    )
 
 
 async def _servers() -> tuple:
@@ -247,9 +235,7 @@ async def test_enabled_server_reaches_both_harness_configs_without_token(druks_d
     servers = await _servers()
 
     claude_config = " ".join(
-        ClaudeHarness(
-            model="claude-x", fast_mode=False, effort=None, sandbox=_sandbox_config()
-        )._mcp_flags(servers)
+        ClaudeHarness(model="claude-x", fast_mode=False, effort=None)._mcp_flags(servers)
     )
     assert _LINEAR_URL in claude_config
     assert "MCP_LINEAR_HEADER_0" in claude_config
@@ -260,7 +246,6 @@ async def test_enabled_server_reaches_both_harness_configs_without_token(druks_d
             model=CodexHarness.default_model,
             fast_mode=False,
             effort=None,
-            sandbox=_sandbox_config(),
         )._mcp_flags(servers)
     )
     assert _LINEAR_URL in codex_config
@@ -338,9 +323,7 @@ async def test_two_header_server_emits_both_headers_in_each_harness_config(druks
     servers = await _servers()
     header_env_var = servers[0].env_headers["X-Api-Key"]
 
-    claude_flags = ClaudeHarness(
-        model="claude-x", fast_mode=False, effort=None, sandbox=_sandbox_config()
-    )._mcp_flags(servers)
+    claude_flags = ClaudeHarness(model="claude-x", fast_mode=False, effort=None)._mcp_flags(servers)
     headers = json.loads(claude_flags[1])["mcpServers"]["grafana"]["headers"]
     assert headers == {
         "X-Grafana-URL": "https://acme.grafana.net",
@@ -353,7 +336,6 @@ async def test_two_header_server_emits_both_headers_in_each_harness_config(druks
             model=CodexHarness.default_model,
             fast_mode=False,
             effort=None,
-            sandbox=_sandbox_config(),
         )._mcp_flags(servers)
     )
     assert 'http_headers."X-Grafana-URL"="https://acme.grafana.net"' in codex_config
@@ -375,9 +357,7 @@ async def test_secret_and_declared_headers_combine_on_one_server(druks_db):
 
     servers = await _servers()
 
-    claude_flags = ClaudeHarness(
-        model="claude-x", fast_mode=False, effort=None, sandbox=_sandbox_config()
-    )._mcp_flags(servers)
+    claude_flags = ClaudeHarness(model="claude-x", fast_mode=False, effort=None)._mcp_flags(servers)
     headers = json.loads(claude_flags[1])["mcpServers"]["acme"]["headers"]
     assert headers == {
         "Authorization": "${MCP_ACME_HEADER_0}",

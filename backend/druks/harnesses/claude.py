@@ -19,13 +19,13 @@ from druks.sandbox.datastructures import (
 from druks.sandbox.layout import get_runs_root
 from druks.sandbox.models import SecretRef
 from druks.secrets.models import VaultSecret
+from druks.settings import load_settings
 from druks.skills.models import Skill
 
 from . import exceptions
 from .artifacts import call_dir, write_cost
 from .base import Harness
 from .constants import CLAUDE_DISALLOWED_TOOLS
-from .datastructures import SandboxSettings
 from .providers import AnthropicProvider
 
 logger = logging.getLogger(__name__)
@@ -113,12 +113,6 @@ class ClaudeHarness(Harness):
         identity: dict | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
-        if not self.sandbox:
-            raise exceptions.HarnessError(
-                "claude harness requires sandbox settings — set sandbox.service_url and "
-                "related TOML settings.",
-            )
-
         in_vm_run_dir = f"{get_runs_root(ssh_username)}/{run_id}"
         in_vm_debug = f"{in_vm_run_dir}/debug.log"
         in_vm_session = f"{in_vm_run_dir}/session.jsonl"
@@ -168,7 +162,6 @@ class ClaudeHarness(Harness):
             stdin=prompt.encode("utf-8"),
             credentials=await _get_credentials(
                 session,
-                self.sandbox,
                 include_plugins=include_plugins,
                 skills=skills,
             ),
@@ -241,7 +234,6 @@ class ClaudeHarness(Harness):
 
 async def _get_credentials(
     session: AsyncSession,
-    sandbox: SandboxSettings,
     *,
     include_plugins: bool = True,
     skills: tuple[str, ...] = (),
@@ -251,7 +243,8 @@ async def _get_credentials(
     placeholder for its token or key. ``include_plugins=False`` skips the
     operator's plugin state, for prompts that use no MCP server and would
     otherwise die on a misconfigured plugin."""
-    config_dir = sandbox.harness_config_root / ClaudeHarness.name
+    settings = load_settings()
+    config_dir = settings.harness_config_root / ClaudeHarness.name
     home: list[HomeFile | HomeCopy] = []
     claude_json = config_dir / ".claude.json"
     if claude_json.is_file():
@@ -274,11 +267,10 @@ async def _get_credentials(
             HomeCopy(".claude/plugins/marketplaces", plugins / "marketplaces"),
             HomeCopy(".claude/plugins/cache", plugins / "cache"),
         ]
-    skills_dir = sandbox.skills_dir or config_dir / "skills"
     home.append(
         HomeCopy(
             ".claude/skills",
-            skills_dir,
+            settings.skills_dir,
             excludes=await Skill.delivery_excludes(session, skills),
         )
     )

@@ -591,11 +591,10 @@ async def test_claude_api_key_stays_on_the_server(
     sandbox.run_prompt = functools.partial(Host.run_prompt, sandbox)
     sandbox._exec = functools.partial(Host._exec, sandbox)
     settings = SimpleNamespace(
-        sandbox=SimpleNamespace(service_url="x", service_token="x", timeout=30.0, image="x"),
         harness_config_root=tmp_path / "harnesses",
-        skills_dir=None,
+        skills_dir=tmp_path / "skills",
     )
-    monkeypatch.setattr("druks.sandbox.host.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.harnesses.claude.load_settings", lambda: settings)
 
     result = await Host.run_agent(
         sandbox,
@@ -650,11 +649,10 @@ async def test_claude_subscription_token_stays_on_the_server(
     sandbox.run_prompt = functools.partial(Host.run_prompt, sandbox)
     sandbox._exec = functools.partial(Host._exec, sandbox)
     settings = SimpleNamespace(
-        sandbox=SimpleNamespace(service_url="x", service_token="x", timeout=30.0, image="x"),
         harness_config_root=tmp_path / "harnesses",
-        skills_dir=None,
+        skills_dir=tmp_path / "skills",
     )
-    monkeypatch.setattr("druks.sandbox.host.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.harnesses.claude.load_settings", lambda: settings)
 
     result = await Host.run_agent(
         sandbox,
@@ -707,11 +705,10 @@ async def test_codex_subscription_token_stays_on_the_server(
     sandbox.run_prompt = functools.partial(Host.run_prompt, sandbox)
     sandbox._exec = functools.partial(Host._exec, sandbox)
     settings = SimpleNamespace(
-        sandbox=SimpleNamespace(service_url="x", service_token="x", timeout=30.0, image="x"),
         harness_config_root=tmp_path / "harnesses",
-        skills_dir=None,
+        skills_dir=tmp_path / "skills",
     )
-    monkeypatch.setattr("druks.sandbox.host.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.harnesses.codex.load_settings", lambda: settings)
 
     result = await Host.run_agent(
         sandbox,

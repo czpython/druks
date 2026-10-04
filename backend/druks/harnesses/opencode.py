@@ -97,12 +97,6 @@ class OpenCodeHarness(Harness):
         identity: dict | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
-        if not self.sandbox:
-            raise exceptions.HarnessError(
-                "opencode harness requires sandbox settings — set sandbox.service_url and "
-                "related TOML settings.",
-            )
-
         mcp = {}
         for server in mcp_servers:
             headers = dict(server.headers)

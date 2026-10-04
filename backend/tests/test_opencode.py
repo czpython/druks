@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 from druks.db import db_session
-from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import (
     HarnessError,
     HarnessInvalidOutputError,
@@ -26,22 +25,11 @@ class _Contract(BaseModel):
     count: int
 
 
-def _sandbox_config() -> SandboxSettings:
-    return SandboxSettings(
-        service_url="https://sandbox.test",
-        service_token="token",
-        service_timeout=30.0,
-        image="image",
-        harness_config_root=Path("/harnesses"),
-    )
-
-
 def _harness() -> OpenCodeHarness:
     return OpenCodeHarness(
         model=_MODEL,
         fast_mode=False,
         effort=None,
-        sandbox=_sandbox_config(),
     )
 
 
@@ -154,7 +142,6 @@ async def test_third_party_invocation_keeps_provider_key_and_model_namespace() -
         model="openrouter/anthropic/claude-sonnet-4",
         fast_mode=False,
         effort=None,
-        sandbox=_sandbox_config(),
     )
 
     invocation = await harness.build_invocation(

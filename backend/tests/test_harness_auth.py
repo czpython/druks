@@ -2,6 +2,7 @@ import base64
 import json
 import shlex
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -11,7 +12,6 @@ from druks.accounts.models import Account
 from druks.db import db_session
 from druks.harnesses.claude import ClaudeHarness, _get_credentials
 from druks.harnesses.codex import CodexHarness
-from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import AgentConfigError, HarnessNotConnectedError
 from druks.harnesses.opencode import OpenCodeHarness
 from druks.harnesses.pi import PiHarness
@@ -21,6 +21,17 @@ from druks.sandbox.models import SandboxIdentity
 from druks.secrets.models import VaultSecret
 from druks.testing import seed_run
 from druks_field_notes.workflows import Summarize
+
+
+@pytest.fixture
+def config_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    settings = SimpleNamespace(
+        harness_config_root=tmp_path / "harnesses",
+        skills_dir=tmp_path / "skills",
+    )
+    monkeypatch.setattr("druks.harnesses.claude.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.harnesses.codex.load_settings", lambda: settings)
+    return settings.harness_config_root
 
 
 async def _seed_claude(
@@ -39,29 +50,19 @@ async def _seed_claude(
     )
 
 
-async def test_claude_bundle_carries_no_credential_file(druks_db):
+async def test_claude_bundle_carries_no_credential_file(druks_db, config_root):
     """The sandbox holds a placeholder for the token. No file carries it."""
     await _seed_claude(access="live", refresh="R0")
-    sandbox = SandboxSettings(
-        service_url="x",
-        service_token="x",
-        service_timeout=30.0,
-        image="x",
-        harness_config_root=Path("/harnesses"),
-    )
-    bundle = await _get_credentials(db_session(), sandbox)
+    bundle = await _get_credentials(db_session())
     assert not any(type(entry) is HomeFile for entry in bundle.home)
-    assert bundle.home[0] == HomeCopy(
-        ".claude/settings.json", Path("/harnesses/claude/settings.json")
-    )
+    assert bundle.home[0] == HomeCopy(".claude/settings.json", config_root / "claude/settings.json")
 
 
 async def test_the_operators_claude_config_reaches_the_box_without_its_mcp_servers(
-    druks_db, tmp_path
+    druks_db, config_root
 ):
     # Druks delivers every server it manages; a copied entry could carry a
     # token the vault never saw.
-    config_root = tmp_path / "harnesses"
     (config_root / "claude").mkdir(parents=True)
     (config_root / "claude" / ".claude.json").write_text(
         json.dumps(
@@ -71,15 +72,8 @@ async def test_the_operators_claude_config_reaches_the_box_without_its_mcp_serve
             }
         )
     )
-    sandbox = SandboxSettings(
-        service_url="x",
-        service_token="x",
-        service_timeout=30.0,
-        image="x",
-        harness_config_root=config_root,
-    )
 
-    bundle = await _get_credentials(db_session(), sandbox)
+    bundle = await _get_credentials(db_session())
 
     [config] = [entry for entry in bundle.home if entry.path == ".claude.json"]
     assert json.loads(config.content) == {"theme": "dark"}
@@ -110,23 +104,15 @@ async def _seed_codex() -> VaultSecret:
     )
 
 
-async def test_credentials_builders_read_their_harness_config_directories(druks_db):
-    config_root = Path("/harnesses")
-    sandbox = SandboxSettings(
-        service_url="x",
-        service_token="x",
-        service_timeout=30.0,
-        image="x",
-        harness_config_root=config_root,
-    )
-
-    claude_bundle = await _get_credentials(db_session(), sandbox)
+async def test_credentials_builders_read_their_harness_config_directories(
+    druks_db, config_root, tmp_path
+):
+    claude_bundle = await _get_credentials(db_session())
     codex_bundle = await CodexHarness(
         model=CodexHarness.default_model,
         fast_mode=False,
         effort=None,
-        sandbox=sandbox,
-    )._get_credentials(db_session(), sandbox)
+    )._get_credentials(db_session())
 
     # No credential file: each CLI reads a placeholder the box holds.
     assert not any(type(entry) is HomeFile for entry in (*claude_bundle.home, *codex_bundle.home))
@@ -155,13 +141,13 @@ async def test_credentials_builders_read_their_harness_config_directories(druks_
     assert HomeCopy(".claude/plugins/cache", config_root / "claude/plugins/cache") in (
         claude_bundle.home
     )
-    assert claude_bundle.home[-1].source == config_root / "claude/skills"
+    assert claude_bundle.home[-1].source == tmp_path / "skills"
     assert HomeCopy(".codex/config.toml", config_root / "codex/config.toml") in codex_bundle.home
     # MCP credentials are box entries; a copied credentials file would carry a
     # second, unmanaged set.
     assert not any(file.path == ".codex/.credentials.json" for file in codex_bundle.home)
     assert HomeCopy(".codex/AGENTS.md", config_root / "codex/AGENTS.md") in codex_bundle.home
-    assert codex_bundle.home[-1].source == config_root / "codex/skills"
+    assert codex_bundle.home[-1].source == tmp_path / "skills"
 
 
 @pytest.mark.parametrize(
@@ -175,24 +161,16 @@ async def test_credentials_builders_read_their_harness_config_directories(druks_
 )
 @pytest.mark.parametrize("config_exists", [False, True])
 async def test_config_delivery_does_not_copy_host_provider_credentials(
-    druks_db, tmp_path, harness, config_name, auth_name, config_exists
+    druks_db, config_root, harness, config_name, auth_name, config_exists
 ):
-    config_root = tmp_path / "harnesses"
     config_dir = config_root / harness.name
     if config_exists:
         config_dir.mkdir(parents=True)
         (config_dir / config_name).write_text("")
         (config_dir / auth_name).write_text('{"token": "host-token"}')
-    sandbox = SandboxSettings(
-        service_url="x",
-        service_token="x",
-        service_timeout=30.0,
-        image="x",
-        harness_config_root=config_root,
-    )
 
     invocation = await harness(
-        model=harness.default_model, fast_mode=False, effort=None, sandbox=sandbox
+        model=harness.default_model, fast_mode=False, effort=None
     ).build_invocation(
         db_session(),
         prompt="hello",
@@ -245,16 +223,9 @@ async def test_a_codex_subscription_binds_a_custom_entry_on_chatgpt(druks_db):
 async def test_the_codex_wrapper_writes_its_login_around_the_placeholder(druks_db):
     subscription = await _seed_codex()
     tokens = subscription.secrets["tokens"]
-    sandbox = SandboxSettings(
-        service_url="x",
-        service_token="x",
-        service_timeout=30.0,
-        image="x",
-        harness_config_root=Path("/harnesses"),
-    )
 
     invocation = await CodexHarness(
-        model=CodexHarness.default_model, fast_mode=False, effort=None, sandbox=sandbox
+        model=CodexHarness.default_model, fast_mode=False, effort=None
     ).build_invocation(
         db_session(),
         prompt="hello",

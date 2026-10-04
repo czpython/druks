@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from drukbox_sdk import Secret
 from druks.db import db_session
-from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import (
     HarnessAuthError,
     HarnessError,
@@ -38,13 +37,6 @@ def _harness(*, effort: str | None = "high") -> PiHarness:
         model=PiHarness.default_model,
         fast_mode=False,
         effort=effort,
-        sandbox=SandboxSettings(
-            service_url="https://sandbox.test",
-            service_token="token",
-            service_timeout=30.0,
-            image="image",
-            harness_config_root=Path("/harnesses"),
-        ),
     )
 
 

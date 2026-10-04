@@ -26,8 +26,6 @@ async def _build(
     mcp_servers: tuple[McpServer, ...] = (),
     skills: tuple[str, ...] = (),
 ) -> dict:
-    # get_manifest never touches the live sandbox, so the harness builds
-    # without sandbox settings — the same shape argv unit tests use.
     harness = harness or ClaudeHarness(
         model="anthropic/claude-opus-4-8", fast_mode=False, effort=None
     )
