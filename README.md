@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="frontend/public/brand-mark.svg" alt="Druks" width="140" height="140" />
+  <img src="frontend/public/brand-mark.svg" alt="Druks" width="280" height="280" />
 </p>
 
 # Druks
