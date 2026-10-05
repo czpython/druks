@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 _MIGRATION = (
     Path(__file__).resolve().parent.parent
+    / "druks"
     / "migrations"
     / "versions"
     / "b4d7e2a9c1f6_merge_review_into_software_factory.py"

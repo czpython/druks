@@ -78,7 +78,7 @@ For app-surface changes, inspect the proof app at
 
 - **Backend:** `backend/druks/` contains FastAPI, DBOS, SQLAlchemy 2.0,
   Pydantic v2, and bundled apps.
-- **Migrations:** `backend/migrations/` contains platform Alembic migrations.
+- **Migrations:** `backend/druks/migrations/` contains platform Alembic migrations.
 - **Tests:** `backend/tests/` contains the pytest suite backed by real Postgres.
 - **Proof app:** `backend/tests/druks-field_notes/` contains the independently
   packaged proof app.

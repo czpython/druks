@@ -9,7 +9,7 @@ from sqlalchemy_encrypted_field import configure
 from druks.db import db_session
 from druks.settings import load_settings
 
-_ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
+_ALEMBIC_INI = Path(__file__).resolve().parent / "alembic.ini"
 _MIGRATION_SUPPORT_ONLY = "migration_support_only"
 
 

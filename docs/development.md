@@ -81,7 +81,7 @@ contains the built SPA and serves it from FastAPI.
 | `backend/druks/contrib/software_factory/` | Bundled reference app, not framework core |
 | `frontend/src/` | Shared dashboard shell and bundled app UI |
 | `frontend/src/druksui/` | The renderer for an app's Python pages |
-| `backend/migrations/` | Core/bundled schema history |
+| `backend/druks/migrations/` | Core/bundled schema history |
 | `deploy/`, `scripts/` | Images, Compose, Caddy, setup, and deployment |
 
 The API process embeds DBOS and executes workflows. App modules register
@@ -110,7 +110,7 @@ tests together.
 Core and bundled historical tables use the core Alembic history:
 
 ```bash
-uv run alembic -c backend/alembic.ini revision --autogenerate -m "describe change"
+uv run alembic -c backend/druks/alembic.ini revision --autogenerate -m "describe change"
 uv run druks init-db
 ```
 

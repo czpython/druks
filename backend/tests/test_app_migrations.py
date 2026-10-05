@@ -19,7 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 # that serves every app. These tests run a synthetic app's revisions through it
 # from an external version_locations, proving the target shape: shared env, the
 # app's own version_locations and version_table, isolated from core's history.
-_ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
+_ALEMBIC_INI = Path(__file__).resolve().parent.parent / "druks" / "alembic.ini"
 
 
 class MigrationProbeFile(Base):

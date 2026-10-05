@@ -100,7 +100,7 @@ include = [
 line-length = 100
 target-version = "py311"
 # Alembic-generated revisions are machine-written; don't hand-lint them.
-extend-exclude = ["backend/migrations/versions"]
+extend-exclude = ["backend/druks/migrations/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "TID251"]

@@ -9,6 +9,7 @@ from sqlalchemy import text
 # inside the suite's rolled-back transaction and runs the real upgrade on it.
 _MIGRATION = (
     Path(__file__).resolve().parent.parent
+    / "druks"
     / "migrations"
     / "versions"
     / "7e1c4b9d2a58_agents_resolve_on_user_settings.py"

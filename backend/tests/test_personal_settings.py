@@ -126,7 +126,13 @@ async def test_migrations_preserve_preferences_and_installation_execution(druks_
             "7dc609a2d51a_move_preferences_to_accounts.py",
             "b43924bf37db_enforce_installation_settings_singleton.py",
         ):
-            path = Path(__file__).resolve().parent.parent / "migrations" / "versions" / filename
+            path = (
+                Path(__file__).resolve().parent.parent
+                / "druks"
+                / "migrations"
+                / "versions"
+                / filename
+            )
             spec = importlib.util.spec_from_file_location("settings_migration", path)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)

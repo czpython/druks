@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 # out-of-tree package's hand-written baseline applies cleanly and tracks its own head,
 # independent of core's. Manages its own DDL (via an AUTOCOMMIT engine) and cleans up, so
 # it opts out of the suite's transaction-rollback isolation (conftest ``_OWN_DATABASE_MODULES``).
-_ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
+_ALEMBIC_INI = Path(__file__).resolve().parent.parent / "druks" / "alembic.ini"
 _PACKAGE_ROOT = Path(__file__).resolve().parent / "druks-field_notes" / "druks_field_notes"
 _VERSIONS = _PACKAGE_ROOT / "migrations" / "versions"
 

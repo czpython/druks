@@ -202,6 +202,7 @@ async def test_event_transaction_migration_preserves_history(druks_db):
     before = (await druks_db.execute(select(Event.id, Event.payload))).all()
     migration = (
         Path(__file__).resolve().parent.parent
+        / "druks"
         / "migrations/versions/8b194c60e72a_event_transaction_visibility.py"
     )
     spec = importlib.util.spec_from_file_location("event_transaction_visibility", migration)

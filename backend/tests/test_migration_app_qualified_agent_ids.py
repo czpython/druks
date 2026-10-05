@@ -11,6 +11,7 @@ from sqlalchemy import text
 # current schema.
 _MIGRATION = (
     Path(__file__).resolve().parent.parent
+    / "druks"
     / "migrations"
     / "versions"
     / "d2f7a9c4e816_app_qualified_agent_ids.py"
