@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import logging
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -336,8 +338,21 @@ class Client:
         )
 
 
+# What Drukbox accepts as an Idempotency-Key.
+_IDEMPOTENCY_KEY = re.compile(r"[A-Za-z0-9_\-:.]{1,255}")
+
+
 def provisioning_key(*parts: str) -> str:
-    return ":".join(part for part in parts if part)
+    """The Idempotency-Key of a box: the parts joined with `:`. A key that Drukbox
+    refuses (a DBOS schedule run id carries `+00:00`, and an id can be long) becomes
+    its accepted characters plus a hash of the whole key, so two keys never collide
+    and a retry of the same run still finds its box. An accepted key stays as is."""
+    key = ":".join(part for part in parts if part)
+    if _IDEMPOTENCY_KEY.fullmatch(key):
+        return key
+    digest = hashlib.sha256(key.encode()).hexdigest()[:16]
+    readable = re.sub(r"[^A-Za-z0-9_\-:.]", "-", key)[: 255 - len(digest) - 1]
+    return f"{readable}.{digest}"
 
 
 async def _upload_helper_script(host: Host) -> None:
