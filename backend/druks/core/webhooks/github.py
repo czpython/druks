@@ -66,6 +66,7 @@ class GitHubEvents(Webhook):
                     "branch": pull_request["head"]["ref"],
                     "action": action,
                     "reviewer": sender["login"],
+                    "author_can_write": review["author_association"] in _WRITERS,
                     "body": review["body"] or "",  # body is nullable on an approve
                 },
             )

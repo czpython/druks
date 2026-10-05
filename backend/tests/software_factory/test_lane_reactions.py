@@ -113,7 +113,13 @@ async def test_build_lifecycle_reaches_the_tracker(druks_db, monkeypatch):
     assert pushed == [TicketStatus.IN_PROGRESS, TicketStatus.IN_REVIEW]
 
 
-async def test_pr_review_answers_through_the_review_gate(druks_db, monkeypatch):
+# On a public repo any GitHub account can approve; only a writer's review answers.
+@pytest.mark.parametrize(
+    ("action", "author_can_write"), [("request_changes", True), ("approve", False)]
+)
+async def test_pr_review_answers_through_the_review_gate(
+    druks_db, monkeypatch, action, author_can_write
+):
     item = await make_test_work_item(
         repo="acme/widget", title="t", source="linear", ticket_key="ACME-9"
     )
@@ -146,22 +152,15 @@ async def test_pr_review_answers_through_the_review_gate(druks_db, monkeypatch):
         pr_number=item.pr_number,
         payload={
             "branch": item.branch,
-            "action": "request_changes",
+            "action": action,
             "reviewer": "alice",
+            "author_can_write": author_can_write,
             "body": "Please split the migration.",
         },
     )
 
-    assert answers == [
-        (
-            item,
-            {
-                "action": "request_changes",
-                "reviewer": "alice",
-                "body": "Please split the migration.",
-            },
-        )
-    ]
+    reply = {"action": action, "reviewer": "alice", "body": "Please split the migration."}
+    assert answers == ([(item, reply)] if author_can_write else [])
 
 
 async def test_pr_open_reaches_the_work_item(druks_db):
