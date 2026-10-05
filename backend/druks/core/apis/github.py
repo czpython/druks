@@ -223,12 +223,25 @@ class GitHubClient:
     async def get_bot_git_author(self) -> tuple[str, str]:
         """Name and email for commits made as the App's bot user — the
         ``<id>+<slug>[bot]@users.noreply.github.com`` convention, the same
-        identity a squash-merge advertises. The id comes from the public users
-        endpoint, no auth needed."""
+        identity a squash-merge advertises. The id comes from the users endpoint,
+        read with an installation token of the App."""
         bot_name = f"{await self.get_mention_handle()}[bot]"
         user_id = _BOT_USER_ID_CACHE.get(self._app_id)
         if not user_id:
-            async with GitHub(base_url=self._base_url) as github:
+            # Without a token this request shares the host IP's 60 requests an
+            # hour, and a used-up limit makes githubkit sleep until the reset with
+            # the run waiting behind it. Any installation's token lifts the limit.
+            installations = (
+                await self._app.rest.apps.async_list_installations(per_page=1)
+            ).parsed_data
+            if not installations:
+                raise GitHubAppNotInstalledError(bot_name)
+            async with GitHub(
+                AppInstallationAuthStrategy(
+                    self._app_id, self._private_key, installations[0].id
+                ),
+                base_url=self._base_url,
+            ) as github:
                 response = await github.rest.users.async_get_by_username(bot_name)
             user_id = response.parsed_data.id
             _BOT_USER_ID_CACHE[self._app_id] = user_id

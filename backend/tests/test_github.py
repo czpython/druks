@@ -561,38 +561,48 @@ async def test_get_file_content_returns_none_when_app_not_installed() -> None:
     assert await client.get_file_content("clawhaven/.druks", "prompts/x.md") is None
 
 
-async def test_get_bot_git_author_composes_the_public_bot_identity(
+async def test_get_bot_git_author_composes_the_bot_identity_with_an_installation_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The author is the App's bot user with GitHub's <id>+<login> noreply
-    # address; the id comes from one unauthenticated lookup, cached for the
-    # life of the process.
-    requested: list[str] = []
+    # address. The id comes from one lookup made with an installation token
+    # (never anonymously: that shares the IP's 60 requests an hour), cached for
+    # the life of the process.
+    requested: list[tuple[str, Any]] = []
 
     class _Users:
+        def __init__(self, auth: Any) -> None:
+            self.auth = auth
+
         async def async_get_by_username(self, username: str) -> SimpleNamespace:
-            requested.append(username)
+            requested.append((username, self.auth))
             return SimpleNamespace(parsed_data=SimpleNamespace(id=123456789))
 
-    class _PublicGitHub:
-        def __init__(self, *, base_url: str) -> None:
+    class _InstallationGitHub:
+        def __init__(self, auth: Any = None, *, base_url: str) -> None:
             assert base_url == "https://github.example/api/v3"
-            self.rest = SimpleNamespace(users=_Users())
+            self.rest = SimpleNamespace(users=_Users(auth))
 
-        async def __aenter__(self) -> "_PublicGitHub":
+        async def __aenter__(self) -> "_InstallationGitHub":
             return self
 
         async def __aexit__(self, *_args: Any) -> None:
             pass
 
-    monkeypatch.setattr(github_api, "GitHub", _PublicGitHub)
+    class _Apps:
+        async def async_list_installations(self, **_: Any) -> SimpleNamespace:
+            return SimpleNamespace(parsed_data=[SimpleNamespace(id=42)])
+
+    monkeypatch.setattr(github_api, "GitHub", _InstallationGitHub)
     monkeypatch.setattr(github_api, "_BOT_USER_ID_CACHE", {})
 
     class _SluggedClient(GitHubClient):
         def __init__(self) -> None:  # skip real auth
             self._app_id = "12345"
+            self._private_key = "pem"
             self._slug = "example-app"
             self._base_url = "https://github.example/api/v3"
+            self._app = SimpleNamespace(rest=SimpleNamespace(apps=_Apps()))
 
     client = _SluggedClient()
     author = await client.get_bot_git_author()
@@ -602,7 +612,10 @@ async def test_get_bot_git_author_composes_the_public_bot_identity(
         "123456789+example-app[bot]@users.noreply.github.com",
     )
     assert await client.get_bot_git_author() == author
-    assert requested == ["example-app[bot]"]
+    [(username, auth)] = requested
+    assert username == "example-app[bot]"
+    assert isinstance(auth, github_api.AppInstallationAuthStrategy)
+    assert auth.installation_id == 42
 
 
 def _template_generating_client(
