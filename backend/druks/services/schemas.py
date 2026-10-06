@@ -48,6 +48,8 @@ class ServiceResponse(Schema):
     connected_at: datetime | None
     fields: list[ServiceFieldSpec]
     create_url: str
+    # Where the connected app is installed at the provider; empty for one without installs.
+    install_url: str
     is_oauth: bool
     scopes: list[str]
     used_by: list[str]
@@ -62,6 +64,7 @@ class ServiceResponse(Schema):
         *,
         managed: bool = False,
         managed_by: str = "",
+        install_url: str = "",
     ) -> "ServiceResponse":
         return cls(
             slug=service.slug,
@@ -75,6 +78,7 @@ class ServiceResponse(Schema):
             connected_at=row.updated_at if row else None,
             fields=[ServiceFieldSpec(**spec) for spec in service.connect_fields()],
             create_url=service.get_create_url() if service.manifest else "",
+            install_url=install_url,
             is_oauth=bool(service.token_endpoint),
             scopes=list(service.scopes()),
             used_by=[declaration.label for declaration in service.declarations()],

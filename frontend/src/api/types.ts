@@ -732,10 +732,11 @@ export interface Service {
   connected: boolean
   managed: boolean
   managedBy: string
-  facts: Record<string, string>
+  facts: Record<string, string | string[]>
   connectedAt: string | null
   fields: ServiceField[]
   createUrl: string
+  installUrl: string
   isOauth: boolean
   scopes: string[]
   usedBy: string[]

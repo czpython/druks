@@ -957,12 +957,12 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
         <section className="mcp-section">
           <details className="set-card svc-facts">
             <summary>Connection details</summary>
-            {Object.entries(service.facts).map(([key, value]) => (
+            {Object.entries(service.facts).filter(([, value]) => value.length).map(([key, value]) => (
               <div className="svc-fact" key={key}>
                 <span className="svc-fact-key">
                   {key.replaceAll('_', ' ').replace(/\bid\b/gi, 'ID').replace(/^./, (letter) => letter.toUpperCase())}
                 </span>
-                <span className="svc-fact-val">{value}</span>
+                <span className="svc-fact-val">{Array.isArray(value) ? value.join(', ') : value}</span>
               </div>
             ))}
           </details>
@@ -972,14 +972,9 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
           {service.isOauth && <ServiceAccess service={service} />}
           {!formOpen && (
             <div className="svc-actions">
-              {service.slug === 'github' && (
-                <a
-                  className="set-btn ghost"
-                  href={`https://github.com/apps/${encodeURIComponent(service.facts.slug ?? '')}/installations/new`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Manage installations
+              {service.installUrl && (
+                <a className="set-btn ghost" href={service.installUrl} target="_blank" rel="noreferrer">
+                  Install
                 </a>
               )}
               {service.slug === 'slack' && createSlackApp}

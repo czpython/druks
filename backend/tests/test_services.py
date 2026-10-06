@@ -92,7 +92,7 @@ async def test_client_factory_resolves_only_the_row(druks_db):
     client = await Github.get_client()
 
     assert client._app_id == "12345"
-    assert client._private_key == _PEM
+    assert client._app.auth.private_key == _PEM
     assert client._slug == "druks-operator"
 
 

@@ -4,6 +4,7 @@ import secrets
 from contextlib import suppress
 from datetime import datetime
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from githubkit import GitHub
@@ -115,8 +116,21 @@ class Github(Service):
         return GitHubClient(
             app_id=row.identity["app_id"],
             private_key=row.secrets["private_key"],
+            app_url=row.identity.get("url", GITHUB_API_URL),
             slug=row.identity["slug"],
         )
+
+    @classmethod
+    async def get_install_endpoint(cls) -> str:
+        slug = (await cls.get()).identity["slug"]
+        return f"https://github.com/apps/{quote(slug, safe='')}/installations/new"
+
+    @classmethod
+    async def sync_installations(cls) -> None:
+        """The accounts the App is installed on, as the fact ``installations``."""
+        accounts = await (await cls.get_client()).list_installation_accounts(cached=False)
+        card = await cls.get()
+        card.identity = {**card.identity, "installations": list(accounts)}
 
     @classmethod
     async def issue_token(cls, resource: str) -> tuple[str, datetime]:

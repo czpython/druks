@@ -123,18 +123,13 @@ refuses it. The table holds the plain fields of the card. Each secret field of
 the card is a file in `DRUKS_SECRETS_DIR`:
 
 ```toml
-managed_by = "Druks Cloud"
-
 [services.waha]
 url = "http://control.example/_instance/<uuid>/waha"
 ```
 
 Here the key is the file `services.waha.key`. Druks does not start when a table
-names an unknown service or holds an invalid field.
-
-`managed_by` names who manages the installation, and each managed card shows it:
-**Managed by Druks Cloud**. Without a name, the card shows **Managed by
-configuration**.
+names an unknown service or holds an invalid field. Each managed card shows
+**Managed by configuration**.
 
 Druks reads the tables at startup, so restart Druks after a change. When you
 remove a table, the card keeps its credentials, and you can change it on the

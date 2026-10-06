@@ -111,6 +111,8 @@ class _TomlSource(TomlConfigSettingsSource):
                     f"druks.toml: {name} is not a druks.toml key. "
                     f"Set {field.alias} in the environment."
                 )
+        if "managed_by" in document:
+            raise ValueError("druks.toml: managed_by is now the [manager] table.")
         return document
 
 
@@ -150,6 +152,37 @@ class _SecretsSource(NestedSecretsSettingsSource):
         # Each file in the table of a configured service is a secret of its card.
         tables = tuple(f"services.{slug}" for slug in self.current_state.get("services", {}))
         return _pick(super().__call__(), Settings.secret_keys() + tables)
+
+
+class Manager(BaseModel):
+    """Who manages the services: it issues their tokens and signs the events it forwards."""
+
+    name: str = ""
+    jwks_url: str = ""
+    issuer: str = ""
+    audience: str = ""
+    # What the manager calls this Druks. Every managed consent's state begins with it.
+    instance: str = ""
+    # The services it manages. Each one's table gives the ``url`` where it answers.
+    services: list[str] = []
+    # The credential of the manager's token exchange: the secret file ``manager.token``.
+    token: SecretStr = SecretStr("")
+
+    @model_validator(mode="after")
+    def _is_fully_configured(self) -> "Manager":
+        values = {
+            "manager.name": self.name,
+            "manager.jwks_url": self.jwks_url,
+            "manager.issuer": self.issuer,
+            "manager.audience": self.audience,
+            "manager.instance": self.instance,
+            "manager.services": ", ".join(self.services),
+            "manager.token": self.token.get_secret_value(),
+        }
+        missing = [name for name, value in values.items() if not value.strip()]
+        if missing and len(missing) < len(values):
+            raise ValueError(f"[manager] requires {', '.join(missing)}")
+        return self
 
 
 class Identity(BaseModel):
@@ -247,8 +280,8 @@ class Settings(BaseSettings):
     )
 
     timezone: Annotated[str, AfterValidator(validate_timezone)] = "UTC"
-    # Who manages this installation. The Services page names it on each managed card.
-    managed_by: str = ""
+    # The Services page names the manager on each managed card.
+    manager: Manager = Manager()
     identity: Identity = Identity()
     urls: Urls = Urls()
     sandbox: Sandbox = Sandbox()

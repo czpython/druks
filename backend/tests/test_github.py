@@ -230,8 +230,11 @@ async def test_merge_when_ready_reports_unsettled_merge() -> None:
 class _OwnerReposClient(GitHubClient):
     def __init__(self, apps: Any) -> None:
         self._app_id = "123"
-        self._private_key = "private-key"
-        self._base_url = "https://api.github.test"
+        apps.async_create_installation_access_token = AsyncMock(
+            return_value=SimpleNamespace(
+                parsed_data=SimpleNamespace(token="ghs_minted", expires_at="2026-09-07T18:00:00Z")
+            )
+        )
         self._app = SimpleNamespace(rest=SimpleNamespace(apps=apps))
 
 
@@ -576,7 +579,7 @@ async def test_get_bot_git_author_composes_the_public_bot_identity(
 
     class _PublicGitHub:
         def __init__(self, *, base_url: str) -> None:
-            assert base_url == "https://github.example/api/v3"
+            assert base_url == github_api.GITHUB_API_URL
             self.rest = SimpleNamespace(users=_Users())
 
         async def __aenter__(self) -> "_PublicGitHub":
@@ -592,7 +595,6 @@ async def test_get_bot_git_author_composes_the_public_bot_identity(
         def __init__(self) -> None:  # skip real auth
             self._app_id = "12345"
             self._slug = "example-app"
-            self._base_url = "https://github.example/api/v3"
 
     client = _SluggedClient()
     author = await client.get_bot_git_author()

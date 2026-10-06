@@ -4,7 +4,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, create_model
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.apps.base import NAME_RE
@@ -273,23 +273,49 @@ class Service:
         raise ServiceNotConnectedError(cls.slug)
 
     @classmethod
-    def is_managed(cls) -> bool:
+    def is_configured(cls) -> bool:
         """Whether druks.toml configures this service. Its card then refuses a change."""
         return cls.slug in load_settings().services
 
     @classmethod
+    def is_managed(cls) -> bool:
+        """Whether the manager manages this service, as ``manager.services`` says."""
+        return cls.slug in load_settings().manager.services
+
+    @classmethod
     async def sync_configuration(cls, session: AsyncSession) -> None:
         """Store each service that druks.toml configures as its card. An entry replaces
-        the credentials of a card that exists."""
-        for slug, entry in load_settings().services.items():
+        the credentials of a card that exists; the facts the card learned since stay."""
+        configuration = load_settings()
+        for slug in configuration.manager.services:
+            if not services.get(slug):
+                raise ServiceConnectError(
+                    f"[manager] manages the service {slug!r}, and no installed app declares "
+                    "it. Remove it from manager.services."
+                )
+        for slug, entry in configuration.services.items():
             service = services.get(slug)
             if not service:
                 raise ServiceConnectError(
                     f"druks.toml configures the service {slug!r}, and no installed app "
                     f"declares it. Remove [services.{slug}]."
                 )
+            model = service.settings_model
+            if service.is_managed():
+                # The card is the plain fields, the ``url``, and the secrets the table gives;
+                # any other key is a fact.
+                fields = {
+                    name: (field.annotation, field)
+                    for name, field in model.model_fields.items()
+                    if field_kind(field) != "secret" or name in entry
+                }
+                model = create_model(
+                    model.__name__,
+                    __config__=ConfigDict(extra="allow"),
+                    **{"url": (str, ...), **fields},
+                )
             try:
-                settings = service.settings_model.model_validate(entry)
+                settings = model.model_validate(entry)
             except ValidationError as error:
                 invalid_fields = ", ".join(
                     f"services.{slug}.{item['loc'][0]}" for item in error.errors()
@@ -298,22 +324,22 @@ class Service:
                 raise ServiceConnectError(
                     f"The entry [services.{slug}] is not valid. Correct {invalid_fields}."
                 ) from None
-            await service._store(session, settings, proven={})
+            card = await VaultSecret.lookup(session, service.secret_kind, Audience.service(slug))
+            facts = card.identity if card else {}
+            learned = {name: value for name, value in facts.items() if name not in entry}
+            await service._store(session, settings, proven=learned)
 
     @classmethod
     async def _store(cls, session: AsyncSession, settings: BaseModel, proven: dict) -> VaultSecret:
         """Store the card from its validated ``settings``: secrets encrypted, the rest as
         identity facts beside the ``proven`` ones."""
-        fields = cls.settings_model.model_fields
         secrets = {
             name: getattr(settings, name).get_secret_value()
-            for name, field in fields.items()
+            for name, field in type(settings).model_fields.items()
             if field_kind(field) == "secret"
         }
         identity = {
-            name: getattr(settings, name)
-            for name, field in fields.items()
-            if field_kind(field) != "secret"
+            name: value for name, value in settings.model_dump().items() if name not in secrets
         }
         return await VaultSecret.store(
             session,
@@ -410,6 +436,19 @@ class Service:
         if not cls.token_endpoint:
             raise TypeError(f"{cls.__name__} declares no OAuth endpoints")
         connected = await cls.get()
+        if cls.is_managed():
+            manager = load_settings().manager
+            return OauthClient(
+                provider=cls.slug,
+                authorization_endpoint=cls.authorization_endpoint,
+                token_endpoint=f"{connected.identity['url'].rstrip('/')}/oauth/token",
+                client_id=connected.identity["client_id"],
+                extra_authorize_params=cls.extra_authorize_params,
+                token_headers={"Authorization": f"Bearer {manager.token.get_secret_value()}"},
+                state_prefix=f"{manager.instance}.",
+                redirect_uri=f"{manager.issuer.rstrip('/')}/{cls.slug}/oauth/callback",
+                is_grant_revoked=cls.is_grant_revoked,
+            )
         return OauthClient(
             provider=cls.slug,
             authorization_endpoint=cls.authorization_endpoint,
@@ -420,6 +459,16 @@ class Service:
             extra_authorize_params=cls.extra_authorize_params,
             is_grant_revoked=cls.is_grant_revoked,
         )
+
+    @classmethod
+    async def get_install_endpoint(cls) -> str:
+        """The provider page that installs the app, then runs the sign-in flow with
+        the installation in its callback. Empty for a provider without one."""
+        return ""
+
+    @classmethod
+    async def sync_installations(cls) -> None:
+        """Record the app's installations on the card. Runs after an install exchange."""
 
     @classmethod
     async def issue_token(cls, resource: str) -> tuple[str, datetime]:
@@ -444,7 +493,7 @@ class Service:
         """Verify and store a paste of the service's fields: secrets encrypted, the rest as
         identity facts. On a connected card a blank secret keeps the stored one. Another
         client ID revokes the connections that belong to the old one."""
-        if cls.is_managed():
+        if cls.is_configured():
             raise ServiceManagedError(cls.slug)
         fields = cls.settings_model.model_fields
         session = db_session()

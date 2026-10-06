@@ -40,6 +40,7 @@ const disconnected: Service = {
   connectedAt: null,
   fields: githubFields,
   createUrl: '/api/core/services/github/manifest',
+  installUrl: '',
   isOauth: false,
   scopes: [],
   usedBy: [],
@@ -82,6 +83,7 @@ const pasteOnly: Service = {
     },
   ],
   createUrl: '',
+  installUrl: '',
   isOauth: false,
   scopes: [],
   usedBy: [],
@@ -324,16 +326,29 @@ describe('ServicesPane', () => {
     expect(await screen.findByText('druks-operator')).toBeTruthy()
   })
 
-  it('links installation management to the connected slug', async () => {
-    stubFetch([[connected]])
+  it('links the install page the backend names', async () => {
+    const installUrl = 'https://github.com/apps/druks-operator/installations/new'
+    stubFetch([[{ ...connected, installUrl }]])
     renderPane()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Configure GitHub' }))
-    const link = screen.getByText('Manage installations')
 
-    expect(link.getAttribute('href')).toBe(
-      'https://github.com/apps/druks-operator/installations/new',
-    )
+    expect(screen.getByText('Install').getAttribute('href')).toBe(installUrl)
+  })
+
+  it('lists the accounts a managed GitHub App is installed on', async () => {
+    const installed: Service = {
+      ...connected,
+      managed: true,
+      managedBy: 'Druks Cloud',
+      facts: { app_id: '12345', slug: 'druks', installations: ['acme', 'paulo'] },
+    }
+    stubFetch([[installed]])
+    renderPane()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Configure GitHub' }))
+
+    expect(screen.getByText('acme, paulo')).toBeTruthy()
   })
 
   it.each(['Druks Cloud', ''])('locks a managed service with manager %j', async (managedBy) => {
