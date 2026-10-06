@@ -357,6 +357,13 @@ class Service:
         return tuple(sorted(scopes))
 
     @classmethod
+    def get_profile(cls, identity: dict[str, Any]) -> dict[str, Any]:
+        """The facts that name the person at the provider: login, email, name. Not the
+        authority or the identity key, which only match the sign-in to its account."""
+        hidden = ("authority", cls.identity_key)
+        return {key: value for key, value in identity.items() if key not in hidden}
+
+    @classmethod
     async def get_identity(cls, access_token: str) -> dict[str, Any]:
         """The signed-in account's facts, read from ``identity_endpoint``.
         Override when the provider needs a different call."""

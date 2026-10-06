@@ -28,7 +28,7 @@ from druks.files.models import FileRecord
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.opencode import OpenCodeHarness
-from druks.mcp.enums import Toolkit
+from druks.mcp.enums import Credential, Toolkit
 from druks.mcp.inbound import get_druks_account_token, get_druks_mcp_server
 from druks.mcp.models import McpServer
 from druks.models import Base
@@ -529,9 +529,15 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
         account_id=conversation.account_id,
         refresh_token="ghr_one",
         scopes=[],
+        identity={"authority": "https://github.com", "subject": "1", "login": "octocat"},
     )
     conversation.account.kind = kind
     starts = []
+    contexts = []
+
+    async def render_prompt(name, /, **context):
+        contexts.append(context)
+        return ""
 
     async def request(self, method, **values):
         if method == "start":
@@ -544,6 +550,7 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
 
     monkeypatch.setattr(Bridge, "request", request)
     monkeypatch.setattr(service, "follow_turn", follow_turn)
+    monkeypatch.setattr(service, "render_prompt", render_prompt)
 
     await service.deliver_pending(druks_db, conversation)
 
@@ -553,6 +560,30 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
         ("github", sign_in.id, "", "github.com")
     ] * len(expected)
     assert starts[0]["mcpServers"] == expected
+    sign_ins = [
+        {
+            "title": "Linear",
+            "host": "",
+            "credential": Credential.HEADERS,
+            "connected": True,
+            "profile": {},
+        },
+        {
+            "title": "sentry",
+            "host": "",
+            "credential": Credential.GRANT,
+            "connected": False,
+            "profile": {},
+        },
+        {
+            "title": "Github",
+            "host": "github.com",
+            "credential": Credential.SERVICE_CONNECTION,
+            "connected": True,
+            "profile": {"login": "octocat"},
+        },
+    ]
+    assert [context["sign_ins"] for context in contexts] == [sign_ins * len(expected)]
 
 
 @pytest.mark.parametrize(

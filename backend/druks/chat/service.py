@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import logging
+from collections.abc import Sequence
 from contextlib import suppress
 from datetime import timedelta
 from pathlib import PurePosixPath
@@ -24,7 +25,8 @@ from druks.harnesses.base import Harness
 from druks.harnesses.config import AgentConfig, get_config
 from druks.harnesses.registry import get_harness, get_harnesses
 from druks.locks import lock
-from druks.mcp.enums import AllowedTools, Toolkit
+from druks.mcp import models as mcp_models
+from druks.mcp.enums import AllowedTools, Credential, Toolkit
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.inbound import get_druks_account_token, get_druks_mcp_server
 from druks.mcp.server import get_tool_name
@@ -79,10 +81,10 @@ async def publish(conversation_id: str, event: dict) -> None:
 
 
 async def get_agent(
-    session: AsyncSession, conversation: Conversation
+    session: AsyncSession, conversation: Conversation, *, sign_ins: Sequence[dict] = ()
 ) -> tuple[str, str, AllowedTools]:
     """The conversation's agent: its Bot's id, its system prompt, and the tools its key
-    allows."""
+    allows. ``sign_ins`` are the facts of ``list_sign_ins``, for an operator."""
     account_type = conversation.account.kind
     # A web conversation and an operator's own connection belong to Chat.
     app = "chat"
@@ -96,11 +98,43 @@ async def get_agent(
         template = ADMIN_PROMPT
         admin_tools = (get_tool_name(name, [bot.app], {bot.app}) for name in bot.admin_tools)
         tools = (*admin_tools, *ADMIN_TOOLS)
-    context = {"source": conversation.source, "thread_id": conversation.thread_id}
+    context = {
+        "source": conversation.source,
+        "thread_id": conversation.thread_id,
+        "sign_ins": sign_ins,
+    }
     if conversation.connection:
         context.update(await conversation.channel.get_prompt_context(session, conversation))
     prompt = await render_prompt(template, **context)
     return bot.id, f"{prompt}\n\n{INTERNAL_MESSAGES_PROMPT}", tools
+
+
+async def list_sign_ins(session: AsyncSession, account_id: str) -> list[dict]:
+    """What an operator's agent reaches, as prompt facts: each enabled MCP server and
+    each service whose sign-in rides into the sandbox."""
+    sign_ins = {}
+    for access in await mcp_models.McpServer.list_access(session, account_id):
+        if access.is_enabled:
+            sign_ins[access.service or access.name] = {
+                "title": services.get(access.service).title if access.service else access.name,
+                "host": "",
+                "credential": access.credential,
+                "connected": access.has_token,
+                "profile": {},
+            }
+    for service in services.all():
+        if service.host and service.token_endpoint:
+            rows = await VaultSecret.list_account_connections(
+                session, Audience.service(service.slug), account_id
+            )
+            sign_ins[service.slug] = {
+                "title": service.title,
+                "host": service.host,
+                "credential": Credential.SERVICE_CONNECTION,
+                "connected": bool(rows),
+                "profile": service.get_profile(rows[0].identity) if rows else {},
+            }
+    return list(sign_ins.values())
 
 
 async def get_sandbox(
@@ -262,7 +296,26 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
             if await conversation.is_held(session):
                 return
             await reset_live_stream(conversation.id)
-            bot_id, prompt, tools = await get_agent(session, conversation)
+            # A bot serves outside people, so only the operator reaches the enabled MCP
+            # servers and holds their own sign-ins.
+            mcp_servers, secret_refs, sign_ins = (), [], []
+            if conversation.account.kind == AccountKind.OPERATOR:
+                # A server the operator has not connected must not stop the chat.
+                mcp_servers, secret_refs = await Workspace.get_all_mcp_servers(
+                    session, None, conversation.account_id, skip_unauthenticated=True
+                )
+                for service in services.all():
+                    if service.host and service.token_endpoint:
+                        sign_in_rows = await VaultSecret.list_account_connections(
+                            session, Audience.service(service.slug), conversation.account_id
+                        )
+                        # A sandbox has one variable per service, so it holds one sign-in.
+                        secret_refs += [
+                            SecretRef(name=service.slug, secret_id=row.id, host=service.host)
+                            for row in sign_in_rows[:1]
+                        ]
+                sign_ins = await list_sign_ins(session, conversation.account_id)
+            bot_id, prompt, tools = await get_agent(session, conversation, sign_ins=sign_ins)
             config = await get_config(session, bot_id, conversation.account_id)
             if not config.harness_class.adapter_command:
                 adapters = ", ".join(
@@ -272,24 +325,6 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                     f"Chat runs on {adapters}. The Bot's settings select "
                     f"{config.harness_class.name}. Set its harness to one of them."
                 )
-            # A bot serves outside people, so only the operator reaches the enabled MCP
-            # servers and holds their own sign-ins.
-            mcp_servers, secret_refs = (), []
-            if conversation.account.kind == AccountKind.OPERATOR:
-                # A server the operator has not connected must not stop the chat.
-                mcp_servers, secret_refs = await Workspace.get_all_mcp_servers(
-                    session, None, conversation.account_id, skip_unauthenticated=True
-                )
-                for service in services.all():
-                    if service.host and service.token_endpoint:
-                        sign_ins = await VaultSecret.list_account_connections(
-                            session, Audience.service(service.slug), conversation.account_id
-                        )
-                        # A sandbox has one variable per service, so it holds one sign-in.
-                        secret_refs += [
-                            SecretRef(name=service.slug, secret_id=sign_in.id, host=service.host)
-                            for sign_in in sign_ins[:1]
-                        ]
             host, identity = await get_sandbox(
                 session,
                 conversation.account_id,

@@ -123,7 +123,8 @@ host, so the command line acts as that person. With a GitHub sign-in, git and
 `gh` act as you: your name is on the issues and comments, and the token permits
 only what both you and the App can do. Druks refreshes the token before it
 expires. Without a sign-in the sandbox has no access to that service: see
-[GitHub](#github). A Bot's sandbox never holds a sign-in.
+[GitHub](#github). The agent's prompt names each MCP server and sign-in it holds,
+and tells it where you connect a missing one. A Bot's sandbox never holds a sign-in.
 A build still acts as the App: see [GitHub](configuration.md#github).
 
 The agent can change Druks through those tools. Chat has no permission dialog
