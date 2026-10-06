@@ -187,7 +187,7 @@ class TestPolicyKeysParsing:
                     "gates:\n"
                     "  plan_approval: machine\n"
                     "  implementation_approval: none\n"
-                    "on_approval: none\n"
+                    "on_approval: merge\n"
                     "delete_branch: false\n"
                     "verification:\n"
                     "  test_commands: [make test]\n"
@@ -197,7 +197,7 @@ class TestPolicyKeysParsing:
         policy = await RepoPolicy.resolve(REPO)
         assert policy.gates.plan_approval == "machine"
         assert policy.gates.implementation_approval == "none"
-        assert policy.on_approval == "none"
+        assert policy.on_approval == "merge"
         assert policy.delete_branch is False
         assert policy.verification.test_commands == ("make test",)
 

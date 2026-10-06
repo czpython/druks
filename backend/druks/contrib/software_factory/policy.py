@@ -51,7 +51,7 @@ class RepoPolicy(BaseModel):
 
     gates: Gates = Field(default_factory=Gates)
     sandbox: Profile = Field(default_factory=Profile)
-    on_approval: Literal["merge", "none"] = "merge"
+    on_approval: Literal["merge", "none"] = "none"
     delete_branch: bool = True
     # Operator-pinned verification commands. None → the repo profiler's
     # detected commands stand; an explicit (even empty) profile replaces them.

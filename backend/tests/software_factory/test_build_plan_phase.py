@@ -609,11 +609,31 @@ async def test_needs_clarification_delivery_stops_the_run(monkeypatch):
         await flow.implement()
 
 
+async def test_approval_ends_the_build_without_merging_by_default(monkeypatch):
+    """A repository that has not opted in keeps its merge: approval marks the PR
+    ready and the build ends."""
+    flow = Build()
+    flow._policy = RepoPolicy()
+    cleared = []
+
+    async def merged():
+        raise AssertionError("merge without opt-in")
+
+    async def fake_clear_draft():
+        cleared.append(True)
+
+    monkeypatch.setattr(flow, "declare_merge_intent", merged)
+    monkeypatch.setattr(flow, "_clear_draft", fake_clear_draft)
+
+    assert await flow._approved_work() is True
+    assert cleared == [True]
+
+
 async def test_a_rejected_merge_intent_reparks_the_work_gate(monkeypatch):
     """GitHub declining the merge sends the operator back to the work gate,
     rather than finishing a run whose PR never merged."""
     flow = Build()
-    flow._policy = RepoPolicy()
+    flow._policy = RepoPolicy(on_approval="merge")
     flow.subject = SimpleNamespace(repo="clawhaven/example")
     flow.journal = SimpleNamespace(implementations=[])
     reparked = []

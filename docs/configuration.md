@@ -439,6 +439,17 @@ Druks answered on GitHub has no client ID on its card. Until it has one,
 secret you generate there. Leave the other fields blank, and save. Then add the
 callback URL to the App on GitHub.
 
+### Repository configuration
+
+A repository configures the `software_factory` build in
+`.druks/software_factory/config.yml`. `on_approval` sets what Druks does when a
+reviewer approves the pull request:
+
+| Value | Behavior |
+| --- | --- |
+| `none` | Default. Druks marks the pull request ready for review and ends the build. The repository's own process merges it. Druks records the merge when GitHub announces it. |
+| `merge` | Druks squash-merges the pull request, or arms auto-merge when checks are still running. |
+
 ### Review identity (optional)
 
 The bundled `software_factory` app declares an optional service, **Github
