@@ -51,7 +51,7 @@ it.each(['success', 'failure'])('shows pending sign-in and handles %s', async (o
   }
 })
 
-it('shows the service login without a Connect button', async () => {
+it('offers Connect beside the service login', async () => {
   vi.spyOn(api, 'mcpServers').mockResolvedValue([{
     name: 'atlassian', url: 'https://mcp.atlassian.com/v2/mcp', isEnabled: true,
     isOauth: true, identityMode: 'per_user', builtin: false, hasToken: true,
@@ -61,5 +61,6 @@ it('shows the service login without a Connect button', async () => {
   render(<QueryClientProvider client={client}><McpServersPane /></QueryClientProvider>)
 
   expect(await screen.findByText('jira login')).toBeTruthy()
-  expect(screen.queryByRole('button', { name: /connect/i })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull()
 })

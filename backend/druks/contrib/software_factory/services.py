@@ -15,9 +15,10 @@ class GithubReviewer(Github):
         "reviews publish as comments from the operator App. "
         "[Read the setup guide](https://docs.druks.ai/configuration#review-identity-optional)."
     )
-    # Nobody signs in through the reviewer App: it only posts.
+    # Nobody signs in through the reviewer App, and no MCP server rides it: it only posts.
     authorization_endpoint = ""
     token_endpoint = ""
+    mcp_host = ""
     # docs/configuration.md lists these permissions — keep the two in step.
     manifest = {
         "name": "druks-reviewer",

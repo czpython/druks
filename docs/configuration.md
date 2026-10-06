@@ -865,7 +865,9 @@ is one of:
   their own key**. Each account then pastes its own key on the server's row,
   and its runs send that key. A run with no person uses the default account's
   key. An account that has set no key gets the server left out of its sandbox.
-- An OAuth connection, which requires `urls.endpoint`.
+- An OAuth connection, which requires `urls.endpoint`. The provider redirects
+  to `<endpoint>/api/mcp-servers/oauth/callback`. A provider that allow-lists
+  redirect hosts, such as Atlassian, must list that URL.
 
 A service can own the host of an OAuth server: GitHub owns
 `api.githubcopilot.com`, Jira owns `mcp.atlassian.com`, and Linear owns

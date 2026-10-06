@@ -2845,6 +2845,7 @@ function McpServerRow({
 }) {
   const claimedMode = server.identityMode
   const isLive = server.hasToken
+  const hasGrant = server.credential === 'grant' && server.hasToken
   const keyFieldId = useId()
   const [auth, setAuth] = useState<McpAuth>(EMPTY_AUTH)
   const [editingKey, setEditingKey] = useState(false)
@@ -2920,7 +2921,7 @@ function McpServerRow({
               {server.hasToken ? 'Reconnect' : 'Connect'}
             </button>
           )}
-          {server.credential === 'grant' &&
+          {(server.credential === 'grant' || server.credential === 'service_login') &&
             (claimedMode === null ? (
               // The first connect claims how this server's credential is held;
               // afterwards the choice is fixed until the last grant is dropped.
@@ -2945,14 +2946,14 @@ function McpServerRow({
             ) : (
               <>
                 <button
-                  className={'set-btn ' + (server.hasToken ? 'ghost' : 'primary')}
+                  className={'set-btn ' + (hasGrant ? 'ghost' : 'primary')}
                   onClick={() => void onConnect(server.name, claimedMode)}
                   disabled={busy}
                   title="Opens the provider's consent page."
                 >
-                  {server.hasToken ? 'Reconnect' : 'Connect'}
+                  {hasGrant ? 'Reconnect' : 'Connect'}
                 </button>
-                {server.hasToken && (
+                {hasGrant && (
                   <button
                     className="set-btn danger"
                     onClick={() => void onDisconnect(server.name)}

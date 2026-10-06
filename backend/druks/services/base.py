@@ -12,6 +12,7 @@ from druks.apps.loader import iter_apps
 from druks.apps.registry import services
 from druks.apps.settings import field_kind, field_multiline
 from druks.db import db_session
+from druks.mcp.models import McpServer
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
@@ -433,10 +434,6 @@ class Service:
         raise NotImplementedError(f"{cls.slug} has no pasted login")
 
     @classmethod
-    def get_for_mcp_host(cls, host: str | None) -> "type[Service] | None":
-        return next((service for service in services.all() if service.mcp_host == host), None)
-
-    @classmethod
     async def is_connected(cls) -> bool:
         return bool(
             await VaultSecret.lookup(db_session(), cls.secret_kind, Audience.service(cls.slug))
@@ -479,10 +476,12 @@ class Service:
 
     @classmethod
     async def disconnect(cls, session: AsyncSession) -> None:
-        """Revoke the card and every account's sign-in. The provider keeps its application."""
+        """Revoke the card, every account's sign-in, and the login its MCP servers derived.
+        The provider keeps its application."""
         audience = Audience.service(cls.slug)
         client = OauthClient(provider=cls.slug)
         for connection in await VaultSecret.list_connections(session, audience):
             await client.disconnect(connection, reason="service_disconnected")
         if card := await VaultSecret.lookup(session, cls.secret_kind, audience):
             await card.revoke("user")
+        await McpServer.remove_login(session, cls.mcp_host)

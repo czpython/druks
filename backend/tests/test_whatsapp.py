@@ -790,7 +790,7 @@ async def test_operator_turns_use_the_apps_prompt_and_settings_without_a_timeout
 
     bot = helpdesk.bot if app == "helpdesk" else Chat.bot
     assert bot_id == bot.id
-    render_prompt.assert_awaited_once_with(bot.prompt, source=source, thread_id="")
+    render_prompt.assert_awaited_once_with(bot.prompt, source=source, thread_id="", sign_ins=())
     assert tools == Toolkit.ALL
     [start] = [call.kwargs for call in request.await_args_list if call.args[0] == "start"]
     assert start["meta"]["claudeCode"]["options"]["systemPrompt"] == {

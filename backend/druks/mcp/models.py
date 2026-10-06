@@ -23,7 +23,6 @@ from druks.models import Base
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
-from druks.services import Service
 
 
 class McpServer(Base, Uuid7Pk):
@@ -102,9 +101,10 @@ class McpServer(Base, Uuid7Pk):
     ) -> list[McpServerAccess]:
         default_account = await Account.get_default(session)
         is_default = bool(default_account) and default_account.id == account_id
+        owners = {service.mcp_host: service for service in services.all() if service.mcp_host}
         accesses = []
         for server in (await cls._merged(session)).values():
-            service = Service.get_for_mcp_host(urlsplit(server["url"]).hostname)
+            service = owners.get(urlsplit(server["url"]).hostname)
             secret = None
             secret_headers = server["secret_headers"]
             if not server["is_oauth"]:
@@ -169,6 +169,18 @@ class McpServer(Base, Uuid7Pk):
             account_id=account_id,
             header=BEARER_HEADER,
         )
+
+    @classmethod
+    async def remove_login(cls, session: AsyncSession, mcp_host: str) -> None:
+        """Remove the header rows ``store_login`` wrote at the servers of ``mcp_host``."""
+        default_account = await Account.get_default(session)
+        for server in (await cls._merged(session)).values():
+            if server["is_oauth"] and urlsplit(server["url"]).hostname == mcp_host:
+                rows = await VaultSecret.list_secret_headers(
+                    session, Audience.mcp(server["name"]), default_account.id
+                )
+                for row in rows:
+                    await row.revoke("service_disconnected")
 
     @classmethod
     async def list_enabled(cls, session: AsyncSession) -> list[dict]:
