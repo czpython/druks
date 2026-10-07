@@ -218,17 +218,23 @@ class Sandbox(BaseModel):
     # The issuer base URL the secrets exchange dials: the web process on the
     # host loopback, or the Caddy issuer listener for a drukbox on another server.
     issuer_url: str = "http://127.0.0.1:8001"
-    # The browser home: browser containers boot on this provider with this image.
-    browser_sandbox_provider: str = "docker"
-    browser_sandbox_image: str = "ghcr.io/czpython/druks/browser:latest"
-    # An HTTP proxy for the login window only, so the login leaves from another
-    # IP. It may carry a user name and password. Empty keeps the box IP.
-    browser_login_proxy: SecretStr = SecretStr("")
-    # The IANA timezone of the login window, in the login proxy's region. Empty
-    # keeps the container default.
-    browser_login_tz: str = ""
     # Sized for the slowest provisioner.
     timeout: float = 180.0
+
+
+class Browser(BaseModel):
+    # The browser home: browser containers boot on this provider with this image.
+    sandbox_provider: str = "docker"
+    sandbox_image: str = "ghcr.io/czpython/druks/browser:latest"
+    # An HTTP proxy the browser leaves through instead of the box IP. It may
+    # carry a user name and password. Empty means no proxy anywhere.
+    proxy: SecretStr = SecretStr("")
+    # ``login``: only the login window uses the proxy. ``all``: the login window
+    # and every borrow use it.
+    proxy_scope: Literal["login", "all"] = "login"
+    # The IANA timezone of the proxied browser, in the proxy's region. Empty
+    # keeps the container default.
+    timezone: str = ""
 
 
 class Settings(BaseSettings):
@@ -252,6 +258,7 @@ class Settings(BaseSettings):
     identity: Identity = Identity()
     urls: Urls = Urls()
     sandbox: Sandbox = Sandbox()
+    browser: Browser = Browser()
     # A [services.<slug>] table makes the card of that service managed. Each table holds
     # its secrets as plain text, so no output shows the field.
     services: dict[str, dict] = Field(default={}, repr=False, exclude=True)

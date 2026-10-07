@@ -95,7 +95,7 @@ async def test_login_launch_leaves_the_box_untouched_when_nothing_is_set(window_
     await LoginWindow.open(await create_session())
 
     command = client.browsers[0].launch_command or ""
-    assert "DRUKS_BROWSER_LOGIN_PROXY" not in command
+    assert "DRUKS_BROWSER_PROXY" not in command
     assert "TZ=" not in command
 
 
@@ -109,8 +109,8 @@ async def test_login_launch_opens_on_the_session_site(window_runtime):
     assert "--drive" not in command
 
 
-def _runtime_with_sandbox(tmp_path, monkeypatch, **sandbox) -> FakeSandboxClient:
-    settings = make_settings(tmp_path, sandbox=sandbox)
+def _runtime_with_browser(tmp_path, monkeypatch, **browser) -> FakeSandboxClient:
+    settings = make_settings(tmp_path, browser=browser)
     client = FakeSandboxClient()
     monkeypatch.setattr(login, "sandbox_client", client)
     monkeypatch.setattr(login, "load_settings", lambda: settings)
@@ -119,16 +119,16 @@ def _runtime_with_sandbox(tmp_path, monkeypatch, **sandbox) -> FakeSandboxClient
 
 async def test_login_launch_routes_through_the_configured_proxy(tmp_path, monkeypatch):
     proxy = "http://172.17.0.1:8888"
-    client = _runtime_with_sandbox(tmp_path, monkeypatch, browser_login_proxy=proxy)
+    client = _runtime_with_browser(tmp_path, monkeypatch, proxy=proxy)
 
     await LoginWindow.open(await create_session())
 
     command = client.browsers[0].launch_command or ""
-    assert f"DRUKS_BROWSER_LOGIN_PROXY={shlex.quote(proxy)}" in command
+    assert f"DRUKS_BROWSER_PROXY={shlex.quote(proxy)}" in command
 
 
 async def test_login_launch_sets_the_configured_timezone(tmp_path, monkeypatch):
-    client = _runtime_with_sandbox(tmp_path, monkeypatch, browser_login_tz="Europe/Madrid")
+    client = _runtime_with_browser(tmp_path, monkeypatch, timezone="Europe/Madrid")
 
     await LoginWindow.open(await create_session())
 
@@ -138,7 +138,7 @@ async def test_login_launch_sets_the_configured_timezone(tmp_path, monkeypatch):
 
 async def test_login_launch_quotes_values_so_a_bad_one_cannot_inject(tmp_path, monkeypatch):
     proxy = "http://h:8888; rm -rf /"
-    client = _runtime_with_sandbox(tmp_path, monkeypatch, browser_login_proxy=proxy)
+    client = _runtime_with_browser(tmp_path, monkeypatch, proxy=proxy)
 
     await LoginWindow.open(await create_session())
 

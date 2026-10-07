@@ -1,4 +1,5 @@
 import json
+import shlex
 from contextlib import asynccontextmanager
 
 import pytest
@@ -173,6 +174,44 @@ async def test_headless_declaration_launches_headless(borrow):
         pass
 
     assert "session-launch --headless >/work/session/launch.log" in browser.commands[0][2]
+
+
+async def test_borrow_launch_routes_through_the_proxy_when_the_scope_is_all(
+    borrow, night_watch, tmp_path, monkeypatch
+):
+    browser = borrow
+    proxy = "http://172.17.0.1:8888"
+    settings = make_settings(
+        tmp_path,
+        browser={"proxy": proxy, "proxy_scope": "all", "timezone": "Europe/Madrid"},
+    )
+    monkeypatch.setattr(sessions_module, "load_settings", lambda: settings)
+    await stored_session(night_watch.docs)
+
+    async with night_watch.docs.cdp():
+        pass
+
+    command = browser.commands[0][2]
+    assert f"DRUKS_BROWSER_PROXY={shlex.quote(proxy)}" in command
+    assert "TZ=Europe/Madrid" in command
+
+
+async def test_borrow_launch_keeps_the_box_ip_under_the_login_scope(
+    borrow, night_watch, tmp_path, monkeypatch
+):
+    browser = borrow
+    settings = make_settings(
+        tmp_path, browser={"proxy": "http://172.17.0.1:8888", "timezone": "Europe/Madrid"}
+    )
+    monkeypatch.setattr(sessions_module, "load_settings", lambda: settings)
+    await stored_session(night_watch.docs)
+
+    async with night_watch.docs.cdp():
+        pass
+
+    command = browser.commands[0][2]
+    assert "DRUKS_BROWSER_PROXY" not in command
+    assert "TZ=" not in command
 
 
 async def test_persisting_borrow_locks_exports_and_stores(borrow, night_watch):

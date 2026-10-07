@@ -1,6 +1,5 @@
 import asyncio
 import json
-import shlex
 import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -15,12 +14,11 @@ from druks.browser.constants import (
     LOGIN_WINDOW_TTL_SECONDS,
     SCREEN_CHUNK_BYTES,
     SESSION_EXPORT_TIMEOUT_SECONDS,
-    SESSION_LAUNCH_TIMEOUT_SECONDS,
     VNC_PORT,
 )
 from druks.browser.enums import BrowserSessionPayloadFormat
 from druks.browser.models import StoredBrowserSession
-from druks.browser.sessions import SESSION_ROOT, seed_state
+from druks.browser.sessions import SESSION_ROOT, launch, seed_state
 from druks.redis import get_client
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.host import Host
@@ -46,19 +44,24 @@ class LoginWindow:
         settings = load_settings()
         try:
             browser = await sandbox_client.provision(
-                image_override=settings.sandbox.browser_sandbox_image,
-                provider=settings.sandbox.browser_sandbox_provider,
+                image_override=settings.browser.sandbox_image,
+                provider=settings.browser.sandbox_provider,
             )
         except Exception as error:
             raise exceptions.BrowserLaunchError(session.name, str(error)) from error
         try:
             await seed_state(browser, session)
-            await _launch(
+            # Every proxy scope covers the login window, so it always gets the
+            # proxy and TZ.
+            await launch(
                 browser,
                 session.name,
-                start_url=f"https://{session.site}",
-                login_proxy=settings.sandbox.browser_login_proxy.get_secret_value(),
-                login_tz=settings.sandbox.browser_login_tz,
+                headless=False,
+                env={
+                    "TZ": settings.browser.timezone,
+                    "DRUKS_BROWSER_PROXY": settings.browser.proxy.get_secret_value(),
+                    "DRUKS_BROWSER_URL": f"https://{session.site}",
+                },
             )
         except BaseException:
             await sandbox_client.release(host_id=browser.id)
@@ -155,39 +158,6 @@ async def _carry_clicks(websocket: WebSocket, screen_writer: asyncssh.SSHWriter[
 async def _carry_screen(websocket: WebSocket, screen_reader: asyncssh.SSHReader[bytes]) -> None:
     while pixels := await screen_reader.read(SCREEN_CHUNK_BYTES):
         await websocket.send_bytes(pixels)
-
-
-async def _launch(
-    browser: Host, name: str, *, start_url: str, login_proxy: str, login_tz: str
-) -> None:
-    # The launcher and its browser read these from the environment: the site to
-    # open on so the operator lands where they log in, the egress proxy that
-    # keeps the login off the box's own IP, and TZ to align the browser's
-    # timezone with the exit's geography. An empty value is simply left unset.
-    env = {
-        "TZ": login_tz,
-        "DRUKS_BROWSER_LOGIN_PROXY": login_proxy,
-        "DRUKS_BROWSER_URL": start_url,
-    }
-    assignments = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items() if value)
-    env_prefix = f"env {assignments} " if assignments else ""
-    ready = await browser.exec(
-        [
-            "sh",
-            "-c",
-            f"nohup setsid {env_prefix}session-launch --headed "
-            f">{SESSION_ROOT}/launch.log 2>&1 </dev/null & "
-            'launcher=$!; attempt=0; while [ "$attempt" -lt 300 ]; do '
-            f"if [ -f {SESSION_ROOT}/.runtime/ready.json ]; then exit 0; fi; "
-            'if ! kill -0 "$launcher" 2>/dev/null; then '
-            f"cat {SESSION_ROOT}/launch.log >&2; exit 1; fi; "
-            "sleep 0.1; attempt=$((attempt + 1)); done; "
-            "printf 'browser did not become ready\\n' >&2; exit 1",
-        ],
-        timeout=SESSION_LAUNCH_TIMEOUT_SECONDS,
-    )
-    if not ready.ok:
-        raise exceptions.BrowserLaunchError(name, ready.stderr.strip())
 
 
 async def _export(browser: Host, name: str) -> bytes:

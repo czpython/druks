@@ -1,5 +1,6 @@
 import asyncio
 import json
+import shlex
 import tempfile
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
@@ -25,7 +26,7 @@ from druks.db import db_session
 from druks.exceptions import LockHeldError
 from druks.locks import lock
 from druks.sandbox.client import sandbox_client
-from druks.settings import load_settings
+from druks.settings import Settings, load_settings
 
 SESSION_ROOT = "/work/session"
 CDP_PORT = 9222
@@ -115,11 +116,11 @@ class BrowserSession:
         async with writer_lock:
             settings = load_settings()
             async with sandbox_client.ephemeral(
-                image_override=settings.sandbox.browser_sandbox_image,
-                provider=settings.sandbox.browser_sandbox_provider,
+                image_override=settings.browser.sandbox_image,
+                provider=settings.browser.sandbox_provider,
             ) as browser:
                 await seed_state(browser, row)
-                await self._launch(browser)
+                await self._launch(browser, settings)
                 await row.mark_used()
                 listener = await browser.forward_local_port(CDP_PORT)
                 try:
@@ -180,25 +181,14 @@ class BrowserSession:
             raise BrowserSessionNotReadyError(self.name, row.status)
         return row
 
-    async def _launch(self, browser) -> None:
-        mode = "--headless" if self.headless else "--headed"
-        ready = await browser.exec(
-            [
-                "sh",
-                "-c",
-                f"nohup setsid session-launch {mode} "
-                f">{SESSION_ROOT}/launch.log 2>&1 </dev/null & "
-                'launcher=$!; attempt=0; while [ "$attempt" -lt 300 ]; do '
-                f"if [ -f {SESSION_ROOT}/.runtime/ready.json ]; then exit 0; fi; "
-                'if ! kill -0 "$launcher" 2>/dev/null; then '
-                f"cat {SESSION_ROOT}/launch.log >&2; exit 1; fi; "
-                "sleep 0.1; attempt=$((attempt + 1)); done; "
-                "printf 'browser did not become ready\\n' >&2; exit 1",
-            ],
-            timeout=SESSION_LAUNCH_TIMEOUT_SECONDS,
-        )
-        if not ready.ok:
-            raise BrowserLaunchError(self.name, ready.stderr.strip())
+    async def _launch(self, browser, settings: Settings) -> None:
+        env: dict[str, str] = {}
+        if settings.browser.proxy_scope == "all":
+            env = {
+                "TZ": settings.browser.timezone,
+                "DRUKS_BROWSER_PROXY": settings.browser.proxy.get_secret_value(),
+            }
+        await launch(browser, self.name, headless=self.headless, env=env)
 
     async def _export(self, browser) -> bytes:
         exported = await browser.exec(["session-export"], timeout=SESSION_EXPORT_TIMEOUT_SECONDS)
@@ -231,3 +221,28 @@ async def seed_state(browser, row: StoredBrowserSession) -> None:
         metadata_path = Path(staging) / "state.meta.json"
         metadata_path.write_text(json.dumps(metadata))
         await browser.upload_file(local=metadata_path, remote=f"{SESSION_ROOT}/state.meta.json")
+
+
+async def launch(browser, name: str, *, headless: bool, env: dict[str, str]) -> None:
+    """Start the launcher and wait for Chrome to report ready. ``env`` reaches the
+    launcher's process; an empty value is left unset."""
+    mode = "--headless" if headless else "--headed"
+    assignments = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items() if value)
+    env_prefix = f"env {assignments} " if assignments else ""
+    ready = await browser.exec(
+        [
+            "sh",
+            "-c",
+            f"nohup setsid {env_prefix}session-launch {mode} "
+            f">{SESSION_ROOT}/launch.log 2>&1 </dev/null & "
+            'launcher=$!; attempt=0; while [ "$attempt" -lt 300 ]; do '
+            f"if [ -f {SESSION_ROOT}/.runtime/ready.json ]; then exit 0; fi; "
+            'if ! kill -0 "$launcher" 2>/dev/null; then '
+            f"cat {SESSION_ROOT}/launch.log >&2; exit 1; fi; "
+            "sleep 0.1; attempt=$((attempt + 1)); done; "
+            "printf 'browser did not become ready\\n' >&2; exit 1",
+        ],
+        timeout=SESSION_LAUNCH_TIMEOUT_SECONDS,
+    )
+    if not ready.ok:
+        raise BrowserLaunchError(name, ready.stderr.strip())

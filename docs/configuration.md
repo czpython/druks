@@ -45,6 +45,7 @@ host-run development template for that environment plane.
 | `[paths]` | Host data and harness configuration paths |
 | `[sandbox]` | Drukbox provider, service URL, image override, registry host and user name, and the proxy and issuer addresses |
 | `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
+| `[browser]` | Browser egress proxy scope and timezone |
 | `[env]` | Additional deployment environment settings rendered verbatim |
 
 A blank string means unset, and the renderer omits it from `.env`. Use `[env]` for settings
@@ -68,7 +69,7 @@ scripted writes.
 
 `druks.toml` holds no secret. The secrets of Druks are `secrets_key`,
 `database_url`, `redis_url`, `sandbox.service_token`, and
-`sandbox.browser_login_proxy`.
+`browser.proxy`.
 Druks takes each one from an environment variable. The name is `DRUKS_` and the
 key path, with `_` for each dot: `DRUKS_SECRETS_KEY`,
 `DRUKS_SANDBOX_SERVICE_TOKEN`. Druks does not start when `druks.toml` holds a
@@ -85,7 +86,7 @@ The installer keeps the secrets in the last section of `~/druks/.env`:
 | `DRUKS_POSTGRES_PASSWORD` | Postgres, and the database URLs that Compose builds | The installer |
 | `SECRETS_KEY` | Drukbox | The installer. The Drukbox key |
 | `REGISTRY_PASSWORD` | Drukbox | You, for private sandbox images |
-| `DRUKS_SANDBOX_BROWSER_LOGIN_PROXY` | Druks | You, for a login-window proxy |
+| `DRUKS_BROWSER_PROXY` | Druks | You, for a browser egress proxy |
 | `DRUKS_DATABASE_URL`, `DRUKS_REDIS_URL` | Druks | You, only for a database or a Redis that Compose does not run |
 | A provider secret, for example `EXE_API_TOKEN` | Drukbox | You |
 
@@ -763,24 +764,42 @@ before provisioning a VM if its selected credential is missing.
 | `sandbox.template_repository` | The repository path on that host where Drukbox publishes sandbox templates. The exe provider requires it |
 | `sandbox.proxy_url` | The secrets proxy, at the address a sandbox dials. The docker shape sets `http://172.17.0.1:8880`. docker-sbx leaves it empty |
 | `sandbox.issuer_url` | The issuer base URL the secrets exchange dials. The default is `http://127.0.0.1:8001`. For a Drukbox on another server, set the address of the Druks host that Drukbox reaches. The installer then serves the issuer route there ([the issuer listener](deployment.md#the-issuer-listener)) |
-| `sandbox.browser_login_proxy` | Login-window egress proxy. A [secret](#secrets). With no value, the login uses the box IP |
-| `sandbox.browser_login_tz` | Login-window timezone (IANA zone). An empty value keeps the container default |
 
 `DRUKS_SANDBOX_KEYS_DIR` remains a process environment override for the
 per-host SSH private-key directory.
 
-The secret `sandbox.browser_login_proxy` sends the browser **login window** through an
-HTTP proxy. The login then leaves from a different IP than the box. Use it for
-sign-in flows that refuse a login from the box IP. Only the login window uses the
-proxy. Borrowed sessions keep the box IP. This is sufficient after Druks makes
-the session.
+`[sandbox].provider` accepts any Drukbox provider name. `docker` selects the
+local install shape, `exe` selects the exe.dev + tailnet shape, and every other
+name selects the generic remote shape. Provider-specific credentials and host
+options live in `[sandbox.<provider>]`, and Drukbox interprets them. See
+[deployment](deployment.md) or [full local setup](full-local.md) for the
+topology.
 
-If you do not set the proxy, the login uses the box IP. If you set the proxy and
-the exit is not available, the login browser fails. It does not fall back to the
-box IP.
+## Browser
+
+| Key | Purpose |
+| --- | --- |
+| `browser.proxy` | Browser egress proxy. A [secret](#secrets). With no value, the browser uses the box IP |
+| `browser.proxy_scope` | The launches that use the proxy. `login` (the default) is the login window only. `all` is the login window and every borrow |
+| `browser.timezone` | Timezone of the proxied browser (IANA zone). An empty value keeps the container default |
+
+The secret `browser.proxy` sends the browser through an HTTP proxy. The
+browser then leaves from a different IP than the box. `browser.proxy_scope`
+selects the launches that use the proxy. There are three modes:
+
+- **No proxy.** Leave `browser.proxy` empty. The login window and every
+  borrow use the box IP.
+- **`login`**, the default. Only the login window uses the proxy. Borrowed
+  sessions keep the box IP. Use it for a sign-in flow that refuses a login from
+  the box IP. The box IP is sufficient after Druks makes the session.
+- **`all`.** The login window and every borrow use the proxy. Use it for a site
+  that must see one IP for the login and for each later visit.
+
+If you set the proxy and the exit is not available, the browser fails. It does
+not fall back to the box IP.
 
 The value can include a user name and password (`http://user:pass@host:port`).
-The login browser authenticates the proxy. You do not need an external relay.
+The browser authenticates the proxy. You do not need an external relay.
 
 Druks does not run the exit. You supply the exit and set this value to it. There
 are two common types.
@@ -793,34 +812,28 @@ are two common types.
 4. Set `TS_USERSPACE=true`.
 5. Set `TS_OUTBOUND_HTTP_PROXY_LISTEN=:8080`.
 6. Set `TS_EXTRA_ARGS=--exit-node=<your-device>`.
-7. Add `DRUKS_SANDBOX_BROWSER_LOGIN_PROXY=http://172.17.0.1:8080` to the secrets
+7. Add `DRUKS_BROWSER_PROXY=http://172.17.0.1:8080` to the secrets
    section of `.env`.
 
-The login then leaves from your home connection. The box keeps its own IP for all
-other traffic. This exit needs no user name or password.
+The browser then leaves from your home connection. The box keeps its own IP for
+all other traffic. This exit needs no user name or password. With scope `all`,
+scheduled borrows need the exit device to stay on.
 
 **A rented static-residential (ISP) proxy.** First make sure that a detection
 service does not already know the IP as a proxy. Then set the secret to the proxy
 with its user name and password:
-`DRUKS_SANDBOX_BROWSER_LOGIN_PROXY=http://user:pass@isp-host:port`.
+`DRUKS_BROWSER_PROXY=http://user:pass@isp-host:port`.
 An ISP IP passes the datacenter-ASN check. A detection service can still find it
 and mark it as a proxy.
 
-`[sandbox].browser_login_tz` sets the timezone of the login browser. Use an IANA
+`[browser].timezone` sets the timezone of the proxied browser. Use an IANA
 zone name, for example `Europe/Madrid`. The browser reports a region, and the IP
 has a region.
 
 Set both to the same region. Some sign-in flows compare these values. If the
-two regions are different, a flow can refuse the login. Only the login window
-uses this value. If you do not set it, the browser keeps the container default
-timezone.
-
-`[sandbox].provider` accepts any Drukbox provider name. `docker` selects the
-local install shape, `exe` selects the exe.dev + tailnet shape, and every other
-name selects the generic remote shape. Provider-specific credentials and host
-options live in `[sandbox.<provider>]`, and Drukbox interprets them. See
-[deployment](deployment.md) or [full local setup](full-local.md) for the
-topology.
+two regions are different, a flow can refuse the login. The timezone applies to
+the same launches as the proxy. If you do not set it, the browser keeps the
+container default timezone.
 
 ## Notifications
 
