@@ -533,11 +533,6 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
     )
     conversation.account.kind = kind
     starts = []
-    contexts = []
-
-    async def render_prompt(name, /, **context):
-        contexts.append(context)
-        return ""
 
     async def request(self, method, **values):
         if method == "start":
@@ -550,7 +545,6 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
 
     monkeypatch.setattr(Bridge, "request", request)
     monkeypatch.setattr(service, "follow_turn", follow_turn)
-    monkeypatch.setattr(service, "render_prompt", render_prompt)
 
     await service.deliver_pending(druks_db, conversation)
 
@@ -583,7 +577,9 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
             "profile": {"login": "octocat"},
         },
     ]
-    assert [context["sign_ins"] for context in contexts] == [sign_ins * len(expected)]
+    assert [call.kwargs["sign_ins"] for call in service.get_agent.await_args_list] == [
+        sign_ins * len(expected)
+    ]
 
 
 @pytest.mark.parametrize(
