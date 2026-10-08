@@ -108,9 +108,9 @@ _KNOWN_TOML_KEYS = {
         "template_repository",
         "proxy_url",
         "issuer_url",
-        "browser_login_tz",
         "timeout",
     ),
+    "browser": ("proxy_scope", "timezone"),
     "env": (),
 }
 
@@ -240,17 +240,23 @@ proxy_url = ""
 # The issuer base URL the secrets exchange dials; loopback web by default. For a
 # drukbox on another server, set the address of this host that drukbox reaches.
 issuer_url = ""
-# The timezone of the login browser. Use an IANA zone, for example
-# "Europe/Madrid". Set it to the region of the login proxy, which is the secret
-# DRUKS_SANDBOX_BROWSER_LOGIN_PROXY in .env. If it is empty, the browser keeps
-# the container default.
-browser_login_tz = ""
 timeout = 180
 
 # Put drukbox environment in [sandbox.<provider>]. The table is passed through
 # to remote stacks verbatim; the local docker shape renders no provider table.
 # Put a provider secret in the secrets section of .env, not in this table.
 # Provider reference: https://github.com/czpython/drukbox (docs/deploy.md).
+
+# The browser that apps borrow and the operator signs into.
+[browser]
+# Which launches leave through the browser proxy, the secret DRUKS_BROWSER_PROXY
+# in .env. "login" (the default) sends only the login window through it. "all"
+# sends the login window and every borrow.
+proxy_scope = ""
+# The timezone of the proxied browser. Use an IANA zone, for example
+# "Europe/Madrid", in the region of the proxy. If it is empty, the browser
+# keeps the container default.
+timezone = ""
 
 # Raw environment for processes druks does not model (drukbox, Caddy, libraries
 # reading os.environ); keys render verbatim unless owned by druks.

@@ -18,9 +18,9 @@ const PROFILE_PATH = path.join(SESSION_ROOT, "profile");
 // Chromium-vs-Chrome brand split, and the switches and debugger of a driver.
 const CHROME_PATH = "/opt/google/chrome/chrome";
 const CDP_URL = "http://127.0.0.1:9222";
-// The proxy for the login only. druks sets it only when the operator gives one.
+// The egress proxy. druks sets it for the launches its proxy scope covers.
 // If it is empty, the browser uses the box IP.
-const loginProxy = process.env.DRUKS_BROWSER_LOGIN_PROXY;
+const egressProxy = process.env.DRUKS_BROWSER_PROXY;
 const RUNTIME_PATH = path.join(SESSION_ROOT, ".runtime");
 const PID_PATH = path.join(RUNTIME_PATH, "launcher.pid");
 const READY_PATH = path.join(RUNTIME_PATH, "ready.json");
@@ -86,7 +86,7 @@ function unpackProfileArchive(meta) {
 function startProxyRelay(proxy) {
   if (!["http:", "https:"].includes(proxy.protocol)) {
     throw new Error(
-      `Chrome cannot send a password to a ${proxy.protocol}// proxy. Use an http or https login proxy.`,
+      `Chrome cannot send a password to a ${proxy.protocol}// proxy. Use an http or https proxy.`,
     );
   }
   const client = proxy.protocol === "https:" ? https : http;
@@ -194,8 +194,8 @@ async function main() {
     if (headless) {
       args.push("--headless=new");
     }
-    if (loginProxy) {
-      const proxy = new URL(loginProxy);
+    if (egressProxy) {
+      const proxy = new URL(egressProxy);
       let proxyServer = `${proxy.protocol}//${proxy.host}`;
       if (proxy.username || proxy.password) {
         relay = await startProxyRelay(proxy);
