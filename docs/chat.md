@@ -205,26 +205,24 @@ an open source WhatsApp HTTP API. Connect WAHA first: see
 ### Link a number
 
 A linked number is a connection. Its owner account holds the WAHA session, the
-session's key, and the webhook secret. There are three kinds:
+session's key, and the webhook secret. There are two kinds:
 
 - **An app's number.** In the app's settings, open **Channels** and select
   **Add number**. The tab shows only when the app declares a
   [Bot](writing-an-app.md#answer-whatsapp-with-a-bot). Druks creates a bot
   account and a bot admin account for the number. These accounts never sign in.
-- **The assistant's number, recommended.** Open **Chat → Channels** and select
-  **Add number**. Scan the QR code with a phone that holds a second WhatsApp
-  number. Then select **Connect my phone** and send the code from your own
-  WhatsApp to that number. You now talk to your agent there, under your account
-  and with the whole Druks toolkit. Replies arrive as normal incoming messages,
-  and WAHA never sees your private chats. Several operators can share the
-  number: each one connects their own phone. Druks ignores every sender that
-  has no connected phone. **Disconnect my phone** removes your phones from the
-  number. This number has no admin and no take-over.
-- **Your own number, the fallback.** On the same tab, select **Link your
-  number**. This needs no second number. Only your chat with yourself reaches
-  your agent, and Druks ignores everyone else on that number. WhatsApp gives no
-  sound for a message that an account sends to itself, and WAHA receives your
-  private chats.
+- **The assistant's number.** Open **Chat → Channels** and select **Add
+  number**. Scan the QR code. Then select **Connect my phone** and send the code
+  to that number. Send it from your own WhatsApp, or from the phone of the
+  number to itself. You then talk to your agent at that number, under your
+  account and with the whole Druks toolkit. If you use a second number, replies
+  arrive as normal incoming messages, and WAHA never sees your private chats.
+  If you use the phone of the number itself, replies arrive in your chat with
+  yourself. WhatsApp gives no sound for them, and WAHA receives the chats of
+  that phone. Several operators can share the number. Each operator connects
+  their own phone. Druks ignores every sender that has no connected phone.
+  **Disconnect my phone** removes your phones from the number. This number has
+  no admin and no take-over.
 
 Druks creates the WAHA session and its key, saves the connection, and then
 writes the session's config. Scan the QR code from **Linked devices** in

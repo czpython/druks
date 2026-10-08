@@ -49,8 +49,6 @@ class Waha(Service):
     async def link(cls, session: AsyncSession, owner: Account, *, identity: dict) -> VaultSecret:
         """Create the number's session and its key, save the session, and then write
         its config: WAHA sends events only after the config names the webhook."""
-        if await VaultSecret.lookup(session, SecretKind.SESSION, WAHA_AUDIENCE, owner.id):
-            raise WhatsAppLinkError("This account has a linked number. Remove it first.")
         base = load_settings().urls.webhook_base
         if not base:
             raise WhatsAppLinkError(
@@ -134,33 +132,29 @@ class Waha(Service):
         connection.identity_status = IdentityStatus.UNAVAILABLE
 
     @classmethod
-    async def list_sessions(
-        cls, session: AsyncSession, *, app: str, account_id: str
-    ) -> list[VaultSecret]:
-        """An app's sessions, or else the account's own, removed ones included."""
-        query = (
-            select(VaultSecret)
-            .where(VaultSecret.kind == SecretKind.SESSION, VaultSecret.audience == WAHA_AUDIENCE)
-            .order_by(VaultSecret.created_at, VaultSecret.id)
+    async def list_sessions(cls, session: AsyncSession, *, app: str) -> list[VaultSecret]:
+        """The sessions of an app. The list includes the removed sessions."""
+        return list(
+            await session.scalars(
+                select(VaultSecret)
+                .where(
+                    VaultSecret.kind == SecretKind.SESSION,
+                    VaultSecret.audience == WAHA_AUDIENCE,
+                    VaultSecret.identity["app"].astext == app,
+                )
+                .order_by(VaultSecret.created_at, VaultSecret.id)
+            )
         )
-        if app:
-            query = query.where(VaultSecret.identity["app"].astext == app)
-        else:
-            query = query.where(VaultSecret.account_id == account_id)
-        return list(await session.scalars(query))
 
     @classmethod
-    async def get_session(
-        cls, session: AsyncSession, session_id: str, account_id: str
-    ) -> VaultSecret | None:
-        """A session the account may manage: an app's, or its own. A removed one stays
-        readable."""
+    async def get_session(cls, session: AsyncSession, session_id: str) -> VaultSecret | None:
+        """A session of an app. A removed session stays readable."""
         connection = await session.get(VaultSecret, session_id)
         if (
             connection
             and connection.kind == SecretKind.SESSION
             and connection.audience == WAHA_AUDIENCE
-            and (connection.account.kind == AccountKind.BOT or connection.account_id == account_id)
+            and connection.account.kind == AccountKind.BOT
         ):
             return connection
         return

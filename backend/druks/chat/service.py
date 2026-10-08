@@ -86,7 +86,7 @@ async def get_agent(
     """The conversation's agent: its Bot's id, its system prompt, and the tools its key
     allows. ``sign_ins`` are the facts of ``list_sign_ins``, for an operator."""
     account_type = conversation.account.kind
-    # A web conversation and an operator's own connection belong to Chat.
+    # A web conversation belongs to Chat.
     app = "chat"
     if conversation.connection:
         app = conversation.connection.identity.get("app", app)

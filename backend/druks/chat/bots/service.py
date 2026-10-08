@@ -108,15 +108,11 @@ async def route_message(
 ) -> Conversation | None:
     """The conversation that a channel's message goes to, or none when the message is
     for no agent. The only text Druks reads is an open admin code."""
-    owner = connection.account
-    if owner.kind == AccountKind.OPERATOR:
-        # Only an operator's chat with themself reaches their agent.
-        if is_from_phone and is_self_chat:
-            return await Conversation.get_or_create_for_user(session, connection, owner.id, **user)
-        return
     bot = get_app(connection.identity["app"]).bot
     if bot.access == BotAccess.PAIRED:
-        if is_from_phone:
+        # The linked phone pairs through its chat with itself. Its messages to other
+        # people reach no agent.
+        if is_from_phone and not is_self_chat:
             return
         if account_id := await redeem_admin_code(connection, body):
             connection.identity = {
@@ -142,7 +138,7 @@ async def route_message(
             return await Conversation.get_or_create_for_user(
                 session, connection, admin["account_id"], **user
             )
-        # What the phone sends to the admin person is no chat to take over.
+        # A message from the phone to the admin is not a chat that the admin takes over.
         if user["user_id"] != admin.get("user_id"):
             await take_over(session, connection, user, body, key)
         return

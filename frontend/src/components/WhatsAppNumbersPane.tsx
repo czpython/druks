@@ -28,26 +28,14 @@ function isWaiting(number: WahaSession) {
   return !number.revokedAt && number.identityStatus !== 'resolved'
 }
 
-/** The WhatsApp channel of an app's Bot: its numbers, and under paired access the
- * operator's own number. */
-export function WhatsAppChannelPane({ app }: { app: AppSettings }) {
-  return (
-    <>
-      <WhatsAppNumbersPane app={app} />
-      {app.botAccess === 'paired' && <WhatsAppNumbersPane />}
-    </>
-  )
-}
-
-/** The WhatsApp numbers of an app's Bot, or without ``app`` the operator's own number. */
-export function WhatsAppNumbersPane({ app }: { app?: Pick<AppSettings, 'name' | 'botAccess'> }) {
-  const appName = app?.name
-  const isPaired = app?.botAccess === 'paired'
+/** The WhatsApp numbers of an app's Bot. */
+export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | 'botAccess'> }) {
+  const isPaired = app.botAccess === 'paired'
   const queryClient = useQueryClient()
   const [adminCodes, setAdminCodes] = useState<AdminCode[]>([])
   const query = useQuery({
-    queryKey: ['wahaSessions', appName],
-    queryFn: () => api.wahaSessions(appName),
+    queryKey: ['wahaSessions', app.name],
+    queryFn: () => api.wahaSessions(app.name),
     refetchInterval: (current) =>
       current.state.data?.some(isWaiting) || adminCodes.length > 0 ? LINK_POLL_INTERVAL : false,
   })
@@ -61,13 +49,11 @@ export function WhatsAppNumbersPane({ app }: { app?: Pick<AppSettings, 'name' | 
   })
   if (openCodes.length < adminCodes.length) setAdminCodes(openCodes)
   const newest = query.data?.at(-1)
-  // A removed number stays in view only while it has something to say: the newest one says
-  // why Druks refused it, and an app's removed number says which number it held.
+  // A removed number stays in view only if it shows something: the newest one shows why
+  // Druks refused it, and a linked one shows which number it held.
   const numbers = (query.data ?? []).filter(
     (number) =>
-      !number.revokedAt ||
-      (number === newest && number.revokedReason in REFUSALS) ||
-      (app && number.number),
+      !number.revokedAt || (number === newest && number.revokedReason in REFUSALS) || number.number,
   )
 
   async function changeNumbers(action: () => Promise<unknown>) {
@@ -75,7 +61,7 @@ export function WhatsAppNumbersPane({ app }: { app?: Pick<AppSettings, 'name' | 
     setError(null)
     try {
       await action()
-      await queryClient.invalidateQueries({ queryKey: ['wahaSessions', appName] })
+      await queryClient.invalidateQueries({ queryKey: ['wahaSessions', app.name] })
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
     } finally {
@@ -107,15 +93,11 @@ export function WhatsAppNumbersPane({ app }: { app?: Pick<AppSettings, 'name' | 
   return (
     <div className="set-pane mcp-pane svc-pane">
       <header className="mcp-pane-head">
-        <h2 className="mcp-pane-title">
-          {isPaired ? "Assistant's number — Recommended" : app ? 'WhatsApp numbers' : 'Your own number'}
-        </h2>
+        <h2 className="mcp-pane-title">{isPaired ? "Assistant's number" : 'WhatsApp numbers'}</h2>
         <p className="mcp-pane-sub">
           {isPaired
-            ? 'Keep your private account outside WAHA. Replies arrive as incoming messages and can ring. This needs one more WhatsApp number.'
-            : app
-            ? `People chat with ${appLabel(app.name)} at these numbers.`
-            : 'Use your chat with yourself without a second number. Replies have no incoming-message sound. WAHA receives your direct chats, but Druks ignores other senders.'}
+            ? 'Add a number. Then connect your phone to it. If you add a second number, WAHA does not see your private account, and replies ring like incoming messages. If you add your own number, replies arrive in your chat with yourself, without a sound.'
+            : `People chat with ${appLabel(app.name)} at these numbers.`}
         </p>
       </header>
       {query.isPending && <p role="status">Loading numbers…</p>}
@@ -132,14 +114,14 @@ export function WhatsAppNumbersPane({ app }: { app?: Pick<AppSettings, 'name' | 
           {error}
         </div>
       )}
-      {query.isSuccess && (app || numbers.every((number) => number.revokedAt)) && (
+      {query.isSuccess && (
         <div>
           <button
             className="set-btn primary"
-            onClick={() => void changeNumbers(() => api.linkWahaSession(appName))}
+            onClick={() => void changeNumbers(() => api.linkWahaSession(app.name))}
             disabled={isBusy}
           >
-            {app ? 'Add number' : 'Link your number'}
+            Add number
           </button>
         </div>
       )}
@@ -161,7 +143,7 @@ export function WhatsAppNumbersPane({ app }: { app?: Pick<AppSettings, 'name' | 
                       </span>
                     )}
                     {number.name && <span className="connection-context">{number.name}</span>}
-                    {app && isLinked && (
+                    {isLinked && (
                       <span className="connection-context">
                         {isPaired
                           ? number.isPhoneConnected ? 'Your phone is connected.' : 'Connect your phone to start a conversation.'
@@ -183,11 +165,11 @@ export function WhatsAppNumbersPane({ app }: { app?: Pick<AppSettings, 'name' | 
                 {isWaiting(number) && !number.number && <NumberQr number={number} />}
                 {adminCode && (
                   <p className="channel-admin-code" role="status">
-                    Send <code>{adminCode.code}</code> from your own WhatsApp to {number.number}{' '}
-                    within {Math.round(adminCode.expiresIn / 60)} minutes.{' '}
+                    Send <code>{adminCode.code}</code> to {number.number} within{' '}
+                    {Math.round(adminCode.expiresIn / 60)} minutes.{' '}
                     {isPaired
-                      ? 'Druks connects that phone to your account. Keep this code private.'
-                      : "Druks then sends this number's questions to the sender."}
+                      ? 'Use your own WhatsApp, or send it from that phone to itself. Druks connects the phone that sent the code to your account. Keep this code private.'
+                      : 'Use your own WhatsApp. Druks then sends the questions of this number to the sender.'}
                   </p>
                 )}
                 {!number.revokedAt && (
@@ -210,7 +192,7 @@ export function WhatsAppNumbersPane({ app }: { app?: Pick<AppSettings, 'name' | 
                         Link again
                       </button>
                     )}
-                    {app && isLinked && !(isPaired && number.isPhoneConnected) && (
+                    {isLinked && !(isPaired && number.isPhoneConnected) && (
                       <button
                         className="set-btn ghost"
                         onClick={() => addAdmin(number)}

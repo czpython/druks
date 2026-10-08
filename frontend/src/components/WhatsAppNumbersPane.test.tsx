@@ -16,11 +16,11 @@ const waiting: WahaSession = {
   revokedReason: '',
 }
 
-function renderPane(app?: string, botAccess: AppSettings['botAccess'] = 'open') {
+function renderPane(app = 'helpdesk', botAccess: AppSettings['botAccess'] = 'open') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={queryClient}>
-      <WhatsAppNumbersPane app={app ? { name: app, botAccess } : undefined} />
+      <WhatsAppNumbersPane app={{ name: app, botAccess }} />
     </QueryClientProvider>,
   )
   return queryClient
@@ -153,20 +153,5 @@ describe('WhatsAppNumbersPane', () => {
 
     expect(await screen.findByText('+41000000000')).toBeTruthy()
     expect(screen.queryByText('Not linked')).toBeNull()
-  })
-
-  it('links the own-number fallback without an app', async () => {
-    const fetchMock = vi.fn(async (_url: string, request?: RequestInit) =>
-      new Response(JSON.stringify(request?.method === 'POST' ? waiting : [])),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-    renderPane()
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Link your number' }))
-
-    await waitFor(() => expect(fetchMock.mock.calls.some(([, request]) => request?.method === 'POST')).toBe(true))
-    const post = fetchMock.mock.calls.find(([, request]) => request?.method === 'POST')!
-    expect(JSON.parse(String(post[1]?.body))).toEqual({})
-    expect(screen.queryByRole('button', { name: 'Connect my phone' })).toBeNull()
   })
 })

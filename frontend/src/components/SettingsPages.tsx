@@ -31,7 +31,7 @@ import { BrowserProfilesPane } from './BrowserProfilesPane'
 import { CallsPane } from './CallsPane'
 import { GitHubPane } from './GitHubPane'
 import { SlackPane } from './SlackPane'
-import { WhatsAppChannelPane } from './WhatsAppNumbersPane'
+import { WhatsAppNumbersPane } from './WhatsAppNumbersPane'
 import {
   AgentAccessPane,
   AgentsPane,
@@ -75,7 +75,7 @@ const CHANNEL_PANES: Record<string, ComponentType<{ app: AppSettings }>> = {
   call: CallsPane,
   github: GitHubPane,
   slack: SlackPane,
-  whatsapp: WhatsAppChannelPane,
+  whatsapp: WhatsAppNumbersPane,
 }
 
 function withField(

@@ -114,13 +114,11 @@ async def link(
 ):
     bind_ambient_session(session)
     await connect_service("waha", identity={"url": "http://waha.test"}, secrets={"key": "admin"})
-    identity = {}
-    if app:
-        if access == BotAccess.PAIRED:
-            identity = {"app": app, "operators": {}}
-        else:
-            admin = await Account.create_for_bot(session, AccountKind.BOT_ADMIN)
-            identity = {"app": app, "admin": {"account_id": admin.id}}
+    if access == BotAccess.PAIRED:
+        identity = {"app": app, "operators": {}}
+    else:
+        admin = await Account.create_for_bot(session, AccountKind.BOT_ADMIN)
+        identity = {"app": app, "admin": {"account_id": admin.id}}
     if number:
         identity = {**identity, "number": number, "user_id": NUMBER}
     identity = {**identity, "session": session_name}
@@ -701,7 +699,7 @@ async def test_disconnect_refuses_an_open_number(druks_db, druks_client, helpdes
     assert connection.identity == identity
 
 
-async def test_a_paired_number_ignores_strangers_and_its_own_phone(druks_db, monkeypatch):
+async def test_a_paired_number_ignores_strangers_and_pairs_its_own_phone(druks_db, monkeypatch):
     connection = await link(
         druks_db, await bot_account(druks_db), app="chat", access=BotAccess.PAIRED
     )
@@ -712,7 +710,7 @@ async def test_a_paired_number_ignores_strangers_and_its_own_phone(druks_db, mon
     monkeypatch.setattr(bot_service.DBOS, "start_workflow_async", delivery)
     monkeypatch.setattr(bot_service, "take_over", take_over)
 
-    for sender, is_from_phone in ((ANA, False), (ANA, True), (NUMBER, True), ("900@lid", True)):
+    for sender, is_from_phone in ((ANA, False), (ANA, True)):
         body = code if is_from_phone else "Hello"
         event = message_event(sender, body, key=f"{sender}-{is_from_phone}", from_me=is_from_phone)
         event["payload"].update(hasMedia=True, media={"url": "http://waha.test/media/one"})
@@ -720,17 +718,23 @@ async def test_a_paired_number_ignores_strangers_and_its_own_phone(druks_db, mon
 
     assert not await Conversation.list_for_connection(druks_db, connection.id)
     assert not connection.identity["operators"]
-    assert await bot_service.redeem_admin_code(connection, code) == operator.id
     save_media.assert_not_awaited()
     delivery.assert_not_awaited()
     take_over.assert_not_awaited()
+
+    await receive(connection, message_event("900@lid", code, key="self-proof", from_me=True))
+
+    assert connection.identity["operators"] == {NUMBER: operator.id}
+    [conversation] = await Conversation.list_for_connection(druks_db, connection.id)
+    assert (conversation.user_id, conversation.account_id) == (NUMBER, operator.id)
+    delivery.assert_awaited_once_with(service.deliver, conversation.id)
+    assert not await bot_service.redeem_admin_code(connection, code)
 
 
 @pytest.mark.parametrize(
     "source, app",
     [
         (ConversationSource.WEB, "chat"),
-        (ConversationSource.WHATSAPP, ""),
         (ConversationSource.WHATSAPP, "chat"),
         (ConversationSource.WHATSAPP, "helpdesk"),
     ],
@@ -742,10 +746,7 @@ async def test_operator_turns_use_the_apps_prompt_and_settings_without_a_timeout
     operator = await Account.get_or_create(druks_db, "op@example.com")
     if source == ConversationSource.WHATSAPP:
         connection = await link(
-            druks_db,
-            await bot_account(druks_db) if app else operator,
-            app=app,
-            access=BotAccess.PAIRED,
+            druks_db, await bot_account(druks_db), app=app, access=BotAccess.PAIRED
         )
         conversation = await Conversation.get_or_create_for_user(
             druks_db, connection, operator.id, **user(ANA)
@@ -900,20 +901,6 @@ async def test_the_phones_chat_with_itself_is_an_admin_chat(druks_db, helpdesk):
     assert [message.body for message in chat.messages] == ["Requests today?", "And tomorrow?"]
 
 
-async def test_a_personal_number_reaches_its_owner_only_from_the_self_chat(druks_db):
-    operator = await Account.get_or_create(druks_db, "op@example.com")
-    connection = await link(druks_db, operator, app="")
-
-    await receive(connection, message_event(ANA, "Hi", key="M1"))
-    await receive(connection, message_event(ANA, "On my way", key="M2", from_me=True))
-    await receive(connection, message_event(NUMBER, "Remind me at six", key="M3", from_me=True))
-
-    [conversation] = await Conversation.list_for_connection(druks_db, connection.id)
-    await druks_db.refresh(conversation, ["messages"])
-    assert (conversation.account_id, conversation.user_id) == (operator.id, NUMBER)
-    assert [message.body for message in conversation.messages] == ["Remind me at six"]
-
-
 async def test_removing_a_number_holds_its_chats_and_relinking_keeps_its_history(
     druks_db, druks_client, helpdesk, waha, monkeypatch
 ):
@@ -933,7 +920,7 @@ async def test_removing_a_number_holds_its_chats_and_relinking_keeps_its_history
     assert resume.await_args.args[1].id == chat.id
     await druks_db.refresh(first)
     assert await chat.is_held(druks_db)
-    sessions = await Waha.list_sessions(druks_db, app="helpdesk", account_id=owner.id)
+    sessions = await Waha.list_sessions(druks_db, app="helpdesk")
     assert [session.id for session in sessions] == [first.id, second.id]
     assert first.identity["number"] == "+41000000000"
 
