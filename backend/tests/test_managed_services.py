@@ -23,7 +23,6 @@ name = "Druks Cloud"
 jwks_url = "https://portal.test/.well-known/jwks.json"
 issuer = "https://portal.test"
 audience = "{INSTANCE_ID}"
-instance = "{INSTANCE_ID}"
 services = ["github"]
 """
 
@@ -90,7 +89,6 @@ def test_manager_takes_its_token_from_one_file(configuration, secrets):
     assert settings.manager.name == "Druks Cloud"
     assert settings.manager.issuer == "https://portal.test"
     assert settings.manager.audience == INSTANCE_ID
-    assert settings.manager.instance == INSTANCE_ID
     assert settings.manager.services == ["github"]
     assert settings.manager.token.get_secret_value() == "manager-secret"
     assert "manager-secret" not in repr(settings)
