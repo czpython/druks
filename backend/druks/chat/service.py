@@ -389,9 +389,6 @@ async def send_turn(
             remote=archive_path,
         )
     server = get_druks_mcp_server(allowed_tools=())
-    headers = []
-    if conversation.connection:
-        headers = [{"name": CONVERSATION_HEADER, "value": conversation.id}]
     account_type = conversation.account.kind
     timeout = 0 if account_type == AccountKind.OPERATOR else config.timeout
     await bridge.request(
@@ -404,7 +401,8 @@ async def send_turn(
         fastMode=config.fast_mode,
         mcpUrl=server.url,
         bearerVariable=get_bearer_token_env_var(server.name),
-        headers=headers,
+        # Each tool call names its conversation, so a run that it starts reports back here.
+        headers=[{"name": CONVERSATION_HEADER, "value": conversation.id}],
         mcpServers=[
             {
                 "name": mcp_server.name,
@@ -585,9 +583,10 @@ async def finish_turn(
 
 
 async def report_result(session: AsyncSession, run: Run, *, result) -> str | None:
-    """Report a run's result to the chat that started it, once the run waited for an
-    answer. Returns the conversation to deliver."""
-    if run.input_requested_at:
+    """Report a run's result to the chat that started it, when the run waited for an
+    answer or returned something. A run that returns nothing put its output where it
+    belongs, such as a review that it posted. Returns the conversation to deliver."""
+    if run.input_requested_at or result:
         body = RESULT_MESSAGE.format(run=run.id, result=to_json(result, fallback=str).decode())
         return await report_outcome(session, run, body)
     return

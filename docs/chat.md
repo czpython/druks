@@ -134,6 +134,13 @@ mode without shell, web, or image tools. OpenCode runs its default agent with
 every permission allowed for an operator. For a Bot it runs an agent that
 denies the file, shell, and web tools.
 
+A run that the agent starts with a tool records its conversation. When the run
+fails, Druks adds an internal message with the failure to that conversation.
+When the run ends, Druks adds an internal message with its result if the run
+waited for an answer or returned a result. A run that returns nothing, such as
+a review that posts itself, adds nothing. The agent then tells you in its own
+words.
+
 The sandbox receives credential placeholders. The Drukbox proxy exchanges
 them for real credentials. See [public URLs and access control](configuration.md#public-urls-and-access-control)
 for the MCP address and edge requirements.
@@ -304,11 +311,10 @@ Only the number's admin can answer a question that came from the number's
 chats. The dashboard, `answer_gate`, and notification buttons all refuse
 everyone else, operators included.
 
-When a run that waited ends, Druks adds an internal message with its result to
-the conversation that started it. When a run fails, waited or not, Druks adds an
-internal message with its failure. The Bot then tells the person: a failure in
-one short line, with no error details and no retry. A cancelled run adds
-nothing.
+When a run that a chat on the number started ends, Druks reports it to that
+chat, as for every [run that a chat starts](#agent-access). The Bot then tells
+the person: a failure in one short line, with no error details and no retry. A
+cancelled run adds nothing.
 
 ### Taking over
 

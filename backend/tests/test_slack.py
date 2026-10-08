@@ -431,6 +431,7 @@ async def test_chat_read_thread_reads_the_callers_own_conversation(
     thread_reads(monkeypatch, [{"ts": "10.0", "user": ANA, "text": "hi"}])
     conversation = await thread_conversation(druks_db, card, ana)
     direct = await thread_conversation(druks_db, card, ana, thread_id="")
+    web = await Conversation.create(druks_db, account_id=ana.id, body="hi")
     _, token = await PersonalAccessToken.create(druks_db, account_id=ana.id, name="chat")
     await druks_db.commit()
     headers = {"Authorization": f"Bearer {token}"}
@@ -441,8 +442,10 @@ async def test_chat_read_thread_reads_the_callers_own_conversation(
             "/thread", headers={**headers, CONVERSATION_HEADER: conversation.id}
         )
         no_thread = await client.get("/thread", headers={**headers, CONVERSATION_HEADER: direct.id})
+        no_channel = await client.get("/thread", headers={**headers, CONVERSATION_HEADER: web.id})
 
-    assert (outside.status_code, no_thread.status_code) == (409, 409)
+    statuses = (outside.status_code, no_thread.status_code, no_channel.status_code)
+    assert statuses == (409, 409, 409)
     assert [(message["ts"], message["is_from_user"]) for message in thread.json()] == [
         ("10.0", True)
     ]
