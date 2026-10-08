@@ -63,7 +63,7 @@ def test_get_declared_sandboxes_deduplicates_by_content(monkeypatch):
 async def test_prepare_sandbox_templates_requests_each_declaration(monkeypatch):
     sandbox = Sandbox(setup="sandboxes/setup.sh")
     object.__setattr__(sandbox, "module", "druks_notes.workflows")
-    create_template = AsyncMock()
+    create_template = AsyncMock(return_value=SimpleNamespace(status="available"))
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
     monkeypatch.setattr(
         templates,
@@ -101,7 +101,7 @@ async def test_prepare_templates_labels_each_app_and_script(monkeypatch):
     sandboxes = [Sandbox(setup="sandboxes/build.sh"), Sandbox(setup="sandboxes/preview.sh")]
     for sandbox in sandboxes:
         object.__setattr__(sandbox, "module", "site_builder.workflows")
-    create_template = AsyncMock()
+    create_template = AsyncMock(return_value=SimpleNamespace(status="available"))
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: self.setup.encode())
     monkeypatch.setattr(
         templates, "load_settings", lambda: SimpleNamespace(sandbox=SimpleNamespace(image=""))
@@ -125,6 +125,49 @@ async def test_prepare_templates_labels_each_app_and_script(monkeypatch):
         "site-builder-preview",
     ]
     assert all(call.kwargs["base_image"] is None for call in create_template.await_args_list)
+
+
+async def test_prepare_sandbox_templates_waits_for_each_build_and_reports_a_failure(
+    monkeypatch,
+):
+    sandbox = Sandbox(setup="sandboxes/setup.sh")
+    object.__setattr__(sandbox, "module", "druks_notes.workflows")
+    create_template = AsyncMock(return_value=SimpleNamespace(status="building"))
+    get_template = AsyncMock(
+        side_effect=[
+            SimpleNamespace(status="building"),
+            SimpleNamespace(status="failed", last_error="OSError: builder crashed"),
+        ]
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
+    monkeypatch.setattr(
+        templates,
+        "load_settings",
+        lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base")),
+    )
+    monkeypatch.setattr(
+        templates, "loader", SimpleNamespace(resolve_workflow_app=lambda module: "notes")
+    )
+    monkeypatch.setattr(
+        templates, "get_declared_sandboxes", lambda extra: {sandbox.setup_script_hash: sandbox}
+    )
+    monkeypatch.setattr(
+        templates,
+        "sandbox_client",
+        SimpleNamespace(create_template=create_template, get_template=get_template),
+    )
+    monkeypatch.setattr(templates.asyncio, "sleep", sleep)
+
+    with pytest.raises(
+        TemplateUnavailable, match="notes-setup failed to build: OSError: builder crashed"
+    ):
+        await templates.prepare_sandbox_templates()
+
+    assert sleep.await_count == 2
+    get_template.assert_awaited_with(
+        base_image="base", setup_script_hash=hashlib.sha256(b"setup").hexdigest()
+    )
 
 
 async def test_get_template_id_uses_available_template(monkeypatch):

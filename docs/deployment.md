@@ -336,10 +336,12 @@ Sandboxes also loads the refreshed base image into its separate image store.
 Older templates follow Drukbox's unused-template cleanup policy. Existing
 hosts keep their image until they are released.
 
-A failed image pull or store load fails the command. `druks doctor` reports a
-template that is still building as pending; runs wait for it. Set
-`[sandbox].timeout` high enough for the base image download and store load
-(180 seconds by default).
+The command waits for each template build, which can take several minutes,
+and fails with the build error from Drukbox when a build fails. A failed image
+pull or store load also fails the command.
+`druks doctor` reports a template that is still building as pending; runs wait
+for it. Set `[sandbox].timeout` high enough for the base image download and
+store load (180 seconds by default).
 
 Recreating `web` interrupts in-flight execution. DBOS recovers compatible
 workflows from completed checkpoints when the process returns. Changes to

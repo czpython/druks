@@ -1,6 +1,8 @@
 import asyncio
 from pathlib import PurePosixPath
 
+from drukbox_sdk import SandboxTemplate
+
 from druks.apps import loader
 from druks.durable.activity import set_run_phase
 from druks.settings import load_settings
@@ -26,11 +28,26 @@ async def prepare_sandbox_templates(*, extra: tuple[Sandbox, ...] = ()) -> None:
     for sandbox in get_declared_sandboxes(extra=extra).values():
         app_name = sandbox.package or loader.resolve_workflow_app(sandbox.module)
         label = f"{app_name}-{PurePosixPath(sandbox.setup).stem}".replace("_", "-")
-        await sandbox_client.create_template(
+        template = await sandbox_client.create_template(
             setup_script=sandbox.read_setup_script().decode("utf-8"),
             base_image=base_image or None,
             label=label,
         )
+        template = await wait_for_build(sandbox, template)
+        if template.status != "available":
+            raise TemplateUnavailable(
+                f"sandbox template {label} failed to build: {template.last_error}"
+            )
+
+
+async def wait_for_build(sandbox: Sandbox, template: SandboxTemplate) -> SandboxTemplate:
+    base_image = load_settings().sandbox.image
+    while template.status == "building":
+        await asyncio.sleep(_TEMPLATE_POLL_SECONDS)
+        template = await sandbox_client.get_template(
+            base_image=base_image, setup_script_hash=sandbox.setup_script_hash
+        )
+    return template
 
 
 async def get_template_id(sandbox: Sandbox) -> str:
@@ -47,11 +64,7 @@ async def get_template_id(sandbox: Sandbox) -> str:
 
     if template.status == "building":
         await set_run_phase("sandbox_building")
-        while template.status == "building":
-            await asyncio.sleep(_TEMPLATE_POLL_SECONDS)
-            template = await sandbox_client.get_template(
-                setup_script_hash=setup_script_hash, base_image=base_image
-            )
+        template = await wait_for_build(sandbox, template)
 
     if template.status == "available":
         return template.id
