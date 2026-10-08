@@ -445,7 +445,7 @@ class Service:
                 client_id=connected.identity["client_id"],
                 extra_authorize_params=cls.extra_authorize_params,
                 token_headers={"Authorization": f"Bearer {manager.token.get_secret_value()}"},
-                state_prefix=f"{manager.instance}.",
+                state_prefix=f"{manager.audience}.",
                 redirect_uri=f"{manager.issuer.rstrip('/')}/{cls.slug}/oauth/callback",
                 is_grant_revoked=cls.is_grant_revoked,
             )

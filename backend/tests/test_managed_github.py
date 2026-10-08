@@ -35,7 +35,6 @@ name = "Druks Cloud"
 jwks_url = "{PORTAL}/.well-known/jwks.json"
 issuer = "{PORTAL}"
 audience = "{INSTANCE_ID}"
-instance = "{INSTANCE_ID}"
 services = ["github"]
 
 [urls]

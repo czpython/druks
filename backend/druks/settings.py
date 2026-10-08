@@ -161,8 +161,6 @@ class Manager(BaseModel):
     jwks_url: str = ""
     issuer: str = ""
     audience: str = ""
-    # What the manager calls this Druks. Every managed consent's state begins with it.
-    instance: str = ""
     # The services it manages. Each one's table gives the ``url`` where it answers.
     services: list[str] = []
     # The credential of the manager's token exchange: the secret file ``manager.token``.
@@ -175,7 +173,6 @@ class Manager(BaseModel):
             "manager.jwks_url": self.jwks_url,
             "manager.issuer": self.issuer,
             "manager.audience": self.audience,
-            "manager.instance": self.instance,
             "manager.services": ", ".join(self.services),
             "manager.token": self.token.get_secret_value(),
         }
