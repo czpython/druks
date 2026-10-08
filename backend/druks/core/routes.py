@@ -83,11 +83,12 @@ async def github_manifest_callback(slug: str, code: str = "") -> HTMLResponse:
             "webhook_secret": app["webhook_secret"],
         }
     )
-    app_slug = row.identity["slug"]
-    install_url = f"https://github.com/apps/{quote(app_slug, safe='')}/installations/new"
     # druks opened this tab via window.open; the broadcast tells the connect
     # card to refetch, then the tab moves on to the one step GitHub still
     # needs — installing the App on the repositories druks should work in.
     return render_page(
-        "github_manifest_callback.html", slug=app_slug, install_url=install_url, service=slug
+        "github_manifest_callback.html",
+        slug=row.identity["slug"],
+        install_url=await service.get_install_endpoint(),
+        service=slug,
     )

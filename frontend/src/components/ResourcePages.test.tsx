@@ -164,6 +164,7 @@ describe('Account grant groups', () => {
         facts: {},
         fields: [],
         createUrl: '',
+        installUrl: '',
         isOauth: true,
         scopes: [],
         usedBy: ['inbox_manager'],

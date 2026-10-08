@@ -5,6 +5,7 @@ import httpx
 import pytest
 from conftest import bind_ambient_session, connect_service
 from druks.accounts.models import Account
+from druks.apps.registry import webhooks
 from druks.chat.channels.whatsapp.services import Waha
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
@@ -12,8 +13,27 @@ from druks.services import Service
 from druks.services.exceptions import ServiceConnectError, ServiceManagedError
 from druks.settings import Settings
 from druks.testing import asgi_client, configure_app_for_test
+from druks.webhooks import Webhook
 from pydantic import BaseModel, SecretStr, field_validator
 from sqlalchemy import select
+
+INSTANCE_ID = "6f2c1c1e-9b8e-4b65-9d3c-7a2b1f4e8d10"
+MANAGER = f"""[manager]
+name = "Druks Cloud"
+jwks_url = "https://portal.test/.well-known/jwks.json"
+issuer = "https://portal.test"
+audience = "{INSTANCE_ID}"
+instance = "{INSTANCE_ID}"
+services = ["github"]
+"""
+
+
+@pytest.fixture
+def declared_webhooks():
+    saved = dict(webhooks._items)
+    yield
+    webhooks._items.clear()
+    webhooks._items.update(saved)
 
 
 @pytest.fixture
@@ -36,7 +56,7 @@ def acme(declared_services):
 @pytest.fixture
 def configuration(tmp_path, monkeypatch):
     path = tmp_path / "druks.toml"
-    path.write_text('managed_by = "Druks Cloud"\n')
+    path.write_text("")
     monkeypatch.setenv("DRUKS_CONFIG", str(path))
     return path
 
@@ -59,6 +79,90 @@ def test_service_entry_takes_its_secrets_from_files(configuration, secrets):
     assert settings.services == {"acme": {"url": "https://acme.test", "key": "acme-secret"}}
     assert "acme-secret" not in repr(settings)
     assert "acme-secret" not in settings.model_dump_json()
+
+
+def test_manager_takes_its_token_from_one_file(configuration, secrets):
+    configuration.write_text(MANAGER)
+    (secrets / "manager.token").write_text("manager-secret")
+
+    settings = Settings()
+
+    assert settings.manager.name == "Druks Cloud"
+    assert settings.manager.issuer == "https://portal.test"
+    assert settings.manager.audience == INSTANCE_ID
+    assert settings.manager.instance == INSTANCE_ID
+    assert settings.manager.services == ["github"]
+    assert settings.manager.token.get_secret_value() == "manager-secret"
+    assert "manager-secret" not in repr(settings)
+    assert "manager-secret" not in settings.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "body, message",
+    [
+        (MANAGER + 'token = "manager-secret"', "manager.token is a secret"),
+        ('[manager]\nname = "Druks Cloud"', "manager.jwks_url, manager.issuer"),
+        (MANAGER, "manager.token"),
+        ('managed_by = "Druks Cloud"', "managed_by is now the"),
+    ],
+)
+def test_an_incomplete_manager_refuses_to_start(configuration, secrets, body, message):
+    configuration.write_text(body)
+
+    with pytest.raises(ValueError, match=message) as error:
+        Settings()
+
+    assert "manager-secret" not in str(error.value)
+
+
+async def test_the_manager_names_only_declared_services(configuration, secrets, druks_db):
+    configuration.write_text(MANAGER.replace('["github"]', '["gihub"]'))
+    (secrets / "manager.token").write_text("manager-secret")
+
+    with pytest.raises(ServiceConnectError, match="gihub"):
+        await Service.sync_configuration(druks_db)
+
+
+async def test_a_configured_service_keeps_its_own_verifier_and_oauth_client(
+    declared_services, declared_webhooks, configuration, secrets, druks_db, tmp_path
+):
+    class Acme(Service):
+        authorization_endpoint = "https://acme.test/authorize"
+        token_endpoint = "https://acme.test/token"
+
+        class Settings(BaseModel):
+            client_id: str
+            client_secret: SecretStr
+
+    class AcmeEvents(Webhook):
+        provider = "acme"
+        category = "events"
+
+        async def request_is_authentic(self) -> bool:
+            return self.request.headers.get("x-acme-signature") == "acme-signed"
+
+        def get_action(self) -> str:
+            return "ping"
+
+    configuration.write_text(MANAGER + '[services.acme]\nclient_id = "id-1"')
+    (secrets / "manager.token").write_text("manager-secret")
+    (secrets / "services.acme.client_secret").write_text("acme-secret")
+    bind_ambient_session(druks_db)
+    await Service.sync_configuration(druks_db)
+
+    client = await Acme.get_oauth_client()
+    assert client.token_endpoint == "https://acme.test/token"
+    assert client.client_secret == "acme-secret"
+    assert not client.token_headers
+
+    api = configure_app_for_test(settings=Settings(data_dir=tmp_path))
+    async with asgi_client(api) as http:
+        refused = await http.post("/_external/acme/events/", content=b"{}")
+        accepted = await http.post(
+            "/_external/acme/events/", content=b"{}", headers={"X-Acme-Signature": "acme-signed"}
+        )
+    assert refused.status_code == 401
+    assert accepted.json() == {"accepted": True, "handled": False}
 
 
 @pytest.mark.parametrize(
@@ -118,10 +222,27 @@ async def test_sync_keeps_the_vault_id_and_replaces_credentials(
     assert pasted.id == original_id
 
 
+async def test_sync_keeps_the_facts_the_card_learned(acme, configuration, secrets, druks_db):
+    bind_ambient_session(druks_db)
+    configuration.write_text('[services.acme]\nurl = "https://acme.test"')
+    (secrets / "services.acme.key").write_text("configured-key")
+    await Service.sync_configuration(druks_db)
+    card = await acme.get()
+    card.identity = {**card.identity, "installations": ["acme", "paulo"]}
+    await druks_db.flush()
+
+    configuration.write_text('[services.acme]\nurl = "https://moved.test"')
+    await Service.sync_configuration(druks_db)
+
+    assert (await acme.get()).identity == {
+        "url": "https://moved.test",
+        "installations": ["acme", "paulo"],
+    }
+
+
 async def test_managed_card_is_read_only(acme, configuration, secrets, druks_db, tmp_path, caplog):
-    configuration.write_text(
-        'managed_by = "Druks Cloud"\n[services.acme]\nurl = "https://acme.test"'
-    )
+    configuration.write_text(MANAGER + '[services.acme]\nurl = "https://acme.test"')
+    (secrets / "manager.token").write_text("manager-secret")
     (secrets / "services.acme.key").write_text("configured-key")
     settings = Settings(data_dir=tmp_path)
     bind_ambient_session(druks_db)

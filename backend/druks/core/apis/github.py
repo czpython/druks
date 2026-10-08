@@ -4,14 +4,16 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, TypeVar
 
-from githubkit import AppAuthStrategy, AppInstallationAuthStrategy, GitHub
+from githubkit import AppAuthStrategy, GitHub, TokenAuthStrategy
 from githubkit.exception import GraphQLFailed, RequestFailed
 
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.utils.time import ensure_utc
+from druks.redis import get_client
+from druks.services.constants import OAUTH_TOKEN_TTL_SKEW_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -63,22 +65,20 @@ def _retry_on_401(func: F) -> F:
 
 
 class GitHubClient:
+    """The App's key signs its calls at ``app_url``. Repository calls go to GitHub with
+    the installation tokens minted there."""
+
     def __init__(
         self,
         *,
         app_id: str,
         private_key: str,
-        base_url: str = GITHUB_API_URL,
+        app_url: str = GITHUB_API_URL,
         slug: str = "",
     ) -> None:
         self._app_id = app_id
-        self._private_key = private_key
-        self._base_url = base_url
         self._slug = slug
-        self._app = GitHub(
-            AppAuthStrategy(app_id, private_key),
-            base_url=base_url,
-        )
+        self._app = GitHub(AppAuthStrategy(app_id, private_key), base_url=app_url)
         self._installation_cache: dict[str, int] = {}
         self._repo_gh_cache: dict[int, GitHub] = {}
 
@@ -116,10 +116,8 @@ class GitHubClient:
         except GitHubAppNotInstalledError:
             return []
 
-        async with GitHub(
-            AppInstallationAuthStrategy(self._app_id, self._private_key, installation_id),
-            base_url=self._base_url,
-        ) as github:
+        github = await self._get_for_installation(installation_id)
+        async with github:
             repos: list[dict[str, Any]] = []
             page = 1
             while True:
@@ -149,10 +147,8 @@ class GitHubClient:
         installation_id = await self._owner_installation_id(owner)
         template_owner, template_name = template_repo.split("/", 1)
         full_name = f"{owner}/{name}"
-        async with GitHub(
-            AppInstallationAuthStrategy(self._app_id, self._private_key, installation_id),
-            base_url=self._base_url,
-        ) as github:
+        github = await self._get_for_installation(installation_id)
+        async with github:
             try:
                 await github.rest.repos.async_create_using_template(
                     template_owner,
@@ -168,15 +164,16 @@ class GitHubClient:
                 raise
         return full_name
 
-    async def list_installation_accounts(self) -> tuple[str, ...]:
+    async def list_installation_accounts(self, cached: bool = True) -> tuple[str, ...]:
         """Account logins (orgs/users) this App is installed on — the
         authoritative "where druks may act". Install the App somewhere and
         druks works there; uninstall and it stops. Cached ~10 min per app
-        id, serving the last-known set when GitHub hiccups."""
-        cached = _INSTALLATION_ACCOUNTS_CACHE.get(self._app_id)
+        id, serving the last-known set when GitHub hiccups. ``cached=False``
+        asks now, after an install."""
+        known = _INSTALLATION_ACCOUNTS_CACHE.get(self._app_id)
         now = time.monotonic()
-        if cached and now - cached[0] < _INSTALLATION_ACCOUNTS_TTL_SECONDS:
-            return cached[1]
+        if cached and known and now - known[0] < _INSTALLATION_ACCOUNTS_TTL_SECONDS:
+            return known[1]
         try:
             accounts: list[str] = []
             page = 1
@@ -194,12 +191,12 @@ class GitHubClient:
                     break
                 page += 1
         except Exception:
-            if cached:
+            if known:
                 logger.warning(
                     "Could not refresh App installations; serving the last-known set.",
                     exc_info=True,
                 )
-                return cached[1]
+                return known[1]
             raise
         result = tuple(dict.fromkeys(accounts))
         _INSTALLATION_ACCOUNTS_CACHE[self._app_id] = (now, result)
@@ -228,7 +225,7 @@ class GitHubClient:
         bot_name = f"{await self.get_mention_handle()}[bot]"
         user_id = _BOT_USER_ID_CACHE.get(self._app_id)
         if not user_id:
-            async with GitHub(base_url=self._base_url) as github:
+            async with GitHub(base_url=GITHUB_API_URL) as github:
                 response = await github.rest.users.async_get_by_username(bot_name)
             user_id = response.parsed_data.id
             _BOT_USER_ID_CACHE[self._app_id] = user_id
@@ -238,12 +235,8 @@ class GitHubClient:
         """The slug GitHub reports for these credentials — a live App-JWT call,
         so it proves the App ID matches the PEM. The connect flow's validation;
         mention resolution reads the stored slug instead."""
-        async with GitHub(
-            AppAuthStrategy(self._app_id, self._private_key),
-            base_url=self._base_url,
-        ) as github:
-            response = await github.rest.apps.async_get_authenticated()
-            return str(getattr(response.parsed_data, "slug", None) or "")
+        response = await self._app.rest.apps.async_get_authenticated()
+        return str(getattr(response.parsed_data, "slug", None) or "")
 
     async def _installation_id(self, repo: str) -> int:
         if repo in self._installation_cache:
@@ -259,22 +252,38 @@ class GitHubClient:
         self._installation_cache[repo] = installation_id
         return installation_id
 
+    async def _get_installation_token(self, installation_id: int) -> tuple[str, datetime]:
+        """The installation's token and its expiry, kept in Redis until the skew before it
+        expires."""
+        redis = get_client()
+        key = f"github:installation_token:{installation_id}"
+        if token := await redis.get(key):
+            return token.decode(), datetime.now(UTC) + timedelta(seconds=await redis.ttl(key))
+        response = await self._app.rest.apps.async_create_installation_access_token(
+            installation_id,
+        )
+        minted = response.parsed_data
+        expires_at = ensure_utc(datetime.fromisoformat(str(minted.expires_at)))
+        ttl = int((expires_at - datetime.now(UTC)).total_seconds()) - OAUTH_TOKEN_TTL_SKEW_SECONDS
+        if ttl > 0:
+            await redis.set(key, str(minted.token), ex=ttl)
+        return str(minted.token), expires_at
+
+    async def _get_for_installation(self, installation_id: int) -> GitHub:
+        token, _ = await self._get_installation_token(installation_id)
+        return GitHub(TokenAuthStrategy(token), base_url=GITHUB_API_URL)
+
     async def _for_repo(self, repo: str) -> GitHub:
         installation_id = await self._installation_id(repo)
         if installation_id not in self._repo_gh_cache:
-            self._repo_gh_cache[installation_id] = GitHub(
-                AppInstallationAuthStrategy(
-                    self._app_id,
-                    self._private_key,
-                    installation_id,
-                ),
-                base_url=self._base_url,
-            )
+            self._repo_gh_cache[installation_id] = await self._get_for_installation(installation_id)
         return self._repo_gh_cache[installation_id]
 
     async def _invalidate_for_repo(self, repo: str) -> None:
         installation_id = self._installation_cache.pop(repo, None)
         github = self._repo_gh_cache.pop(installation_id, None) if installation_id else None
+        if installation_id:
+            await get_client().delete(f"github:installation_token:{installation_id}")
         if github:
             try:
                 await github.__aexit__(None, None, None)
@@ -288,22 +297,9 @@ class GitHubClient:
     @_retry_on_401
     async def token_for_repo(self, repo: str) -> tuple[str, datetime]:
         """The installation token for ``repo`` and the expiry GitHub gave it."""
-        # The decorator drops the cached installation client + id on a
-        # 401 and retries once. Important here because git is the
-        # consumer of the minted token — once it's handed to git,
-        # there's no httpx-layer retry hook to recover from a stale
-        # ``installation_id`` (e.g. after the App was reinstalled and
-        # got a new id, leaving every worker's cache pointing at the
-        # dead one). The 401 from this method's own SDK call gives us
-        # the only chance to invalidate before git presents a bad
-        # token to GitHub and produces ``expected flush after ref
-        # listing``.
-        installation_id = await self._installation_id(repo)
-        token_response = await self._app.rest.apps.async_create_installation_access_token(
-            installation_id,
-        )
-        token = token_response.parsed_data
-        return str(token.token), ensure_utc(datetime.fromisoformat(str(token.expires_at)))
+        # git holds the token after this call, so a 401 here is the one chance to drop
+        # a stale installation id (the App was reinstalled) and mint again.
+        return await self._get_installation_token(await self._installation_id(repo))
 
     @_retry_on_401
     async def get_repository(self, repo: str) -> dict[str, Any]:

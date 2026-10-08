@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 from typing import Any
@@ -6,7 +7,9 @@ from fastapi import HTTPException, Request, status
 from fastapi.responses import Response
 from starlette.routing import compile_path
 
-from druks.apps.registry import webhooks
+from druks.accounts.exceptions import InvalidAssertionError
+from druks.accounts.jwt import verify_claims
+from druks.apps.registry import services, webhooks
 from druks.settings import Settings
 
 from .deliveries import mark_delivery, release_delivery
@@ -142,10 +145,33 @@ class Webhook:
         fields = {"webhook_event": event, "webhook_ignored_reason": reason, **extra}
         logger.info("webhook ignored: %s (%s)", reason, event, extra=fields)
 
+    async def request_is_manager_signed(self) -> bool:
+        """Whether the manager signed this forwarded event for this Druks: a JWT in
+        ``X-Druks-Signature`` over the delivery and the body's SHA-256."""
+        manager = self.settings.manager
+        try:
+            claims = await verify_claims(
+                self.request.headers.get("x-druks-signature", ""),
+                jwks_url=manager.jwks_url,
+                issuer=manager.issuer,
+                audience=manager.audience,
+            )
+        except InvalidAssertionError:
+            return False
+        delivery = f"{self.provider}:{self.get_delivery_key()}"
+        digest = hashlib.sha256(self.raw_body).hexdigest()
+        return claims.get("sub") == delivery and claims.get("body_sha256") == digest
+
     async def respond(self) -> Response:
         self.raw_body = await self.request.body()
 
-        if not await self.request_is_authentic():
+        # The manager forwards a managed service's events with its own signature.
+        service = services.get(self.provider)
+        if service and service.is_managed():
+            authentic = await self.request_is_manager_signed()
+        else:
+            authentic = await self.request_is_authentic()
+        if not authentic:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid webhook signature.",

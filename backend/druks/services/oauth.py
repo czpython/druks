@@ -47,9 +47,10 @@ async def _post_token(
     client_id: str,
     client_secret: str,
     basic_auth: bool,
+    headers: dict[str, str],
 ) -> httpx.Response:
     # RFC 6749 answers in JSON, but GitHub answers in form encoding unless asked.
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json", **headers}
     # RFC 6749: HTTP Basic keeps the client credentials out of the form body.
     if basic_auth:
         return await http.post(
@@ -92,6 +93,9 @@ class OauthClient:
     consent query, for example Google's ``access_type=offline`` and
     ``prompt=consent``. Each ``begin_connect`` asks for its own scopes.
     ``is_grant_revoked`` reads the token endpoint's answer to a refresh.
+
+    ``token_headers`` go on every token request, ``state_prefix`` begins every
+    state, and ``redirect_uri`` fixes the callback; empty, the caller chooses it.
     """
 
     def __init__(
@@ -105,6 +109,9 @@ class OauthClient:
         basic_auth: bool = False,
         extra_token_params: dict[str, str] | None = None,
         extra_authorize_params: dict[str, str] | None = None,
+        token_headers: dict[str, str] | None = None,
+        state_prefix: str = "",
+        redirect_uri: str = "",
         mint_wait_interval_seconds: float = OAUTH_MINT_WAIT_INTERVAL_SECONDS,
         mint_wait_attempts: int = OAUTH_MINT_WAIT_ATTEMPTS,
         is_grant_revoked: Callable[[int, dict[str, Any]], bool] = is_grant_revoked,
@@ -117,6 +124,9 @@ class OauthClient:
         self.basic_auth = basic_auth
         self.extra_token_params = dict(extra_token_params or {})
         self.extra_authorize_params = dict(extra_authorize_params or {})
+        self.token_headers = dict(token_headers or {})
+        self.state_prefix = state_prefix
+        self.redirect_uri = redirect_uri
         self.mint_wait_interval_seconds = mint_wait_interval_seconds
         self.mint_wait_attempts = mint_wait_attempts
         self.is_grant_revoked = is_grant_revoked
@@ -129,14 +139,16 @@ class OauthClient:
         consent_query: dict[str, str] | None = None,
         context: dict[str, Any] | None = None,
         extra_authorize_params: dict[str, str] | None = None,
+        authorization_endpoint: str = "",
     ) -> str:
         """Stash the pending exchange in Redis under a new single-use state, and
         return the consent URL. ``consent_query`` is the query that asks for ``scopes``,
         when the provider names them otherwise than RFC 6749's ``scope``. ``context``
         comes back from ``complete_connect``. ``extra_authorize_params`` override the
-        client's declared ones on the same key. Nothing durable is written, so an
-        abandoned consent expires."""
-        state = secrets.token_urlsafe(32)
+        client's declared ones on the same key. ``authorization_endpoint`` is another
+        provider page that starts the same flow, such as GitHub's install page.
+        Nothing durable is written, so an abandoned consent expires."""
+        state = self.state_prefix + secrets.token_urlsafe(32)
         code_verifier = secrets.token_urlsafe(64)
         code_challenge = (
             base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest())
@@ -154,6 +166,7 @@ class OauthClient:
             "client_secret": self.client_secret,
             "basic_auth": self.basic_auth,
             "extra_token_params": self.extra_token_params,
+            "token_headers": self.token_headers,
         }
         await get_client().set(
             f"oauth:connect:{state}",
@@ -171,7 +184,7 @@ class OauthClient:
         if scopes:
             query.update(consent_query or {"scope": " ".join(scopes)})
         query.update({**self.extra_authorize_params, **(extra_authorize_params or {})})
-        return f"{self.authorization_endpoint}?{urlencode(query)}"
+        return f"{authorization_endpoint or self.authorization_endpoint}?{urlencode(query)}"
 
     async def get_access_token(
         self,
@@ -248,6 +261,7 @@ class OauthClient:
                         client_id=self.client_id,
                         client_secret=self.client_secret,
                         basic_auth=self.basic_auth,
+                        headers=self.token_headers,
                     )
                 except httpx.HTTPError as error:
                     raise OauthRefreshError(self.provider, str(error)) from error
@@ -324,9 +338,12 @@ def _expiry(seconds: int) -> datetime | None:
     return datetime.now(UTC) + timedelta(seconds=seconds) if seconds > 0 else None
 
 
-async def complete_connect(*, state: str, code: str) -> tuple[dict, dict]:
+async def complete_connect(
+    *, state: str, code: str, installation_id: str = ""
+) -> tuple[dict, dict]:
     """Consume the single-use state and exchange the code. Returns ``(tokens,
-    pending)``. The caller stores the grant, because only it knows the account."""
+    pending)``; the caller stores the grant, because only it knows the account. The
+    exchange forwards the callback's ``installation_id``."""
     raw = await get_client().getdel(f"oauth:connect:{state}")
     if not raw:
         raise OauthExchangeError(
@@ -343,6 +360,8 @@ async def complete_connect(*, state: str, code: str) -> tuple[dict, dict]:
         "code_verifier": pending["code_verifier"],
         **pending["extra_token_params"],
     }
+    if installation_id:
+        data["installation_id"] = installation_id
     async with _http() as http:
         try:
             response = await _post_token(
@@ -352,6 +371,7 @@ async def complete_connect(*, state: str, code: str) -> tuple[dict, dict]:
                 client_id=pending["client_id"],
                 client_secret=pending["client_secret"],
                 basic_auth=pending["basic_auth"],
+                headers=pending["token_headers"],
             )
         except httpx.HTTPError as error:
             raise OauthExchangeError(
