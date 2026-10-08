@@ -13,16 +13,16 @@ from druks.secrets.models import VaultSecret
 from .schemas import QrResponse, SessionResponse
 from .services import Waha
 
-router = APIRouter(prefix="/services/waha")
+router = APIRouter(prefix="/services/waha", dependencies=[Depends(current_session_account)])
 
 
 @router.get("/sessions", response_model=list[SessionResponse], response_model_by_alias=True)
 async def list_sessions(
-    session: SessionDep, app: str = "", account: Account = Depends(current_session_account)
+    session: SessionDep, app: str, account: Account = Depends(current_session_account)
 ) -> list[SessionResponse]:
-    """An app's numbers, or the operator's own number."""
+    """The numbers of an app."""
     numbers = []
-    for connection in await Waha.list_sessions(session, app=app, account_id=account.id):
+    for connection in await Waha.list_sessions(session, app=app):
         number = SessionResponse.model_validate(connection)
         if (
             connection.account.kind == AccountKind.BOT
@@ -36,35 +36,26 @@ async def list_sessions(
 @router.post(
     "/sessions", status_code=201, response_model=SessionResponse, response_model_by_alias=True
 )
-async def link_session(
-    session: SessionDep,
-    app: Annotated[str, Body(embed=True)] = "",
-    account: Account = Depends(current_session_account),
-) -> VaultSecret:
-    """Link a number for an app's Bot or for the operator."""
-    owner = account
-    identity = {}
-    if app:
-        try:
-            bot = get_app(app).bot
-        except KeyError as exc:
-            raise HTTPException(404, f"Unknown app {app!r}") from exc
-        if not bot:
-            raise HTTPException(404, f"App {app!r} declares no Bot.")
-        owner = await Account.create_for_bot(session, AccountKind.BOT)
-        if bot.access == BotAccess.PAIRED:
-            identity = {"app": app, "operators": {}}
-        else:
-            admin = await Account.create_for_bot(session, AccountKind.BOT_ADMIN)
-            identity = {"app": app, "admin": {"account_id": admin.id}}
+async def link_session(session: SessionDep, app: Annotated[str, Body(embed=True)]) -> VaultSecret:
+    """Link a number for the Bot of an app."""
+    try:
+        bot = get_app(app).bot
+    except KeyError as exc:
+        raise HTTPException(404, f"Unknown app {app!r}") from exc
+    if not bot:
+        raise HTTPException(404, f"App {app!r} declares no Bot.")
+    owner = await Account.create_for_bot(session, AccountKind.BOT)
+    if bot.access == BotAccess.PAIRED:
+        identity = {"app": app, "operators": {}}
+    else:
+        admin = await Account.create_for_bot(session, AccountKind.BOT_ADMIN)
+        identity = {"app": app, "admin": {"account_id": admin.id}}
     return await Waha.link(session, owner, identity=identity)
 
 
 @router.get("/sessions/{session_id}/qr", response_model=QrResponse, response_model_by_alias=True)
-async def get_qr(
-    session: SessionDep, session_id: str, account: Account = Depends(current_session_account)
-) -> dict[str, str]:
-    connection = await Waha.get_session(session, session_id, account.id)
+async def get_qr(session: SessionDep, session_id: str) -> dict[str, str]:
+    connection = await Waha.get_session(session, session_id)
     if connection and connection.is_live:
         client = await Waha.get_client(session, connection)
         return await client.get_qr()
@@ -74,11 +65,9 @@ async def get_qr(
 @router.post(
     "/sessions/{session_id}/relink", response_model=SessionResponse, response_model_by_alias=True
 )
-async def relink_session(
-    session: SessionDep, session_id: str, account: Account = Depends(current_session_account)
-) -> VaultSecret:
+async def relink_session(session: SessionDep, session_id: str) -> VaultSecret:
     """Take a new scan on a number that lost its link."""
-    connection = await Waha.get_session(session, session_id, account.id)
+    connection = await Waha.get_session(session, session_id)
     if connection and connection.is_live:
         await Waha.relink(session, connection)
         return connection
@@ -86,10 +75,8 @@ async def relink_session(
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
-async def remove_session(
-    session: SessionDep, session_id: str, account: Account = Depends(current_session_account)
-) -> None:
-    connection = await Waha.get_session(session, session_id, account.id)
+async def remove_session(session: SessionDep, session_id: str) -> None:
+    connection = await Waha.get_session(session, session_id)
     if not connection:
         raise HTTPException(404, "Session not found.")
     # Removing is idempotent: a second delete finds the session removed.

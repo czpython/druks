@@ -53,9 +53,8 @@ it.each(['chat', 'helpdesk'])('uses paired access for the number options in %s C
   mount(`/apps/${app}/settings/channels`, app)
 
   expect(await screen.findByRole('button', { name: 'Add number' })).toBeTruthy()
-  expect(await screen.findByRole('button', { name: 'Link your number' })).toBeTruthy()
   expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent))
-    .toEqual(["Assistant's number — Recommended", 'Your own number'])
+    .toEqual(["Assistant's number"])
   expect(screen.getByRole('link', { name: 'Bots' }).getAttribute('href'))
     .toBe(`/apps/${app}/settings/bots`)
   expect(screen.queryByRole('link', { name: 'Agents' })).toBeNull()
@@ -73,7 +72,7 @@ it('keeps WhatsApp setup out of Connections Accounts', async () => {
   mount('/settings/connections?tab=accounts')
 
   expect(await screen.findByRole('link', { name: 'Accounts' })).toBeTruthy()
-  expect(screen.queryByRole('button', { name: 'Link your number' })).toBeNull()
-  expect(screen.queryByRole('heading', { name: 'Your own number' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Add number' })).toBeNull()
+  expect(screen.queryByRole('heading', { name: "Assistant's number" })).toBeNull()
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/waha/'))).toBe(false)
 })

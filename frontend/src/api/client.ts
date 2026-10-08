@@ -336,12 +336,10 @@ export const api = {
   listConnections: () => getJSON<Connection[]>('/api/oauth/connections'),
   disconnectConnection: (connectionId: string) =>
     deleteRequest(`/api/oauth/connections/${encodeURIComponent(connectionId)}`),
-  // Linked WhatsApp numbers: an app's with ``app``, else the caller's own number.
-  wahaSessions: (app?: string) =>
-    getJSON<WahaSession[]>(
-      `/api/chat/services/waha/sessions${app ? `?app=${encodeURIComponent(app)}` : ''}`,
-    ),
-  linkWahaSession: (app?: string) =>
+  // An app's linked WhatsApp numbers.
+  wahaSessions: (app: string) =>
+    getJSON<WahaSession[]>(`/api/chat/services/waha/sessions?app=${encodeURIComponent(app)}`),
+  linkWahaSession: (app: string) =>
     postJSON<WahaSession>('/api/chat/services/waha/sessions', { app }),
   wahaSessionQr: (id: string) =>
     getJSON<{ mimetype: string; data: string }>(
