@@ -206,8 +206,9 @@ class BuildSite(Workflow):
     sandbox = Sandbox(setup="sandboxes/build.sh")
 ```
 
-Place the file at `site_builder/sandboxes/build.sh`. The path is relative to the
-app package.
+Place the file at `site_builder/sandboxes/build.sh`, beside
+`site_builder/workflows.py`. The path is relative to the folder of the module
+that declares the workflow.
 
 Druks reads the raw bytes. It does not render
 the file or run it during import. Drukbox builds a reusable template from the

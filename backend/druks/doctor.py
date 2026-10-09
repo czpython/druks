@@ -22,8 +22,9 @@ from .accounts.models import Account
 from .agents import Agent
 from .apps.loader import iter_apps
 from .apps.registry import _ROLES, agents, autodiscover, services, webhooks, workflows
+from .browser.sessions import BrowserSession
+from .chat.bridge import Bridge
 from .chat.channels.base import Channel
-from .chat.sandbox import CHAT_SANDBOX
 from .core.services import Github
 from .database import create_async_engine_from_url, create_engine_from_url, session_scope
 from .harnesses.providers import get_providers
@@ -304,7 +305,7 @@ async def check_sandbox_e2e(settings: Settings) -> CheckResult | list[CheckResul
 
 async def check_declared_sandboxes(settings: Settings) -> CheckResult | list[CheckResult]:
     try:
-        declared = get_declared_sandboxes(extra=(CHAT_SANDBOX,))
+        declared = get_declared_sandboxes(extra=(Bridge.sandbox, BrowserSession.sandbox))
     except Exception as error:  # noqa: BLE001 — doctor reports, never raises
         return CheckResult(
             name="sandbox_templates",

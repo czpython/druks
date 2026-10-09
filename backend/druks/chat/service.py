@@ -62,7 +62,6 @@ from .constants import (
 from .enums import MessageRole, MessageState
 from .exceptions import ChatBridgeError, ChatHarnessError, ChatSandboxGone, TranscriptionError
 from .models import Conversation, Message
-from .sandbox import CHAT_SANDBOX
 from .services import SpeechToText
 
 logger = logging.getLogger(__name__)
@@ -176,7 +175,7 @@ async def get_sandbox(
             session, account_id=account_id, run_id=None, scoped_to="chat"
         ):
             await sandbox_client.release(host_id=previous.host_id)
-        template = await get_template_id(CHAT_SANDBOX)
+        template = await get_template_id(Bridge.sandbox)
         identity, entries = await SandboxIdentity.create(
             session,
             account_id=account_id,

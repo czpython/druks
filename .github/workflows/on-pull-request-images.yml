@@ -1,15 +1,16 @@
 name: PR Images
 
-# The sandbox and browser images publish only on push to main, so a change to
-# their build contexts reached main with no pre-merge check. This builds them on
-# the pull request — amd64 only and without pushing, so a broken Dockerfile
-# fails the PR instead of the deploy. arm64 stays covered by the publish build.
+# The sandbox images publish only on push to main, and Drukbox builds the
+# browser template only at deploy, so a change to either reached main with no
+# pre-merge check. This builds them on the pull request — amd64 only and without
+# pushing, so a broken Dockerfile or setup script fails the PR instead of the
+# deploy. arm64 stays covered by the publish build.
 on:
   pull_request:
     branches: [main]
     paths:
       - "deploy/sandbox/**"
-      - "deploy/browser/**"
+      - "backend/druks/browser/sandboxes/**"
       - ".github/workflows/on-pull-request-images.yml"
 
 concurrency:
@@ -85,22 +86,22 @@ jobs:
           # prohibit-password; both allow the key login drukbox injects.
           docker exec sbx-boot /usr/sbin/sshd -T | grep -iEx 'permitrootlogin (prohibit-password|without-password|yes)'
 
+  # Drukbox builds the browser as a template: browser.sh run on the stock image
+  # of its docker provider.
   browser:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: deploy/browser
-          platforms: linux/amd64
-          push: false
-          load: true
-          tags: druks-browser:pr
-          cache-from: type=gha,scope=browser
+      - name: Build browser.sh the way Drukbox builds a template
+        run: |
+          printf '%s\n' \
+            'FROM ghcr.io/czpython/drukbox/sandbox:latest' \
+            'COPY browser.sh /drukbox-setup.sh' \
+            'RUN sh /drukbox-setup.sh && rm /drukbox-setup.sh' \
+            | docker build --tag druks-browser:pr --file - backend/druks/browser/sandboxes
       - uses: ./.github/actions/dgoss
         with:
           image: druks-browser:pr
-          files-path: deploy/browser
+          files-path: backend/druks/browser/sandboxes

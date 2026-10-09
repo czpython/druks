@@ -1,5 +1,6 @@
 import hashlib
-import importlib.util
+import inspect
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -7,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from druks.apps import loader
+from druks.settings import load_settings
 
 from .constants import DEFAULT_DIR_EXCLUDES
 from .exceptions import SetupScriptError
@@ -30,27 +31,20 @@ class Profile(BaseModel):
 
 @dataclass(frozen=True)
 class Sandbox:
-    # Path of the setup script inside its package, by convention under
-    # ``sandboxes/``. An app's sandbox finds the package through the workflow
-    # class it is assigned on, which stamps the owning module. A sandbox that no
-    # workflow declares, such as Chat's, names its package.
+    # Path of the setup script beside the module of the class that declares the
+    # sandbox, by convention under ``sandboxes/``.
     setup: str
-    package: str = ""
+    # None runs the sandbox on the installation's provider.
+    provider: str | None = None
     module: str = field(init=False, compare=False, default="")
 
     def __set_name__(self, owner: type, attr: str) -> None:
         object.__setattr__(self, "module", owner.__module__)
 
     def read_setup_script(self) -> bytes:
-        if not self.module and not self.package:
-            raise SetupScriptError(
-                f"sandbox setup {self.setup!r} is not declared on a workflow class"
-            )
-        package = self.package or loader.get_app(loader.resolve_workflow_app(self.module)).package
-        spec = importlib.util.find_spec(package)
-        if not spec or not spec.submodule_search_locations:
-            raise SetupScriptError(f"sandbox setup {self.setup!r} cannot find package {package!r}")
-        path = Path(spec.submodule_search_locations[0]) / self.setup
+        if not self.module:
+            raise SetupScriptError(f"sandbox setup {self.setup!r} is not declared on a class")
+        path = Path(inspect.getfile(sys.modules[self.module])).parent / self.setup
         try:
             return path.read_bytes()
         except OSError as error:
@@ -60,9 +54,15 @@ class Sandbox:
 
     @property
     def setup_script_hash(self) -> str:
-        # Drukbox's template identity: sha256 of the script text. Base image and
-        # provider are the other two columns of its unique key, resolved there.
+        # Drukbox keys a template by this hash, the provider, and the base image.
         return hashlib.sha256(self.read_setup_script()).hexdigest()
+
+    def get_base_image(self) -> str:
+        # The installation image belongs to the installation's provider. A sandbox
+        # that names its provider builds on that provider's default image.
+        if self.provider:
+            return ""
+        return load_settings().sandbox.image
 
 
 @dataclass(frozen=True)

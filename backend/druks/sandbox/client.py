@@ -51,9 +51,7 @@ class Client:
         self,
         *,
         idempotency_key: str | None = None,
-        image_override: str | None = None,
         provider: str | None = None,
-        sandbox_env: dict[str, str] | None = None,
         secrets: dict[str, Secret | Issuer] | None = None,
         template: str | None = None,
         identity: SandboxIdentity | None = None,
@@ -64,9 +62,7 @@ class Client:
         try:
             async with self.acquire(
                 idempotency_key=idempotency_key,
-                image_override=image_override,
                 provider=provider,
-                sandbox_env=sandbox_env,
                 secrets=secrets,
                 template=template,
                 identity=identity,
@@ -82,9 +78,7 @@ class Client:
         self,
         *,
         idempotency_key: str | None = None,
-        image_override: str | None = None,
         provider: str | None = None,
-        sandbox_env: dict[str, str] | None = None,
         secrets: dict[str, Secret | Issuer] | None = None,
         template: str | None = None,
         identity: SandboxIdentity | None = None,
@@ -96,17 +90,16 @@ class Client:
         try:
             settings = load_settings()
             if template:
-                # A template names its own image, built on the installation image.
+                # A template names its own image.
                 image = None
             else:
-                image = image_override or settings.sandbox.image
+                image = settings.sandbox.image
             # drukbox reaps the host at lease end, so a dead worker still frees its VM.
             expires_at = datetime.now(UTC) + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
             try:
                 try:
                     record = await api.create_host(
                         expires_at=expires_at,
-                        env=sandbox_env,
                         idempotency_key=key,
                         image=image or None,
                         provider=provider,
@@ -162,11 +155,14 @@ class Client:
         finally:
             await api.aclose()
 
-    async def create_template(self, *, setup_script: str, base_image: str | None, label: str):
+    async def create_template(
+        self, *, setup_script: str, provider: str | None, base_image: str | None, label: str
+    ):
         api = self._api()
         try:
             return await api.create_template(
                 setup_script=setup_script,
+                provider=provider,
                 base_image=base_image,
                 label=label,
             )
@@ -235,9 +231,7 @@ class Client:
         self,
         *,
         idempotency_key: str | None = None,
-        image_override: str | None = None,
         provider: str | None = None,
-        sandbox_env: dict[str, str] | None = None,
         secrets: dict[str, Secret | Issuer] | None = None,
         template: str | None = None,
         identity: SandboxIdentity | None = None,
@@ -246,9 +240,7 @@ class Client:
         owns ``release``."""
         async with self.acquire(
             idempotency_key=idempotency_key,
-            image_override=image_override,
             provider=provider,
-            sandbox_env=sandbox_env,
             secrets=secrets,
             template=template,
             identity=identity,
