@@ -529,6 +529,38 @@ Codex. A nested CLI reads it from the environment. The
 [configuration guide](configuration.md#harnesses) lists the variable, host, and
 header per harness.
 
+### Allow repository prompt overrides
+
+An agent uses its bundled prompt by default. A context variable named `repo`
+is ordinary template data and causes no GitHub reads.
+
+Let repository maintainers replace a prompt with an explicit declaration:
+
+```python
+survey = Agent(
+    prompt="night_watch/survey.md",
+    contract=ReportOutput,
+    allow_prompt_override=True,
+)
+```
+
+The workflow must use `RepoWorkspace` or a subclass. Druks reads the repository
+from `RepoWorkspace.get_repo(subject)`. For `night_watch/survey.md`, it checks
+these locations in order, on their default branches:
+
+1. `<repo>/.druks/night_watch/prompts/survey.md`
+2. The owner's `.druks` repository, at `night_watch/prompts/survey.md`
+3. `survey.md` in the app's bundled `templates` directory.
+
+A missing file falls through. Authentication and network errors fail the call.
+Anyone who can change either repository's default branch can change the
+agent's instructions. The template sandbox limits Python access; it does not
+limit what the prompt asks the agent to do. Enable overrides only for repositories
+whose maintainers you trust. Software Factory enables them for its agents.
+
+Code that renders a prompt directly can opt in with
+`render_prompt(name, overrides_from="owner/repo", **context)`.
+
 ### Give an agent a service's secret
 
 An agent that calls a provider from its sandbox lists the secret it needs. The
