@@ -481,15 +481,6 @@ async def test_routes_set_and_remove_the_signed_in_account_key(tmp_path, druks_d
         rows = await VaultSecret.list_secret_headers(druks_db, Audience.mcp("lusha"), operator.id)
         assert [row.header for row in rows] == [BEARER_HEADER]
 
-        await client.post(
-            "/api/mcp-servers",
-            json={"name": "linear", "url": _LINEAR_URL, "secret_headers": _BEARER},
-        )
-        shared = await client.put(
-            "/api/mcp-servers/linear/headers", json={"secret_headers": _BEARER}
-        )
-        assert shared.status_code == 404
-
 
 async def test_routes_reject_creating_an_authless_custom_server(tmp_path, druks_db):
     url = "https://mcp.notion.com/sse"
@@ -676,6 +667,33 @@ async def test_db_overlay_still_disables_a_catalog_entry(tmp_path, registry_stat
     resolved = (await McpServer._merged(druks_db))["figma_test"]
     assert resolved["builtin"] is True
     assert "figma_test" not in {s["name"] for s in await McpServer.list_enabled(druks_db)}
+
+
+async def test_routes_set_the_shared_key_of_a_catalog_server(tmp_path, registry_state, druks_db):
+    # A static catalog entry has no row until its key is set; an OAuth one
+    # takes no pasted key, though its row would not say so.
+    load_mcp_catalog(
+        _write_catalog(
+            tmp_path,
+            {
+                "figma_test": {**_static_entry("https://mcp.figma.test/"), "enabled": False},
+                "jira_test": {"url": "https://mcp.jira.test/", "auth": {"type": "oauth"}},
+            },
+        )
+    )
+    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        figma = await client.put(
+            "/api/mcp-servers/figma_test/headers", json={"secret_headers": {"x-api-key": "f-1"}}
+        )
+        assert (figma.json()["hasToken"], figma.json()["isEnabled"]) == (True, False)
+        await client.patch("/api/mcp-servers/jira_test", json={"is_enabled": True})
+        jira = await client.put(
+            "/api/mcp-servers/jira_test/headers", json={"secret_headers": _BEARER}
+        )
+        assert jira.status_code == 404
+
+    [row] = await VaultSecret.list_installation_tokens(druks_db)
+    assert (row.audience_name, row.header) == ("figma_test", "x-api-key")
 
 
 async def test_catalog_enabled_false_ships_the_entry_dark(tmp_path, registry_state, druks_db):

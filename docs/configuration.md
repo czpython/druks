@@ -869,6 +869,9 @@ is one of:
 
 - Secret headers, which Druks keeps in the vault. A bearer token is the
   `Authorization` header spelled out; the form's Bearer field composes it.
+  **Set key** on the server's row replaces them. A catalog entry with
+  `"auth": {"type": "static"}` gets its key the same way. While an enabled
+  server has no key, every run fails.
 - Secret headers that each person sets. Add the server with **Each person uses
   their own key**. Each account then pastes its own key on the server's row,
   and its runs send that key. A run with no person uses the default account's

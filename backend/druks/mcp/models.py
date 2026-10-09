@@ -188,18 +188,23 @@ class McpServer(Base, Uuid7Pk):
         return [server for server in (await cls._merged(session)).values() if server["is_enabled"]]
 
     @classmethod
-    async def set_enabled(cls, session: AsyncSession, name: str, is_enabled: bool) -> None:
-        # A built-in has no row until an operator changes its state; the enable
-        # choice creates one, carrying the built-in's url.
+    async def get_or_create(cls, session: AsyncSession, name: str) -> "McpServer":
+        """The server's row. A built-in has none until an operator sets state on it,
+        so its first one carries the built-in's url and shipped enable state."""
         server = await cls.get_for_name(session, name)
         if server:
-            server.is_enabled = is_enabled
-        elif name in mcp_servers:
-            await cls.create(
-                session, name=name, url=mcp_servers.get(name)["url"], is_enabled=is_enabled
+            return server
+        if name in mcp_servers:
+            definition = mcp_servers.get(name)
+            return await cls.create(
+                session, name=name, url=definition["url"], is_enabled=definition["enabled"]
             )
-        else:
-            raise McpServerNotFoundError(name)
+        raise McpServerNotFoundError(name)
+
+    @classmethod
+    async def set_enabled(cls, session: AsyncSession, name: str, is_enabled: bool) -> None:
+        server = await cls.get_or_create(session, name)
+        server.is_enabled = is_enabled
 
     @classmethod
     async def create(
@@ -236,8 +241,7 @@ class McpServer(Base, Uuid7Pk):
     async def set_secret_headers(
         self, account_id: str | None, secret_headers: dict[str, str]
     ) -> None:
-        """Replace the secret headers one account holds at the server. None sets the
-        shared headers every account sends."""
+        """Replace the secret headers the account's key replaces; see ``get_key_holder``."""
         await self.remove_secret_headers(account_id)
         for header, value in secret_headers.items():
             await VaultSecret.store(
@@ -245,14 +249,20 @@ class McpServer(Base, Uuid7Pk):
                 SecretKind.STATIC,
                 Audience.mcp(self.name),
                 secrets={"value": value},
-                account_id=account_id,
+                account_id=self.get_key_holder(account_id),
                 header=header,
             )
 
     async def remove_secret_headers(self, account_id: str | None) -> None:
         audience = Audience.mcp(self.name)
-        for secret in await VaultSecret.list_secret_headers(self.session, audience, account_id):
+        holder = self.get_key_holder(account_id)
+        for secret in await VaultSecret.list_secret_headers(self.session, audience, holder):
             await secret.revoke("user")
+
+    def get_key_holder(self, account_id: str | None) -> str | None:
+        """Whose secret headers a key from ``account_id`` replaces: that account's own on a
+        server that takes a key per person, else the installation's shared set (None)."""
+        return account_id if self.identity_mode == IdentityMode.PER_USER else None
 
     async def delete(self) -> None:
         for secret in await VaultSecret.list_tokens(self.session, Audience.mcp(self.name)):
