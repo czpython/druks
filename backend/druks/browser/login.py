@@ -1,7 +1,5 @@
 import asyncio
 import json
-import tempfile
-from pathlib import Path
 from urllib.parse import urlsplit
 
 import asyncssh
@@ -13,23 +11,22 @@ from druks.browser.constants import (
     LOGIN_WINDOW_KEY_PREFIX,
     LOGIN_WINDOW_TTL_SECONDS,
     SCREEN_CHUNK_BYTES,
-    SESSION_EXPORT_TIMEOUT_SECONDS,
     VNC_PORT,
 )
 from druks.browser.enums import BrowserSessionPayloadFormat
 from druks.browser.models import StoredBrowserSession
-from druks.browser.sessions import SESSION_ROOT, launch, seed_state
+from druks.browser.sessions import BrowserSession, export_state, launch, seed_state
 from druks.redis import get_client
 from druks.sandbox.client import sandbox_client
-from druks.sandbox.host import Host
+from druks.sandbox.templates import get_template_id
 from druks.settings import load_settings
 
 
 class LoginWindow:
     """The browser a user signs into by hand for one session. The operator
     opens it, watches it over a WebSocket, then saves or cancels — each a
-    separate request, so it lives in Redis (and its container on the browser
-    home) between them, and frees itself on the record's TTL if the operator
+    separate request, so it lives in Redis (and its container on the Druks
+    box) between them, and frees itself on the record's TTL if the operator
     walks away."""
 
     def __init__(self, session_name: str, host_id: str) -> None:
@@ -43,9 +40,10 @@ class LoginWindow:
             await cls(session.name, json.loads(stale)["host_id"])._close()
         settings = load_settings()
         try:
+            # A web request is not a run, so it does not wait for a template build.
+            template = await get_template_id(BrowserSession.sandbox, wait=False)
             browser = await sandbox_client.provision(
-                image_override=settings.browser.sandbox_image,
-                provider=settings.browser.sandbox_provider,
+                provider=BrowserSession.sandbox.provider, template=template
             )
         except Exception as error:
             raise exceptions.BrowserLaunchError(session.name, str(error)) from error
@@ -113,7 +111,7 @@ class LoginWindow:
         if row:
             try:
                 async with sandbox_client.attach(host_id=self.host_id) as browser:
-                    payload = await _export(browser, row.name)
+                    payload = await export_state(browser, row.name)
                 row.payload_format = BrowserSessionPayloadFormat.PROFILE_DIR.value
                 await row.store_payload(payload)
                 return row
@@ -158,13 +156,3 @@ async def _carry_clicks(websocket: WebSocket, screen_writer: asyncssh.SSHWriter[
 async def _carry_screen(websocket: WebSocket, screen_reader: asyncssh.SSHReader[bytes]) -> None:
     while pixels := await screen_reader.read(SCREEN_CHUNK_BYTES):
         await websocket.send_bytes(pixels)
-
-
-async def _export(browser: Host, name: str) -> bytes:
-    exported = await browser.exec(["session-export"], timeout=SESSION_EXPORT_TIMEOUT_SECONDS)
-    if not exported.ok:
-        raise exceptions.BrowserExportError(name, exported.stderr.strip())
-    with tempfile.TemporaryDirectory(prefix="druks-browser-") as staging:
-        out = Path(staging) / "state.tar.gz"
-        await browser.download(remote=f"{SESSION_ROOT}/out/state.tar.gz", local=out)
-        return out.read_bytes()

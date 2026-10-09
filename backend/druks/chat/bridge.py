@@ -7,6 +7,7 @@ import asyncssh
 from acp.schema import SessionNotification
 from pydantic import ValidationError
 
+from druks.sandbox.datastructures import Sandbox
 from druks.sandbox.host import Host
 from druks.sandbox.layout import get_remote_home, get_work_root
 
@@ -15,6 +16,8 @@ from .exceptions import ChatBridgeError, ChatBridgeUnavailable
 
 
 class Bridge:
+    sandbox = Sandbox(setup="sandboxes/chat.sh")
+
     def __init__(self, host: Host) -> None:
         self.host = host
 

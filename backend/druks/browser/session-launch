@@ -18,6 +18,7 @@ const PROFILE_PATH = path.join(SESSION_ROOT, "profile");
 // Chromium-vs-Chrome brand split, and the switches and debugger of a driver.
 const CHROME_PATH = "/opt/google/chrome/chrome";
 const CDP_URL = "http://127.0.0.1:9222";
+const DISPLAY_SOCKET = "/tmp/.X11-unix/X99";
 // The egress proxy. druks sets it for the launches its proxy scope covers.
 // If it is empty, the browser uses the box IP.
 const egressProxy = process.env.DRUKS_BROWSER_PROXY;
@@ -130,6 +131,31 @@ function startProxyRelay(proxy) {
   });
 }
 
+// The box starts no display, so a headed launch starts its own.
+async function startDisplay() {
+  spawn("Xvfb", [":99", "-screen", "0", "1920x1080x24", "-nolisten", "tcp", "-ac"], {
+    detached: true,
+    stdio: "ignore",
+  }).unref();
+  // VNC listens on loopback only, and SSH is the only way in, so it needs no
+  // password. -loop retries until the display exists.
+  spawn(
+    "x11vnc",
+    [
+      "-display", ":99", "-loop", "-forever", "-listen", "127.0.0.1", "-rfbport", "5900",
+      "-nopw", "-noxdamage", "-shared",
+    ],
+    { detached: true, stdio: "ignore" },
+  ).unref();
+  const deadline = Date.now() + 10000;
+  while (!fs.existsSync(DISPLAY_SOCKET)) {
+    if (Date.now() > deadline) {
+      throw new Error("Xvfb did not open display :99");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 async function debuggerVersion(chrome) {
   const deadline = Date.now() + 20000;
   while (Date.now() < deadline && chrome.exitCode === null && chrome.signalCode === null) {
@@ -193,6 +219,8 @@ async function main() {
     ];
     if (headless) {
       args.push("--headless=new");
+    } else {
+      await startDisplay();
     }
     if (egressProxy) {
       const proxy = new URL(egressProxy);

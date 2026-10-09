@@ -2,6 +2,7 @@ import json
 import shlex
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from druks.accounts.dependencies import require_operator
@@ -34,7 +35,7 @@ class FakeSandbox:
         if command[:2] == ["sh", "-c"] and "session-launch --headed" in command[2]:
             self.launch_command = command[2]
             self.files["/work/session/.runtime/ready.json"] = b"{}\n"
-        if command == ["session-export"]:
+        if command == ["/work/session/session-export"]:
             if self.export_exit_code:
                 return ExecResult(exit_code=self.export_exit_code, stdout="", stderr="failed")
             self.files[OUTPUT_STATE_PATH] = self.export_payload
@@ -57,8 +58,8 @@ class FakeSandboxClient:
         self.provisions: list[dict[str, str]] = []
         self.released: list[str] = []
 
-    async def provision(self, *, image_override: str, provider: str) -> FakeSandbox:
-        self.provisions.append({"image_override": image_override, "provider": provider})
+    async def provision(self, *, provider: str, template: str) -> FakeSandbox:
+        self.provisions.append({"provider": provider, "template": template})
         browser = FakeSandbox(f"browser-{len(self.browsers) + 1}")
         self.browsers.append(browser)
         return browser
@@ -77,6 +78,7 @@ def window_runtime(tmp_path, monkeypatch):
     client = FakeSandboxClient()
     monkeypatch.setattr(login, "sandbox_client", client)
     monkeypatch.setattr(login, "load_settings", lambda: settings)
+    monkeypatch.setattr(login, "get_template_id", AsyncMock(return_value="browser-template"))
     return client
 
 
@@ -114,6 +116,7 @@ def _runtime_with_browser(tmp_path, monkeypatch, **browser) -> FakeSandboxClient
     client = FakeSandboxClient()
     monkeypatch.setattr(login, "sandbox_client", client)
     monkeypatch.setattr(login, "load_settings", lambda: settings)
+    monkeypatch.setattr(login, "get_template_id", AsyncMock(return_value="browser-template"))
     return client
 
 
@@ -162,9 +165,7 @@ async def test_open_seeds_a_blank_profile_and_records_the_container(window_runti
     assert STATE_PATH not in browser.files
     assert PROFILE_PATH not in browser.files
     assert (await LoginWindow.get_for_session(session.name)).host_id == browser.id
-    assert client.provisions == [
-        {"image_override": "ghcr.io/czpython/druks/browser:latest", "provider": "docker"}
-    ]
+    assert client.provisions == [{"provider": "docker", "template": "browser-template"}]
 
 
 async def test_reopening_disposes_the_previous_window(window_runtime):

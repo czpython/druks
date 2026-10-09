@@ -160,12 +160,13 @@ def main() -> None:
         import asyncio
 
         from .apps.loader import iter_apps
-        from .chat.sandbox import CHAT_SANDBOX
+        from .browser.sessions import BrowserSession
+        from .chat.bridge import Bridge
         from .sandbox.templates import prepare_sandbox_templates
 
         for app in iter_apps():
             app.discover()
-        asyncio.run(prepare_sandbox_templates(extra=(CHAT_SANDBOX,)))
+        asyncio.run(prepare_sandbox_templates(extra=(Bridge.sandbox, BrowserSession.sandbox)))
         return
 
     raise AssertionError(f"Unhandled command: {args.command}")

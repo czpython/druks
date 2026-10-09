@@ -329,7 +329,8 @@ After every deploy, build the sandbox images:
 docker compose exec web druks sandboxes build
 ```
 
-The command asks Drukbox to prepare each declared sandbox, including Chat.
+The command asks Drukbox to prepare each declared sandbox, including Chat and
+the browser.
 Drukbox pulls the base image and reuses a template only when its digest and
 setup script match. A changed digest starts a new template build. Docker
 Sandboxes also loads the refreshed base image into its separate image store.

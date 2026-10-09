@@ -253,9 +253,6 @@ class Sandbox(BaseModel):
 
 
 class Browser(BaseModel):
-    # The browser home: browser containers boot on this provider with this image.
-    sandbox_provider: str = "docker"
-    sandbox_image: str = "ghcr.io/czpython/druks/browser:latest"
     # An HTTP proxy the browser leaves through instead of the box IP. It may
     # carry a user name and password. Empty means no proxy anywhere.
     proxy: SecretStr = SecretStr("")

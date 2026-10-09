@@ -168,25 +168,23 @@ def _stub_acquire_settings(
 
 
 @pytest.mark.parametrize(
-    ("override", "setting", "expected"),
+    ("setting", "expected"),
     [
-        ("ami-top-rung", "fallback-not-used", "ami-top-rung"),
-        (None, "ami-deployment-default", "ami-deployment-default"),
-        (None, "", None),
+        ("ami-deployment-default", "ami-deployment-default"),
+        ("", None),
     ],
-    ids=["override_wins", "setting_used", "drukbox_default"],
+    ids=["setting_used", "drukbox_default"],
 )
-async def test_acquire_image_precedence(
+async def test_acquire_sends_the_installation_image(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    override: str | None,
     setting: str,
     expected: str | None,
 ):
-    """First non-empty of (override, setting) wins; empty passes image=None,
-    which the SDK drops from the request — the VM is born unpinned."""
+    """An empty image passes image=None, which the SDK drops from the request —
+    the VM is born unpinned."""
     sc, calls = _stub_acquire_settings(monkeypatch, tmp_path, sandbox_image=setting)
-    async with sc.acquire(idempotency_key="op", image_override=override):
+    async with sc.acquire(idempotency_key="op"):
         pass
     assert calls[0]["image"] == expected
 
