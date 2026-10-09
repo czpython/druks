@@ -13,7 +13,7 @@ from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.chat import service, sockets
 from druks.chat.bridge import Bridge
-from druks.chat.constants import CHAT_KEY_NAME
+from druks.chat.constants import CHAT_KEY_NAME, CONVERSATION_HEADER
 from druks.chat.enums import ConversationSource, MessageRole, MessageState
 from druks.chat.exceptions import (
     ChatBridgeError,
@@ -499,6 +499,7 @@ async def test_new_sandbox_restores_archive_and_drains_pending_messages(
     assert first.state == second.state == "replied"
     assert starts[0]["archivePath"].endswith("/restore.tar.gz")
     assert starts[1]["archivePath"] == ""
+    assert starts[0]["headers"] == [{"name": CONVERSATION_HEADER, "value": conversation.id}]
     assert host.upload_file.await_count == 1
     assert previous.deleted_at
 
@@ -1094,13 +1095,24 @@ async def test_cancel_route_only_changes_the_requested_pending_message(
     get_running_sandbox.assert_not_called()
 
 
+async def test_a_run_that_never_parked_reports_only_a_result_it_returned(druks_db, conversation):
+    run = await seed_run(druks_db, kind="test", account_id=conversation.account_id)
+    run.conversation_id = conversation.id
+
+    assert not await service.report_result(druks_db, run, result=None)
+    reported = await service.report_result(druks_db, run, result={"url": "https://bingo.test"})
+    assert reported == conversation.id
+
+    *_, report = await list_messages(druks_db, conversation)
+    assert (report.is_internal, '"url":"https://bingo.test"' in report.body) == (True, True)
+
+
 async def test_a_failed_run_reports_to_its_conversation_whether_or_not_it_parked(
     druks_db, conversation
 ):
     run = await seed_run(druks_db, kind="test", account_id=conversation.account_id)
     run.conversation_id = conversation.id
 
-    assert not await service.report_result(druks_db, run, result={"ok": True})
     reported = await service.report_failure(druks_db, run, failure="the sandbox died")
     assert reported == conversation.id
 

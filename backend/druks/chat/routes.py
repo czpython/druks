@@ -183,6 +183,8 @@ async def read_thread(
             409, "This tool reads a channel conversation's thread. Call it from one."
         )
     conversation = await session.get(Conversation, conversation_id)
+    if not conversation.channel:
+        raise HTTPException(409, "A web conversation has no thread.")
     try:
         return await conversation.channel.read_thread(session, conversation)
     except ChannelHasNoThreadsError as error:
@@ -207,6 +209,6 @@ async def require_tag(
         )
     conversation = await session.get(Conversation, conversation_id)
     if not conversation.thread_id:
-        raise HTTPException(409, "A direct message has no thread. Every message reaches you.")
+        raise HTTPException(409, "This conversation has no thread. Every message reaches you.")
     conversation.is_tag_required = is_required
     await session.commit()
