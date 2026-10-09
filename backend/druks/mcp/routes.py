@@ -135,22 +135,25 @@ async def set_mcp_server_enabled(
 async def set_mcp_server_secret_headers(
     session: SessionDep, name: str, secret_headers: Annotated[dict[str, str], Body(embed=True)]
 ) -> McpServerResponse:
-    server = await McpServer.get_for_name(session, name)
-    if server and not server.is_oauth and server.identity_mode == IdentityMode.PER_USER:
+    # The merged view decides: only a built-in's definition knows it is OAuth.
+    access = await McpServer.get_access(session, name, current_account_id.get())
+    if access and access.credential == Credential.HEADERS:
+        server = await McpServer.get_or_create(session, name)
         await server.set_secret_headers(
             current_account_id.get(), _valid_secret_headers(name, secret_headers)
         )
         return await _response(session, name)
-    raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no key per person.")
+    raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no pasted key.")
 
 
 @router.delete("/{name}/headers", status_code=204)
 async def remove_mcp_server_secret_headers(session: SessionDep, name: str) -> None:
-    server = await McpServer.get_for_name(session, name)
-    if server and not server.is_oauth and server.identity_mode == IdentityMode.PER_USER:
+    access = await McpServer.get_access(session, name, current_account_id.get())
+    if access and access.credential == Credential.HEADERS:
+        server = await McpServer.get_or_create(session, name)
         await server.remove_secret_headers(current_account_id.get())
         return
-    raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no key per person.")
+    raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no pasted key.")
 
 
 @router.get("/{name}/connections", response_model=list[McpServerConnectionResponse])

@@ -2477,7 +2477,11 @@ export function McpServersPane() {
   }
 
   async function removeHeaders(name: string) {
-    if (window.confirm(`Remove your key for ${name}? Your agents lose its tools until you set one again.`)) {
+    const isPersonal = servers.find((server) => server.name === name)?.identityMode === 'per_user'
+    const question = isPersonal
+      ? `Remove your key for ${name}? Your agents lose its tools until you set one again.`
+      : `Remove the key for ${name}? Every run fails while it is enabled without one.`
+    if (window.confirm(question)) {
       setBusy(true)
       setError(null)
       try {
@@ -2839,6 +2843,7 @@ function McpServerRow({
   onRemoveHeaders: (name: string) => Promise<void>
 }) {
   const claimedMode = server.identityMode
+  const isPersonal = claimedMode === 'per_user'
   const isLive = server.hasToken
   const hasGrant = server.credential === 'grant' && server.hasToken
   const keyFieldId = useId()
@@ -2883,24 +2888,24 @@ function McpServerRow({
           <span className="mcp-enable-label">Enabled</span>
         </span>
         <div className="mcp-actions">
-          {server.credential === 'headers' && claimedMode === 'per_user' && (
+          {server.credential === 'headers' && (
             <>
               <button
                 className={'set-btn ' + (server.hasToken ? 'ghost' : 'primary')}
                 onClick={() => setEditingKey((editing) => !editing)}
                 disabled={busy}
-                title="Paste the key this server gave you."
+                title={isPersonal ? 'Paste the key this server gave you.' : 'Paste the key every run sends.'}
               >
-                Set your key
+                {isPersonal ? 'Set your key' : 'Set key'}
               </button>
               {server.hasToken && (
                 <button
                   className="set-btn danger"
                   onClick={() => void onRemoveHeaders(server.name)}
                   disabled={busy}
-                  title="Drop the key stored under your account."
+                  title={isPersonal ? 'Drop the key stored under your account.' : 'Drop the key every run sends.'}
                 >
-                  Remove your key
+                  {isPersonal ? 'Remove your key' : 'Remove key'}
                 </button>
               )}
             </>

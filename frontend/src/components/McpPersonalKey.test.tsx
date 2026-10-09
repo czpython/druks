@@ -16,17 +16,21 @@ const lusha = {
   credential: 'headers' as const, service: null,
 }
 
-it('lets the account set its own key on a per-person header server', async () => {
-  vi.spyOn(api, 'mcpServers').mockResolvedValue([lusha])
+it.each([
+  ['per_user', 'No key for you', 'Set your key', 'Remove your key'],
+  [null, 'No secret header', 'Set key', 'Remove key'],
+])('sets the key of a header server held as %s', async (identityMode, status, setLabel, removeLabel) => {
+  const server = { ...lusha, identityMode }
+  vi.spyOn(api, 'mcpServers').mockResolvedValue([server])
   vi.spyOn(api, 'mcpServerDirectory').mockResolvedValue([])
-  const set = vi.spyOn(api, 'setMcpServerHeaders').mockResolvedValue({ ...lusha, hasToken: true })
+  const set = vi.spyOn(api, 'setMcpServerHeaders').mockResolvedValue({ ...server, hasToken: true })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(<QueryClientProvider client={client}><McpServersPane /></QueryClientProvider>)
 
-  expect(await screen.findByText('No key for you')).toBeTruthy()
-  expect(screen.queryByRole('button', { name: 'Remove your key' })).toBeNull()
+  expect(await screen.findByText(status)).toBeTruthy()
+  expect(screen.queryByRole('button', { name: removeLabel })).toBeNull()
   const row = within(screen.getByText('lusha').closest('.mcp-row') as HTMLElement)
-  fireEvent.click(row.getByRole('button', { name: 'Set your key' }))
+  fireEvent.click(row.getByRole('button', { name: setLabel }))
   fireEvent.click(row.getByLabelText('Header'))
   fireEvent.change(row.getByLabelText(/Header name/), { target: { value: 'x-api-key' } })
   fireEvent.change(row.getByLabelText(/Header value/), { target: { value: 'k-1' } })
