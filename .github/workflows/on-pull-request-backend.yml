@@ -66,6 +66,15 @@ jobs:
       # The proof app is a standalone distribution that depends on druks;
       # it installs the way an author's would, so druks never depends on it.
       - run: uv pip install -e backend/tests/druks-field_notes
+      # The suite builds its schema with create_all, so only an upgrade of a
+      # database that has never seen the chain proves every migration executes.
+      - run: |
+          PGPASSWORD=druks psql -h localhost -U druks -d postgres -c 'CREATE DATABASE druks_migrate'
+          uv run druks init-db
+        env:
+          DRUKS_DATA_DIR: ${{ runner.temp }}/druks
+          DRUKS_DATABASE_URL: postgresql+psycopg://druks:druks@localhost:5432/druks_migrate
+          DRUKS_SECRETS_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
       - run: uv run pytest backend/
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
