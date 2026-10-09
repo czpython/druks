@@ -227,7 +227,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
     reason = tools["cancel_run"].input_schema["properties"]["reason"]
     assert (reason["minLength"], reason["maxLength"]) == (1, 500)
     assert tools["software_factory_start"].input_schema["properties"]["ticket"]["description"] == (
-        "The tracker's ticket key, e.g. ENG-831."
+        "The tracker's ticket key, e.g. ENG-831, or owner/repo#12 for GitHub."
     )
     # software_factory_start moves the tracker ticket and waits on webhook intake — its
     # derived description must say so, run-id-free.

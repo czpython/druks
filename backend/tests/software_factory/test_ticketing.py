@@ -11,13 +11,20 @@ from druks.contrib.software_factory.app import (
 )
 from druks.contrib.software_factory.ticketing.druks import DruksTracker
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
+from druks.contrib.software_factory.ticketing.github import GitHub
 from druks.contrib.software_factory.ticketing.jira import Jira
 from druks.contrib.software_factory.ticketing.linear import Linear
 from druks.core import services
-from druks.core.apis.exceptions import JiraAPIError, LinearAPIError, UnknownTicketError
+from druks.core.apis.exceptions import (
+    GitHubAppNotInstalledError,
+    JiraAPIError,
+    LinearAPIError,
+    UnknownTicketError,
+)
 from druks.core.apis.jira import JiraClient
 from druks.core.apis.linear import LinearClient
 from druks.services import ServiceConnectError
+from githubkit.exception import RequestFailed
 
 from software_factory.factories import make_test_work_item
 
@@ -36,6 +43,14 @@ async def _connect_linear():
         "linear",
         identity={"actor": "druks", "workspace": "Acme"},
         secrets={"api_key": "lin_secret", "webhook_secret": "lin-hook"},
+    )
+
+
+async def _connect_github():
+    return await connect_service(
+        "github",
+        identity={"slug": "druks", "app_id": "1"},
+        secrets={"app_id": "1", "private_key": "pem", "webhook_secret": "gh-hook"},
     )
 
 
@@ -265,11 +280,14 @@ async def test_tracker_check_accepts_the_board_without_a_service(monkeypatch):
     assert not result.pending
 
 
-def test_status_settings_show_for_linear_and_jira_with_the_selected_tracker_statuses():
+def test_status_settings_show_for_every_tracker_that_names_its_own_statuses():
     fields = SoftwareFactory.Settings.model_fields
-    assert field_choices(fields["tracker"]) == ["none", "linear", "jira", "druks"]
+    assert field_choices(fields["tracker"]) == ["none", "linear", "jira", "druks", "github"]
     for status in ("trigger", "in_progress", "in_review", "done", "resting"):
-        assert field_visibility(fields[f"{status}_status"]) == ("tracker", ["linear", "jira"])
+        assert field_visibility(fields[f"{status}_status"]) == (
+            "tracker",
+            ["linear", "jira", "github"],
+        )
         assert field_live_choices(fields[f"{status}_status"]).source is list_tracker_status_choices
 
 
@@ -668,3 +686,158 @@ async def test_jira_client_lists_the_statuses_of_active_workflows():
     assert [status["name"] for status in statuses] == ["To Do", "Done"]
     # The status search endpoint needs Jira admin rights. This one needs Browse projects.
     assert paths == ["/rest/api/3/status"]
+
+
+class _FakeGitHubClient:
+    """Records the client calls the tracker delegates to - no HTTP."""
+
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    async def replace_issue_labels(self, repo, issue_number, *, add, remove):
+        self.calls.append(("labels", repo, issue_number, add, sorted(remove)))
+
+    async def set_issue_state(self, repo, issue_number, *, state, state_reason=None):
+        self.calls.append(("state", repo, issue_number, state, state_reason))
+
+    async def aclose(self):
+        self.calls.append(("aclose",))
+
+
+def _github_tracker(monkeypatch, **status_names):
+    fake = _FakeGitHubClient()
+
+    async def get_client(cls):
+        return fake
+
+    monkeypatch.setattr(services.Github, "get_client", classmethod(get_client))
+    names = {
+        TicketStatus.TRIGGER: "ready-for-agent",
+        TicketStatus.IN_PROGRESS: "agent:in-progress",
+        TicketStatus.IN_REVIEW: "agent:in-review",
+        TicketStatus.DONE: "agent:done",
+        TicketStatus.BACKLOG: "",
+    }
+    names.update({TicketStatus(status): name for status, name in status_names.items()})
+    return GitHub(status_names=names), fake
+
+
+async def test_github_set_status_swaps_the_label_within_an_exclusive_group(monkeypatch):
+    tracker, fake = _github_tracker(monkeypatch)
+
+    await tracker.set_status("acme/widget#7", TicketStatus.IN_PROGRESS)
+
+    # The new label goes on; every other label this tracker owns comes off, so
+    # an issue never reads as two states at once.
+    assert fake.calls == [
+        (
+            "labels",
+            "acme/widget",
+            7,
+            "agent:in-progress",
+            ["agent:done", "agent:in-review", "ready-for-agent"],
+        )
+    ]
+
+
+async def test_github_set_status_clears_the_trigger_label_so_a_relabel_can_retrigger(monkeypatch):
+    tracker, fake = _github_tracker(monkeypatch)
+
+    await tracker.set_status("acme/widget#7", TicketStatus.IN_PROGRESS)
+
+    _, _, _, _, removed = fake.calls[0]
+    assert "ready-for-agent" in removed
+
+
+async def test_github_done_closes_the_issue_as_completed(monkeypatch):
+    tracker, fake = _github_tracker(monkeypatch)
+
+    await tracker.set_status("acme/widget#7", TicketStatus.DONE)
+
+    assert ("state", "acme/widget", 7, "closed", "completed") in fake.calls
+
+
+async def test_github_non_terminal_status_leaves_the_issue_open(monkeypatch):
+    tracker, fake = _github_tracker(monkeypatch)
+
+    await tracker.set_status("acme/widget#7", TicketStatus.IN_REVIEW)
+
+    assert not [call for call in fake.calls if call[0] == "state"]
+
+
+async def test_github_an_unmapped_status_raises(monkeypatch):
+    tracker, _ = _github_tracker(monkeypatch)
+
+    # BACKLOG is unnamed by default: an empty resting label leaves the issue put.
+    with pytest.raises(ValueError, match="no configured label"):
+        await tracker.set_status("acme/widget#7", TicketStatus.BACKLOG)
+
+
+async def test_github_rejects_a_key_without_a_repo_qualifier(monkeypatch):
+    tracker, _ = _github_tracker(monkeypatch)
+
+    # Issue numbers repeat across repositories, so a bare number is ambiguous
+    # and must not be guessed at.
+    with pytest.raises(UnknownTicketError, match="doesn't exist in GitHub"):
+        await tracker.set_status("7", TicketStatus.DONE)
+    with pytest.raises(UnknownTicketError):
+        await tracker.set_status("acme/widget#not-a-number", TicketStatus.DONE)
+
+
+async def test_github_closes_the_client_it_created(monkeypatch):
+    tracker, fake = _github_tracker(monkeypatch)
+
+    async with tracker:
+        await tracker.set_status("acme/widget#7", TicketStatus.IN_REVIEW)
+
+    assert fake.calls[-1] == ("aclose",)
+
+
+def test_github_declares_known_exceptions():
+    # The GitHub client raises githubkit's errors, not httpx's. A caller that
+    # misses them lets a failed label write fail the webhook that caused it.
+    assert UnknownTicketError in GitHub.known_exceptions
+    assert GitHubAppNotInstalledError in GitHub.known_exceptions
+    assert RequestFailed in GitHub.known_exceptions
+    assert httpx.HTTPError in GitHub.known_exceptions
+
+
+async def test_tracker_builds_github_from_the_operator_app(monkeypatch):
+    await _connect_github()
+    _pin_software_factory_settings(
+        monkeypatch,
+        tracker="github",
+        trigger_status="ready-for-agent",
+        resting_status="needs-triage",
+    )
+
+    tracker = await SoftwareFactory.get_tracker("github")
+
+    assert isinstance(tracker, GitHub)
+    assert tracker._status_names[TicketStatus.TRIGGER] == "ready-for-agent"
+    assert tracker._status_names[TicketStatus.BACKLOG] == "needs-triage"
+
+
+async def test_github_tracker_check_reports_the_operator_app(monkeypatch):
+    await _connect_github()
+    _pin_software_factory_settings(monkeypatch, tracker="github")
+
+    result = await check_tracker_identity()
+
+    assert result.ok
+    assert "github" in result.detail
+
+
+async def test_github_tracker_check_pends_without_the_operator_app(monkeypatch):
+    _pin_software_factory_settings(monkeypatch, tracker="github")
+
+    result = await check_tracker_identity()
+
+    assert not result.ok
+    assert result.pending
+
+
+def test_github_manifest_subscribes_to_issue_events():
+    # The tracker's intake is the issues event. An App created from this
+    # manifest without it would connect cleanly and then never open a build.
+    assert "issues" in services.Github.manifest["default_events"]

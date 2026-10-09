@@ -242,6 +242,18 @@ async def test_software_factory_start_stamps_the_trigger_status_for_known_and_un
     assert starts == []  # a repeat call re-stamps; it never dispatches locally
 
 
+def test_software_factory_start_takes_a_github_key(client: TestClient, monkeypatch):
+    # owner/repo#12 has a ``/``, which ends a plain path segment, and a ``#``,
+    # which the caller encodes.
+    fake = _FakeTracker()
+    monkeypatch.setattr(SoftwareFactory, "get_tracker", _tracker_stub(fake))
+
+    response = client.post("/api/software_factory/work-items/acme/widget%2312/start")
+
+    assert response.status_code == 202
+    assert fake.calls == [("acme/widget#12", TicketStatus.TRIGGER), "aclose"]
+
+
 def test_software_factory_start_translates_an_unknown_tracker_ticket(
     client: TestClient, monkeypatch
 ):
