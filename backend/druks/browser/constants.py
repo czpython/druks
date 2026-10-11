@@ -7,6 +7,8 @@ SITE_MAX_LENGTH = 255
 SESSION_LAUNCH_TIMEOUT_SECONDS = 45
 SESSION_EXPORT_TIMEOUT_SECONDS = 5 * 60
 CDP_CONNECT_TIMEOUT_SECONDS = 30
+# PinchTab gives a page 60 seconds to load; a request waits longer than that.
+PINCHTAB_REQUEST_TIMEOUT_SECONDS = 90
 
 # A login window keeps only this Redis record; if the operator walks away it
 # lapses and the container's own lease reaps the browser — nothing sweeps.

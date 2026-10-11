@@ -6,7 +6,13 @@ import pytest
 # exact names it exports. Pattern A — no root facade; druks stays thin.
 AUTHOR_SURFACE = {
     "druks.apps": {"App", "AppSettings", "Choices", "Secret"},
-    "druks.browser": {"BrowserSession", "BrowserSessionSignedOutError", "BrowserSessionStatus"},
+    "druks.browser": {
+        "BrowserClient",
+        "BrowserCommandError",
+        "BrowserSession",
+        "BrowserSessionSignedOutError",
+        "BrowserSessionStatus",
+    },
     "druks.services": {
         "Connection",
         "OauthClient",
