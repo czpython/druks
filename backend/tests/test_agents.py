@@ -7,9 +7,11 @@ import pytest
 from conftest import installation_key, make_agent_result
 from druks import agents
 from druks.accounts.models import Account
+from druks.browser import BrowserClient, BrowserSession
 from druks.db import db_session
 from druks.durable import AgentCall, WorkflowError
 from druks.files import File
+from druks.sandbox.datastructures import McpServer
 from druks.sandbox.exceptions import SandboxDownloadError
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.secrets.datastructures import Audience
@@ -40,6 +42,17 @@ FILE_AGENT = agents.Agent(
     id="file",
     prompt="dummy/agent.md",
     contract=FileOutput,
+)
+
+# Declared outside an app class, so the session joins no registry.
+ATLAS = BrowserSession(site="atlas.example", read_only=True)
+
+BROWSER_AGENT = agents.Agent(
+    id="browser_probe",
+    prompt="dummy/agent.md",
+    contract=DummyOutput,
+    browser=ATLAS,
+    browser_client=BrowserClient.PINCHTAB,
 )
 
 
@@ -125,6 +138,80 @@ def _inline_agent_steps(monkeypatch):
     monkeypatch.setattr(agents.DBOS, "run_step_async", run_inline)
     monkeypatch.setattr(agents.DBOS, "sleep_async", sleep)
     return checkpoints, sleep
+
+
+BROWSER_SERVER = McpServer(
+    name="browser", url="https://druks.example/mcp", bearer_token_env_var="MCP_BROWSER_TOKEN"
+)
+
+
+@pytest.fixture
+async def lent_browser(druks_db, monkeypatch):
+    """The browsers the calls borrow, each lent with one stored key."""
+    key = await VaultSecret.store(
+        druks_db, SecretKind.STATIC, "mcp:browser test", secrets={"value": "Bearer key"}
+    )
+    lent = []
+
+    @asynccontextmanager
+    async def lend(session, client, *, account_id, call_id):
+        lent.append((session, client, account_id, call_id))
+        yield BROWSER_SERVER, SecretRef(name="mcp_browser_token", secret_id=key.id)
+
+    monkeypatch.setattr(agents.AgentBrowser, "lend", lend)
+    return lent
+
+
+def test_a_browser_agent_drives_with_the_pinchtab_client():
+    with pytest.raises(TypeError, match="needs browser_client=BrowserClient.PINCHTAB"):
+        agents.Agent(id="no_client", contract=DummyOutput, browser=ATLAS)
+    with pytest.raises(TypeError, match="needs browser_client=BrowserClient.PINCHTAB"):
+        agents.Agent(
+            id="playwright_client",
+            contract=DummyOutput,
+            browser=ATLAS,
+            browser_client=BrowserClient.PLAYWRIGHT,
+        )
+    with pytest.raises(TypeError, match="needs browser="):
+        agents.Agent(id="no_session", contract=DummyOutput, browser_client=BrowserClient.PINCHTAB)
+
+
+async def test_an_agent_browser_gets_its_own_box_and_the_browser_server(
+    druks_db, tmp_path, monkeypatch, current_run, lent_browser
+):
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    boxes = []
+
+    @asynccontextmanager
+    async def fake_ephemeral(self, *, idempotency_key=None, secrets=None, **_kwargs):
+        boxes.append((idempotency_key, secrets))
+        yield sandbox
+
+    monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", fake_ephemeral)
+    monkeypatch.setattr(current_run, "_lease_host", AsyncMock(side_effect=AssertionError))
+    other = McpServer(name="tracker", url="https://tracker.example/mcp")
+    resolve = AsyncMock(return_value=((other,), []))
+    monkeypatch.setattr(Workspace, "get_all_mcp_servers", resolve)
+
+    assert await BROWSER_AGENT._run(db_session(), workflow_id="wf-9") == DummyOutput(ok=True)
+
+    [(session, client, account_id, call_id)] = lent_browser
+    assert (session, client, account_id) == (ATLAS, BrowserClient.PINCHTAB, current_run.account_id)
+    [(key, secrets)] = boxes
+    assert key.startswith(f"wf-9:{call_id}:")
+    assert "mcp_browser_token" in secrets
+    kwargs = sandbox.run_agent.await_args.kwargs
+    assert kwargs["mcp_servers"] == (other, BROWSER_SERVER)
+
+
+async def test_a_replayed_call_starts_no_browser(monkeypatch, current_run, lent_browser):
+    async def replay(options, function):
+        return DummyOutput(ok=True)
+
+    monkeypatch.setattr(agents.DBOS, "run_step_async", replay)
+
+    assert await BROWSER_AGENT() == DummyOutput(ok=True)
+    assert lent_browser == []
 
 
 async def test_run_outside_workflow_raises():

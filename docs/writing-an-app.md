@@ -888,6 +888,65 @@ scheduled run can proceed.
 Provider selection is an operator concern. App workspace code targets the
 Druks sandbox contract, not `exe`, AWS, or Docker directly.
 
+### Give an agent a browser session
+
+An agent can drive a browser session. Name the session and the client:
+
+```python
+from druks.agents import Agent, AgentOutput
+from druks.apps import App
+from druks.browser import BrowserClient, BrowserSession
+
+
+class Balance(AgentOutput):
+    amount_due: str
+    due_date: str
+
+
+class Payables(App):
+    name = "payables"
+    supplier = BrowserSession(site="supplier.example", read_only=True)
+
+    read_balance = Agent(
+        prompt="payables/read_balance.md",
+        contract=Balance,
+        browser=supplier,
+        browser_client=BrowserClient.PINCHTAB,
+        include_plugins=False,
+        include_mcp=False,
+    )
+```
+
+The prompt names the page and the tools:
+
+```markdown
+Open https://supplier.example/account with browser_navigate and read what the
+account owes and when it is due. browser_snapshot reads the page and
+browser_evaluate runs JavaScript in it. Only read; never submit a form.
+```
+
+A workflow calls it like any other agent: `await Payables.read_balance()`.
+
+Druks borrows the session inside each call and starts PinchTab beside Chrome.
+The call's sandbox gets one MCP server, `browser`, with five tools:
+`browser_navigate`, `browser_evaluate`, `browser_snapshot`, `browser_text`, and
+`browser_action`. They work in one tab, which the first `browser_navigate`
+opens. `browser_action` takes a PinchTab action, for example `click` with a
+`ref` from `browser_snapshot`. Each tool runs in Druks against the call's
+browser. The sandbox never reaches the browser, its debugger port, its profile,
+or the bridge's network log.
+
+The key behind the server allows the five tools and nothing else. Druks mints
+it for the call and revokes it when the call ends, fails, times out, or is
+cancelled. It then releases the browser. The `browser` server comes beside the
+plugins and MCP servers the agent declares. A site the operator does not run
+can try to steer the agent through its pages, so declare `include_plugins=False`
+and `include_mcp=False` for such a site. Each of its calls gets its own sandbox,
+also in a workflow that sets `steps_reuse_sandbox = True`. A replay of a completed call
+starts no browser. An interrupted call borrows the browser again. The call gets
+prompt context only, and Druks opens no page for it. `BrowserClient.PINCHTAB`
+is the only client that an agent can use.
+
 ## Wait for input
 
 The gate fields form the reply schema. `name` fixes the durable gate identity.

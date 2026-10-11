@@ -9,7 +9,7 @@ from druks.db import db_session
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.mcp.catalog import load_mcp_catalog
-from druks.mcp.constants import BEARER_HEADER, DRUKS_SERVER_NAME
+from druks.mcp.constants import BEARER_HEADER, BROWSER_SERVER_NAME, DRUKS_SERVER_NAME
 from druks.mcp.exceptions import (
     InvalidCatalogError,
     InvalidServerNameError,
@@ -113,13 +113,12 @@ async def test_create_rejects_names_that_break_env_or_config(druks_db):
             await McpServer.create(druks_db, name=bad, url=_LINEAR_URL, secret_headers=_BEARER)
 
 
-async def test_create_refuses_the_name_this_appliance_delivers_under(druks_db):
-    """This appliance's own /mcp owns that config key. A row claiming it would
+@pytest.mark.parametrize("name", [DRUKS_SERVER_NAME, BROWSER_SERVER_NAME])
+async def test_create_refuses_the_names_this_appliance_delivers_under(druks_db, name):
+    """This appliance's own /mcp owns those config keys. A row claiming one would
     collide in the VM's config, so the operator hears about it at creation."""
     with pytest.raises(ReservedServerNameError, match="reserved"):
-        await McpServer.create(
-            druks_db, name=DRUKS_SERVER_NAME, url=_LINEAR_URL, secret_headers=_BEARER
-        )
+        await McpServer.create(druks_db, name=name, url=_LINEAR_URL, secret_headers=_BEARER)
 
 
 async def test_valid_name_derives_shell_safe_env_var(druks_db):

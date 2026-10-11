@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.apps.exceptions import AppBotError
 from druks.apps.registry import agents, bots
+from druks.browser.agent_browsers import AgentBrowser
+from druks.browser.enums import BrowserClient
 from druks.chat.bots.dependencies import BotUser
 from druks.chat.enums import BotAccess
 from druks.db import db_session
@@ -37,6 +39,7 @@ from druks.usage.models import UsageScrape
 from druks.workflows import _in_step, current_workflow
 
 if TYPE_CHECKING:
+    from druks.browser.sessions import BrowserSession
     from druks.services.base import ServiceField
     from druks.workflows import Workflow
     from druks.workspaces import Workspace
@@ -156,6 +159,12 @@ class Agent:
     # The service secrets the call's sandbox holds, ``(Acme.fields.api_key,)``.
     # Each is a placeholder that the secrets proxy swaps at the service's host.
     secrets: "tuple[ServiceField, ...]" = ()
+    # The saved browser session the call drives, and the client Druks starts
+    # beside Chrome for it. The call gets the ``browser`` MCP server beside the
+    # servers it has anyway.
+    # A session is mutable, so it stays out of the agent's hash.
+    browser: "BrowserSession | None" = field(default=None, compare=False)
+    browser_client: BrowserClient | None = None
     # ``id`` is the agent's durable key (settings, timeline, registry, step name):
     # ``<app>.<attribute>`` for an agent declared on an App, or the explicit ``id=``
     # of a standalone agent (a test, a one-off). ``app`` is the owning App's name,
@@ -165,6 +174,13 @@ class Agent:
     app: str = field(init=False, compare=False, default="")
 
     def __post_init__(self) -> None:
+        if self.browser and self.browser_client != BrowserClient.PINCHTAB:
+            raise TypeError(
+                "An agent with browser= needs browser_client=BrowserClient.PINCHTAB. "
+                "Druks starts no other client for an agent call."
+            )
+        if self.browser_client and not self.browser:
+            raise TypeError("Agent(browser_client=...) needs browser=, the session it drives.")
         for secret in self.secrets:
             declared = f"{secret.service.__name__}.fields.{secret.name}"
             if not secret.is_secret:
@@ -346,12 +362,18 @@ class Agent:
 
         # Registered for provisioning through execution — the subscription's
         # rotation defers around it. A key never rotates.
-        gate = (
-            sandbox_gate.use(subscription_id, call_id)
-            if subscription_id
-            else contextlib.nullcontext()
-        )
-        async with gate:
+        gate = contextlib.nullcontext()
+        if subscription_id:
+            gate = sandbox_gate.use(subscription_id, call_id)
+        borrow = contextlib.nullcontext()
+        if self.browser:
+            borrow = AgentBrowser.lend(
+                self.browser,
+                self.browser_client,
+                account_id=workflow.account_id,
+                call_id=call_id,
+            )
+        async with gate, borrow as lent_browser:
             await set_run_phase("provisioning_vm")
             # Resolved once: the box's entries and the harness config name the
             # same servers.
@@ -362,6 +384,9 @@ class Agent:
                 mcp_servers, mcp_secret_refs = await workspace_class.get_all_mcp_servers(
                     session, subject, workflow.account_id
                 )
+            if lent_browser:
+                server, secret = lent_browser
+                mcp_servers, mcp_secret_refs = (*mcp_servers, server), [*mcp_secret_refs, secret]
             service_refs = []
             for secret in self.secrets:
                 # An optional service that is not connected leaves its secrets out.
@@ -387,7 +412,14 @@ class Agent:
                 ),
                 *mcp_secret_refs,
             ]
-            host_id = await workflow._lease_host(session, config, refs)
+            # An agent browser's box holds the call's key, so the box belongs to
+            # the call: it is never the warm box, and no other attempt resumes it.
+            scope = self.id
+            host_id = None
+            if self.browser:
+                scope = call_id
+            else:
+                host_id = await workflow._lease_host(session, config, refs)
 
             # Record the call RUNNING once it has a host to run on (its id names
             # the on-disk transcript dir) so the live step shows while the agent
@@ -395,7 +427,7 @@ class Agent:
             # starting. A provisioning failure happens before this and records
             # no call.
             async with _runner(
-                session, workflow, host_id, workflow_id, self.id, config, refs
+                session, workflow, host_id, workflow_id, scope, config, refs
             ) as runner:
                 context = await runner.prepare_context(session, context, agent_call_id=call_id)
                 # Templates read the live workflow + the workspace the agent runs in,

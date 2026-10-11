@@ -23,6 +23,7 @@ from druks.api.subjects import router as subjects_router
 from druks.apps.loader import iter_apps, load
 from druks.apps.routes import router as apps_router
 from druks.browser.exceptions import BrowserApiError
+from druks.browser.routes import agent_browser_router
 from druks.browser.routes import router as browser_sessions_router
 from druks.chat.channels.calls.exceptions import CallsLinkError
 from druks.chat.channels.whatsapp.exceptions import WahaError, WhatsAppLinkError
@@ -308,6 +309,7 @@ app.include_router(auth_router)
 app.include_router(providers_router)
 app.include_router(secrets_router)
 app.include_router(browser_sessions_router)
+app.include_router(agent_browser_router, dependencies=_identity_gate)
 app.include_router(settings_router, dependencies=_identity_gate)
 app.include_router(agents_router, dependencies=_identity_gate)
 app.include_router(apps_router, dependencies=_identity_gate)

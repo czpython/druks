@@ -1,6 +1,13 @@
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
+
 import httpx
 
+from druks.browser.constants import PINCHTAB_PORT, PINCHTAB_REQUEST_TIMEOUT_SECONDS
 from druks.browser.exceptions import BrowserCommandError
+
+if TYPE_CHECKING:
+    from druks.sandbox.host import Host
 
 
 class PinchTab:
@@ -11,9 +18,25 @@ class PinchTab:
         self.http = http
         self.tab_id = ""
 
-    async def navigate(self, url: str) -> None:
+    @classmethod
+    @asynccontextmanager
+    async def connect(cls, browser: "Host", token: str):
+        """The bridge in ``browser``'s container, reached over an SSH forward."""
+        listener = await browser.forward_local_port(PINCHTAB_PORT)
+        try:
+            async with httpx.AsyncClient(
+                base_url=f"http://127.0.0.1:{listener.get_port()}",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=PINCHTAB_REQUEST_TIMEOUT_SECONDS,
+            ) as http:
+                yield cls(http)
+        finally:
+            listener.close()
+
+    async def navigate(self, url: str) -> dict:
         reply = await self._send("POST", "/navigate", json={"url": url, "tabId": self.tab_id})
         self.tab_id = reply["tabId"]
+        return reply
 
     async def evaluate(self, expression: str):
         """The JSON value of ``expression`` in the page. A promise resolves first."""

@@ -73,9 +73,20 @@ class BrowserClientMissingError(DruksError):
         )
 
 
-class BrowserCommandError(DruksError):
+class BrowserCommandError(BrowserApiError):
+    # The browser's own refusal, with its reason: a browser tool returns it to the
+    # agent, which then corrects its ref or its JavaScript.
+    status_code = 400
+
     def __init__(self, command: str, detail: str) -> None:
         super().__init__(f"Browser {command} failed: {detail}")
+
+
+class AgentBrowserGoneError(BrowserApiError):
+    status_code = 409
+
+    def __init__(self) -> None:
+        super().__init__("This key drives no browser.")
 
 
 class BrowserLoginWindowGoneError(BrowserApiError):

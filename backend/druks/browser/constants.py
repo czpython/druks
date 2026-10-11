@@ -9,6 +9,19 @@ SESSION_EXPORT_TIMEOUT_SECONDS = 5 * 60
 CDP_CONNECT_TIMEOUT_SECONDS = 30
 # PinchTab gives a page 60 seconds to load; a request waits longer than that.
 PINCHTAB_REQUEST_TIMEOUT_SECONDS = 90
+PINCHTAB_PORT = 9867
+# An agent call's browser keeps only this Redis record, under the call's key:
+# the box, the bridge's token, and the tab. The tools refuse the key once the
+# record is gone.
+AGENT_BROWSER_KEY_PREFIX = "agent_browser:"
+# The tools an agent call's key allows: the browser routes' operation ids.
+BROWSER_TOOLS = (
+    "browser_navigate",
+    "browser_evaluate",
+    "browser_snapshot",
+    "browser_text",
+    "browser_action",
+)
 
 # A login window keeps only this Redis record; if the operator walks away it
 # lapses and the container's own lease reaps the browser — nothing sweeps.

@@ -1,7 +1,7 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, WebSocket
 
 from druks.accounts.dependencies import (
     current_account,
@@ -12,6 +12,7 @@ from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.apps.registry import browser_sessions
 from druks.browser import exceptions
+from druks.browser.agent_browsers import AgentBrowser
 from druks.browser.constants import MAX_PAYLOAD_BYTES, PAYLOAD_WARNING_BYTES
 from druks.browser.enums import BrowserSessionPayloadFormat
 from druks.browser.login import LoginWindow, is_same_origin
@@ -22,6 +23,9 @@ from druks.database import session_scope
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/browser-sessions", tags=["browser-sessions"])
+# The browser tools of Druks' MCP server, which an agent call's key allows.
+# Docstrings are the tool descriptions and operation_id is the tool name.
+agent_browser_router = APIRouter(prefix="/api/browser", tags=["browser"])
 
 
 @router.get("", response_model=list[BrowserSessionResponse])
@@ -144,3 +148,68 @@ async def delete_browser_session(
         await row.delete()
         return
     raise exceptions.BrowserSessionUnknownError(name)
+
+
+async def current_agent_browser(request: Request) -> AgentBrowser:
+    """The browser that the calling key drives. The router's identity gate
+    authenticated the key."""
+    if pat := request.state.pat:
+        return await AgentBrowser.get_for_key(pat.token_prefix)
+    raise exceptions.AgentBrowserGoneError
+
+
+AgentBrowserDep = Annotated[AgentBrowser, Depends(current_agent_browser)]
+
+
+@agent_browser_router.post(
+    "/navigate", operation_id="browser_navigate", openapi_extra={"x-destructive": False}
+)
+async def browser_navigate(
+    browser: AgentBrowserDep, url: Annotated[str, Body(embed=True, description="The page to open.")]
+) -> dict:
+    """Open a page in the call's tab, signed in. Returns the tab and its URL."""
+    async with browser.pinchtab() as pinchtab:
+        return await pinchtab.navigate(url)
+
+
+@agent_browser_router.post(
+    "/evaluate", operation_id="browser_evaluate", openapi_extra={"x-destructive": False}
+)
+async def browser_evaluate(
+    browser: AgentBrowserDep,
+    expression: Annotated[str, Body(embed=True, description="JavaScript to run in the page.")],
+) -> dict:
+    """Run JavaScript in the page and return its JSON value as result. A promise
+    resolves first."""
+    async with browser.pinchtab() as pinchtab:
+        return {"result": await pinchtab.evaluate(expression)}
+
+
+@agent_browser_router.get("/snapshot", operation_id="browser_snapshot")
+async def browser_snapshot(browser: AgentBrowserDep) -> dict:
+    """The page's accessibility tree. Its refs name elements for browser_action."""
+    async with browser.pinchtab() as pinchtab:
+        return await pinchtab.snapshot()
+
+
+@agent_browser_router.get("/text", operation_id="browser_text")
+async def browser_text(browser: AgentBrowserDep) -> dict:
+    """The page's main text."""
+    async with browser.pinchtab() as pinchtab:
+        return {"text": await pinchtab.text()}
+
+
+@agent_browser_router.post(
+    "/action", operation_id="browser_action", openapi_extra={"x-destructive": False}
+)
+async def browser_action(
+    browser: AgentBrowserDep,
+    kind: Annotated[str, Body(description="The PinchTab action, such as click or scroll.")],
+    fields: Annotated[
+        dict[str, object],
+        Body(description="The action's fields, such as a ref from browser_snapshot."),
+    ],
+) -> dict:
+    """One PinchTab action on the page, such as click with a ref."""
+    async with browser.pinchtab() as pinchtab:
+        return await pinchtab.action(kind, **fields)

@@ -11,6 +11,7 @@ from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.server import mcp_app
+from druks.browser.constants import BROWSER_TOOLS
 from druks.chat.channels.whatsapp.constants import WAHA_AUDIENCE
 from druks.chat.constants import CONVERSATION_HEADER
 from druks.chat.enums import ConversationSource
@@ -324,6 +325,20 @@ async def test_a_bot_key_calls_its_tool_for_the_person_in_its_conversation(
     assert names == {"field_notes_jot_note"}
     assert (await Note.get(id=jotted.structured_content["id"])).body == "Ana: The gate sticks."
     assert "field_notes_jot_note" not in toolkit
+
+
+async def test_a_browser_key_lists_the_browser_tools_only(druks_db, app, account, pat_token):
+    _, token = await PersonalAccessToken.create(
+        druks_db, account_id=account.id, name="browser", allowed_tools=list(BROWSER_TOOLS)
+    )
+
+    async with live(app), _client(app, token) as client:
+        names = {tool.name for tool in await client.list_tools()}
+    async with live(app), _client(app, pat_token) as client:
+        toolkit = {tool.name for tool in await client.list_tools()}
+
+    assert names == set(BROWSER_TOOLS)
+    assert not toolkit & names
 
 
 @pytest.mark.parametrize(

@@ -8,12 +8,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
-import httpx
-
 from druks.apps.registry import browser_sessions
 from druks.browser.constants import (
     CDP_CONNECT_TIMEOUT_SECONDS,
-    PINCHTAB_REQUEST_TIMEOUT_SECONDS,
     SESSION_EXPORT_TIMEOUT_SECONDS,
     SESSION_LAUNCH_TIMEOUT_SECONDS,
 )
@@ -38,7 +35,6 @@ from druks.settings import load_settings
 
 SESSION_ROOT = "/work/session"
 CDP_PORT = 9222
-PINCHTAB_PORT = 9867
 
 
 async def _playwright_context(connection, name: str):
@@ -132,17 +128,11 @@ class BrowserSession:
         starts beside Chrome for the block. The bridge opens only the
         session's site."""
         token = secrets.token_urlsafe(32)
-        async with self._borrow(client=BrowserClient.PINCHTAB, token=token) as browser:
-            listener = await browser.forward_local_port(PINCHTAB_PORT)
-            try:
-                async with httpx.AsyncClient(
-                    base_url=f"http://127.0.0.1:{listener.get_port()}",
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=PINCHTAB_REQUEST_TIMEOUT_SECONDS,
-                ) as http:
-                    yield PinchTab(http)
-            finally:
-                listener.close()
+        async with (
+            self._borrow(client=BrowserClient.PINCHTAB, token=token) as browser,
+            PinchTab.connect(browser, token) as pinchtab,
+        ):
+            yield pinchtab
 
     @asynccontextmanager
     async def playwright(self):

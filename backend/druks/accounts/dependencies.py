@@ -38,6 +38,8 @@ async def resolve_pat_account(
                 detail=str(error),
                 headers={"WWW-Authenticate": f'{_BEARER_CHALLENGE}, error="invalid_token"'},
             ) from error
+        # The key the request authenticated with, for a route that acts per key.
+        request.state.pat = pat
         if pat.allowed_tools is None:
             return pat.account
         # The MCP surface maps each agent route's endpoint to its tool name at boot.
@@ -125,6 +127,7 @@ async def current_account(
     if "Authorization" in request.headers:
         account = await resolve_pat_account(session, request, bearer)
     else:
+        request.state.pat = None
         account = await _resolve_operator(session, request)
         if not account:
             raise HTTPException(

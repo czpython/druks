@@ -99,7 +99,7 @@ class StrictInputValidation(Middleware):
         return await call_next(context)
 
 
-_TOOL_TAGS = frozenset({"agent", "bot"})
+_TOOL_TAGS = frozenset({"agent", "bot", "browser"})
 
 
 def _validate_agent_tools(api: FastAPI) -> None:
@@ -223,7 +223,7 @@ def _annotate(route: HTTPRoute, component: object) -> None:
 
 def _is_visible(context: AuthContext) -> bool:
     # A limited key lists and calls only the tools it names. Any other key gets the
-    # Druks toolkit: the agent tools, never a tool only a Bot calls.
+    # Druks toolkit: the agent tools, never a tool only a Bot or a browser call calls.
     allowed = context.token.claims["allowed_tools"]
     if allowed is not None:
         return context.component.name in allowed
@@ -247,6 +247,7 @@ def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
         route_maps=[
             RouteMap(tags={"agent"}, mcp_type=MCPType.TOOL),
             RouteMap(tags={"bot"}, mcp_type=MCPType.TOOL),
+            RouteMap(tags={"browser"}, mcp_type=MCPType.TOOL),
             RouteMap(mcp_type=MCPType.EXCLUDE),
         ],
         mcp_component_fn=_annotate,
