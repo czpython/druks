@@ -19,7 +19,7 @@ INTERNAL_MESSAGES_PROMPT = (
 RESULT_MESSAGE = "[Internal: Run {run} ended. Its result:\n{result}]"
 FAILURE_MESSAGE = (
     "[Internal: Run {run} failed: {failure}. Tell the person in one short line, with no "
-    "error details, and do not retry it.]"
+    "error details, and offer what they can do next. Do not retry it.]"
 )
 # The line between what a person typed and what they said in the same message.
 VOICE_NOTE_MARKER = "[Voice note]"

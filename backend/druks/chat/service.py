@@ -14,7 +14,7 @@ from pydantic_core import to_json
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
-from druks.apps.loader import get_app
+from druks.apps.loader import get_app, iter_apps
 from druks.apps.registry import services
 from druks.durable.engine import step_session
 from druks.durable.models import Run
@@ -101,6 +101,7 @@ async def get_agent(
         "source": conversation.source,
         "thread_id": conversation.thread_id,
         "sign_ins": sign_ins,
+        "apps": [app for app in iter_apps() if app.description and not app.builtin],
     }
     if conversation.connection:
         context.update(await conversation.channel.get_prompt_context(session, conversation))
