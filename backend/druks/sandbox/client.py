@@ -11,6 +11,7 @@ import asyncssh
 from drukbox_sdk import Issuer, SandboxAPI, SandboxHost, Secret
 from drukbox_sdk.exceptions import (
     SandboxAPIError,
+    SandboxCapacityError,
     SandboxNotFoundError,
     SandboxProvisioningError,
     SandboxUnavailableError,
@@ -18,6 +19,7 @@ from drukbox_sdk.exceptions import (
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_utils import uuid7
 
+from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine
 from druks.harnesses.exceptions import HarnessSandboxProvisioningError
 from druks.settings import load_settings
@@ -95,23 +97,35 @@ class Client:
             else:
                 image = settings.sandbox.image
             # drukbox reaps the host at lease end, so a dead worker still frees its VM.
-            expires_at = datetime.now(UTC) + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
+            lease = timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
+            deadline = datetime.now(UTC) + lease
             try:
-                try:
-                    record = await api.create_host(
-                        expires_at=expires_at,
-                        idempotency_key=key,
-                        image=image or None,
-                        provider=provider,
-                        secrets=secrets,
-                        template=template,
-                    )
-                except (SandboxProvisioningError, SandboxUnavailableError) as exc:
-                    # A 502 or 503 from the control plane is transient: the run
-                    # retries. Every other SDK error is fatal and passes through.
-                    raise HarnessSandboxProvisioningError(
-                        f"sandbox host provisioning failed: {exc}"
-                    ) from exc
+                while True:
+                    try:
+                        record = await api.create_host(
+                            expires_at=datetime.now(UTC) + lease,
+                            idempotency_key=key,
+                            image=image or None,
+                            provider=provider,
+                            secrets=secrets,
+                            template=template,
+                        )
+                        break
+                    except SandboxCapacityError as exc:
+                        # The provider is at its host limit: wait for a slot. The
+                        # wait holds nothing, so a restart simply waits again.
+                        if datetime.now(UTC) >= deadline:
+                            raise HarnessSandboxProvisioningError(
+                                f"sandbox host provisioning failed: {exc}"
+                            ) from exc
+                        await set_run_phase("queued_for_vm")
+                        await asyncio.sleep(exc.retry_after)
+                    except (SandboxProvisioningError, SandboxUnavailableError) as exc:
+                        # A 502 or 503 from the control plane is transient: the run
+                        # retries. Every other SDK error is fatal and passes through.
+                        raise HarnessSandboxProvisioningError(
+                            f"sandbox host provisioning failed: {exc}"
+                        ) from exc
             except BaseException:
                 # The next attempt presents a new identity and a new key.
                 if identity:

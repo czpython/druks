@@ -222,6 +222,8 @@ class SandboxIdentity(Base, Uuid7Pk):
 
     async def bind(self, host_id: str) -> None:
         self.host_id = host_id
+        # The box lease starts now, after any wait for a slot.
+        self.expires_at = Base.utc_now() + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
         await self.session.commit()
 
     async def revoke(self) -> None:
