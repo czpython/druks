@@ -3,6 +3,138 @@
 All notable changes to Druks. Versions follow [semantic versioning](https://semver.org);
 while Druks is pre-1.0, a minor bump may break compatibility.
 
+## [0.9.0] — 2026-10-12
+
+### Breaking changes
+
+- **`druks.toml` holds no secret.** Each secret comes from its environment
+  variable, such as `DRUKS_SECRETS_KEY`, or from a file in `DRUKS_SECRETS_DIR`.
+  The `[secrets]` table is gone, and Druks does not start when `druks.toml`
+  holds a secret. `druks setup` moves each secret to the last section of `.env`.
+- **`druks sandboxes build` builds the sandbox templates.** It waits for each
+  build and fails with its error. `druks doctor` only reports the templates. Run
+  the command after each deploy. Druks needs a current Drukbox.
+- **The browser is a sandbox template**, like Chat. The browser image and the
+  settings `sandbox.browser_*` are gone. A `[browser]` table holds
+  `proxy_scope` and `timezone`, and `DRUKS_BROWSER_PROXY` names the proxy.
+- **Registry settings live in `[sandbox]`:** `registry_host`,
+  `registry_username`, `registry_password`, and `template_repository`. The
+  `EXE_*` registry keys in `[sandbox.exe]` are gone.
+- **Druks runs on DBOS 3.** Do not run a 0.8 process and a 0.9 process against
+  one database at the same time.
+- **`GITHUB_API_URL` is gone.** Every GitHub API call goes to
+  `https://api.github.com`.
+- **A directory of MCP servers replaces the registry search.** The dashboard
+  offers a vetted list of hosted servers that sign in with OAuth.
+  `DRUKS_MCP_DIRECTORY` replaces `DRUKS_MCP_TRUSTED`. Add a server that is not
+  in the list as a custom server.
+- **Software Factory does not merge on approval by default.** `on_approval` is
+  `none`: Druks marks the pull request ready for review and ends the build. Set
+  `on_approval: merge` in `.druks/software_factory/config.yml` to merge.
+- **WhatsApp has one link.** Add a number, then pair a phone with the code. The
+  separate path for your own number is gone. A code that the linked phone sends
+  to itself makes that chat yours.
+- **A sandbox setup script sits beside its module.** The path is relative to
+  the folder of the module that declares the `Sandbox`, not to the app package.
+  `Sandbox.package` is gone.
+
+### Added
+
+- **Phone calls.** Link a Twilio number to an app's Bot, and the Bot answers
+  calls with a speech-to-speech model from OpenAI or Google. The Bot's tools
+  work during the call, and the caller's earlier calls are context. Any operator
+  reads a number's calls in the app's Channels tab. The calls server is a
+  separate program with its own image, `ghcr.io/czpython/druks-calls`, and the
+  default stack does not run it. `docs/deployment.md` describes how to add it.
+- **The operator's Chat reaches more.** It reaches every enabled MCP server. Its
+  sandbox holds the operator's own sign-in at each service with a `host`, so
+  `git` and `gh` act as that person. The prompt lists the sign-ins it holds. A
+  Bot still reaches only the Druks server.
+- **An agent declares the service secrets its sandbox holds.**
+  `Agent(secrets=(Acme.fields.api_key,))` gives the sandbox `ACME_API_KEY`.
+  `Service.host` is the one host that the secret can go to.
+- **An MCP server can use its service's credential.** `Service.mcp_host` names
+  the MCP host that the service's identity signs in to. GitHub, Jira, and Linear
+  set it. An account with a sign-in at the service needs no second consent. Other
+  accounts of a pasted-login service connect their own grant, and the default
+  account sends the login that `Service.get_authorization()` builds.
+- **A header MCP server can hold one key for each person.** Each person sets
+  their own key on the server's row.
+- **Disconnect a service** in Settings → Services. Druks revokes its credentials
+  and every account's sign-in to it.
+- **Create the reviewer GitHub App from Settings**, like the operator App. Each
+  service that declares a `manifest` gets **Create App**.
+- **Managed services.** A `[services.<slug>]` table in `druks.toml` holds the
+  plain fields of a service card, and its secrets are files in
+  `DRUKS_SECRETS_DIR`. Druks syncs the card at startup and refuses edits to it.
+  With a `[manager]` table, a manager can answer a service's API calls and sign
+  its webhooks. The card then differs only in its `url` and its key.
+- **A person can require a tag in a Slack thread.** The agent tool
+  `chat_require_tag` turns off the untagged replies for that conversation.
+- **The browser proxy can cover every launch.** `browser.proxy_scope` is
+  `login`, the default, for the login window only, or `all` for every borrow too.
+- **More page and service blocks.** An app with no landing page gets a platform
+  home: one live table for each subject type. `Cards(layout="tiles")` crops each
+  image to a square. `Columns(layout="split")` is a page of two panes: a list and
+  what it opened. A service card renders its `description` as Markdown, and a
+  field with a default can stay empty.
+- **More author reads.** `Service.list_for_account(account_id)` reads an
+  account's sign-ins without a scope declaration. `GitHubClient.create_reaction()`
+  reacts to a comment.
+- **Instances can share one host's Postgres and Redis.** `DRUKS_WEB_PORT` sets
+  the web port. `DRUKS_DATABASE_POOL_SIZE`, `DRUKS_DATABASE_MAX_OVERFLOW`, and
+  `DRUKS_DBOS_POOL_SIZE` set the pool sizes. Druks supports Postgres 16 and newer.
+
+### Changed
+
+- **A chat hears every run it started.** A run reports its result when it waited
+  or returned something, and it always reports a failure. Web Chat hears its runs
+  too.
+- **A failed Chat delivery retries** up to five times, with a backoff. Then its
+  messages end as `failed`. The page shows **Send again** on a failed,
+  interrupted, or cancelled message. A Slack, GitHub, or WhatsApp conversation
+  gets one short line that the message failed.
+- **The login window runs Google Chrome as a plain process.** Playwright attaches
+  only for a short time to add and read cookies, so a site sees no debugger.
+- **OpenAI subscriptions connect with Codex device authorization.** Druks shows a
+  code and a link. First, enable device code authorization for Codex in ChatGPT.
+- **An agent call can run for 2 hours.** The Agents settings offer 7200 seconds.
+- **The Dashboard shows your runs and the unattended runs**, not the runs of
+  other operators.
+- **A tracker build runs under the person who moved the ticket**, then the
+  assignee, then the default account. A Jira rule sends
+  `{{initiator.accountId}}` in the `x-jira-initiator` header.
+- **An unlinked person in a Slack room gets the link in a direct message**, and
+  the thread says so.
+- **Claude Chat sessions have auto memory off.** Subject pages start with every
+  transcript collapsed.
+
+### Fixed
+
+- **Only the owner of a connection can reconsent or revoke it.** A reconsent
+  wrote the caller's grant into another person's connection, and Settings listed
+  the connections of every account.
+- **Only a reviewer who can write to the repository answers a build's review
+  gate.** On a public repository, any account's approval could answer it.
+- **The Chat agent reaches the Druks tools.** The bridge sent `Bearer Bearer`,
+  and Druks refused it.
+- **A Chat message is sent again when the bridge never got its prompt.** A turn
+  never runs twice.
+- **A new key, or a switch between harnesses on one key, gets a new sandbox.**
+  A warm sandbox kept the old key entries, so Codex failed without
+  `CODEX_API_KEY`.
+- **A scheduled run gets its sandbox.** Drukbox refused its run id as an
+  idempotency key.
+- **A catalog MCP server with a static key can take its key.** Nothing could
+  store it, so every run failed while the server was enabled.
+- **`druks init-db` works from a wheel install.** The package carries
+  `alembic.ini` and the core migrations. The developer command is
+  `uv run alembic -c backend/druks/alembic.ini`.
+- **WebSockets work behind an edge that rewrites `Host`.** Druks compares
+  `Origin` with the host of `urls.endpoint`.
+- **Chat and the login window work on a docker-sbx host.**
+- **A link to a subject whose id holds `/` or `#` opens that subject.**
+
 ## [0.8.0] — 2026-09-27
 
 ### Breaking changes
