@@ -86,18 +86,21 @@ jobs:
           # prohibit-password; both allow the key login drukbox injects.
           docker exec sbx-boot /usr/sbin/sshd -T | grep -iEx 'permitrootlogin (prohibit-password|without-password|yes)'
 
-  # Drukbox builds the browser as a template: browser.sh run on the stock image
-  # of its docker provider.
+  # Drukbox builds the browser as a template: browser.sh run on the default
+  # image of its docker provider, which every druks deploy sets to the sandbox
+  # image above.
   browser:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Build the sandbox image
+        run: docker build --target sandbox --tag druks-sandbox:pr deploy/sandbox
       - name: Build browser.sh the way Drukbox builds a template
         run: |
           printf '%s\n' \
-            'FROM ghcr.io/czpython/drukbox/sandbox:latest' \
+            'FROM druks-sandbox:pr' \
             'COPY browser.sh /drukbox-setup.sh' \
             'RUN sh /drukbox-setup.sh && rm /drukbox-setup.sh' \
             | docker build --tag druks-browser:pr --file - backend/druks/browser/sandboxes
