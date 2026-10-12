@@ -232,7 +232,7 @@ async def deliver(conversation_id: str) -> None:
             conversation = await session.get(Conversation, conversation_id)
             await deliver_pending(session, conversation)
 
-    async def end_turns() -> str | None:
+    async def end_turns(error_message: str) -> str | None:
         """Give the pending messages the failed state; a delivered turn runs on. On a
         live channel, also save a reply that says so, and return its id."""
         async with step_session() as session:
@@ -247,9 +247,14 @@ async def deliver(conversation_id: str) -> None:
                 newest_message = max(
                     person_messages, key=lambda message: (message.created_at, message.id)
                 )
+                # Only an operator can change a setting or credential.
+                if conversation.account.kind == AccountKind.OPERATOR:
+                    message = error_message
+                else:
+                    message = DELIVERY_FAILED_MESSAGE
                 reply = await conversation.create_message(
                     session,
-                    DELIVERY_FAILED_MESSAGE,
+                    body=message,
                     role=MessageRole.ASSISTANT,
                     reply_to=newest_message,
                 )
@@ -261,10 +266,12 @@ async def deliver(conversation_id: str) -> None:
             reply = await session.get(Message, reply_id)
             await conversation.channel.send_reply(session, conversation, reply)
 
-    async def record_failed(detail: str) -> None:
-        reply_id = await DBOS.run_step_async(StepOptions(name="chat.deliver.failed"), end_turns)
+    async def record_failed(error_message: str) -> None:
+        reply_id = await DBOS.run_step_async(
+            StepOptions(name="chat.deliver.failed"), end_turns, error_message
+        )
         await reset_live_stream(conversation_id)
-        await publish(conversation_id, {"type": "error", "detail": detail})
+        await publish(conversation_id, {"type": "error", "detail": error_message})
         if reply_id:
             await DBOS.run_step_async(
                 StepOptions(name="chat.deliver.reply", retries_allowed=True, max_attempts=5),
@@ -322,7 +329,7 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
             try:
                 config = await get_config(session, bot_id, conversation.account_id)
             except (AgentConfigError, HarnessNotConnectedError) as error:
-                raise ChatHarnessError(f"Chat cannot run: {error}") from error
+                raise ChatHarnessError(f"The agent cannot run: {error}") from error
             if not config.harness_class.adapter_command:
                 adapters = ", ".join(
                     harness.name for harness in get_harnesses() if harness.adapter_command

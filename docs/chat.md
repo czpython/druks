@@ -82,12 +82,13 @@ action can cause the agent to do an external action again.
 Druks tries a delivery up to five times. It stops at the first attempt when a
 person must change the Chat agent's settings or provider credentials. When the
 delivery fails, the pending messages show **Failed**, and Druks never sends them
-again by itself. **Send
-again** saves a new message with the same text and file. A turn that the agent
-already runs keeps running, and the next delivery saves its reply. In a Slack, GitHub, or
-WhatsApp conversation, Druks also replies in the channel that the message
-failed, unless the conversation is paused or its connection was removed. Send
-the message again in the channel to retry.
+again by itself. **Send again** saves a new message with the same text and file.
+A turn that the agent already runs keeps running, and the next delivery saves
+its reply. In a Slack, GitHub, or WhatsApp conversation, Druks also replies in
+the channel that the message failed, unless the conversation is paused or its
+connection was removed. When a person must change a setting or credential, the
+reply names it, except in a Bot's conversation. Send the message again in the
+channel to retry.
 
 A browser connection loss does not send the message again. The page connects
 again and reads the saved messages and available live events.
