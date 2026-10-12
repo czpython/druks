@@ -673,7 +673,8 @@ async def _stream_local_tar_into(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    assert proc.stdout is not None
+    # tar stops writing the archive once its stderr pipe fills, so read both pipes together.
+    stderr_read = asyncio.create_task(proc.stderr.read())
 
     try:
         while True:
@@ -685,6 +686,7 @@ async def _stream_local_tar_into(
         writer.write_eof()
     finally:
         rc = await proc.wait()
+        stderr = await stderr_read
 
     # tar exit codes: 0 = ok, 1 = "some files differ / changed or were
     # removed while reading" (the archive is still complete minus the
@@ -695,17 +697,11 @@ async def _stream_local_tar_into(
     # down every agent operation in credentials.push. Observed in prod:
     # "tar: ./<skill>: File removed before we read it" → exit 1.
     if rc >= 2:
-        stderr = b""
-        if proc.stderr is not None:
-            stderr = await proc.stderr.read()
         raise RuntimeError(
             f"local tar exited {rc} while tarring {local}: "
             f"{stderr.decode('utf-8', errors='replace').strip()}",
         )
     if rc == 1:
-        stderr = b""
-        if proc.stderr is not None:
-            stderr = await proc.stderr.read()
         logger.warning(
             "local tar exited 1 (files changed/removed during read) while tarring "
             "%s; uploaded the rest: %s",
