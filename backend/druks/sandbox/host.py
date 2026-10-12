@@ -684,6 +684,11 @@ async def _stream_local_tar_into(
             writer.write(chunk)
             await writer.drain()
         writer.write_eof()
+    except BaseException:
+        # Nothing reads stdout now, so a running tar would block on the full pipe and never exit.
+        if proc.returncode is None:
+            proc.kill()
+        raise
     finally:
         rc = await proc.wait()
         stderr = await stderr_read
