@@ -382,7 +382,8 @@ message.
 Tell the agent to answer only when you tag it, and your untagged replies in that
 thread stop reaching it. The agent records your choice with `chat_require_tag`.
 Tell it to answer your replies again, and they reach it again for the rest of the
-24 hours. Your choice holds for that thread only.
+24 hours. Your choice holds for that thread only. **Settings → Preferences**
+sets the default for the threads you tag the bot in from then on.
 
 The agent reads the thread with `chat_read_thread`: the newest 200 messages,
 oldest first, each with its author's id and name, whether this agent wrote it,

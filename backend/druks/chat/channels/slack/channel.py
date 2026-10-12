@@ -92,6 +92,7 @@ class SlackChannel(Channel):
             user_name="",
             user_phone="",
             thread_id=get_thread_id(message),
+            is_tag_required=account.is_tag_required,
         )
         client = SlackClient(token=card.secrets["bot_token"])
         shares = message.get("files", [])

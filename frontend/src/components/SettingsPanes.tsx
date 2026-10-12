@@ -430,12 +430,16 @@ export function PreferencesPane({
   setTimezone,
   timezones,
   clock,
+  isTagRequired,
+  setTagRequired,
   busy,
 }: {
   timezone: string
   setTimezone: (timezone: string) => void
   timezones: string[]
   clock: string
+  isTagRequired: boolean
+  setTagRequired: (isTagRequired: boolean) => void
   busy: boolean
 }) {
   const timezoneId = 'personal-timezone'
@@ -467,6 +471,26 @@ export function PreferencesPane({
           <span className="set-clock">
             now · <b>{clock}</b>
           </span>
+        </div>
+      </div>
+      <div className="set-group" data-setting={SETTINGS_FIELDS.tagRequired.field}>
+        <div className="set-group-label">Slack threads</div>
+        <div className="settings-fast-mode">
+          <div>
+            <label className="mcp-label" htmlFor="personal-tag-required">
+              Answer only when I tag the bot
+            </label>
+            <span className="set-field-help">
+              For the threads you tag the bot in from now on.
+            </span>
+          </div>
+          <Switch
+            id="personal-tag-required"
+            on={isTagRequired}
+            onClick={() => setTagRequired(!isTagRequired)}
+            disabled={busy}
+            label="Answer only when I tag the bot"
+          />
         </div>
       </div>
     </div>

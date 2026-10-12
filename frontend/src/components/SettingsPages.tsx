@@ -174,6 +174,7 @@ export function SettingsPages({
   const errorNotice = useRef<HTMLParagraphElement>(null)
   const effectiveDefaults = defaults ?? savedDefaults
   const personalTimezone = personalEdits.timezone ?? personalQuery.data?.timezone ?? 'UTC'
+  const personalTagRequired = personalEdits.isTagRequired ?? personalQuery.data?.isTagRequired ?? false
   const personalChanges = Object.fromEntries(
     Object.entries(personalEdits).filter(([field, value]) =>
       value !== personalQuery.data?.[field as keyof UpdatePersonalSettingsRequest],
@@ -688,6 +689,8 @@ export function SettingsPages({
                   setTimezone={(value) => setPersonalEdits((current) => ({ ...current, timezone: value }))}
                   timezones={timezones}
                   clock={clock}
+                  isTagRequired={personalTagRequired}
+                  setTagRequired={(value) => setPersonalEdits((current) => ({ ...current, isTagRequired: value }))}
                   busy={saving}
                 />
               )}

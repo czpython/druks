@@ -52,6 +52,7 @@ async def test_account_creation_copies_defaults_once(tmp_path, druks_db, monkeyp
         ).json() == {
             "timezone": "America/New_York",
             "gateParkDestinationId": None,
+            "isTagRequired": False,
         }
     assert await druks_db.scalar(select(func.count()).select_from(InstallationSettings)) == 1
 
@@ -72,6 +73,8 @@ async def test_personal_notifications_can_be_saved_and_cleared(tmp_path, druks_d
         assert cleared.json()["gateParkDestinationId"] is None
         rejected = client.patch("/api/settings/personal", json={"gateParkDestinationId": "missing"})
         assert rejected.status_code == 422
+        required = client.patch("/api/settings/personal", json={"isTagRequired": True})
+        assert required.json()["isTagRequired"] is True
 
 
 @pytest.mark.parametrize("has_settings", [False, True])
@@ -265,7 +268,7 @@ async def test_personal_api_is_scoped_and_does_not_retime_schedules(
         alice = {IDENTITY_HEADER: "alice@example.com"}
         bob = {IDENTITY_HEADER: "bob@example.com"}
         inherited = client.get("/api/settings/personal", headers=alice).json()
-        assert set(inherited) == {"timezone", "gateParkDestinationId"}
+        assert set(inherited) == {"timezone", "gateParkDestinationId", "isTagRequired"}
         saved = client.patch(
             "/api/settings/personal", headers=alice, json={"timezone": "America/New_York"}
         )
