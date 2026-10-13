@@ -2045,7 +2045,11 @@ a.dui-status:hover { text-decoration: underline; }
 .dui-cards-tiles .dui-links { padding-bottom: 12px; }
 .dui-cards-tiles .dui-fact-list { margin: 0; gap: 4px 12px; }
 .dui-cards-tiles .dui-links { margin-top: 0; }
-.dui-cards > li { display: grid; }
+/* display: grid makes every card in a row as tall as the tallest.
+   min-width: 0 lets what is inside shrink into the column — the default
+   minimum is the content's own width, so a wide image paints over the next card. */
+.dui-cards > li { display: grid; min-width: 0; }
+.dui-cards .dui-card { min-width: 0; max-width: 100%; }
 /* A board column stretches to the tallest neighbor. The drop target has to
    fill that height, or an empty column only accepts a drop on its empty copy.
    min-width: 0 keeps columns from growing with empty copy, which would shove
@@ -2062,9 +2066,12 @@ a.dui-status:hover { text-decoration: underline; }
 .dui-cards-item-dim { opacity: 0.4; }
 .dui-cards-item-away { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .dui-card-ghost { opacity: 0.4; pointer-events: none; }
-.dui-gallery-grid { list-style: none; margin: 12px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
-.dui-gallery-item { display: block; }
-.dui-gallery .dui-image { margin: 0; }
+.dui-gallery { min-width: 0; max-width: 100%; }
+.dui-gallery-grid { list-style: none; margin: 12px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; min-width: 0; }
+.dui-gallery-grid > li { min-width: 0; }
+.dui-gallery-item { display: block; min-width: 0; }
+.dui-gallery .dui-image { margin: 0; min-width: 0; max-width: 100%; }
+.dui-gallery .dui-image img { width: 100%; }
 
 /* A narrow screen scrolls the table sideways rather than restacking it: a
    stacked row loses the header each cell belongs to, and a screen reader reads
