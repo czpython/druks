@@ -11,7 +11,7 @@ from conftest import bind_ambient_session, connect_service
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.dependencies import request_session
 from druks.chat.channels.slack.channel import SlackChannel
-from druks.chat.channels.slack.constants import LINK_KEY
+from druks.chat.channels.slack.constants import FILE_KEY, LINK_KEY
 from druks.chat.constants import CONVERSATION_HEADER
 from druks.chat.enums import ConversationSource, MessageRole
 from druks.chat.exceptions import ChannelHasNoThreadsError
@@ -74,7 +74,8 @@ def delivery(monkeypatch):
 
 @pytest.fixture
 def endpoint(monkeypatch):
-    settings = SimpleNamespace(urls=SimpleNamespace(endpoint="https://druks.example"))
+    urls = SimpleNamespace(endpoint="https://druks.example", webhook_base="https://druks.example")
+    settings = SimpleNamespace(urls=urls)
     monkeypatch.setattr("druks.chat.channels.slack.channel.load_settings", lambda: settings)
 
 
@@ -385,16 +386,22 @@ async def test_an_unlinked_person_who_tags_the_bot_gets_the_link_by_direct_messa
     delivery.assert_not_awaited()
 
 
-async def test_the_agent_reads_its_thread_and_knows_who_wrote_what(card, druks_db, monkeypatch):
+async def test_the_agent_reads_its_thread_and_knows_who_wrote_what(
+    card, druks_db, endpoint, tmp_path, monkeypatch
+):
     """Ben's agent answers in the same thread as the same bot: only the replies this
-    conversation recorded are the agent's own."""
+    conversation recorded are the agent's own. A file on a message is a Druks file
+    the agent fetches."""
+    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+    download = AsyncMock(return_value=b"%PDF")
+    monkeypatch.setattr(SlackClient, "download", download)
     ana = await Account.get_or_create(druks_db, "ana@example.com")
     reads = thread_reads(
         monkeypatch,
         [
             {"ts": "10.0", "user": ANA, "text": f"<@{BOT}> read my runs"},
             {"ts": "10.1", "user": BOT, "text": "Sure."},
-            {"ts": "10.2", "user": "U200", "text": "me too"},
+            {"ts": "10.2", "user": "U200", "text": "", "files": [shared_file()]},
             {"ts": "10.3", "user": BOT, "text": "Hi Ben."},
         ],
     )
@@ -415,6 +422,15 @@ async def test_the_agent_reads_its_thread_and_knows_who_wrote_what(card, druks_d
         ("10.2", "Ben", False, False),
         ("10.3", "Druks", False, False),
     ]
+    [shared] = thread[2]["files"]
+    assert (shared["name"], shared["content_type"]) == ("plan.pdf", "application/pdf")
+    assert shared["url"].startswith("https://druks.example/api/files/")
+    assert [message["files"] for message in thread] == [[], [], [shared], []]
+    # The second read found the copy by Slack file id. Without that, by its bytes.
+    assert download.await_count == 1
+    await get_client().delete(FILE_KEY.format(file_id="F1"))
+    again = await SlackChannel.read_thread(druks_db, conversation)
+    assert again[2]["files"] == [shared] and download.await_count == 2
     assert reads.count("users.info") == 3
     direct = await thread_conversation(druks_db, card, ana, thread_id="")
     with pytest.raises(ChannelHasNoThreadsError):

@@ -386,10 +386,12 @@ Tell it to answer your replies again, and they reach it again for the rest of th
 sets the default for the threads you tag the bot in from then on.
 
 The agent reads the thread with `chat_read_thread`: the newest 200 messages,
-oldest first, each with its author's id and name, whether this agent wrote it,
-and whether the person it answers wrote it. Every agent in a thread posts as the
-one bot, so Druks tells an agent's own replies by the Slack ids it recorded. In
-a direct message the tool answers that there is no thread.
+oldest first, each with its author's id and name, the files on it, whether this
+agent wrote it, and whether the person it answers wrote it. The newest 20 files
+in the thread are copies in Druks that the agent fetches by url; an older file is
+named only. Every agent in a thread posts as the one bot, so Druks tells an
+agent's own replies by the Slack ids it recorded. In a direct message the tool
+answers that there is no thread.
 
 ## GitHub
 

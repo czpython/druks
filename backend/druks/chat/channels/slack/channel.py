@@ -20,11 +20,14 @@ from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
 
 from .constants import (
+    FILE_KEY,
+    FILE_TTL_SECONDS,
     JOINED_THREAD_SECONDS,
     LINK_KEY,
     LINK_MESSAGE,
     LINK_TTL_SECONDS,
     REPLY_PIECE_CHARACTERS,
+    THREAD_FILES,
     THREAD_MESSAGES,
     UNLINKED_REPLY,
 )
@@ -36,6 +39,37 @@ def get_thread_id(message: dict) -> str:
     if message["channel_type"] == "im":
         return ""
     return f"{message['channel']}:{message.get('thread_ts') or message['ts']}"
+
+
+async def download_files(
+    client: SlackClient, shares: list[dict], *, uploaded_by: str
+) -> list[File]:
+    """Each shared Slack file as a Druks file, in order. A copy made in the last day
+    is found by Slack file id without a download, and the same file sent again is
+    one file."""
+    redis = get_client()
+    keys = [FILE_KEY.format(file_id=shared["id"]) for shared in shares]
+    held = [await redis.get(key) for key in keys]
+    # Every download first: a failed one then leaves no file on disk.
+    contents = [
+        None if file_id else await client.download(shared["url_private_download"])
+        for shared, file_id in zip(shares, held, strict=True)
+    ]
+    files = []
+    for shared, key, file_id, content in zip(shares, keys, held, contents, strict=True):
+        if file_id:
+            files.append(File(id=file_id.decode()))
+            continue
+        file = await File.get_or_create(
+            name=shared["name"],
+            content_type=shared["mimetype"],
+            content=content,
+            app="chat",
+            uploaded_by=uploaded_by,
+        )
+        await redis.set(key, file.id, ex=FILE_TTL_SECONDS)
+        files.append(file)
+    return files
 
 
 class SlackChannel(Channel):
@@ -96,18 +130,7 @@ class SlackChannel(Channel):
         )
         client = SlackClient(token=card.secrets["bot_token"])
         shares = message.get("files", [])
-        # Every download first: a failed one then leaves no file on disk.
-        contents = [await client.download(shared["url_private_download"]) for shared in shares]
-        files = [
-            await File.create(
-                name=shared["name"],
-                content_type=shared["mimetype"],
-                content=content,
-                app="chat",
-                uploaded_by=account.id,
-            )
-            for shared, content in zip(shares, contents, strict=True)
-        ]
+        files = await download_files(client, shares, uploaded_by=account.id)
         # The agent would take the bot's own mention for the person it answers.
         text = message["text"].replace(f"<@{card.identity['bot_user_id']}>", "").strip()
         source_id = f"{message['channel']}:{message['ts']}"
@@ -168,24 +191,44 @@ class SlackChannel(Channel):
 
     @classmethod
     async def read_thread(cls, session: AsyncSession, conversation: Conversation) -> list[dict]:
-        """The thread's newest messages, oldest first, with who wrote each one. Every
-        agent in the thread posts as the one bot, so a reply is this conversation's by
-        its recorded Slack id. A webhook's post has no author and is left out."""
+        """The thread's newest messages, oldest first, with who wrote each one and the
+        files on it. The thread's newest files are Druks files the agent fetches by
+        url; an older one is named without a url. Every agent in the thread posts as
+        the one bot, so a reply is this conversation's by its recorded Slack id. A
+        webhook's post has no author and is left out."""
         room, _, thread_ts = conversation.thread_id.partition(":")
         if not room:
             raise ChannelHasNoThreadsError("A direct message has no thread to read.")
         client = SlackClient(token=conversation.connection.secrets["bot_token"])
-        messages = await client.list_replies(room, thread_ts, limit=THREAD_MESSAGES)
+        messages = [
+            message
+            for message in await client.list_replies(room, thread_ts, limit=THREAD_MESSAGES)
+            if "user" in message
+        ]
         own_replies = await conversation.list_reply_source_ids(session)
+        shares = [shared for message in messages for shared in message.get("files", [])]
+        shares = shares[-THREAD_FILES:]
+        files = await download_files(client, shares, uploaded_by=conversation.account_id)
+        base = load_settings().urls.webhook_base
+        urls = {
+            shared["id"]: f"{base}{file.url}" for shared, file in zip(shares, files, strict=True)
+        }
         return [
             {
                 "ts": message["ts"],
                 "user_id": message["user"],
                 "user_name": await client.get_user_name(message["user"]),
                 "text": message["text"],
+                "files": [
+                    {
+                        "name": shared["name"],
+                        "content_type": shared["mimetype"],
+                        "url": urls.get(shared["id"], ""),
+                    }
+                    for shared in message.get("files", [])
+                ],
                 "is_from_you": f"{room}:{message['ts']}" in own_replies,
                 "is_from_user": message["user"] == conversation.user_id,
             }
             for message in messages
-            if "user" in message
         ]

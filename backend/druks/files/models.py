@@ -16,6 +16,7 @@ class FileRecord(Base, Uuid7Pk):
             "num_nonnulls(uploaded_by, agent_call_id) <= 1", name="files_one_source_check"
         ),
         Index("files_deleted_at_idx", "deleted_at"),
+        Index("files_sha256_idx", "sha256"),
     )
 
     name: Mapped[str] = mapped_column(String)
