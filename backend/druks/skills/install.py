@@ -5,6 +5,8 @@ import tarfile
 from pathlib import Path
 from urllib.parse import urlparse
 
+from githubkit.exception import RequestFailed
+
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.apis.github import download_public_tarball
 from druks.core.services import Github
@@ -26,7 +28,14 @@ async def fetch_collection(
         github = await Github.get_client()
         archive = await github.download_tarball(repo)
     except (ServiceNotConnectedError, GitHubAppNotInstalledError):
-        archive = await download_public_tarball(repo)
+        try:
+            archive = await download_public_tarball(repo)
+        except RequestFailed as error:
+            if error.response.status_code != 404:
+                raise
+            raise ValueError(
+                "Repository not found. A private repository needs the GitHub App installed on it."
+            ) from error
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
         members = tar.getmembers()
         if not members:
@@ -58,6 +67,8 @@ def remove_files(path: str) -> None:
 
 
 def _parse_github_repo(url: str) -> str:
+    if "://" not in url:
+        url = f"https://{url}"
     parsed = urlparse(url)
     parts = [part for part in parsed.path.split("/") if part]
     if parsed.netloc not in ("github.com", "www.github.com") or len(parts) < 2:
