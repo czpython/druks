@@ -878,7 +878,12 @@ is one of:
   key. An account that has set no key gets the server left out of its sandbox.
 - An OAuth connection, which requires `urls.endpoint`. The provider redirects
   to `<endpoint>/api/mcp-servers/oauth/callback`. A provider that allow-lists
-  redirect hosts, such as Atlassian, must list that URL.
+  redirect hosts, such as Atlassian, must list that URL. **Connect for
+  everyone** makes one connection that every run uses. While such an enabled
+  server has no connection, every run fails. **Connect your account** makes
+  each account connect its own. An account that has not connected the server
+  gets it left out of its sandbox. The run's agent call manifest records the
+  server as declared but not delivered.
 
 A service can own the host of an OAuth server: GitHub owns
 `api.githubcopilot.com`, Jira owns `mcp.atlassian.com`, and Linear owns

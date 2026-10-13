@@ -100,6 +100,8 @@ class MissingGrantError(McpServerError):
     # An enabled OAuth server has no stored grant, so delivery can't mint a
     # token for it. Raised loudly at delivery — the operator must run the
     # connect flow (or disable the server), not discover a dead server mid-run.
+    # A server each account connects for itself is left out of the box
+    # instead: one account's missing grant must not stop every other account.
     def __init__(self, name: str, account_id: str | None):
         scope = f"account {account_id!r}" if account_id else "the installation"
         super().__init__(
