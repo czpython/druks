@@ -1,12 +1,16 @@
+import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import Response
+from starlette.requests import ClientDisconnect
 
 from druks.api.dependencies import SettingsDep
 from druks.apps.registry import webhooks
 
 from .exceptions import InvalidWebhookError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/_external", tags=["webhooks"])
 
@@ -34,4 +38,9 @@ async def dispatch(hook_path: str, request: Request, settings: SettingsDep) -> R
         WebhookCls, kwargs = match_webhook(hook_path)
     except InvalidWebhookError as exc:
         raise HTTPException(status_code=404, detail="Webhook doesn't exist.") from exc
-    return await WebhookCls(request, kwargs, settings).respond()
+    try:
+        return await WebhookCls(request, kwargs, settings).respond()
+    except ClientDisconnect:
+        # The sender hung up before the body arrived; it retries on its own.
+        logger.info("webhook sender disconnected: %s", request.url.path)
+        return Response(status_code=status.HTTP_400_BAD_REQUEST)
