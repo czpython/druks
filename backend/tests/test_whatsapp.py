@@ -541,7 +541,7 @@ async def test_a_bot_in_a_group_reads_the_group_first(druks_db, helpdesk, monkey
     assert await service.get_agent(druks_db, conversation) == (
         "helpdesk.bot",
         f"Be kind.\n\n{THREAD_PROMPT}\n\n{INTERNAL_MESSAGES_PROMPT}",
-        ("helpdesk_get_ticket", "chat_read_thread"),
+        ("helpdesk_get_ticket", "chat_read_thread", "chat_read_file"),
     )
 
 

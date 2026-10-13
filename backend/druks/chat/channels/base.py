@@ -51,6 +51,14 @@ class Channel:
         raise ChannelHasNoThreadsError(f"A {cls.name} conversation has no thread to read.")
 
     @classmethod
+    async def download_file(
+        cls, session: AsyncSession, conversation: Conversation, file_id: str
+    ) -> tuple[bytes, str, str]:
+        """A file on the conversation's thread, by the id its source gave it, as its
+        bytes, name, and content type."""
+        raise ChannelHasNoThreadsError(f"A {cls.name} conversation has no thread files to read.")
+
+    @classmethod
     async def start_conversation(
         cls, session: AsyncSession, conversation: Conversation, *, phone: str, name: str
     ) -> Conversation:

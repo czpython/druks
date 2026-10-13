@@ -494,10 +494,13 @@ Tell it to answer your replies again, and they reach it again for the rest of th
 then on.
 
 The agent reads the thread with `chat_read_thread`: the newest 200 messages,
-oldest first, each with its author's id and name, whether this agent wrote it,
-and whether the person it answers wrote it. Every agent in a thread posts as the
-one bot, so Druks tells an agent's own replies by the Slack ids it recorded. In
-a direct message the tool answers that there is no thread.
+oldest first, each with its author's id and name, the files on it, whether this
+agent wrote it, and whether the person it answers wrote it. A file stays in
+Slack. The agent reads one with `chat_read_file`: Druks fetches it, once Slack
+confirms it is shared where the thread lives, and puts it in the agent's
+workspace. Every agent in a thread posts as the one bot, so Druks tells an
+agent's own replies by the Slack ids it recorded. In a direct message the tool
+answers that there is no thread.
 
 ## GitHub
 
