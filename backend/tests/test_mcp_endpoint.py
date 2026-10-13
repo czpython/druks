@@ -533,7 +533,13 @@ async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
         )
         external.input_requested_at = datetime.now(UTC)
         await druks_db.flush()
-        unanswerable = await _call_error(client, "get_gate", {"run": external.id})
+        gate = (await client.call_tool("get_gate", {"run": external.id})).structured_content
+        assert gate["ask"]["presentation"] == "external"
+        unanswerable = await _call_error(
+            client,
+            "answer_gate",
+            {"run": external.id, "parkedAt": gate["parkedAt"], "control": "approve"},
+        )
     assert unanswerable["code"] == "GATE_NOT_ANSWERABLE"
 
 

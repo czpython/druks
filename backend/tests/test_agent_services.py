@@ -152,7 +152,7 @@ async def test_get_gate_serves_the_artifact(druks_db):
     assert len(view.artifact.content.encode()) <= 4096
 
 
-async def test_get_gate_refuses_when_not_parked_or_external(druks_db):
+async def test_get_gate_refuses_when_not_parked(druks_db):
     with pytest.raises(RunNotFound):
         await services.get_gate(db_session(), "no-such-run")
 
@@ -161,14 +161,15 @@ async def test_get_gate_refuses_when_not_parked_or_external(druks_db):
     with pytest.raises(exceptions.GateNotOpen):
         await services.get_gate(db_session(), running.id)
 
-    external_item = await make_test_note()
-    external = await _park(
-        druks_db,
-        external_item,
-        ask={"presentation": "external", "label": "Answer on the ticket"},
-    )
-    with pytest.raises(exceptions.GateNotAnswerable):
-        await services.get_gate(db_session(), external.id)
+
+async def test_get_gate_reads_an_external_gate(druks_db):
+    item = await make_test_note()
+    ask = {"presentation": "external", "label": "Answer on the ticket", "url": "https://x/1"}
+    external = await _park(druks_db, item, ask=ask)
+
+    view = await services.get_gate(db_session(), external.id)
+
+    assert view.ask == ask
 
 
 # The answered and already-answered happy paths are pinned at both doors —

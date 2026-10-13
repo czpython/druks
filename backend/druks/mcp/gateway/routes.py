@@ -23,7 +23,6 @@ router = APIRouter(prefix="/api", tags=["agent"])
     responses=agent_error_responses(
         RunNotFound("run-123"),
         gate_errors.GateNotOpen("run-123"),
-        gate_errors.GateNotAnswerable("run-123"),
     ),
 )
 async def get_gate(
@@ -31,7 +30,10 @@ async def get_gate(
     run: Annotated[str, Path(description="The parked run, from list_open_subjects.")],
 ) -> schemas.GateResponse:
     """A parked run's open gate: the ask, a bounded artifact chunk, and
-    parkedAt — echo parkedAt unchanged to answer_gate."""
+    parkedAt — echo parkedAt unchanged to answer_gate. ask.presentation is
+    in_app when answer_gate takes this gate. An external ask is answered by a
+    person at ask.url and ask.label says what it waits for: do not call
+    answer_gate on it, report where it is answered instead."""
     return await services.get_gate(session, run)
 
 
