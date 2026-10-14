@@ -175,6 +175,7 @@ describe('project dialogs', () => {
     await openActions()
     fireEvent.click(screen.getByRole('button', { name: 'Rename project' }))
     const name = screen.getByRole('textbox', { name: 'Project name' })
+    expect(document.activeElement).toBe(name)
     fireEvent.change(name, { target: { value: 'Renamed' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save name' }))
     expect((await screen.findByRole('alert')).textContent).toContain('name is taken')
@@ -219,6 +220,17 @@ describe('project deletion', () => {
 })
 
 describe('repository selection', () => {
+  it.each([false, true])('focuses the repository filter with cached data: %s', async (hasCachedRepositories) => {
+    const repositories = { repos: [{ fullName: 'acme/docs', description: null }] }
+    vi.mocked(projectsApi.listGithubRepos).mockResolvedValue(repositories)
+    const client = renderPage([project({ repos: [repo()] })])
+    if (hasCachedRepositories) client.setQueryData(['github-repos'], repositories)
+    await openActions()
+    fireEvent.click(screen.getByRole('button', { name: 'Add repo' }))
+    const filter = await screen.findByRole('textbox', { name: 'Filter repositories' })
+    expect(document.activeElement).toBe(filter)
+  })
+
   it('excludes existing repositories and submits the selected repo and purpose', async () => {
     vi.mocked(projectsApi.listGithubRepos).mockResolvedValue({ repos: [
       { fullName: 'ACME/SERVICE', description: null },

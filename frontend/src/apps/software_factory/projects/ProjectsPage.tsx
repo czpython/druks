@@ -86,6 +86,7 @@ function ProjectDialog({
   useEffect(() => {
     const element = dialog.current!
     element.showModal()
+    element.querySelector('input')?.focus()
     return () => {
       element.close()
       if (opener instanceof HTMLElement) opener.focus()
@@ -135,7 +136,7 @@ function ProjectNameDialog({ project, onClose }: { project?: Project; onClose: (
         <div className="pj-dialog-body">
           <label className="pj-field">
             Project name
-            <TextInput autoFocus value={name} disabled={save.isPending} onChange={(event) => setName(event.target.value)} />
+            <TextInput value={name} disabled={save.isPending} onChange={(event) => setName(event.target.value)} />
           </label>
           {!project && <p>A project groups the repos a build operates on. Add repos after you create it.</p>}
           {save.error && <p className="pj-error" role="alert">{String(save.error)}</p>}
