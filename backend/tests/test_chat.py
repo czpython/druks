@@ -40,6 +40,7 @@ from druks.secrets.models import VaultSecret
 from druks.settings import Urls
 from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_run
 from druks.user_settings.models import SettingsOverride
+from druks.workflows import Subject
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy import delete
 
@@ -1095,16 +1096,44 @@ async def test_cancel_route_only_changes_the_requested_pending_message(
     get_running_sandbox.assert_not_called()
 
 
-async def test_a_run_that_never_parked_reports_only_a_result_it_returned(druks_db, conversation):
+async def test_a_run_that_never_parked_reports_its_result_or_that_it_had_none(
+    druks_db, conversation
+):
     run = await seed_run(druks_db, kind="test", account_id=conversation.account_id)
     run.conversation_id = conversation.id
 
-    assert not await service.report_result(druks_db, run, result=None)
+    assert await service.report_result(druks_db, run, result=None) == conversation.id
+    *_, report = await list_messages(druks_db, conversation)
+    assert (report.is_internal, run.id in report.body, "no result" in report.body) == (
+        True,
+        True,
+        True,
+    )
+
     reported = await service.report_result(druks_db, run, result={"url": "https://bingo.test"})
     assert reported == conversation.id
 
     *_, report = await list_messages(druks_db, conversation)
     assert (report.is_internal, '"url":"https://bingo.test"' in report.body) == (True, True)
+
+
+async def test_a_run_with_no_result_names_its_subject_so_the_agent_reads_it_there(
+    druks_db, conversation
+):
+    class Widget(Subject):
+        pass
+
+    run = await seed_run(
+        druks_db,
+        kind="test",
+        subject=Widget(id="acme/widget#7"),
+        account_id=conversation.account_id,
+    )
+    run.conversation_id = conversation.id
+
+    assert await service.report_result(druks_db, run, result=None) == conversation.id
+    *_, report = await list_messages(druks_db, conversation)
+    assert (report.is_internal, "acme/widget#7" in report.body) == (True, True)
 
 
 async def test_a_failed_run_reports_to_its_conversation_whether_or_not_it_parked(

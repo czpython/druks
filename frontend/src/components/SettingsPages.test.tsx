@@ -342,6 +342,7 @@ function stubFetch(
         const preferences = savedPersonal ?? {
           timezone: 'UTC',
           gateParkDestinationId: savedSettings.gateParkDestinationId,
+          isTagRequired: false,
         }
         if (init?.method === 'PATCH') {
           const changes = JSON.parse(String(init.body))
@@ -977,7 +978,7 @@ describe('settings resource and keyboard behavior', () => {
     expect(update).toHaveBeenCalledTimes(1)
     expect(update).toHaveBeenCalledWith({ timezone: 'Europe/Madrid' })
     await act(async () => {
-      finish({ timezone: 'Europe/Madrid', gateParkDestinationId: null } as PersonalSettings)
+      finish({ timezone: 'Europe/Madrid', gateParkDestinationId: null, isTagRequired: false } as PersonalSettings)
     })
     expect(
       (screen.getByRole('button', { name: 'Save changes' }) as HTMLButtonElement).disabled,
@@ -1687,7 +1688,7 @@ it('focuses a personal field after preferences finish loading', async () => {
   renderSettings('/settings/personal?field=timezone')
   await screen.findByRole('heading', { name: 'Preferences' })
   expect(screen.queryByRole('combobox', { name: 'Timezone' })).toBeNull()
-  await act(async () => { finish({ timezone: 'UTC', gateParkDestinationId: null }) })
+  await act(async () => { finish({ timezone: 'UTC', gateParkDestinationId: null, isTagRequired: false }) })
   await waitFor(() => expect(document.activeElement?.id).toBe('personal-timezone'))
 })
 

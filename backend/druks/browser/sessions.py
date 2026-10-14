@@ -1,5 +1,6 @@
 import asyncio
 import json
+import secrets
 import shlex
 import tempfile
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -7,13 +8,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
+import httpx
+
 from druks.apps.registry import browser_sessions
 from druks.browser.constants import (
     CDP_CONNECT_TIMEOUT_SECONDS,
+    PINCHTAB_REQUEST_TIMEOUT_SECONDS,
     SESSION_EXPORT_TIMEOUT_SECONDS,
     SESSION_LAUNCH_TIMEOUT_SECONDS,
 )
-from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
+from druks.browser.enums import BrowserClient, BrowserSessionPayloadFormat, BrowserSessionStatus
 from druks.browser.exceptions import (
     BrowserClientMissingError,
     BrowserExportError,
@@ -23,16 +27,18 @@ from druks.browser.exceptions import (
     BrowserSessionWriterLockedError,
 )
 from druks.browser.models import StoredBrowserSession
+from druks.browser.pinchtab import PinchTab
 from druks.db import db_session
 from druks.exceptions import LockHeldError
 from druks.locks import lock
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.datastructures import Sandbox
 from druks.sandbox.templates import get_template_id
-from druks.settings import Settings, load_settings
+from druks.settings import load_settings
 
 SESSION_ROOT = "/work/session"
 CDP_PORT = 9222
+PINCHTAB_PORT = 9867
 
 
 async def _playwright_context(connection, name: str):
@@ -51,14 +57,14 @@ async def _playwright_context(connection, name: str):
 class BrowserSession:
     """A named browser login the app's runs borrow.
 
-    Declared on the App class — ``acme = BrowserSession(site="acme.example")``
+    Declared on the App class — ``atlas = BrowserSession(site="atlas.example")``
     — the attribute name and the app's name become the session's identity
-    (``night_watch.acme``). The operator signs in once through the login window;
+    (``field_notes.atlas``). The operator signs in once through the login window;
     a workflow then borrows the logged-in browser::
 
-        async with NightWatch.acme.playwright() as browser:
+        async with FieldNotes.atlas.playwright() as browser:
             page = await browser.new_page()
-            await page.goto("https://acme.example/home")
+            await page.goto("https://atlas.example/species")
     """
 
     # Browsers run in containers on the Druks box, whatever provider the
@@ -73,6 +79,9 @@ class BrowserSession:
     # The session needs no login: every borrow opens a blank profile and the
     # operator is never asked to sign in.
     anonymous: bool = False
+    # Every borrow drops each request that is not a GET, in the browser. The
+    # login window is unaffected.
+    read_only: bool = False
     name: str = field(init=False, default="")
 
     def __post_init__(self) -> None:
@@ -110,37 +119,30 @@ class BrowserSession:
         block. The browser lives in its own container on the druks box and
         dies with the block; a persisting session is exported and stored
         back first."""
-        row = await (self.get_or_create_row() if self.anonymous else self._ready_row())
-        writer_lock = AsyncExitStack()
-        if self.persist:
+        async with self._borrow() as browser:
+            listener = await browser.forward_local_port(CDP_PORT)
             try:
-                await writer_lock.enter_async_context(
-                    lock(f"browser_session:{row.id}", blocking=False)
-                )
-            except LockHeldError as error:
-                raise BrowserSessionWriterLockedError(row.id) from error
-        async with writer_lock:
-            settings = load_settings()
-            template = await get_template_id(self.sandbox)
-            async with sandbox_client.ephemeral(
-                provider=self.sandbox.provider, template=template
-            ) as browser:
-                await seed_state(browser, row)
-                await self._launch(browser, settings)
-                await row.mark_used()
-                listener = await browser.forward_local_port(CDP_PORT)
-                try:
-                    yield f"http://127.0.0.1:{listener.get_port()}"
-                except BrowserSessionSignedOutError as error:
-                    # The app says the login bounced; only the door knows
-                    # which session that was. The run machinery does the rest.
-                    error.session_name = self.name
-                    raise
-                finally:
-                    listener.close()
-                if self.persist:
-                    row.payload_format = BrowserSessionPayloadFormat.PROFILE_DIR.value
-                    await row.store_payload(await export_state(browser, self.name))
+                yield f"http://127.0.0.1:{listener.get_port()}"
+            finally:
+                listener.close()
+
+    @asynccontextmanager
+    async def pinchtab(self):
+        """The logged-in browser, driven through a PinchTab bridge that Druks
+        starts beside Chrome for the block. The bridge opens only the
+        session's site."""
+        token = secrets.token_urlsafe(32)
+        async with self._borrow(client=BrowserClient.PINCHTAB, token=token) as browser:
+            listener = await browser.forward_local_port(PINCHTAB_PORT)
+            try:
+                async with httpx.AsyncClient(
+                    base_url=f"http://127.0.0.1:{listener.get_port()}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=PINCHTAB_REQUEST_TIMEOUT_SECONDS,
+                ) as http:
+                    yield PinchTab(http)
+            finally:
+                listener.close()
 
     @asynccontextmanager
     async def playwright(self):
@@ -187,25 +189,58 @@ class BrowserSession:
             raise BrowserSessionNotReadyError(self.name, row.status)
         return row
 
-    async def _launch(self, browser, settings: Settings) -> None:
-        env: dict[str, str] = {}
-        if settings.browser.proxy_scope == "all":
-            env = {
-                "TZ": settings.browser.timezone,
-                "DRUKS_BROWSER_PROXY": settings.browser.proxy.get_secret_value(),
-            }
-        await launch(browser, self.name, headless=self.headless, env=env)
+    @asynccontextmanager
+    async def _borrow(self, *, client: BrowserClient | None = None, token: str = ""):
+        """The launched browser container. ``client`` starts beside Chrome and
+        answers only ``token``."""
+        row = await (self.get_or_create_row() if self.anonymous else self._ready_row())
+        writer_lock = AsyncExitStack()
+        if self.persist:
+            try:
+                await writer_lock.enter_async_context(
+                    lock(f"browser_session:{row.id}", blocking=False)
+                )
+            except LockHeldError as error:
+                raise BrowserSessionWriterLockedError(row.id) from error
+        async with writer_lock:
+            env: dict[str, str] = {}
+            if client:
+                env["DRUKS_BROWSER_CLIENT"] = client
+                env["DRUKS_BROWSER_CLIENT_TOKEN"] = token
+                env["DRUKS_BROWSER_SITE"] = self.site
+            if self.read_only:
+                env["DRUKS_BROWSER_READ_ONLY"] = "1"
+            settings = load_settings()
+            if settings.browser.proxy_scope == "all":
+                env["TZ"] = settings.browser.timezone
+                env["DRUKS_BROWSER_PROXY"] = settings.browser.proxy.get_secret_value()
+            template = await get_template_id(self.sandbox)
+            async with sandbox_client.ephemeral(
+                provider=self.sandbox.provider, template=template
+            ) as browser:
+                await seed_state(browser, row)
+                await launch(browser, self.name, headless=self.headless, env=env)
+                await row.mark_used()
+                try:
+                    yield browser
+                except BrowserSessionSignedOutError as error:
+                    # The app says the login bounced; only the door knows
+                    # which session that was. The run machinery does the rest.
+                    error.session_name = self.name
+                    raise
+                if self.persist:
+                    row.payload_format = BrowserSessionPayloadFormat.PROFILE_DIR.value
+                    await row.store_payload(await export_state(browser, self.name))
 
 
 async def seed_state(browser, row: StoredBrowserSession) -> None:
     """Put the row's stored browser state in the container before launch."""
     with tempfile.TemporaryDirectory(prefix="druks-browser-") as staging:
         if row.payload:
-            state_filename = (
-                "state.json"
-                if row.payload_format == BrowserSessionPayloadFormat.STORAGE_STATE.value
-                else "state.tar.gz"
-            )
+            if row.payload_format == BrowserSessionPayloadFormat.STORAGE_STATE.value:
+                state_filename = "state.json"
+            else:
+                state_filename = "state.tar.gz"
             state_path = Path(staging) / state_filename
             state_path.write_bytes(row.payload.decrypt())
             await browser.upload_file(local=state_path, remote=f"{SESSION_ROOT}/{state_filename}")

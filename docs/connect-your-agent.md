@@ -69,4 +69,6 @@ Three details matter when an agent uses the MCP endpoint:
   body `{"code", "message", "retryable"}`. Codes such as `GATE_ROUND_STALE`
   and `RUN_NOT_ACTIVE` are stable match values. App tools use the API shape
   `{"error", "detail"}` for refusals. Shape errors contain
-  `VALIDATION_ERROR` detail.
+  `VALIDATION_ERROR` detail. A call with an argument that the tool does not
+  declare, or without a path argument, fails before Druks sends a request. The
+  error names the argument.

@@ -76,7 +76,7 @@ jobs:
           DRUKS_DATABASE_URL: postgresql+psycopg://druks:druks@localhost:5432/druks_migrate
           DRUKS_SECRETS_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
       - run: uv run pytest backend/
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
       - run: npm install --prefix "$RUNNER_TEMP/chat-sdk" --no-audit --no-fund @agentclientprotocol/sdk@1.4.0

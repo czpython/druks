@@ -654,9 +654,9 @@ call from outside a conversation.
 A run that a bot tool starts remembers its conversation. Ask for approval with
 an in-app question, `self.review()`. Druks then asks the connection's admin in the
 admin's own chat, and only that admin can answer. When the run ends, Druks tells
-the conversation its failure, or its result if it waited or returned one, and the
-Bot tells the person. A run that never waits and returns nothing tells the person
-only of a failure. A cancelled run tells nothing.
+the conversation its result or its failure, whether or not the run waited, and the
+Bot tells the person. A run that returns nothing, such as a review that posts
+itself, tells the conversation that it ended. A cancelled run tells nothing.
 
 To withdraw a waiting request, cancel it in a bot tool:
 `await GrantAccess.cancel(request)`. A subject has one active run per workflow, so
@@ -821,13 +821,13 @@ Declare required logins on the app class. The attribute name and app name form
 the session identity. The sessions pane asks the operator to sign in:
 
 ```python
-from druks.browser import BrowserSession
 from druks.apps import App
+from druks.browser import BrowserSession
 
 
-class NightWatch(App):
-    name = "night_watch"
-    acme = BrowserSession(site="acme.example", persist=True)
+class FieldNotes(App):
+    name = "field_notes"
+    atlas = BrowserSession(site="atlas.example", persist=True)
 ```
 
 A workflow borrows the logged-in browser as a Playwright handle. The app
@@ -836,15 +836,38 @@ lifecycle. The browser starts in a container on the Druks host. It stops with
 the block. Druks exports and stores a ``persist`` session before the stop:
 
 ```python
-async with NightWatch.acme.playwright() as browser:
-    page = await browser.new_page()  # opened on the logged-in context
-    await page.goto("https://acme.example/home")
+async with FieldNotes.atlas.playwright() as browser:
+    page = await browser.new_page()
+    await page.goto("https://atlas.example/species")
 ```
 
 ``playwright()`` yields the logged-in browser context. Pages that you open in
-this context use the session. ``NightWatch.acme.cdp()`` borrows the same browser
+this context use the session. ``FieldNotes.atlas.cdp()`` borrows the same browser
 and yields the raw CDP URL. Use this URL with a test suite, raw CDP client, or
 custom wrapper.
+
+``pinchtab()`` borrows the same browser through a PinchTab bridge. The app needs
+no other dependency:
+
+```python
+async with FieldNotes.atlas.pinchtab() as browser:
+    await browser.navigate("https://atlas.example/species")
+    title = await browser.evaluate("document.title")
+```
+
+The client has five methods: ``navigate``, ``evaluate``, ``snapshot``, ``text``,
+and ``action``. They work in one tab, which the first ``navigate`` opens.
+``evaluate`` returns the JSON value of the expression and waits for a promise.
+``action`` takes a PinchTab action, for example ``action("click", ref="e5")``.
+``snapshot`` supplies the refs. If the browser refuses a command, the method
+raises ``BrowserCommandError``. Druks starts the bridge beside Chrome and stops
+it with the block. The bridge opens only the session's site and its subdomains.
+Its cookie commands are off.
+
+``read_only=True`` makes every borrow drop each request that is not a GET, in
+the browser. The rule covers every tab, popup, worker, and service worker. The
+rule cannot reach a shared worker, so a read-only browser has none. The login
+window is unaffected, so the operator can still sign in.
 
 ``persist=True`` writes rotated state after each borrow. Use it for sites that
 expire an unused login. ``headless=True`` is an optional optimization for sites
@@ -2020,7 +2043,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.accounts` | `current_account_id` |
 | `druks.apps` | `App`, `AppSettings`, `Choices`, `Secret` |
 | `druks.services` | `Service`, `Connection`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
-| `druks.browser` | `BrowserSession`, `BrowserSessionSignedOutError`, `BrowserSessionStatus` |
+| `druks.browser` | `BrowserClient`, `BrowserCommandError`, `BrowserSession`, `BrowserSessionSignedOutError`, `BrowserSessionStatus` |
 | `druks.agents` | `Agent`, `AgentOutput`, `Bot`, `BotUser` |
 | `druks.workflows` | `Workflow`, `Gate`, `GateTimeout`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox`, `SandboxMcpServer`, `SandboxSecret` |

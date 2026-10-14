@@ -6,14 +6,16 @@ import httpx2
 from fastapi import FastAPI
 from fastapi.routing import APIRoute, iter_route_contexts
 from fastmcp import FastMCP
+from fastmcp.exceptions import ValidationError
 from fastmcp.server.auth import AccessToken, TokenVerifier
 from fastmcp.server.dependencies import get_http_request
 from fastmcp.server.http import StarletteWithLifespan
-from fastmcp.server.middleware import AuthMiddleware
+from fastmcp.server.middleware import AuthMiddleware, CallNext, Middleware, MiddlewareContext
 from fastmcp.server.providers.openapi import MCPType, OpenAPIProvider, OpenAPITool, RouteMap
+from fastmcp.tools import ToolResult
 from fastmcp.utilities.authorization import AuthContext
 from fastmcp.utilities.openapi import HTTPRoute
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolRequestParams, ToolAnnotations
 
 from druks.accounts.exceptions import InvalidPatError
 from druks.accounts.models import PersonalAccessToken
@@ -27,7 +29,9 @@ _INSTRUCTIONS = """\
 Druks coordinates durable agent runs over shared work items. Start with
 list_open_subjects; each workflow's run and latestAgentCall ids feed the
 id-keyed tools.
-get_gate returns a parked run's ask, a bounded artifact chunk, and parkedAt;
+get_gate returns a parked run's ask, a bounded artifact chunk, and parkedAt.
+answer_gate takes the gate only when ask.presentation is in_app; an external
+ask is answered by a person at ask.url, so report where instead of answering.
 answer_gate must echo that parkedAt unchanged — it names the exact question
 being answered, and a repeat answer reports already_answered. get_agent_call
 returns bounded transcript and stderr tails, never full payloads. cancel_run
@@ -74,6 +78,25 @@ class CallerPat(httpx2.Auth):
         if bearer:
             request.headers["Authorization"] = bearer
         yield request
+
+
+class StrictInputValidation(Middleware):
+    # A derived tool drops an argument its route does not declare, so a misnamed
+    # argument reaches the route as absent. fastmcp's strict_input_validation
+    # covers only function tools.
+    async def on_call_tool(
+        self,
+        context: MiddlewareContext[CallToolRequestParams],
+        call_next: CallNext[CallToolRequestParams, ToolResult],
+    ) -> ToolResult:
+        tool = await context.fastmcp_context.fastmcp.get_tool(context.message.name)
+        arguments = context.message.arguments or {}
+        if unknown := sorted(arguments.keys() - tool.parameters["properties"].keys()):
+            raise ValidationError(
+                f"{tool.name} has no argument {', '.join(map(repr, unknown))}. Call it "
+                "with the arguments its input schema declares."
+            )
+        return await call_next(context)
 
 
 _TOOL_TAGS = frozenset({"agent", "bot"})
@@ -233,7 +256,7 @@ def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
         providers=[provider],
         instructions=_INSTRUCTIONS,
         auth=PatTokenVerifier(),
-        middleware=[AuthMiddleware(auth=_is_visible)],
+        middleware=[AuthMiddleware(auth=_is_visible), StrictInputValidation()],
     )
     # Derivation primed app.openapi()'s cache mid-assembly; drop it.
     api.openapi_schema = None

@@ -487,6 +487,22 @@ async def test_a_person_who_requires_a_tag_is_answered_only_when_they_tag(
     assert (required.status_code, optional.status_code, no_thread.status_code) == (204, 204, 409)
 
 
+async def test_a_persons_new_thread_conversation_starts_with_their_tag_preference(
+    card, druks_db, slack, delivery
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    await ana.update_preferences(is_tag_required=True)
+    await link_person(druks_db, ana)
+    await receive(card, room_event())
+    await receive(card, room_event(text="more", ts="12.0", thread_ts="10.0"))
+    await receive(card, room_event(ts="13.0", thread_ts="10.0"))
+
+    [conversation] = await Conversation.list_for_connection(druks_db, card.id)
+    await druks_db.refresh(conversation, ["messages"])
+    assert conversation.is_tag_required
+    assert [message.body for message in conversation.messages] == ["read my runs", "read my runs"]
+
+
 def shared_file(file_id="F1", name="plan.pdf"):
     return {
         "id": file_id,

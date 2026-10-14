@@ -2,15 +2,18 @@ import inspect
 from unittest.mock import AsyncMock
 
 import pytest
+from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
 from druks.apps.registry import channels, services
 from druks.chat import service
+from druks.chat.constants import DELIVERY_FAILED_MESSAGE
 from druks.chat.enums import MessageRole, MessageState
 from druks.chat.exceptions import ChatBridgeError
 from druks.chat.models import Conversation, Message
 from druks.database import session_scope
 from druks.files.datastructures import File
 from druks.files.models import FileRecord
+from druks.harnesses.exceptions import HarnessNotConnectedError
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.testing import asgi_client, configure_app_for_test, make_settings
@@ -65,6 +68,50 @@ async def test_a_failed_delivery_ends_the_pending_messages_and_replies_on_a_live
         [reply] = replies
         assert reply.reply_to == pending.id
         assert send_reply.await_args.args[2].id == reply.id
+
+
+@pytest.mark.parametrize(
+    "kind,body",
+    [
+        (AccountKind.OPERATOR, "The agent cannot run: connect your Anthropic subscription"),
+        (AccountKind.BOT, DELIVERY_FAILED_MESSAGE),
+        (AccountKind.BOT_ADMIN, DELIVERY_FAILED_MESSAGE),
+    ],
+)
+async def test_a_turn_with_no_connected_provider_names_the_fix_to_the_operator_side(
+    druks_db, monkeypatch, kind, body
+):
+    account = await Account.get_or_create(druks_db, "op@example.com")
+    if kind != AccountKind.OPERATOR:
+        account = await Account.create_for_bot(druks_db, kind)
+    conversation = await Conversation.create(druks_db, account_id=account.id, body="Hi")
+    conversation.source = "slack"
+    connection = await VaultSecret.store(
+        druks_db,
+        services.get("slack").secret_kind,
+        Audience.service("slack"),
+        identity={},
+        secrets={},
+    )
+    conversation.connection_id = connection.id
+    await druks_db.commit()
+
+    async def run_inline(options, function, *args):
+        return await function(*args)
+
+    monkeypatch.setattr(service, "step_session", session_scope)
+    monkeypatch.setattr(service.DBOS, "run_step_async", run_inline)
+    monkeypatch.setattr(service, "get_agent", AsyncMock(return_value=("chat.bot", "", ())))
+    not_connected = HarnessNotConnectedError(
+        "connect your Anthropic subscription in Settings → Providers."
+    )
+    monkeypatch.setattr(service, "get_config", AsyncMock(side_effect=not_connected))
+    monkeypatch.setattr(channels.get("slack"), "send_reply", AsyncMock())
+
+    await inspect.unwrap(service.deliver)(conversation.id)
+
+    reply = await druks_db.scalar(select(Message).where(Message.role == MessageRole.ASSISTANT))
+    assert reply.body.startswith(body)
 
 
 async def test_retry_keeps_the_attachment_and_the_failed_history(druks_db, monkeypatch, tmp_path):

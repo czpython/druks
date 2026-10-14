@@ -438,6 +438,21 @@ async def test_upload_dir_tar_honours_excludes(tmp_path: Path):
     assert not (dst / "plugin" / "node_modules").exists()
 
 
+async def test_upload_dir_tar_survives_more_warnings_than_a_pipe_holds(tmp_path: Path, caplog):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "kept.txt").write_text("kept")
+    # tar -h warns once per dangling link, and 2000 warnings overflow a 64 KiB pipe.
+    for index in range(2000):
+        (src / f"missing-{index}").symlink_to(tmp_path / "nowhere")
+
+    dst = tmp_path / "dst"
+    await _roundtrip_via_tar(src, dst)
+
+    assert (dst / "kept.txt").read_text() == "kept"
+    assert "missing-1999" in caplog.text
+
+
 async def test_write_secret_raises_when_the_remote_write_fails(fake_record):
     # push() now writes the harness OAuth credential through write_secret, so a
     # failed remote write must fail the run, not start the agent unauthenticated.

@@ -14,7 +14,7 @@ from pydantic_core import to_json
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
-from druks.apps.loader import get_app
+from druks.apps.loader import get_app, iter_apps
 from druks.apps.registry import services
 from druks.durable.engine import step_session
 from druks.durable.models import Run
@@ -23,6 +23,7 @@ from druks.files.datastructures import File
 from druks.files.storage import get_file_storage
 from druks.harnesses.base import Harness
 from druks.harnesses.config import AgentConfig, get_config
+from druks.harnesses.exceptions import AgentConfigError, HarnessNotConnectedError
 from druks.harnesses.registry import get_harness, get_harnesses
 from druks.locks import lock
 from druks.mcp import models as mcp_models
@@ -55,6 +56,8 @@ from .constants import (
     DELIVERY_FAILED_MESSAGE,
     FAILURE_MESSAGE,
     INTERNAL_MESSAGES_PROMPT,
+    NO_RESULT_MESSAGE,
+    NO_RESULT_ON_SUBJECT_MESSAGE,
     RESULT_MESSAGE,
     TRANSCRIPTION_FAILED_MESSAGE,
     VOICE_NOTE_MARKER,
@@ -101,6 +104,7 @@ async def get_agent(
         "source": conversation.source,
         "thread_id": conversation.thread_id,
         "sign_ins": sign_ins,
+        "apps": [app for app in iter_apps() if app.description and not app.builtin],
     }
     if conversation.connection:
         context.update(await conversation.channel.get_prompt_context(session, conversation))
@@ -228,7 +232,7 @@ async def deliver(conversation_id: str) -> None:
             conversation = await session.get(Conversation, conversation_id)
             await deliver_pending(session, conversation)
 
-    async def end_turns() -> str | None:
+    async def end_turns(error_message: str) -> str | None:
         """Give the pending messages the failed state; a delivered turn runs on. On a
         live channel, also save a reply that says so, and return its id."""
         async with step_session() as session:
@@ -243,9 +247,14 @@ async def deliver(conversation_id: str) -> None:
                 newest_message = max(
                     person_messages, key=lambda message: (message.created_at, message.id)
                 )
+                # Only an operator can change a setting or credential.
+                if conversation.account.kind == AccountKind.OPERATOR:
+                    message = error_message
+                else:
+                    message = DELIVERY_FAILED_MESSAGE
                 reply = await conversation.create_message(
                     session,
-                    DELIVERY_FAILED_MESSAGE,
+                    body=message,
                     role=MessageRole.ASSISTANT,
                     reply_to=newest_message,
                 )
@@ -257,10 +266,12 @@ async def deliver(conversation_id: str) -> None:
             reply = await session.get(Message, reply_id)
             await conversation.channel.send_reply(session, conversation, reply)
 
-    async def record_failed(detail: str) -> None:
-        reply_id = await DBOS.run_step_async(StepOptions(name="chat.deliver.failed"), end_turns)
+    async def record_failed(error_message: str) -> None:
+        reply_id = await DBOS.run_step_async(
+            StepOptions(name="chat.deliver.failed"), end_turns, error_message
+        )
         await reset_live_stream(conversation_id)
-        await publish(conversation_id, {"type": "error", "detail": detail})
+        await publish(conversation_id, {"type": "error", "detail": error_message})
         if reply_id:
             await DBOS.run_step_async(
                 StepOptions(name="chat.deliver.reply", retries_allowed=True, max_attempts=5),
@@ -315,7 +326,10 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                         ]
                 sign_ins = await list_sign_ins(session, conversation.account_id)
             bot_id, prompt, tools = await get_agent(session, conversation, sign_ins=sign_ins)
-            config = await get_config(session, bot_id, conversation.account_id)
+            try:
+                config = await get_config(session, bot_id, conversation.account_id)
+            except (AgentConfigError, HarnessNotConnectedError) as error:
+                raise ChatHarnessError(f"The agent cannot run: {error}") from error
             if not config.harness_class.adapter_command:
                 adapters = ", ".join(
                     harness.name for harness in get_harnesses() if harness.adapter_command
@@ -582,13 +596,17 @@ async def finish_turn(
 
 
 async def report_result(session: AsyncSession, run: Run, *, result) -> str | None:
-    """Report a run's result to the chat that started it, when the run waited for an
-    answer or returned something. A run that returns nothing put its output where it
-    belongs, such as a review that it posted. Returns the conversation to deliver."""
-    if run.input_requested_at or result:
+    """Report a run's result to the chat that started it, whether or not the run waited
+    for an answer. A run that returns nothing put its output where it belongs, such as a
+    review that it posted; the chat still hears that it ended, so the agent keeps its
+    promise to report back. Returns the conversation to deliver."""
+    if result is None and run.subject_key:
+        body = NO_RESULT_ON_SUBJECT_MESSAGE.format(run=run.id, subject=run.subject_key)
+    elif result is None:
+        body = NO_RESULT_MESSAGE.format(run=run.id)
+    else:
         body = RESULT_MESSAGE.format(run=run.id, result=to_json(result, fallback=str).decode())
-        return await report_outcome(session, run, body)
-    return
+    return await report_outcome(session, run, body)
 
 
 async def report_failure(session: AsyncSession, run: Run, *, failure: str) -> str | None:

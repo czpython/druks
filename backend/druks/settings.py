@@ -411,6 +411,9 @@ def setup_logging(settings: Settings) -> None:
     # operation. Real failures stay audible at WARNING.
     asyncssh.set_log_level(logging.WARNING)
     asyncssh.set_sftp_log_level(logging.WARNING)
+    # httpx logs one line per request at INFO. The CLI polls drukbox every few
+    # seconds, so those lines bury its own output.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def ensure_data_dirs(settings: Settings) -> None:

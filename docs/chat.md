@@ -79,13 +79,16 @@ If a turn dies, Druks shows **Interrupted**. Druks never sends that turn again
 by itself. **Send again** saves a new message with the same text and file. This
 action can cause the agent to do an external action again.
 
-Druks tries a delivery up to five times. If every attempt fails, the pending
-messages show **Failed**, and Druks never sends them again by itself. **Send
-again** saves a new message with the same text and file. A turn that the agent
-already runs keeps running, and the next delivery saves its reply. In a Slack, GitHub, or
-WhatsApp conversation, Druks also replies in the channel that the message
-failed, unless the conversation is paused or its connection was removed. Send
-the message again in the channel to retry.
+Druks tries a delivery up to five times. It stops at the first attempt when a
+person must change the Chat agent's settings or provider credentials. When the
+delivery fails, the pending messages show **Failed**, and Druks never sends them
+again by itself. **Send again** saves a new message with the same text and file.
+A turn that the agent already runs keeps running, and the next delivery saves
+its reply. In a Slack, GitHub, or WhatsApp conversation, Druks also replies in
+the channel that the message failed, unless the conversation is paused or its
+connection was removed. When a person must change a setting or credential, the
+reply names it, except in a Bot's conversation. Send the message again in the
+channel to retry.
 
 A browser connection loss does not send the message again. The page connects
 again and reads the saved messages and available live events.
@@ -136,10 +139,10 @@ denies the file, shell, and web tools.
 
 A run that the agent starts with a tool records its conversation. When the run
 fails, Druks adds an internal message with the failure to that conversation.
-When the run ends, Druks adds an internal message with its result if the run
-waited for an answer or returned a result. A run that returns nothing, such as
-a review that posts itself, adds nothing. The agent then tells you in its own
-words.
+When the run ends, Druks adds an internal message with its result, whether or
+not the run waited for an answer. A run that returns nothing, such as a review
+that posts itself, adds a message that says it ended. The agent then tells you
+in its own words.
 
 The sandbox receives credential placeholders. The Drukbox proxy exchanges
 them for real credentials. See [public URLs and access control](configuration.md#public-urls-and-access-control)
@@ -382,7 +385,9 @@ message.
 Tell the agent to answer only when you tag it, and your untagged replies in that
 thread stop reaching it. The agent records your choice with `chat_require_tag`.
 Tell it to answer your replies again, and they reach it again for the rest of the
-24 hours. Your choice holds for that thread only.
+24 hours. Your choice holds for that thread only. The Slack pane of
+**Chat → Channels** sets the default for the threads you tag the bot in from
+then on.
 
 The agent reads the thread with `chat_read_thread`: the newest 200 messages,
 oldest first, each with its author's id and name, whether this agent wrote it,

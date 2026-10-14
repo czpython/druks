@@ -36,9 +36,6 @@ async def get_gate(session: AsyncSession, run_id: str) -> schemas.GateResponse:
         raise RunNotFound(run_id)
     if run.state != RunState.PARKED.value:
         raise exceptions.GateNotOpen(run_id)
-    ask = run.input_request
-    if not ask or ask.get("presentation") != "in_app":
-        raise exceptions.GateNotAnswerable(run_id)
     return schemas.GateResponse(
         run=run.id,
         gate=run.input_gate,  # type: ignore[arg-type]

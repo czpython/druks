@@ -67,6 +67,8 @@ x-drukbox: &drukbox
     # Off, unless the [sandbox.<provider>] table sets TAILSCALE_ENABLED=true
     # (the exe provider does).
     TAILSCALE_ENABLED: ${TAILSCALE_ENABLED:-false}
+    # Hosts per provider, as JSON. A provider not named has no limit.
+    HOST_LIMITS: ${HOST_LIMITS:-{}}
     # Browser-login containers run sshd for the druks user, not for root.
     DOCKER_SSH_USERNAME: druks
     # The public certificate of the secrets proxy, delivered into each sandbox

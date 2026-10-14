@@ -1,4 +1,5 @@
 from druks.apps.loader import load_app
+from druks.apps.registry import browser_sessions
 from druks.models import Base
 
 _PACKAGE = "druks_field_notes"
@@ -20,6 +21,13 @@ def test_discovery_registers_the_tables_and_capabilities():
 
     prefixes = {router.prefix for router in app.routers()}
     assert prefixes >= {"/notes", "/transcripts/{call_id}", "/note"}
+
+
+def test_boot_registers_the_read_only_browser_session():
+    app = load_app("field_notes")
+
+    assert browser_sessions.get("field_notes.atlas") is app.atlas
+    assert app.atlas.read_only
 
 
 def test_migration_is_the_history_root():

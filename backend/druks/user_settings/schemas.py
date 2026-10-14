@@ -34,6 +34,7 @@ class PersonalSettingsResponse(Schema):
 
     timezone: str
     gate_park_destination_id: str | None
+    is_tag_required: bool
 
 
 class SettingsResponse(Schema):
@@ -57,6 +58,7 @@ class UpdatePersonalSettingsRequest(BaseModel):
     gate_park_destination_id: str | None = Field(
         default=None, validation_alias="gateParkDestinationId"
     )
+    is_tag_required: bool | None = Field(default=None, validation_alias="isTagRequired")
 
 
 class UpdateSettingsRequest(BaseModel):

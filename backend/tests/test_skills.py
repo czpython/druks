@@ -3,7 +3,9 @@ import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
+import httpx
 import pytest
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.db import db_session
@@ -13,6 +15,8 @@ from druks.skills.datastructures import CollectionContents, InstalledSkill
 from druks.skills.models import Skill, SkillCollection
 from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
+from githubkit.exception import RequestFailed
+from githubkit.response import Response
 
 
 def _tarball(root: str, files: dict[str, bytes]) -> bytes:
@@ -110,6 +114,20 @@ async def test_fetch_collection_is_anonymous_when_the_app_is_not_on_the_repo(tmp
     assert [skill.name for skill in contents.skills] == ["public"]
 
 
+async def test_fetch_collection_names_the_private_repo_cause(tmp_path, monkeypatch):
+    async def download_tarball(repo):
+        raise GitHubAppNotInstalledError(repo)
+
+    async def fake_download(repo):
+        request = httpx.Request("GET", "https://api.github.com/repos/owner/repo/tarball")
+        raise RequestFailed(Response(httpx.Response(404, request=request), Any))
+
+    _patch_github_client(monkeypatch, download_tarball)
+    monkeypatch.setattr(install_mod, "download_public_tarball", fake_download)
+    with pytest.raises(ValueError, match="GitHub App"):
+        await _fetch("https://github.com/owner/repo", tmp_path)
+
+
 async def test_fetch_collection_rejects_missing_skill_md(tmp_path, monkeypatch):
     _patch_download(monkeypatch, _tarball("owner-repo-abc", {"README.md": b"no skill"}))
     with pytest.raises(ValueError, match="SKILL.md"):
@@ -129,6 +147,10 @@ async def test_fetch_collection_rejects_path_traversal(tmp_path, monkeypatch):
     )
     with pytest.raises(ValueError, match="Unsafe path"):
         await _fetch("https://github.com/owner/repo", tmp_path)
+
+
+def test_scheme_less_github_url_accepted():
+    assert install_mod._parse_github_repo("github.com/owner/repo") == "owner/repo"
 
 
 def test_non_github_url_rejected():

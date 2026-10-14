@@ -50,6 +50,7 @@ class Account(Base, Uuid7Pk):
     gate_park_destination_id: Mapped[str | None] = mapped_column(
         ForeignKey("notification_destinations.id", ondelete="SET NULL"), default=None
     )
+    is_tag_required: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @classmethod

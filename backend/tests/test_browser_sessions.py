@@ -17,13 +17,13 @@ from sqlalchemy_encrypted_field import utils as secret_utils
 
 
 @pytest.fixture
-def night_watch(browser_session_declarations):
-    class NightWatch:
-        name = "night_watch"
-        acme = BrowserSession(site="acme.example")
-        docs = BrowserSession(site="docs.example")
+def notebook(browser_session_declarations):
+    class Notebook:
+        name = "notebook"
+        archive = BrowserSession(site="archive.example")
+        journal = BrowserSession(site="journal.example")
 
-    return NightWatch
+    return Notebook
 
 
 @pytest.fixture
@@ -47,21 +47,25 @@ class FakeLoginWindow:
 
 
 async def test_declared_sessions_list_without_a_row_and_the_pane_read_writes_nothing(
-    client, night_watch
+    client, notebook
 ):
     listed = client.get("/api/browser-sessions").json()
 
-    assert [entry["name"] for entry in listed] == ["night_watch.acme", "night_watch.docs"]
-    entry = listed[0]
+    assert [entry["name"] for entry in listed] == [
+        "field_notes.atlas",
+        "notebook.archive",
+        "notebook.journal",
+    ]
+    entry = listed[1]
     assert entry["status"] == BrowserSessionStatus.NEEDS_LOGIN
     assert entry["isDeclared"] is True
     assert entry["payloadFormat"] is None
     assert entry["createdAt"] is None
-    assert entry["site"] == "acme.example"
+    assert entry["site"] == "archive.example"
     assert not await StoredBrowserSession.list_all(db_session())
 
 
-async def test_leftover_rows_list_as_undeclared_and_refuse_the_login_window(client, night_watch):
+async def test_leftover_rows_list_as_undeclared_and_refuse_the_login_window(client, notebook):
     await StoredBrowserSession.get_or_create(
         db_session(),
         name="gone_ext.old",
@@ -71,8 +75,9 @@ async def test_leftover_rows_list_as_undeclared_and_refuse_the_login_window(clie
 
     listed = client.get("/api/browser-sessions").json()
     assert [(entry["name"], entry["isDeclared"]) for entry in listed] == [
-        ("night_watch.acme", True),
-        ("night_watch.docs", True),
+        ("field_notes.atlas", True),
+        ("notebook.archive", True),
+        ("notebook.journal", True),
         ("gone_ext.old", False),
     ]
 
@@ -103,38 +108,38 @@ async def test_anonymous_sessions_list_as_anonymous_and_refuse_login_and_state(
 
 
 async def test_opening_the_login_window_materializes_the_declared_row(
-    client, night_watch, monkeypatch
+    client, notebook, monkeypatch
 ):
     monkeypatch.setattr(routes, "LoginWindow", FakeLoginWindow)
     monkeypatch.setattr(FakeLoginWindow, "opened", [])
 
-    opened = client.post("/api/browser-sessions/night_watch.acme/login-window")
+    opened = client.post("/api/browser-sessions/notebook.archive/login-window")
 
     assert opened.status_code == 204
-    assert FakeLoginWindow.opened == ["night_watch.acme"]
-    row = await StoredBrowserSession.get_for_name(db_session(), "night_watch.acme")
+    assert FakeLoginWindow.opened == ["notebook.archive"]
+    row = await StoredBrowserSession.get_for_name(db_session(), "notebook.archive")
     assert row.status == BrowserSessionStatus.NEEDS_LOGIN.value
-    assert row.site == "acme.example"
+    assert row.site == "archive.example"
 
     assert client.post("/api/browser-sessions/nobody.home/login-window").status_code == 404
 
 
 async def test_import_materializes_the_row_survives_restart_and_delete_removes_it(
-    client, night_watch, tmp_path, monkeypatch
+    client, notebook, tmp_path, monkeypatch
 ):
     payload = b'{"cookies":[{"name":"auth_token","value":"secret"}],"origins":[]}'
     uploaded = client.put(
-        "/api/browser-sessions/night_watch.acme/state?payloadFormat=storage_state",
+        "/api/browser-sessions/notebook.archive/state?payloadFormat=storage_state",
         content=payload,
         headers={"Content-Type": "application/octet-stream"},
     )
     assert uploaded.status_code == 204
     listed = {entry["name"]: entry for entry in client.get("/api/browser-sessions").json()}
-    assert listed["night_watch.acme"]["status"] == BrowserSessionStatus.READY
-    assert listed["night_watch.acme"]["payloadFormat"] == BrowserSessionPayloadFormat.STORAGE_STATE
-    assert listed["night_watch.acme"]["lastRefreshedAt"]
+    assert listed["notebook.archive"]["status"] == BrowserSessionStatus.READY
+    assert listed["notebook.archive"]["payloadFormat"] == BrowserSessionPayloadFormat.STORAGE_STATE
+    assert listed["notebook.archive"]["lastRefreshedAt"]
 
-    row = await StoredBrowserSession.get_for_name(db_session(), "night_watch.acme")
+    row = await StoredBrowserSession.get_for_name(db_session(), "notebook.archive")
     stored = (
         await db_session().execute(
             text("SELECT payload FROM browser_sessions WHERE id = :id"),
@@ -155,7 +160,7 @@ async def test_import_materializes_the_row_survives_restart_and_delete_removes_i
             row.payload.decrypt()
 
     db_session().expunge_all()
-    restarted = await StoredBrowserSession.get_for_name(db_session(), "night_watch.acme")
+    restarted = await StoredBrowserSession.get_for_name(db_session(), "notebook.archive")
     assert restarted.payload.decrypt() == payload
 
     undeclared = client.put(
@@ -163,30 +168,30 @@ async def test_import_materializes_the_row_survives_restart_and_delete_removes_i
     )
     assert undeclared.status_code == 404
 
-    deleted = client.delete("/api/browser-sessions/night_watch.acme")
+    deleted = client.delete("/api/browser-sessions/notebook.archive")
     assert deleted.status_code == 204
     assert not await StoredBrowserSession.list_all(db_session())
 
 
-def test_upload_rejects_payloads_above_the_cap(client, night_watch, monkeypatch):
+def test_upload_rejects_payloads_above_the_cap(client, notebook, monkeypatch):
     monkeypatch.setattr(routes, "MAX_PAYLOAD_BYTES", 3)
 
     response = client.put(
-        "/api/browser-sessions/night_watch.acme/state?payloadFormat=storage_state", content=b"four"
+        "/api/browser-sessions/notebook.archive/state?payloadFormat=storage_state", content=b"four"
     )
 
     assert response.status_code == 413
     assert "256 MB" in response.json()["detail"]
     listed = {entry["name"]: entry for entry in client.get("/api/browser-sessions").json()}
-    assert listed["night_watch.acme"]["status"] == BrowserSessionStatus.NEEDS_LOGIN
+    assert listed["notebook.archive"]["status"] == BrowserSessionStatus.NEEDS_LOGIN
 
 
-def test_upload_warns_at_the_product_threshold(client, night_watch, monkeypatch, caplog):
+def test_upload_warns_at_the_product_threshold(client, notebook, monkeypatch, caplog):
     monkeypatch.setattr(routes, "PAYLOAD_WARNING_BYTES", 3)
 
     with caplog.at_level("WARNING"):
         response = client.put(
-            "/api/browser-sessions/night_watch.acme/state?payloadFormat=storage_state",
+            "/api/browser-sessions/notebook.archive/state?payloadFormat=storage_state",
             content=b"three",
         )
 
@@ -194,7 +199,7 @@ def test_upload_warns_at_the_product_threshold(client, night_watch, monkeypatch,
     assert "received a 5-byte payload" in caplog.text
 
 
-async def test_bearer_pat_reads_sessions_but_cannot_mutate_them(tmp_path, druks_db, night_watch):
+async def test_bearer_pat_reads_sessions_but_cannot_mutate_them(tmp_path, druks_db, notebook):
     settings = make_settings(
         tmp_path,
         identity={"mode": "header", "header": "X-Edge-Email"},
@@ -208,12 +213,12 @@ async def test_bearer_pat_reads_sessions_but_cannot_mutate_them(tmp_path, druks_
         assert pat_client.get("/api/browser-sessions", headers=headers).status_code == 200
         mutations = (
             pat_client.put(
-                "/api/browser-sessions/night_watch.acme/state?payloadFormat=storage_state",
+                "/api/browser-sessions/notebook.archive/state?payloadFormat=storage_state",
                 content=b"blocked",
                 headers=headers,
             ),
-            pat_client.post("/api/browser-sessions/night_watch.acme/login-window", headers=headers),
-            pat_client.delete("/api/browser-sessions/night_watch.acme", headers=headers),
+            pat_client.post("/api/browser-sessions/notebook.archive/login-window", headers=headers),
+            pat_client.delete("/api/browser-sessions/notebook.archive", headers=headers),
         )
 
     assert [response.status_code for response in mutations] == [401, 401, 401]
