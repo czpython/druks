@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import ColumnElement, Index, Select, Text, and_, cast, func, not_, or_, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, aliased, mapped_column
 from sqlalchemy.types import UserDefinedType
 
 from druks.apps.loader import iter_apps, resolve_workflow_app
@@ -71,6 +71,7 @@ class Event(Base):
         from druks.durable.enums import WorkflowEvent
 
         owners = [owner.name for owner in iter_apps() if not owner.builtin]
+        milestone = aliased(cls)
         statement = select(cls).where(
             cls.app.in_(owners),
             or_(
@@ -85,6 +86,16 @@ class Event(Base):
                 ),
                 # A validated gate reply records its result; a routine start records none.
                 and_(cls.type == WorkflowEvent.RUNNING, cls.payload.has_key("result")),
+                # A run that recorded no milestone of its own shows that it finished.
+                and_(
+                    cls.type == WorkflowEvent.FINISHED,
+                    ~select(milestone.id)
+                    .where(
+                        milestone.payload["run"] == cls.payload["run"],
+                        milestone.type.not_like("workflow.%"),
+                    )
+                    .exists(),
+                ),
             ),
         )
         if app:

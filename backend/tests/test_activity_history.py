@@ -134,7 +134,7 @@ async def test_pages_follow_the_cursor(druks_client, history):
 
 async def test_activity_keeps_decisions_failures_and_stops(druks_db, druks_client):
     db_session.registry.set(druks_db)
-    for kind in ["workflow.running", "workflow.finished", "workflow.step", "workflow.retry"]:
+    for kind in ["workflow.running", "workflow.step", "workflow.retry"]:
         await Event.emit(druks_db, type=kind, app="field_notes", run="gone")
     round_facts = {"gate": "review", "input_requested_at": "2026-09-09T01:00:00Z"}
     await Event.emit(druks_db, type="workflow.scheduled", app="field_notes", run="gone")
@@ -183,6 +183,18 @@ async def test_activity_keeps_decisions_failures_and_stops(druks_db, druks_clien
         "Timed out",
         "Stopped",
     )
+
+
+async def test_activity_shows_a_finish_only_for_a_run_without_a_milestone(druks_db, druks_client):
+    db_session.registry.set(druks_db)
+    await Event.emit(druks_db, type="gist.prepared", app="field_notes", run="announced")
+    for run in ["announced", "quiet"]:
+        await Event.emit(druks_db, type="workflow.finished", app="field_notes", run=run)
+    items = (await druks_client.get("/api/events")).json()["items"]
+    assert [(item["topic"], item["payload"]["run"]) for item in items] == [
+        ("workflow.finished", "quiet"),
+        ("gist.prepared", "announced"),
+    ]
 
 
 async def test_destinations_report_what_still_exists(druks_db, druks_client, tmp_path, monkeypatch):

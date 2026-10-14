@@ -31,6 +31,12 @@ describe('eventLine', () => {
     )
   })
 
+  it('names a finished run', () => {
+    expect(eventLine(event({ topic: 'workflow.finished', payload: { kind: 'software_factory.profile' } })).label).toBe(
+      'Profile finished',
+    )
+  })
+
   it("words an app's milestone through the app", () => {
     const line = eventLine(event({ topic: 'merged', app: 'software_factory' }))
 
