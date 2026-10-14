@@ -103,7 +103,7 @@ class GitHubChannel(Channel):
         Druks wrote."""
         asked = await session.get(Message, reply.reply_to)
         source_id = await conversation.get_answered_source_id(session, asked)
-        reply.source_id = await cls.post(conversation.thread_id, reply.body, source_id=source_id)
+        reply.source_id = await cls.post(conversation.thread_id, reply.answer, source_id=source_id)
         await session.commit()
 
     @classmethod

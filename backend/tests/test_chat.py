@@ -13,7 +13,7 @@ from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.chat import service, sockets
 from druks.chat.bridge import Bridge
-from druks.chat.constants import CHAT_KEY_NAME, CONVERSATION_HEADER
+from druks.chat.constants import CHAT_KEY_NAME, CONVERSATION_HEADER, DELIVERY_FAILED_MESSAGE
 from druks.chat.enums import ConversationSource, MessageRole, MessageState
 from druks.chat.exceptions import (
     ChatBridgeError,
@@ -401,6 +401,18 @@ async def test_recovery_reads_live_events_then_saves_reply_and_replaces_archive(
     assert not archive.uploaded_by
     assert archive.size == 7
     assert host.upload_file.await_count == 0
+
+
+@pytest.mark.parametrize(
+    ("offsets", "answer"), [([14, 28], "Done."), ([14, 28, 33], DELIVERY_FAILED_MESSAGE)]
+)
+def test_a_reply_answers_with_the_text_after_its_last_tool_call(offsets, answer):
+    reply = Message(
+        body="Still running.Still running.Done.",
+        tool_calls=[{"textOffset": offset} for offset in offsets],
+    )
+
+    assert reply.answer == answer
 
 
 def channel(answer: bytes) -> tuple[asyncio.StreamReader, MagicMock]:

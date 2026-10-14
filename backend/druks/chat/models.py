@@ -16,6 +16,7 @@ from druks.files.models import FileRecord
 from druks.models import Base
 from druks.secrets.models import VaultSecret
 
+from .constants import DELIVERY_FAILED_MESSAGE
 from .enums import ConversationSource, MessageRole, MessageState
 
 if TYPE_CHECKING:
@@ -45,6 +46,13 @@ class Message(Base, Uuid7Pk):
     transcript: Mapped[str] = mapped_column(default="", server_default=text("''"))
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     delivered_at: Mapped[datetime | None]
+
+    @property
+    def answer(self) -> str:
+        """The text after the agent's last tool call. The text before it is the agent's
+        notes."""
+        start = max((call["textOffset"] for call in self.tool_calls), default=0)
+        return self.body[start:] or DELIVERY_FAILED_MESSAGE
 
     @classmethod
     async def get_for_source_id(cls, session: AsyncSession, source_id: str) -> "Message | None":

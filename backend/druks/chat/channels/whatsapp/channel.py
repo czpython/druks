@@ -18,7 +18,7 @@ class WhatsAppChannel(Channel):
         """Send a reply to the person who wrote. Druks records the reply's WhatsApp id
         before the send, so the copy that WAHA reports back is known as Druks's own."""
         is_self_chat = conversation.user_id == conversation.connection.identity["user_id"]
-        text = f"[Druks] {reply.body}" if is_self_chat else reply.body
+        text = f"[Druks] {reply.answer}" if is_self_chat else reply.answer
         client = await Waha.get_client(session, conversation.connection)
         reply.source_id = await client.new_message_id()
         await session.commit()

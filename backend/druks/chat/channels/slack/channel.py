@@ -158,10 +158,10 @@ class SlackChannel(Channel):
         posted = [
             await client.post_markdown(
                 room or conversation.user_id,
-                reply.body[start : start + REPLY_PIECE_CHARACTERS],
+                reply.answer[start : start + REPLY_PIECE_CHARACTERS],
                 thread_ts=thread_ts,
             )
-            for start in range(0, len(reply.body), REPLY_PIECE_CHARACTERS)
+            for start in range(0, len(reply.answer), REPLY_PIECE_CHARACTERS)
         ]
         reply.source_id = f"{posted[0]['channel']}:{posted[0]['ts']}"
         await session.commit()

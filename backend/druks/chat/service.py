@@ -588,7 +588,7 @@ async def finish_turn(
     await reset_live_stream(conversation.id)
     if conversation.connection:
         # A person who took the chat over during the turn answers it instead.
-        if state == MessageState.REPLIED and body and not await conversation.is_held(session):
+        if state == MessageState.REPLIED and not await conversation.is_held(session):
             await conversation.channel.send_reply(session, conversation, reply)
     elif not conversation.title:
         harness = get_harness(status["harness"])
