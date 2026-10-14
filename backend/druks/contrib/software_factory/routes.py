@@ -308,6 +308,7 @@ async def start_work_item(
         except TicketNotMovableError as error:
             raise TicketNotMovable(str(error)) from error
         except tracker.known_exceptions as error:
+            logger.warning("Could not move ticket %s to the trigger status.", ticket, exc_info=True)
             raise TrackerRefused(str(error)) from error
 
 
