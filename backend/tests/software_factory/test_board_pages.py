@@ -1,3 +1,5 @@
+import pytest
+from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.enums import Status
 from druks.contrib.software_factory.models import ProjectRepo, Ticket
 
@@ -7,6 +9,12 @@ _PAGES = "/api/software_factory/pages"
 _TICKETS = "/api/software_factory/tickets"
 _PROJECTS = "/api/software_factory/projects"
 COLUMNS = [status.label for status in Status]
+
+
+@pytest.fixture(autouse=True)
+async def _druks_tracker(druks_db):
+    # The board exists only for the druks tracker.
+    await SoftwareFactory.override_setting("tracker", "druks")
 
 
 async def _open_repo(druks_client, *, project="Acme", repo="acme/druks"):

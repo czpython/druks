@@ -1322,7 +1322,12 @@ supplies the description.
 A `GET` route is read-only. If a write is non-destructive, declare
 `x-destructive: false`. If a write is idempotent, declare `x-idempotent: true`.
 Safe defaults are destructive
-and non-idempotent. Startup refuses a missing `operation_id` or docstring.
+and non-idempotent. A tool that works only in some configuration guards its
+router with a dependency: an `async def` with no parameters that reads the
+setting or connection and raises `ToolNotAvailable` otherwise.
+Druks runs it on each listing and call. The tool is listed only while it holds,
+and a call that reaches the route gets the error. Startup refuses a missing
+`operation_id` or docstring.
 
 Two spellings run through druks, and which one a segment wears says who owns it:
 

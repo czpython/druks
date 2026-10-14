@@ -1,8 +1,16 @@
+import pytest
 from druks.accounts.models import Account
+from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.enums import Status
 
 _TICKETS = "/api/software_factory/tickets"
 _PROJECTS = "/api/software_factory/projects"
+
+
+@pytest.fixture(autouse=True)
+async def _druks_tracker(druks_db):
+    # The board exists only for the druks tracker.
+    await SoftwareFactory.override_setting("tracker", "druks")
 
 
 def _published(monkeypatch):

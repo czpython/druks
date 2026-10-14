@@ -1,6 +1,7 @@
 import inspect
 from collections import defaultdict
-from collections.abc import Generator
+from collections.abc import Callable, Generator
+from functools import partial
 
 import httpx2
 from fastapi import FastAPI
@@ -13,12 +14,13 @@ from fastmcp.server.http import StarletteWithLifespan
 from fastmcp.server.middleware import AuthMiddleware, CallNext, Middleware, MiddlewareContext
 from fastmcp.server.providers.openapi import MCPType, OpenAPIProvider, OpenAPITool, RouteMap
 from fastmcp.tools import ToolResult
-from fastmcp.utilities.authorization import AuthContext
+from fastmcp.utilities.authorization import AuthCheck, AuthContext
 from fastmcp.utilities.openapi import HTTPRoute
 from mcp.types import CallToolRequestParams, ToolAnnotations
 
 from druks.accounts.exceptions import InvalidPatError
 from druks.accounts.models import PersonalAccessToken
+from druks.api.exceptions import ToolNotAvailable
 from druks.apps.exceptions import AppBotError
 from druks.apps.loader import iter_apps
 from druks.apps.registry import bots
@@ -183,7 +185,7 @@ def _namespace_app_operations(spec: dict, app_names: set[str]) -> None:
                 operation["operationId"] = derived
 
 
-def _install_app_namespacing(api: FastAPI) -> None:
+def _install_app_namespacing(api: FastAPI, app_names: set[str]) -> None:
     # The tool name comes from the spec's operation id, so the namespace must
     # land on the document api.openapi() builds — not on FastAPI's cached, merged
     # route contexts, which later generation silently discards. Wrap the app's
@@ -193,7 +195,6 @@ def _install_app_namespacing(api: FastAPI) -> None:
     # which already returns the cached schema when it is warm, so namespaced()
     # need not repeat that guard — and the derivation is idempotent, so running
     # it on a warm cache leaves the already-prefixed ids untouched.
-    app_names = {app.name for app in iter_apps()}
     # The identity gate holds a tools-limited token to these routes, found by
     # the endpoint a request matched.
     api.state.agent_tools = {
@@ -211,7 +212,39 @@ def _install_app_namespacing(api: FastAPI) -> None:
     api.openapi = namespaced
 
 
-def _annotate(route: HTTPRoute, component: object) -> None:
+def _list_tool_preconditions(api: FastAPI, app_names: set[str]) -> dict[str, list[Callable]]:
+    # A coroutine dependency that takes no parameters can only check configuration
+    # and raise, so it is a precondition, not a request resource. The tool it guards
+    # is listed only while it holds.
+    return {
+        get_tool_name(route.operation_id, list(route.tags), app_names): [
+            depends.dependency
+            for depends in route.dependencies
+            if inspect.iscoroutinefunction(depends.dependency)
+            and not inspect.signature(depends.dependency).parameters
+        ]
+        for route in iter_route_contexts(api.routes)
+        if isinstance(route.original_route, APIRoute) and _TOOL_TAGS & set(route.tags)
+    }
+
+
+def _visible_while(preconditions: list[Callable]) -> AuthCheck:
+    async def is_visible(context: AuthContext) -> bool:
+        # The MCP layer binds no request session.
+        async with session_scope():
+            try:
+                for precondition in preconditions:
+                    await precondition()
+            except ToolNotAvailable:
+                return False
+        return True
+
+    return is_visible
+
+
+def _annotate(
+    tool_preconditions: dict[str, list[Callable]], route: HTTPRoute, component: object
+) -> None:
     if isinstance(component, OpenAPITool):
         is_read = route.method == "GET"
         component.annotations = ToolAnnotations(
@@ -219,6 +252,8 @@ def _annotate(route: HTTPRoute, component: object) -> None:
             destructive_hint=not is_read and route.extensions.get("x-destructive", True),
             idempotent_hint=route.extensions.get("x-idempotent", False),
         )
+        if preconditions := tool_preconditions[route.operation_id]:
+            component.auth = _visible_while(preconditions)
 
 
 def _is_visible(context: AuthContext) -> bool:
@@ -232,7 +267,9 @@ def _is_visible(context: AuthContext) -> bool:
 
 def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
     _validate_agent_tools(api)
-    _install_app_namespacing(api)
+    app_names = {app.name for app in iter_apps()}
+    _install_app_namespacing(api, app_names)
+    tool_preconditions = _list_tool_preconditions(api, app_names)
     # Built directly rather than via from_fastapi, which owns the transport:
     # raise_app_exceptions=False makes an app crash reach the tool as the
     # app's sanitized 500, so no masking is needed and the taxonomy travels.
@@ -249,7 +286,7 @@ def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
             RouteMap(tags={"bot"}, mcp_type=MCPType.TOOL),
             RouteMap(mcp_type=MCPType.EXCLUDE),
         ],
-        mcp_component_fn=_annotate,
+        mcp_component_fn=partial(_annotate, tool_preconditions),
     )
     server = FastMCP(
         name="druks",

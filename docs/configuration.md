@@ -513,7 +513,8 @@ A ticket that enters Ready for Agent opens a build against the selected
 repository. If a scheduled, running, or parked run already exists for that
 ticket, Software Factory does not start another.
 
-An agent reads and answers a board ticket through this appliance's own `/mcp`. A
+An agent reads and answers a board ticket through this appliance's own `/mcp`. The
+server lists the five ticket tools only while the tracker is **druks**. A
 build whose tracker is **druks** asks for that server. You paste nothing and
 connect nothing. Druks mints the token of the account the run belongs to, and it
 allows only the five ticket tools. A comment the agent writes then carries that

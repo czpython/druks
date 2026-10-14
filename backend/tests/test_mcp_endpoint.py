@@ -63,6 +63,13 @@ _TOOL_NAMES = [
     "get_agent_call",
     "get_usage",
 ]
+_BOARD_TOOLS = {
+    "software_factory_create_ticket",
+    "software_factory_get_ticket",
+    "software_factory_update_ticket",
+    "software_factory_set_status",
+    "software_factory_add_comment",
+}
 
 
 @pytest.fixture
@@ -185,11 +192,6 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
         "chat_require_tag",
         "software_factory_start",
         "software_factory_review",
-        "software_factory_create_ticket",
-        "software_factory_get_ticket",
-        "software_factory_update_ticket",
-        "software_factory_set_status",
-        "software_factory_add_comment",
     ]
 
     expected_annotations = {
@@ -239,6 +241,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
 
 
 async def test_issues_ticket_tools_read_and_comment_as_the_pat_account(app, account, pat_token):
+    await SoftwareFactory.override_setting("tracker", "druks")
     project = await Project.create(name="Acme")
     repo = await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
     ticket = await Ticket.create(
@@ -271,6 +274,7 @@ async def test_issues_ticket_tools_read_and_comment_as_the_pat_account(app, acco
 
 
 async def test_a_ticket_token_reaches_only_its_tools(druks_db, app, account):
+    await SoftwareFactory.override_setting("tracker", "druks")
     project = await Project.create(name="Acme")
     repo = await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
     ticket = await Ticket.create(project_repo=repo, title="Add an endpoint")
@@ -291,6 +295,30 @@ async def test_a_ticket_token_reaches_only_its_tools(druks_db, app, account):
     assert names == {"software_factory_get_ticket"}
     assert fetched.structured_content["title"] == "Add an endpoint"
     assert refused.is_error
+
+
+async def test_board_ticket_tools_follow_the_tracker_setting(app, pat_token):
+    project = await Project.create(name="Acme")
+    repo = await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
+    ticket = await Ticket.create(project_repo=repo, title="Add an endpoint")
+
+    async with live(app), _client(app, pat_token) as client:
+        on_linear = {tool.name for tool in await client.list_tools()}
+        refused = await client.call_tool(
+            "software_factory_get_ticket",
+            {"identifier": ticket.identifier},
+            raise_on_error=False,
+        )
+        await SoftwareFactory.override_setting("tracker", "druks")
+        on_druks = {tool.name for tool in await client.list_tools()}
+        fetched = await client.call_tool(
+            "software_factory_get_ticket", {"identifier": ticket.identifier}
+        )
+
+    assert _BOARD_TOOLS.isdisjoint(on_linear)
+    assert refused.is_error
+    assert _BOARD_TOOLS.issubset(on_druks)
+    assert fetched.structured_content["title"] == "Add an endpoint"
 
 
 async def test_a_bot_key_calls_its_tool_for_the_person_in_its_conversation(

@@ -6,7 +6,7 @@ from sqlalchemy import delete, func, select, update
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
-from druks.api.exceptions import agent_error_responses
+from druks.api.exceptions import ToolNotAvailable, agent_error_responses
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.enums import Priority, Status
 from druks.contrib.software_factory.exceptions import (
@@ -369,7 +369,19 @@ async def request_review(
     )
 
 
-tickets_router = APIRouter(prefix="/tickets", tags=["tickets"])
+async def require_board() -> None:
+    settings = await SoftwareFactory.settings()
+    if settings.tracker == "druks":
+        return
+    raise ToolNotAvailable(
+        f"The ticket board is off: the tracker is {settings.tracker}. Board tools apply only "
+        "to the druks tracker. Use that tracker for the ticket."
+    )
+
+
+tickets_router = APIRouter(
+    prefix="/tickets", tags=["tickets"], dependencies=[Depends(require_board)]
+)
 
 
 async def require_ticket(identifier: str) -> Ticket:

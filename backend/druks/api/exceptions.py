@@ -75,3 +75,13 @@ class SubjectBusy(AgentApiError):
 
     def __init__(self, run_id: str) -> None:
         super().__init__(f"The subject already has active run {run_id}.")
+
+
+class ToolNotAvailable(AgentApiError):
+    # A route precondition raises it while its tool is off in this configuration.
+    # The MCP server lists the tool only while the precondition does not.
+    status_code = 404
+    code = "TOOL_NOT_AVAILABLE"
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
