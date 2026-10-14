@@ -486,11 +486,13 @@ Select the tracker in **Software Factory → Settings**. The default is Linear.
 **Linear** and **Jira** are service identities. Connect them from
 **Settings → Connections → Services**. The Linear identity uses an API key
 and webhook secret. The Jira identity uses a base URL, email, API token, and
-webhook secret. Druks validates the credentials before it stores them. Linear
-and Jira share five status settings: trigger, in progress, in review, done, and
-resting. When the selected tracker is connected, the settings page lists its
-statuses. After you change the tracker, save the settings to list the statuses of
-the new tracker. An empty in review or resting status leaves the ticket where it is.
+webhook secret. For an Atlassian service account, the email is its address at
+`serviceaccount.atlassian.com`. Druks validates the credentials before it
+stores them. Linear and Jira share five status settings: trigger, in progress,
+in review, done, and resting. When the selected tracker is connected, the
+settings page lists its statuses. After you change the tracker, save the
+settings to list the statuses of the new tracker. An empty in review or resting
+status leaves the ticket where it is.
 
 Select **druks** to use the ticket board on this appliance. That choice needs no
 credentials. The status settings stay hidden. The trigger status is

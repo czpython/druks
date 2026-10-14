@@ -6,6 +6,9 @@ from druks.core.apis.exceptions import JiraAPIError, UnknownTicketError
 
 _DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=5.0, write=10.0, pool=5.0)
 _DEFAULT_LIMITS = httpx.Limits(max_connections=20, max_keepalive_connections=10)
+# The site URL refuses a scoped token, such as a service account's.
+_GATEWAY = "https://api.atlassian.com/ex/jira"
+SERVICE_ACCOUNT_DOMAIN = "serviceaccount.atlassian.com"
 
 
 class JiraClient:
@@ -18,6 +21,7 @@ class JiraClient:
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self._api_url: str | None = None
         self._client = client or httpx.AsyncClient(
             timeout=_DEFAULT_TIMEOUT,
             limits=_DEFAULT_LIMITS,
@@ -35,7 +39,11 @@ class JiraClient:
         *,
         json: dict[str, Any] | None = None,
     ):
-        response = await self._client.request(method, f"{self.base_url}{path}", json=json)
+        if not self._api_url:
+            tenant = await self._client.get(f"{self.base_url}/_edge/tenant_info")
+            tenant.raise_for_status()
+            self._api_url = f"{_GATEWAY}/{tenant.json()['cloudId']}"
+        response = await self._client.request(method, f"{self._api_url}{path}", json=json)
         if not response.is_success:
             raise JiraAPIError(
                 f"{method} {path} -> {response.status_code}: {response.text[:300]}",
@@ -44,6 +52,9 @@ class JiraClient:
         if response.status_code == 204 or not response.content:
             return {}
         return response.json()
+
+    async def get_myself(self) -> dict[str, Any]:
+        return await self._request("GET", "/rest/api/3/myself")
 
     async def get_issue_status(self, key: str) -> str:
         try:

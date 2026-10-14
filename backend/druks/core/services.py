@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from druks.accounts.models import Account
 from druks.core.apis.exceptions import TwilioError, TwilioNotFoundError
 from druks.core.apis.github import GITHUB_API_URL, GITHUB_AUTHORITY, GitHubClient
+from druks.core.apis.jira import SERVICE_ACCOUNT_DOMAIN, JiraClient
 from druks.core.apis.linear import LINEAR_GRAPHQL_URL
 from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
 from druks.core.apis.twilio import TwilioClient
@@ -194,23 +195,36 @@ class Jira(Service):
 
     class Settings(BaseModel):
         base_url: str = Field(title="Base URL", description="Base URL of the Jira Cloud site.")
-        email: str = Field(title="Email")
+        email: str = Field(
+            title="Email",
+            description=(
+                "The Atlassian account that owns the token. A service account's is its "
+                f"address at {SERVICE_ACCOUNT_DOMAIN}."
+            ),
+        )
         api_token: SecretStr = Field(title="API token")
         webhook_secret: SecretStr = Field(title="Webhook secret")
 
     @classmethod
     def get_authorization(cls, login: VaultSecret) -> str:
-        credentials = f"{login.identity['email']}:{login.secrets['api_token']}"
-        return f"Basic {base64.b64encode(credentials.encode()).decode()}"
+        # Atlassian's MCP server takes a person's token as Basic auth and a service
+        # account's key as a bearer token.
+        email = login.identity["email"]
+        token = login.secrets["api_token"]
+        if email.endswith(f"@{SERVICE_ACCOUNT_DOMAIN}"):
+            return f"Bearer {token}"
+        return f"Basic {base64.b64encode(f'{email}:{token}'.encode()).decode()}"
 
     @classmethod
     async def verify(cls, settings: Settings) -> dict[str, Any]:
-        auth = httpx.BasicAuth(settings.email, settings.api_token.get_secret_value())
+        token = settings.api_token.get_secret_value()
+        auth = httpx.BasicAuth(settings.email, token)
         try:
-            async with httpx.AsyncClient(timeout=_VERIFY_TIMEOUT, auth=auth) as client:
-                response = await client.get(f"{settings.base_url.rstrip('/')}/rest/api/3/myself")
-            response.raise_for_status()
-            facts = {"display_name": response.json()["displayName"]}
+            async with httpx.AsyncClient(timeout=_VERIFY_TIMEOUT, auth=auth) as wire:
+                client = JiraClient(
+                    base_url=settings.base_url, email=settings.email, api_token=token, client=wire
+                )
+                facts = {"display_name": (await client.get_myself())["displayName"]}
         except Exception as error:  # noqa: BLE001 — any auth/transport failure is a rejected paste
             logger.warning("Jira service-identity connect rejected: %s", type(error).__name__)
             raise ServiceConnectError(
