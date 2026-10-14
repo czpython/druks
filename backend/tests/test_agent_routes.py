@@ -9,7 +9,7 @@ from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Build, PullRequestReview
-from druks.core.apis.exceptions import LinearAPIError, UnknownTicketError
+from druks.core.apis.exceptions import LinearAPIError, TicketNotMovableError, UnknownTicketError
 from druks.db import db_session
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
@@ -170,6 +170,8 @@ async def test_review_request_returns_the_run_id_start_hands_back(
 class _FakeTracker:
     """Records the status moves the route delegates to — no HTTP."""
 
+    known_exceptions = (LinearAPIError, TicketNotMovableError, UnknownTicketError)
+
     def __init__(self, error: Exception | None = None) -> None:
         self.error = error
         self.calls: list = []
@@ -270,19 +272,39 @@ def test_software_factory_start_reports_a_missing_tracker_configuration(client: 
     assert body["retryable"] is False
 
 
-def test_software_factory_start_does_not_acknowledge_a_tracker_failure(
-    tmp_path, druks_db, monkeypatch
+@pytest.mark.parametrize(
+    ("error", "status_code", "body"),
+    [
+        (
+            TicketNotMovableError("ENG-831 has no transition to status 'Todo'."),
+            409,
+            {
+                "code": "TICKET_NOT_MOVABLE",
+                "message": "ENG-831 has no transition to status 'Todo'.",
+                "retryable": False,
+            },
+        ),
+        (
+            LinearAPIError("linear fell over"),
+            502,
+            {
+                "code": "TRACKER_REFUSED",
+                "message": "The ticket tracker refused the request: linear fell over",
+                "retryable": False,
+            },
+        ),
+    ],
+)
+def test_software_factory_start_reports_a_tracker_refusal(
+    client: TestClient, monkeypatch, error, status_code, body
 ):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
-    app = configure_app_for_test(settings=make_settings(tmp_path))
-    fake = _FakeTracker(error=LinearAPIError("linear fell over"))
+    fake = _FakeTracker(error=error)
     monkeypatch.setattr(SoftwareFactory, "get_tracker", _tracker_stub(fake))
 
-    with TestClient(app, raise_server_exceptions=False) as failing:
-        response = failing.post("/api/software_factory/work-items/ENG-831/start")
+    response = client.post("/api/software_factory/work-items/ENG-831/start")
 
-    assert response.status_code == 500
-    assert response.json() == {"error": "INTERNAL_ERROR", "detail": "Internal server error"}
+    assert response.status_code == status_code
+    assert response.json() == body
 
 
 async def test_review_request_refuses_when_github_is_not_connected(client: TestClient, monkeypatch):

@@ -14,7 +14,12 @@ from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.ticketing.jira import Jira
 from druks.contrib.software_factory.ticketing.linear import Linear
 from druks.core import services
-from druks.core.apis.exceptions import JiraAPIError, LinearAPIError, UnknownTicketError
+from druks.core.apis.exceptions import (
+    JiraAPIError,
+    LinearAPIError,
+    TicketNotMovableError,
+    UnknownTicketError,
+)
 from druks.core.apis.jira import JiraClient
 from druks.core.apis.linear import LinearClient
 from druks.secrets.models import VaultSecret
@@ -572,6 +577,7 @@ async def test_jira_set_status_leaves_a_ticket_already_at_the_status_untouched()
 
 def test_jira_declares_known_exceptions():
     assert JiraAPIError in Jira.known_exceptions
+    assert TicketNotMovableError in Jira.known_exceptions
     assert UnknownTicketError in Jira.known_exceptions
     assert httpx.HTTPError in Jira.known_exceptions
 
@@ -653,7 +659,7 @@ async def test_jira_client_still_errors_without_a_matching_transition():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"transitions": [{"id": "31", "to": {"name": "Done"}}]})
 
-    with pytest.raises(JiraAPIError, match="no transition to status"):
+    with pytest.raises(TicketNotMovableError, match="It can move to Done."):
         await _jira_client(handler).transition_issue("PROJ-7", "Ready for Agent")
 
 

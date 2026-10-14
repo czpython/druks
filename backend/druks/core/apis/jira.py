@@ -2,7 +2,7 @@ from typing import Any
 
 import httpx
 
-from druks.core.apis.exceptions import JiraAPIError, UnknownTicketError
+from druks.core.apis.exceptions import JiraAPIError, TicketNotMovableError, UnknownTicketError
 
 _DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=5.0, write=10.0, pool=5.0)
 _DEFAULT_LIMITS = httpx.Limits(max_connections=20, max_keepalive_connections=10)
@@ -86,7 +86,11 @@ class JiraClient:
             None,
         )
         if not transition:
-            raise JiraAPIError(f"{key} has no transition to status {status_name!r}")
+            reachable = ", ".join(transition["to"]["name"] for transition in data["transitions"])
+            raise TicketNotMovableError(
+                f"{key} has no transition to status {status_name!r}. "
+                f"It can move to {reachable or 'no other status'}."
+            )
         body: dict[str, Any] = {"transition": {"id": transition["id"]}}
         resolution = transition.get("fields", {}).get("resolution", {})
         if resolution.get("required"):

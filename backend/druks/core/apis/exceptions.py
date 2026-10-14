@@ -43,6 +43,11 @@ class UnknownTicketError(DruksError):
         self.tracker = tracker
 
 
+class TicketNotMovableError(DruksError):
+    """The tracker's workflow does not let the ticket move to the status. The message
+    names the statuses the ticket can move to."""
+
+
 class TwilioError(DruksError):
     """Twilio did not accept a request. The message names the request and Twilio's status."""
 

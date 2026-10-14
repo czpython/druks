@@ -14,7 +14,9 @@ from druks.contrib.software_factory.exceptions import (
     PrefixTakenError,
     RepoNotFound,
     TicketNotFound,
+    TicketNotMovable,
     TrackerNotConfigured,
+    TrackerRefused,
 )
 from druks.contrib.software_factory.models import Comment, Project, ProjectRepo, Ticket, WorkItem
 from druks.contrib.software_factory.schemas import (
@@ -34,7 +36,7 @@ from druks.contrib.software_factory.schemas import (
 )
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Profile, PullRequestReview
-from druks.core.apis.exceptions import UnknownTicketError
+from druks.core.apis.exceptions import TicketNotMovableError, UnknownTicketError
 from druks.core.services import Github
 from druks.db import db_session
 from druks.services.exceptions import ServiceNotConnectedError
@@ -276,7 +278,14 @@ async def list_work_items_history(
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="start",
     tags=["agent"],
-    responses=agent_error_responses(TicketNotFound("ENG-9999", "Linear"), TrackerNotConfigured()),
+    responses=agent_error_responses(
+        TicketNotFound("ENG-9999", "Linear"),
+        TicketNotMovable(
+            "PROJ-7 has no transition to status 'Ready for Agent'. It can move to Specification."
+        ),
+        TrackerRefused("GET /rest/api/3/issue/PROJ-7 -> 401: Unauthorized"),
+        TrackerNotConfigured(),
+    ),
 )
 async def start_work_item(
     ticket: str = Path(
@@ -296,6 +305,10 @@ async def start_work_item(
             await tracker.set_status(ticket, TicketStatus.TRIGGER)
         except UnknownTicketError as error:
             raise TicketNotFound(error.key, error.tracker) from error
+        except TicketNotMovableError as error:
+            raise TicketNotMovable(str(error)) from error
+        except tracker.known_exceptions as error:
+            raise TrackerRefused(str(error)) from error
 
 
 reviews_router = APIRouter(prefix="/reviews")

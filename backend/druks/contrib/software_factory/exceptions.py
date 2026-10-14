@@ -18,6 +18,20 @@ class TicketNotFound(AgentApiError):
         super().__init__(f"{ticket} doesn't exist in {tracker}")
 
 
+class TicketNotMovable(AgentApiError):
+    status_code = 409
+    code = "TICKET_NOT_MOVABLE"
+
+
+class TrackerRefused(AgentApiError):
+    # The tracker failed the call: a revoked token, a status it does not know, or an outage.
+    status_code = 502
+    code = "TRACKER_REFUSED"
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"The ticket tracker refused the request: {reason}")
+
+
 class TrackerNotConfigured(AgentApiError):
     # The operator's problem, not the caller's: no tracker is selected or its
     # credentials are missing, so Software Factory cannot reach a ticket at all.
