@@ -533,7 +533,13 @@ async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
         )
         external.input_requested_at = datetime.now(UTC)
         await druks_db.flush()
-        unanswerable = await _call_error(client, "get_gate", {"run": external.id})
+        gate = (await client.call_tool("get_gate", {"run": external.id})).structured_content
+        assert gate["ask"]["presentation"] == "external"
+        unanswerable = await _call_error(
+            client,
+            "answer_gate",
+            {"run": external.id, "parkedAt": gate["parkedAt"], "control": "approve"},
+        )
     assert unanswerable["code"] == "GATE_NOT_ANSWERABLE"
 
 
@@ -568,6 +574,15 @@ async def test_get_agent_call_serves_bounded_tails(app, pat_token, druks_db):
         "message": "No agent call missing.",
         "retryable": False,
     }
+
+
+async def test_an_undeclared_argument_fails_before_the_request(app, pat_token):
+    async with live(app), _client(app, pat_token) as client:
+        result = await client.call_tool("get_agent_call", {"id": "abc"}, raise_on_error=False)
+    assert result.is_error
+    assert result.content[0].text == (
+        "get_agent_call has no argument 'id'. Call it with the arguments its input schema declares."
+    )
 
 
 async def test_cancel_run_is_destructive_but_repeatable(app, pat_token, druks_db, monkeypatch):

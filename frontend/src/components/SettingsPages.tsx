@@ -429,6 +429,11 @@ export function SettingsPages({
     path: `/settings/${field.section}?field=${field.field}`,
   })), apps.flatMap((entry) => [
     { label: appLabel(entry.name), owner: 'App settings', kind: 'Section', terms: '', path: `/apps/${entry.name}/settings` },
+    ...(entry.bot && channels.includes('slack') ? [{
+      label: 'Answer only when I tag the bot', owner: appLabel(entry.name), kind: 'Field',
+      terms: 'slack tag mention thread reply',
+      path: `/apps/${entry.name}/settings/channels?field=tag-required`,
+    }] : []),
     ...[
       ...entry.settings.map((field) => ({ field, fields: entry.settings, changes: appEdits[entry.name]?.appSettings?.[entry.name], scope: `app.${entry.name}` })),
       ...entry.workflows.flatMap((workflow) => workflow.fields.map((field) => ({ field, fields: workflow.fields, changes: appEdits[entry.name]?.workflowSettings?.[workflow.kind], scope: `workflow.${workflow.kind}` }))),

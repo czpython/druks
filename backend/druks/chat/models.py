@@ -151,6 +151,7 @@ class Conversation(Base, Uuid7Pk):
         user_name: str,
         user_phone: str,
         thread_id: str,
+        is_tag_required: bool = False,
     ) -> "Conversation":
         """The one conversation of a person in a thread, or in a direct chat, on a
         channel's connection, under the account the person routes to. It keeps the name
@@ -166,6 +167,7 @@ class Conversation(Base, Uuid7Pk):
                 user_name=user_name,
                 user_phone=user_phone,
                 thread_id=thread_id,
+                is_tag_required=is_tag_required,
                 created_at=Base.utc_now(),
             )
             .on_conflict_do_nothing(

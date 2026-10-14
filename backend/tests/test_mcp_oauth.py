@@ -729,18 +729,18 @@ async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
         await Workspace.get_all_mcp_servers(db_session(), None, None)
 
 
-async def test_delivery_names_the_account_missing_its_per_user_grant(druks_db):
-    account = await Account.get_or_create(druks_db, "run@example.com")
-    server = await McpServer.create(db_session(), name=_NAME, url=_SERVER_URL, is_oauth=True)
-    server.identity_mode = IdentityMode.PER_USER
+async def test_delivery_leaves_a_per_user_server_out_for_an_account_without_a_grant(
+    auth_server, druks_db
+):
+    # One account's connection must not make every other account's run fail.
+    connected = await Account.get_or_create(druks_db, "connected@example.com")
+    other = await Account.get_or_create(druks_db, "other@example.com")
+    await _store_grant(account_id=connected.id, identity_mode=IdentityMode.PER_USER)
 
-    with pytest.raises(MissingGrantError) as error:
-        await Workspace.get_all_mcp_servers(db_session(), None, account.id)
+    servers, refs = await Workspace.get_all_mcp_servers(db_session(), None, other.id)
 
-    assert error.value.name == _NAME
-    assert error.value.account_id == account.id
-    assert _NAME in str(error.value)
-    assert account.id in str(error.value)
+    assert servers == ()
+    assert refs == []
 
 
 async def test_delivery_without_a_run_account_uses_the_default_account(auth_server, druks_db):
@@ -759,10 +759,10 @@ async def test_delivery_with_a_named_account_does_not_use_the_default_account(
     named = await Account.get_or_create(druks_db, "named@example.com")
     await _store_grant(account_id=default_account.id, identity_mode=IdentityMode.PER_USER)
 
-    with pytest.raises(MissingGrantError) as error:
-        await Workspace.get_all_mcp_servers(db_session(), None, named.id)
+    servers, refs = await Workspace.get_all_mcp_servers(db_session(), None, named.id)
 
-    assert error.value.account_id == named.id
+    assert servers == ()
+    assert refs == []
 
 
 async def test_the_ref_binds_the_accounts_own_grant(auth_server, druks_db):

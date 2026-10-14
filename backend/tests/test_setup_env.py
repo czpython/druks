@@ -664,6 +664,14 @@ def test_registry_settings_render_for_drukbox_on_every_provider(tmp_path, provid
     assert stat.S_IMODE((tmp_path / "druks.toml").stat().st_mode) == 0o600
 
 
+def test_host_limits_render_for_drukbox_as_json(tmp_path):
+    env_path = tmp_path / ".env"
+
+    _run(env_path, set_values=("sandbox.host_limits.exe=2", "sandbox.host_limits.docker=1"))
+
+    assert read_env(env_path)["HOST_LIMITS"] == '{"exe":2,"docker":1}'
+
+
 def test_setup_writes_and_preserves_installation_timezone(tmp_path, monkeypatch):
     env_path = tmp_path / ".env"
     _run(env_path)

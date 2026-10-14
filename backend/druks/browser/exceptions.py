@@ -68,9 +68,14 @@ class BrowserSessionWriterLockedError(DruksError):
 class BrowserClientMissingError(DruksError):
     def __init__(self, name: str) -> None:
         super().__init__(
-            f"{name}.browser() drives the session with playwright, which the app "
-            "supplies — add playwright to its dependencies, or use .cdp() with another client."
+            f"{name}.playwright() needs Playwright, and the app does not install it. "
+            "Add playwright to the app's dependencies, or borrow with .pinchtab() or .cdp()."
         )
+
+
+class BrowserCommandError(DruksError):
+    def __init__(self, command: str, detail: str) -> None:
+        super().__init__(f"Browser {command} failed: {detail}")
 
 
 class BrowserLoginWindowGoneError(BrowserApiError):

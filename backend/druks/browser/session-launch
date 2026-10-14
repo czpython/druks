@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 process.env.DISPLAY ||= ":99";
 
+const dns = require("node:dns/promises");
 const fs = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
@@ -18,14 +19,23 @@ const PROFILE_PATH = path.join(SESSION_ROOT, "profile");
 // Chromium-vs-Chrome brand split, and the switches and debugger of a driver.
 const CHROME_PATH = "/opt/google/chrome/chrome";
 const CDP_URL = "http://127.0.0.1:9222";
+const PINCHTAB_URL = "http://127.0.0.1:9867";
 const DISPLAY_SOCKET = "/tmp/.X11-unix/X99";
 // The egress proxy. druks sets it for the launches its proxy scope covers.
 // If it is empty, the browser uses the box IP.
 const egressProxy = process.env.DRUKS_BROWSER_PROXY;
+// A read-only borrow drops every request that is not a GET, in the browser.
+const isReadOnly = process.env.DRUKS_BROWSER_READ_ONLY === "1";
+// The client druks starts beside Chrome for a borrow. It answers only this token
+// and opens only the session's site.
+const client = process.env.DRUKS_BROWSER_CLIENT;
+const clientToken = process.env.DRUKS_BROWSER_CLIENT_TOKEN;
+const site = process.env.DRUKS_BROWSER_SITE;
 const RUNTIME_PATH = path.join(SESSION_ROOT, ".runtime");
 const PID_PATH = path.join(RUNTIME_PATH, "launcher.pid");
 const READY_PATH = path.join(RUNTIME_PATH, "ready.json");
 const CLOSED_PATH = path.join(RUNTIME_PATH, "closed");
+const PINCHTAB_CONFIG_PATH = path.join(RUNTIME_PATH, "pinchtab.json");
 // Chrome drops session-only cookies when it closes, and a login often lives in
 // one. They ride in the profile so the export carries them to the next launch.
 const SESSION_COOKIES_PATH = path.join(PROFILE_PATH, "druks-session-cookies.json");
@@ -168,6 +178,65 @@ async function debuggerVersion(chrome) {
   throw new Error("Chrome did not open its debugger on 127.0.0.1:9222");
 }
 
+async function startPinchTab(proxyServer) {
+  let proxyAddresses = [];
+  if (proxyServer) {
+    // An IPv6 host keeps its brackets in a URL.
+    const host = new URL(proxyServer).hostname.replace(/^\[(.*)\]$/, "$1");
+    const addresses = await dns.lookup(host, { all: true });
+    proxyAddresses = addresses.map(({ address }) => address);
+  }
+  const config = {
+    server: {
+      bind: "127.0.0.1",
+      port: new URL(PINCHTAB_URL).port,
+      stateDir: path.join(RUNTIME_PATH, "pinchtab"),
+    },
+    security: {
+      allowEvaluate: true,
+      allowCookies: false,
+      allowedDomains: [site, `*.${site}`],
+      // This block replaces PinchTab's IDPI defaults, and IDPI is what holds a
+      // navigation to the allowed domains.
+      idpi: {
+        enabled: true,
+        strictMode: true,
+        scanContent: true,
+        wrapContent: true,
+        scanTimeoutSec: 5,
+      },
+      // PinchTab refuses a page that arrives from a private address, unless
+      // the address is a trusted proxy. It takes addresses, not host names.
+      trustedProxyCIDRs: proxyAddresses,
+    },
+  };
+  fs.writeFileSync(PINCHTAB_CONFIG_PATH, JSON.stringify(config), { mode: 0o600 });
+  return spawn("pinchtab", ["bridge", "--cdp-attach", CDP_URL, "--browser", "chrome"], {
+    env: {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      PINCHTAB_CONFIG: PINCHTAB_CONFIG_PATH,
+      PINCHTAB_TOKEN: clientToken,
+    },
+    stdio: ["ignore", "ignore", "inherit"],
+  });
+}
+
+// The bridge reports healthy once it has attached to Chrome.
+async function waitForPinchTab(bridge) {
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline && bridge.exitCode === null && bridge.signalCode === null) {
+    const response = await fetch(`${PINCHTAB_URL}/health`, {
+      headers: { Authorization: `Bearer ${clientToken}` },
+    }).catch(() => undefined);
+    if (response?.ok) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`PinchTab did not attach to Chrome on ${CDP_URL}`);
+}
+
 // One command on its own CDP socket. It enables no domain, so a page cannot read it.
 function sendCdp(webSocketUrl, method, params) {
   return new Promise((resolve) => {
@@ -197,6 +266,8 @@ async function main() {
   let chrome;
   let chromeExit;
   let version;
+  let fence;
+  let bridge;
   let isReady = false;
   try {
     const args = [
@@ -217,14 +288,19 @@ async function main() {
       "--disable-component-update",
       "--disable-features=OptimizationHints",
     ];
+    if (isReadOnly) {
+      // The read-only route cannot reach a shared worker, so it never starts.
+      args.push("--disable-shared-workers");
+    }
     if (headless) {
       args.push("--headless=new");
     } else {
       await startDisplay();
     }
+    let proxyServer;
     if (egressProxy) {
       const proxy = new URL(egressProxy);
-      let proxyServer = `${proxy.protocol}//${proxy.host}`;
+      proxyServer = `${proxy.protocol}//${proxy.host}`;
       if (proxy.username || proxy.password) {
         relay = await startProxyRelay(proxy);
         proxyServer = `http://127.0.0.1:${relay.address().port}`;
@@ -247,7 +323,8 @@ async function main() {
     version = await debuggerVersion(chrome);
 
     // Playwright attaches here, before a site opens, and again at shutdown.
-    // Between the two, the window has no driver for a site to read.
+    // Between the two, the window has no driver for a site to read, except
+    // the fence of a read-only borrow.
     const browser = await chromium.connectOverCDP(CDP_URL);
     const [context] = browser.contexts();
     if (meta.format === "storage_state") {
@@ -256,7 +333,20 @@ async function main() {
     if (fs.existsSync(SESSION_COOKIES_PATH)) {
       await context.addCookies(JSON.parse(fs.readFileSync(SESSION_COOKIES_PATH, "utf8")));
     }
-    await browser.close();
+    if (isReadOnly) {
+      // The route covers every tab, popup, worker, and service worker of the context.
+      await context.route("**/*", (route) =>
+        route.request().method() === "GET" ? route.continue() : route.abort(),
+      );
+      fence = browser;
+    } else {
+      await browser.close();
+    }
+
+    if (client === "pinchtab") {
+      bridge = await startPinchTab(proxyServer);
+      await waitForPinchTab(bridge);
+    }
 
     // Open on the session's own site so the operator lands where they log in,
     // not on a blank tab. Best-effort: a slow or blocked site still yields a
@@ -277,6 +367,7 @@ async function main() {
 
     await shutdownRequested;
   } finally {
+    bridge?.kill();
     if (version) {
       let cookies = [];
       try {
@@ -294,6 +385,8 @@ async function main() {
       // Chrome writes its cookie store on Browser.close. It does not on SIGTERM.
       await sendCdp(version.webSocketDebuggerUrl, "Browser.close");
       await chromeExit;
+      // The fence holds until Chrome is gone.
+      await fence?.close();
     } else {
       chrome?.kill();
     }

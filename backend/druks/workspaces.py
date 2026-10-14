@@ -176,8 +176,9 @@ class Workspace:
         them, and the secret refs for the box's entries, one per bearer and per
         secret header. The workspace's servers come first and own their names:
         a same-named registry entry is neither resolved nor delivered. A registry
-        server that cannot authenticate fails here, before the box, unless
-        ``skip_unauthenticated`` leaves it out."""
+        server that cannot authenticate fails here, before the box, unless each
+        account keys or connects it for itself or ``skip_unauthenticated`` leaves
+        it out."""
         workspace_servers = await cls.get_mcp_servers(subject)
         workspace_names = {server.name for server in workspace_servers}
         if len(workspace_names) != len(workspace_servers):
@@ -236,6 +237,11 @@ class Workspace:
                     )
                 )
             elif access.credential != Credential.HEADERS:
+                if access.identity_mode == IdentityMode.PER_USER:
+                    # The account has connected no grant of its own; its box goes
+                    # without, and the call's manifest records the server as
+                    # declared but not delivered.
+                    continue
                 raise MissingGrantError(name, run_account)
             elif not secret_headers:
                 if access.identity_mode == IdentityMode.PER_USER:

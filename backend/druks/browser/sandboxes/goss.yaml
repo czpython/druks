@@ -1,5 +1,5 @@
 # The boot contract of the browser template: the drukbox base entrypoint seeds
-# the ``druks`` user that browser.sh adds, and /work/session belongs to it.
+# the ``druks`` user of the sandbox image, and /work/session belongs to it.
 # dgoss checks it in CI with DRUKBOX_SSH_USER=druks and
 # DRUKBOX_AUTHORIZED_KEY="ssh-ed25519 AAAA goss".
 file:

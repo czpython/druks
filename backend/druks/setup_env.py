@@ -1,5 +1,6 @@
 import base64
 import copy
+import json
 import os
 import re
 import secrets
@@ -62,6 +63,7 @@ _OWNED_ENV_KEYS = frozenset(
         "REDIS_URL",
         "DRUKS_AUTH_HEADER",
         "DEFAULT_HOST_PROVIDER",
+        "HOST_LIMITS",
         "REGISTRY_HOST",
         "REGISTRY_USERNAME",
         "REGISTRY_PASSWORD",
@@ -106,6 +108,7 @@ _KNOWN_TOML_KEYS = {
         "registry_host",
         "registry_username",
         "template_repository",
+        "host_limits",
         "proxy_url",
         "issuer_url",
         "timeout",
@@ -247,8 +250,12 @@ timeout = 180
 # Put a provider secret in the secrets section of .env, not in this table.
 # Provider reference: https://github.com/czpython/drukbox (docs/deploy.md).
 
-# The browser that apps borrow and the operator signs into.
+# Hosts drukbox keeps per provider, for example exe = 28. A provider not named
+# has no limit. At the limit a run waits for a slot.
+[sandbox.host_limits]
+
 [browser]
+# The browser that apps borrow and the operator signs into.
 # Which launches leave through the browser proxy, the secret DRUKS_BROWSER_PROXY
 # in .env. "login" (the default) sends only the login window through it. "all"
 # sends the login window and every borrow.
@@ -316,6 +323,17 @@ def _canonical_config(raw: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(table, dict):
             raise ValueError(f"druks.toml: [{table_name}] must be a table")
         for key in keys:
+            if (table_name, key) == ("sandbox", "host_limits"):
+                limits = table.setdefault(key, {})
+                if not isinstance(limits, dict) or not all(
+                    str(count).isdigit() for count in limits.values()
+                ):
+                    raise ValueError(
+                        "druks.toml: sandbox.host_limits must be a table of provider = count"
+                    )
+                # --set writes a string; drukbox reads a number.
+                table[key] = {name: int(count) for name, count in limits.items()}
+                continue
             value = table.setdefault(key, "")
             if table_name == "sandbox" and key == "timeout":
                 if type(value) not in (str, int, float):
@@ -444,6 +462,8 @@ def _render_env(
     provider = _get_string(config, ("sandbox", "provider"))
     proxy_url = _get_string(config, ("sandbox", "proxy_url"))
     issuer_url = _get_string(config, ("sandbox", "issuer_url"))
+    limits = config["sandbox"]["host_limits"]
+    host_limits = json.dumps(limits, separators=(",", ":")) if limits else ""
 
     sections = (
         (
@@ -471,6 +491,7 @@ def _render_env(
                 ("REGISTRY_HOST", _get_string(config, ("sandbox", "registry_host"))),
                 ("REGISTRY_USERNAME", _get_string(config, ("sandbox", "registry_username"))),
                 ("TEMPLATE_REPOSITORY", _get_string(config, ("sandbox", "template_repository"))),
+                ("HOST_LIMITS", host_limits),
                 ("SECRETS_PROXY_URL", proxy_url),
                 # The proxy binds the address sandboxes dial and nothing else.
                 ("DRUKS_SECRETS_PROXY_BIND_HOST", urlsplit(proxy_url).hostname or ""),

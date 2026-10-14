@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from drukbox_sdk import SandboxTemplate
 
@@ -30,11 +31,17 @@ async def prepare_sandbox_templates(*, extra: tuple[Sandbox, ...] = ()) -> None:
             base_image=sandbox.get_base_image() or None,
             label=label,
         )
+        if template.status == "available":
+            print(f"{label}: already built")
+            continue
+        print(f"{label}: building on {template.base_image}")
+        started = time.monotonic()
         template = await wait_for_build(sandbox, template)
         if template.status != "available":
             raise TemplateUnavailable(
                 f"sandbox template {label} failed to build: {template.last_error}"
             )
+        print(f"{label}: available after {time.monotonic() - started:.0f}s")
 
 
 async def wait_for_build(sandbox: Sandbox, template: SandboxTemplate) -> SandboxTemplate:

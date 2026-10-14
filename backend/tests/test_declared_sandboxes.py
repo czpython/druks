@@ -56,7 +56,7 @@ def test_get_declared_sandboxes_deduplicates_by_content(monkeypatch):
     assert declared == {hashlib.sha256(b"setup").hexdigest(): other}
 
 
-async def test_prepare_sandbox_templates_requests_each_declaration(monkeypatch):
+async def test_prepare_sandbox_templates_requests_each_declaration(monkeypatch, capsys):
     sandbox = Sandbox(setup="sandboxes/setup.sh")
     object.__setattr__(sandbox, "module", "druks_notes.workflows")
     create_template = AsyncMock(return_value=SimpleNamespace(status="available"))
@@ -85,6 +85,7 @@ async def test_prepare_sandbox_templates_requests_each_declaration(monkeypatch):
         base_image="base",
         label="druks_notes.workflows:sandboxes/setup.sh",
     )
+    assert capsys.readouterr().out == "druks_notes.workflows:sandboxes/setup.sh: already built\n"
     await templates.prepare_sandbox_templates()
     assert create_template.await_count == 2
 
@@ -148,7 +149,7 @@ async def test_prepare_sandbox_templates_waits_for_each_build_and_reports_a_fail
 ):
     sandbox = Sandbox(setup="sandboxes/setup.sh")
     object.__setattr__(sandbox, "module", "druks_notes.workflows")
-    create_template = AsyncMock(return_value=SimpleNamespace(status="building"))
+    create_template = AsyncMock(return_value=SimpleNamespace(status="building", base_image="base"))
     get_template = AsyncMock(
         side_effect=[
             SimpleNamespace(status="building"),
