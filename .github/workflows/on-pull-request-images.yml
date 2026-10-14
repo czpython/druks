@@ -87,20 +87,27 @@ jobs:
           docker exec sbx-boot /usr/sbin/sshd -T | grep -iEx 'permitrootlogin (prohibit-password|without-password|yes)'
 
   # Drukbox builds the browser as a template: browser.sh run on the default
-  # image of its docker provider, which every druks deploy sets to the sandbox
-  # image above.
+  # image of its docker provider. The deployment sets that image, so browser.sh
+  # must build on drukbox's stock image and on the sandbox image above.
   browser:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        base: [ghcr.io/czpython/drukbox/sandbox:latest, druks-sandbox:pr]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Build the sandbox image
+        if: matrix.base == 'druks-sandbox:pr'
         run: docker build --target sandbox --tag druks-sandbox:pr deploy/sandbox
       - name: Build browser.sh the way Drukbox builds a template
+        env:
+          BASE: ${{ matrix.base }}
         run: |
           printf '%s\n' \
-            'FROM druks-sandbox:pr' \
+            "FROM $BASE" \
             'COPY browser.sh /drukbox-setup.sh' \
             'RUN sh /drukbox-setup.sh && rm /drukbox-setup.sh' \
             | docker build --tag druks-browser:pr --file - backend/druks/browser/sandboxes
