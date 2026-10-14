@@ -79,8 +79,10 @@ If a turn dies, Druks shows **Interrupted**. Druks never sends that turn again
 by itself. **Send again** saves a new message with the same text and file. This
 action can cause the agent to do an external action again.
 
-Druks tries a delivery up to five times. If every attempt fails, the pending
-messages show **Failed**, and Druks never sends them again by itself. **Send
+Druks tries a delivery up to five times. It stops at the first attempt when a
+person must change the Chat agent's settings or provider credentials. When the
+delivery fails, the pending messages show **Failed**, and Druks never sends them
+again by itself. **Send
 again** saves a new message with the same text and file. A turn that the agent
 already runs keeps running, and the next delivery saves its reply. In a Slack, GitHub, or
 WhatsApp conversation, Druks also replies in the channel that the message

@@ -23,6 +23,7 @@ from druks.files.datastructures import File
 from druks.files.storage import get_file_storage
 from druks.harnesses.base import Harness
 from druks.harnesses.config import AgentConfig, get_config
+from druks.harnesses.exceptions import AgentConfigError, HarnessNotConnectedError
 from druks.harnesses.registry import get_harness, get_harnesses
 from druks.locks import lock
 from druks.mcp import models as mcp_models
@@ -318,7 +319,10 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                         ]
                 sign_ins = await list_sign_ins(session, conversation.account_id)
             bot_id, prompt, tools = await get_agent(session, conversation, sign_ins=sign_ins)
-            config = await get_config(session, bot_id, conversation.account_id)
+            try:
+                config = await get_config(session, bot_id, conversation.account_id)
+            except (AgentConfigError, HarnessNotConnectedError) as error:
+                raise ChatHarnessError(f"Chat cannot run: {error}") from error
             if not config.harness_class.adapter_command:
                 adapters = ", ".join(
                     harness.name for harness in get_harnesses() if harness.adapter_command

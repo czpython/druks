@@ -768,6 +768,11 @@ async def test_a_bot_on_a_harness_with_no_adapter_fails_at_the_first_turn(druks_
         await service.deliver_pending(druks_db, conversation)
 
 
+async def test_a_bot_with_no_provider_credential_fails_at_the_first_turn(druks_db, conversation):
+    with pytest.raises(ChatHarnessError, match="Chat cannot run: connect your"):
+        await service.deliver_pending(druks_db, conversation)
+
+
 async def test_each_open_page_receives_the_same_live_event(druks_db, conversation, tmp_path):
     api = configure_app_for_test(settings=make_settings(tmp_path))
     pages = []
