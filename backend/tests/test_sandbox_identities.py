@@ -125,6 +125,25 @@ async def test_an_identity_keeps_the_hash_and_puts_the_bearer_in_the_issuer_entr
     assert not identity.host_id
 
 
+async def test_bind_starts_the_lease_with_the_box(druks_db):
+    subscription = await _subscription()
+    await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
+    identity, _ = await SandboxIdentity.create(
+        db_session(),
+        account_id=(await Account.get_for_run(db_session(), None)).id,
+        run_id="run-1",
+        scoped_to="workflow",
+        secret_refs=[_anthropic(subscription)],
+        secrets_hash="",
+    )
+    # A wait for a slot can outlast the lease the identity got at creation.
+    identity.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+
+    await identity.bind("host-1")
+
+    assert identity.is_live
+
+
 async def test_one_box_holds_one_identity(druks_db):
     subscription = await _subscription()
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")

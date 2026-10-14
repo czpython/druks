@@ -2,6 +2,7 @@
 // running agent call names itself, so the later phase maps to nothing.
 const PHASE_LINES: Record<string, string> = {
   provisioning_vm: 'Provisioning sandbox VM…',
+  queued_for_vm: 'Waiting for a sandbox slot…',
   sandbox_building: 'Building sandbox…',
 }
 

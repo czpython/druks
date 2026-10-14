@@ -15,7 +15,7 @@ class ChatBridgeError(ChatError):
 
 
 class ChatHarnessError(ChatError):
-    """The settings select a harness with no ACP adapter for Chat."""
+    """A person must change the Chat agent's settings or credentials."""
 
     is_retryable = False
 

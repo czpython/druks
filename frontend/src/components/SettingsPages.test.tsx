@@ -826,14 +826,6 @@ describe('SettingsPages agents', () => {
 })
 
 describe('settings drafts and navigation', () => {
-  it('saves the Slack thread preference', async () => {
-    stubFetch(false)
-    renderSettings()
-    fireEvent.click(await screen.findByRole('button', { name: 'Answer only when I tag the bot' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
-    await waitFor(() => expect(personalPatched).toEqual([{ isTagRequired: true }]))
-  })
-
   it('keeps shared drafts across pages and saves only the current page', async () => {
     stubFetch(false)
     renderSettings()

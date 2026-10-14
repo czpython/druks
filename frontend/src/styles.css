@@ -2265,6 +2265,7 @@ a.dui-action { text-decoration: none; color: var(--text-mid); }
 
 .dui-page { overflow-wrap: break-word; }
 .dui-fact-value { overflow-wrap: anywhere; }
+.dui-card-desc { overflow-wrap: anywhere; }
 
 :is(.dui-action, .dui-link, .dui-tab, .dui-retry, .dui-parent, .dui-checkbox,
     .dui-choice input, .dui-input, .dui-gallery-item, .dui-dialog-close,

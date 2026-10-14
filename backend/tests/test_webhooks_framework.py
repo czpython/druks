@@ -10,6 +10,7 @@ from druks.webhooks.router import router as webhooks_router
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, Response
 from fastapi.testclient import TestClient
+from starlette.requests import ClientDisconnect, Request
 
 
 @pytest.fixture(autouse=True)
@@ -256,6 +257,22 @@ def test_dispatch_request_is_authentic_may_raise_http_exception(settings):
     with _client_for(Hook, settings=settings) as client:
         response = client.post("/_external/rich/events/", json={})
     assert response.status_code == 403
+
+
+def test_sender_disconnect_logs_one_line_without_a_traceback(settings, monkeypatch, caplog):
+    class Hook(Webhook):
+        provider = "gone"
+        category = "events"
+
+    async def body(self):
+        raise ClientDisconnect()
+
+    monkeypatch.setattr(Request, "body", body)
+    with _client_for(Hook, settings=settings) as client, caplog.at_level("INFO"):
+        response = client.post("/_external/gone/events/", json={})
+    assert response.status_code == 400
+    assert "webhook sender disconnected: /_external/gone/events/" in caplog.text
+    assert "Traceback" not in caplog.text
 
 
 def test_unknown_path_returns_404(settings):

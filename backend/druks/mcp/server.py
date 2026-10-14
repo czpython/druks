@@ -27,7 +27,9 @@ _INSTRUCTIONS = """\
 Druks coordinates durable agent runs over shared work items. Start with
 list_open_subjects; each workflow's run and latestAgentCall ids feed the
 id-keyed tools.
-get_gate returns a parked run's ask, a bounded artifact chunk, and parkedAt;
+get_gate returns a parked run's ask, a bounded artifact chunk, and parkedAt.
+answer_gate takes the gate only when ask.presentation is in_app; an external
+ask is answered by a person at ask.url, so report where instead of answering.
 answer_gate must echo that parkedAt unchanged — it names the exact question
 being answered, and a repeat answer reports already_answered. get_agent_call
 returns bounded transcript and stderr tails, never full payloads. cancel_run

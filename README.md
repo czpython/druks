@@ -3,6 +3,8 @@
   druks
 </h1>
 
+[![All Contributors](https://img.shields.io/github/all-contributors/czpython/druks?color=ee8449&style=flat-square)](#contributors)
+
 > [!WARNING]
 > Druks is under active development. Breaking changes and rough edges can occur
 > before version 1.0. `main` and `latest` contain edge builds. They are not
@@ -120,3 +122,18 @@ orchestration belongs to `software_factory`, not to Druks.
 - **Contributing to Druks:** [Contribution guide](https://github.com/czpython/druks/blob/main/CONTRIBUTING.md)
 - **Reporting a vulnerability:** [Security policy](https://github.com/czpython/druks/blob/main/SECURITY.md)
 - **All documentation:** [docs.druks.ai](https://docs.druks.ai).
+
+## Contributors
+
+Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!

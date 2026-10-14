@@ -9,6 +9,7 @@ from drukbox_sdk import SandboxHost as SandboxHostRecord
 from drukbox_sdk import Secret
 from drukbox_sdk.exceptions import (
     SandboxAuthError,
+    SandboxCapacityError,
     SandboxConflictError,
     SandboxNotFoundError,
     SandboxProvisioningError,
@@ -99,6 +100,8 @@ class _FakeAPI:
     get_host_responses: list[SandboxHostRecord] = field(default_factory=list)
     create_record: SandboxHostRecord | None = None
     create_raises: Exception | None = None
+    # Raised by the next creates, one each, before a create succeeds.
+    create_refusals: list[Exception] = field(default_factory=list)
     delete_raises: Exception | None = None
     # The attach() tests: the provider 404s a host still in our registry.
     get_host_raises: Exception | None = None
@@ -117,13 +120,15 @@ class _FakeAPI:
         self.created_envs.append(env)
         self.created_secrets.append(secrets)
         self.created_expires_at.append(expires_at)
-        if self.create_raises is not None:
+        if self.create_raises:
             raise self.create_raises
-        assert self.create_record is not None, "test forgot to set create_record"
+        if self.create_refusals:
+            raise self.create_refusals.pop(0)
+        assert self.create_record, "test forgot to set create_record"
         return self.create_record
 
     async def get_host(self, host_id: str) -> SandboxHostRecord:
-        if self.get_host_raises is not None:
+        if self.get_host_raises:
             raise self.get_host_raises
         if len(self.get_host_responses) > 1:
             return self.get_host_responses.pop(0)
@@ -133,7 +138,7 @@ class _FakeAPI:
 
     async def delete_host(self, host_id: str) -> None:
         self.deleted_ids.append(host_id)
-        if self.delete_raises is not None:
+        if self.delete_raises:
             raise self.delete_raises
 
     async def renew_host(
@@ -479,7 +484,7 @@ async def test_acquire_uploads_helper_and_closes_ssh_without_releasing(
     # The host is created with a fixed lease so drukbox reaps it if the worker
     # dies mid-run — no druks-side reconciler.
     [expires_at] = api.created_expires_at
-    assert expires_at is not None
+    assert expires_at
     remaining = (expires_at - datetime.now(UTC)).total_seconds()
     assert 0 < remaining <= SANDBOX_HOST_LEASE_SECONDS
 
@@ -546,6 +551,30 @@ async def test_acquire_translates_transient_create_failures(
     # The schedule is inherited from HarnessSandboxError, not re-declared.
     assert error.retry_delays == (60, 300)
     assert error.__cause__ is sdk_error
+
+
+async def test_acquire_waits_for_a_slot_at_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """A create refused at the provider's host limit is retried after the
+    Retry-After, and the run shows the wait as its phase."""
+    refusal = SandboxCapacityError("provider at host limit", retry_after=0)
+    api = _FakeAPI(create_record=_record(), create_refusals=[refusal, refusal])
+    patched_sandbox_api.append(api)
+    phases: list[str] = []
+
+    async def _record_phase(phase: str) -> None:
+        phases.append(phase)
+
+    monkeypatch.setattr("druks.sandbox.client.set_run_phase", _record_phase)
+
+    async with sandbox_client.acquire() as sandbox:
+        assert sandbox.id == "host-xyz"
+
+    assert len(api.created_expires_at) == 3
+    assert phases == ["queued_for_vm", "queued_for_vm"]
 
 
 _ENTRIES = {
@@ -915,15 +944,12 @@ async def test_a_gone_box_loses_its_identity_and_the_retry_provisions_anew(
 
     await db_session().refresh(identity)
     assert not identity.is_live
-    assert (
-        await SandboxIdentity.lookup(
-            db_session(),
-            account_id=(await Account.get_for_run(db_session(), None)).id,
-            run_id="run-1",
-            scoped_to="workflow",
-            secret_refs=identity.secret_refs,
-        )
-        is None
+    assert not await SandboxIdentity.lookup(
+        db_session(),
+        account_id=(await Account.get_for_run(db_session(), None)).id,
+        run_id="run-1",
+        scoped_to="workflow",
+        secret_refs=identity.secret_refs,
     )
 
 
