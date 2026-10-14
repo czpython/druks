@@ -576,6 +576,15 @@ async def test_get_agent_call_serves_bounded_tails(app, pat_token, druks_db):
     }
 
 
+async def test_an_undeclared_argument_fails_before_the_request(app, pat_token):
+    async with live(app), _client(app, pat_token) as client:
+        result = await client.call_tool("get_agent_call", {"id": "abc"}, raise_on_error=False)
+    assert result.is_error
+    assert result.content[0].text == (
+        "get_agent_call has no argument 'id'. Call it with the arguments its input schema declares."
+    )
+
+
 async def test_cancel_run_is_destructive_but_repeatable(app, pat_token, druks_db, monkeypatch):
     cancels = []
 
