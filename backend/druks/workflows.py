@@ -599,15 +599,13 @@ async def _emit_run_event(
                 for field, value in facts.items():
                     setattr(run, field, value)
                 await session.flush()
-            # Subjectless framework crons are plumbing: no feed entry.
+            # Subjectless framework crons are plumbing: no feed entry. A routine
+            # start records none either; its signal still publishes.
             if subject:
-                return {
-                    "kind": run.kind,
-                    "subject": subject,
-                    "payload": await _log_run_event(
-                        session, run, state, subject, key, result, gate
-                    ),
-                }
+                payload = {"run": run.id, "kind": run.kind}
+                if result or state != RunState.RUNNING:
+                    payload = await _log_run_event(session, run, state, subject, key, result, gate)
+                return {"kind": run.kind, "subject": subject, "payload": payload}
 
     transition = await DBOS.run_step_async(
         StepOptions(name=f"run.{state.value}", **_IO_RETRIES), _transition
@@ -638,8 +636,8 @@ async def _log_run_event(
     result: Any = None,
     gate: str | None = None,
 ) -> dict[str, Any]:
-    # One event per transition — the feed's run-level granularity, read off the
-    # just-written row so gate and failure ride the transition that set them.
+    # One event per recorded transition — the feed's run-level granularity, read off
+    # the just-written row so gate and failure ride the transition that set them.
     # The result rides the finished event so reactions read the outcome off the
     # payload instead of artifacts.
     facts: dict[str, Any] = {}

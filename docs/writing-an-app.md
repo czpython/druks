@@ -1180,8 +1180,9 @@ Druks records these workflow facts without app calls:
   the request time for that round.
 - Response received: the concrete gate validated a reply. This does not mean
   that the domain accepted the reply's proposal. The workflow decides that.
-- Run failed: the run ended with a terminal failure. Routine running and
-  finished signals remain available to subscribers but do not enter Activity.
+- Run finished: the run ended.
+- Run failed: the run ended with a terminal failure. Routine running signals
+  remain available to subscribers but do not enter Activity.
 - Run cancelled: an operator cancelled the run through the cancel route. Domain
   cleanup that cancels a run records no row and announces no owner outcome.
 

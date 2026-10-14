@@ -1107,11 +1107,7 @@ async def test_run_events_carry_subject(runtime):
     finally:
         await session.close()
 
-    assert sorted(e.type for e in events) == [
-        "workflow.finished",
-        "workflow.running",
-        "workflow.scheduled",
-    ]
+    assert sorted(e.type for e in events) == ["workflow.finished", "workflow.scheduled"]
     assert {e.subject_type for e in events} == {"widget"}
 
     assert {e.subject_key for e in events} == {"W-4242"}
@@ -1415,5 +1411,6 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
         *review_round,
         *review_round,
         "note.gist_approved",
+        "workflow.finished",
     ]
     assert kinds[failed_id] == ["workflow.scheduled", "workflow.failed"]
