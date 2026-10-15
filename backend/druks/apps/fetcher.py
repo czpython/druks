@@ -1,4 +1,5 @@
 import contextlib
+import shutil
 import time
 
 from druks.core.services import Github
@@ -27,3 +28,18 @@ async def fetch_file(*, repo: str, path: str) -> str | None:
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(body or "")
     return body
+
+
+def evict_files(*, repo: str, paths: list[str]) -> None:
+    """Delete the cached copies of the ``.druks`` files that a push changed."""
+    root = load_settings().data_dir / _CACHE_DIR / repo
+    is_druks_repo = repo.endswith("/.druks")
+    for path in paths:
+        if is_druks_repo or path.startswith(".druks/"):
+            (root / path).unlink(missing_ok=True)
+
+
+def evict_repo(*, repo: str) -> None:
+    """Delete every cached file of ``repo``."""
+    with contextlib.suppress(FileNotFoundError):
+        shutil.rmtree(load_settings().data_dir / _CACHE_DIR / repo)

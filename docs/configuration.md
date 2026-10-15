@@ -446,6 +446,9 @@ reviewer approves the pull request:
 | `none` | Default. Druks marks the pull request ready for review and ends the build. The repository's own process merges it. Druks records the merge when GitHub announces it. |
 | `merge` | Druks squash-merges the pull request, or arms auto-merge when checks are still running. |
 
+When Druks receives a push to the default branch that changes `config.yml`, the
+next build uses the new file.
+
 ### Review identity (optional)
 
 The bundled `software_factory` app declares an optional service, **Github

@@ -4,6 +4,7 @@ from typing import Any, ClassVar
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
 
+from druks.apps.fetcher import evict_files, evict_repo
 from druks.core.services import Github
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.signals import publish
@@ -152,21 +153,26 @@ class GitHubEvents(Webhook):
         return _accepted()
 
     async def on_push(self) -> Response:
-        # Normalized facts only — which paths matter is each subscriber's call.
         repository = self.data["repository"]
-        await publish(
-            "repo.pushed",
-            repo=repository["full_name"],
-            to_default_branch=self.data["ref"] == f"refs/heads/{repository['default_branch']}",
-            paths=sorted(
-                {
-                    path
-                    for commit in self.data["commits"]
-                    for changeset in (commit["added"], commit["removed"], commit["modified"])
-                    for path in changeset
-                }
-            ),
+        repo = repository["full_name"]
+        to_default_branch = self.data["ref"] == f"refs/heads/{repository['default_branch']}"
+        paths = sorted(
+            {
+                path
+                for commit in self.data["commits"]
+                for changeset in (commit["added"], commit["removed"], commit["modified"])
+                for path in changeset
+            }
         )
+        if to_default_branch:
+            # Before the announcement, so no subscriber reads an old cached copy. A
+            # force-push can rewind the branch without listing the files it changed.
+            if self.data["forced"]:
+                evict_repo(repo=repo)
+            else:
+                evict_files(repo=repo, paths=paths)
+        # Normalized facts only — which paths matter is each subscriber's call.
+        await publish("repo.pushed", repo=repo, to_default_branch=to_default_branch, paths=paths)
         return _accepted()
 
 
