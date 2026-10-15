@@ -9,6 +9,7 @@ from druks.contrib.software_factory.contracts import (
     ReviewWork,
     TriageOutput,
 )
+from druks.contrib.software_factory.enums import EvaluationVerdict, HumanFeedbackAction
 from druks.workflows import Journal
 
 
@@ -46,6 +47,10 @@ class BuildJournal(Journal):
         return self.filter(EvaluationOutput)
 
     @property
+    def is_verified(self) -> bool:
+        return self.evaluations[-1].verdict == EvaluationVerdict.PASS
+
+    @property
     def plan_reviews(self) -> list[ReviewOutput]:
         return self.filter(ReviewOutput)
 
@@ -71,6 +76,19 @@ class BuildJournal(Journal):
         return
 
     @property
+    def triage_question(self) -> str | None:
+        # Triage's question waits for the next answer. An evaluation after it means
+        # the work moved on.
+        triage = self.latest(TriageOutput)
+        if (
+            triage
+            and triage.action == HumanFeedbackAction.QUESTION
+            and not self.filter(EvaluationOutput, after=triage)
+        ):
+            return triage.question
+        return
+
+    @property
     def human_feedback(self) -> list[dict[str, Any]]:
         # Every request_changes reply, in order, with the triage that digested it.
         # The newest reply has no triage yet while its own triage agent renders
@@ -82,7 +100,7 @@ class BuildJournal(Journal):
             entries.append(
                 {
                     "reviewer": reply.reviewer,
-                    "body": reply.body,
+                    "note": reply.note,
                     "triage": triages[0] if triages else None,
                 }
             )

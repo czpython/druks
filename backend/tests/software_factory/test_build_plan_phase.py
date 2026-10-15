@@ -10,8 +10,11 @@ from druks.contrib.software_factory.contracts import (
     ReviewOutput,
     ReviewWork,
 )
-from druks.contrib.software_factory.enums import ReviewDecision
-from druks.contrib.software_factory.policy import PlanGate, RepoPolicy
+from druks.contrib.software_factory.enums import (
+    HumanFeedbackAction,
+    ReviewDecision,
+)
+from druks.contrib.software_factory.policy import Gates, PlanGate, RepoPolicy
 from druks.contrib.software_factory.workflows import Build
 from druks.workflows import FatalError, OperatorReply, Run
 
@@ -572,7 +575,9 @@ async def test_operator_rounds_after_the_critique_never_rerun_the_reviewer(monke
 async def test_review_work_ask_renders_a_notification_body(monkeypatch):
     workflow = _flow()
     workflow.subject = SimpleNamespace(repo="org/repo")
-    workflow.journal = SimpleNamespace(implementations=[SimpleNamespace(pr_number=42)])
+    workflow.journal = SimpleNamespace(
+        is_verified=True, implementations=[SimpleNamespace(pr_number=42)]
+    )
     input_requests: list[dict] = []
 
     async def fake_wait(*, input_request):
@@ -629,24 +634,163 @@ async def test_approval_ends_the_build_without_merging_by_default(monkeypatch):
     assert cleared == [True]
 
 
-async def test_a_rejected_merge_intent_reparks_the_work_gate(monkeypatch):
-    """GitHub declining the merge sends the operator back to the work gate,
-    rather than finishing a run whose PR never merged."""
+def _merging_flow(*, approval: str = "none") -> Build:
     flow = Build()
-    flow._policy = RepoPolicy(on_approval="merge")
+    flow._policy = RepoPolicy(gates=Gates(implementation_approval=approval), on_approval="merge")
     flow.subject = SimpleNamespace(repo="clawhaven/example")
-    flow.journal = SimpleNamespace(implementations=[])
-    reparked = []
+    return flow
 
-    async def declined():
-        return False
 
-    async def fake_work_gate():
-        reparked.append(True)
+async def test_ungated_passed_work_is_marked_ready_then_merged_once(monkeypatch):
+    """With approval off, passing work is marked ready, then merged with one merge
+    call."""
+    flow = _merging_flow()
+    flow.journal = SimpleNamespace(is_verified=True)
+    calls = []
+
+    async def ready():
+        calls.append("ready")
+
+    async def merged():
+        calls.append("merge")
         return True
 
-    monkeypatch.setattr(flow, "declare_merge_intent", declined)
-    monkeypatch.setattr(flow, "_work_gate", fake_work_gate)
+    monkeypatch.setattr(flow, "_clear_draft", ready)
+    monkeypatch.setattr(flow, "declare_merge_intent", merged)
 
-    assert await flow._approved_work() is True
-    assert reparked == [True]
+    assert await flow._work_gate() is True
+    assert calls == ["ready", "merge"]
+
+
+async def test_a_refused_merge_parks_for_review_before_another_attempt(monkeypatch):
+    """GitHub declining the merge parks the work for review on GitHub. Druks calls
+    GitHub again only after a person approves."""
+    flow = _merging_flow()
+    flow.journal = SimpleNamespace(
+        is_verified=True, implementations=[SimpleNamespace(pr_number=42)]
+    )
+    calls = []
+    accepted = iter([False, True])
+
+    async def ready():
+        return
+
+    async def merge():
+        calls.append("merge")
+        return next(accepted)
+
+    async def fake_wait(*, input_request):
+        calls.append(input_request["presentation"])
+        return ReviewWork(action="approve")
+
+    monkeypatch.setattr(flow, "_clear_draft", ready)
+    monkeypatch.setattr(flow, "declare_merge_intent", merge)
+    monkeypatch.setattr(ReviewWork, "wait", fake_wait)
+
+    assert await flow._work_gate() is True
+    assert calls == ["merge", "external", "merge"]
+
+
+@pytest.mark.parametrize("approval", ["none", "human"])
+async def test_unverified_work_waits_in_druks_until_a_change_request(monkeypatch, approval):
+    """Blocked or exhausted work never reaches approval. It waits in Druks with one
+    control, and a GitHub approval parks it again."""
+    flow = _merging_flow(approval=approval)
+    flow.journal = SimpleNamespace(is_verified=False, triage_question=None)
+    asks = []
+    replies = iter(
+        [ReviewWork(action="approve"), ReviewWork(action="request_changes", note="Split it.")]
+    )
+
+    async def fake_wait(*, input_request):
+        asks.append(input_request)
+        return next(replies)
+
+    async def triaged():
+        return False
+
+    async def approved():
+        raise AssertionError("unverified work must not be marked ready or merged")
+
+    monkeypatch.setattr(ReviewWork, "wait", fake_wait)
+    monkeypatch.setattr(flow, "_triage", triaged)
+    monkeypatch.setattr(flow, "_approved_work", approved)
+
+    assert await flow._work_gate() is False
+    assert asks == [{"presentation": "in_app", "controls": ["request_changes"]}] * 2
+
+
+async def test_an_open_triage_question_shows_in_the_in_app_ask(monkeypatch):
+    """When triage asked the operator a question, the in-app wait shows it, so the
+    operator can answer it in Druks."""
+    flow = _merging_flow()
+    flow.journal = SimpleNamespace(is_verified=False, triage_question="Which file?")
+    asks = []
+
+    async def fake_wait(*, input_request):
+        asks.append(input_request)
+        return ReviewWork(action="request_changes", note="The parser.")
+
+    async def triaged():
+        return False
+
+    monkeypatch.setattr(ReviewWork, "wait", fake_wait)
+    monkeypatch.setattr(flow, "_triage", triaged)
+
+    assert await flow._work_gate() is False
+    assert asks[0]["label"] == "Triage asks: Which file?"
+
+
+async def test_a_no_change_triage_after_a_refused_merge_waits_on_github(monkeypatch):
+    """A change request on a refused merge is never skipped. When triage finds no
+    change to make, the work waits for review on GitHub again instead of merging."""
+    flow = _merging_flow()
+    flow.journal = SimpleNamespace(
+        is_verified=True, implementations=[SimpleNamespace(pr_number=42)]
+    )
+    calls = []
+    triages = iter([HumanFeedbackAction.NO_CHANGE, HumanFeedbackAction.CHANGE_REQUIRED])
+
+    async def ready():
+        return
+
+    async def refused():
+        calls.append("merge")
+        return False
+
+    async def fake_wait(*, input_request):
+        calls.append(input_request["presentation"])
+        return ReviewWork(action="request_changes", note="Split the migration.")
+
+    async def triage():
+        return SimpleNamespace(action=next(triages))
+
+    monkeypatch.setattr(flow, "_clear_draft", ready)
+    monkeypatch.setattr(flow, "declare_merge_intent", refused)
+    monkeypatch.setattr(ReviewWork, "wait", fake_wait)
+    monkeypatch.setattr(SoftwareFactory, "triage_human_feedback", triage)
+
+    assert await flow._work_gate() is False
+    assert calls == ["merge", "external", "external"]
+
+
+@pytest.mark.parametrize("is_verified", [True, False])
+async def test_the_review_park_keeps_unverified_work_a_draft(monkeypatch, is_verified):
+    """A review park marks verified work ready and asks for a review. Unverified work
+    stays a draft, and nobody is asked."""
+    flow = Build()
+    flow.journal = SimpleNamespace(is_verified=is_verified)
+    calls = []
+
+    async def set_pr_draft(*, draft):
+        calls.append(("draft", draft))
+
+    async def request_review():
+        calls.append("review")
+
+    monkeypatch.setattr(flow, "set_pr_draft", set_pr_draft)
+    monkeypatch.setattr(flow, "request_assignee_review", request_review)
+
+    await ReviewWork.on_wait(flow)
+
+    assert calls == ([("draft", False), "review"] if is_verified else [("draft", True)])

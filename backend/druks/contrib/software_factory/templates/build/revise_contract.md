@@ -31,7 +31,7 @@ everything the original plan got right.
 
 ### {{ fb.reviewer }}
 
-{{ fb.body }}
+{{ fb.note }}
 
 {% if fb.triage %}
 **Triage decision ({{ fb.triage.action }}):** {{ fb.triage.body }}
