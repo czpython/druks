@@ -17,6 +17,8 @@ class Channel:
     # Whether chat runs agent turns on the channel's conversations. False when something
     # outside chat answers the people on the channel.
     has_turns: ClassVar[bool] = True
+    # Whether chat_read_thread reads the channel's threads, where other people write too.
+    has_readable_threads: ClassVar[bool] = False
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()

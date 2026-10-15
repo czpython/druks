@@ -11,6 +11,7 @@ from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 
+from .channels.whatsapp.exceptions import WahaError
 from .enums import MessageState
 from .exceptions import ChannelHasNoThreadsError, ChatSandboxGone
 from .models import Conversation, Message
@@ -169,7 +170,7 @@ async def cancel(
     await DBOS.start_workflow_async(deliver, conversation.id)
 
 
-@router.get("/thread", operation_id="read_thread", tags=["agent"])
+@router.get("/thread", operation_id="read_thread", tags=["agent", "bot"])
 async def read_thread(
     session: SessionDep, account: Account = Depends(current_account)
 ) -> list[dict]:
@@ -189,7 +190,7 @@ async def read_thread(
         return await conversation.channel.read_thread(session, conversation)
     except ChannelHasNoThreadsError as error:
         raise HTTPException(409, str(error)) from error
-    except (SlackApiError, RequestFailed) as error:
+    except (SlackApiError, RequestFailed, WahaError) as error:
         raise HTTPException(502, str(error)) from error
 
 

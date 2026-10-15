@@ -8,22 +8,17 @@ from dbos import DBOS
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from druks.apps.loader import get_app
 from druks.chat.bots.service import get_thread_conversation, route_message
-from druks.chat.enums import ConversationSource
+from druks.chat.enums import BotAccess, ConversationSource
 from druks.chat.models import Conversation, Message
 from druks.chat.service import deliver
 from druks.db import db_session
 from druks.files.datastructures import File
 from druks.webhooks import Webhook
 
+from .channel import get_phone, get_sender_name, get_source_id
 from .services import Waha
-
-
-def get_phone(chat_id: str) -> str:
-    """The phone number in a chat ID. A LID holds none."""
-    if chat_id.endswith("@c.us"):
-        return "+" + chat_id.removesuffix("@c.us")
-    return ""
 
 
 class WahaEvents(Webhook):
@@ -52,9 +47,7 @@ class WahaEvents(Webhook):
         """Save the message in the conversation it goes to, and start its turn."""
         session = db_session()
         message = self.data["payload"]
-        # WAHA's id reads {fromMe}_{chat}_{id}, followed by _{participant} in a group, and a
-        # reply that Druks sent carries the plain id.
-        key = message["id"].split("_")[2]
+        key = get_source_id(message["id"])
         if not await Message.get_for_source_id(session, key):
             if message["from"].endswith("@g.us"):
                 conversation = await self.get_group_conversation(session)
@@ -77,15 +70,16 @@ class WahaEvents(Webhook):
         the Bot of an open number reaches it, and never one that the number's phone sent.
         The admin is the sender whose phone number is the admin's."""
         message = self.data["payload"]
-        admin = self.connection.identity.get("admin")
-        if admin and self.is_addressed and not message["fromMe"]:
+        bot = get_app(self.connection.identity["app"]).bot
+        if bot.access == BotAccess.OPEN and self.is_addressed and not message["fromMe"]:
+            admin = self.connection.identity["admin"]
             client = await Waha.get_client(session, self.connection)
             sender = await client.get_phone_chat_id(message["participant"])
             admin_chat_id = await client.get_phone_chat_id(admin.get("user_id", ""))
             user = {
                 "source": ConversationSource.WHATSAPP,
                 "user_id": message["participant"],
-                "user_name": self.sender_name,
+                "user_name": get_sender_name(message),
                 "user_phone": get_phone(sender),
                 "thread_id": message["from"],
             }
@@ -102,8 +96,7 @@ class WahaEvents(Webhook):
     def is_self_chat(self) -> bool:
         """Whether the message is in the phone's chat with itself. WhatsApp names that
         chat by the number or by its LID."""
-        me = self.data["me"]
-        return self.data["payload"]["from"] in (me["id"], me.get("lid"))
+        return self.data["payload"]["from"] in self.own_ids
 
     @property
     def own_ids(self) -> list[str]:
@@ -128,16 +121,6 @@ class WahaEvents(Webhook):
         )
 
     @property
-    def sender_name(self) -> str:
-        raw = self.data["payload"].get("_data") or {}
-        return (
-            raw.get("pushName")
-            or raw.get("Info", {}).get("PushName")
-            or raw.get("notifyName")
-            or ""
-        )
-
-    @property
     def text(self) -> str:
         """The message's text without the number's tag, which the agent would take for the
         person it answers."""
@@ -148,7 +131,7 @@ class WahaEvents(Webhook):
         a LID has no phone."""
         message = self.data["payload"]
         chat_id = message["from"]
-        name = self.sender_name
+        name = get_sender_name(message)
         phone = get_phone(chat_id)
         if self.is_self_chat:
             # The phone's chat with itself stays one conversation, under the number.

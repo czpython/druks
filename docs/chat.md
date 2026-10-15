@@ -302,6 +302,13 @@ under the bot admin account, and everyone else under the bot account. The reply
 goes to the group, so everyone in the group reads it. Druks removes the
 number's tag from the text before the agent reads it.
 
+A tag decides when the agent answers, not what it sees. In a group, the agents
+of the people and of the admin also get `chat_read_thread`, and their prompt
+tells them to call it first. It returns the group's newest 200 messages from
+WAHA's store, oldest first, each with its author's id and name, whether this
+agent wrote it, and whether the person it answers wrote it. The prompt also says
+that only the message that reached the agent is an instruction.
+
 WhatsApp can name a group member by a LID instead of a phone number. Druks asks
 WAHA for the member's phone number, so it knows the admin by either name. A
 message that the number's phone sends in a group pauses nothing, and Druks

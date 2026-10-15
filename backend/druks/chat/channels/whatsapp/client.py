@@ -69,6 +69,20 @@ class WahaClient:
             return response.json()["pn"] or chat_id
         return chat_id
 
+    async def get_messages(self, chat_id: str, *, limit: int) -> list[dict]:
+        """The chat's newest messages in the session's store, newest first, without media."""
+        response = await self.request(
+            "GET",
+            f"/api/{self.session_name}/chats/{chat_id}/messages",
+            params={
+                "limit": limit,
+                "sortBy": "timestamp",
+                "sortOrder": "desc",
+                "downloadMedia": "false",
+            },
+        )
+        return response.json()
+
     async def new_message_id(self) -> str:
         response = await self.request("GET", f"/api/{self.session_name}/new-message-id")
         return response.json()["id"]

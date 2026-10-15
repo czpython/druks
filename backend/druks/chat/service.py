@@ -47,7 +47,7 @@ from druks.secrets.models import VaultSecret
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.workspaces import Workspace
 
-from .bots.constants import ADMIN_PROMPT, ADMIN_TOOLS
+from .bots.constants import ADMIN_PROMPT, ADMIN_TOOLS, THREAD_PROMPT, THREAD_TOOLS
 from .bridge import Bridge
 from .constants import (
     BRIDGE_SETTLED_STATUSES,
@@ -109,6 +109,13 @@ async def get_agent(
     if conversation.connection:
         context.update(await conversation.channel.get_prompt_context(session, conversation))
     prompt = await render_prompt(template, **context)
+    if (
+        conversation.thread_id
+        and conversation.channel.has_readable_threads
+        and account_type in (AccountKind.BOT, AccountKind.BOT_ADMIN)
+    ):
+        tools = (*tools, *THREAD_TOOLS)
+        prompt = f"{prompt}\n\n{THREAD_PROMPT}"
     return bot.id, f"{prompt}\n\n{INTERNAL_MESSAGES_PROMPT}", tools
 
 

@@ -41,6 +41,7 @@ def get_thread_id(message: dict) -> str:
 class SlackChannel(Channel):
     name = ConversationSource.SLACK
     service = Slack
+    has_readable_threads = True
 
     @classmethod
     async def lookup_account(

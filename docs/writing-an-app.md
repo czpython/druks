@@ -607,7 +607,8 @@ class Helpdesk(App):
   which names the WhatsApp group of a group conversation and is empty in a
   direct chat. Druks gives the result to the agent as its system prompt, and
   adds one paragraph at the end. It explains the `[Internal: …]` messages that
-  Druks writes to the agent.
+  Druks writes to the agent. In a group, Druks first adds a paragraph that tells
+  the agent to read the group with `chat_read_thread`, and gives it that tool.
 - `user_tools` are the tools of each person who writes to the connection.
 - `admin_tools` are the tools of the connection's admin. The admin also gets
   Druks's admin prompt, `answer_gate`, and `chat_resume_conversation`.

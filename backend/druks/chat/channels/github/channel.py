@@ -32,6 +32,7 @@ def is_tagged(body: str, handle: str) -> bool:
 class GitHubChannel(Channel):
     name = ConversationSource.GITHUB
     service = Github
+    has_readable_threads = True
 
     @classmethod
     async def lookup_account(cls, session: AsyncSession, payload: dict) -> Account | None:

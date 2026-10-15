@@ -21,7 +21,7 @@ from druks.chat import service
 from druks.chat.app import Chat
 from druks.chat.bots import routes as bot_routes
 from druks.chat.bots import service as bot_service
-from druks.chat.bots.constants import OPERATOR_PAIRED_MESSAGE, PAUSE_TOPIC
+from druks.chat.bots.constants import OPERATOR_PAIRED_MESSAGE, PAUSE_TOPIC, THREAD_PROMPT
 from druks.chat.bridge import Bridge
 from druks.chat.channels.whatsapp.channel import WhatsAppChannel
 from druks.chat.channels.whatsapp.client import WahaClient
@@ -41,7 +41,7 @@ from druks.chat.enums import (
     MessageState,
     PauseSignal,
 )
-from druks.chat.exceptions import TranscriptionError
+from druks.chat.exceptions import ChannelHasNoThreadsError, TranscriptionError
 from druks.chat.models import Conversation
 from druks.harnesses.claude import ClaudeHarness
 from druks.mcp.enums import Toolkit
@@ -404,6 +404,69 @@ async def test_a_reply_in_a_group_goes_to_the_group(druks_db, waha):
     await WhatsAppChannel.send_reply(druks_db, conversation, reply)
 
     assert waha.calls[-1][2]["chatId"] == GROUP
+
+
+async def test_a_group_reads_its_newest_messages_oldest_first(druks_db, waha):
+    owner = await bot_account(druks_db)
+    connection = await link(druks_db, owner)
+    conversation = await Conversation.get_or_create_for_user(
+        druks_db, connection, owner.id, **{**user(BEN), "thread_id": GROUP}
+    )
+    await conversation.create_message(
+        druks_db, "Yes, today.", role=MessageRole.ASSISTANT, source_id="R1"
+    )
+    direct = await Conversation.get_or_create_for_user(druks_db, connection, owner.id, **user(BEN))
+    waha.answers[("GET", f"/api/session_one/chats/{GROUP}/messages")] = [
+        {
+            "id": f"true_{GROUP}_R1_{NUMBER}",
+            "timestamp": 3,
+            "participant": NUMBER,
+            "body": "Yes, today.",
+            "_data": {},
+        },
+        {
+            "id": f"false_{GROUP}_G2_{BEN}",
+            "timestamp": 2,
+            "participant": BEN,
+            "body": "@41000000000 is it stock day?",
+            "_data": {"pushName": "Ben"},
+        },
+        {
+            "id": f"false_{GROUP}_G1_{ANA}",
+            "timestamp": 1,
+            "participant": ANA,
+            "body": "Stock count today.",
+            "_data": {"pushName": "Ana"},
+        },
+    ]
+
+    thread = await WhatsAppChannel.read_thread(druks_db, conversation)
+
+    assert [
+        (message["text"], message["user_name"], message["is_from_you"], message["is_from_user"])
+        for message in thread
+    ] == [
+        ("Stock count today.", "Ana", False, False),
+        ("@41000000000 is it stock day?", "Ben", False, True),
+        ("Yes, today.", "", True, False),
+    ]
+    with pytest.raises(ChannelHasNoThreadsError):
+        await WhatsAppChannel.read_thread(druks_db, direct)
+
+
+async def test_a_bot_in_a_group_reads_the_group_first(druks_db, helpdesk, monkeypatch):
+    owner = await bot_account(druks_db)
+    connection = await link(druks_db, owner)
+    conversation = await Conversation.get_or_create_for_user(
+        druks_db, connection, owner.id, **{**user(BEN), "thread_id": GROUP}
+    )
+    monkeypatch.setattr(service, "render_prompt", AsyncMock(return_value="Be kind."))
+
+    assert await service.get_agent(druks_db, conversation) == (
+        "helpdesk.bot",
+        f"Be kind.\n\n{THREAD_PROMPT}\n\n{INTERNAL_MESSAGES_PROMPT}",
+        ("helpdesk_get_ticket", "chat_read_thread"),
+    )
 
 
 async def test_a_message_reaches_the_bot_of_its_numbers_app(druks_db, helpdesk, monkeypatch):
