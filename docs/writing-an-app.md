@@ -603,9 +603,11 @@ class Helpdesk(App):
 ```
 
 - `prompt` names a template, like an agent's prompt. Druks renders it with
-  `source`, the conversation's source (`web` or `whatsapp`), and gives it to the
-  agent as its system prompt. Druks adds one paragraph at the end. It explains
-  the `[Internal: …]` messages that Druks writes to the agent.
+  `source`, the conversation's source (`web` or `whatsapp`), and `thread_id`,
+  which names the WhatsApp group of a group conversation and is empty in a
+  direct chat. Druks gives the result to the agent as its system prompt, and
+  adds one paragraph at the end. It explains the `[Internal: …]` messages that
+  Druks writes to the agent.
 - `user_tools` are the tools of each person who writes to the connection.
 - `admin_tools` are the tools of the connection's admin. The admin also gets
   Druks's admin prompt, `answer_gate`, and `chat_resume_conversation`.

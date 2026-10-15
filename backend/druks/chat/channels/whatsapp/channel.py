@@ -22,4 +22,5 @@ class WhatsAppChannel(Channel):
         client = await Waha.get_client(session, conversation.connection)
         reply.source_id = await client.new_message_id()
         await session.commit()
-        await client.send_text(conversation.user_id, text, message_id=reply.source_id)
+        chat_id = conversation.thread_id or conversation.user_id
+        await client.send_text(chat_id, text, message_id=reply.source_id)

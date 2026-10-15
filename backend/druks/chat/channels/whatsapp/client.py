@@ -61,6 +61,14 @@ class WahaClient:
         )
         return response.json()
 
+    async def get_phone_chat_id(self, chat_id: str) -> str:
+        """The chat ID of the person's phone number. WhatsApp can name a person by a
+        LID instead, and WAHA maps it back when it knows the person."""
+        if chat_id.endswith("@lid"):
+            response = await self.request("GET", f"/api/{self.session_name}/lids/{chat_id}")
+            return response.json()["pn"] or chat_id
+        return chat_id
+
     async def new_message_id(self) -> str:
         response = await self.request("GET", f"/api/{self.session_name}/new-message-id")
         return response.json()["id"]

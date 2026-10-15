@@ -78,14 +78,16 @@ class Waha(Service):
                 "webhooks": [
                     {
                         "url": f"{base}/_external/waha/events/",
-                        "events": ["message.any", "session.status"],
+                        "events": ["message.any", "message.reaction", "session.status"],
                         "hmac": {"key": webhook_secret},
                     }
                 ],
-                "ignore": {"status": True, "groups": True, "channels": True, "broadcast": True},
+                "ignore": {"status": True, "channels": True, "broadcast": True},
                 # WhatsApp does not ring the phone while a linked client is online, and
                 # a NOWEB session marks itself online unless its config says otherwise.
-                "noweb": {"markOnline": False},
+                # The store keeps the group history that the agent reads, and it must be
+                # on before the scan.
+                "noweb": {"markOnline": False, "store": {"enabled": True, "fullSync": False}},
                 # WhatsApp names the linked device "<browserName> (<deviceName>)", and it
                 # drops a device name that comes with a browser name it does not know.
                 "client": {"deviceName": "Druks", "browserName": "Chrome"},

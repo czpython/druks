@@ -11,4 +11,4 @@ bot answers that chat again after the phone stays quiet for some hours. To let t
 bot answer sooner, call chat_resume_conversation with its conversation.
 
 Use your other tools when the admin asks for their work. Your replies go to a phone,
-so keep them short.
+so keep them short.{% if thread_id %} This chat is a group, so everyone in it reads them.{% endif %}

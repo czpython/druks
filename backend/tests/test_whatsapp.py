@@ -61,6 +61,7 @@ from sqlalchemy import func, select
 ANA = "41700000001@c.us"
 BEN = "41700000002@c.us"
 NUMBER = "41000000000@c.us"
+GROUP = "120363000000000001@g.us"
 
 
 @pytest.fixture
@@ -100,7 +101,7 @@ def waha(monkeypatch):
         return httpx.Response(200, json=answers.get((method, path), {}))
 
     monkeypatch.setattr(WahaClient, "request", request)
-    return SimpleNamespace(calls=calls, handlers=handlers)
+    return SimpleNamespace(calls=calls, handlers=handlers, answers=answers)
 
 
 async def link(
@@ -169,6 +170,23 @@ def message_event(chat, body, *, key="MSG1", from_me=False, session_name="sessio
             "hasMedia": False,
             "_data": {"pushName": "Ana"},
         },
+    }
+
+
+def group_event(participant, body, *, key, from_me=False, reply_to=None):
+    event = message_event(GROUP, body, key=key, from_me=from_me)
+    event["payload"].update(
+        id=f"{str(from_me).lower()}_{GROUP}_{key}_{participant}",
+        participant=participant,
+        replyTo=reply_to,
+    )
+    return event
+
+
+def make_admin(connection, chat_id):
+    connection.identity = {
+        **connection.identity,
+        "admin": {**connection.identity["admin"], "user_id": chat_id},
     }
 
 
@@ -243,12 +261,15 @@ async def test_adding_a_number_creates_its_accounts_and_session(
     assert config["webhooks"] == [
         {
             "url": "https://hooks.test/_external/waha/events/",
-            "events": ["message.any", "session.status"],
+            "events": ["message.any", "message.reaction", "session.status"],
             "hmac": {"key": connection.secrets["webhook_secret"]},
         }
     ]
-    assert config["ignore"] == {"status": True, "groups": True, "channels": True, "broadcast": True}
-    assert config["noweb"] == {"markOnline": False}
+    assert config["ignore"] == {"status": True, "channels": True, "broadcast": True}
+    assert config["noweb"] == {
+        "markOnline": False,
+        "store": {"enabled": True, "fullSync": False},
+    }
     assert config["client"] == {"deviceName": "Druks", "browserName": "Chrome"}
 
 
@@ -318,6 +339,71 @@ async def test_only_self_chat_replies_have_a_prefix(druks_db, waha, sender, pref
     assert waha.calls[-1][2]["text"] == f"{prefix}Your ticket is open."
     await druks_db.refresh(reply)
     assert reply.body == "Your ticket is open."
+
+
+async def test_a_group_reaches_the_bot_after_its_admin_tags_it_there(
+    druks_db, helpdesk, waha, monkeypatch
+):
+    owner = await bot_account(druks_db)
+    connection = await link(druks_db, owner)
+    make_admin(connection, ANA)
+    enqueue = AsyncMock()
+    monkeypatch.setattr(bot_service.DBOS, "enqueue_workflow_async", enqueue)
+
+    await receive(connection, group_event(BEN, "@41000000000 is it stock day?", key="G1"))
+    await receive(connection, group_event(ANA, "Stock count today.", key="G2"))
+    await receive(connection, group_event(NUMBER, "@41000000000 typed", key="G3", from_me=True))
+    assert await Conversation.list_for_connection(druks_db, connection.id) == []
+
+    await receive(connection, group_event(ANA, "@41000000000 hello", key="G4"))
+    await receive(connection, group_event(BEN, "@41000000000 is it stock day?", key="G5"))
+    await receive(connection, group_event(BEN, "Thanks", key="G6"))
+    await receive(
+        connection, group_event(BEN, "Done", key="G7", reply_to={"id": "R1", "participant": NUMBER})
+    )
+
+    conversations = {
+        conversation.user_id: conversation
+        for conversation in await Conversation.list_for_connection(druks_db, connection.id)
+    }
+    admin_chat, member_chat = conversations[ANA], conversations[BEN]
+    assert (admin_chat.account_id, admin_chat.thread_id) == (
+        connection.identity["admin"]["account_id"],
+        GROUP,
+    )
+    assert (member_chat.account_id, member_chat.thread_id) == (owner.id, GROUP)
+    await druks_db.refresh(admin_chat, ["messages"])
+    await druks_db.refresh(member_chat, ["messages"])
+    assert [message.body for message in admin_chat.messages] == ["hello"]
+    assert [message.body for message in member_chat.messages] == ["is it stock day?", "Done"]
+    enqueue.assert_not_awaited()
+
+
+async def test_a_group_knows_its_admin_by_a_lid(druks_db, helpdesk, waha):
+    connection = await link(druks_db, await bot_account(druks_db))
+    make_admin(connection, ANA)
+    waha.answers[("GET", "/api/session_one/lids/900111@lid")] = {"lid": "900111@lid", "pn": ANA}
+
+    await receive(connection, group_event("900111@lid", "@41000000000 hello", key="G1"))
+
+    [conversation] = await Conversation.list_for_connection(druks_db, connection.id)
+    assert (conversation.account_id, conversation.user_phone) == (
+        connection.identity["admin"]["account_id"],
+        "+41700000001",
+    )
+
+
+async def test_a_reply_in_a_group_goes_to_the_group(druks_db, waha):
+    owner = await bot_account(druks_db)
+    connection = await link(druks_db, owner)
+    conversation = await Conversation.get_or_create_for_user(
+        druks_db, connection, owner.id, **{**user(BEN), "thread_id": GROUP}
+    )
+    reply = await conversation.create_message(druks_db, "Yes, today.", role=MessageRole.ASSISTANT)
+
+    await WhatsAppChannel.send_reply(druks_db, conversation, reply)
+
+    assert waha.calls[-1][2]["chatId"] == GROUP
 
 
 async def test_a_message_reaches_the_bot_of_its_numbers_app(druks_db, helpdesk, monkeypatch):

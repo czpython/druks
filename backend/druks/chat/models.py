@@ -213,6 +213,26 @@ class Conversation(Base, Uuid7Pk):
             )
         )
 
+    @classmethod
+    async def get_for_thread(
+        cls,
+        session: AsyncSession,
+        connection: VaultSecret,
+        *,
+        account_id: str,
+        thread_id: str,
+    ) -> "Conversation | None":
+        """An account's conversation in a thread on a channel's connection."""
+        return await session.scalar(
+            select(cls)
+            .where(
+                cls.connection_id == connection.id,
+                cls.account_id == account_id,
+                cls.thread_id == thread_id,
+            )
+            .limit(1)
+        )
+
     async def create_message(
         self,
         session: AsyncSession,

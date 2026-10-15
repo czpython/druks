@@ -155,6 +155,26 @@ async def route_message(
     return await Conversation.get_or_create_for_user(session, connection, account_id, **user)
 
 
+async def get_thread_conversation(
+    session: AsyncSession, connection: VaultSecret, user: dict, *, is_from_admin: bool
+) -> Conversation | None:
+    """The conversation of a thread message for the Bot, or none. The admin's tag turns
+    the thread on: it opens the admin's conversation there. After that, everyone in the
+    thread writes under the bot account."""
+    admin = connection.identity["admin"]
+    if is_from_admin:
+        return await Conversation.get_or_create_for_user(
+            session, connection, admin["account_id"], **user
+        )
+    if await Conversation.get_for_thread(
+        session, connection, account_id=admin["account_id"], thread_id=user["thread_id"]
+    ):
+        return await Conversation.get_or_create_for_user(
+            session, connection, connection.account_id, **user
+        )
+    return
+
+
 async def take_over(
     session: AsyncSession, connection: VaultSecret, user: dict, body: str, key: str
 ) -> None:

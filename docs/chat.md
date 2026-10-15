@@ -289,6 +289,28 @@ Druks also adds **internal messages** to a conversation. Each one comes from a
 fixed template. An internal message starts a turn like any message, and it
 never goes to WhatsApp. Druks talks to agents, and agents talk to people.
 
+### Groups
+
+Add an app's number to a WhatsApp group as you add any contact. The group
+reaches no agent until the number's admin tags the number there. That tag turns
+the group on and opens the admin's conversation for it. After that, a message
+reaches the Bot when it tags the number or replies to one of the number's
+messages. Druks drops every other group message, saves nothing of it, and
+starts no turn. As in a [Slack room](#rooms), each person who writes to the Bot
+gets their own conversation, with the group as its thread. The admin writes
+under the bot admin account, and everyone else under the bot account. The reply
+goes to the group, so everyone in the group reads it. Druks removes the
+number's tag from the text before the agent reads it.
+
+WhatsApp can name a group member by a LID instead of a phone number. Druks asks
+WAHA for the member's phone number, so it knows the admin by either name. A
+message that the number's phone sends in a group pauses nothing, and Druks
+drops it. A paired number ignores groups.
+
+Druks turns on the session's message store when it links a number, so WAHA
+keeps the group history. A number linked before Druks read groups ignores them
+until you remove it and add it again.
+
 ### Admins
 
 Each app number has an admin from the moment it links: the person who holds its
