@@ -133,7 +133,7 @@ async def current_account(
             )
     conversation_id = request.headers.get(CONVERSATION_HEADER)
     if conversation_id and not await Conversation.get_for_account(
-        session, conversation_id, account.id
+        session, conversation_id, account
     ):
         raise HTTPException(
             status_code=403, detail=f"Conversation {conversation_id} is not this account's."

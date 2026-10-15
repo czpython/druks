@@ -1,11 +1,15 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
+import sqlalchemy
+from croniter import croniter
 from sqlalchemy import ForeignKey, Index, func, select, text, tuple_, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
+from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
 from druks.apps.registry import channels
 from druks.core.models import Uuid7Pk, uuid7_str
@@ -15,9 +19,11 @@ from druks.files.datastructures import File
 from druks.files.models import FileRecord
 from druks.models import Base
 from druks.secrets.models import VaultSecret
+from druks.settings import load_settings
 
 from .constants import DELIVERY_FAILED_MESSAGE
 from .enums import ConversationSource, MessageRole, MessageState
+from .exceptions import ReminderError
 
 if TYPE_CHECKING:
     from .channels.base import Channel
@@ -233,6 +239,19 @@ class Conversation(Base, Uuid7Pk):
             .limit(1)
         )
 
+    @classmethod
+    def _for_account(cls, account: Account) -> sqlalchemy.ColumnElement[bool]:
+        """The account's own conversations. A number's admin also has the direct chats
+        of everyone who wrote to the number."""
+        own = cls.account_id == account.id
+        if account.kind == AccountKind.BOT_ADMIN:
+            admin_numbers = select(cls.connection_id).where(own)
+            direct_chats = sqlalchemy.and_(
+                cls.connection_id.in_(admin_numbers), cls.thread_id == ""
+            )
+            return sqlalchemy.or_(own, direct_chats)
+        return own
+
     async def create_message(
         self,
         session: AsyncSession,
@@ -265,18 +284,20 @@ class Conversation(Base, Uuid7Pk):
 
     @classmethod
     async def get_for_account(
-        cls, session: AsyncSession, conversation_id: str, account_id: str
+        cls, session: AsyncSession, conversation_id: str, account: Account
     ) -> "Conversation | None":
         return await session.scalar(
-            select(cls).where(cls.id == conversation_id, cls.account_id == account_id)
+            select(cls).where(cls.id == conversation_id, cls._for_account(account))
         )
 
     @classmethod
-    async def list_for_account(cls, session: AsyncSession, account_id: str) -> list["Conversation"]:
+    async def list_for_account(
+        cls, session: AsyncSession, account: Account
+    ) -> list["Conversation"]:
         return list(
             await session.scalars(
                 select(cls)
-                .where(cls.account_id == account_id)
+                .where(cls._for_account(account))
                 .order_by(cls.last_message_at.desc(), cls.id.desc())
             )
         )
@@ -424,3 +445,105 @@ Conversation.active_message_id = column_property(
     .limit(1)
     .scalar_subquery()
 )
+
+
+class Reminder(Base, Uuid7Pk):
+    __tablename__ = "chat_reminders"
+    __table_args__ = (
+        Index("chat_reminders_account_idx", "account_id", "created_at"),
+        Index("chat_reminders_due_idx", "next_send_at"),
+    )
+
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("chat_conversations.id", ondelete="CASCADE")
+    )
+    conversation: Mapped[Conversation] = relationship(lazy="joined")
+    # The account that asked for the reminder. Only it lists or cancels the reminder.
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
+    body: Mapped[str]
+    # A cron in the installation timezone. Empty for a reminder that sends once.
+    cron: Mapped[str] = mapped_column(default="", server_default=text("''"))
+    next_send_at: Mapped[datetime]
+    created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
+
+    @classmethod
+    def create(
+        cls,
+        session: AsyncSession,
+        conversation: Conversation,
+        account_id: str,
+        *,
+        body: str,
+        send_at: datetime | None,
+        cron: str,
+    ) -> "Reminder":
+        """A reminder that sends once at ``send_at``, or on ``cron``."""
+        if bool(send_at) == bool(cron):
+            raise ReminderError("Give exactly one of send_at and cron.")
+        if cron and not croniter.is_valid(cron):
+            raise ReminderError(f"'{cron}' is not a cron. Write five fields, such as '0 9 * * 1'.")
+        reminder = cls(
+            conversation_id=conversation.id,
+            account_id=account_id,
+            body=body,
+            cron=cron,
+            next_send_at=send_at,
+        )
+        if cron:
+            reminder.next_send_at = reminder.get_next_send_at(Base.utc_now())
+        elif not send_at.tzinfo:
+            # The agent writes the time that the person said, which is local.
+            reminder.next_send_at = send_at.replace(tzinfo=ZoneInfo(load_settings().timezone))
+        if reminder.next_send_at <= Base.utc_now():
+            raise ReminderError("send_at is in the past. Give a later time.")
+        session.add(reminder)
+        return reminder
+
+    @classmethod
+    async def list_due(cls, session: AsyncSession) -> list["Reminder"]:
+        """The reminders due now. Their rows stay locked until the caller commits, so a
+        slow tick and the next one cannot send a reminder twice."""
+        return list(
+            await session.scalars(
+                select(cls)
+                .where(cls.next_send_at <= Base.utc_now())
+                .order_by(cls.next_send_at)
+                .with_for_update(of=cls, skip_locked=True)
+            )
+        )
+
+    @classmethod
+    async def list_for_account(cls, session: AsyncSession, account_id: str) -> list["Reminder"]:
+        return list(
+            await session.scalars(
+                select(cls)
+                .where(cls.account_id == account_id)
+                .order_by(cls.created_at.desc(), cls.id.desc())
+            )
+        )
+
+    @classmethod
+    async def get_for_account(
+        cls, session: AsyncSession, reminder_id: str, account_id: str
+    ) -> "Reminder | None":
+        return await session.scalar(
+            select(cls).where(cls.id == reminder_id, cls.account_id == account_id)
+        )
+
+    def get_next_send_at(self, after: datetime) -> datetime:
+        """The first time after ``after`` on the reminder's cron, which runs in the
+        installation timezone."""
+        local = after.astimezone(ZoneInfo(load_settings().timezone))
+        return croniter(self.cron, local).get_next(datetime).astimezone(UTC)
+
+    async def create_message(self, session: AsyncSession) -> Message:
+        """Save the reminder as the Bot's message in its conversation. A reminder on a
+        cron moves to its next time, and one that sends once is deleted."""
+        message = await self.conversation.create_message(
+            session, self.body, role=MessageRole.ASSISTANT
+        )
+        if self.cron:
+            self.next_send_at = self.get_next_send_at(Base.utc_now())
+        else:
+            await session.delete(self)
+        return message

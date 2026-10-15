@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import json
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Annotated
 from unittest.mock import ANY, AsyncMock
@@ -41,8 +42,9 @@ from druks.chat.enums import (
     MessageState,
     PauseSignal,
 )
-from druks.chat.exceptions import ChannelHasNoThreadsError, TranscriptionError
-from druks.chat.models import Conversation
+from druks.chat.exceptions import ChannelHasNoThreadsError, ReminderError, TranscriptionError
+from druks.chat.models import Conversation, Reminder
+from druks.chat.tasks import send_due_reminders
 from druks.harnesses.claude import ClaudeHarness
 from druks.mcp.enums import Toolkit
 from druks.mcp.server import _is_visible, _validate_agent_tools
@@ -261,7 +263,7 @@ async def test_adding_a_number_creates_its_accounts_and_session(
     assert config["webhooks"] == [
         {
             "url": "https://hooks.test/_external/waha/events/",
-            "events": ["message.any", "message.reaction", "session.status"],
+            "events": ["message.any", "session.status"],
             "hmac": {"key": connection.secrets["webhook_secret"]},
         }
     ]
@@ -1134,3 +1136,80 @@ async def test_a_waiting_run_asks_the_admin_and_its_end_reaches_the_chat(druks_d
     await druks_db.refresh(chat, ["messages"])
     assert run.id in admin.messages[-1].body
     assert '"granted":true' in chat.messages[-1].body
+
+
+def test_a_reminder_cron_runs_in_the_installation_timezone(monkeypatch):
+    settings = SimpleNamespace(timezone="Asia/Manila")
+    monkeypatch.setattr("druks.chat.models.load_settings", lambda: settings)
+    thursday = datetime(2026, 10, 15, tzinfo=UTC)
+
+    assert Reminder(cron="0 9 * * 1").get_next_send_at(thursday) == datetime(
+        2026, 10, 19, 1, tzinfo=UTC
+    )
+
+
+@pytest.mark.parametrize(
+    "send_at, cron",
+    [
+        (None, ""),
+        (datetime(2099, 1, 1, tzinfo=UTC), "0 9 * * 1"),
+        (None, "every monday"),
+        (datetime(2000, 1, 1, tzinfo=UTC), ""),
+    ],
+)
+async def test_a_reminder_needs_one_later_time_or_one_cron(druks_db, send_at, cron):
+    with pytest.raises(ReminderError):
+        Reminder.create(
+            druks_db, SimpleNamespace(id="c"), "a", body="Stock count", send_at=send_at, cron=cron
+        )
+
+
+async def test_a_due_reminder_sends_once_as_written(druks_db, waha):
+    connection = await link(druks_db, await bot_account(druks_db))
+    make_admin(connection, ANA)
+    admin_id = connection.identity["admin"]["account_id"]
+    group_chat = await Conversation.get_or_create_for_user(
+        druks_db, connection, admin_id, **{**user(ANA), "thread_id": GROUP}
+    )
+    reminder = Reminder.create(
+        druks_db, group_chat, admin_id, body="Stock count today 🧮", send_at=None, cron="0 9 * * *"
+    )
+    reminder.next_send_at = Base.utc_now() - timedelta(minutes=1)
+    await druks_db.commit()
+
+    await send_due_reminders._function()
+    await send_due_reminders._function()
+
+    sends = [values for method, path, values in waha.calls if path == "/api/sendText"]
+    assert [(send["chatId"], send["text"]) for send in sends] == [(GROUP, "Stock count today 🧮")]
+    await druks_db.refresh(reminder)
+    assert reminder.next_send_at > Base.utc_now()
+
+
+async def test_reminders_reach_the_admins_number_and_groups_or_the_callers_own_chats(druks_db):
+    owner = await bot_account(druks_db)
+    connection = await link(druks_db, owner)
+    make_admin(connection, ANA)
+    admin = await druks_db.get(Account, connection.identity["admin"]["account_id"])
+    other = await link(druks_db, await bot_account(druks_db), session_name="session_two")
+    chats = {
+        name: await Conversation.get_or_create_for_user(druks_db, number, account_id, **chat)
+        for name, number, account_id, chat in [
+            ("person", connection, owner.id, user(BEN)),
+            ("admin", connection, admin.id, user(ANA)),
+            ("group", connection, admin.id, {**user(ANA), "thread_id": GROUP}),
+            ("member in group", connection, owner.id, {**user(BEN), "thread_id": GROUP}),
+            ("other number", other, other.account_id, user(BEN)),
+        ]
+    }
+    operator = await Account.get_or_create(druks_db, "op@example.com")
+    web_chat = await Conversation.create(druks_db, account_id=operator.id, body="Hi")
+
+    assert {chat.id for chat in await Conversation.list_for_account(druks_db, admin)} == {
+        chats["person"].id,
+        chats["admin"].id,
+        chats["group"].id,
+    }
+    assert [chat.id for chat in await Conversation.list_for_account(druks_db, operator)] == [
+        web_chat.id
+    ]

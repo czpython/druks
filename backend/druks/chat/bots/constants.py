@@ -1,5 +1,12 @@
 # The platform tools of a number's admin, beside the Bot's admin_tools.
-ADMIN_TOOLS = ("answer_gate", "chat_resume_conversation")
+ADMIN_TOOLS = (
+    "answer_gate",
+    "chat_resume_conversation",
+    "chat_list_conversations",
+    "chat_create_reminder",
+    "chat_list_reminders",
+    "chat_cancel_reminder",
+)
 # The admin's system prompt, a template of the chat app.
 ADMIN_PROMPT = "chat/bots/admin.md"
 # A Bot's tools and prompt paragraph in a group, beside its own.

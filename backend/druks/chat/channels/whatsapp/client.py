@@ -83,6 +83,11 @@ class WahaClient:
         )
         return response.json()
 
+    async def get_group_name(self, group_id: str) -> str:
+        # NOWEB calls a group's name its subject, and GOWS calls it Name.
+        group = (await self.request("GET", f"/api/{self.session_name}/groups/{group_id}")).json()
+        return group.get("subject") or group.get("Name") or ""
+
     async def new_message_id(self) -> str:
         response = await self.request("GET", f"/api/{self.session_name}/new-message-id")
         return response.json()["id"]

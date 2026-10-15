@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
 
 from druks.accounts.dependencies import require_operator
+from druks.accounts.models import Account
 from druks.browser.login import is_same_origin
 from druks.database import get_session
 from druks.redis import get_client
@@ -31,7 +32,7 @@ async def conversation_socket(websocket: WebSocket, conversation_id: str) -> Non
         except HTTPException:
             await websocket.close(code=1008)
             return
-        conversation = await Conversation.get_for_account(session, conversation_id, account.id)
+        conversation = await Conversation.get_for_account(session, conversation_id, account)
         if not conversation:
             await websocket.close(code=1008)
             return
@@ -40,9 +41,7 @@ async def conversation_socket(websocket: WebSocket, conversation_id: str) -> Non
     await DBOS.start_workflow_async(deliver, conversation_id)
     try:
         async with asyncio.TaskGroup() as group:
-            streaming = group.create_task(
-                stream_conversation(websocket, conversation_id, account.id)
-            )
+            streaming = group.create_task(stream_conversation(websocket, conversation_id, account))
             # The page never sends: receive() returns when it leaves.
             await websocket.receive()
             streaming.cancel()
@@ -50,7 +49,7 @@ async def conversation_socket(websocket: WebSocket, conversation_id: str) -> Non
         pass
 
 
-async def stream_conversation(websocket: WebSocket, conversation_id: str, account_id: str) -> None:
+async def stream_conversation(websocket: WebSocket, conversation_id: str, account: Account) -> None:
     position = "0-0"
     events = [{"type": "messages"}]
     while True:
@@ -58,7 +57,7 @@ async def stream_conversation(websocket: WebSocket, conversation_id: str, accoun
             if event["type"] == "messages":
                 async with get_session(websocket.app.state.engine) as session:
                     conversation = await Conversation.get_for_account(
-                        session, conversation_id, account_id
+                        session, conversation_id, account
                     )
                     if not conversation:
                         await websocket.close(code=1008)

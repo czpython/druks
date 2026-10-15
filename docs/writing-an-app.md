@@ -611,7 +611,8 @@ class Helpdesk(App):
   the agent to read the group with `chat_read_thread`, and gives it that tool.
 - `user_tools` are the tools of each person who writes to the connection.
 - `admin_tools` are the tools of the connection's admin. The admin also gets
-  Druks's admin prompt, `answer_gate`, and `chat_resume_conversation`.
+  Druks's admin prompt, `answer_gate`, `chat_resume_conversation`, and the
+  [reminder](chat.md#reminders) tools.
 
 Each name is the `operation_id` of one of the app's routes tagged `bot`. Druks
 refuses to start when an app declares a Bot under another attribute name, or

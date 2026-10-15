@@ -124,7 +124,7 @@ async def test_a_linked_persons_message_reaches_their_own_conversation(
 
     await receive(card, message_event())
 
-    [conversation] = await Conversation.list_for_account(druks_db, ana.id)
+    [conversation] = await Conversation.list_for_account(druks_db, ana)
     assert (conversation.source, conversation.connection_id, conversation.user_id) == (
         ConversationSource.SLACK,
         card.id,
@@ -147,7 +147,7 @@ async def test_the_webhook_drops_what_is_not_for_the_bot(card, druks_db, slack, 
 
     await receive(card, message_event(**event))
 
-    assert not await Conversation.list_for_account(druks_db, ana.id)
+    assert not await Conversation.list_for_account(druks_db, ana)
     assert not slack
     delivery.assert_not_awaited()
 
@@ -169,7 +169,7 @@ async def test_an_unlinked_person_gets_a_link_that_answers_their_message_once_th
     operator = await Account.get_or_create(druks_db, "op@example.com")
     await link_person(druks_db, operator)
     linked = await druks_client.get(link, follow_redirects=False)
-    [conversation] = await Conversation.list_for_account(druks_db, operator.id)
+    [conversation] = await Conversation.list_for_account(druks_db, operator)
     assert linked.headers["location"] == f"/chat/{conversation.id}"
     await druks_db.refresh(conversation, ["messages"])
     assert [message.source_id for message in conversation.messages] == ["D1:1.0"]
@@ -538,7 +538,7 @@ async def test_a_file_a_linked_person_sends_is_a_druks_file_on_their_message(
     )
     await receive(card, message_event(text="", ts="3.0"))
 
-    [conversation] = await Conversation.list_for_account(druks_db, ana.id)
+    [conversation] = await Conversation.list_for_account(druks_db, ana)
     await druks_db.refresh(conversation, ["messages"])
     assert [
         (message.body, message.source_id, message.file.name) for message in conversation.messages

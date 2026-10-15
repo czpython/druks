@@ -78,7 +78,7 @@ class Waha(Service):
                 "webhooks": [
                     {
                         "url": f"{base}/_external/waha/events/",
-                        "events": ["message.any", "message.reaction", "session.status"],
+                        "events": ["message.any", "session.status"],
                         "hmac": {"key": webhook_secret},
                     }
                 ],

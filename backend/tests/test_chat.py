@@ -110,8 +110,8 @@ async def test_new_conversation_is_unnamed_private_and_answers_in_order(druks_db
     assert not conversation.title
     assert conversation.source == ConversationSource.WEB
     assert not conversation.session_file
-    assert not await Conversation.get_for_account(druks_db, conversation.id, other.id)
-    assert not await Conversation.list_for_account(druks_db, other.id)
+    assert not await Conversation.get_for_account(druks_db, conversation.id, other)
+    assert not await Conversation.list_for_account(druks_db, other)
     first = await conversation.get_unanswered_message(druks_db)
     await conversation.create_message(druks_db, "second")
     assert first.state == MessageState.PENDING
@@ -797,7 +797,7 @@ async def test_each_open_page_receives_the_same_live_event(druks_db, conversatio
         socket = SimpleNamespace(app=api, send_json=send_json)
         tasks.append(
             asyncio.create_task(
-                sockets.stream_conversation(socket, conversation.id, conversation.account_id)
+                sockets.stream_conversation(socket, conversation.id, conversation.account)
             )
         )
         await asyncio.wait_for(ready.wait(), 2)
@@ -822,7 +822,7 @@ async def test_conversation_recency_comes_from_messages_not_pins(druks_db):
     for conversation in (earlier, later, empty):
         await druks_db.refresh(conversation)
 
-    conversations = await Conversation.list_for_account(druks_db, owner.id)
+    conversations = await Conversation.list_for_account(druks_db, owner)
 
     assert [conversation.id for conversation in conversations] == [earlier.id, later.id, empty.id]
     assert earlier.last_message_at == reply.created_at
@@ -831,7 +831,7 @@ async def test_conversation_recency_comes_from_messages_not_pins(druks_db):
 
     reply.created_at = later.last_message_at
     await druks_db.flush()
-    conversations = await Conversation.list_for_account(druks_db, owner.id)
+    conversations = await Conversation.list_for_account(druks_db, owner)
     assert [conversation.id for conversation in conversations] == [later.id, earlier.id, empty.id]
 
 

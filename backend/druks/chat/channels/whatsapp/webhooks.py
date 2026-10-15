@@ -83,9 +83,12 @@ class WahaEvents(Webhook):
                 "user_phone": get_phone(sender),
                 "thread_id": message["from"],
             }
-            return await get_thread_conversation(
+            conversation = await get_thread_conversation(
                 session, self.connection, user, is_from_admin=sender == admin_chat_id
             )
+            if conversation and not conversation.title:
+                conversation.title = await client.get_group_name(message["from"])
+            return conversation
         return
 
     async def on_session_status(self) -> Response:

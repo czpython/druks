@@ -1,8 +1,9 @@
 from contextlib import suppress
+from datetime import datetime
 from typing import Annotated
 
 from dbos import DBOS
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Path
 from githubkit.exception import RequestFailed
 from slack_sdk.errors import SlackApiError
 
@@ -13,21 +14,33 @@ from druks.api.dependencies import SessionDep
 
 from .channels.whatsapp.exceptions import WahaError
 from .enums import MessageState
-from .exceptions import ChannelHasNoThreadsError, ChatSandboxGone
-from .models import Conversation, Message
-from .schemas import ConversationDetailResponse, ConversationResponse, MessageResponse
+from .exceptions import ChannelHasNoThreadsError, ChatSandboxGone, ReminderError
+from .models import Conversation, Message, Reminder
+from .schemas import (
+    ConversationDetailResponse,
+    ConversationResponse,
+    MessageResponse,
+    ReminderResponse,
+)
 from .service import cancel_turn, deliver, publish
 
 router = APIRouter()
 
 
 @router.get(
-    "/conversations", response_model=list[ConversationResponse], response_model_by_alias=True
+    "/conversations",
+    operation_id="list_conversations",
+    tags=["agent", "bot"],
+    response_model=list[ConversationResponse],
+    response_model_by_alias=True,
 )
 async def list_conversations(
-    session: SessionDep, account: Account = Depends(current_session_account)
+    session: SessionDep, account: Account = Depends(current_account)
 ) -> list[Conversation]:
-    return await Conversation.list_for_account(session, account.id)
+    """Your conversations, newest first. thread_id is set for a group, and title names
+    it. A number's admin also gets the direct chats of everyone who wrote to the number.
+    A person has a direct chat only after they wrote."""
+    return await Conversation.list_for_account(session, account)
 
 
 @router.post(
@@ -61,7 +74,7 @@ async def create_conversation(
 async def get_conversation(
     conversation_id: str, session: SessionDep, account: Account = Depends(current_session_account)
 ) -> Conversation:
-    conversation = await Conversation.get_for_account(session, conversation_id, account.id)
+    conversation = await Conversation.get_for_account(session, conversation_id, account)
     if not conversation:
         raise HTTPException(404, "Conversation not found.")
     await session.refresh(conversation, ["messages"])
@@ -79,7 +92,7 @@ async def set_conversation_pinned(
     is_pinned: Annotated[bool, Body(embed=True)],
     account: Account = Depends(current_session_account),
 ) -> Conversation:
-    conversation = await Conversation.get_for_account(session, conversation_id, account.id)
+    conversation = await Conversation.get_for_account(session, conversation_id, account)
     if not conversation:
         raise HTTPException(404, "Conversation not found.")
     conversation.is_pinned = is_pinned
@@ -100,7 +113,7 @@ async def create_message(
     body: Annotated[str, Body(embed=True)],
     account: Account = Depends(current_session_account),
 ) -> Message:
-    conversation = await Conversation.get_for_account(session, conversation_id, account.id)
+    conversation = await Conversation.get_for_account(session, conversation_id, account)
     if not conversation:
         raise HTTPException(404, "Conversation not found.")
     if not body.strip():
@@ -124,7 +137,7 @@ async def retry_message(
     session: SessionDep,
     account: Account = Depends(current_session_account),
 ) -> Message:
-    conversation = await Conversation.get_for_account(session, conversation_id, account.id)
+    conversation = await Conversation.get_for_account(session, conversation_id, account)
     if not conversation:
         raise HTTPException(404, "Conversation not found.")
     original_message = await conversation.get_message(session, message_id)
@@ -159,7 +172,7 @@ async def cancel(
     message_id: Annotated[str, Body(embed=True, alias="messageId")],
     account: Account = Depends(current_session_account),
 ) -> None:
-    conversation = await Conversation.get_for_account(session, conversation_id, account.id)
+    conversation = await Conversation.get_for_account(session, conversation_id, account)
     if not conversation:
         raise HTTPException(404, "Conversation not found.")
     message = await conversation.get_message(session, message_id)
@@ -212,4 +225,73 @@ async def require_tag(
     if not conversation.thread_id:
         raise HTTPException(409, "This conversation has no thread. Every message reaches you.")
     conversation.is_tag_required = is_required
+    await session.commit()
+
+
+@router.post(
+    "/reminders",
+    operation_id="create_reminder",
+    status_code=201,
+    tags=["agent", "bot"],
+    response_model=ReminderResponse,
+    response_model_by_alias=True,
+)
+async def create_reminder(
+    session: SessionDep,
+    conversation_id: Annotated[
+        str, Body(description="A conversation from chat_list_conversations.")
+    ],
+    body: Annotated[str, Body(description="The words to send, as the person wants them.")],
+    send_at: Annotated[
+        datetime | None, Body(description="When to send once. A time with no offset is local.")
+    ] = None,
+    cron: Annotated[str, Body(description="A cron to send again and again, local time.")] = "",
+    account: Account = Depends(current_account),
+) -> Reminder:
+    """Send a message in a conversation once (send_at), or on a cron. Druks sends the
+    body word for word. Local time is the installation timezone."""
+    conversation = await Conversation.get_for_account(session, conversation_id, account)
+    if not conversation:
+        raise HTTPException(404, "Conversation not found. Choose one from chat_list_conversations.")
+    try:
+        reminder = Reminder.create(
+            session, conversation, account.id, body=body, send_at=send_at, cron=cron
+        )
+    except ReminderError as error:
+        raise HTTPException(422, str(error)) from error
+    await session.commit()
+    await session.refresh(reminder)
+    return reminder
+
+
+@router.get(
+    "/reminders",
+    operation_id="list_reminders",
+    tags=["agent", "bot"],
+    response_model=list[ReminderResponse],
+    response_model_by_alias=True,
+)
+async def list_reminders(
+    session: SessionDep, account: Account = Depends(current_account)
+) -> list[Reminder]:
+    """Your reminders, newest first: each one's conversation, body, cron, and next time."""
+    return await Reminder.list_for_account(session, account.id)
+
+
+@router.delete(
+    "/reminders/{reminder_id}",
+    operation_id="cancel_reminder",
+    status_code=204,
+    tags=["agent", "bot"],
+)
+async def cancel_reminder(
+    session: SessionDep,
+    reminder_id: Annotated[str, Path(description="A reminder from chat_list_reminders.")],
+    account: Account = Depends(current_account),
+) -> None:
+    """Stop one of your reminders. What it already sent stays in the conversation."""
+    reminder = await Reminder.get_for_account(session, reminder_id, account.id)
+    if not reminder:
+        raise HTTPException(404, "Reminder not found.")
+    await session.delete(reminder)
     await session.commit()

@@ -188,8 +188,12 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
 
     assert list(tools)[:7] == _TOOL_NAMES
     assert list(tools)[7:] == [
+        "chat_list_conversations",
         "chat_read_thread",
         "chat_require_tag",
+        "chat_list_reminders",
+        "chat_create_reminder",
+        "chat_cancel_reminder",
         "software_factory_start",
         "software_factory_review",
     ]

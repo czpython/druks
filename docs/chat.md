@@ -207,6 +207,29 @@ Nothing renews an idle sandbox. It expires with its lease. The next message
 gets a new sandbox and reloads the saved session files. Each turn renews the
 sandbox lease and its identity expiry. The lease is 270 minutes.
 
+## Reminders
+
+A reminder sends a message in a conversation once at a time, or again on a
+cron. Ask the agent for one in plain words, and it calls `chat_create_reminder`.
+Druks checks for due reminders every minute. It sends the words as written, as
+the agent's message, and runs no turn. The message goes through the
+conversation's channel, so it reaches WhatsApp, Slack, or the web page. A cron
+and a time with no offset use the installation `timezone`. A reminder sends
+once for each due time. When Druks was down at that time, it sends once on the
+next check and moves on.
+
+| Caller | Where their reminders go |
+| --- | --- |
+| An operator | The operator's own conversations |
+| A number's admin | The direct chats of everyone who wrote to the number, and the groups that the admin turned on |
+| Anyone else who writes to a number | Nowhere: they get no reminder tools |
+
+A person gets a private reminder only after they wrote to the number, so Druks
+never starts a chat. `chat_list_conversations` lists where the caller can
+send. `chat_list_reminders` lists the caller's reminders with each one's cron
+and next time. `chat_cancel_reminder` stops a reminder, and what it already sent
+stays in the conversation.
+
 ## WhatsApp
 
 WhatsApp is a source for Chat. A person writes to a linked number, and Druks
@@ -256,7 +279,7 @@ message to a conversation by its sender:
 
 | Sender | Owner | Prompt | Tools |
 | --- | --- | --- | --- |
-| The number's admin | The number's bot admin account | Druks's admin prompt | The Bot's `admin_tools`, `answer_gate`, `chat_resume_conversation` |
+| The number's admin | The number's bot admin account | Druks's admin prompt | The Bot's `admin_tools`, `answer_gate`, `chat_resume_conversation`, the [reminder](#reminders) tools |
 | Anyone else | The number's bot account | The Bot's `prompt` | The Bot's `user_tools` |
 
 The agents of a number have no shell, file, or web tools. Their harness, model,
@@ -300,7 +323,8 @@ starts no turn. As in a [Slack room](#rooms), each person who writes to the Bot
 gets their own conversation, with the group as its thread. The admin writes
 under the bot admin account, and everyone else under the bot account. The reply
 goes to the group, so everyone in the group reads it. Druks removes the
-number's tag from the text before the agent reads it.
+number's tag from the text before the agent reads it, and gives each
+conversation in the group the group's name as its title.
 
 A tag decides when the agent answers, not what it sees. In a group, the agents
 of the people and of the admin also get `chat_read_thread`, and their prompt

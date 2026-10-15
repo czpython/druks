@@ -158,7 +158,7 @@ async def test_a_linked_writers_tag_reaches_their_own_conversation(
 
     await receive(tmp_path, comment_event(body=f"Hey @{HANDLE}, what changed?"))
 
-    [conversation] = await Conversation.list_for_account(druks_db, ana.id)
+    [conversation] = await Conversation.list_for_account(druks_db, ana)
     assert (
         conversation.source,
         conversation.connection_id,
@@ -192,7 +192,7 @@ async def test_the_channel_drops_what_is_not_for_the_bot(
 
     await receive(tmp_path, comment_event(**event))
 
-    assert not await Conversation.list_for_account(druks_db, ana.id)
+    assert not await Conversation.list_for_account(druks_db, ana)
     assert not github
     delivery.assert_not_awaited()
 
@@ -204,7 +204,7 @@ async def test_a_comment_delivered_twice_is_saved_once(card, druks_db, tmp_path,
     await receive(tmp_path, comment_event())
     await receive(tmp_path, comment_event())
 
-    [conversation] = await Conversation.list_for_account(druks_db, ana.id)
+    [conversation] = await Conversation.list_for_account(druks_db, ana)
     await druks_db.refresh(conversation, ["messages"])
     assert len(conversation.messages) == 1
     delivery.assert_awaited_once()

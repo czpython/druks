@@ -34,3 +34,7 @@ class ChannelHasNoThreadsError(ChatError):
 
 class TranscriptionError(ChatError):
     """Druks got no transcript for a voice note."""
+
+
+class ReminderError(ChatError):
+    """A reminder cannot be made as asked. The message says what to change."""

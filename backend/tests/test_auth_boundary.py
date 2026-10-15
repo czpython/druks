@@ -23,7 +23,6 @@ EXEMPT_API_PATHS = {
 
 # Capability management admits the session identity only — never a PAT.
 SESSION_ONLY_API_ROUTES = {
-    ("GET", "/api/chat/conversations"),
     ("POST", "/api/chat/conversations"),
     ("GET", "/api/chat/conversations/{conversation_id}"),
     ("PATCH", "/api/chat/conversations/{conversation_id}"),
