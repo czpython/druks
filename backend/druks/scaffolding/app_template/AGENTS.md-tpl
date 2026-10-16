@@ -37,6 +37,9 @@ webhooks, and the dashboard.
   webhook, and settings plumbing belongs to Druks. When this app needs
   something the author surface lacks, widen the primitive that already owns the
   concern rather than reaching past it.
+- Agent prompts use bundled templates by default. `allow_prompt_override=True`
+  lets the workflow repository's maintainers replace a prompt and requires
+  `RepoWorkspace`. A `repo` template variable does not enable overrides.
 
 ## Verify
 

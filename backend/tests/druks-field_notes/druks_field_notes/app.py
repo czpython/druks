@@ -100,6 +100,7 @@ class FieldNotes(App):
     survey = Agent(
         description="reads a cloned repository and writes its one-line gist",
         prompt="field_notes/survey.md",
+        allow_prompt_override=True,
         contract=GistOutput,
     )
     # Answers the app's WhatsApp numbers with the routes tagged bot.

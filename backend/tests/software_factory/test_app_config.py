@@ -4,6 +4,7 @@ import pytest
 from druks.apps.config import resolve_app_config
 from druks.apps.exceptions import AppConfigError
 from druks.contrib.software_factory.policy import RepoPolicy
+from druks.prompts import render_prompt
 from druks.testing import make_settings
 
 REPO = "acme/widget"
@@ -104,8 +105,6 @@ class TestAppPromptOverridePaths:
     async def test_repo_app_dir_checked_before_org(self, monkeypatch):
         """``software_factory/build/*`` resolves via the repo's
         ``.druks/software_factory/prompts/...`` first, then the org's app dir."""
-        from druks.prompts.resolver import _resolve_override
-
         calls: list[tuple[str, str]] = []
 
         async def fetch(*, repo: str, path: str) -> str | None:
@@ -113,23 +112,30 @@ class TestAppPromptOverridePaths:
             return None
 
         monkeypatch.setattr("druks.prompts.resolver.fetch_file", fetch)
-        body = await _resolve_override("software_factory/build/implement.md", repo=REPO)
-        assert body is None
+        body = await render_prompt(
+            "software_factory/verification_block.md",
+            overrides_from=REPO,
+            sections=[],
+            has_commands=False,
+            sandbox_env_keys=[],
+        )
+        assert body
         assert calls == [
-            (REPO, ".druks/software_factory/prompts/build/implement.md"),
-            (ORG_DRUKS, "software_factory/prompts/build/implement.md"),
+            (REPO, ".druks/software_factory/prompts/verification_block.md"),
+            (ORG_DRUKS, "software_factory/prompts/verification_block.md"),
         ]
 
     async def test_repo_app_dir_wins(self, monkeypatch):
-        from druks.prompts.resolver import _resolve_override
-
         async def fetch(*, repo: str, path: str) -> str | None:
             if (repo, path) == (REPO, ".druks/software_factory/prompts/build/implement.md"):
                 return "tuned"
             return None
 
         monkeypatch.setattr("druks.prompts.resolver.fetch_file", fetch)
-        assert await _resolve_override("software_factory/build/implement.md", repo=REPO) == "tuned"
+        assert (
+            await render_prompt("software_factory/build/implement.md", overrides_from=REPO)
+            == "tuned"
+        )
 
 
 class TestLoadPolicyAndProfile:

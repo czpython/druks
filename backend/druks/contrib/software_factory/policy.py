@@ -83,6 +83,7 @@ class RepoPolicy(BaseModel):
         ]
         body = await render_prompt(
             "software_factory/verification_block.md",
+            overrides_from=repo,
             repo=repo,
             sections=sections,
             has_commands=any(section["command_entries"] for section in sections),
