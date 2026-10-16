@@ -80,8 +80,10 @@ boundaries. This has several consequences:
   deployment compatibility decision.
 
 Workflow recovery does not preserve a live external agent process through a
-worker crash. Agent execution in a workflow is a durable operation around a
-process in a sandbox. Recovery follows the operation boundary in this section.
+worker crash. Before a recovered agent call prepares its workspace, Druks
+revokes the abandoned sandbox's identity and asks Drukbox to delete that sandbox.
+If deletion fails, recovery stops. The new call uses a fresh sandbox. Completed
+durable operations keep their recorded results.
 [Chat](chat.md#execution-and-recovery) has a separate live-session lifecycle.
 
 ## When Druks fits
