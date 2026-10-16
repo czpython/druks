@@ -10,6 +10,7 @@ from druks.contrib.software_factory.contracts import (
     TriageOutput,
 )
 from druks.contrib.software_factory.enums import EvaluationVerdict, HumanFeedbackAction
+from druks.contrib.software_factory.exceptions import MergeConflictError
 from druks.workflows import Journal
 
 
@@ -28,6 +29,9 @@ class BuildJournal(Journal):
 
     @property
     def pr_base_sha(self) -> str | None:
+        # A rebase onto the base branch moves the start of the PR's own changes.
+        if self.merge_conflict:
+            return self.merge_conflict.base_sha
         with suppress(IndexError):
             return self.implementations[0].base_sha
         return
@@ -86,6 +90,18 @@ class BuildJournal(Journal):
             and not self.filter(EvaluationOutput, after=triage)
         ):
             return triage.question
+        return
+
+    @property
+    def merge_conflict(self) -> MergeConflictError | None:
+        return self.latest(MergeConflictError)
+
+    @property
+    def rebase_request(self) -> MergeConflictError | None:
+        # The conflict drives exactly one implement round, like a revision request.
+        conflict = self.merge_conflict
+        if conflict and not self.filter(EvaluationOutput, after=conflict):
+            return conflict
         return
 
     @property

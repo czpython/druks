@@ -43,6 +43,12 @@ acceptance criterion — nothing more, nothing less.
 
 {{ build.journal.revision_request }}
 
+{% endif %}
+{% if build.journal.rebase_request %}
+## Merge conflict
+
+The work branch conflicts with `{{ build.journal.rebase_request.base_ref }}` at `{{ build.journal.rebase_request.base_sha }}`.
+
 {% endif %}When the checkout has `.druks/review/checklist.md`, read it before you write: it is the repo's standing rules for code and prose, and the reviewer holds your diff to it.
 
 Implement the approved plan (rendered above as **Current plan**) on the work branch (see "Delivering your work" below). When a **Revision request** section is rendered above, implement it on top of the plan — it is the reviewer's feedback, already triaged into instructions. Before pushing, you may run the repo's configured test, lint, or typecheck command narrowed to the files your diff touches — self-checking your own work, nothing more. Never run the full verification profile, and never adjudicate it: the evaluator owns that verdict, and a failure you cannot attribute to your own diff is environment noise to report, not a gate to chase. Do not run ad hoc install, build, or smoke commands beyond that unless the plan explicitly requires changing those commands or generated outputs. Never leave dependency lockfile, generated, or cache changes unless they are part of the requested implementation. Return structured evidence for every acceptance criterion, every check you ran or intentionally did not run, changed files, and known risks. If a check was not run, include status not_run and a reason.

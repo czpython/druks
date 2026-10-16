@@ -7,6 +7,7 @@ from druks.contrib.software_factory.contracts import (
     TriageOutput,
 )
 from druks.contrib.software_factory.enums import EvaluationVerdict, HumanFeedbackAction
+from druks.contrib.software_factory.exceptions import MergeConflictError
 from druks.contrib.software_factory.journal import BuildJournal
 
 
@@ -104,6 +105,22 @@ def test_a_triage_question_waits_until_an_evaluation_follows():
         update={"action": HumanFeedbackAction.NO_CHANGE, "question": "N/A"}
     )
     assert _journal(no_change).triage_question is None
+
+
+def test_a_merge_conflict_moves_the_pr_base_and_drives_one_rebase_round():
+    conflict = MergeConflictError("main", "base-at-conflict")
+    pending = _journal(_implementation(base_sha="round-1-base"), _evaluation(), conflict)
+    assert pending.rebase_request is conflict
+    assert pending.pr_base_sha == "base-at-conflict"
+    rebased = _journal(
+        _implementation(base_sha="round-1-base"),
+        _evaluation(),
+        conflict,
+        _implementation(base_sha="round-1-head"),
+        _evaluation(),
+    )
+    assert rebased.rebase_request is None
+    assert rebased.pr_base_sha == "base-at-conflict"
 
 
 def test_assignee_scan_falls_through_unresolved_revisions():

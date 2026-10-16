@@ -451,6 +451,11 @@ that still fails after the last revision, stays a draft and waits in the Druks
 dashboard, whatever the approval setting. Request changes there with a note to
 send the work back to the agent.
 
+Before Druks asks for a review or approves the work, it checks whether the pull
+request conflicts with the base branch. On a conflict, the agent rebases the
+branch once, and the build evaluates it again. A conflict that remains parks the
+build for review on GitHub.
+
 ### Review identity (optional)
 
 The bundled `software_factory` app declares an optional service, **Github
