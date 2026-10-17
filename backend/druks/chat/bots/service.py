@@ -156,18 +156,22 @@ async def route_message(
 
 
 async def get_thread_conversation(
-    session: AsyncSession, connection: VaultSecret, user: dict, *, is_from_admin: bool
+    session: AsyncSession, connection: VaultSecret, user: dict, *, sender_account_id: str | None
 ) -> Conversation | None:
-    """The conversation of a thread message for the Bot, or none. The admin's tag turns
-    the thread on: it opens the admin's conversation there. After that, everyone in the
-    thread writes under the bot account."""
-    admin = connection.identity["admin"]
-    if is_from_admin:
+    """The conversation of a thread message for the Bot, or none. A paired phone and the
+    admin write under their own account, which opens their conversation there. On an
+    open number, the admin's conversation turns the thread on, and everyone else in it
+    then writes under the bot account."""
+    if sender_account_id:
         return await Conversation.get_or_create_for_user(
-            session, connection, admin["account_id"], **user
+            session, connection, sender_account_id, **user
         )
-    if await Conversation.get_for_thread(
-        session, connection, account_id=admin["account_id"], thread_id=user["thread_id"]
+    bot = get_app(connection.identity["app"]).bot
+    if bot.access == BotAccess.OPEN and await Conversation.get_for_thread(
+        session,
+        connection,
+        account_id=connection.identity["admin"]["account_id"],
+        thread_id=user["thread_id"],
     ):
         return await Conversation.get_or_create_for_user(
             session, connection, connection.account_id, **user

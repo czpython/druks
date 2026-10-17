@@ -67,15 +67,22 @@ class WahaEvents(Webhook):
 
     async def get_group_conversation(self, session: AsyncSession) -> Conversation | None:
         """The conversation of a group message, or none. Only a message that addresses
-        the Bot of an open number reaches it, and never one that the number's phone sent.
-        The admin is the sender whose phone number is the admin's."""
+        the Bot reaches it, and never one that the number's phone sent. A paired phone
+        and the admin write under their own account."""
         message = self.data["payload"]
-        bot = get_app(self.connection.identity["app"]).bot
-        if bot.access == BotAccess.OPEN and self.is_addressed and not message["fromMe"]:
-            admin = self.connection.identity["admin"]
+        if self.is_addressed and not message["fromMe"]:
+            identity = self.connection.identity
+            if get_app(identity["app"]).bot.access == BotAccess.PAIRED:
+                accounts = identity["operators"]
+            else:
+                accounts = {identity["admin"].get("user_id", ""): identity["admin"]["account_id"]}
             client = await Waha.get_client(session, self.connection)
+            # A group can name a member by a LID, so Druks compares phone numbers.
+            accounts_by_phone = {
+                await client.get_phone_chat_id(user_id): account_id
+                for user_id, account_id in accounts.items()
+            }
             sender = await client.get_phone_chat_id(message["participant"])
-            admin_chat_id = await client.get_phone_chat_id(admin.get("user_id", ""))
             user = {
                 "source": ConversationSource.WHATSAPP,
                 "user_id": message["participant"],
@@ -84,7 +91,7 @@ class WahaEvents(Webhook):
                 "thread_id": message["from"],
             }
             conversation = await get_thread_conversation(
-                session, self.connection, user, is_from_admin=sender == admin_chat_id
+                session, self.connection, user, sender_account_id=accounts_by_phone.get(sender)
             )
             if conversation and not conversation.title:
                 conversation.title = await client.get_group_name(message["from"])

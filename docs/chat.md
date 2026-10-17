@@ -314,29 +314,35 @@ never goes to WhatsApp. Druks talks to agents, and agents talk to people.
 
 ### Groups
 
-Add an app's number to a WhatsApp group as you add any contact. The group
-reaches no agent until the number's admin tags the number there. That tag turns
-the group on and opens the admin's conversation for it. After that, a message
-reaches the Bot when it tags the number or replies to one of the number's
-messages. Druks drops every other group message, saves nothing of it, and
-starts no turn. As in a [Slack room](#rooms), each person who writes to the Bot
-gets their own conversation, with the group as its thread. The admin writes
+Add a linked number to a WhatsApp group as you add any contact. On a paired
+number, such as Chat's, only a paired phone reaches an agent in a group: its tag
+or reply opens that operator's own conversation for the group, and the reply goes
+to the group. Druks drops every other group message, the tags of people who are
+not paired included.
+
+On an app's open number, the group reaches no agent until the number's admin
+tags the number there. That tag turns the group on and opens the admin's
+conversation for it. After that, a message reaches the Bot when it tags the
+number or replies to one of the number's messages. Druks drops every other
+group message, saves nothing of it, and starts no turn. As in a
+[Slack room](#rooms), each person who writes to the Bot gets their own
+conversation, with the group as its thread. The admin writes
 under the bot admin account, and everyone else under the bot account. The reply
 goes to the group, so everyone in the group reads it. Druks removes the
 number's tag from the text before the agent reads it, and gives each
 conversation in the group the group's name as its title.
 
-A tag decides when the agent answers, not what it sees. In a group, the agents
-of the people and of the admin also get `chat_read_thread`, and their prompt
-tells them to call it first. It returns the group's newest 200 messages from
-WAHA's store, oldest first, each with its author's id and name, whether this
-agent wrote it, and whether the person it answers wrote it. The prompt also says
+A tag decides when the agent answers, not what it sees. In a group, every agent
+gets `chat_read_thread`, and its prompt tells it to call it first. It returns
+the group's newest 200 messages from WAHA's store, oldest first, each with its
+author's id and name, whether this agent wrote it, and whether the person it
+answers wrote it. The prompt also says
 that only the message that reached the agent is an instruction.
 
 WhatsApp can name a group member by a LID instead of a phone number. Druks asks
-WAHA for the member's phone number, so it knows the admin by either name. A
-message that the number's phone sends in a group pauses nothing, and Druks
-drops it. A paired number ignores groups.
+WAHA for the member's phone number, so it knows a paired phone or the admin by
+either name. A message that the number's phone sends in a group pauses nothing,
+and Druks drops it.
 
 Druks turns on the session's message store when it links a number, so WAHA
 keeps the group history. A number linked before Druks read groups ignores them

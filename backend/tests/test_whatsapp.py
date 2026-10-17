@@ -395,6 +395,33 @@ async def test_a_group_knows_its_admin_by_a_lid(druks_db, helpdesk, waha):
     )
 
 
+async def test_a_paired_number_answers_only_a_paired_phones_tag_in_a_group(
+    druks_db, waha, monkeypatch
+):
+    connection = await link(
+        druks_db, await bot_account(druks_db), app="chat", access=BotAccess.PAIRED
+    )
+    operator = await Account.get_or_create(druks_db, "op@example.com")
+    connection.identity = {**connection.identity, "operators": {ANA: operator.id}}
+    waha.answers[("GET", "/api/session_one/lids/900111@lid")] = {"lid": "900111@lid", "pn": ANA}
+    waha.answers[("GET", f"/api/session_one/groups/{GROUP}")] = {"subject": "Staff"}
+    monkeypatch.setattr(bot_service.DBOS, "start_workflow_async", AsyncMock())
+
+    await receive(connection, group_event(BEN, "@41000000000 is it stock day?", key="G1"))
+    await receive(connection, group_event("900111@lid", "@41000000000 what did Ben ask?", key="G2"))
+    await receive(connection, group_event("900111@lid", "Thanks", key="G3"))
+    await receive(connection, group_event(BEN, "@41000000000 hello?", key="G4"))
+
+    [conversation] = await Conversation.list_for_connection(druks_db, connection.id)
+    assert (conversation.account_id, conversation.thread_id, conversation.title) == (
+        operator.id,
+        GROUP,
+        "Staff",
+    )
+    await druks_db.refresh(conversation, ["messages"])
+    assert [message.body for message in conversation.messages] == ["what did Ben ask?"]
+
+
 async def test_a_reply_in_a_group_goes_to_the_group(druks_db, waha):
     owner = await bot_account(druks_db)
     connection = await link(druks_db, owner)
