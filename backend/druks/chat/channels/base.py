@@ -3,7 +3,7 @@ from typing import ClassVar
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.apps.registry import channels
-from druks.chat.exceptions import ChannelHasNoThreadsError
+from druks.chat.exceptions import ChannelHasNoThreadsError, ChannelStartsNoConversationsError
 from druks.chat.models import Conversation, Message
 from druks.services import Service
 
@@ -40,3 +40,13 @@ class Channel:
     async def read_thread(cls, session: AsyncSession, conversation: Conversation) -> list[dict]:
         """The conversation's thread at its source, oldest first."""
         raise ChannelHasNoThreadsError(f"A {cls.name} conversation has no thread to read.")
+
+    @classmethod
+    async def start_conversation(
+        cls, session: AsyncSession, conversation: Conversation, *, phone: str, name: str
+    ) -> Conversation:
+        """A direct chat with a person on the conversation's connection, under the
+        conversation's account. Nothing is sent."""
+        raise ChannelStartsNoConversationsError(
+            f"A {cls.name} conversation cannot start a chat with a person."
+        )

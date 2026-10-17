@@ -1,6 +1,6 @@
 import httpx
 
-from .exceptions import WahaError
+from .exceptions import NumberNotOnWhatsAppError, WahaError
 
 
 class WahaClient:
@@ -68,6 +68,18 @@ class WahaClient:
             response = await self.request("GET", f"/api/{self.session_name}/lids/{chat_id}")
             return response.json()["pn"] or chat_id
         return chat_id
+
+    async def get_chat_id_for_phone(self, phone: str) -> str:
+        """The chat ID of the WhatsApp account on a phone number."""
+        response = await self.request(
+            "GET",
+            "/api/contacts/check-exists",
+            params={"phone": phone, "session": self.session_name},
+        )
+        result = response.json()
+        if result["numberExists"]:
+            return result["chatId"]
+        raise NumberNotOnWhatsAppError(f"{phone} has no WhatsApp account.")
 
     async def get_messages(self, chat_id: str, *, limit: int) -> list[dict]:
         """The chat's newest messages in the session's store, newest first, without media."""

@@ -192,6 +192,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
         "chat_list_conversations",
         "chat_read_thread",
         "chat_require_tag",
+        "chat_start_conversation",
         "chat_list_reminders",
         "chat_create_reminder",
         "chat_cancel_reminder",

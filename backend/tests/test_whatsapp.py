@@ -44,6 +44,8 @@ from druks.chat.enums import (
 )
 from druks.chat.exceptions import ChannelHasNoThreadsError, ReminderError, TranscriptionError
 from druks.chat.models import Conversation, Reminder
+from druks.chat.routes import start_conversation
+from druks.chat.schemas import ConversationResponse
 from druks.chat.tasks import send_due_reminders
 from druks.harnesses.claude import ClaudeHarness
 from druks.mcp.enums import Toolkit
@@ -1213,3 +1215,44 @@ async def test_reminders_reach_the_admins_number_and_groups_or_the_callers_own_c
     assert [chat.id for chat in await Conversation.list_for_account(druks_db, operator)] == [
         web_chat.id
     ]
+
+
+async def test_a_paired_operator_starts_a_chat_that_their_reminders_reach(druks_db, waha, tmp_path):
+    configure_app_for_test(settings=make_settings(tmp_path), authenticated=False)
+    api = FastAPI(dependencies=[Depends(request_session)])
+    api.add_api_route(
+        "/connection/conversations",
+        start_conversation,
+        methods=["POST"],
+        status_code=201,
+        response_model=ConversationResponse,
+        response_model_by_alias=True,
+    )
+    connection = await link(
+        druks_db, await bot_account(druks_db), app="chat", access=BotAccess.PAIRED
+    )
+    operator = await Account.get_or_create(druks_db, "op@example.com")
+    own_chat = await Conversation.get_or_create_for_user(
+        druks_db, connection, operator.id, **user(ANA)
+    )
+    _, token = await PersonalAccessToken.create(druks_db, account_id=operator.id, name="chat")
+    await druks_db.commit()
+    headers = {"Authorization": f"Bearer {token}", CONVERSATION_HEADER: own_chat.id}
+    ben = {"phone": "+41700000002", "name": "Ben"}
+    waha.answers[("GET", "/api/contacts/check-exists")] = {"numberExists": True, "chatId": BEN}
+
+    async with asgi_client(api) as client:
+        started = await client.post("/connection/conversations", json=ben, headers=headers)
+        again = await client.post("/connection/conversations", json=ben, headers=headers)
+        waha.answers[("GET", "/api/contacts/check-exists")] = {"numberExists": False}
+        unknown = await client.post(
+            "/connection/conversations",
+            json={"phone": "+41700000009", "name": "Nobody"},
+            headers=headers,
+        )
+
+    assert (started.status_code, again.status_code, unknown.status_code) == (201, 201, 422)
+    assert started.json()["id"] == again.json()["id"]
+    chat = await Conversation.get_for_account(druks_db, started.json()["id"], operator)
+    assert (chat.user_id, chat.user_name, chat.user_phone) == (BEN, "Ben", "+41700000002")
+    assert not [call for call in waha.calls if call[1] == "/api/sendText"]

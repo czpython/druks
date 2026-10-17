@@ -68,3 +68,23 @@ class WhatsAppChannel(Channel):
             }
             for message in reversed(messages)
         ]
+
+    @classmethod
+    async def start_conversation(
+        cls, session: AsyncSession, conversation: Conversation, *, phone: str, name: str
+    ) -> Conversation:
+        """A chat with the WhatsApp account on a phone number, under the conversation's
+        account. Only an operator calls it, and an operator's WhatsApp chats are on paired
+        numbers, so an open number never starts a chat."""
+        client = await Waha.get_client(session, conversation.connection)
+        chat_id = await client.get_chat_id_for_phone(phone)
+        return await Conversation.get_or_create_for_user(
+            session,
+            conversation.connection,
+            conversation.account_id,
+            source=ConversationSource.WHATSAPP,
+            user_id=chat_id,
+            user_name=name,
+            user_phone=get_phone(chat_id),
+            thread_id="",
+        )

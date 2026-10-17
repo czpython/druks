@@ -224,11 +224,17 @@ next check and moves on.
 | A number's admin | The direct chats of everyone who wrote to the number, and the groups that the admin turned on |
 | Anyone else who writes to a number | Nowhere: they get no reminder tools |
 
-A person gets a private reminder only after they wrote to the number, so Druks
-never starts a chat. `chat_list_conversations` lists where the caller can
-send. `chat_list_reminders` lists the caller's reminders with each one's cron
-and next time. `chat_cancel_reminder` stops a reminder, and what it already sent
-stays in the conversation.
+On an open number, a person gets a private reminder only after they wrote to the
+number, so Druks never starts a chat there. On a paired number, the operator's
+agent can start one with `chat_start_conversation`: it takes the person's phone
+number and name, and the chat is the operator's own, so their reminders reach it.
+WAHA confirms that the number is on WhatsApp. Druks sends nothing until a
+reminder does, and the person's replies reach no agent.
+
+`chat_list_conversations` lists where the caller can send. `chat_list_reminders`
+lists the caller's reminders with each one's cron and next time.
+`chat_cancel_reminder` stops a reminder, and what it already sent stays in the
+conversation.
 
 ## WhatsApp
 

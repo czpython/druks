@@ -12,9 +12,14 @@ from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 
-from .channels.whatsapp.exceptions import WahaError
+from .channels.whatsapp.exceptions import NumberNotOnWhatsAppError, WahaError
 from .enums import MessageState
-from .exceptions import ChannelHasNoThreadsError, ChatSandboxGone, ReminderError
+from .exceptions import (
+    ChannelHasNoThreadsError,
+    ChannelStartsNoConversationsError,
+    ChatSandboxGone,
+    ReminderError,
+)
 from .models import Conversation, Message, Reminder
 from .schemas import (
     ConversationDetailResponse,
@@ -226,6 +231,43 @@ async def require_tag(
         raise HTTPException(409, "This conversation has no thread. Every message reaches you.")
     conversation.is_tag_required = is_required
     await session.commit()
+
+
+@router.post(
+    "/connection/conversations",
+    operation_id="start_conversation",
+    status_code=201,
+    tags=["agent"],
+    response_model=ConversationResponse,
+    response_model_by_alias=True,
+)
+async def start_conversation(
+    session: SessionDep,
+    phone: Annotated[str, Body(description="The person's phone number, with its country code.")],
+    name: Annotated[str, Body(description="The person's name, as you call them.")],
+    account: Account = Depends(current_account),
+) -> Conversation:
+    """Start a chat with a person on the number this call comes from, so your reminders
+    reach them. Druks sends nothing until a reminder does."""
+    conversation_id = current_conversation_id.get()
+    if not conversation_id:
+        raise HTTPException(409, "Call this tool from a chat with the Bot's number.")
+    conversation = await session.get(Conversation, conversation_id)
+    if not conversation.channel:
+        raise HTTPException(409, "A web conversation has no number to start a chat on.")
+    try:
+        started = await conversation.channel.start_conversation(
+            session, conversation, phone=phone, name=name
+        )
+    except ChannelStartsNoConversationsError as error:
+        raise HTTPException(409, str(error)) from error
+    except NumberNotOnWhatsAppError as error:
+        raise HTTPException(422, str(error)) from error
+    except WahaError as error:
+        raise HTTPException(502, str(error)) from error
+    await session.commit()
+    await session.refresh(started)
+    return started
 
 
 @router.post(
