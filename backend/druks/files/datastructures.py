@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import GetCoreSchemaHandler
 from pydantic_core import CoreSchema, core_schema
+from sqlalchemy import select
 
 from druks.core.models import uuid7_str
 from druks.db import db_session
@@ -69,6 +70,39 @@ class File:
             raise
         return cls(
             id=record.id, name=record.name, size=record.size, content_type=record.content_type
+        )
+
+    @classmethod
+    async def get_or_create(
+        cls,
+        *,
+        name: str,
+        content_type: str,
+        content: bytes,
+        app: str,
+        uploaded_by: str,
+    ) -> "File":
+        """The app's file with this name, type, and bytes, or a new one."""
+        digest = await asyncio.to_thread(hashlib.sha256, content)
+        record = await db_session().scalar(
+            select(FileRecord).where(
+                FileRecord.sha256 == digest.hexdigest(),
+                FileRecord.name == name,
+                FileRecord.content_type == content_type,
+                FileRecord.app == app,
+                FileRecord.deleted_at.is_(None),
+            )
+        )
+        if record:
+            file = cls()
+            file._hydrate(record)
+            return file
+        return await cls.create(
+            name=name,
+            content_type=content_type,
+            content=content,
+            app=app,
+            uploaded_by=uploaded_by,
         )
 
     @classmethod

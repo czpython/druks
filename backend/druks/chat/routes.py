@@ -188,9 +188,10 @@ async def read_thread(
     session: SessionDep, account: Account = Depends(current_account)
 ) -> list[dict]:
     """Read the thread of the conversation this call comes from: its newest 200
-    messages, oldest first. Each one has ts, user_id, user_name, text, is_from_you (you
-    wrote it), and is_from_user (the person you answer wrote it). A direct message has
-    no thread."""
+    messages, oldest first. Each one has ts, user_id, user_name, text, files (each
+    file's name, content_type, and url: fetch the url to read the file; only the
+    thread's newest 20 files have one), is_from_you (you wrote it), and is_from_user
+    (the person you answer wrote it). A direct message has no thread."""
     conversation_id = current_conversation_id.get()
     if not conversation_id:
         raise HTTPException(
