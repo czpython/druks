@@ -33,7 +33,7 @@ from druks.durable.engine import (
 from druks.durable.enums import AgentCallStatus, WorkflowEvent
 from druks.durable.models import AgentCall, Artifact
 from druks.events.models import Event
-from druks.exceptions import SessionNotBoundError
+from druks.exceptions import DruksError, SessionNotBoundError
 from druks.models import StoredSubject
 from druks.sandbox.datastructures import AgentResult
 from druks.secrets.datastructures import Audience
@@ -88,6 +88,13 @@ TASK_RETRY_ATTEMPTS = 0
 STEP_RETRY_ATTEMPTS = 0
 
 
+class Refused(DruksError):
+    # DBOS must be able to pickle this step error with its attribute.
+    def __init__(self, base_sha: str) -> None:
+        super().__init__(f"refused at {base_sha}")
+        self.base_sha = base_sha
+
+
 class Widget(StoredSubject):
     __tablename__ = "test_widgets"
 
@@ -121,7 +128,18 @@ async def runtime():
         await session.flush()
         session.add_all(
             Widget(id=subject_id)
-            for subject_id in (7, 4242, 636363, 424242, 515151, 878787, 909090, 313131, 616161)
+            for subject_id in (
+                7,
+                4242,
+                636363,
+                424242,
+                515151,
+                878787,
+                909090,
+                313131,
+                616161,
+                717171,
+            )
         )
         session.add(
             VaultSecret(
@@ -279,6 +297,24 @@ async def runtime():
             if SINK.count("gate:completed") == 1:
                 raise asyncio.CancelledError
 
+    class RefusalFlow(Workflow):
+        subject = Widget
+
+        @step
+        async def merge(self) -> bool:
+            SINK.append("refusal:step-ran")
+            raise Refused("c0ffee")
+
+        async def run_multistep(self) -> None:
+            try:
+                await self.merge()
+            except Refused as refusal:
+                self.journal.add(refusal)
+            await Approve.wait()
+            SINK.append(f"refusal:journal:{self.journal.latest(Refused).base_sha}")
+            if SINK.count("refusal:journal:c0ffee") == 1:
+                raise asyncio.CancelledError
+
     class ConfirmFlow(Workflow):
         subject = Widget
 
@@ -326,6 +362,7 @@ async def runtime():
             RecordFeedback=RecordFeedback,
             SubjectFlow=SubjectFlow,
             DoubleGateFlow=DoubleGateFlow,
+            RefusalFlow=RefusalFlow,
             ConfirmFlow=ConfirmFlow,
             SubjectlessConfirmFlow=SubjectlessConfirmFlow,
             ReviewFlow=ReviewFlow,
@@ -354,6 +391,7 @@ async def runtime():
         workflows._items.pop("daily_sweep", None)
         workflows._items.pop("subject_flow", None)
         workflows._items.pop("double_gate_flow", None)
+        workflows._items.pop("refusal_flow", None)
         workflows._items.pop("confirm_flow", None)
         workflows._items.pop("subjectless_confirm_flow", None)
         workflows._items.pop("review_flow", None)
@@ -557,6 +595,25 @@ async def test_duplicate_replies_to_one_round_collapse(runtime):
     assert "round2:duplicate" not in SINK
 
     assert "gate-journal:['first', 'second']" in SINK
+
+
+async def test_a_recorded_step_error_replays_into_the_journal(runtime):
+    workflow_id = await runtime.RefusalFlow.start(subject=Widget(id=717171))
+    parked = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state == RunState.PARKED
+    )
+
+    await parked.resume(action="retry")
+    for _ in range(100):
+        if "refusal:journal:c0ffee" in SINK:
+            break
+        await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
+    await DBOS.resume_workflow_async(workflow_id)
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+
+    assert SINK.count("refusal:step-ran") == 1
+    assert SINK.count("refusal:journal:c0ffee") == 2
 
 
 async def test_fail_branch(runtime):
