@@ -12,7 +12,7 @@
  * never see it.
  */
 
-import type { DashboardItem, WorkItemSummary } from './api'
+import type { DashboardItem } from './api'
 
 const SLUG_MAX_LEN = 40
 
@@ -73,10 +73,6 @@ export function workItemPath(
   title?: string | null,
 ): string {
   return `/software_factory/work-items/${itemSlug(id, ticketKey, title)}`
-}
-
-export function workItemPathFromSummary(item: WorkItemSummary): string {
-  return workItemPath(item.id, item.ticketKey, item.title)
 }
 
 export function dashboardItemPath(item: DashboardItem): string {
