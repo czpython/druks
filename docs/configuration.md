@@ -444,7 +444,12 @@ reviewer approves the pull request:
 | Value | Behavior |
 | --- | --- |
 | `none` | Default. Druks marks the pull request ready for review and ends the build. The repository's own process merges it. Druks records the merge when GitHub announces it. |
-| `merge` | Druks squash-merges the pull request, or arms auto-merge when checks are still running. |
+| `merge` | Druks marks the pull request ready, then squash-merges it, or arms auto-merge when checks are still running. A refusal parks the build for review on GitHub. |
+
+Druks approves only work whose last evaluation passed. Work that is blocked, or
+that still fails after the last revision, stays a draft and waits in the Druks
+dashboard, whatever the approval setting. Request changes there with a note to
+send the work back to the agent.
 
 When Druks receives a push to the default branch that changes `config.yml`, the
 next build uses the new file.

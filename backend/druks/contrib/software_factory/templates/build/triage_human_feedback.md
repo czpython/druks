@@ -26,9 +26,9 @@ without ambiguity.
 ## Human feedback
 
 {% for fb in build.journal.human_feedback %}
-### {{ fb.reviewer }}{% if not fb.triage %} — PENDING, not yet triaged{% endif %}
+### {{ fb.reviewer or "The operator, in Druks" }}{% if not fb.triage %} — PENDING, not yet triaged{% endif %}
 
-{{ fb.body }}
+{{ fb.note }}
 
 {% if fb.triage %}
 **Triage decision ({{ fb.triage.action }}):** {{ fb.triage.body }}
@@ -55,7 +55,8 @@ build; the comment is what the reviewer sees.
 
 - For `no_change`: explain why no change is needed, ask them to re-review, and
   **re-request them as a reviewer** on the PR (their GitHub login is the name on
-  the feedback entry above).
+  the feedback entry above). Skip the re-request for the operator's note from
+  Druks: the operator answers in Druks.
 - For `change_required` / `contract_change_required`: summarize what will change.
 - For `question`: post the exact question.
 - For `close`: state that the PR is being closed and why.

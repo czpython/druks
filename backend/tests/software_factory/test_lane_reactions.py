@@ -159,7 +159,7 @@ async def test_pr_review_answers_through_the_review_gate(
         },
     )
 
-    reply = {"action": action, "reviewer": "alice", "body": "Please split the migration."}
+    reply = {"action": action, "reviewer": "alice", "note": "Please split the migration."}
     assert answers == ([(item, reply)] if author_can_write else [])
 
 
