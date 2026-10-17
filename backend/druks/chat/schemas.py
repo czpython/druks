@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 from druks.schemas import Schema
 from druks.ui.blocks import FileSummary
@@ -52,4 +52,4 @@ class ReminderResponse(Schema):
     conversation_id: str
     body: str
     cron: str
-    next_send_at: datetime
+    next_send_at: datetime = Field(validation_alias="local_next_send_at")

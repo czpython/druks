@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -474,12 +474,14 @@ class Reminder(Base, Uuid7Pk):
         account_id: str,
         *,
         body: str,
-        send_at: datetime | None,
-        cron: str,
+        send_at: datetime | None = None,
+        delay_seconds: int = 0,
+        cron: str = "",
     ) -> "Reminder":
-        """A reminder that sends once at ``send_at``, or on ``cron``."""
-        if bool(send_at) == bool(cron):
-            raise ReminderError("Give exactly one of send_at and cron.")
+        """A reminder that sends once, at ``send_at`` or ``delay_seconds`` from now, or
+        again and again on ``cron``."""
+        if [bool(send_at), bool(delay_seconds), bool(cron)].count(True) != 1:
+            raise ReminderError("Give exactly one of send_at, delay_seconds, and cron.")
         if cron and not croniter.is_valid(cron):
             raise ReminderError(f"'{cron}' is not a cron. Write five fields, such as '0 9 * * 1'.")
         reminder = cls(
@@ -491,11 +493,13 @@ class Reminder(Base, Uuid7Pk):
         )
         if cron:
             reminder.next_send_at = reminder.get_next_send_at(Base.utc_now())
+        elif delay_seconds:
+            reminder.next_send_at = Base.utc_now() + timedelta(seconds=delay_seconds)
         elif not send_at.tzinfo:
             # The agent writes the time that the person said, which is local.
             reminder.next_send_at = send_at.replace(tzinfo=ZoneInfo(load_settings().timezone))
         if reminder.next_send_at <= Base.utc_now():
-            raise ReminderError("send_at is in the past. Give a later time.")
+            raise ReminderError("That time is past. Give a later one.")
         session.add(reminder)
         return reminder
 
@@ -529,6 +533,11 @@ class Reminder(Base, Uuid7Pk):
         return await session.scalar(
             select(cls).where(cls.id == reminder_id, cls.account_id == account_id)
         )
+
+    @property
+    def local_next_send_at(self) -> datetime:
+        """When the reminder sends next, in the installation timezone."""
+        return self.next_send_at.astimezone(ZoneInfo(load_settings().timezone))
 
     def get_next_send_at(self, after: datetime) -> datetime:
         """The first time after ``after`` on the reminder's cron, which runs in the

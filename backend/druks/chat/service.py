@@ -7,6 +7,7 @@ from contextlib import suppress
 from datetime import timedelta
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import asyncssh
 from dbos import DBOS, StepOptions
@@ -45,6 +46,7 @@ from druks.sandbox.templates import get_template_id
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.services.exceptions import ServiceNotConnectedError
+from druks.settings import load_settings
 from druks.workspaces import Workspace
 
 from .bots.constants import ADMIN_PROMPT, ADMIN_TOOLS, THREAD_PROMPT, THREAD_TOOLS
@@ -59,6 +61,7 @@ from .constants import (
     NO_RESULT_MESSAGE,
     NO_RESULT_ON_SUBJECT_MESSAGE,
     RESULT_MESSAGE,
+    TIME_MESSAGE,
     TRANSCRIPTION_FAILED_MESSAGE,
     VOICE_NOTE_MARKER,
 )
@@ -494,11 +497,14 @@ async def get_transcript(session: AsyncSession, file: File) -> str:
 async def get_turn_content(
     host: Host, conversation_root: str, messages: list[Message]
 ) -> list[dict]:
-    """The ACP content blocks the agent reads: each message's text, with the words of
-    its voice note under a marker, then its file. An image travels in the prompt. Audio
-    adds nothing more. Any other file goes to the conversation's folder in the sandbox,
-    and the agent gets a link to it."""
-    content = []
+    """The ACP content blocks the agent reads: the time, then each message's text, with
+    the words of its voice note under a marker, then its file. An image travels in the
+    prompt. Audio adds nothing more. Any other file goes to the conversation's folder in
+    the sandbox, and the agent gets a link to it."""
+    now = Base.utc_now().astimezone(ZoneInfo(load_settings().timezone))
+    content = [
+        {"type": "text", "text": TIME_MESSAGE.format(now=now.isoformat(), timezone=now.tzinfo)}
+    ]
     for message in messages:
         parts = [message.body]
         if message.transcript:

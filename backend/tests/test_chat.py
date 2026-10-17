@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import json
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call
 from uuid import uuid4
@@ -1163,3 +1163,20 @@ async def test_a_failed_run_reports_to_its_conversation_whether_or_not_it_parked
         True,
         True,
     )
+
+
+async def test_each_turn_opens_with_the_local_time(monkeypatch):
+    settings = SimpleNamespace(timezone="Europe/Madrid")
+    monkeypatch.setattr(service, "load_settings", lambda: settings)
+    monkeypatch.setattr(Base, "utc_now", lambda: datetime(2026, 10, 17, 21, 14, 57, tzinfo=UTC))
+    message = Message(body="Remind me in 5 minutes", transcript="", file=None)
+
+    content = await service.get_turn_content(SimpleNamespace(), "/chat", [message])
+
+    assert content == [
+        {
+            "type": "text",
+            "text": "[Internal: The time is 2026-10-17T23:14:57+02:00 (Europe/Madrid).]",
+        },
+        {"type": "text", "text": "Remind me in 5 minutes"},
+    ]

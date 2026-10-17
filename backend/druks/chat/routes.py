@@ -280,24 +280,44 @@ async def start_conversation(
 )
 async def create_reminder(
     session: SessionDep,
-    conversation_id: Annotated[
-        str, Body(description="A conversation from chat_list_conversations.")
-    ],
     body: Annotated[str, Body(description="The words to send, as the person wants them.")],
+    conversation_id: Annotated[
+        str,
+        Body(
+            description="Where to send: a conversation from chat_list_conversations. Leave "
+            "it out to send in this chat."
+        ),
+    ] = "",
     send_at: Annotated[
         datetime | None, Body(description="When to send once. A time with no offset is local.")
     ] = None,
+    delay_seconds: Annotated[
+        int, Body(description='How long from now to send once, such as 300 for "in 5 minutes".')
+    ] = 0,
     cron: Annotated[str, Body(description="A cron to send again and again, local time.")] = "",
     account: Account = Depends(current_account),
 ) -> Reminder:
-    """Send a message in a conversation once (send_at), or on a cron. Druks sends the
-    body word for word. Local time is the installation timezone."""
+    """Send a message in a conversation once, at send_at or delay_seconds from now, or
+    again and again on a cron. Give exactly one of the three. Druks sends the body word
+    for word at its first check after the reminder is due, and it checks every minute.
+    Local time is the installation timezone. The answer's nextSendAt is local: tell the
+    person that time as it is. When Druks refuses a time, ask the person rather than
+    pick another, and never make a reminder to test the time."""
+    conversation_id = conversation_id or current_conversation_id.get()
+    if not conversation_id:
+        raise HTTPException(422, "Give conversation_id: this call comes from no chat.")
     conversation = await Conversation.get_for_account(session, conversation_id, account)
     if not conversation:
         raise HTTPException(404, "Conversation not found. Choose one from chat_list_conversations.")
     try:
         reminder = Reminder.create(
-            session, conversation, account.id, body=body, send_at=send_at, cron=cron
+            session,
+            conversation,
+            account.id,
+            body=body,
+            send_at=send_at,
+            delay_seconds=delay_seconds,
+            cron=cron,
         )
     except ReminderError as error:
         raise HTTPException(422, str(error)) from error

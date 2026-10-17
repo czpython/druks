@@ -209,14 +209,26 @@ sandbox lease and its identity expiry. The lease is 270 minutes.
 
 ## Reminders
 
-A reminder sends a message in a conversation once at a time, or again on a
-cron. Ask the agent for one in plain words, and it calls `chat_create_reminder`.
-Druks checks for due reminders every minute. It sends the words as written, as
-the agent's message, and runs no turn. The message goes through the
-conversation's channel, so it reaches WhatsApp, Slack, or the web page. A cron
-and a time with no offset use the installation `timezone`. A reminder sends
-once for each due time. When Druks was down at that time, it sends once on the
-next check and moves on.
+A reminder sends a message in a conversation once, or again on a cron. Ask the
+agent for one in plain words, and it calls `chat_create_reminder` with exactly
+one of these:
+
+| Field | Sends | Example |
+| --- | --- | --- |
+| `delay_seconds` | Once, that many seconds after Druks saves the reminder | `300` for "in 5 minutes" |
+| `send_at` | Once, at that time. A time with no offset is local. | `2026-10-20T09:00` |
+| `cron` | Again and again, in local time | `0 9 * * 1` for Mondays at 9 |
+
+Local time is the installation `timezone`. Each turn opens with the current time
+and that timezone, so the agent never guesses them. Without `conversation_id`, the
+reminder sends in the chat that asked for it. The answer gives `nextSendAt` in
+local time, and the agent tells the person that time.
+
+Druks checks for due reminders every minute, so a reminder sends up to a minute
+after its time. It sends the words as written, as the agent's message, and runs no
+turn. The message goes through the conversation's channel, so it reaches WhatsApp,
+Slack, or the web page. A reminder sends once for each due time. When Druks was
+down at that time, it sends once on the next check and moves on.
 
 | Caller | Where their reminders go |
 | --- | --- |

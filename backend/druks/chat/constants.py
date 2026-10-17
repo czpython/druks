@@ -15,6 +15,8 @@ INTERNAL_MESSAGES_PROMPT = (
     "[Internal: ...]. The person never sees them. Say what the person must know in your "
     "own words."
 )
+# Each turn opens with the time, so the agent never guesses it.
+TIME_MESSAGE = "[Internal: The time is {now} ({timezone}).]"
 # Druks tells a run's conversation how the run ended with one of these templates.
 RESULT_MESSAGE = "[Internal: Run {run} ended. Its result:\n{result}]"
 NO_RESULT_MESSAGE = "[Internal: Run {run} ended with no result. Tell the person it is done.]"

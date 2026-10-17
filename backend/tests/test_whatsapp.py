@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Annotated
 from unittest.mock import ANY, AsyncMock
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -44,8 +45,8 @@ from druks.chat.enums import (
 )
 from druks.chat.exceptions import ChannelHasNoThreadsError, ReminderError, TranscriptionError
 from druks.chat.models import Conversation, Reminder
-from druks.chat.routes import start_conversation
-from druks.chat.schemas import ConversationResponse
+from druks.chat.routes import create_reminder, start_conversation
+from druks.chat.schemas import ConversationResponse, ReminderResponse
 from druks.chat.tasks import send_due_reminders
 from druks.harnesses.claude import ClaudeHarness
 from druks.mcp.enums import Toolkit
@@ -596,7 +597,7 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
     *asked, reply = conversation.messages
     copy = f"/home/druks/work/chat/{conversation.id}/files/{asked[3].file.id}/form.pdf"
     [prompt] = [values for method, values in requests if method == "prompt"]
-    assert prompt["content"] == [
+    assert prompt["content"][1:] == [
         {"type": "text", "text": "Hello"},
         {"type": "image", "data": base64.b64encode(b"\x89PNG").decode(), "mimeType": "image/png"},
         {"type": "text", "text": "And the second one?"},
@@ -1165,30 +1166,102 @@ async def test_a_waiting_run_asks_the_admin_and_its_end_reaches_the_chat(druks_d
     assert '"granted":true' in chat.messages[-1].body
 
 
-def test_a_reminder_cron_runs_in_the_installation_timezone(monkeypatch):
-    settings = SimpleNamespace(timezone="Asia/Manila")
+def test_a_reminder_cron_keeps_local_time_across_daylight_saving(monkeypatch):
+    settings = SimpleNamespace(timezone="Europe/Madrid")
     monkeypatch.setattr("druks.chat.models.load_settings", lambda: settings)
-    thursday = datetime(2026, 10, 15, tzinfo=UTC)
+    mondays_at_nine = Reminder(cron="0 9 * * 1")
 
-    assert Reminder(cron="0 9 * * 1").get_next_send_at(thursday) == datetime(
-        2026, 10, 19, 1, tzinfo=UTC
+    assert mondays_at_nine.get_next_send_at(datetime(2026, 10, 15, tzinfo=UTC)) == datetime(
+        2026, 10, 19, 7, tzinfo=UTC
+    )
+    assert mondays_at_nine.get_next_send_at(datetime(2026, 10, 22, tzinfo=UTC)) == datetime(
+        2026, 10, 26, 8, tzinfo=UTC
     )
 
 
+async def test_a_reminder_sends_after_a_delay_or_at_a_local_or_offset_time(druks_db, monkeypatch):
+    settings = SimpleNamespace(timezone="Europe/Madrid")
+    monkeypatch.setattr("druks.chat.models.load_settings", lambda: settings)
+    chat = SimpleNamespace(id="c")
+    before = Base.utc_now()
+
+    in_five = Reminder.create(druks_db, chat, "a", body="Trash", delay_seconds=300)
+    local = Reminder.create(druks_db, chat, "a", body="Trash", send_at=datetime(2099, 1, 1, 9))
+    offset = Reminder.create(
+        druks_db, chat, "a", body="Trash", send_at=datetime(2099, 1, 1, 9, tzinfo=UTC)
+    )
+
+    five_minutes = timedelta(seconds=300)
+    assert before + five_minutes <= in_five.next_send_at <= Base.utc_now() + five_minutes
+    assert local.next_send_at == datetime(2099, 1, 1, 8, tzinfo=UTC)
+    assert local.local_next_send_at.isoformat() == "2099-01-01T09:00:00+01:00"
+    assert offset.next_send_at == datetime(2099, 1, 1, 9, tzinfo=UTC)
+
+
 @pytest.mark.parametrize(
-    "send_at, cron",
+    "send_at, delay_seconds, cron",
     [
-        (None, ""),
-        (datetime(2099, 1, 1, tzinfo=UTC), "0 9 * * 1"),
-        (None, "every monday"),
-        (datetime(2000, 1, 1, tzinfo=UTC), ""),
+        (None, 0, ""),
+        (datetime(2099, 1, 1, tzinfo=UTC), 0, "0 9 * * 1"),
+        (None, 300, "0 9 * * 1"),
+        (None, 0, "every monday"),
+        (datetime(2000, 1, 1, tzinfo=UTC), 0, ""),
+        (None, -60, ""),
     ],
 )
-async def test_a_reminder_needs_one_later_time_or_one_cron(druks_db, send_at, cron):
+async def test_a_reminder_needs_exactly_one_later_time_or_cron(
+    druks_db, send_at, delay_seconds, cron
+):
     with pytest.raises(ReminderError):
         Reminder.create(
-            druks_db, SimpleNamespace(id="c"), "a", body="Stock count", send_at=send_at, cron=cron
+            druks_db,
+            SimpleNamespace(id="c"),
+            "a",
+            body="Stock count",
+            send_at=send_at,
+            delay_seconds=delay_seconds,
+            cron=cron,
         )
+
+
+async def test_a_reminder_sends_in_the_calling_chat_unless_told_where(
+    druks_db, monkeypatch, tmp_path
+):
+    configure_app_for_test(settings=make_settings(tmp_path), authenticated=False)
+    api = FastAPI(dependencies=[Depends(request_session)])
+    api.add_api_route(
+        "/reminders",
+        create_reminder,
+        methods=["POST"],
+        status_code=201,
+        response_model=ReminderResponse,
+        response_model_by_alias=True,
+    )
+    settings = SimpleNamespace(timezone="Europe/Madrid")
+    monkeypatch.setattr("druks.chat.models.load_settings", lambda: settings)
+    operator = await Account.get_or_create(druks_db, "op@example.com")
+    chat = await Conversation.create(druks_db, account_id=operator.id, body="Hi")
+    other = await Conversation.create(druks_db, account_id=operator.id, body="Hello")
+    _, token = await PersonalAccessToken.create(druks_db, account_id=operator.id, name="chat")
+    await druks_db.commit()
+    outside_chat = {"Authorization": f"Bearer {token}"}
+    in_chat = {**outside_chat, CONVERSATION_HEADER: chat.id}
+    trash = {"body": "Take out the trash", "delay_seconds": 300}
+
+    async with asgi_client(api) as client:
+        here = await client.post("/reminders", json=trash, headers=in_chat)
+        nowhere = await client.post("/reminders", json=trash, headers=outside_chat)
+        there = await client.post(
+            "/reminders", json={**trash, "conversation_id": other.id}, headers=in_chat
+        )
+
+    assert (here.status_code, nowhere.status_code, there.status_code) == (201, 422, 201)
+    assert (here.json()["conversationId"], there.json()["conversationId"]) == (chat.id, other.id)
+    next_send_at = datetime.fromisoformat(here.json()["nextSendAt"])
+    assert (
+        next_send_at.utcoffset() == next_send_at.astimezone(ZoneInfo("Europe/Madrid")).utcoffset()
+    )
+    assert len(await Reminder.list_for_account(druks_db, operator.id)) == 2
 
 
 async def test_a_due_reminder_sends_once_as_written(druks_db, waha):
