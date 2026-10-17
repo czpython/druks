@@ -6,7 +6,7 @@ from fastapi import FastAPI, WebSocket
 
 from .call import Call
 
-# An open number is a paid minute for anyone who dials it, so the live calls have a cap.
+# A public number is a paid minute for anyone who dials it, so the live calls have a cap.
 MAX_CALLS = 10
 
 app = FastAPI()

@@ -509,7 +509,7 @@ class Bot:
     Each tool names the ``operation_id`` of an app route tagged ``bot``."""
 
     prompt: str
-    access: BotAccess = BotAccess.OPEN
+    access: BotAccess = BotAccess.PUBLIC
     user_tools: tuple[str, ...] = ()
     admin_tools: tuple[str, ...] = ()
     name: str | None = None

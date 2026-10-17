@@ -32,10 +32,10 @@ beforeEach(() => {
     if (url === '/api/settings/apps') response = {
       allowedEfforts: [], channels, apps: [{
         name: 'chat', description: 'Live agent conversations.', icon: 'messages-square',
-        builtin: true, bot: 'chat.bot', botAccess: 'paired', agents: [], workflows: [], settings: [],
+        builtin: true, bot: 'chat.bot', botAccess: 'private', agents: [], workflows: [], settings: [],
       }, {
         name: 'helpdesk', description: 'Helpdesk.', icon: 'messages-square',
-        builtin: false, bot: 'helpdesk.bot', botAccess: 'paired', agents: [], workflows: [], settings: [],
+        builtin: false, bot: 'helpdesk.bot', botAccess: 'private', agents: [], workflows: [], settings: [],
       }],
     }
     if (url === '/api/settings/apps/chat/choices') response = {}
@@ -49,18 +49,19 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it.each(['chat', 'helpdesk'])('uses paired access for the number options in %s Channels', async (app) => {
+it.each(['chat', 'helpdesk'])('uses private access for the number options in %s Channels', async (app) => {
   mount(`/apps/${app}/settings/channels`, app)
 
   expect(await screen.findByRole('button', { name: 'Add number' })).toBeTruthy()
   expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent))
-    .toEqual(["Assistant's number"])
+    .toEqual(['WhatsApp numbers'])
+  expect(screen.getByText(/^Only paired phones get an answer\./)).toBeTruthy()
   expect(screen.getByRole('link', { name: 'Bots' }).getAttribute('href'))
     .toBe(`/apps/${app}/settings/bots`)
   expect(screen.queryByRole('link', { name: 'Agents' })).toBeNull()
 })
 
-it('shows no Channels tab on a paired Bot when calls are the only channel', async () => {
+it('shows no Channels tab on a private Bot when calls are the only channel', async () => {
   channels = ['call']
   mount('/apps/chat/settings/bots', 'chat')
 
@@ -73,6 +74,6 @@ it('keeps WhatsApp setup out of Connections Accounts', async () => {
 
   expect(await screen.findByRole('link', { name: 'Accounts' })).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Add number' })).toBeNull()
-  expect(screen.queryByRole('heading', { name: "Assistant's number" })).toBeNull()
+  expect(screen.queryByRole('heading', { name: 'WhatsApp numbers' })).toBeNull()
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/waha/'))).toBe(false)
 })

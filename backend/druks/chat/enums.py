@@ -2,12 +2,13 @@ from enum import StrEnum
 
 
 class BotAccess(StrEnum):
-    """Who can write to a Bot's connection and which account owns each conversation."""
+    """Who a Bot's number answers and which account owns each conversation."""
 
-    # Anyone writes under the connection's bot account. The connection has an admin.
-    OPEN = "open"
-    # Proven senders write under their paired operator accounts. There is no admin.
-    PAIRED = "paired"
+    # Anyone writes under the number's bot account. The number has an admin.
+    PUBLIC = "public"
+    # Only operators who paired their phone write, each under their own account. There
+    # is no admin.
+    PRIVATE = "private"
 
 
 class ConversationSource(StrEnum):

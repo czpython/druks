@@ -7,7 +7,7 @@ import { CallsPane } from './CallsPane'
 
 const helpdesk: AppSettings = {
   name: 'helpdesk', description: 'Helpdesk.', icon: 'messages-square',
-  builtin: false, bot: 'helpdesk.bot', botAccess: 'open', agents: [], workflows: [], settings: [],
+  builtin: false, bot: 'helpdesk.bot', botAccess: 'public', agents: [], workflows: [], settings: [],
 }
 
 const numbers = '/api/chat/services/twilio/numbers'

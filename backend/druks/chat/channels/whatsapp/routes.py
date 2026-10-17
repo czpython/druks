@@ -26,9 +26,9 @@ async def list_sessions(
         number = SessionResponse.model_validate(connection)
         if (
             connection.account.kind == AccountKind.BOT
-            and get_app(connection.identity["app"]).bot.access == BotAccess.PAIRED
+            and get_app(connection.identity["app"]).bot.access == BotAccess.PRIVATE
         ):
-            number.is_phone_connected = account.id in connection.identity["operators"].values()
+            number.is_phone_paired = account.id in connection.identity["operators"].values()
         numbers.append(number)
     return numbers
 
@@ -45,7 +45,7 @@ async def link_session(session: SessionDep, app: Annotated[str, Body(embed=True)
     if not bot:
         raise HTTPException(404, f"App {app!r} declares no Bot.")
     owner = await Account.create_for_bot(session, AccountKind.BOT)
-    if bot.access == BotAccess.PAIRED:
+    if bot.access == BotAccess.PRIVATE:
         identity = {"app": app, "operators": {}}
     else:
         admin = await Account.create_for_bot(session, AccountKind.BOT_ADMIN)

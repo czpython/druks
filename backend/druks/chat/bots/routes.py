@@ -9,9 +9,9 @@ from druks.apps.loader import get_app
 from druks.chat.enums import BotAccess
 from druks.chat.models import Conversation
 
-from .constants import ADMIN_CODE_TTL_SECONDS
-from .schemas import AdminCodeResponse, ResumeConversationResponse
-from .service import create_admin_code, get_bot_connection, resume
+from .constants import ONE_TIME_CODE_TTL_SECONDS
+from .schemas import OneTimeCodeResponse, ResumeConversationResponse
+from .service import create_one_time_code, get_bot_connection, resume
 
 router = APIRouter()
 
@@ -42,20 +42,20 @@ async def resume_conversation(
 
 
 @router.post(
-    "/connections/{connection_id}/admin-code",
-    response_model=AdminCodeResponse,
+    "/connections/{connection_id}/one-time-code",
+    response_model=OneTimeCodeResponse,
     response_model_by_alias=True,
 )
-async def add_admin_code(
+async def open_one_time_code(
     session: SessionDep,
     connection_id: str,
     account: Account = Depends(current_session_account),
-) -> AdminCodeResponse:
-    """A one-time code to connect a phone to the connection."""
+) -> OneTimeCodeResponse:
+    """A one-time code that pairs a phone, or makes its sender the number's admin."""
     connection = await get_bot_connection(session, connection_id)
     if connection:
-        code = await create_admin_code(connection, account.id)
-        return AdminCodeResponse(code=code, expires_in=ADMIN_CODE_TTL_SECONDS)
+        code = await create_one_time_code(connection, account.id)
+        return OneTimeCodeResponse(code=code, expires_in=ONE_TIME_CODE_TTL_SECONDS)
     raise HTTPException(404, "Connection not found.")
 
 
@@ -67,7 +67,7 @@ async def unpair(
 ) -> None:
     """Remove the signed-in operator's phones from this connection."""
     connection = await get_bot_connection(session, connection_id)
-    if connection and get_app(connection.identity["app"]).bot.access == BotAccess.PAIRED:
+    if connection and get_app(connection.identity["app"]).bot.access == BotAccess.PRIVATE:
         connection.identity = {
             **connection.identity,
             "operators": {

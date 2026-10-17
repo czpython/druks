@@ -221,15 +221,15 @@ next check and moves on.
 | Caller | Where their reminders go |
 | --- | --- |
 | An operator | The operator's own conversations |
-| A number's admin | The direct chats of everyone who wrote to the number, and the groups that the admin turned on |
-| Anyone else who writes to a number | Nowhere: they get no reminder tools |
+| A public number's admin | The direct chats of everyone who wrote to the number, and the groups that the admin turned on |
+| Anyone else who writes to a public number | Nowhere: they get no reminder tools |
 
-On an open number, a person gets a private reminder only after they wrote to the
-number, so Druks never starts a chat there. On a paired number, the operator's
-agent can start one with `chat_start_conversation`: it takes the person's phone
-number and name, and the chat is the operator's own, so their reminders reach it.
-WAHA confirms that the number is on WhatsApp. Druks sends nothing until a
-reminder does, and the person's replies reach no agent.
+On a public number, a person gets a reminder in their own chat only after they
+wrote to the number, so Druks never starts a chat there. On a private number,
+the operator's agent can start one with `chat_start_conversation`: it takes the
+person's phone number and name, and the chat is the operator's own, so their
+reminders reach it. WAHA confirms that the number is on WhatsApp. Druks sends
+nothing until a reminder does, and the person's replies reach no agent.
 
 `chat_list_conversations` lists where the caller can send. `chat_list_reminders`
 lists the caller's reminders with each one's cron and next time.
@@ -245,34 +245,41 @@ message. Druks reaches WhatsApp through [WAHA](https://github.com/devlikeapro/wa
 an open source WhatsApp HTTP API. Connect WAHA first: see
 [WhatsApp](configuration.md#whatsapp).
 
+A number is public or private:
+
+- **A public number**, such as an app's, answers anyone who writes. One person
+  is the number's [admin](#admins).
+- **A private number**, such as Chat's, answers only operators who paired their
+  phone with it. Each operator talks to their own agent. It has no admin.
+
 ### Link a number
 
 A linked number is a connection. Its owner account holds the WAHA session, the
-session's key, and the webhook secret. There are two kinds:
+session's key, and the webhook secret.
 
-- **An app's number.** In the app's settings, open **Channels** and select
+- **A public number.** In the app's settings, open **Channels** and select
   **Add number**. The tab shows only when the app declares a
   [Bot](writing-an-app.md#answer-whatsapp-with-a-bot). Druks creates a bot
   account and a bot admin account for the number. These accounts never sign in.
-- **The assistant's number.** Open **Chat → Channels** and select **Add
-  number**. Scan the QR code. Then select **Connect my phone** and send the code
-  to that number. Send it from your own WhatsApp, or from the phone of the
-  number to itself. You then talk to your agent at that number, under your
-  account and with the whole Druks toolkit. If you use a second number, replies
-  arrive as normal incoming messages, and WAHA never sees your private chats.
-  If you use the phone of the number itself, replies arrive in your chat with
-  yourself. WhatsApp gives no sound for them, and WAHA receives the chats of
-  that phone. Several operators can share the number. Each operator connects
-  their own phone. Druks ignores every sender that has no connected phone.
-  **Disconnect my phone** removes your phones from the number. This number has
-  no admin and no take-over.
+- **A private number.** Open **Chat → Channels** and select **Add
+  number**. Scan the QR code. Then select **Pair my phone** and send the
+  one-time code to that number. Send it from your own WhatsApp, or from the
+  phone of the number to itself. You then talk to your agent at that number,
+  under your account and with the whole Druks toolkit. If you use a second
+  number, replies arrive as normal incoming messages, and WAHA never sees your
+  own chats. If you use the phone of the number itself, replies arrive in your
+  chat with yourself. WhatsApp gives no sound for them, and WAHA receives the
+  chats of that phone. Several operators can share the number. Each operator
+  pairs their own phone. Druks ignores every sender that has no paired phone.
+  **Unpair my phone** removes your phones from the number. This number has no
+  take-over.
 
 Druks creates the WAHA session and its key, saves the connection, and then
 writes the session's config. Scan the QR code from **Linked devices** in
 WhatsApp on the phone, which shows the device as Druks. The number is live when
 WAHA reports that the session works. When WhatsApp unlinks the device, the
 number shows **Disconnected**, and **Link again** takes a new scan on the same
-connection, which keeps its chats, its admin, and its connected phones. Druks
+connection, which keeps its chats, its admin, and its paired phones. Druks
 refuses a number that another live connection holds. **Remove** deletes the WAHA
 session and its key, and ends the pauses of the number's chats.
 The connection and its chats stay as history, and each new link is a new
@@ -285,11 +292,12 @@ message to a conversation by its sender:
 
 | Sender | Owner | Prompt | Tools |
 | --- | --- | --- | --- |
-| The number's admin | The number's bot admin account | Druks's admin prompt | The Bot's `admin_tools`, `answer_gate`, `chat_resume_conversation`, the [reminder](#reminders) tools |
-| Anyone else | The number's bot account | The Bot's `prompt` | The Bot's `user_tools` |
+| An operator's paired phone, on a private number | The operator's account | The Bot's `prompt` | The whole Druks toolkit |
+| The number's admin, on a public number | The number's bot admin account | Druks's admin prompt | The Bot's `admin_tools`, `answer_gate`, `chat_resume_conversation`, the [reminder](#reminders) tools |
+| Anyone else, on a public number | The number's bot account | The Bot's `prompt` | The Bot's `user_tools` |
 
-The agents of a number have no shell, file, or web tools. Their harness, model,
-billing, effort, and timeout come from the Bot's row in the app's
+The agents of a public number have no shell, file, or web tools. Their harness,
+model, billing, effort, and timeout come from the Bot's row in the app's
 **Settings → Bots**. A turn that runs past the timeout stops, and Druks marks
 it `interrupted`. A bot or bot admin account holds no credential of its own, so its
 agents and runs bill the default account.
@@ -320,13 +328,13 @@ never goes to WhatsApp. Druks talks to agents, and agents talk to people.
 
 ### Groups
 
-Add a linked number to a WhatsApp group as you add any contact. On a paired
+Add a linked number to a WhatsApp group as you add any contact. On a private
 number, such as Chat's, only a paired phone reaches an agent in a group: its tag
 or reply opens that operator's own conversation for the group, and the reply goes
 to the group. Druks drops every other group message, the tags of people who are
 not paired included.
 
-On an app's open number, the group reaches no agent until the number's admin
+On a public number, the group reaches no agent until the number's admin
 tags the number there. That tag turns the group on and opens the admin's
 conversation for it. After that, a message reaches the Bot when it tags the
 number or replies to one of the number's messages. Druks drops every other
@@ -356,8 +364,8 @@ until you remove it and add it again.
 
 ### Admins
 
-Each app number has an admin from the moment it links: the person who holds its
-phone. They talk to the admin's agent in the phone's chat with itself, **Message
+Each public number has an admin from the moment it links: the person who holds
+its phone. They talk to the admin's agent in the phone's chat with itself, **Message
 yourself** in WhatsApp. This needs no setup and no second phone. WhatsApp does
 not ring for a message that an account sends to itself, so the phone shows
 Druks's questions in that chat without a sound. Druks puts `[Druks] ` before
@@ -369,7 +377,7 @@ number. This opens a one-time code that expires after 10 minutes. Druks then
 sends the number's questions to the person who sends exactly that code from
 their own WhatsApp, and the admin's agent greets them. A number has one such
 person. Both chats belong to the number's bot admin account, which never signs
-in. The only text that Druks reads in a message is an open admin code.
+in. The only text that Druks reads in a message is an open one-time code.
 
 ### Confirmation
 
@@ -515,7 +523,7 @@ Everything else in the thread is context.
 ## Calls
 
 People can phone an app's Bot. Each call is its own conversation. Only an app
-with an open [Bot](writing-an-app.md#answer-whatsapp-with-a-bot) takes calls.
+with a public [Bot](writing-an-app.md#answer-whatsapp-with-a-bot) takes calls.
 Connect the Twilio and Voice cards first: see [Calls](configuration.md#calls).
 
 ### Link a number

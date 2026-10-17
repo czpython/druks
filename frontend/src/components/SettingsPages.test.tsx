@@ -1099,7 +1099,7 @@ describe('canonical app settings', () => {
       name: 'helpdesk',
       description: 'Helpdesk settings',
       bot: hasBot ? 'helpdesk.bot' : null,
-      botAccess: hasBot ? 'open' as const : null,
+      botAccess: hasBot ? 'public' as const : null,
       agents: [
         ...(hasAgents ? [{ ...coder, name: 'helpdesk.coder' }] : []),
         ...(hasBot ? [{ ...coder, name: 'helpdesk.bot', label: 'bot' }] : []),
@@ -1216,7 +1216,7 @@ describe('canonical app settings', () => {
     const settings = structuredClone(appSettings)
     const factory = settings.apps[0]!
     factory.bot = 'software_factory.bot'
-    factory.botAccess = 'open'
+    factory.botAccess = 'public'
     factory.agents.push({ ...coder, name: factory.bot, label: 'bot' })
     stubFetch(false, undefined, settings)
     renderSettings('/apps/software_factory/settings')
@@ -1557,7 +1557,7 @@ it('finds model defaults, agent and bot overrides, and timezone with working fie
   const settings = structuredClone(appSettings)
   const factory = settings.apps[0]!
   factory.bot = 'software_factory.bot'
-  factory.botAccess = 'open'
+  factory.botAccess = 'public'
   factory.agents.push({ ...coder, name: factory.bot, label: 'bot' })
   stubFetch(false, undefined, settings)
   const scroll = mockScroll()

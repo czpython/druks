@@ -681,13 +681,13 @@ export interface Connection {
 }
 
 /** A linked WhatsApp number: one WAHA session. ``admin`` is the name of the person who
- * sent its admin code. */
+ * sent its one-time code. */
 export interface WahaSession {
   id: string
   number: string | null
   name: string | null
   admin: string | null
-  isPhoneConnected: boolean
+  isPhonePaired: boolean
   identityStatus: 'resolved' | 'unavailable' | 'failed' | null
   revokedAt: string | null
   revokedReason: string
@@ -869,7 +869,7 @@ export interface AppSettings {
   builtin: boolean
   /** The id of the app's Bot, which answers people on its channels. */
   bot: string | null
-  botAccess: 'open' | 'paired' | null
+  botAccess: 'public' | 'private' | null
   agents: AgentSetting[]
   workflows: WorkflowSettings[]
   /** The app's own settings (not tied to a workflow). */

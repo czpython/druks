@@ -583,7 +583,9 @@ The prompt or a subsequent explicit step owns those actions.
 A Bot answers the connections that an operator links to your app, such as a
 WhatsApp number. It is not an agent: it has no contract, and no workflow awaits
 it. Each person who writes gets their own [chat conversation](chat.md#whatsapp).
-The Bot acts only through the app routes that you tag `bot`.
+The Bot acts only through the app routes that you tag `bot`. An app's number is
+public: it answers anyone who writes, and one person is the number's admin. Only
+Chat's number is private: see [WhatsApp](chat.md#whatsapp).
 
 Declare the Bot as the `bot` attribute of the app class. An app has one Bot:
 
@@ -610,7 +612,7 @@ class Helpdesk(App):
   Druks writes to the agent. In a group, Druks first adds a paragraph that tells
   the agent to read the group with `chat_read_thread`, and gives it that tool.
 - `user_tools` are the tools of each person who writes to the connection.
-- `admin_tools` are the tools of the connection's admin. The admin also gets
+- `admin_tools` are the tools of the number's admin. The admin also gets
   Druks's admin prompt, `answer_gate`, `chat_resume_conversation`, and the
   [reminder](chat.md#reminders) tools.
 
@@ -656,7 +658,7 @@ never appears in the tool's input schema. A route that takes `BotUser` refuses a
 call from outside a conversation.
 
 A run that a bot tool starts remembers its conversation. Ask for approval with
-an in-app question, `self.review()`. Druks then asks the connection's admin in the
+an in-app question, `self.review()`. Druks then asks the number's admin in the
 admin's own chat, and only that admin can answer. When the run ends, Druks tells
 the conversation its result or its failure, whether or not the run waited, and the
 Bot tells the person. A run that returns nothing, such as a review that posts

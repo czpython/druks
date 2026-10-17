@@ -74,8 +74,8 @@ class WhatsAppChannel(Channel):
         cls, session: AsyncSession, conversation: Conversation, *, phone: str, name: str
     ) -> Conversation:
         """A chat with the WhatsApp account on a phone number, under the conversation's
-        account. Only an operator calls it, and an operator's WhatsApp chats are on paired
-        numbers, so an open number never starts a chat."""
+        account. Only an operator calls it, and an operator's WhatsApp chats are on private
+        numbers, so a public number never starts a chat."""
         client = await Waha.get_client(session, conversation.connection)
         chat_id = await client.get_chat_id_for_phone(phone)
         return await Conversation.get_or_create_for_user(

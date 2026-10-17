@@ -122,7 +122,7 @@ class Waha(Service):
     @classmethod
     async def relink(cls, session: AsyncSession, connection: VaultSecret) -> None:
         """Take a new scan on the same connection, which keeps its chats, its admin, and
-        its connected phones. The session teaches Druks the number again when it works."""
+        its paired phones. The session teaches Druks the number again when it works."""
         client = await cls.get_client(session, connection)
         await client.logout()
         await client.start()

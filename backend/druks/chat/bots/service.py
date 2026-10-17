@@ -19,7 +19,7 @@ from druks.secrets.models import VaultSecret
 
 from .constants import (
     ADMIN_ADDED_MESSAGE,
-    ADMIN_CODE_TTL_SECONDS,
+    ONE_TIME_CODE_TTL_SECONDS,
     OPERATOR_PAIRED_MESSAGE,
     PAUSE_SECONDS,
     PAUSE_TOPIC,
@@ -42,20 +42,20 @@ async def get_bot_connection(session: AsyncSession, connection_id: str) -> Vault
     return
 
 
-async def create_admin_code(connection: VaultSecret, account_id: str) -> str:
+async def create_one_time_code(connection: VaultSecret, account_id: str) -> str:
     """A one-time phone proof code, owned by the signed-in operator."""
     code = f"{secrets.randbelow(10**8):08d}"
     await get_client().set(
-        f"chat:{connection.id}:admin-code",
+        f"chat:{connection.id}:one-time-code",
         json.dumps({"code": code, "account_id": account_id}),
-        ex=ADMIN_CODE_TTL_SECONDS,
+        ex=ONE_TIME_CODE_TTL_SECONDS,
     )
     return code
 
 
-async def redeem_admin_code(connection: VaultSecret, text: str) -> str | None:
+async def redeem_one_time_code(connection: VaultSecret, text: str) -> str | None:
     """Consume a matching code and return its operator account id."""
-    key = f"chat:{connection.id}:admin-code"
+    key = f"chat:{connection.id}:one-time-code"
     if value := await get_client().get(key):
         proof = json.loads(value)
         if text.strip() == proof["code"] and await get_client().delete(key):
@@ -82,7 +82,7 @@ async def get_or_create_admin_conversation(
     session: AsyncSession, conversation: Conversation
 ) -> Conversation:
     """Where Druks writes to the admin of the conversation's number: the chat of the
-    person who sent the admin code, or else the phone's chat with itself."""
+    person who sent the one-time code, or else the phone's chat with itself."""
     identity = conversation.connection.identity
     return await Conversation.get_or_create_for_user(
         session,
@@ -107,14 +107,14 @@ async def route_message(
     is_self_chat: bool,
 ) -> Conversation | None:
     """The conversation that a channel's message goes to, or none when the message is
-    for no agent. The only text Druks reads is an open admin code."""
+    for no agent. The only text Druks reads is an open one-time code."""
     bot = get_app(connection.identity["app"]).bot
-    if bot.access == BotAccess.PAIRED:
+    if bot.access == BotAccess.PRIVATE:
         # The linked phone pairs through its chat with itself. Its messages to other
         # people reach no agent.
         if is_from_phone and not is_self_chat:
             return
-        if account_id := await redeem_admin_code(connection, body):
+        if account_id := await redeem_one_time_code(connection, body):
             connection.identity = {
                 **connection.identity,
                 "operators": {**connection.identity["operators"], user["user_id"]: account_id},
@@ -142,12 +142,12 @@ async def route_message(
         if user["user_id"] != admin.get("user_id"):
             await take_over(session, connection, user, body, key)
         return
-    if await redeem_admin_code(connection, body):
+    if await redeem_one_time_code(connection, body):
         conversation = await add_admin(session, connection, user)
         await session.commit()
         await DBOS.start_workflow_async(deliver, conversation.id)
         return
-    # The person who sent the admin code talks under the admin account, and everyone
+    # The person who sent the one-time code talks under the admin account, and everyone
     # else under the bot account.
     account_id = connection.account_id
     if user["user_id"] == admin.get("user_id"):
@@ -160,14 +160,14 @@ async def get_thread_conversation(
 ) -> Conversation | None:
     """The conversation of a thread message for the Bot, or none. A paired phone and the
     admin write under their own account, which opens their conversation there. On an
-    open number, the admin's conversation turns the thread on, and everyone else in it
+    public number, the admin's conversation turns the thread on, and everyone else in it
     then writes under the bot account."""
     if sender_account_id:
         return await Conversation.get_or_create_for_user(
             session, connection, sender_account_id, **user
         )
     bot = get_app(connection.identity["app"]).bot
-    if bot.access == BotAccess.OPEN and await Conversation.get_for_thread(
+    if bot.access == BotAccess.PUBLIC and await Conversation.get_for_thread(
         session,
         connection,
         account_id=connection.identity["admin"]["account_id"],

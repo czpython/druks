@@ -10,13 +10,13 @@ const waiting: WahaSession = {
   number: null,
   name: null,
   admin: null,
-  isPhoneConnected: false,
+  isPhonePaired: false,
   identityStatus: null,
   revokedAt: null,
   revokedReason: '',
 }
 
-function renderPane(app = 'helpdesk', botAccess: AppSettings['botAccess'] = 'open') {
+function renderPane(app = 'helpdesk', botAccess: AppSettings['botAccess'] = 'public') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={queryClient}>
@@ -59,38 +59,38 @@ describe('WhatsAppNumbersPane', () => {
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ app: 'helpdesk' })
   })
 
-  it.each(['open', 'paired'] as const)('closes the used phone code for %s access', async (botAccess) => {
+  it.each(['public', 'private'] as const)('closes the used one-time code for %s access', async (botAccess) => {
     const app = 'helpdesk'
     const number = { ...waiting, number: '+41000000000', identityStatus: 'resolved' as const }
     const fetchMock = vi.fn(async (url: string, request?: RequestInit) => {
       if (url === `/api/chat/services/waha/sessions?app=${app}`)
         return new Response(JSON.stringify([number]))
-      if (url === '/api/chat/connections/number-1/admin-code' && request?.method === 'POST')
+      if (url === '/api/chat/connections/number-1/one-time-code' && request?.method === 'POST')
         return new Response(JSON.stringify({ code: '12345678', expiresIn: 600 }))
       return new Response('{}', { status: 404 })
     })
     vi.stubGlobal('fetch', fetchMock)
     const client = renderPane(app, botAccess)
-    const action = botAccess === 'paired' ? 'Connect my phone' : 'Add admin'
+    const action = botAccess === 'private' ? 'Pair my phone' : 'Add admin'
 
     fireEvent.click(await screen.findByRole('button', { name: action }))
 
     expect(await screen.findByText('12345678')).toBeTruthy()
-    const [url, request] = fetchMock.mock.calls.find(([url]) => url.endsWith('/admin-code'))!
-    expect(url).toBe('/api/chat/connections/number-1/admin-code')
+    const [url, request] = fetchMock.mock.calls.find(([url]) => url.endsWith('/one-time-code'))!
+    expect(url).toBe('/api/chat/connections/number-1/one-time-code')
     expect(JSON.parse(String((request as RequestInit).body))).toEqual({})
     await act(async () => {
       client.setQueryData(['wahaSessions', app], [{
         ...number,
-        admin: botAccess === 'open' ? 'Ana' : null,
-        isPhoneConnected: botAccess === 'paired',
+        admin: botAccess === 'public' ? 'Ana' : null,
+        isPhonePaired: botAccess === 'private',
       }])
     })
 
     await waitFor(() => expect(screen.queryByText('12345678')).toBeNull())
-    if (botAccess === 'paired') {
-      expect(screen.getByText('Your phone is connected.')).toBeTruthy()
-      expect(screen.getByRole('button', { name: 'Disconnect my phone' })).toBeTruthy()
+    if (botAccess === 'private') {
+      expect(screen.getByText('Your phone is paired.')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Unpair my phone' })).toBeTruthy()
       expect(screen.queryByRole('button', { name: 'Add admin' })).toBeNull()
     } else {
       expect(screen.getByText('Admin: Ana')).toBeTruthy()
@@ -99,10 +99,10 @@ describe('WhatsAppNumbersPane', () => {
   })
 
   it('disconnects the current operator phone and offers pairing again', async () => {
-    const number = { ...waiting, number: '+41000000000', identityStatus: 'resolved', isPhoneConnected: true }
+    const number = { ...waiting, number: '+41000000000', identityStatus: 'resolved', isPhonePaired: true }
     const fetchMock = vi.fn(async (url: string, request?: RequestInit) => {
       if (url === '/api/chat/connections/number-1/pairing' && request?.method === 'DELETE') {
-        number.isPhoneConnected = false
+        number.isPhonePaired = false
         return new Response(null, { status: 204 })
       }
       if (url === '/api/chat/services/waha/sessions?app=helpdesk')
@@ -110,12 +110,12 @@ describe('WhatsAppNumbersPane', () => {
       return new Response('{}', { status: 404 })
     })
     vi.stubGlobal('fetch', fetchMock)
-    renderPane('helpdesk', 'paired')
+    renderPane('helpdesk', 'private')
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Disconnect my phone' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Unpair my phone' }))
 
-    expect(await screen.findByRole('button', { name: 'Connect my phone' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Disconnect my phone' })).toBeNull()
+    expect(await screen.findByRole('button', { name: 'Pair my phone' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Unpair my phone' })).toBeNull()
     expect(fetchMock.mock.calls.some(([url, request]) =>
       url === '/api/chat/connections/number-1/pairing' && request?.method === 'DELETE',
     )).toBe(true)

@@ -205,9 +205,9 @@ export function SettingsPages({
   const dirty = dirtyPages.includes(section)
   const app = appName ? apps.find((entry) => entry.name === appName) : undefined
   const hasAgents = Boolean(app?.agents.some((agent) => agent.name !== app.bot))
-  // Only an open Bot takes calls.
+  // Only a public Bot takes calls.
   const channels = (appsQuery.data?.channels ?? []).filter(
-    (channel) => channel !== 'call' || app?.botAccess === 'open',
+    (channel) => channel !== 'call' || app?.botAccess === 'public',
   )
   const hasChannels = Boolean(app?.bot && channels.length)
   const appTab = ['agents', 'bots', 'channels'].find((tab) => location.endsWith(`/${tab}`)) ?? 'options'

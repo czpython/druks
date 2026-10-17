@@ -43,13 +43,13 @@ async def link_number(
     app: Annotated[str, Body(embed=True)],
     sid: Annotated[str, Body(embed=True)],
 ) -> VaultSecret:
-    """Link a Twilio number to an app's open Bot. The number gets its own bot account."""
+    """Link a Twilio number to an app's public Bot. The number gets its own bot account."""
     try:
         bot = get_app(app).bot
     except KeyError as error:
         raise HTTPException(404, f"Unknown app {app!r}") from error
-    if not bot or bot.access != BotAccess.OPEN:
-        raise HTTPException(404, f"App {app!r} declares no open Bot.")
+    if not bot or bot.access != BotAccess.PUBLIC:
+        raise HTTPException(404, f"App {app!r} declares no public Bot.")
     webhook_base = load_settings().urls.webhook_base
     if not webhook_base:
         raise CallsLinkError(

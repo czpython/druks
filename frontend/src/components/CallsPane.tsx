@@ -9,7 +9,7 @@ import { useFormatters } from '../lib/preferences'
 import { Select } from './Control'
 import '../chat.css'
 
-/** The phone numbers of an app's open Bot. */
+/** The phone numbers of an app's public Bot. */
 export function CallsPane({ app }: { app: AppSettings }) {
   const queryClient = useQueryClient()
   const linkedNumbers = useQuery({

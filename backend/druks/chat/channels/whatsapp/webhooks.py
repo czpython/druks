@@ -72,7 +72,7 @@ class WahaEvents(Webhook):
         message = self.data["payload"]
         if self.is_addressed and not message["fromMe"]:
             identity = self.connection.identity
-            if get_app(identity["app"]).bot.access == BotAccess.PAIRED:
+            if get_app(identity["app"]).bot.access == BotAccess.PRIVATE:
                 accounts = identity["operators"]
             else:
                 accounts = {identity["admin"].get("user_id", ""): identity["admin"]["account_id"]}

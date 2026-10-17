@@ -12,4 +12,4 @@ class Chat(App):
     icon = "messages-square"
     description = "Live agent conversations."
     builtin = True
-    bot = Bot(prompt="chat/bot.md", access=BotAccess.PAIRED)
+    bot = Bot(prompt="chat/bot.md", access=BotAccess.PRIVATE)
