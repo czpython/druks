@@ -21,12 +21,13 @@ from druks.chat.models import Conversation
 from druks.chat.routes import read_thread, require_tag
 from druks.core.apis.slack import SlackClient
 from druks.core.services import Slack
-from druks.core.webhooks.slack import SlackEvents
+from druks.core.webhooks.slack import SlackEvents, SlackInteractivity
 from druks.models import Base
 from druks.redis import close_client, get_client
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.testing import asgi_client, configure_app_for_test, make_settings
+from druks.webhooks.router import match_webhook
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from slack_sdk.errors import SlackApiError
@@ -321,6 +322,14 @@ def test_create_slack_app_opens_slack_with_the_whole_manifest(tmp_path):
     query = dict(parse_qsl(location.query))
     assert (location.netloc, location.path, query["new_app"]) == ("api.slack.com", "/apps", "1")
     assert json.loads(query["manifest_json"]) == manifest
+
+
+def test_the_manifest_sends_button_clicks_to_the_interactivity_webhook():
+    interactivity = Slack.get_manifest()["settings"]["interactivity"]
+
+    path = urlparse(interactivity["request_url"]).path.removeprefix("/_external/")
+    assert interactivity["is_enabled"] is True
+    assert match_webhook(path)[0] is SlackInteractivity
 
 
 def room_event(user=ANA, text=f"<@{BOT}> read my runs", ts="10.0", **event):

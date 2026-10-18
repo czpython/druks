@@ -31,7 +31,7 @@ from sqlalchemy.exc import IntegrityError
 
 async def test_account_creation_copies_defaults_once(tmp_path, druks_db, monkeypatch):
     destination = await Destination.create(
-        druks_db, name="New account gates", kind="slack_webhook", url="https://example.invalid/hook"
+        druks_db, name="New account gates", kind="slack_channel", channel_id="C1"
     )
     installation = await InstallationSettings.get_or_create(druks_db)
     await installation.update(gate_park_destination_id=destination.id)
@@ -59,7 +59,7 @@ async def test_account_creation_copies_defaults_once(tmp_path, druks_db, monkeyp
 
 async def test_personal_notifications_can_be_saved_and_cleared(tmp_path, druks_db):
     destination = await Destination.create(
-        druks_db, name="Personal gates", kind="slack_webhook", url="https://example.invalid/hook"
+        druks_db, name="Personal gates", kind="slack_channel", channel_id="C1"
     )
     with settings_client(tmp_path) as client:
         saved = client.patch(
@@ -84,7 +84,7 @@ async def test_migrations_preserve_preferences_and_installation_execution(druks_
     charlie = await Account.get_or_create(druks_db, "charlie@example.com")
     account_ids = (alice.id, bob.id, charlie.id)
     destination = await Destination.create(
-        druks_db, name="Personal gates", kind="slack_webhook", url="https://example.invalid/hook"
+        druks_db, name="Personal gates", kind="slack_channel", channel_id="C1"
     )
     for statement in (
         "DELETE FROM settings",
@@ -323,7 +323,7 @@ async def test_shared_agent_overrides_use_installation_settings_after_a_personal
 
 async def test_notification_default_only_seeds_new_accounts(tmp_path, druks_db):
     destination = await Destination.create(
-        druks_db, name="Default gates", kind="slack_webhook", url="https://example.invalid/hook"
+        druks_db, name="Default gates", kind="slack_channel", channel_id="C1"
     )
     with header_client(tmp_path) as client:
         alice = {IDENTITY_HEADER: "alice@example.com"}

@@ -1,41 +1,38 @@
-import apprise
-import httpx
+import aiohttp
+from slack_sdk.errors import SlackApiError
 
+from druks.core.apis.slack import SlackClient
 from druks.notifications.buttons import encode_button
 from druks.notifications.exceptions import DeliveryError, DisabledDestinationError
-from druks.notifications.models import Destination, DestinationKind
+from druks.notifications.models import Destination
 
-_SEND_TIMEOUT_SECONDS = 10.0
+# What Slack's answer means when the bot cannot post to the channel, and the fix.
+_CHANNEL_REASONS = {
+    "not_in_channel": "the bot is not in channel {channel}. Invite the bot to the channel in Slack",
+    "channel_not_found": (
+        "Slack finds no channel {channel} for the bot. Check the channel ID. "
+        "If the channel is private, invite the bot to it"
+    ),
+}
 
 
 async def deliver(
+    client: SlackClient,
     destination: Destination,
     body: str,
     *,
     actions: list[dict] | None = None,
     token: str | None = None,
-    idempotency_key: str | None = None,
+    deep_link: str | None = None,
 ) -> None:
-    # idempotency_key is part of the seam for providers that dedup on it (the
-    # outbox passes the notification id); Slack webhooks and Apprise ignore it.
+    """Each action becomes a button that carries ``token``, so a click answers this
+    notification."""
     if not destination.is_enabled:
         raise DisabledDestinationError(destination.name)
-    url = destination.url  # the one place the secret is read in the clear
-    if destination.kind == DestinationKind.SLACK_WEBHOOK and actions:
-        # Interactivity has no cross-provider abstraction (Apprise can't
-        # express buttons), so the actionable path is hand-rolled Block Kit.
-        await _post_slack_blocks(destination.name, url, body, actions, token)
-        return
-    await _notify_apprise(destination.name, url, body)
-
-
-async def _post_slack_blocks(
-    name: str, url: str, body: str, actions: list[dict], token: str | None
-) -> None:
-    message = {
-        "text": body,
-        "blocks": [
-            {"type": "section", "text": {"type": "mrkdwn", "text": body}},
+    text = f"{body}\n{deep_link}" if deep_link else body
+    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": text}}]
+    if actions:
+        blocks.append(
             {
                 "type": "actions",
                 "elements": [
@@ -46,28 +43,15 @@ async def _post_slack_blocks(
                     }
                     for action in actions
                 ],
-            },
-        ],
-    }
+            }
+        )
+    # from None: these errors can keep the request, and its headers carry the bot token.
     try:
-        async with httpx.AsyncClient(timeout=_SEND_TIMEOUT_SECONDS) as client:
-            response = await client.post(url, json=message)
-        response.raise_for_status()
-    except httpx.HTTPError as error:
-        # from None: httpx error text embeds the webhook URL (the credential),
-        # so the chain must not survive into logs; the class name is enough.
-        raise DeliveryError(name, type(error).__name__) from None
-
-
-async def _notify_apprise(name: str, url: str, body: str) -> None:
-    # The URL was already parse-checked at save; a stored one that no longer
-    # parses leaves zero servers and notify returns falsy — caught below.
-    sender = apprise.Apprise()
-    sender.add(url)
-    try:
-        sent = await sender.async_notify(body=body)
-    except Exception as error:
-        # from None: provider exceptions can embed the webhook URL.
-        raise DeliveryError(name, type(error).__name__) from None
-    if not sent:
-        raise DeliveryError(name, "the provider rejected the notification")
+        await client.chat_postMessage(channel=destination.channel_id, text=text, blocks=blocks)
+    except SlackApiError as error:
+        reason = error.response.get("error") or f"HTTP {error.response.status_code}"
+        if reason in _CHANNEL_REASONS:
+            reason = _CHANNEL_REASONS[reason].format(channel=destination.channel_id)
+        raise DeliveryError(destination.name, reason) from None
+    except (aiohttp.ClientError, TimeoutError) as error:
+        raise DeliveryError(destination.name, type(error).__name__) from None

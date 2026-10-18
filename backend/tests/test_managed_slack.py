@@ -279,6 +279,18 @@ async def test_a_refused_install_stores_nothing(managed_slack, manager, slack):
     assert not slack
 
 
+async def test_a_notification_destination_waits_for_the_install(managed_slack, slack):
+    async with asgi_client(configure_app_for_test(settings=managed_slack)) as client:
+        created = await client.post(
+            "/api/notifications/destinations",
+            json={"name": "ops", "kind": "slack_channel", "channelId": "C1"},
+        )
+
+    assert created.status_code == 409
+    assert "slack is not connected" in created.json()["detail"]
+    assert not slack
+
+
 async def test_a_personal_link_keeps_the_persons_token_apart_and_in_the_cards_workspace(
     card_after_install, managed_slack, manager, slack
 ):
@@ -389,7 +401,7 @@ async def test_a_forwarded_click_answers_its_notification_once(
     await druks_db.flush()
     await seed_dbos_status(druks_db, run.id, "parked")
     destination = await Destination.create(
-        druks_db, name="slack", kind="slack_webhook", url="https://hooks.slack.com/services/T1"
+        druks_db, name="slack", kind="slack_channel", channel_id="C1"
     )
     notification = await Notification.create(
         druks_db,

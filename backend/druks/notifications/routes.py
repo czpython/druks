@@ -1,11 +1,13 @@
 from typing import Annotated
 
-import apprise
 from fastapi import APIRouter, Body, HTTPException, Query
 
 from druks.api.dependencies import SessionDep
+from druks.core.services import Slack
+from druks.notifications.delivery import deliver
 from druks.notifications.exceptions import (
     AlreadyAcknowledgedError,
+    DeliveryError,
     InvalidChoiceError,
     StaleRoundError,
     UnknownTokenError,
@@ -18,6 +20,8 @@ from druks.notifications.schemas import (
     RespondRequest,
 )
 from druks.notifications.services import respond_to_notification
+
+CHANNEL_CHECK_MESSAGE = "Druks posts here when a run waits for an answer."
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
@@ -38,14 +42,17 @@ async def create_destination(session: SessionDep, body: CreateDestinationRequest
         raise HTTPException(
             status_code=409, detail=f"Destination {body.name!r} already exists; remove it first."
         )
-    url = body.url.get_secret_value()
-    if not apprise.Apprise().add(url):
-        # The same offline parse delivery performs, run while the operator is
-        # still here to fix the typo — instead of at the first failed send.
-        raise HTTPException(
-            status_code=422, detail="URL is not a recognized notification destination."
-        )
-    return await Destination.create(session, name=body.name, kind=body.kind.value, url=url)
+    client = await Slack.get_client()
+    destination = await Destination.create(
+        session, name=body.name, kind=body.kind, channel_id=body.channel_id
+    )
+    try:
+        # A first post proves the bot can post there, while the operator is still here
+        # to fix it. A refusal rolls the row back.
+        await deliver(client, destination, CHANNEL_CHECK_MESSAGE)
+    except DeliveryError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return destination
 
 
 @router.patch("/destinations/{destination_id}", response_model=DestinationResponse)

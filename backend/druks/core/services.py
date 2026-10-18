@@ -377,6 +377,13 @@ class Slack(Service):
         card.identity = {**card.identity, **facts}
 
     @classmethod
+    async def get_client(cls) -> SlackClient:
+        card = await cls.get()
+        if not cls.is_card_connected(card):
+            raise ServiceNotConnectedError(cls.slug)
+        return SlackClient(token=card.secrets["bot_token"])
+
+    @classmethod
     async def get_identity(cls, access_token: str) -> dict[str, Any]:
         """The person behind a user token, keyed the way ``Account.lookup`` finds them.
         Only a person in the card's workspace links: a managed card names none before
@@ -439,6 +446,10 @@ class Slack(Service):
                         "message.im",
                         "message.mpim",
                     ],
+                },
+                "interactivity": {
+                    "is_enabled": True,
+                    "request_url": f"{urls.webhook_base}/_external/slack/interactivity/",
                 },
                 "token_rotation_enabled": False,
             },
