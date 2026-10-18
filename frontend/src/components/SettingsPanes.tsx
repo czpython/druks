@@ -873,8 +873,10 @@ export function ServicesPane() {
   )
 }
 
-const managedLabel = (service: Service) =>
-  service.managed ? `Managed by ${service.managedBy || 'configuration'}` : undefined
+const managedLabel = (service: Service) => {
+  if (!service.managed) return undefined
+  return service.connected ? `Managed by ${service.managedBy || 'configuration'}` : 'Not installed'
+}
 
 function ServiceStatus({ connected, label }: { connected: boolean; label?: string }) {
   return (
@@ -995,7 +997,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
                   Install
                 </a>
               )}
-              {service.slug === 'slack' && createSlackApp}
+              {service.slug === 'slack' && !service.managed && createSlackApp}
               <button className="set-btn ghost" onClick={() => setFormOpen(true)} disabled={busy || service.managed}>
                 Replace connection
               </button>
@@ -1008,7 +1010,13 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
       )}
       {!service.connected && !formOpen && (
         <section className="mcp-section">
-          {service.createUrl ? (
+          {service.managed ? (
+            <div className="svc-actions">
+              <a className="set-btn primary" href={service.installUrl} target="_blank" rel="noreferrer">
+                Install
+              </a>
+            </div>
+          ) : service.createUrl ? (
             <>
               <div>{createApp}</div>
               <button type="button" className="svc-alt" onClick={() => setFormOpen(true)}>

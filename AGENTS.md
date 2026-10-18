@@ -70,7 +70,8 @@ For app-surface changes, inspect the proof app at
 - Use one canonical name and shape for each contract. Fail loudly on every other shape.
 - A managed service differs from a self-hosted one only in configuration: a URL,
   a key, or a verifier. Any manager that serves the same routes and publishes a
-  JWKS works.
+  JWKS works. The docs describe Druks as an operator runs it: the
+  `[services.<slug>]` table and the Services page. They name no manager.
 - Do not type-switch over a typed stream in app code. When a projection needs
   ordering or anchoring, grow the SDK primitive instead of an `isinstance` chain.
 - Put only identity and facts in a read-side field. Keep UI wording in the app pages.

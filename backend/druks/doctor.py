@@ -73,9 +73,11 @@ async def check_service_identities(settings: Settings) -> list[CheckResult]:
             results: list[CheckResult] = []
             for service in services.all():
                 name = f"{service.slug}_identity"
-                try:
+                if await service.is_connected():
                     row = await service.get()
-                except ServiceNotConnectedError:
+                    facts = " ".join(f"{key}={value}" for key, value in row.identity.items())
+                    results.append(CheckResult(name=name, ok=True, detail=f"connected; {facts}"))
+                else:
                     results.append(
                         CheckResult(
                             name=name,
@@ -85,9 +87,6 @@ async def check_service_identities(settings: Settings) -> list[CheckResult]:
                             "Settings → Connections → Services.",
                         )
                     )
-                    continue
-                facts = " ".join(f"{key}={value}" for key, value in row.identity.items())
-                results.append(CheckResult(name=name, ok=True, detail=f"connected; {facts}"))
             return results
     except Exception as error:  # noqa: BLE001 — a DB-read failure is a fail, not a crash
         return [
@@ -112,11 +111,11 @@ async def check_installations(settings: Settings) -> CheckResult:
             pending=True,
             detail="github is not connected — connect it in Settings → Connections → Services.",
         )
-    except Exception as exc:  # noqa: BLE001 — doctor reports, never raises
+    except Exception as error:  # noqa: BLE001 — doctor reports, never raises
         return CheckResult(
             name="installations",
             ok=False,
-            detail=f"could not list operator App installations: {exc}",
+            detail=f"could not list operator App installations: {error}",
         )
     if not accounts:
         return CheckResult(
@@ -188,13 +187,12 @@ def check_provider_credentials(settings: Settings) -> list[CheckResult]:
                         VaultSecret.revoked_at.is_(None),
                     )
                 )
-                key_set_by = (
-                    session.scalar(
+                if key:
+                    key_set_by = session.scalar(
                         select(Account.username).where(Account.id == key.identity["pasted_by"])
                     )
-                    if key
-                    else None
-                )
+                else:
+                    key_set_by = None
                 results.append(
                     _credentials_check(
                         provider.id,
@@ -253,8 +251,8 @@ def check_data_dir(settings: Settings) -> CheckResult:
 def check_database(settings: Settings) -> CheckResult:
     try:
         engine = create_engine_from_url(settings.database_url.get_secret_value())
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
         engine.dispose()
     except Exception as error:  # noqa: BLE001 — any DB error surfaces as a fail
         return CheckResult(
@@ -285,10 +283,10 @@ async def check_drukbox(settings: Settings) -> CheckResult:
         await api.aclose()
     if report.ok:
         return CheckResult(name="drukbox", ok=True, detail=f"{report.active_provider} ok")
-    fail = next(c for c in report.checks if c.status != "ok")
-    detail = f"{fail.name}: {fail.detail}"
-    if fail.hint:
-        detail += f" ({fail.hint})"
+    failed_check = next(check for check in report.checks if check.status != "ok")
+    detail = f"{failed_check.name}: {failed_check.detail}"
+    if failed_check.hint:
+        detail += f" ({failed_check.hint})"
     return CheckResult(name="drukbox", ok=False, detail=detail)
 
 
@@ -464,23 +462,22 @@ def check_capability_modules(settings: Settings) -> CheckResult:
         discovered = {role: set(registry._items) for role, registry in by_role.items()}
         # Tasks register straight into DBOS's own map — it is their registry.
         discovered["tasks"] = set(_get_or_create_dbos_registry().workflow_info_map)
-        pkg = importlib.import_module(package)
-        for info in pkgutil.walk_packages(pkg.__path__, prefix=f"{package}."):
+        package_module = importlib.import_module(package)
+        for info in pkgutil.walk_packages(package_module.__path__, prefix=f"{package}."):
             if info.ispkg or info.name.rsplit(".", 1)[-1] in _ROLES:
                 continue
             try:
                 module = importlib.import_module(info.name)
-            except Exception as exc:  # noqa: BLE001 — doctor reports, never raises
-                strays.append(f"{info.name}: failed to import — {exc}")
+            except Exception as error:  # noqa: BLE001 — doctor reports, never raises
+                strays.append(f"{info.name}: failed to import — {error}")
                 continue
-            found = _defined_capability(module)
-            if not found:
-                continue
-            role, key = found
-            if key not in discovered[role]:
-                strays.append(
-                    f"{info.name} defines a {role} but won't be discovered — rename to {role}.py"
-                )
+            if found := _defined_capability(module):
+                role, key = found
+                if key not in discovered[role]:
+                    strays.append(
+                        f"{info.name} defines a {role} but won't be discovered — "
+                        f"rename to {role}.py"
+                    )
     return CheckResult(
         name="capability_modules",
         ok=not strays,
