@@ -327,7 +327,10 @@ class CodexHarness(Harness):
             login = json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": "${CODEX_API_KEY}"})
         files = {f"{sandbox_home}/.codex/auth.json": login}
         if account_type == AccountKind.OPERATOR:
-            config: dict[str, object] = {"model": model_id, "developer_instructions": prompt}
+            # Codex records developer instructions in the rollout and replays them on resume,
+            # while it reads AGENTS.md again every turn.
+            files[f"{conversation_root}/AGENTS.md"] = prompt
+            config: dict[str, object] = {"model": model_id}
             mode = "agent-full-access"
         else:
             files[f"{conversation_root}/instructions.md"] = prompt

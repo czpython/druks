@@ -48,6 +48,8 @@ class Conversation {
     this.eventsFile = path.join(this.root, "turn.ndjson");
     this.events = readEvents(this.eventsFile);
     this.connection = undefined;
+    this.child = undefined;
+    this.setup = undefined;
     this.starting = undefined;
     fs.mkdirSync(this.root, { recursive: true });
   }
@@ -99,9 +101,16 @@ class Conversation {
 
   async start(request) {
     if (this.starting) await this.starting;
-    if (this.connection) {
+    if (this.connection && request.setup === this.setup) {
       await this.configure(this.connection, request, this.configOptions);
       return this.state;
+    }
+    if (this.connection) {
+      if (this.state.status === "running") throw new Error("A turn is already running.");
+      // The adapter's own session fingerprint ignores the system prompt, so changed
+      // instructions take a new adapter process. That one path serves every harness.
+      this.child.kill();
+      this.connection = undefined;
     }
     this.starting = this.open(request);
     try {
@@ -179,6 +188,8 @@ class Conversation {
       this.state.model = request.model;
       await this.configure(connection, request, session.configOptions ?? []);
       this.connection = connection;
+      this.child = child;
+      this.setup = request.setup;
       this.sessionFiles = request.sessionFiles;
       this.state.status = "idle";
       this.save();
@@ -241,8 +252,26 @@ class Conversation {
   }
 }
 
-async function handle(request) {
-  if (request.method === "ping") return {};
+function hasRunningTurn() {
+  return [...sessions.values()].some(conversation => conversation.state.status === "running");
+}
+
+function exitWhenIdle() {
+  if (hasRunningTurn()) return;
+  // Idle adapters end with their bridge; the next bridge loads their sessions again.
+  for (const conversation of sessions.values()) conversation.child?.kill();
+  process.exit();
+}
+
+async function handle(request, socket) {
+  // Druks launches the bridge with its program's hash and retires a bridge that echoes another.
+  if (request.method === "ping") return { version: process.argv[3] };
+  if (request.method === "retire") {
+    const busy = hasRunningTurn();
+    // The answer goes out first. A turn that began meanwhile keeps this bridge until the next retire.
+    if (!busy) socket.once("close", exitWhenIdle);
+    return { busy };
+  }
   const directory = conversationRoot(request.conversationId);
   let conversation = sessions.get(request.conversationId);
   if (!conversation) {
@@ -275,7 +304,7 @@ const server = createServer(socket => {
   const lines = createInterface({ input: socket });
   lines.once("line", line => {
     lines.close();
-    Promise.resolve().then(() => handle(JSON.parse(line)))
+    Promise.resolve().then(() => handle(JSON.parse(line), socket))
       .then(result => socket.end(JSON.stringify({ ok: true, ...result }) + "\n"))
       .catch(error => {
         console.error(error);

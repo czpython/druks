@@ -1,8 +1,14 @@
+import hashlib
+from pathlib import Path
+
 from druks.mcp.constants import DRUKS_SERVER_NAME
 
 # The dot keeps the name outside NAME_PATTERN, so no registry server can share its vault row.
 CHAT_KEY_NAME = f"{DRUKS_SERVER_NAME}.chat"
 CHAT_BRIDGE_PORT = 43123
+# A running bridge echoes the hash it was launched with, so a deployment finds the bridges
+# of an older Druks.
+BRIDGE_VERSION = hashlib.sha256(Path(__file__).with_name("bridge.mjs").read_bytes()).hexdigest()
 # The bridge statuses with a live session and no running turn.
 BRIDGE_SETTLED_STATUSES = ("idle", "replied", "cancelled")
 TRANSCRIPTION_TIMEOUT_SECONDS = 120.0

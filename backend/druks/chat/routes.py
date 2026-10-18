@@ -284,8 +284,9 @@ async def create_reminder(
     conversation_id: Annotated[
         str,
         Body(
-            description="Where to send: a conversation from chat_list_conversations. Leave "
-            "it out to send in this chat."
+            description="Where to send: a conversation from chat_list_conversations, or a "
+            "chat you start with chat_start_conversation for someone who has none. Leave it "
+            "out to send in this chat."
         ),
     ] = "",
     send_at: Annotated[
