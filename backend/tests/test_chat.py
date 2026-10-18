@@ -641,6 +641,7 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
                         "options": {
                             "disallowedTools": ["AskUserQuestion"],
                             "model": "claude-opus-4-7",
+                            "extraArgs": {"system-prompt-snapshot": "off"},
                             "systemPrompt": {
                                 "type": "preset",
                                 "preset": "claude_code",
@@ -669,6 +670,7 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
                         "options": {
                             "disallowedTools": ["AskUserQuestion"],
                             "model": "claude-opus-4-7",
+                            "extraArgs": {"system-prompt-snapshot": "off"},
                             "systemPrompt": "Be kind.",
                             "tools": [],
                             "settingSources": [],
@@ -693,12 +695,13 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
             {
                 "meta": {},
                 "env": {
-                    "CODEX_CONFIG": json.dumps(
-                        {"model": "gpt-5.5", "developer_instructions": "Be kind."}
-                    ),
+                    "CODEX_CONFIG": json.dumps({"model": "gpt-5.5"}),
                     "INITIAL_AGENT_MODE": "agent-full-access",
                 },
-                "files": {"/home/druks/.codex/auth.json": CODEX_KEY_LOGIN},
+                "files": {
+                    "/home/druks/.codex/auth.json": CODEX_KEY_LOGIN,
+                    "/home/druks/work/chat/one/AGENTS.md": "Be kind.",
+                },
                 "mode": "agent-full-access",
                 "model": "gpt-5.5",
                 "options": {"model": "model", "effort": "reasoning_effort", "fast": "fast-mode"},
