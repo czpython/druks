@@ -36,20 +36,18 @@ class LinearClient:
     def __init__(
         self,
         *,
-        api_key: str,
+        authorization: str,
         api_url: str = LINEAR_GRAPHQL_URL,
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.api_key = api_key
+        # A pasted API key goes out as it is. An app's access token goes out as a bearer.
+        self.authorization = authorization
         self.api_url = api_url
         # One AsyncClient per LinearClient pools connections across the calls of a build run.
         self._client = client or httpx.AsyncClient(
             timeout=_DEFAULT_TIMEOUT,
             limits=_DEFAULT_LIMITS,
-            headers={
-                "Authorization": api_key,
-                "Content-Type": "application/json",
-            },
+            headers={"Content-Type": "application/json"},
         )
 
     async def aclose(self) -> None:
@@ -138,6 +136,7 @@ class LinearClient:
         response = await self._client.post(
             self.api_url,
             json={"query": query, "variables": variables},
+            headers={"Authorization": self.authorization},
         )
         response.raise_for_status()
         body = response.json()

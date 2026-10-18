@@ -18,7 +18,7 @@ from druks.accounts.models import Account
 from druks.core.apis.exceptions import GitHubAppNotInstalledError, TwilioError, TwilioNotFoundError
 from druks.core.apis.github import GITHUB_API_URL, GITHUB_AUTHORITY, GitHubClient
 from druks.core.apis.jira import SERVICE_ACCOUNT_DOMAIN, JiraClient
-from druks.core.apis.linear import LINEAR_AUTHORITY, LINEAR_GRAPHQL_URL
+from druks.core.apis.linear import LINEAR_AUTHORITY, LINEAR_GRAPHQL_URL, LinearClient
 from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
 from druks.core.apis.twilio import TwilioClient
 from druks.secrets.datastructures import Audience
@@ -69,9 +69,9 @@ class GithubApp(Service):
             row.identity = {**row.identity, "installations": list(accounts)}
 
         @classmethod
-        def is_grant_revoked(cls, status: int, tokens: dict[str, Any]) -> bool:
+        def is_grant_revoked(cls, response: httpx.Response) -> bool:
             # GitHub answers a dead refresh token with a 200.
-            return tokens.get("error") == "bad_refresh_token"
+            return response.json().get("error") == "bad_refresh_token"
 
         @classmethod
         async def issue_token(
@@ -234,6 +234,21 @@ class Linear(Service):
                 "name": viewer["name"],
                 "email": viewer["email"],
             }
+
+        @classmethod
+        def is_grant_revoked(cls, response: httpx.Response) -> bool:
+            # The manager refuses the refresh of an installation that Linear revoked.
+            return response.status_code != 200 and response.json().get("error") in (
+                "invalid_grant",
+                "access_denied",
+            )
+
+    @classmethod
+    async def get_client(cls) -> LinearClient:
+        row = await cls.get()
+        if "api_key" in row.secrets:
+            return LinearClient(authorization=row.secrets["api_key"])
+        return LinearClient(authorization=f"Bearer {await cls.get_access_token()}")
 
     @classmethod
     async def verify(cls, settings: BaseModel) -> dict[str, Any]:

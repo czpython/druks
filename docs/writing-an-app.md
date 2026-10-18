@@ -1679,7 +1679,7 @@ shape. Override `Authentication.get_identity` for them:
 ```
 
 `Authentication` also has `get_consent_query(scopes)`, `read_grant(tokens)`,
-and `is_grant_revoked(status, tokens)`, for a provider that shapes the consent
+and `is_grant_revoked(response)`, for a provider that shapes the consent
 query, the token answer, or a refused refresh differently.
 
 One provider can back several services — Google backs both Gmail and Google
