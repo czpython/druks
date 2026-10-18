@@ -3,6 +3,95 @@
 All notable changes to Druks. Versions follow [semantic versioning](https://semver.org);
 while Druks is pre-1.0, a minor bump may break compatibility.
 
+## [0.10.0] — 2026-10-18
+
+### Breaking changes
+
+- **A Bot's number is public or private.** `BotAccess.PUBLIC` replaces
+  `BotAccess.OPEN`, and `BotAccess.PRIVATE` replaces `BotAccess.PAIRED`. On the
+  wire, `botAccess` is `public` or `private`.
+
+### Added
+
+- **Reminders in chat.** Ask the agent to remind you or another person, one time
+  or on a schedule. Druks sends the reminder word for word through the
+  conversation's channel: web Chat, Slack, or WhatsApp. A reminder takes a
+  delay, a time, or a cron in the installation timezone, and the agent gets the
+  time on each turn. The agent tools are `chat_create_reminder`,
+  `chat_list_reminders`, and `chat_cancel_reminder`. The Chat page shows each
+  reminder.
+- **WhatsApp groups.** A public number answers in a group after its admin tags
+  it there. Then a message that tags the number or replies to it reaches the
+  Bot. On a private number, only the tag of a paired phone reaches its agent.
+  The agent reads the group with `chat_read_thread` before it answers, and tags
+  a member with `@` and their number. A number linked before this release
+  ignores groups until you link it again.
+- **More for WhatsApp.** On a private number, an operator's agent can start a
+  chat with a phone number through `chat_start_conversation`, for example to set
+  a reminder there. A shared contact card reaches the agent as text.
+- **GitHub Issues as a Software Factory tracker.** An issue that gets the trigger
+  label opens a build. The five status settings are label names, and the done
+  label closes the issue. A ticket key is `owner/repo#number`. The operator App
+  must subscribe to the `issues` event.
+- **An agent can drive a saved browser session.**
+  `Agent(browser=session, browser_client=BrowserClient.PINCHTAB)` gives the call
+  five browser tools through the Druks MCP server. The sandbox never holds the
+  browser's endpoint, token, or profile. In app code,
+  `BrowserSession.pinchtab()` borrows the session, and
+  `BrowserSession(read_only=True)` lets only GET requests through.
+- **A run waits for a sandbox slot.** When Drukbox is at capacity, the run waits,
+  and the dashboard shows "Waiting for a sandbox slot". `[sandbox.host_limits]`
+  in `druks.toml` sets the limit of each provider.
+- **A default for Slack tags.** On the Slack pane of Chat → Channels, a person
+  sets whether the bot answers only their tagged messages in new Slack threads.
+- **A Jira service account can connect.** Druks calls Jira through the Atlassian
+  gateway, so a scoped service-account token works.
+- **A tool can depend on configuration.** A router dependency that raises
+  `ToolNotAvailable` hides the router's tools from `/mcp` until its condition
+  holds.
+
+### Changed
+
+- **A chat hears every run it started**, also a run that returns nothing. That
+  report names the run's subject, so the agent can read the output there.
+- **A chat channel gets only the reply after the agent's last tool call.** The
+  notes between tool calls stay on the Chat page.
+- **A chat turn with no connected provider fails at once.** On a channel, an
+  operator's conversation gets the cause, such as "connect your Anthropic
+  subscription". A Bot's conversation keeps the fixed reply.
+- **The Chat agent answers with outcomes.** It keeps Slack and GitHub replies
+  short, loads a tool's schema before its first call, and ends its turn after it
+  starts a run. In a thread that other people read, such as a WhatsApp group, it
+  does not list a person's connections unless that person asks.
+- **An MCP tool call with an undeclared argument fails**, and the error names
+  the argument.
+- **The board ticket tools show only while Software Factory's tracker is
+  `druks`.**
+- **`software_factory_start` answers a tracker refusal with an agent error:**
+  409 `TICKET_NOT_MOVABLE` or 502 `TRACKER_REFUSED`.
+- **`get_gate` reads a gate that is answered on its source.** `answer_gate`
+  still refuses it.
+- **`druks sandboxes build` prints the progress of each template build.**
+
+### Fixed
+
+- **The browser template builds on any docker base image.** It failed on every
+  Compose install.
+- **A live chat session gets new instructions and MCP servers on its next
+  turn.** It kept its first prompt and servers after a deploy, or after an
+  operator connected a server. The session keeps its history.
+- **A per-person OAuth MCP server does not break other accounts' runs.** A run
+  whose account has not connected the server leaves it out.
+- **A push that changes a `.druks` file reaches the next build.** Druks used its
+  cached copy for 24 hours.
+- **A build does not wait on GitHub's anonymous rate limit.** The App's git
+  author lookup uses an installation token.
+- **A directory upload to a sandbox does not hang** when tar writes many warnings
+  or the stream stops.
+- **A skill repository URL without `https://` installs.** For a private
+  repository without the App, the error names that cause.
+- **A long URL in a card description wraps.**
+
 ## [0.9.0] — 2026-10-12
 
 ### Breaking changes
