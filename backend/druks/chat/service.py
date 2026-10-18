@@ -104,20 +104,18 @@ async def get_agent(
         template = ADMIN_PROMPT
         admin_tools = (get_tool_name(name, [bot.app], {bot.app}) for name in bot.admin_tools)
         tools = (*admin_tools, *ADMIN_TOOLS)
+    is_shared_thread = bool(conversation.thread_id) and conversation.channel.has_readable_threads
     context = {
         "source": conversation.source,
         "thread_id": conversation.thread_id,
+        "is_shared_thread": is_shared_thread,
         "sign_ins": sign_ins,
         "apps": [app for app in iter_apps() if app.description and not app.builtin],
     }
     if conversation.connection:
         context.update(await conversation.channel.get_prompt_context(session, conversation))
     prompt = await render_prompt(template, **context)
-    if (
-        conversation.thread_id
-        and conversation.channel.has_readable_threads
-        and account_type in (AccountKind.BOT, AccountKind.BOT_ADMIN)
-    ):
+    if is_shared_thread and account_type in (AccountKind.BOT, AccountKind.BOT_ADMIN):
         tools = (*tools, *THREAD_TOOLS)
         prompt = f"{prompt}\n\n{THREAD_PROMPT}"
     return bot.id, f"{prompt}\n\n{INTERNAL_MESSAGES_PROMPT}", tools

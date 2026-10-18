@@ -518,6 +518,25 @@ async def test_a_bot_in_a_group_reads_the_group_first(druks_db, helpdesk, monkey
     )
 
 
+async def test_an_operator_keeps_its_connections_out_of_a_group(druks_db):
+    connection = await link(
+        druks_db, await bot_account(druks_db), app="chat", access=BotAccess.PRIVATE
+    )
+    operator = await Account.get_or_create(druks_db, "op@example.com")
+    group, direct = [
+        await Conversation.get_or_create_for_user(
+            druks_db, connection, operator.id, **{**user(ANA), "thread_id": thread_id}
+        )
+        for thread_id in (GROUP, "")
+    ]
+
+    _, group_prompt, _ = await service.get_agent(druks_db, group)
+    _, direct_prompt, _ = await service.get_agent(druks_db, direct)
+
+    assert "Other people read this thread." in group_prompt
+    assert "Other people read this thread." not in direct_prompt
+
+
 async def test_a_message_reaches_the_bot_of_its_numbers_app(druks_db, helpdesk, monkeypatch):
     owner = await bot_account(druks_db)
     connection = await link(druks_db, owner)
@@ -1014,7 +1033,7 @@ async def test_operator_turns_use_the_apps_prompt_and_settings_without_a_timeout
     bot = helpdesk.bot if app == "helpdesk" else Chat.bot
     assert bot_id == bot.id
     render_prompt.assert_awaited_once_with(
-        bot.prompt, source=source, thread_id="", sign_ins=(), apps=ANY
+        bot.prompt, source=source, thread_id="", is_shared_thread=False, sign_ins=(), apps=ANY
     )
     assert tools == Toolkit.ALL
     [start] = [call.kwargs for call in request.await_args_list if call.args[0] == "start"]
