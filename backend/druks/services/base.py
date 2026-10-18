@@ -1,3 +1,4 @@
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -26,6 +27,8 @@ from .exceptions import (
 )
 from .oauth import OauthClient, fetch_identity, is_grant_revoked
 from .resources import Resource
+
+logger = logging.getLogger(__name__)
 
 # GoogleCalendar -> google_calendar, HTTPServer -> http_server.
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
@@ -294,13 +297,12 @@ class Service:
         """Store each service that druks.toml configures as its card. An entry replaces
         the credentials of a card that exists; the facts the card learned since stay."""
         configuration = load_settings()
-        for slug in configuration.manager.services:
-            if not services.get(slug):
-                raise ServiceConnectError(
-                    f"[manager] manages the service {slug!r}, and no installed app declares "
-                    "it. Remove it from manager.services."
-                )
+        undeclared = [slug for slug in configuration.manager.services if not services.get(slug)]
+        for slug in undeclared:
+            logger.info("No installed app declares the managed service %r. Druks ignores it.", slug)
         for slug, entry in configuration.services.items():
+            if slug in undeclared:
+                continue
             service = services.get(slug)
             if not service:
                 raise ServiceConnectError(

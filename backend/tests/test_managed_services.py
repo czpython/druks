@@ -113,12 +113,17 @@ def test_an_incomplete_manager_refuses_to_start(configuration, secrets, body, me
     assert "manager-secret" not in str(error.value)
 
 
-async def test_the_manager_names_only_declared_services(configuration, secrets, druks_db):
-    configuration.write_text(MANAGER.replace('["github"]', '["gihub"]'))
+async def test_a_managed_service_that_no_app_declares_is_ignored(configuration, secrets, druks_db):
+    configuration.write_text(
+        MANAGER.replace('["github"]', '["unknown"]')
+        + '\n[services.unknown]\nurl = "https://unknown.test"\n'
+    )
     (secrets / "manager.token").write_text("manager-secret")
 
-    with pytest.raises(ServiceConnectError, match="gihub"):
-        await Service.sync_configuration(druks_db)
+    await Service.sync_configuration(druks_db)
+
+    audience = Audience.service("unknown")
+    assert not await druks_db.scalar(select(VaultSecret).where(VaultSecret.audience == audience))
 
 
 async def test_a_configured_service_keeps_its_own_verifier_and_oauth_client(
