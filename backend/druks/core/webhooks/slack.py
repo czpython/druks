@@ -67,21 +67,22 @@ def verify_slack_signature(
 
 
 class SlackWebhook(Webhook):
-    """A delivery from the installation's Slack app, signed with the card's secret."""
+    """A delivery from the card's Slack app. A handler takes a payload from the card's
+    workspace only, so a managed card takes none before its install."""
 
     abstract = True
     provider = "slack"
 
     async def request_is_authentic(self) -> bool:
         try:
-            self.card = await Slack.get()
+            card = await Slack.get()
         except ServiceNotConnectedError as error:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(error)) from error
         verify_slack_signature(
             self.raw_body,
             self.request.headers.get("x-slack-signature"),
             self.request.headers.get("x-slack-request-timestamp"),
-            self.card.secrets["signing_secret"],
+            card.secrets["signing_secret"],
         )
         return True
 
@@ -89,9 +90,14 @@ class SlackWebhook(Webhook):
 class SlackInteractivity(SlackWebhook):
     # A button click on a delivered notification: decode the action_id back to
     # (token, choice) and route it through the same respond core as the HTTP
-    # rail. Slack sends no stable interactivity id, so the base get_delivery_key
-    # stays None — the DBOS round key is the one-answer guard.
+    # rail.
     category = "interactivity"
+
+    def get_delivery_key(self) -> str:
+        """The body's digest. Slack gives an interaction no id, and a retry repeats its
+        bytes. Another click is new bytes, and the notification's round takes only the
+        first answer."""
+        return "interaction:" + hashlib.sha256(self.raw_body).hexdigest()
 
     def get_data(self) -> dict:
         # Interactivity arrives form-encoded as payload=<json>.
@@ -108,9 +114,19 @@ class SlackInteractivity(SlackWebhook):
 
     async def on_block_actions(self) -> Response:
         try:
+            team_id = self.data["team"]["id"]
             action_id = self.data["actions"][0]["action_id"]
         except (TypeError, KeyError, IndexError) as error:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Malformed Slack payload.") from error
+        card_team_id = (await Slack.get()).identity.get("team_id", "")
+        if team_id != card_team_id:
+            self.log_ignored(
+                event="block_actions",
+                reason="workspace_mismatch",
+                team_id=team_id,
+                card_team_id=card_team_id,
+            )
+            return JSONResponse({"accepted": False})
         try:
             token, choice_id = decode_button(action_id)
         except MalformedButtonError as error:
@@ -139,10 +155,9 @@ class SlackEvents(SlackWebhook):
     category = "events"
 
     def get_delivery_key(self) -> str | None:
-        """A message's room and timestamp. A timestamp is unique in one room only."""
+        """The event's id, which each retry of the event repeats."""
         if self.data["type"] == "event_callback":
-            event = self.data["event"]
-            return f"{event['channel']}:{event['ts']}"
+            return self.data["event_id"]
         return
 
     def get_action(self) -> str:
@@ -154,12 +169,22 @@ class SlackEvents(SlackWebhook):
     async def on_event_callback(self) -> Response:
         """Publish a person's message. Edits, deletes, joins, hidden events, the bot's
         own messages, and people from other workspaces are not facts for anyone."""
+        card = await Slack.get()
+        card_team_id = card.identity.get("team_id", "")
+        if self.data["team_id"] != card_team_id:
+            self.log_ignored(
+                event="event_callback",
+                reason="workspace_mismatch",
+                team_id=self.data["team_id"],
+                card_team_id=card_team_id,
+            )
+            return JSONResponse({"accepted": False})
         event = self.data["event"]
         is_from_person = (
             (not event.get("subtype") or event["subtype"] in ("file_share", "thread_broadcast"))
             and not event.get("hidden")
             and not event.get("bot_id")
-            and event.get("user") != self.card.identity["bot_user_id"]
+            and event.get("user") != card.identity["bot_user_id"]
             and event.get("user_team", self.data["team_id"]) == self.data["team_id"]
         )
         if is_from_person:

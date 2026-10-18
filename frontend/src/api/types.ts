@@ -731,6 +731,7 @@ export interface Service {
   title: string
   description: string
   required: boolean
+  /** False without a card, and for a managed card whose app still needs its install. */
   connected: boolean
   managed: boolean
   managedBy: string
@@ -738,6 +739,8 @@ export interface Service {
   connectedAt: string | null
   fields: ServiceField[]
   createUrl: string
+  /** The provider's install page, or the sign-in door when a manager binds the
+   * install. Empty for a service without installs. */
   installUrl: string
   isOauth: boolean
   scopes: string[]

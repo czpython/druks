@@ -413,7 +413,8 @@ class VaultSecret(Base, Uuid7Pk):
         the refresh request for ``host_id``, the box that asks."""
         if not self.is_live:
             raise SecretRevokedError(self.audience)
-        # A managed card has no secrets. The service gives the token of the resource.
+        # The service answers for the resource that the box names. A managed card
+        # holds only secrets scoped to the instance.
         if resource and self.audience == Audience.service(self.audience_name):
             return await services.get(self.audience_name).issue_token(resource)
         if self.kind == SecretKind.STATIC:

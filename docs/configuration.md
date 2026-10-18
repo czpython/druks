@@ -119,7 +119,8 @@ environment and in a file. The installer does not use files.
 ## Managed services
 
 A `[services.<slug>]` table makes that service managed. `druks.toml` and the
-secret files own its card, and the Services page cannot change or disconnect it.
+secret files own its card. The Services page cannot change or disconnect it,
+but it can install the app (see below).
 The table is for a platform that writes `druks.toml` itself: the installer
 refuses it. The table holds the plain fields of the card. Each secret field of
 the card is a file in `DRUKS_SECRETS_DIR`:
@@ -131,11 +132,19 @@ url = "http://control.example/_instance/<uuid>/waha"
 
 Here the key is the file `services.waha.key`. Druks does not start when a table
 names an unknown service or holds an invalid field. Each managed card shows
-**Managed by configuration**.
+**Managed by** and the manager's name, or **Managed by configuration** without a
+`[manager]` table.
 
 Druks reads the tables at startup, so restart Druks after a change. When you
 remove a table, the card keeps its credentials, and you can change it on the
 Services page again.
+
+A restart keeps the facts that a card learned and the secret that its install
+stored, such as a Slack bot token. The table and its secret files give every
+other value. When `[manager]` lists the service in `manager.services`, the
+manager owns the app: its table names the manager's `url`, and the manager signs
+the service's events. A managed Slack card shows **Installation needed** until
+someone selects **Install** on it: see [Slack](#slack).
 
 ## Personal and installation settings
 
@@ -637,10 +646,19 @@ Redirect URL:
 Druks checks each event's signature with the signing secret, and refuses an
 event older than five minutes. With rotation off, the pasted bot token and each
 person's Slack token live until someone revokes them. A person connects their
-own Slack account through the same app: see [Chat](chat.md#slack).
+own Slack account through the same app: see [Chat](chat.md#slack). Leave PKCE
+off in the Slack app.
 
 An app created from an earlier manifest needs `reactions:write`: add it under
 **OAuth & Permissions** and reinstall the app.
+
+Under a manager, the manager's Slack app replaces the one you create. The
+`[services.slack]` table holds the manager's `url` and the app's `client_id`,
+and Druks needs no client secret, signing secret, or pasted bot token. Select
+**Install** on the Slack card and approve the app in your workspace. Druks keeps
+the bot token on the card, with the workspace and the bot as its facts. The
+manager forwards each event and button click with its own signature, and Druks
+ignores a payload from another workspace.
 
 ## Speech to text
 
@@ -896,7 +914,7 @@ The dashboard has no notifications page yet. Manage destinations through the
 API. The current destination type is a Slack incoming webhook. Actionable
 messages use Slack Block Kit. Other messages use the same URL through Apprise.
 The [Slack card](#slack)'s signing secret authenticates the button clicks that
-Slack sends back.
+Slack sends back. Under a manager, the manager's signature authenticates them.
 
 Select one enabled destination as the gate-notification destination through
 the API. A parked subjected run then produces a durable notification. Failure

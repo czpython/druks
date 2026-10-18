@@ -67,7 +67,7 @@ def _signed_headers(body: bytes, *, timestamp=None, secret=_SIGNING_SECRET):
 
 
 def _interactivity_body(action_id: str) -> bytes:
-    payload = {"type": "block_actions", "actions": [{"action_id": action_id}]}
+    payload = {"type": "block_actions", "team": {"id": "T1"}, "actions": [{"action_id": action_id}]}
     return urlencode({"payload": json.dumps(payload)}).encode()
 
 

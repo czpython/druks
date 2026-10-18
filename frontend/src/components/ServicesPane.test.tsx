@@ -351,6 +351,35 @@ describe('ServicesPane', () => {
     expect(screen.getByText('acme, paulo')).toBeTruthy()
   })
 
+  it('offers Install on a managed Slack card until its install, then shows its workspace', async () => {
+    const waiting: Service = {
+      ...pasteOnly,
+      slug: 'slack',
+      title: 'Slack',
+      managed: true,
+      managedBy: 'Druks Cloud',
+      facts: { url: 'http://cloud.test/_instance/1/services/slack', client_id: '1234.5678' },
+      installUrl: '/api/oauth/slack/connect?install=1',
+    }
+    const ready: Service = { ...waiting, connected: true, facts: { ...waiting.facts, team: 'Acme' } }
+    stubFetch([[waiting], [ready]])
+    renderPane()
+
+    expect(await screen.findByText('Installation needed')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Slack' }))
+    expect(screen.getByText('Install').getAttribute('href')).toBe(waiting.installUrl)
+    expect(screen.queryByRole('button', { name: 'Connect Slack' })).toBeNull()
+    expect(screen.queryByText('Create Slack App')).toBeNull()
+
+    act(() => {
+      new BroadcastChannel('druks-service-connect').postMessage('slack')
+    })
+
+    expect(await screen.findByText('Acme')).toBeTruthy()
+    expect(screen.getByText('Managed by Druks Cloud')).toBeTruthy()
+    expect(screen.queryByText('Create Slack App')).toBeNull()
+  })
+
   it.each(['Druks Cloud', ''])('locks a managed service with manager %j', async (managedBy) => {
     stubFetch([[{ ...pasteOnly, connected: true, managed: true, managedBy }]])
     renderPane()

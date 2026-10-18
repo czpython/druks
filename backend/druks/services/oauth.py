@@ -63,8 +63,8 @@ async def _post_token(
 
 
 class OauthClient:
-    """One provider's OAuth 2.0 authorization-code flow with PKCE, and a refresh
-    that is safe when the provider rotates refresh tokens. Use it for a provider
+    """One provider's OAuth 2.0 authorization-code flow, and a refresh that is
+    safe when the provider rotates refresh tokens. Use it for a provider
     with fixed endpoints and a pre-registered client::
 
         client = OauthClient(
@@ -96,6 +96,8 @@ class OauthClient:
 
     ``token_headers`` go on every token request, ``state_prefix`` begins every
     state, and ``redirect_uri`` fixes the callback; empty, the caller chooses it.
+    ``pkce`` proves the code with PKCE S256. Turn it off only for a provider that
+    refuses PKCE from a client that has a secret.
     """
 
     def __init__(
@@ -112,6 +114,7 @@ class OauthClient:
         token_headers: dict[str, str] | None = None,
         state_prefix: str = "",
         redirect_uri: str = "",
+        pkce: bool = True,
         mint_wait_interval_seconds: float = OAUTH_MINT_WAIT_INTERVAL_SECONDS,
         mint_wait_attempts: int = OAUTH_MINT_WAIT_ATTEMPTS,
         is_grant_revoked: Callable[[int, dict[str, Any]], bool] = is_grant_revoked,
@@ -127,6 +130,7 @@ class OauthClient:
         self.token_headers = dict(token_headers or {})
         self.state_prefix = state_prefix
         self.redirect_uri = redirect_uri
+        self.pkce = pkce
         self.mint_wait_interval_seconds = mint_wait_interval_seconds
         self.mint_wait_attempts = mint_wait_attempts
         self.is_grant_revoked = is_grant_revoked
@@ -139,22 +143,19 @@ class OauthClient:
         consent_query: dict[str, str] | None = None,
         context: dict[str, Any] | None = None,
         extra_authorize_params: dict[str, str] | None = None,
+        extra_token_params: dict[str, str] | None = None,
         authorization_endpoint: str = "",
     ) -> str:
         """Stash the pending exchange in Redis under a new single-use state, and
         return the consent URL. ``consent_query`` is the query that asks for ``scopes``,
         when the provider names them otherwise than RFC 6749's ``scope``. ``context``
         comes back from ``complete_connect``. ``extra_authorize_params`` override the
-        client's declared ones on the same key. ``authorization_endpoint`` is another
-        provider page that starts the same flow, such as GitHub's install page.
-        Nothing durable is written, so an abandoned consent expires."""
+        client's declared ones on the same key, and ``extra_token_params`` do the same
+        in this flow's code exchange. ``authorization_endpoint`` is another provider
+        page that starts the same flow, such as GitHub's install page. Nothing durable
+        is written, so an abandoned consent expires."""
         state = self.state_prefix + secrets.token_urlsafe(32)
-        code_verifier = secrets.token_urlsafe(64)
-        code_challenge = (
-            base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest())
-            .rstrip(b"=")
-            .decode()
-        )
+        code_verifier = secrets.token_urlsafe(64) if self.pkce else ""
         pending = {
             **(context or {}),
             "provider": self.provider,
@@ -165,7 +166,7 @@ class OauthClient:
             "client_id": self.client_id,
             "client_secret": self.client_secret,
             "basic_auth": self.basic_auth,
-            "extra_token_params": self.extra_token_params,
+            "extra_token_params": {**self.extra_token_params, **(extra_token_params or {})},
             "token_headers": self.token_headers,
         }
         await get_client().set(
@@ -178,9 +179,11 @@ class OauthClient:
             "client_id": self.client_id,
             "redirect_uri": redirect_uri,
             "state": state,
-            "code_challenge": code_challenge,
-            "code_challenge_method": "S256",
         }
+        if code_verifier:
+            digest = hashlib.sha256(code_verifier.encode()).digest()
+            query["code_challenge"] = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+            query["code_challenge_method"] = "S256"
         if scopes:
             query.update(consent_query or {"scope": " ".join(scopes)})
         query.update({**self.extra_authorize_params, **(extra_authorize_params or {})})
@@ -357,9 +360,10 @@ async def complete_connect(
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": pending["redirect_uri"],
-        "code_verifier": pending["code_verifier"],
         **pending["extra_token_params"],
     }
+    if pending["code_verifier"]:
+        data["code_verifier"] = pending["code_verifier"]
     if installation_id:
         data["installation_id"] = installation_id
     async with _http() as http:

@@ -1592,6 +1592,8 @@ class Acme(Service):
     token_endpoint = "https://acme.example/oauth/token"
     # True = HTTP Basic on the token endpoint. False = secret in the body.
     basic_auth = True
+    # False for a provider that refuses PKCE from a client with a secret.
+    pkce = True
     identity_endpoint = "https://acme.example/oauth/userinfo"
     identity_scopes = ("openid", "email")
     # Query parameters the provider's consent URL must carry.
