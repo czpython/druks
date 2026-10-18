@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -28,6 +29,7 @@ from druks.workspaces import RepoWorkspace
 from .app import SoftwareFactory
 from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, TICKET_TOOLS
 from .datastructures import PullRequest
+from .exceptions import MergeConflictError
 from .github import get_review_actor
 from .journal import BuildJournal
 from .policy import PlanGate, RepoPolicy
@@ -297,10 +299,16 @@ class Build(Workflow):
 
     async def _implement_phase(self) -> None:
         while True:
+            # The pass after a merge conflict gets no automatic repair. Its evaluation
+            # goes to the work gate.
+            is_rebase_round = bool(self.journal.rebase_request)
             await self.implement()
             evaluation = await SoftwareFactory.evaluate_implementation()
-            if evaluation.verdict == EvaluationVerdict.FAIL and (
-                self.journal.implementation_revision < self._settings.max_implementation_revisions
+            if (
+                evaluation.verdict == EvaluationVerdict.FAIL
+                and not is_rebase_round
+                and self.journal.implementation_revision
+                < self._settings.max_implementation_revisions
             ):
                 continue
             if await self._work_gate():
@@ -309,8 +317,30 @@ class Build(Workflow):
     async def _work_gate(self) -> bool:
         """Park for work approval. Return True when the work is done, or False when it
         goes back to implementation."""
+        if not self.journal.is_verified:
+            # Unverified work waits in Druks with one control. Any other answer, such
+            # as a GitHub approval, cannot release it, so the work parks again.
+            ask = {"presentation": "in_app", "controls": ["request_changes"]}
+            if question := self.journal.triage_question:
+                ask["label"] = f"Triage asks: {question}"
+            decision = await ReviewWork.wait(input_request=ask)
+            if decision.action == "request_changes":
+                return await self._triage()
+            return await self._work_gate()
+        try:
+            await self.check_base_conflict()
+        except MergeConflictError as conflict:
+            # The agent gets one pass per run at a conflict with the base branch. A
+            # conflict after that waits for a person.
+            if not self.journal.merge_conflict:
+                self.journal.add(conflict)
+                return False
+            return await self._review_on_github()
         if self._policy.implementation_approval_gate() == "none":
             return await self._approved_work()
+        return await self._review_on_github()
+
+    async def _review_on_github(self) -> bool:
         decision = await ReviewWork.wait(
             input_request={
                 "presentation": "external",
@@ -328,16 +358,16 @@ class Build(Workflow):
 
     async def _approved_work(self) -> bool:
         # GitHub announces the merge. The pr.closed reaction stores the result.
+        await self._clear_draft()
         if self._policy.on_approval == "merge":
             if await self.declare_merge_intent():
                 return True
             logger.warning(
-                "GitHub did not accept the merge of %s#%s. The work parks for review again.",
+                "GitHub did not accept the merge of %s#%s. The work parks for review.",
                 (await self.subject).repo,
                 self.pr_number,
             )
-            return await self._work_gate()
-        await self._clear_draft()
+            return await self._review_on_github()
         return True
 
     async def _triage(self) -> bool:
@@ -349,7 +379,9 @@ class Build(Workflow):
             return False
         if feedback.action == HumanFeedbackAction.CLOSE:
             raise FatalError("closed at human triage")
-        # NO_CHANGE and QUESTION park the work again.
+        # NO_CHANGE and QUESTION park the work again where the person answered.
+        if self.journal.is_verified:
+            return await self._review_on_github()
         return await self._work_gate()
 
     # Body code, never @step. The agent calls inside memoize themselves and write the
@@ -374,6 +406,25 @@ class Build(Workflow):
         """Whether GitHub accepted ownership of the merge."""
         github = await Github.get_client()
         return await github.merge_when_ready((await self.subject).repo, self.pr_number)
+
+    @step
+    async def check_base_conflict(self) -> None:
+        """Raise MergeConflictError when the PR branch conflicts with its base. A
+        mergeability that GitHub has not computed yet passes, because the merge still
+        refuses a conflict."""
+        github = await Github.get_client()
+        repo = (await self.subject).repo
+        pull_request = await github.get_pull_request(repo, self.pr_number)
+        # GitHub computes mergeability in the background after the head or the base
+        # moves, and reports null until it is done.
+        for _ in range(4):
+            if pull_request["state"] == "closed" or pull_request["mergeable"] is not None:
+                break
+            await asyncio.sleep(3)
+            pull_request = await github.get_pull_request(repo, self.pr_number)
+        if pull_request["state"] == "open" and pull_request["mergeable"] is False:
+            base_ref = pull_request["base"]["ref"]
+            raise MergeConflictError(base_ref, await github.get_branch_head(repo, base_ref))
 
     # The branch and the PR come from the first delivery. Before it, both are None.
     # Rework deliveries reuse the pair. The item row and webhook routing use it as a

@@ -1,17 +1,26 @@
+import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import (
     AcceptanceCriterionOutput,
+    EvaluationOutput,
     PlanData,
     QuestionOptionOutput,
     QuestionOutput,
     ReviewOutput,
     ReviewWork,
 )
-from druks.contrib.software_factory.enums import ReviewDecision
-from druks.contrib.software_factory.policy import PlanGate, RepoPolicy
+from druks.contrib.software_factory.enums import (
+    EvaluationVerdict,
+    HumanFeedbackAction,
+    ReviewDecision,
+)
+from druks.contrib.software_factory.exceptions import MergeConflictError
+from druks.contrib.software_factory.journal import BuildJournal
+from druks.contrib.software_factory.policy import Gates, PlanGate, RepoPolicy
 from druks.contrib.software_factory.workflows import Build
 from druks.workflows import FatalError, OperatorReply, Run
 
@@ -572,7 +581,9 @@ async def test_operator_rounds_after_the_critique_never_rerun_the_reviewer(monke
 async def test_review_work_ask_renders_a_notification_body(monkeypatch):
     workflow = _flow()
     workflow.subject = SimpleNamespace(repo="org/repo")
-    workflow.journal = SimpleNamespace(implementations=[SimpleNamespace(pr_number=42)])
+    workflow.journal = SimpleNamespace(
+        is_verified=True, implementations=[SimpleNamespace(pr_number=42)]
+    )
     input_requests: list[dict] = []
 
     async def fake_wait(*, input_request):
@@ -584,6 +595,7 @@ async def test_review_work_ask_renders_a_notification_body(monkeypatch):
 
     monkeypatch.setattr(ReviewWork, "wait", fake_wait)
     monkeypatch.setattr(workflow, "_approved_work", fake_approved_work)
+    monkeypatch.setattr(workflow, "check_base_conflict", AsyncMock())
 
     await workflow._work_gate()
 
@@ -629,24 +641,302 @@ async def test_approval_ends_the_build_without_merging_by_default(monkeypatch):
     assert cleared == [True]
 
 
-async def test_a_rejected_merge_intent_reparks_the_work_gate(monkeypatch):
-    """GitHub declining the merge sends the operator back to the work gate,
-    rather than finishing a run whose PR never merged."""
+def _merging_flow(*, approval: str = "none") -> Build:
     flow = Build()
-    flow._policy = RepoPolicy(on_approval="merge")
+    flow._policy = RepoPolicy(gates=Gates(implementation_approval=approval), on_approval="merge")
     flow.subject = SimpleNamespace(repo="clawhaven/example")
-    flow.journal = SimpleNamespace(implementations=[])
-    reparked = []
+    return flow
 
-    async def declined():
-        return False
 
-    async def fake_work_gate():
-        reparked.append(True)
+async def test_ungated_passed_work_is_marked_ready_then_merged_once(monkeypatch):
+    """With approval off, passing work is marked ready, then merged with one merge
+    call."""
+    flow = _merging_flow()
+    flow.journal = SimpleNamespace(is_verified=True)
+    calls = []
+
+    async def ready():
+        calls.append("ready")
+
+    async def merged():
+        calls.append("merge")
         return True
 
-    monkeypatch.setattr(flow, "declare_merge_intent", declined)
-    monkeypatch.setattr(flow, "_work_gate", fake_work_gate)
+    monkeypatch.setattr(flow, "check_base_conflict", AsyncMock())
+    monkeypatch.setattr(flow, "_clear_draft", ready)
+    monkeypatch.setattr(flow, "declare_merge_intent", merged)
 
-    assert await flow._approved_work() is True
-    assert reparked == [True]
+    assert await flow._work_gate() is True
+    assert calls == ["ready", "merge"]
+
+
+async def test_a_refused_merge_parks_for_review_before_another_attempt(monkeypatch):
+    """GitHub declining the merge parks the work for review on GitHub. Druks calls
+    GitHub again only after a person approves."""
+    flow = _merging_flow()
+    flow.journal = SimpleNamespace(
+        is_verified=True, implementations=[SimpleNamespace(pr_number=42)]
+    )
+    calls = []
+    accepted = iter([False, True])
+
+    async def ready():
+        return
+
+    async def merge():
+        calls.append("merge")
+        return next(accepted)
+
+    async def fake_wait(*, input_request):
+        calls.append(input_request["presentation"])
+        return ReviewWork(action="approve")
+
+    monkeypatch.setattr(flow, "check_base_conflict", AsyncMock())
+    monkeypatch.setattr(flow, "_clear_draft", ready)
+    monkeypatch.setattr(flow, "declare_merge_intent", merge)
+    monkeypatch.setattr(ReviewWork, "wait", fake_wait)
+
+    assert await flow._work_gate() is True
+    assert calls == ["merge", "external", "merge"]
+
+
+@pytest.mark.parametrize("approval", ["none", "human"])
+async def test_unverified_work_waits_in_druks_until_a_change_request(monkeypatch, approval):
+    """Blocked or exhausted work never reaches approval. It waits in Druks with one
+    control, and a GitHub approval parks it again."""
+    flow = _merging_flow(approval=approval)
+    flow.journal = SimpleNamespace(is_verified=False, triage_question=None)
+    asks = []
+    replies = iter(
+        [ReviewWork(action="approve"), ReviewWork(action="request_changes", note="Split it.")]
+    )
+
+    async def fake_wait(*, input_request):
+        asks.append(input_request)
+        return next(replies)
+
+    async def triaged():
+        return False
+
+    async def approved():
+        raise AssertionError("unverified work must not be marked ready or merged")
+
+    monkeypatch.setattr(ReviewWork, "wait", fake_wait)
+    monkeypatch.setattr(flow, "_triage", triaged)
+    monkeypatch.setattr(flow, "_approved_work", approved)
+
+    assert await flow._work_gate() is False
+    assert asks == [{"presentation": "in_app", "controls": ["request_changes"]}] * 2
+
+
+async def test_an_open_triage_question_shows_in_the_in_app_ask(monkeypatch):
+    """When triage asked the operator a question, the in-app wait shows it, so the
+    operator can answer it in Druks."""
+    flow = _merging_flow()
+    flow.journal = SimpleNamespace(is_verified=False, triage_question="Which file?")
+    asks = []
+
+    async def fake_wait(*, input_request):
+        asks.append(input_request)
+        return ReviewWork(action="request_changes", note="The parser.")
+
+    async def triaged():
+        return False
+
+    monkeypatch.setattr(ReviewWork, "wait", fake_wait)
+    monkeypatch.setattr(flow, "_triage", triaged)
+
+    assert await flow._work_gate() is False
+    assert asks[0]["label"] == "Triage asks: Which file?"
+
+
+async def test_a_no_change_triage_after_a_refused_merge_waits_on_github(monkeypatch):
+    """A change request on a refused merge is never skipped. When triage finds no
+    change to make, the work waits for review on GitHub again instead of merging."""
+    flow = _merging_flow()
+    flow.journal = SimpleNamespace(
+        is_verified=True, implementations=[SimpleNamespace(pr_number=42)]
+    )
+    calls = []
+    triages = iter([HumanFeedbackAction.NO_CHANGE, HumanFeedbackAction.CHANGE_REQUIRED])
+
+    async def ready():
+        return
+
+    async def refused():
+        calls.append("merge")
+        return False
+
+    async def fake_wait(*, input_request):
+        calls.append(input_request["presentation"])
+        return ReviewWork(action="request_changes", note="Split the migration.")
+
+    async def triage():
+        return SimpleNamespace(action=next(triages))
+
+    monkeypatch.setattr(flow, "check_base_conflict", AsyncMock())
+    monkeypatch.setattr(flow, "_clear_draft", ready)
+    monkeypatch.setattr(flow, "declare_merge_intent", refused)
+    monkeypatch.setattr(ReviewWork, "wait", fake_wait)
+    monkeypatch.setattr(SoftwareFactory, "triage_human_feedback", triage)
+
+    assert await flow._work_gate() is False
+    assert calls == ["merge", "external", "external"]
+
+
+@pytest.mark.parametrize("is_verified", [True, False])
+async def test_the_review_park_keeps_unverified_work_a_draft(monkeypatch, is_verified):
+    """A review park marks verified work ready and asks for a review. Unverified work
+    stays a draft, and nobody is asked."""
+    flow = Build()
+    flow.journal = SimpleNamespace(is_verified=is_verified)
+    calls = []
+
+    async def set_pr_draft(*, draft):
+        calls.append(("draft", draft))
+
+    async def request_review():
+        calls.append("review")
+
+    monkeypatch.setattr(flow, "set_pr_draft", set_pr_draft)
+    monkeypatch.setattr(flow, "request_assignee_review", request_review)
+
+    await ReviewWork.on_wait(flow)
+
+    assert calls == ([("draft", False), "review"] if is_verified else [("draft", True)])
+
+
+@pytest.mark.parametrize("approval", ["none", "human"])
+async def test_a_conflict_at_the_gate_gets_one_rebase_round_then_waits(monkeypatch, approval):
+    """The gate checks the PR before review or approval. The first conflict sends the
+    work back for one rebase round, and a conflict after that waits on GitHub."""
+    flow = _merging_flow(approval=approval)
+    flow.journal = BuildJournal()
+    flow.journal.add(
+        EvaluationOutput(
+            verdict=EvaluationVerdict.PASS,
+            body="",
+            review_notes="",
+            findings=[],
+            checks=[],
+            acceptance_results=[],
+        )
+    )
+    conflicts = iter([MergeConflictError("main", "first"), MergeConflictError("main", "second")])
+    parks = []
+
+    async def conflicting():
+        raise next(conflicts)
+
+    async def approved():
+        raise AssertionError("conflicting work must not be approved or merged")
+
+    async def fake_wait(*, input_request):
+        parks.append(input_request["presentation"])
+        return ReviewWork(action="request_changes", note="Rebase it by hand.")
+
+    async def triaged():
+        return False
+
+    monkeypatch.setattr(flow, "check_base_conflict", conflicting)
+    monkeypatch.setattr(flow, "_approved_work", approved)
+    monkeypatch.setattr(ReviewWork, "wait", fake_wait)
+    monkeypatch.setattr(flow, "_triage", triaged)
+
+    assert await flow._work_gate() is False
+    assert flow.journal.rebase_request.base_sha == "first"
+    assert parks == []
+    assert await flow._work_gate() is False
+    assert parks == ["external"]
+    assert flow.journal.merge_conflict.base_sha == "first"
+
+
+async def test_the_rebase_round_goes_to_the_work_gate_even_when_it_fails(monkeypatch):
+    """The agent takes one pass at a conflict. A failed pass waits for a person
+    instead of starting automatic repairs."""
+    flow = Build()
+    flow._settings = Build.Settings(max_implementation_revisions=5)
+    flow.journal = BuildJournal()
+    flow.journal.add(MergeConflictError("main", "c0ffee"))
+    calls = []
+
+    async def implement():
+        calls.append("implement")
+
+    async def evaluate():
+        return SimpleNamespace(verdict=EvaluationVerdict.FAIL)
+
+    async def work_gate():
+        calls.append("gate")
+        return True
+
+    monkeypatch.setattr(flow, "implement", implement)
+    monkeypatch.setattr(SoftwareFactory, "evaluate_implementation", evaluate)
+    monkeypatch.setattr(flow, "_work_gate", work_gate)
+
+    await flow._implement_phase()
+
+    assert calls == ["implement", "gate"]
+
+
+def _fake_github(monkeypatch, *mergeable: bool | None, state: str = "open") -> list[str]:
+    calls: list[str] = []
+    reads = iter(mergeable)
+
+    async def get_pull_request(repo, pr_number):
+        calls.append("read")
+        return {
+            "state": state,
+            "mergeable": next(reads, mergeable[-1]),
+            "base": {"ref": "main", "sha": "base-at-open"},
+        }
+
+    async def get_branch_head(repo, branch):
+        calls.append("tip")
+        return "main-tip"
+
+    async def client():
+        return SimpleNamespace(get_pull_request=get_pull_request, get_branch_head=get_branch_head)
+
+    monkeypatch.setattr("druks.core.services.Github.get_client", client)
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+    return calls
+
+
+def _flow_with_pr() -> Build:
+    flow = _merging_flow()
+    flow.journal = SimpleNamespace(implementations=[SimpleNamespace(pr_number=42)])
+    return flow
+
+
+@pytest.mark.parametrize("mergeable", [(False,), (None, False)])
+async def test_a_conflict_raises_with_the_current_base_tip(monkeypatch, mergeable):
+    """The rebase targets the base branch as it is now, not the base the PR was
+    opened against."""
+    calls = _fake_github(monkeypatch, *mergeable)
+
+    with pytest.raises(MergeConflictError) as raised:
+        await Build.check_base_conflict.__wrapped__(_flow_with_pr())
+
+    assert (raised.value.base_ref, raised.value.base_sha) == ("main", "main-tip")
+    assert calls == ["read"] * len(mergeable) + ["tip"]
+
+
+@pytest.mark.parametrize("mergeable", [(True,), (None, True), (None,)])
+async def test_a_clean_or_uncomputed_branch_passes_the_check(monkeypatch, mergeable):
+    """A clean branch goes on to review or approval. So does one whose mergeability
+    GitHub has not computed, because the merge still refuses a conflict."""
+    calls = _fake_github(monkeypatch, *mergeable)
+
+    await Build.check_base_conflict.__wrapped__(_flow_with_pr())
+
+    assert "tip" not in calls
+
+
+async def test_a_closed_pull_request_passes_the_check(monkeypatch):
+    """A PR that is already closed goes on, and the merge step converges on it."""
+    calls = _fake_github(monkeypatch, False, state="closed")
+
+    await Build.check_base_conflict.__wrapped__(_flow_with_pr())
+
+    assert calls == ["read"]

@@ -415,6 +415,15 @@ class GitHubClient:
         return response.parsed_data.model_dump()
 
     @_retry_on_401
+    async def get_branch_head(self, repo: str, branch: str) -> str:
+        """The SHA at the tip of ``branch``. A pull request's ``base.sha`` is the base
+        it was opened against, not the branch's current tip."""
+        owner, name = repo.split("/", 1)
+        github = await self._for_repo(repo)
+        response = await github.rest.repos.async_get_branch(owner, name, branch)
+        return response.parsed_data.commit.sha
+
+    @_retry_on_401
     async def squash_merge_pull_request(self, repo: str, pr_number: int) -> bool:
         # No commit_title: GitHub then titles the squash commit from the PR title.
         owner, name = repo.split("/", 1)

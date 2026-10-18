@@ -9,6 +9,8 @@ from druks.contrib.software_factory.contracts import (
     ReviewWork,
     TriageOutput,
 )
+from druks.contrib.software_factory.enums import EvaluationVerdict, HumanFeedbackAction
+from druks.contrib.software_factory.exceptions import MergeConflictError
 from druks.workflows import Journal
 
 
@@ -27,6 +29,9 @@ class BuildJournal(Journal):
 
     @property
     def pr_base_sha(self) -> str | None:
+        # A rebase onto the base branch moves the start of the PR's own changes.
+        if self.merge_conflict:
+            return self.merge_conflict.base_sha
         with suppress(IndexError):
             return self.implementations[0].base_sha
         return
@@ -44,6 +49,10 @@ class BuildJournal(Journal):
     @property
     def evaluations(self) -> list[EvaluationOutput]:
         return self.filter(EvaluationOutput)
+
+    @property
+    def is_verified(self) -> bool:
+        return self.evaluations[-1].verdict == EvaluationVerdict.PASS
 
     @property
     def plan_reviews(self) -> list[ReviewOutput]:
@@ -71,6 +80,31 @@ class BuildJournal(Journal):
         return
 
     @property
+    def triage_question(self) -> str | None:
+        # Triage's question waits for the next answer. An evaluation after it means
+        # the work moved on.
+        triage = self.latest(TriageOutput)
+        if (
+            triage
+            and triage.action == HumanFeedbackAction.QUESTION
+            and not self.filter(EvaluationOutput, after=triage)
+        ):
+            return triage.question
+        return
+
+    @property
+    def merge_conflict(self) -> MergeConflictError | None:
+        return self.latest(MergeConflictError)
+
+    @property
+    def rebase_request(self) -> MergeConflictError | None:
+        # The conflict drives exactly one implement round, like a revision request.
+        conflict = self.merge_conflict
+        if conflict and not self.filter(EvaluationOutput, after=conflict):
+            return conflict
+        return
+
+    @property
     def human_feedback(self) -> list[dict[str, Any]]:
         # Every request_changes reply, in order, with the triage that digested it.
         # The newest reply has no triage yet while its own triage agent renders
@@ -82,7 +116,7 @@ class BuildJournal(Journal):
             entries.append(
                 {
                     "reviewer": reply.reviewer,
-                    "body": reply.body,
+                    "note": reply.note,
                     "triage": triages[0] if triages else None,
                 }
             )

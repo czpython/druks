@@ -10,6 +10,16 @@ class PrefixTakenError(DruksError):
         )
 
 
+class MergeConflictError(DruksError):
+    """GitHub cannot merge the pull request, because its branch conflicts with the
+    base branch. It keeps that base, so a replayed step raises the same conflict."""
+
+    def __init__(self, base_ref: str, base_sha: str) -> None:
+        super().__init__(f"The pull request conflicts with {base_ref} at {base_sha}.")
+        self.base_ref = base_ref
+        self.base_sha = base_sha
+
+
 class TicketNotFound(AgentApiError):
     status_code = 404
     code = "TICKET_NOT_FOUND"

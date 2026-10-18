@@ -63,7 +63,7 @@ async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict
                 item,
                 action=payload["action"],
                 reviewer=payload["reviewer"],
-                body=payload["body"],
+                note=payload["body"],
             )
 
 
