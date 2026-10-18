@@ -54,6 +54,7 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     "import fs from 'node:fs'; import path from 'node:path';",
     "import { homedir } from 'node:os'; import { randomUUID } from 'node:crypto';",
     "import { Readable, Writable } from 'node:stream';",
+    "fs.appendFileSync('spawns.log', process.pid + '\\n');",
     "let sessionId, cwd, release, memory = '';",
     "const transcript = () => path.join(homedir(), '.claude/projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'), sessionId + '.jsonl');",
     "new AgentSideConnection(client => ({",
@@ -64,6 +65,7 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     " fs.writeFileSync(path.join(cwd, 'setup.json'), JSON.stringify(p.mcpServers));",
     " return {sessionId, configOptions: [{id: 'model'}, {id: 'effort'}, {id: 'fast'}]}; },",
     "loadSession: async p => { cwd=p.cwd; sessionId=p.sessionId; memory=fs.readFileSync(transcript(), 'utf8');",
+    " fs.writeFileSync(path.join(cwd, 'setup.json'), JSON.stringify(p.mcpServers));",
     " await client.sessionUpdate({sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'replay'}}}); return {configOptions: [{id: 'model'}, {id: 'effort'}, {id: 'fast'}]}; },",
     "setSessionMode: async p => { if (p.modeId !== 'bypassPermissions') throw Error('mode'); return {}; },",
     "setSessionConfigOption: async p => { fs.appendFileSync(path.join(cwd, 'config.log'), p.configId + '=' + p.value + '\\n');",
@@ -96,8 +98,8 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     }
     await fs.rm(temporary, { recursive: true, force: true });
   });
-  async function launch(directory) {
-    const child = spawn(process.execPath, ["--import", bootstrap, bridge, String(port)], {
+  async function launch(directory, version) {
+    const child = spawn(process.execPath, ["--import", bootstrap, bridge, String(port), version], {
       detached: true, stdio: ["ignore", "ignore", "pipe"],
       env: { ...process.env, HOME: directory, MCP_DRUKS_TOKEN: "placeholder" },
     });
@@ -110,7 +112,7 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     return child;
   }
   const start = conversation => ({
-    method: "start", conversationId: conversation, archivePath: "", harness: "claude", command: [adapter],
+    method: "start", conversationId: conversation, archivePath: "", setup: "one", harness: "claude", command: [adapter],
     sessionFiles: [path.join(home, ".claude/projects/*/{sessionId}.jsonl"), path.join(home, ".claude/projects/*/{sessionId}")],
     mode: "bypassPermissions", model: "claude-opus-4-7", meta: { harness: "options" }, env: {}, files: {},
     options: { model: "model", effort: "effort", fast: "fast" },
@@ -118,26 +120,42 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     headers: [], mcpServers: [],
   });
   const status = conversation => request(port, { method: "status", conversationId: conversation });
-  const first = await launch(home);
+  const read = (conversation, name) => fs.readFile(path.join(home, "work", "chat", conversation, name), "utf8");
+  const spawns = async conversation => (await read(conversation, "spawns.log")).trim().split("\n").length;
+  const first = await launch(home, "one");
+  assert.equal((await request(port, { method: "ping" })).version, "one");
   assert.equal((await request(port, start(id(1)))).ok, true);
   const conversationHeader = { name: "X-Druks-Conversation", value: id(2) };
   const login = path.join(home, ".fake/login.json");
   const linear = { name: "linear", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer ${MCP_DRUKS_TOKEN}" } };
   assert.equal((await request(port, { ...start(id(2)), headers: [conversationHeader], mcpServers: [linear], files: { [login]: '{"token": "${MCP_DRUKS_TOKEN}"}' } })).ok, true);
-  const servers = JSON.parse(await fs.readFile(path.join(home, "work", "chat", id(2), "setup.json"), "utf8"));
+  const servers = JSON.parse(await read(id(2), "setup.json"));
   assert.deepEqual(servers[0].headers[1], conversationHeader);
   // A registry server's header names its placeholder, and the bridge fills it the same way.
   assert.deepEqual(servers[1], { name: "linear", type: "http", url: linear.url, headers: [{ name: "Authorization", value: "Bearer placeholder" }] });
   // A file names a placeholder variable, and the bridge fills it from the sandbox environment.
   assert.equal(await fs.readFile(login, "utf8"), '{"token": "placeholder"}');
   assert.equal((await request(port, { ...start(id(1)), model: "claude-sonnet-5", effort: "low", fastMode: false })).ok, true);
-  const settings = await fs.readFile(path.join(home, "work", "chat", id(1), "config.log"), "utf8");
+  const settings = await read(id(1), "config.log");
   // The session opens on its model at session/new; the model option only switches it.
   assert.deepEqual(settings.trim().split("\n"), ["effort=high", "fast=on", "model=claude-sonnet-5", "effort=low", "fast=off"]);
 
   await request(port, { method: "prompt", conversationId: id(1), messageId: message(1), content: [...text("remember-one"), { type: "image", data: "aGk=", mimeType: "image/png" }] }, true);
   await until(() => request(port, { method: "events", conversationId: id(1), after: 0 }), result => result.events.length > 0);
   const saved = await until(() => status(id(1)), result => result.status === "replied");
+
+  // A changed setup opens the same session in a new adapter with the current servers.
+  assert.equal((await request(port, { ...start(id(1)), setup: "two", mcpServers: [linear] })).ok, true);
+  assert.equal(await spawns(id(1)), 2);
+  assert.equal(JSON.parse(await read(id(1), "setup.json"))[1].name, "linear");
+  // The same setup with another model keeps the adapter.
+  assert.equal((await request(port, { ...start(id(1)), setup: "two", mcpServers: [linear], model: "claude-opus-4-7" })).ok, true);
+  assert.equal(await spawns(id(1)), 2);
+  await request(port, { method: "prompt", conversationId: id(1), messageId: message(9), content: text("after-reload") });
+  await until(() => status(id(1)), result => result.status === "replied");
+  const reloaded = (await request(port, { method: "events", conversationId: id(1), after: 0 })).events;
+  // The reloaded session remembers the first turn, and its replay reaches no event.
+  assert.deepEqual(reloaded.map(event => event.notification.update.content.text), ["remember-one imageafter-reload"]);
   await request(port, { method: "prompt", conversationId: id(2), messageId: message(2), content: text("private-two") });
   await until(() => status(id(2)), result => result.status === "replied");
   await request(port, { method: "prompt", conversationId: id(2), messageId: message(7), content: text("wait"), timeout: 0.2 });
@@ -146,6 +164,10 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
   await request(port, { method: "prompt", conversationId: id(1), messageId: message(3), content: text("wait") });
   await until(() => status(id(1)), result => result.status === "running");
   assert.equal((await request(port, { method: "prompt", conversationId: id(1), messageId: message(4), content: text("duplicate") })).ok, false);
+  // A running turn refuses a changed setup and keeps its bridge through a retire.
+  assert.equal((await request(port, { ...start(id(1)), setup: "three" })).ok, false);
+  assert.equal((await request(port, { method: "retire" })).busy, true);
+  assert.equal((await status(id(1))).status, "running");
   await until(() => request(port, { method: "events", conversationId: id(1), after: 0 }), result => result.events.some(event => event.messageId === message(3)));
   assert.equal((await request(port, { method: "events", conversationId: id(1), after: 0 })).events.some(event => event.messageId === message(1)), false);
   await request(port, { method: "cancel", conversationId: id(1), messageId: message(3) });
@@ -160,12 +182,14 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
 
   const archive = path.join(temporary, "session.tar.gz");
   await fs.copyFile(saved.archivePath, archive);
-  process.kill(-first.pid, "SIGKILL");
+  // An idle bridge exits after it answers a retire.
+  assert.equal((await request(port, { method: "retire" })).busy, false);
   await once(first, "exit");
   // A new sandbox has the same home path, so the archived paths land where the adapter reads them.
   await fs.rm(home, { recursive: true, force: true });
   await fs.mkdir(home);
-  const second = await launch(home);
+  const second = await launch(home, "two");
+  assert.equal((await request(port, { method: "ping" })).version, "two");
   assert.equal((await request(port, { ...start(id(1)), archivePath: archive })).ok, true);
   assert.equal((await request(port, { method: "events", conversationId: id(1), after: 0 })).events.length, 0);
   await request(port, { method: "prompt", conversationId: id(1), messageId: message(5), content: text("continue") });
@@ -187,6 +211,6 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
   assert.equal((await status(id(1))).stopReason, "");
   process.kill(-second.pid, "SIGKILL");
   await once(second, "exit");
-  await launch(home);
+  await launch(home, "two");
   assert.equal((await status(id(1))).status, "interrupted");
 });

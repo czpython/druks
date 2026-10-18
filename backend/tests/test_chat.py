@@ -13,7 +13,12 @@ from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.chat import service, sockets
 from druks.chat.bridge import Bridge
-from druks.chat.constants import CHAT_KEY_NAME, CONVERSATION_HEADER, DELIVERY_FAILED_MESSAGE
+from druks.chat.constants import (
+    BRIDGE_VERSION,
+    CHAT_KEY_NAME,
+    CONVERSATION_HEADER,
+    DELIVERY_FAILED_MESSAGE,
+)
 from druks.chat.enums import ConversationSource, MessageRole, MessageState
 from druks.chat.exceptions import (
     ChatBridgeError,
@@ -459,6 +464,34 @@ async def test_bridge_start_uploads_the_bridge_only_when_none_answers():
     assert upload.kwargs["local"].is_file()
     assert upload.kwargs["remote"].endswith("/druks-chat-bridge.mjs")
     host.exec.assert_awaited_once()
+
+
+async def test_bridge_start_retires_the_bridge_of_an_older_druks():
+    older = b'{"ok": true, "version": "older"}\n'
+    current = f'{{"ok": true, "version": "{BRIDGE_VERSION}"}}\n'.encode()
+    channels = [
+        channel(older),
+        channel(b'{"ok": true, "busy": true}\n'),
+        channel(older),
+        channel(b'{"ok": true, "busy": false}\n'),
+        channel(current),
+    ]
+    host = SimpleNamespace(
+        ssh_username="druks",
+        open_tcp_connection=AsyncMock(side_effect=channels),
+        upload_file=AsyncMock(),
+        exec=AsyncMock(return_value=SimpleNamespace(ok=True)),
+    )
+
+    # A busy bridge serves this turn; an idle one exits, and the launch carries the version.
+    await Bridge(host).start()
+    host.upload_file.assert_not_awaited()
+    await Bridge(host).start()
+
+    methods = [json.loads(writer.write.call_args.args[0])["method"] for _, writer in channels]
+    assert methods == ["ping", "retire", "ping", "retire", "ping"]
+    host.upload_file.assert_awaited_once()
+    assert BRIDGE_VERSION in host.exec.await_args.args[0][2]
 
 
 async def test_new_sandbox_restores_archive_and_drains_pending_messages(

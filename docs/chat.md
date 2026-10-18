@@ -189,6 +189,14 @@ After a completed turn, Druks saves the adapter's session files as a Druks
 file. The next saved archive replaces the previous archive. A conversation that
 moves to another harness starts a fresh agent session and keeps its messages.
 
+Before each turn, the bridge compares the conversation's instructions and MCP
+servers with the ones its adapter opened with. When they differ, it starts a
+new adapter and loads the same agent session. A deployed prompt change or a
+newly connected MCP server therefore reaches the next message, and the history
+stays. A model or effort change applies to the live adapter. Each Druks release
+carries its own bridge program. A bridge of an older release exits once no turn
+runs in it, and the next turn starts the current one.
+
 ### Druks restarts
 
 The agent keeps its process in the sandbox. Each delivery is a DBOS workflow.
