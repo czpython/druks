@@ -11,7 +11,7 @@ from druks.sandbox.datastructures import Sandbox
 from druks.sandbox.host import Host
 from druks.sandbox.layout import get_remote_home, get_work_root
 
-from .constants import CHAT_BRIDGE_PORT
+from .constants import BRIDGE_VERSION, CHAT_BRIDGE_PORT
 from .exceptions import ChatBridgeError, ChatBridgeUnavailable
 
 
@@ -46,7 +46,7 @@ class Bridge:
         raise ChatBridgeError(response["error"])
 
     async def start(self) -> None:
-        """Upload and start the bridge in the sandbox unless it already answers."""
+        """Upload and start the bridge in the sandbox unless the current one answers."""
         if await self.is_running():
             return
         script = f"{get_remote_home(self.host.ssh_username)}/druks-chat-bridge.mjs"
@@ -57,7 +57,7 @@ class Bridge:
                 "sh",
                 "-c",
                 f"mkdir -p {root} && nohup setsid node {shlex.quote(script)} {CHAT_BRIDGE_PORT} "
-                f">{root}/chat-bridge.log 2>&1 </dev/null &",
+                f"{BRIDGE_VERSION} >{root}/chat-bridge.log 2>&1 </dev/null &",
             ],
             timeout=10,
         )
@@ -68,10 +68,15 @@ class Bridge:
                 await asyncio.sleep(0.25)
 
     async def is_running(self) -> bool:
+        """Whether a bridge of this Druks answers. The bridge of an older Druks retires: an
+        idle one exits after it answers, and a busy one serves this turn."""
         try:
-            await self.request("ping")
+            pong = await self.request("ping")
         except ChatBridgeUnavailable:
             return False
+        # A bridge from before versions cannot retire; it serves until its sandbox lease ends.
+        if "version" in pong and pong["version"] != BRIDGE_VERSION:
+            return (await self.request("retire"))["busy"]
         return True
 
     async def events(self, conversation_id: str, after: int) -> list[dict]:

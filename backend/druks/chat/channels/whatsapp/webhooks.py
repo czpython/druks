@@ -4,6 +4,7 @@ import re
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
+import vobject
 from dbos import DBOS
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -130,11 +131,26 @@ class WahaEvents(Webhook):
             reply_to.get("participant") in self.own_ids
         )
 
-    @property
-    def text(self) -> str:
-        """The message's text without the number's tag, which the agent would take for the
-        person it answers."""
-        return self.own_tag.sub("", self.data["payload"]["body"] or "").strip()
+    def get_text(self, message: dict) -> str:
+        """A message's text without the number's tag, which the agent would take for the
+        person it answers. A line for each shared contact follows it."""
+        typed_text = self.own_tag.sub("", message["body"] or "").strip()
+        contacts = [f"Shared contact: {contact}" for contact in self.get_contacts(message)]
+        return "\n".join(filter(None, [typed_text, *contacts]))
+
+    def get_contacts(self, message: dict) -> list[str]:
+        """The name and phone numbers on each contact card that a message shares. WhatsApp
+        marks a number on WhatsApp with its waid, which holds the country code that a saved
+        number can omit."""
+        vcards = "\n".join(message.get("vCards") or [])
+        contacts = []
+        for card in vobject.readComponents(vcards):
+            phones = [
+                f"+{tel.params['WAID'][0]}" if "WAID" in tel.params else tel.value
+                for tel in card.contents.get("tel", [])
+            ]
+            contacts.append(", ".join([card.fn.value, *phones]))
+        return contacts
 
     def get_user(self) -> dict[str, str]:
         """The person of the message's chat, as WAHA names them. A person known only by
@@ -162,7 +178,7 @@ class WahaEvents(Webhook):
     ) -> None:
         """Save the message and start its turn. A message with no text and no media, such
         as a shared location, gives the agent nothing to read."""
-        body = self.text
+        body = self.get_text(self.data["payload"])
         file = await self.save_media(session, conversation)
         if body or file:
             await conversation.create_message(session, body, source_id=key, file=file)
