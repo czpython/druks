@@ -56,7 +56,13 @@ class ClaudeHarness(Harness):
         """Chat has no asks, and the model goes in the _meta because the adapter's model
         option takes only the models its CLI lists."""
         model_id = model.partition("/")[2]
-        options: dict[str, object] = {"disallowedTools": ["AskUserQuestion"], "model": model_id}
+        # The CLI records the system prompt on a conversation's first request and sends
+        # that record on every resume, so a reloaded session would keep its old instructions.
+        options: dict[str, object] = {
+            "disallowedTools": ["AskUserQuestion"],
+            "model": model_id,
+            "extraArgs": {"system-prompt-snapshot": "off"},
+        }
         if account_type == AccountKind.OPERATOR:
             options["systemPrompt"] = {"type": "preset", "preset": "claude_code", "append": prompt}
         else:

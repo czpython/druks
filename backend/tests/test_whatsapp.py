@@ -438,6 +438,23 @@ async def test_a_reply_in_a_group_goes_to_the_group(druks_db, waha):
     assert waha.calls[-1][2]["chatId"] == GROUP
 
 
+async def test_a_reply_mentions_each_lid_and_phone_number_it_tags(druks_db, waha):
+    owner = await bot_account(druks_db)
+    connection = await link(druks_db, owner)
+    conversation = await Conversation.get_or_create_for_user(
+        druks_db, connection, owner.id, **{**user(BEN), "thread_id": GROUP}
+    )
+    waha.answers[("GET", "/api/session_one/lids/pn/900111")] = {"lid": None, "pn": "900111@c.us"}
+    waha.answers[("GET", "/api/session_one/lids/pn/41700000002")] = {"lid": "900222@lid", "pn": BEN}
+    reply = await conversation.create_message(
+        druks_db, "@900111 and @41700000002, stock count today.", role=MessageRole.ASSISTANT
+    )
+
+    await WhatsAppChannel.send_reply(druks_db, conversation, reply)
+
+    assert waha.calls[-1][2]["mentions"] == ["900111@lid", "41700000002@c.us"]
+
+
 async def test_a_group_reads_its_newest_messages_oldest_first(druks_db, waha):
     owner = await bot_account(druks_db)
     connection = await link(druks_db, owner)
@@ -501,6 +518,25 @@ async def test_a_bot_in_a_group_reads_the_group_first(druks_db, helpdesk, monkey
     )
 
 
+async def test_an_operator_keeps_its_connections_out_of_a_group(druks_db):
+    connection = await link(
+        druks_db, await bot_account(druks_db), app="chat", access=BotAccess.PRIVATE
+    )
+    operator = await Account.get_or_create(druks_db, "op@example.com")
+    group, direct = [
+        await Conversation.get_or_create_for_user(
+            druks_db, connection, operator.id, **{**user(ANA), "thread_id": thread_id}
+        )
+        for thread_id in (GROUP, "")
+    ]
+
+    _, group_prompt, _ = await service.get_agent(druks_db, group)
+    _, direct_prompt, _ = await service.get_agent(druks_db, direct)
+
+    assert "Other people read this thread." in group_prompt
+    assert "Other people read this thread." not in direct_prompt
+
+
 async def test_a_message_reaches_the_bot_of_its_numbers_app(druks_db, helpdesk, monkeypatch):
     owner = await bot_account(druks_db)
     connection = await link(druks_db, owner)
@@ -516,6 +552,26 @@ async def test_a_message_reaches_the_bot_of_its_numbers_app(druks_db, helpdesk, 
         "helpdesk.bot",
         f"Be kind.\n\n{INTERNAL_MESSAGES_PROMPT}",
         ("helpdesk_get_ticket",),
+    )
+
+
+async def test_shared_contacts_reach_the_agent_as_names_and_numbers(druks_db, helpdesk):
+    connection = await link(druks_db, await bot_account(druks_db))
+    cards = message_event(ANA, None)
+    cards["payload"]["vCards"] = [
+        "BEGIN:VCARD\nVERSION:3.0\nN:;Jun;;;\nFN:Jun\n"
+        "item1.TEL;waid=639171234567:+63 917 123 4567\nitem1.X-ABLabel:Mobile\nEND:VCARD",
+        "BEGIN:VCARD\nVERSION:3.0\nN:Reyes;Mia;;;\nFN:Mia Reyes\n"
+        "TEL;type=HOME:02 8123 4567\nEND:VCARD",
+    ]
+
+    await receive(connection, cards)
+
+    [conversation] = await Conversation.list_for_connection(druks_db, connection.id)
+    await druks_db.refresh(conversation, ["messages"])
+    [message] = conversation.messages
+    assert message.body == (
+        "Shared contact: Jun, +639171234567\nShared contact: Mia Reyes, 02 8123 4567"
     )
 
 
@@ -629,7 +685,13 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
     assert reply.source_id == "REPLY1"
     sends = [body for method, path, body in waha.calls if path == "/api/sendText"]
     assert sends == [
-        {"session": "session_one", "chatId": ANA, "text": "Your ticket is open.", "id": "REPLY1"}
+        {
+            "session": "session_one",
+            "chatId": ANA,
+            "text": "Your ticket is open.",
+            "id": "REPLY1",
+            "mentions": [],
+        }
     ]
     pause.assert_not_awaited()
 
@@ -971,7 +1033,7 @@ async def test_operator_turns_use_the_apps_prompt_and_settings_without_a_timeout
     bot = helpdesk.bot if app == "helpdesk" else Chat.bot
     assert bot_id == bot.id
     render_prompt.assert_awaited_once_with(
-        bot.prompt, source=source, thread_id="", sign_ins=(), apps=ANY
+        bot.prompt, source=source, thread_id="", is_shared_thread=False, sign_ins=(), apps=ANY
     )
     assert tools == Toolkit.ALL
     [start] = [call.kwargs for call in request.await_args_list if call.args[0] == "start"]

@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 from collections.abc import Sequence
@@ -103,20 +104,18 @@ async def get_agent(
         template = ADMIN_PROMPT
         admin_tools = (get_tool_name(name, [bot.app], {bot.app}) for name in bot.admin_tools)
         tools = (*admin_tools, *ADMIN_TOOLS)
+    is_shared_thread = bool(conversation.thread_id) and conversation.channel.has_readable_threads
     context = {
         "source": conversation.source,
         "thread_id": conversation.thread_id,
+        "is_shared_thread": is_shared_thread,
         "sign_ins": sign_ins,
         "apps": [app for app in iter_apps() if app.description and not app.builtin],
     }
     if conversation.connection:
         context.update(await conversation.channel.get_prompt_context(session, conversation))
     prompt = await render_prompt(template, **context)
-    if (
-        conversation.thread_id
-        and conversation.channel.has_readable_threads
-        and account_type in (AccountKind.BOT, AccountKind.BOT_ADMIN)
-    ):
+    if is_shared_thread and account_type in (AccountKind.BOT, AccountKind.BOT_ADMIN):
         tools = (*tools, *THREAD_TOOLS)
         prompt = f"{prompt}\n\n{THREAD_PROMPT}"
     return bot.id, f"{prompt}\n\n{INTERNAL_MESSAGES_PROMPT}", tools
@@ -414,10 +413,21 @@ async def send_turn(
     server = get_druks_mcp_server(allowed_tools=())
     account_type = conversation.account.kind
     timeout = 0 if account_type == AccountKind.OPERATOR else config.timeout
+    session_servers = [
+        {
+            "name": mcp_server.name,
+            "url": mcp_server.url,
+            "headers": mcp_server.get_request_headers(),
+        }
+        for mcp_server in mcp_servers
+    ]
+    # The bridge reopens a live session when its instructions or MCP servers change.
+    setup = hashlib.sha256(to_json([prompt, server.url, session_servers])).hexdigest()
     await bridge.request(
         "start",
         conversationId=conversation.id,
         archivePath=archive_path,
+        setup=setup,
         harness=config.harness_class.name,
         command=config.harness_class.adapter_command,
         effort=config.effort,
@@ -426,14 +436,7 @@ async def send_turn(
         bearerVariable=get_bearer_token_env_var(server.name),
         # Each tool call names its conversation, so a run that it starts reports back here.
         headers=[{"name": CONVERSATION_HEADER, "value": conversation.id}],
-        mcpServers=[
-            {
-                "name": mcp_server.name,
-                "url": mcp_server.url,
-                "headers": mcp_server.get_request_headers(),
-            }
-            for mcp_server in mcp_servers
-        ],
+        mcpServers=session_servers,
         **config.harness_class.get_acp_session(
             account_type, config.model, prompt, config.identity, sandbox_home, conversation_root
         ),

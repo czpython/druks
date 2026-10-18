@@ -317,7 +317,18 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
     <div className="chat-messages" ref={scrollRef} role="log" aria-label="Messages" aria-live="polite" hidden={!id}>
       <div className="chat-messages-content" ref={contentRef}>
         {id && !conversation && connection === 'opening' && <p className="chat-notice" role="status">Loading conversation…</p>}
-        {userMessages.map((message) => {
+        {messages.map((message) => {
+          if (message.role === 'assistant') {
+            // A reply shows in the turn of the message it answers. A reminder answers none.
+            return !message.replyTo && <article className="chat-turn" key={message.id} aria-label="Agent message">
+              <div className="chat-reply">
+                <div className="chat-message-meta chat-agent-meta">Agent
+                  <time dateTime={message.createdAt} title={format.absTime(message.createdAt)}>{format.absTimeCompact(message.createdAt)}</time>
+                </div>
+                <Reply rows={savedReplyRows(message)} />
+              </div>
+            </article>
+          }
           const reply = message.state === 'replied' || (message.state === 'cancelled' && message.deliveredAt)
             ? replies.get(message.id) : undefined
           const rows = reply ? savedReplyRows(reply) : state.turns[message.id]?.rows ?? []

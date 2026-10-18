@@ -69,6 +69,15 @@ class WahaClient:
             return response.json()["pn"] or chat_id
         return chat_id
 
+    async def get_chat_id_for_tag(self, digits: str) -> str:
+        """The chat ID that @<digits> names in a message. WhatsApp names a person by a
+        phone number or by a LID. The digits are a phone number when WAHA knows a LID for
+        them, and a LID otherwise."""
+        response = await self.request("GET", f"/api/{self.session_name}/lids/pn/{digits}")
+        if response.json()["lid"]:
+            return f"{digits}@c.us"
+        return f"{digits}@lid"
+
     async def get_chat_id_for_phone(self, phone: str) -> str:
         """The chat ID of the WhatsApp account on a phone number."""
         response = await self.request(
@@ -104,11 +113,19 @@ class WahaClient:
         response = await self.request("GET", f"/api/{self.session_name}/new-message-id")
         return response.json()["id"]
 
-    async def send_text(self, chat_id: str, text: str, *, message_id: str) -> None:
+    async def send_text(
+        self, chat_id: str, text: str, *, message_id: str, mentions: list[str]
+    ) -> None:
         await self.request(
             "POST",
             "/api/sendText",
-            json={"session": self.session_name, "chatId": chat_id, "text": text, "id": message_id},
+            json={
+                "session": self.session_name,
+                "chatId": chat_id,
+                "text": text,
+                "id": message_id,
+                "mentions": mentions,
+            },
         )
 
     async def download(self, path: str) -> bytes:
