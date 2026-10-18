@@ -438,6 +438,23 @@ async def test_a_reply_in_a_group_goes_to_the_group(druks_db, waha):
     assert waha.calls[-1][2]["chatId"] == GROUP
 
 
+async def test_a_reply_mentions_each_lid_and_phone_number_it_tags(druks_db, waha):
+    owner = await bot_account(druks_db)
+    connection = await link(druks_db, owner)
+    conversation = await Conversation.get_or_create_for_user(
+        druks_db, connection, owner.id, **{**user(BEN), "thread_id": GROUP}
+    )
+    waha.answers[("GET", "/api/session_one/lids/pn/900111")] = {"lid": None, "pn": "900111@c.us"}
+    waha.answers[("GET", "/api/session_one/lids/pn/41700000002")] = {"lid": "900222@lid", "pn": BEN}
+    reply = await conversation.create_message(
+        druks_db, "@900111 and @41700000002, stock count today.", role=MessageRole.ASSISTANT
+    )
+
+    await WhatsAppChannel.send_reply(druks_db, conversation, reply)
+
+    assert waha.calls[-1][2]["mentions"] == ["900111@lid", "41700000002@c.us"]
+
+
 async def test_a_group_reads_its_newest_messages_oldest_first(druks_db, waha):
     owner = await bot_account(druks_db)
     connection = await link(druks_db, owner)
@@ -629,7 +646,13 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
     assert reply.source_id == "REPLY1"
     sends = [body for method, path, body in waha.calls if path == "/api/sendText"]
     assert sends == [
-        {"session": "session_one", "chatId": ANA, "text": "Your ticket is open.", "id": "REPLY1"}
+        {
+            "session": "session_one",
+            "chatId": ANA,
+            "text": "Your ticket is open.",
+            "id": "REPLY1",
+            "mentions": [],
+        }
     ]
     pause.assert_not_awaited()
 
