@@ -1502,6 +1502,82 @@ class Acme(Service):
         return f"Bearer {login.secrets['api_key']}"
 ```
 
+### Resources at a provider
+
+A resource is an item that an app keeps at a provider, for example a Cloudflare
+Worker. Each resource has its own token.
+
+A resource class does only what the token of the resource cannot do. It has four
+steps: `create`, `update`, `delete`, and `get_token`. Druks refuses a resource
+class with other public methods. An app makes all other calls to the provider with
+`get_token()` and the SDK of the provider.
+
+Declare each resource class inside its service class, as you declare `Settings`.
+Write the steps that Druks uses with pasted credentials:
+
+```python
+from hashlib import sha256
+
+from druks.services import Resource, Service
+
+
+class Cloudflare(Service):
+    host = "api.cloudflare.com"
+
+    class Settings(BaseModel):
+        api_token: SecretStr = Field(title="API token")
+
+    class Workers(Resource):
+        def __init__(self, key: str) -> None:
+            super().__init__(sha256(key.encode()).hexdigest()[:12])
+
+        async def create(self) -> None: ...
+        async def update(self, *, domain: str | None) -> dict | None: ...
+        async def delete(self) -> None: ...
+```
+
+The app uses the resource class in the same way in each installation:
+
+```python
+worker = Cloudflare.Workers(site.id)
+await worker.create()
+state = await worker.update(domain="www.example.com")
+value, expires_at = await worker.get_token()
+```
+
+These rules apply to each resource:
+
+- A resource keeps the key that the app gives to it.
+- The `__init__` method can make the name from the key, as in the example. If
+  the class has no `__init__`, the name is the key.
+- The name starts with the `resource_prefix` of the service in druks.toml. The
+  provider must get `worker.name`, not the key.
+- The `update` method takes one attribute and returns the answer for that
+  attribute. The value `None` removes the attribute.
+- If the resource does not exist, the `delete` method must not raise an error.
+- If the class does not declare `get_token`, the token is the one secret of the
+  card. A class declares `get_token` only to give a token with fewer permissions.
+- Druks uses a token again until a short time before the token expires.
+- The slug of the class is the class name in snake case, so `Workers` gives
+  `workers`. A class can set `slug` to keep its slug after a rename.
+- A step can also raise `ResourceError`. Catch it with the errors of the SDK of
+  the provider.
+
+To give the token to a sandbox, add the secrets of the resource to the secrets of
+the workspace:
+
+```python
+class SiteWorkspace(RepoWorkspace):
+    @classmethod
+    async def get_secrets(cls, site):
+        return [*await super().get_secrets(site), *await Cloudflare.Workers(site.id).get_secrets()]
+```
+
+The sandbox holds a placeholder in `CLOUDFLARE_API_TOKEN`. The name of this
+variable is the service slug and `API_TOKEN`, in upper case. On requests to
+`host`, the secrets proxy replaces the placeholder with the token. A sandbox can
+hold only one resource of each service.
+
 ## Connect provider accounts (OAuth)
 
 Declare the OAuth endpoints on the service that holds the client
@@ -2132,7 +2208,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | --- | --- |
 | `druks.accounts` | `current_account_id` |
 | `druks.apps` | `App`, `AppSettings`, `Choices`, `Secret` |
-| `druks.services` | `Service`, `Connection`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
+| `druks.services` | `Service`, `Connection`, `Resource`, `ResourceError`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
 | `druks.browser` | `BrowserClient`, `BrowserCommandError`, `BrowserSession`, `BrowserSessionSignedOutError`, `BrowserSessionStatus` |
 | `druks.agents` | `Agent`, `AgentOutput`, `Bot`, `BotUser` |
 | `druks.workflows` | `Workflow`, `Gate`, `GateTimeout`, `step`, run/agent response types, lifecycle enums and workflow errors |

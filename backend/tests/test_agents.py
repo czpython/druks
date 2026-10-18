@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from conftest import installation_key, make_agent_result
+from conftest import connect_service, installation_key, make_agent_result
 from druks import agents
 from druks.accounts.models import Account
 from druks.browser import BrowserClient, BrowserSession
@@ -17,9 +17,11 @@ from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
+from druks.services import Resource, Service
 from druks.usage.models import UsageScrape
 from druks.user_settings.models import SettingsOverride
 from druks.workspaces import Workspace
+from pydantic import BaseModel, SecretStr
 from sqlalchemy import select
 
 
@@ -307,10 +309,6 @@ async def test_an_agent_without_mcp_resolves_no_server(
 async def test_an_agent_holds_its_declared_service_secrets(
     druks_db, tmp_path, monkeypatch, current_run, declared_services
 ):
-    from conftest import connect_service
-    from druks.services import Service
-    from pydantic import BaseModel, SecretStr
-
     class Acme(Service):
         host = "api.acme.test"
 
@@ -346,6 +344,40 @@ async def test_an_agent_holds_its_declared_service_secrets(
     [ref] = list(refs)
     assert (ref.name, ref.secret_id, ref.host) == ("acme_api_key", card.id, "api.acme.test")
     assert await ref.secret.issue_token(ref.resource, name=ref.name) == ("key-1", None)
+
+
+async def test_an_agent_holds_a_resource_secret_from_its_workspace(
+    druks_db, tmp_path, monkeypatch, current_run, declared_services
+):
+    class Acme(Service):
+        host = "api.acme.test"
+
+        class Settings(BaseModel):
+            api_token: SecretStr
+
+        class Workers(Resource):
+            async def get_token(self) -> tuple[str, None]:
+                return f"{self.name}-token", None
+
+    async def get_secrets(cls, subject):
+        return await Acme.Workers("site").get_secrets()
+
+    card = await connect_service("acme", identity={}, secrets={"api_token": "pasted"})
+    monkeypatch.setattr(Workspace, "get_secrets", classmethod(get_secrets))
+    agent = agents.Agent(id="resource_probe", prompt="dummy/agent.md", contract=DummyOutput)
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    _patch_ephemeral(monkeypatch, sandbox)
+
+    await agent._run(db_session(), workflow_id="wf-9")
+
+    [identity] = await _identities("wf-9")
+    [ref] = await db_session().scalars(
+        select(SecretRef).where(
+            SecretRef.identity_id == identity.id, SecretRef.name == "acme_api_token"
+        )
+    )
+    assert (ref.secret_id, ref.resource, ref.host) == (card.id, "workers/site", "api.acme.test")
+    assert await ref.secret.issue_token(ref.resource, name=ref.name) == ("site-token", None)
 
 
 async def test_runner_comes_from_workflow_workspace_factory(

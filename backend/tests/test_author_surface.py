@@ -18,6 +18,8 @@ AUTHOR_SURFACE = {
         "OauthClient",
         "OauthExchangeError",
         "OauthRefreshError",
+        "Resource",
+        "ResourceError",
         "Service",
         "ServiceConnectError",
         "ServiceNotConnectedError",
