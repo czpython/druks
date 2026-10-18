@@ -166,9 +166,11 @@ async def test_get_refresh_rejection_evicts_and_raises(token_endpoint):
     assert not await redis.get(_lock_key(connection))
 
 
-@pytest.mark.parametrize(("status", "response"), [(500, {}), (400, {"error": "invalid_client"})])
+@pytest.mark.parametrize(
+    ("status", "response", "posts"), [(500, {}, 2), (400, {"error": "invalid_client"}, 1)]
+)
 async def test_other_refresh_failures_leave_the_connection_live(
-    token_endpoint, monkeypatch, status, response
+    token_endpoint, monkeypatch, status, response, posts
 ):
     token_endpoint.status = status
     token_endpoint.response = response
@@ -185,6 +187,7 @@ async def test_other_refresh_failures_leave_the_connection_live(
 
     assert await VaultSecret.reload(db_session(), connection.id)
     assert not published
+    assert len(token_endpoint.requests) == posts
 
 
 async def test_a_service_reads_its_own_revoked_answer(token_endpoint, monkeypatch):

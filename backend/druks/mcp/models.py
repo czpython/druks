@@ -133,15 +133,14 @@ class McpServer(Base, Uuid7Pk):
                         session, Audience.mcp(server["name"]), grant_account
                     )
                     secret = next(iter(connections), None)
-                # A service's pasted login is one person's token, with all their
-                # rights. Only the default account, which runs with no person act
-                # as, falls back to it; everyone else connects their own grant.
-                if not secret and service and is_default:
+                # A service's login has all of its rights: one person's pasted token, or
+                # the app's own grant. Only the default account, which runs with no person
+                # to act as, falls back to it; everyone else connects their own grant.
+                if not secret and service and is_default and await service.is_connected():
                     secret = await VaultSecret.lookup(
                         session, service.secret_kind, Audience.service(service.slug)
                     )
-                    if secret:
-                        credential = Credential.SERVICE_LOGIN
+                    credential = Credential.SERVICE_LOGIN
             accesses.append(
                 McpServerAccess(
                     **server | {"secret_headers": secret_headers},

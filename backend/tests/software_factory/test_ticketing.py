@@ -71,7 +71,7 @@ async def test_tracker_builds_linear_from_the_service_row(monkeypatch):
     tracker = await SoftwareFactory.get_tracker("linear")
 
     assert isinstance(tracker, Linear)
-    assert tracker._client.api_key == "lin_secret"
+    assert tracker._client.authorization == "lin_secret"
     assert tracker._status_names == {
         TicketStatus.TRIGGER: "To Agent",
         TicketStatus.IN_PROGRESS: "In Progress",
@@ -334,15 +334,13 @@ class _FakeLinearClient:
 async def test_set_status_maps_the_ticket_status_to_a_provider_name():
     fake = _FakeLinearClient()
     provider = Linear(
-        api_key="lin_x",
+        client=fake,
         status_names={
             TicketStatus.DONE: "Done",
             TicketStatus.BACKLOG: "Backlog",
             TicketStatus.TRIGGER: "To Agent",
         },
-        client=object(),
     )
-    provider._client = fake  # the unit seam is the API client, not HTTP
     await provider.set_status("ACME-270", TicketStatus.DONE)
     await provider.set_status("ACME-270", TicketStatus.BACKLOG)
     await provider.set_status("ACME-270", TicketStatus.TRIGGER)
@@ -354,8 +352,7 @@ async def test_set_status_maps_the_ticket_status_to_a_provider_name():
 
 
 async def test_set_status_unmapped_raises():
-    provider = Linear(api_key="lin_x", status_names={TicketStatus.BACKLOG: ""}, client=object())
-    provider._client = _FakeLinearClient()
+    provider = Linear(client=_FakeLinearClient(), status_names={TicketStatus.BACKLOG: ""})
     with pytest.raises(ValueError, match="no configured status"):
         await provider.set_status("ACME-270", TicketStatus.BACKLOG)
     with pytest.raises(ValueError, match="no configured status"):
@@ -370,7 +367,7 @@ def test_linear_declares_known_exceptions():
 
 def _linear_client(handler) -> LinearClient:
     wire = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return LinearClient(api_key="lin_x", client=wire)
+    return LinearClient(authorization="lin_x", client=wire)
 
 
 def _linear_issue_response(*, current: str, states: list[tuple[str, str]]) -> httpx.Response:
@@ -397,6 +394,7 @@ async def test_linear_client_skips_the_mutation_when_already_at_the_status():
     requests = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "lin_x"
         requests.append(json.loads(request.content))
         return _linear_issue_response(
             current="Ready for Agent", states=[("current-id", "Ready for Agent")]

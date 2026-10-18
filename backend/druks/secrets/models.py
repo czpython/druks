@@ -366,6 +366,13 @@ class VaultSecret(Base, Uuid7Pk):
 
         raise OauthRefreshError(self.audience_name, "the connection was revoked mid-refresh")
 
+    def remove_refresh_token(self, refused_token: str) -> None:
+        # An install that stored a new grant since the refused refresh keeps it.
+        if self.secrets.get("refresh_token") == refused_token:
+            self.secrets = {
+                name: value for name, value in self.secrets.items() if name != "refresh_token"
+            }
+
     @property
     def audience_name(self) -> str:
         """The name behind the namespace: the provider id, the slug, the server."""

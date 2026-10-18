@@ -186,8 +186,8 @@ class Service:
     # The app that the create page registers at the provider. A service with one
     # offers that page on its card; without one, the person pastes credentials.
     manifest: ClassVar[dict[str, Any]] = {}
-    # The install stores the actor's token under this name. The service is connected only
-    # when its row holds it.
+    # The install stores the actor's token under this name. A managed service is connected
+    # only when its row holds it.
     actor_token_name: ClassVar[str] = ""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -443,7 +443,7 @@ class Service:
 
     @classmethod
     async def get_oauth_client(cls) -> OauthClient:
-        if not cls.token_endpoint:
+        if not cls.token_endpoint and not cls.is_managed():
             raise TypeError(f"{cls.__name__} declares no OAuth endpoints")
         connected = await cls.get()
         if cls.is_managed():
@@ -508,7 +508,7 @@ class Service:
     @classmethod
     async def is_connected(cls) -> bool:
         row = await VaultSecret.lookup(db_session(), cls.secret_kind, Audience.service(cls.slug))
-        if row and cls.actor_token_name:
+        if row and cls.actor_token_name and cls.is_managed():
             return cls.actor_token_name in row.secrets
         return bool(row)
 
