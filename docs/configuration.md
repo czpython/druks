@@ -665,6 +665,9 @@ is invited to, leaves token rotation off, and names these URLs:
 Events URL:
 `https://<webhook-host>/_external/slack/events/`
 
+Interactivity URL:
+`https://<webhook-host>/_external/slack/interactivity/`
+
 Redirect URL:
 `<endpoint>/api/oauth/callback`
 
@@ -673,8 +676,10 @@ event older than five minutes. With rotation off, the pasted bot token and each
 person's Slack token live until someone revokes them. A person connects their
 own Slack account through the same app: see [Chat](chat.md#slack).
 
-An app created from an earlier manifest needs `reactions:write`: add it under
-**OAuth & Permissions** and reinstall the app.
+An app created from an earlier manifest needs `reactions:write` and the
+Interactivity URL. Add the scope under **OAuth & Permissions** and reinstall the
+app. Under **Interactivity & Shortcuts**, turn on Interactivity and set the
+Request URL to the Interactivity URL.
 
 ## Speech to text
 
@@ -927,10 +932,16 @@ container default timezone.
 ## Notifications
 
 The dashboard has no notifications page yet. Manage destinations through the
-API. The current destination type is a Slack incoming webhook. Actionable
-messages use Slack Block Kit. Other messages use the same URL through Apprise.
-The [Slack card](#slack)'s signing secret authenticates the button clicks that
-Slack sends back.
+API. A destination is a Slack channel. Druks posts to it as the bot of the
+[Slack card](#slack), so connect Slack first. A message that asks for an answer
+has buttons. The card's signing secret authenticates the button clicks that
+Slack sends back. Under a manager, the manager's signature authenticates them.
+
+To add a destination, invite the bot to the channel. Then send `name`, `kind`
+set to `slack_channel`, and `channelId` to `POST /api/notifications/destinations`.
+Slack shows the channel ID at the bottom of the channel details. Druks posts a
+first message to the channel before it saves the destination. If Slack refuses
+that message, Druks refuses the destination and shows the reason.
 
 Select one enabled destination as the gate-notification destination through
 the API. A parked subjected run then produces a durable notification. Failure
@@ -1102,7 +1113,5 @@ values.
 Drukbox database. The installer generates it for the Drukbox API and the secrets
 exchange. Rotate it as you rotate `secrets_key`, with the new key first.
 
-The envelope does **not** cover notification webhook URLs. Postgres stores
-them as ordinary fields, although the API masks their values. Treat access to
-Postgres and its backups as access to those values. GitHub App private keys,
-the operator identity's and the review identity's, are encrypted vault rows.
+GitHub App private keys, the operator identity's and the review identity's,
+are encrypted vault rows.

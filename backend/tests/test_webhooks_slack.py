@@ -20,7 +20,6 @@ from fastapi.testclient import TestClient
 from uuid_utils import uuid7
 
 _SIGNING_SECRET = "slack-test-signing-secret"
-_WEBHOOK_URL = "https://hooks.slack.com/services/T000/B000/slackrail"
 
 _IN_APP_ASK = {
     "presentation": "in_app",
@@ -42,7 +41,7 @@ async def _parked_notification(druks_db):
     await druks_db.flush()
     await seed_dbos_status(druks_db, run.id, "parked")
     destination = await Destination.create(
-        druks_db, name=f"slack-{run.id[-8:]}", kind="slack_webhook", url=_WEBHOOK_URL
+        druks_db, name=f"slack-{run.id[-8:]}", kind="slack_channel", channel_id="C1"
     )
     notification = await Notification.create(
         druks_db,

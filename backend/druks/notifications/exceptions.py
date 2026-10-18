@@ -30,12 +30,6 @@ class StaleRoundError(NotificationError):
         super().__init__("The run has moved past the round this notification was sent for.")
 
 
-class UnknownDestinationKindError(NotificationError):
-    def __init__(self, kind: str, supported: tuple[str, ...]):
-        super().__init__(f"Unknown destination kind {kind!r}; supported: {', '.join(supported)}.")
-        self.kind = kind
-
-
 class DisabledDestinationError(NotificationError):
     def __init__(self, name: str):
         super().__init__(f"Destination {name!r} is disabled; nothing was sent.")
@@ -44,8 +38,7 @@ class DisabledDestinationError(NotificationError):
 
 class DeliveryError(NotificationError):
     # The message lands in logs and stored failure reasons, so it carries only
-    # the destination name and a short reason — never the webhook URL, which is
-    # the credential.
+    # the destination name and a short reason.
     def __init__(self, name: str, reason: str):
         super().__init__(f"Delivery to destination {name!r} failed: {reason}.")
         self.name = name
