@@ -318,7 +318,10 @@ All pending messages of a WhatsApp conversation go into one turn. Druks saves
 media as a Druks file on its message. An image reaches the agent with its
 message. Any other file except audio reaches it as a link to a copy in the
 sandbox. An operator's agent opens the copy with its tools. A number's bot
-agents have no file tools, so they see the link and the file's name. Druks
+agents have no file tools, so they see the link and the file's name. A shared
+contact card reaches the agent as one line of text with the person's name and
+phone numbers. An operator can share a card to name a person for
+`chat_start_conversation` or a reminder, and type no number. Druks
 drops a repeated message by its WhatsApp ID. Druks writes to a person only to
 answer them, one reply for each turn. It never starts a chat and never sends in
 bulk. Before it sends a reply, Druks takes a new message ID from WAHA and

@@ -519,6 +519,26 @@ async def test_a_message_reaches_the_bot_of_its_numbers_app(druks_db, helpdesk, 
     )
 
 
+async def test_shared_contacts_reach_the_agent_as_names_and_numbers(druks_db, helpdesk):
+    connection = await link(druks_db, await bot_account(druks_db))
+    cards = message_event(ANA, None)
+    cards["payload"]["vCards"] = [
+        "BEGIN:VCARD\nVERSION:3.0\nN:;Jun;;;\nFN:Jun\n"
+        "item1.TEL;waid=639171234567:+63 917 123 4567\nitem1.X-ABLabel:Mobile\nEND:VCARD",
+        "BEGIN:VCARD\nVERSION:3.0\nN:Reyes;Mia;;;\nFN:Mia Reyes\n"
+        "TEL;type=HOME:02 8123 4567\nEND:VCARD",
+    ]
+
+    await receive(connection, cards)
+
+    [conversation] = await Conversation.list_for_connection(druks_db, connection.id)
+    await druks_db.refresh(conversation, ["messages"])
+    [message] = conversation.messages
+    assert message.body == (
+        "Shared contact: Jun, +639171234567\nShared contact: Mia Reyes, 02 8123 4567"
+    )
+
+
 async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
     druks_db, helpdesk, waha, tmp_path, monkeypatch
 ):
