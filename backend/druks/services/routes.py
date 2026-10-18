@@ -94,7 +94,11 @@ async def connect_oauth_service(
     """Start a sign-in at the provider. ``install`` starts it from the provider's
     install page, and the callback completes the install."""
     service = services.get(slug)
-    if not service or not service.token_endpoint:
+    # The manager runs the install that stores a managed card's grant, also for a service
+    # that nobody signs in to.
+    if not service or not (
+        service.token_endpoint or (install and service.install_secret and service.is_managed())
+    ):
         raise OauthPageError(f"No OAuth service {slug!r}.", status_code=404)
     account_id = current_account_id.get()
     if connection:

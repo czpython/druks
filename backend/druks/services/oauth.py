@@ -16,6 +16,7 @@ from druks.database import get_session
 from druks.exceptions import LockHeldError
 from druks.locks import lock
 from druks.redis import get_client
+from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.signals import publish
 
@@ -245,6 +246,12 @@ class OauthClient:
             )
         async with refresh_lock:
             grant = await connection.get_grant()
+            if "refresh_token" not in grant:
+                # A revoked grant leaves its service's card without one.
+                raise OauthRefreshError(
+                    self.provider,
+                    "the provider revoked the grant; install the app again to restore it",
+                )
             if not grant["refresh_token"]:
                 # The grant is one access token that never expires.
                 return grant["access_token"], None
@@ -256,18 +263,27 @@ class OauthClient:
             if requested:
                 data["scope"] = " ".join(requested)
             async with _http() as http:
-                try:
-                    response = await _post_token(
-                        http,
-                        self.token_endpoint,
-                        data,
-                        client_id=self.client_id,
-                        client_secret=self.client_secret,
-                        basic_auth=self.basic_auth,
-                        headers=self.token_headers,
-                    )
-                except httpx.HTTPError as error:
-                    raise OauthRefreshError(self.provider, str(error)) from error
+                # A network failure or a 5xx can hide a rotation. The vault still holds the
+                # token this refresh presented, so the same refresh goes once more: a
+                # provider with a grace window, as Linear's 30 minutes, answers it with the
+                # new tokens.
+                for is_replay in (False, True):
+                    try:
+                        response = await _post_token(
+                            http,
+                            self.token_endpoint,
+                            data,
+                            client_id=self.client_id,
+                            client_secret=self.client_secret,
+                            basic_auth=self.basic_auth,
+                            headers=self.token_headers,
+                        )
+                    except httpx.HTTPError as error:
+                        if is_replay:
+                            raise OauthRefreshError(self.provider, str(error)) from error
+                        continue
+                    if response.status_code < 500:
+                        break
             try:
                 tokens = response.json()
             except ValueError:
@@ -282,13 +298,19 @@ class OauthClient:
                 # Presenting the grant again can never succeed. The revoke commits on
                 # its own: the caller's step session rolls back when this error propagates.
                 async with get_session(session.bind) as own:
-                    revoked = await own.get(VaultSecret, connection.id)
-                    await self.disconnect(revoked, reason="invalid_grant")
+                    fresh = await own.get(VaultSecret, connection.id)
+                    if fresh.kind == SecretKind.OAUTH:
+                        await self.disconnect(fresh, reason="invalid_grant")
+                        remedy = "sign in again to restore the connection"
+                    else:
+                        # A service's card keeps its configuration and loses only the grant
+                        # that its install stored, so the card offers the install again.
+                        fresh.remove_refresh_token(grant["refresh_token"])
+                        await self.evict_access_token(fresh.id)
+                        session.expire(connection, ["secrets"])
+                        remedy = "install the app again to restore it"
                     await own.commit()
-                raise OauthRefreshError(
-                    self.provider,
-                    "the provider revoked the grant; sign in again to restore the connection",
-                )
+                raise OauthRefreshError(self.provider, f"the provider revoked the grant; {remedy}")
             if response.status_code != 200:
                 await redis.delete(token_key)
                 raise OauthRefreshError(

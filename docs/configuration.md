@@ -122,8 +122,8 @@ A `[services.<slug>]` table makes that service managed. `druks.toml` and the
 secret files own its card. The Services page cannot change or disconnect it,
 but it can install the app (see below).
 The table is for a platform that writes `druks.toml` itself: the installer
-refuses it. The table holds the plain fields of the card. Each secret field of
-the card is a file in `DRUKS_SECRETS_DIR`:
+refuses it. The table holds the plain fields of the card, and any other key is a
+fact of the card. Each secret field of the card is a file in `DRUKS_SECRETS_DIR`:
 
 ```toml
 [services.waha]
@@ -140,11 +140,12 @@ remove a table, the card keeps its credentials, and you can change it on the
 Services page again.
 
 A restart keeps the facts that a card learned and the secret that its install
-stored, such as a Slack bot token. The table and its secret files give every
-other value. When `[manager]` lists the service in `manager.services`, the
-manager owns the app: its table names the manager's `url`, and the manager signs
-the service's events. A managed Slack card shows **Installation needed** until
-someone selects **Install** on it: see [Slack](#slack).
+stored, such as a Slack bot token or a Linear refresh token. The table and its
+secret files give every other value. When `[manager]` lists the service in
+`manager.services`, the manager owns the app: its table names the manager's
+`url`, and the manager signs the service's events. A managed Slack or Linear
+card shows **Installation needed** until someone selects **Install** on it: see
+[Slack](#slack) and [Ticketing integrations](#ticketing-integrations).
 
 ## Personal and installation settings
 
@@ -511,6 +512,16 @@ and lists its statuses, the settings page offers them as choices. After you
 change the tracker, save the settings to list the statuses of the new tracker.
 An empty in review or resting status leaves the ticket where it is.
 
+Under a manager, the manager's Linear app replaces the API key. The
+`[services.linear]` table holds the manager's `url` and the app's `client_id`,
+and Druks needs no API key, client secret, or webhook secret. Select **Install**
+on the Linear card and approve the app in your workspace. The app acts as itself
+with read and write access. Druks keeps the app's refresh token on the card, with
+the workspace as its facts, and gets each access token through the manager. When
+Linear or the manager refuses the refresh token, Druks removes it, and the card
+shows **Installation needed** again. The manager forwards each event with its own
+signature.
+
 Select **druks** to use the ticket board on this appliance. That choice needs no
 credentials. The status settings stay hidden. The trigger status is
 Ready for Agent, and it is not a setting.
@@ -542,8 +553,10 @@ The agent reads a ticket with
 `software_factory_get_ticket` and posts with `software_factory_add_comment`.
 
 Webhook URLs remain `/_external/linear/events/` and
-`/_external/jira/events/`. The Jira webhook uses a Jira Automation
-**Send web request** action.
+`/_external/jira/events/`. Druks takes a Linear event only from the workspace of
+the Linear card. A `[services.linear]` table that `manager.services` does not
+list names the ID of that workspace in `workspace_id`. The Jira webhook uses a
+Jira Automation **Send web request** action.
 
 Select **Issue data (Jira format)** as its body.
 Druks accepts the REST issue JSON under `issue`. Put the shared token in the
@@ -978,12 +991,12 @@ A service can own the host of an OAuth server: GitHub owns
 
 - GitHub has sign-ins. Each account uses its own GitHub sign-in, and **Connect**
   opens it. Druks refuses a connection for everyone.
-- Jira and Linear hold a pasted login. When the service is connected, the runs
-  of the default account send that login. A run that no person starts uses the
-  default account, so scheduled runs act as the service's login. Every other
-  account connects its own OAuth grant. Atlassian accepts the Jira login only
-  after an organization admin turns on API token authentication for its MCP
-  server.
+- Jira and Linear hold a login: a pasted one, or the current access token of a
+  managed Linear app. When the service is connected, the runs of the default
+  account send that login. A run that no person starts uses the default
+  account, so scheduled runs act as the service's login. Every other account
+  connects its own OAuth grant. Atlassian accepts the Jira login only after an
+  organization admin turns on API token authentication for its MCP server.
 
 Druks gives OAuth discovery and client registration 30 seconds in total.
 A timeout names the stage that was pending. Retry the connection.

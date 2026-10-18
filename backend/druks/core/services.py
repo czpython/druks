@@ -17,14 +17,14 @@ from druks.accounts.models import Account
 from druks.core.apis.exceptions import GitHubAppNotInstalledError, TwilioError, TwilioNotFoundError
 from druks.core.apis.github import GITHUB_API_URL, GITHUB_AUTHORITY, GitHubClient
 from druks.core.apis.jira import SERVICE_ACCOUNT_DOMAIN, JiraClient
-from druks.core.apis.linear import LINEAR_GRAPHQL_URL
+from druks.core.apis.linear import LINEAR_GRAPHQL_URL, LinearClient
 from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
 from druks.core.apis.twilio import TwilioClient
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
-from druks.services import Service, ServiceConnectError
+from druks.services import OauthClient, Service, ServiceConnectError
 from druks.services.exceptions import OauthExchangeError, ServiceNotConnectedError
 from druks.settings import load_settings
 
@@ -157,12 +157,12 @@ class Github(Service):
 
 
 class Linear(Service):
-    description = (
-        "The Linear identity druks reads and updates tickets as; its webhook "
-        "secret verifies inbound deliveries."
-    )
+    description = "The Linear identity that Druks reads and updates tickets as."
     required = False
     mcp_host = "mcp.linear.app"
+    # Under a manager, the install grants the app a refresh token. The token path
+    # rotates it through the manager under this name.
+    install_secret = "refresh_token"
 
     class Settings(BaseModel):
         api_key: SecretStr = Field(title="API key")
@@ -175,19 +175,92 @@ class Linear(Service):
     @classmethod
     async def verify(cls, settings: Settings) -> dict[str, Any]:
         try:
-            async with httpx.AsyncClient(timeout=_VERIFY_TIMEOUT) as client:
-                response = await client.post(
-                    LINEAR_GRAPHQL_URL,
-                    json={"query": "{ viewer { name } organization { name } }"},
-                    headers={"Authorization": settings.api_key.get_secret_value()},
-                )
-            response.raise_for_status()
-            data = response.json()["data"]
-            facts = {"actor": data["viewer"]["name"], "workspace": data["organization"]["name"]}
+            facts = await cls._get_facts(settings.api_key.get_secret_value())
         except Exception as error:  # noqa: BLE001 — any auth/transport failure is a rejected paste
             logger.warning("Linear service-identity connect rejected: %s", type(error).__name__)
             raise ServiceConnectError("Linear did not accept this API key.") from error
         return facts
+
+    @classmethod
+    async def get_install_endpoint(cls) -> str:
+        """Under a manager, Linear's consent page installs the manager's app in a workspace.
+        A self-hosted operator pastes an API key."""
+        return "https://linear.app/oauth/authorize" if cls.is_managed() else ""
+
+    @classmethod
+    def get_install_params(cls) -> dict[str, str]:
+        # The app acts as itself, and an app cannot hold admin.
+        return {"actor": "app", "scope": "read,write"}
+
+    @classmethod
+    async def complete_install(cls, tokens: dict[str, Any]) -> None:
+        """Keep the app's grant on the card, where the token path refreshes it, with the
+        workspace that the app acts in."""
+        grant = cls.read_grant(tokens)
+        try:
+            facts = await cls._get_facts(f"Bearer {grant['access_token']}")
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+            raise OauthExchangeError(
+                cls.slug,
+                "Linear did not accept the new access token. Install the app again.",
+                context={},
+            ) from error
+        card = await cls.get()
+        card.secrets = {**card.secrets, cls.install_secret: grant["refresh_token"]}
+        card.identity = {**card.identity, **facts}
+        # A token cached for an earlier install must not serve this one.
+        await OauthClient(provider=cls.slug).evict_access_token(card.id)
+
+    @classmethod
+    async def get_client(cls) -> LinearClient:
+        """It fetches no token before its first request."""
+        card = await cls.get()
+        if not cls.is_card_connected(card):
+            raise ServiceNotConnectedError(cls.slug)
+        if cls.is_managed():
+            return LinearClient(get_access_token=cls.get_access_token)
+        return LinearClient(api_key=card.secrets["api_key"])
+
+    @classmethod
+    async def get_access_token(cls, cached: bool = True) -> tuple[str, datetime | None]:
+        """The manager refreshes the grant on the card."""
+        card = await cls.get()
+        client = await cls.get_oauth_client()
+        return await client.get_access_token(card.session, connection=card, cached=cached)
+
+    @classmethod
+    def get_login_resource(cls, login: VaultSecret) -> str:
+        # The app's grant acts in the card's workspace.
+        return login.identity["workspace_id"]
+
+    @classmethod
+    async def issue_token(cls, resource: str) -> tuple[str, datetime | None]:
+        if not await cls.is_connected():
+            raise MissingSecretError(
+                "The Linear app is not installed. Select Install on the Linear card."
+            )
+        return await cls.get_access_token()
+
+    @classmethod
+    def is_grant_revoked(cls, status: int, tokens: dict[str, Any]) -> bool:
+        # The manager refuses the refresh of an installation that Linear revoked.
+        return status != 200 and tokens.get("error") in ("invalid_grant", "access_denied")
+
+    @classmethod
+    async def _get_facts(cls, authorization: str) -> dict[str, str]:
+        async with httpx.AsyncClient(timeout=_VERIFY_TIMEOUT) as client:
+            response = await client.post(
+                LINEAR_GRAPHQL_URL,
+                json={"query": "{ viewer { name } organization { id name } }"},
+                headers={"Authorization": authorization},
+            )
+        response.raise_for_status()
+        data = response.json()["data"]
+        return {
+            "actor": data["viewer"]["name"],
+            "workspace": data["organization"]["name"],
+            "workspace_id": data["organization"]["id"],
+        }
 
 
 class Jira(Service):

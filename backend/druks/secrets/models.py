@@ -366,6 +366,13 @@ class VaultSecret(Base, Uuid7Pk):
 
         raise OauthRefreshError(self.audience_name, "the connection was revoked mid-refresh")
 
+    def remove_refresh_token(self, refused_token: str) -> None:
+        # An install that stored a new grant since the refused refresh keeps it.
+        if self.secrets.get("refresh_token") == refused_token:
+            self.secrets = {
+                name: value for name, value in self.secrets.items() if name != "refresh_token"
+            }
+
     @property
     def audience_name(self) -> str:
         """The name behind the namespace: the provider id, the slug, the server."""
@@ -413,8 +420,7 @@ class VaultSecret(Base, Uuid7Pk):
         the refresh request for ``host_id``, the box that asks."""
         if not self.is_live:
             raise SecretRevokedError(self.audience)
-        # The service answers for the resource that the box names. A managed card
-        # holds only secrets scoped to the instance.
+        # The service answers for what the box names.
         if resource and self.audience == Audience.service(self.audience_name):
             return await services.get(self.audience_name).issue_token(resource)
         if self.kind == SecretKind.STATIC:

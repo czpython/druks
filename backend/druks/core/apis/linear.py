@@ -1,4 +1,6 @@
 import hashlib
+from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -35,20 +37,19 @@ class LinearClient:
     def __init__(
         self,
         *,
-        api_key: str,
+        api_key: str = "",
+        get_access_token: Callable[..., Awaitable[tuple[str, datetime | None]]] | None = None,
         api_url: str = LINEAR_GRAPHQL_URL,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.api_key = api_key
+        self.get_access_token = get_access_token
         self.api_url = api_url
         # One AsyncClient per LinearClient pools connections across the calls of a build run.
         self._client = client or httpx.AsyncClient(
             timeout=_DEFAULT_TIMEOUT,
             limits=_DEFAULT_LIMITS,
-            headers={
-                "Authorization": api_key,
-                "Content-Type": "application/json",
-            },
+            headers={"Content-Type": "application/json"},
         )
 
     async def aclose(self) -> None:
@@ -129,10 +130,15 @@ class LinearClient:
             cursor = page["pageInfo"]["endCursor"]
 
     async def _execute(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        response = await self._client.post(
-            self.api_url,
-            json={"query": query, "variables": variables},
-        )
+        response = await self._post(query, variables)
+        # Linear refuses a token with HTTP 401, or with HTTP 400 and the GraphQL error code
+        # AUTHENTICATION_ERROR. It runs nothing for a refused request, so a mutation goes
+        # again too.
+        if self.get_access_token and (
+            response.status_code == 401
+            or (response.status_code == 400 and "AUTHENTICATION_ERROR" in response.text)
+        ):
+            response = await self._post(query, variables, cached=False)
         response.raise_for_status()
         body = response.json()
         errors = body.get("errors")
@@ -144,6 +150,20 @@ class LinearClient:
             raise LinearAPIError("Linear API response did not include data.")
 
         return data
+
+    async def _post(
+        self, query: str, variables: dict[str, Any], *, cached: bool = True
+    ) -> httpx.Response:
+        # Linear takes a pasted API key with no scheme.
+        authorization = self.api_key
+        if self.get_access_token:
+            token, _ = await self.get_access_token(cached=cached)
+            authorization = f"Bearer {token}"
+        return await self._client.post(
+            self.api_url,
+            json={"query": query, "variables": variables},
+            headers={"Authorization": authorization},
+        )
 
 
 def _status_id_by_name(states: list[dict[str, Any]], status_name: str) -> str:
