@@ -352,6 +352,21 @@ describe('Chat page', () => {
     expect(chatApi.send).not.toHaveBeenCalled()
   })
 
+  it('shows a reminder, which answers no message, in time order', async () => {
+    vi.mocked(chatApi.get).mockResolvedValue({ ...conversation, activeMessageId: null, messages: [
+      { ...message, state: 'replied' },
+      { ...message, id: '11', role: 'assistant', body: 'Reminder set for 09:21.', state: null, replyTo: '10' },
+      { ...message, id: '12', role: 'assistant', body: 'Take out the trash!', state: null, replyTo: null },
+      { ...message, id: '13', body: 'Done', state: 'replied' },
+    ] })
+    mount()
+    await connected()
+    const turns = screen.getAllByRole('article')
+    expect(turns.map((turn) => turn.getAttribute('aria-label'))).toEqual(['Message and reply', 'Agent message', 'Message and reply'])
+    expect(within(turns[1]!).getByText('Agent')).toBeTruthy()
+    expect(within(turns[1]!).getByText('Take out the trash!')).toBeTruthy()
+  })
+
   it('pairs each reply with its user message by replyTo when replies arrive out of order', async () => {
     vi.mocked(chatApi.get).mockResolvedValue({ ...conversation, activeMessageId: null, messages: [
       { ...message, state: 'replied' },
