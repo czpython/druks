@@ -3,6 +3,20 @@
 All notable changes to Druks. Versions follow [semantic versioning](https://semver.org);
 while Druks is pre-1.0, a minor bump may break compatibility.
 
+## [0.11.0] — 2026-10-18
+
+### Added
+
+- **An app can keep resources at a provider**, such as a Cloudflare Worker, and
+  get a token for each one. Declare a `Resource` class inside the service class,
+  as you declare `Settings`. It has four steps: `create`, `update`, `delete`,
+  and `get_token`. The app makes every other call with `get_token()` and the
+  provider's SDK. When a manager manages the service card, Druks sends the four
+  steps to the manager, and the app code does not change. A failed step raises
+  `ResourceError`. `resource.get_secrets()` gives a sandbox the resource's token
+  as a placeholder, such as `CLOUDFLARE_API_TOKEN`. `Resource` and
+  `ResourceError` come from `druks.services`.
+
 ## [0.10.0] — 2026-10-18
 
 ### Breaking changes
