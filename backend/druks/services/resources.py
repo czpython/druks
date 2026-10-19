@@ -139,10 +139,12 @@ class ManagedResource(Resource):
             if not (missing_ok and response.status_code == 404):
                 response.raise_for_status()
         except httpx.HTTPStatusError as error:
-            reason = str(error.response.status_code)
+            reason = ""
             with contextlib.suppress(ValueError, KeyError, TypeError):
-                reason += f" {error.response.json()['message']}"
-            raise ResourceError(step, self.path, reason) from error
+                reason = str(error.response.json()["message"])
+            raise ResourceError(
+                step, self.path, reason, status_code=error.response.status_code
+            ) from error
         except httpx.TransportError as error:
             raise ResourceError(step, self.path, str(error) or type(error).__name__) from error
         return response

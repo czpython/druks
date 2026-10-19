@@ -163,8 +163,12 @@ async def test_a_refused_step_raises_a_resource_error(acme, managed, manager, mo
 
     monkeypatch.setattr(manager, "handle", refuse)
 
-    with pytest.raises(ResourceError, match="create on workers/6f2c-site failed: 403 Not your"):
+    with pytest.raises(
+        ResourceError, match="create on workers/6f2c-site failed: 403 Not your"
+    ) as refused:
         await acme.Workers("site").create()
+
+    assert (refused.value.status_code, refused.value.reason) == (403, "Not your Worker.")
 
 
 @pytest.mark.parametrize(

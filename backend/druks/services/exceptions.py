@@ -61,7 +61,14 @@ class OauthRefreshError(DruksError):
 
 
 class ResourceError(DruksError):
-    """A step on a resource failed at the manager."""
+    """A step on a resource failed at the manager. ``status_code`` and ``reason``
+    are the manager's answer. A step that got no answer has no status code, and
+    its reason is the transport error."""
 
-    def __init__(self, step: str, resource: str, reason: str) -> None:
-        super().__init__(f"{step} on {resource} failed: {reason}")
+    def __init__(
+        self, step: str, resource: str, reason: str, *, status_code: int | None = None
+    ) -> None:
+        answer = f"{status_code} {reason}".strip() if status_code else reason
+        super().__init__(f"{step} on {resource} failed: {answer}")
+        self.status_code = status_code
+        self.reason = reason

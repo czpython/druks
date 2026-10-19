@@ -1561,7 +1561,9 @@ These rules apply to each resource:
 - The slug of the class is the class name in snake case, so `Workers` gives
   `workers`. A class can set `slug` to keep its slug after a rename.
 - A step can also raise `ResourceError`. Catch it with the errors of the SDK of
-  the provider.
+  the provider. Its `status_code` and `reason` are the manager's answer, so the
+  app can tell its user why the manager refused a step. A step that got no
+  answer has no status code.
 
 To give the token to a sandbox, add the secrets of the resource to the secrets of
 the workspace:
