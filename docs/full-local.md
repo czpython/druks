@@ -224,6 +224,9 @@ keep the exact public paths:
 The tunnel must preserve request bodies and signature headers. Do not expose
 the rest of the local dashboard without adding an authentication edge.
 
+[Webhook tunnels](webhook-tunnels.md) describes the paths to forward, the
+`urls.webhook_host` setting, and a Tailscale Funnel setup.
+
 Phone calls need the tunnel too. Twilio posts each call to
 `/_external/twilio/calls/` on `127.0.0.1:8001`, and it streams the call's audio
 to `/_calls/*`, which must go to the calls server on `127.0.0.1:8002` with the
