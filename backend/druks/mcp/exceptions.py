@@ -1,5 +1,6 @@
 from druks.exceptions import DruksError
 from druks.mcp.enums import IdentityMode
+from druks.secrets.exceptions import MissingSecretError
 
 
 class McpServerError(DruksError):
@@ -96,7 +97,7 @@ class UnresolvedGrantAccountError(McpServerError):
         self.account_id = account_id
 
 
-class MissingGrantError(McpServerError):
+class MissingGrantError(MissingSecretError):
     # An enabled OAuth server has no stored grant, so delivery can't mint a
     # token for it. Raised loudly at delivery — the operator must run the
     # connect flow (or disable the server), not discover a dead server mid-run.

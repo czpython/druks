@@ -99,7 +99,7 @@ class GitHubClient:
                 response = await self._app.rest.apps.async_get_user_installation(owner)
             except RequestFailed as error:
                 if error.response.status_code == 404:
-                    raise GitHubAppNotInstalledError(owner) from error
+                    raise GitHubAppNotInstalledError(owner, app=self._slug) from error
                 raise
         return response.parsed_data.id
 
@@ -231,7 +231,7 @@ class GitHubClient:
                 if not installation.suspended_at:
                     installations.append(installation)
             if not installations:
-                raise GitHubAppNotInstalledError(bot_name)
+                raise GitHubAppNotInstalledError(bot_name, app=self._slug)
             github = await self._get_for_installation(installations[0].id)
             async with github:
                 response = await github.rest.users.async_get_by_username(bot_name)
@@ -254,7 +254,7 @@ class GitHubClient:
             response = await self._app.rest.apps.async_get_repo_installation(owner, name)
         except RequestFailed as error:
             if error.response.status_code == 404:
-                raise GitHubAppNotInstalledError(repo) from error
+                raise GitHubAppNotInstalledError(repo, app=self._slug) from error
             raise
         installation_id: int = response.parsed_data.id
         self._installation_cache[repo] = installation_id

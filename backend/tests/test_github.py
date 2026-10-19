@@ -230,6 +230,7 @@ async def test_merge_when_ready_reports_unsettled_merge() -> None:
 class _OwnerReposClient(GitHubClient):
     def __init__(self, apps: Any) -> None:
         self._app_id = "123"
+        self._slug = "example-app"
         apps.async_create_installation_access_token = AsyncMock(
             return_value=SimpleNamespace(
                 parsed_data=SimpleNamespace(token="ghs_minted", expires_at="2026-09-07T18:00:00Z")
@@ -538,13 +539,14 @@ async def test_installation_lookup_404_names_the_repo() -> None:
     class _UninstalledClient(GitHubClient):
         def __init__(self) -> None:  # skip real auth
             self._installation_cache = {}
+            self._slug = "example-app"
             self._app = type("_App", (), {"rest": type("_Rest", (), {"apps": _Apps()})()})()
 
     client = _UninstalledClient()
     try:
         await client._installation_id("ClawHaven/acme-app")
     except GitHubAppNotInstalledError as error:
-        assert "ClawHaven/acme-app" in str(error)
+        assert "The GitHub App example-app has no access to ClawHaven/acme-app" in str(error)
         assert "install the app" in str(error)
     else:
         raise AssertionError("expected GitHubAppNotInstalledError")
@@ -558,7 +560,7 @@ async def test_get_file_content_returns_none_when_app_not_installed() -> None:
             pass
 
         async def _for_repo(self, repo: str) -> Any:
-            raise GitHubAppNotInstalledError(repo)
+            raise GitHubAppNotInstalledError(repo, app="example-app")
 
     client = _UninstalledClient()
     assert await client.get_file_content("clawhaven/.druks", "prompts/x.md") is None

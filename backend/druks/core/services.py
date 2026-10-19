@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.models import Account
-from druks.core.apis.exceptions import TwilioError, TwilioNotFoundError
+from druks.core.apis.exceptions import GitHubAppNotInstalledError, TwilioError, TwilioNotFoundError
 from druks.core.apis.github import GITHUB_API_URL, GITHUB_AUTHORITY, GitHubClient
 from druks.core.apis.jira import SERVICE_ACCOUNT_DOMAIN, JiraClient
 from druks.core.apis.linear import LINEAR_GRAPHQL_URL
@@ -22,6 +22,7 @@ from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
 from druks.core.apis.twilio import TwilioClient
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
+from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
 from druks.services import Service, ServiceConnectError
 from druks.services.exceptions import ServiceNotConnectedError
@@ -137,7 +138,10 @@ class Github(Service):
     @classmethod
     async def issue_token(cls, resource: str) -> tuple[str, datetime]:
         """The installation token for the repo, and the expiry GitHub gave it."""
-        return await (await cls.get_client()).token_for_repo(resource)
+        try:
+            return await (await cls.get_client()).token_for_repo(resource)
+        except GitHubAppNotInstalledError as error:
+            raise MissingSecretError(str(error)) from error
 
     @classmethod
     def is_grant_revoked(cls, status: int, tokens: dict[str, Any]) -> bool:

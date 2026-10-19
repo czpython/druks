@@ -6,6 +6,8 @@ import httpx
 import pytest
 from conftest import connect_provider, connect_service
 from druks.accounts.models import Account
+from druks.core.apis.exceptions import GitHubAppNotInstalledError
+from druks.core.apis.github import GitHubClient
 from druks.core.services import Github
 from druks.db import db_session
 from druks.durable.engine import _step_engine
@@ -433,6 +435,24 @@ async def test_the_issuer_answers_503_when_github_refuses(druks_db, tmp_path, mo
     assert "installed" not in response.text
 
 
+async def test_the_issuer_answers_422_with_the_reason_when_the_app_is_not_on_the_repo(
+    druks_db, tmp_path, monkeypatch
+):
+    async def token_for_repo(self, repo: str) -> tuple[str, datetime]:
+        raise GitHubAppNotInstalledError(repo, app="druks-reviewer")
+
+    monkeypatch.setattr(GitHubClient, "token_for_repo", token_for_repo)
+    await _connect_github()
+    identity, bearer = await _github_identity()
+
+    response = await _fetch(tmp_path, identity.id, bearer, "github")
+
+    assert response.status_code == 422
+    assert response.json()["detail"].startswith(
+        "The GitHub App druks-reviewer has no access to acme/widgets"
+    )
+
+
 async def _mcp_identity() -> tuple[SandboxIdentity, str, dict]:
     # The one ref a box of a plain workspace binds for the enabled servers.
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
@@ -523,7 +543,7 @@ async def test_the_gateway_key_entry_sends_its_bearer_verbatim(druks_db):
     assert (await row.issue_token(""))[0].startswith("Bearer ")
 
 
-async def test_the_issuer_answers_503_for_a_disconnected_mcp_grant(druks_db, tmp_path):
+async def test_the_issuer_answers_422_for_a_disconnected_mcp_grant(druks_db, tmp_path):
     server = await McpServer.create(
         druks_db, name="linear", url="https://mcp.linear.app/mcp", is_oauth=True
     )
@@ -537,5 +557,5 @@ async def test_the_issuer_answers_503_for_a_disconnected_mcp_grant(druks_db, tmp
 
     response = await _fetch(tmp_path, identity.id, bearer, "mcp_linear_token")
 
-    assert response.status_code == 503
+    assert response.status_code == 422
     assert "rt" not in response.text

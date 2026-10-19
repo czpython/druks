@@ -105,7 +105,7 @@ async def test_fetch_collection_downloads_through_the_github_app(tmp_path, monke
 
 async def test_fetch_collection_is_anonymous_when_the_app_is_not_on_the_repo(tmp_path, monkeypatch):
     async def download_tarball(repo):
-        raise GitHubAppNotInstalledError(repo)
+        raise GitHubAppNotInstalledError(repo, app="example-app")
 
     _patch_github_client(monkeypatch, download_tarball)
     _patch_download(monkeypatch, _tarball("owner-repo-abc", {"SKILL.md": _skill_md("public")}))
@@ -116,7 +116,7 @@ async def test_fetch_collection_is_anonymous_when_the_app_is_not_on_the_repo(tmp
 
 async def test_fetch_collection_names_the_private_repo_cause(tmp_path, monkeypatch):
     async def download_tarball(repo):
-        raise GitHubAppNotInstalledError(repo)
+        raise GitHubAppNotInstalledError(repo, app="example-app")
 
     async def fake_download(repo):
         request = httpx.Request("GET", "https://api.github.com/repos/owner/repo/tarball")

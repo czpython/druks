@@ -6,6 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from druks.api.dependencies import SessionDep
 from druks.harnesses.exceptions import OAuthTokenError
+from druks.secrets.exceptions import MissingSecretError
 
 from .exceptions import IdentityDenied
 from .models import SandboxIdentity
@@ -26,8 +27,9 @@ async def secret(
     name: str,
     bearer: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> JSONResponse:
-    """The value behind a box's placeholder. A 403 carries no reason. A 503
-    says the source holds nothing valid now, and the exchange retries."""
+    """The value behind a box's placeholder. A 403 carries no reason. A 422 says
+    the source has no secret until a person acts, and names the fix. A 503 says the source
+    holds nothing valid now, and the exchange retries."""
     credential = bearer.credentials if bearer else ""
     try:
         identity = await SandboxIdentity.authenticate(session, identity_id, credential, name)
@@ -41,6 +43,9 @@ async def secret(
         await SandboxIdentity.authenticate(session, identity_id, credential, name)
     except IdentityDenied:
         raise HTTPException(status_code=403) from None
+    except MissingSecretError as exc:
+        logger.warning("fetch of %s for identity %s failed: %s", name, identity_id, exc)
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     except OAuthTokenError:
         raise HTTPException(status_code=503) from None
     except Exception as exc:  # noqa: BLE001 — the source failed; the box gets a 503 and the exchange retries
