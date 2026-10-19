@@ -28,7 +28,8 @@ levels are not among them.
 4. Select **Send**, or press Enter.
 
 The first message creates the conversation. It shows as **New conversation**
-until the agent's first reply. Then the harness names it in a short separate call.
+until the harness names it from that message, in a short separate call that runs
+beside the first reply.
 New lines use Shift + Enter.
 
 The starter prompts fill the message field. They do not send a message.
