@@ -1072,6 +1072,8 @@ export interface McpServer {
   isEnabled: boolean
   isOauth: boolean
   identityMode: string | null
+  // The scopes a connect requests; null requests what the server advertises.
+  scopes: string[] | null
   // A catalog-declared server — managed by druks, can't be removed here,
   // only disabled.
   builtin: boolean
@@ -1085,6 +1087,13 @@ export interface McpServer {
 }
 
 export type McpCredential = 'headers' | 'grant' | 'service_connection' | 'service_login'
+
+export interface McpServerScopes {
+  // What the server advertises, and what a connect requests; null requests
+  // the advertised list.
+  advertised: string[]
+  requested: string[] | null
+}
 
 export interface McpServerConnection {
   // Null identifies the shared connection every account uses.

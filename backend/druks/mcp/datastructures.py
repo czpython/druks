@@ -16,6 +16,8 @@ class McpServerAccess:
     # A catalog definition, which Druks manages: disable it, never remove it.
     builtin: bool
     identity_mode: str | None
+    # The scopes a connect requests. None requests what the server advertises.
+    scopes: list[str] | None
     headers: dict[str, Any]
     secret_headers: dict[str, VaultSecret]
     # The service that owns the server's host.
@@ -31,3 +33,8 @@ class McpServerAccess:
         if self.credential == Credential.HEADERS:
             return bool(self.secret_headers)
         return bool(self.secret)
+
+    @property
+    def supports_scope_selection(self) -> bool:
+        """Whether Druks runs the server's OAuth flow itself, and so can choose its scopes."""
+        return self.is_oauth and self.credential != Credential.SERVICE_CONNECTION

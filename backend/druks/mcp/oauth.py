@@ -222,6 +222,16 @@ def _supported_scopes(name: str, metadata: dict) -> list[str]:
     raise OauthConnectError(name, "the server returned invalid supported scopes")
 
 
+async def list_advertised_scopes(name: str, server_url: str) -> list[str]:
+    """The scopes the server's protected-resource metadata advertises."""
+    try:
+        async with asyncio.timeout(OAUTH_CONNECT_DEADLINE_SECONDS), _http() as client:
+            _, resource = await _discover(client, name, server_url)
+    except TimeoutError as error:
+        raise OauthConnectError(name, "authorization discovery timed out. Retry.") from error
+    return _supported_scopes(name, resource)
+
+
 async def begin_connect(
     name: str,
     server_url: str,
@@ -229,12 +239,14 @@ async def begin_connect(
     *,
     account_id: str | None,
     identity_mode: IdentityMode,
+    scopes: list[str] | None = None,
 ) -> str:
     """Start the operator's authorization-code + PKCE flow for one server:
     discover the authorization server, register druks as a public client, and
     hand the engine the resulting client to stash the pending exchange and
     render the consent URL. Nothing durable is written here — an abandoned
-    consent simply expires."""
+    consent simply expires. ``scopes`` pins what the connect requests at the
+    resource. None requests what the resource advertises."""
     redirect_uri = f"{endpoint.rstrip('/')}{OAUTH_CALLBACK_PATH}"
     phase = "authorization discovery"
     try:
@@ -248,19 +260,18 @@ async def begin_connect(
             phase = "identity discovery"
             identity_provider = await _resolve_identity_provider(client, name, authorization_server)
             provider_scopes = _supported_scopes(name, identity_provider)
-            scopes = ()
+            requested = tuple(scopes or ())
             if "openid" in provider_scopes:
                 # A scope request replaces the provider's default grant, so it must
                 # also ask for the MCP resource's scopes.
                 identity_scopes = [
                     scope for scope in ("openid", "email", "profile") if scope in provider_scopes
                 ]
-                scopes = tuple(
-                    dict.fromkeys([*_supported_scopes(name, resource), *identity_scopes])
-                )
+                resource_scopes = scopes or _supported_scopes(name, resource)
+                requested = tuple(dict.fromkeys([*resource_scopes, *identity_scopes]))
             phase = "client registration"
             registration = await _register_client(
-                client, name, authorization_server, redirect_uri, scopes
+                client, name, authorization_server, redirect_uri, requested
             )
     except TimeoutError as error:
         raise OauthConnectError(name, f"{phase} timed out. Retry the connection.") from error
@@ -276,7 +287,7 @@ async def begin_connect(
             extra_token_params={"resource": server_url},
         ).begin_connect(
             redirect_uri=redirect_uri,
-            scopes=scopes,
+            scopes=requested,
             context={
                 "name": name,
                 "server_url": server_url,

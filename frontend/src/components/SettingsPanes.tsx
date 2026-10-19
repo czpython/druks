@@ -2476,6 +2476,33 @@ export function McpServersPane() {
     }
   }
 
+  async function setScopes(name: string, scopes: string[]) {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.setMcpServerScopes(name, scopes)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      throw e
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function removeScopes(name: string) {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.removeMcpServerScopes(name)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function removeHeaders(name: string) {
     const isPersonal = servers.find((server) => server.name === name)?.identityMode === 'per_user'
     const question = isPersonal
@@ -2536,6 +2563,8 @@ export function McpServersPane() {
                 onDisconnect={disconnect}
                 onSetHeaders={setHeaders}
                 onRemoveHeaders={removeHeaders}
+                onSetScopes={setScopes}
+                onRemoveScopes={removeScopes}
               />
             ))}
           </div>
@@ -2831,6 +2860,8 @@ function McpServerRow({
   onDisconnect,
   onSetHeaders,
   onRemoveHeaders,
+  onSetScopes,
+  onRemoveScopes,
 }: {
   server: McpServer
   busy: boolean
@@ -2841,14 +2872,56 @@ function McpServerRow({
   onDisconnect: (name: string) => Promise<void>
   onSetHeaders: (name: string, secretHeaders: Record<string, string>) => Promise<void>
   onRemoveHeaders: (name: string) => Promise<void>
+  onSetScopes: (name: string, scopes: string[]) => Promise<void>
+  onRemoveScopes: (name: string) => Promise<void>
 }) {
   const claimedMode = server.identityMode
   const isPersonal = claimedMode === 'per_user'
   const isLive = server.hasToken
   const hasGrant = server.credential === 'grant' && server.hasToken
+  // Druks runs the server's OAuth flow itself, and so can choose its scopes.
+  const supportsScopeSelection = server.isOauth && server.credential !== 'service_connection'
   const keyFieldId = useId()
   const [auth, setAuth] = useState<McpAuth>(EMPTY_AUTH)
   const [editingKey, setEditingKey] = useState(false)
+  const [editingScopes, setEditingScopes] = useState(false)
+  const [ticked, setTicked] = useState<string[] | null>(null)
+  const scopesQuery = useQuery({
+    queryKey: ['mcpServerScopes', server.name],
+    queryFn: () => api.mcpServerScopes(server.name),
+    enabled: editingScopes,
+  })
+  // A pinned scope the server no longer advertises stays visible, so a save
+  // never drops it unseen.
+  const choices = scopesQuery.data
+    ? [...new Set([...scopesQuery.data.advertised, ...(server.scopes ?? [])])]
+    : []
+  const requested = ticked ?? server.scopes ?? choices
+
+  function toggleScope(scope: string) {
+    setTicked(
+      requested.includes(scope) ? requested.filter((other) => other !== scope) : [...requested, scope],
+    )
+  }
+
+  function closeScopes() {
+    setTicked(null)
+    setEditingScopes(false)
+  }
+
+  async function saveScopes() {
+    try {
+      await onSetScopes(server.name, requested)
+      closeScopes()
+    } catch {
+      // The pane shows the error; the ticks stay for a retry.
+    }
+  }
+
+  async function resetScopes() {
+    await onRemoveScopes(server.name)
+    closeScopes()
+  }
 
   async function saveKey() {
     if (isAuthReady(auth)) {
@@ -2921,7 +2994,7 @@ function McpServerRow({
               {server.hasToken ? 'Reconnect' : 'Connect'}
             </button>
           )}
-          {(server.credential === 'grant' || server.credential === 'service_login') &&
+          {supportsScopeSelection &&
             (claimedMode === null ? (
               // The first connect claims how this server's credential is held;
               // afterwards the choice is fixed until the last grant is dropped.
@@ -2965,6 +3038,16 @@ function McpServerRow({
                 )}
               </>
             ))}
+          {supportsScopeSelection && (
+            <button
+              className="set-btn ghost"
+              onClick={() => (editingScopes ? closeScopes() : setEditingScopes(true))}
+              disabled={busy}
+              title="Choose which of the server's scopes a connect requests."
+            >
+              {server.scopes ? `Scopes (${server.scopes.length})` : 'Scopes'}
+            </button>
+          )}
           {/* A built-in (catalog entry) is managed by druks: disable, never remove. */}
           {!server.builtin && (
             <button
@@ -2997,6 +3080,60 @@ function McpServerRow({
               Save key
             </button>
           </div>
+        </div>
+      )}
+      {editingScopes && (
+        <div className="mcp-scope-form">
+          {scopesQuery.isPending && (
+            <p className="mcp-help" role="status">
+              Reading the scopes {server.name} advertises…
+            </p>
+          )}
+          {scopesQuery.isError && (
+            <p className="mcp-error" role="alert">
+              {scopesQuery.error.message}
+            </p>
+          )}
+          {scopesQuery.data && (
+            <>
+              <p className="mcp-help">
+                {choices.length
+                  ? 'A connect requests the ticked scopes. Untick the ones no agent needs.'
+                  : "The server advertises no scopes. A connect takes the provider's default grant."}
+              </p>
+              <div className="mcp-scope-list">
+                {choices.map((scope) => (
+                  <label key={scope} className="mcp-check">
+                    <input
+                      type="checkbox"
+                      checked={requested.includes(scope)}
+                      onChange={() => toggleScope(scope)}
+                      disabled={busy}
+                    />{' '}
+                    <code>{scope}</code>
+                  </label>
+                ))}
+              </div>
+              <div className="mcp-actions">
+                {server.scopes && (
+                  <button className="set-btn ghost" disabled={busy} onClick={() => void resetScopes()}>
+                    Use advertised
+                  </button>
+                )}
+                <button className="set-btn ghost" disabled={busy} onClick={closeScopes}>
+                  Cancel
+                </button>
+                <button
+                  className="set-btn primary"
+                  disabled={busy || !requested.length}
+                  aria-busy={busy}
+                  onClick={() => void saveScopes()}
+                >
+                  Save scopes
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

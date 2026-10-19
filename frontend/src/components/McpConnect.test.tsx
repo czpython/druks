@@ -14,7 +14,7 @@ it.each(['success', 'failure'])('shows pending sign-in and handles %s', async (o
   vi.spyOn(api, 'mcpServers').mockResolvedValue([{
     name: 'jira', url: 'https://jira.test/mcp', isEnabled: true,
     isOauth: true, identityMode: 'shared', builtin: false, hasToken: false,
-    credential: 'grant' as const, service: null,
+    credential: 'grant' as const, service: null, scopes: null,
   }])
   vi.spyOn(api, 'mcpServerDirectory').mockResolvedValue([])
   let resolve!: (value: { authorizationUrl: string }) => void
@@ -55,7 +55,7 @@ it('offers Connect beside the service login', async () => {
   vi.spyOn(api, 'mcpServers').mockResolvedValue([{
     name: 'atlassian', url: 'https://mcp.atlassian.com/v2/mcp', isEnabled: true,
     isOauth: true, identityMode: 'per_user', builtin: false, hasToken: true,
-    credential: 'service_login' as const, service: 'jira',
+    credential: 'service_login' as const, service: 'jira', scopes: null,
   }])
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(<QueryClientProvider client={client}><McpServersPane /></QueryClientProvider>)

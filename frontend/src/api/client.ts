@@ -34,6 +34,7 @@ import type {
   McpServer,
   McpServerConnection,
   McpServerDirectoryEntry,
+  McpServerScopes,
   Service,
   Provider,
   ProviderCatalog,
@@ -455,4 +456,10 @@ export const api = {
     ),
   removeMcpServerHeaders: (name: string) =>
     deleteRequest(`/api/mcp-servers/${encodeURIComponent(name)}/headers`),
+  mcpServerScopes: (name: string) =>
+    getJSON<McpServerScopes>(`/api/mcp-servers/${encodeURIComponent(name)}/scopes`),
+  setMcpServerScopes: (name: string, scopes: string[]) =>
+    postJSON<McpServer>(`/api/mcp-servers/${encodeURIComponent(name)}/scopes`, { scopes }, 'PUT'),
+  removeMcpServerScopes: (name: string) =>
+    deleteRequest(`/api/mcp-servers/${encodeURIComponent(name)}/scopes`),
 }

@@ -174,6 +174,19 @@ async def test_connect_resolves_standard_identity(provider, druks_db):
     assert grant.scopes == requested
 
 
+async def test_a_pinned_connect_requests_its_scopes_with_identity(provider):
+    url = await oauth.begin_connect(
+        NAME,
+        provider["server"],
+        "https://druks.example.test",
+        account_id=None,
+        identity_mode=IdentityMode.SHARED,
+        scopes=["read:me"],
+    )
+    params = dict(parse_qsl(urlparse(url).query))
+    assert params["scope"].split() == ["read:me", "openid", "email"]
+
+
 async def test_openid_only_issuer_can_register_and_request_identity(provider):
     """OpenID discovery remains sufficient when OAuth metadata is absent."""
     provider["oauth"] = None

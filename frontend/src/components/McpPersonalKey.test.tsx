@@ -13,7 +13,7 @@ afterEach(() => {
 const lusha = {
   name: 'lusha', url: 'https://mcp.lusha.com/mcp', isEnabled: true,
   isOauth: false, identityMode: 'per_user', builtin: false, hasToken: false,
-  credential: 'headers' as const, service: null,
+  credential: 'headers' as const, service: null, scopes: null,
 }
 
 it.each([

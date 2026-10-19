@@ -44,7 +44,9 @@ async def test_adding_a_directory_server_ships_dark_and_connects(tmp_path, monke
 
         begun = []
 
-        async def fake_begin_connect(name, server_url, endpoint, *, account_id, identity_mode):
+        async def fake_begin_connect(
+            name, server_url, endpoint, *, account_id, identity_mode, scopes
+        ):
             begun.append((name, server_url, endpoint, identity_mode))
             return "https://consent.example/authorize"
 

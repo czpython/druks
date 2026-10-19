@@ -918,6 +918,15 @@ is one of:
   gets it left out of its sandbox. The run's agent call manifest records the
   server as declared but not delivered.
 
+A connect requests every scope that the server advertises. A provider can
+refuse consent for a scope that the organization has not enabled; Atlassian
+then shows an empty consent page. **Scopes** on the server's row reads the
+advertised list from the server. Untick the scopes that no agent needs and
+save. Druks then requests the ticked scopes at each connect, and the row
+shows their count. **Use advertised** returns to the full list. If the ticked
+scopes miss one that a tool needs, the tool fails with `insufficient_scope`.
+Tick the scope and reconnect.
+
 A service can own the host of an OAuth server: GitHub owns
 `api.githubcopilot.com`, Jira owns `mcp.atlassian.com`, and Linear owns
 `mcp.linear.app`. Such a server uses the service's credential:
@@ -967,9 +976,9 @@ new outcome.
 The identity comes from the authorization server itself if it offers `openid`.
 It comes from the OpenID provider at the origin root if that provider has the
 same authorization and token endpoints. If a provider offers `openid`, Druks
-requests the MCP resource's scopes with `openid`, `email`, and `profile`, and
-registers its client with the same scopes. An existing grant gets an identity
-at its next reconnect.
+adds `openid`, `email`, and `profile` to the requested scopes, and registers
+its client with the same scopes. An existing grant gets an identity at its
+next reconnect.
 
 Druks stores the `scope` field of the token response as the granted scopes.
 If the field is missing, the provider granted the requested scopes. If the

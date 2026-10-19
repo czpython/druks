@@ -46,6 +46,7 @@ class FakeAuthServer:
         self.resource_metadata_supported = True
         self.registration_supported = True
         self.resource = _SERVER_URL
+        self.resource_scopes = ["read", "write"]
         self.issuer = _AUTH_BASE
         self.code_challenge_methods = ["S256"]
         self.userinfo_endpoint = f"{_AUTH_BASE}/userinfo"
@@ -67,7 +68,12 @@ class FakeAuthServer:
             if not (self.discovery_supported and self.resource_metadata_supported):
                 return httpx.Response(404)
             return httpx.Response(
-                200, json={"resource": self.resource, "authorization_servers": [_AUTH_BASE]}
+                200,
+                json={
+                    "resource": self.resource,
+                    "authorization_servers": [_AUTH_BASE],
+                    "scopes_supported": self.resource_scopes,
+                },
             )
         if path.startswith("/.well-known/oauth-authorization-server") or path.startswith(
             "/.well-known/openid-configuration"
@@ -507,8 +513,6 @@ async def test_reconnect_after_disconnect_creates_a_new_grant(auth_server, druks
     state = dict(parse_qsl(urlparse(url).query))["state"]
     await oauth.complete_connect(druks_db, state=state, code="code-1")
 
-    from druks.db import db_session
-
     db_session().expunge_all()
     # A re-connect creates a new grant. The revoked row stays as history,
     # so at most one live connection holds the (server, account) slot.
@@ -899,6 +903,27 @@ def test_connect_route_returns_the_consent_url(tmp_path, registry_state, auth_se
         )
         assert response.status_code == 200
         assert response.json()["authorizationUrl"].startswith(f"{_AUTH_BASE}/authorize?")
+
+
+def test_scope_routes_preview_pin_and_reset(tmp_path, registry_state, auth_server, druks_db):
+    _register_oauth_server()
+    settings = make_settings(tmp_path, urls={"endpoint": _ENDPOINT})
+    scopes_path = f"/api/mcp-servers/{_NAME}/scopes"
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        preview = client.get(scopes_path).json()
+        assert preview == {"advertised": ["read", "write"], "requested": None}
+        assert client.put(scopes_path, json={"scopes": []}).status_code == 422
+        assert client.put(scopes_path, json={"scopes": ["read write"]}).status_code == 422
+        assert client.put(scopes_path, json={"scopes": ["read"]}).json()["scopes"] == ["read"]
+        assert client.get(scopes_path).json()["requested"] == ["read"]
+        consent = client.post(
+            f"/api/mcp-servers/{_NAME}/connect", json={"identity_mode": IdentityMode.SHARED}
+        )
+        params = dict(parse_qsl(urlparse(consent.json()["authorizationUrl"]).query))
+        assert params["scope"] == "read"
+        assert client.delete(scopes_path).status_code == 204
+        assert client.get(scopes_path).json()["requested"] is None
+        assert client.get("/api/mcp-servers/github/scopes").status_code == 404
 
 
 async def test_callback_route_completes_the_connect(

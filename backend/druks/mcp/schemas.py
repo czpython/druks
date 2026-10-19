@@ -18,6 +18,8 @@ class McpServerResponse(Schema):
     is_enabled: bool
     is_oauth: bool
     identity_mode: str | None
+    # The scopes a connect requests. Null requests what the server advertises.
+    scopes: list[str] | None
     builtin: bool
     # Whether the server can authenticate at delivery — never the token itself.
     has_token: bool
@@ -34,6 +36,13 @@ class McpServerConnectionResponse(Schema):
     account_username: str | None = Field(
         default=None, validation_alias=AliasPath("account", "username")
     )
+
+
+class McpServerScopesResponse(Schema):
+    # What the server advertises, and what a connect requests. Null requests
+    # the advertised list.
+    advertised: list[str]
+    requested: list[str] | None
 
 
 class ConnectMcpServerResponse(Schema):

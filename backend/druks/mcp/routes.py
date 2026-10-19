@@ -11,7 +11,7 @@ from druks.api.dependencies import SessionDep
 from druks.apps.registry import mcp_servers
 from druks.core.templates import render_page
 from druks.mcp import oauth
-from druks.mcp.constants import HEADER_NAME_PATTERN
+from druks.mcp.constants import HEADER_NAME_PATTERN, SCOPE_PATTERN
 from druks.mcp.enums import Credential, IdentityMode
 from druks.mcp.exceptions import (
     InvalidServerNameError,
@@ -27,6 +27,7 @@ from druks.mcp.schemas import (
     McpServerConnectionResponse,
     McpServerDirectoryResponse,
     McpServerResponse,
+    McpServerScopesResponse,
 )
 from druks.secrets.models import VaultSecret
 
@@ -180,6 +181,43 @@ async def remove_mcp_server(session: SessionDep, name: str) -> None:
     await server.delete()
 
 
+@router.get("/{name}/scopes", response_model=McpServerScopesResponse)
+async def get_mcp_server_scopes(session: SessionDep, name: str) -> McpServerScopesResponse:
+    access = await McpServer.get_access(session, name, current_account_id.get())
+    if access and access.supports_scope_selection:
+        try:
+            advertised = await oauth.list_advertised_scopes(name, access.url)
+        except OauthConnectError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        return McpServerScopesResponse(advertised=advertised, requested=access.scopes)
+    raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no scope selection.")
+
+
+@router.put("/{name}/scopes", response_model=McpServerResponse)
+async def set_mcp_server_scopes(
+    session: SessionDep, name: str, scopes: Annotated[list[str], Body(embed=True)]
+) -> McpServerResponse:
+    access = await McpServer.get_access(session, name, current_account_id.get())
+    if access and access.supports_scope_selection:
+        if scopes and all(SCOPE_PATTERN.match(scope) for scope in scopes):
+            await McpServer.set_scopes(session, name, scopes)
+            return await _response(session, name)
+        raise HTTPException(
+            status_code=422,
+            detail=f"MCP server {name!r} needs at least one scope. A scope has no spaces.",
+        )
+    raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no scope selection.")
+
+
+@router.delete("/{name}/scopes", status_code=204)
+async def remove_mcp_server_scopes(session: SessionDep, name: str) -> None:
+    access = await McpServer.get_access(session, name, current_account_id.get())
+    if access and access.supports_scope_selection:
+        await McpServer.set_scopes(session, name, None)
+        return
+    raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no scope selection.")
+
+
 @router.post("/{name}/connect", response_model=ConnectMcpServerResponse)
 async def connect_mcp_server(
     session: SessionDep,
@@ -225,6 +263,7 @@ async def connect_mcp_server(
             endpoint,
             account_id=current_account_id.get(),
             identity_mode=identity_mode,
+            scopes=access.scopes,
         )
     except OauthConnectError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
