@@ -15,6 +15,7 @@ function provider(overrides: Partial<Provider> = {}): Provider {
     id: 'anthropic',
     label: 'Anthropic',
     billingOptions: ['api_key', 'subscription'],
+    signIn: 'login',
     ...overrides,
   }
 }
@@ -110,7 +111,7 @@ describe('ProviderConnect', () => {
   })
 
   it('a key-only vendor shows only the key block', () => {
-    renderCard(provider({ id: 'xai', label: 'xAI', billingOptions: ['api_key'] }))
+    renderCard(provider({ id: 'xai', label: 'xAI', billingOptions: ['api_key'], signIn: '' }))
 
     expect(screen.getByRole('button', { name: 'Add API key' })).toBeTruthy()
     expect(screen.queryByLabelText('API key')).toBeNull()
@@ -371,5 +372,48 @@ describe('ProviderConnect', () => {
     expect(url).toBe('/api/providers/anthropic/key')
     expect(init?.method).toBe('DELETE')
     expect(fetchMock.mock.calls).toHaveLength(1)
+  })
+  it('an installation on a pasted token offers the paste instead of the login, and posts it', async () => {
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
+      async () =>
+        new Response(JSON.stringify(subscription({ providerEmail: null })), { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { invalidate } = renderCard(provider({ signIn: 'token' }))
+    expect(screen.queryByRole('button', { name: /Sign in/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Paste token' }))
+    expect(screen.queryByRole('button', { name: 'Paste token' })).toBeNull()
+    fireEvent.change(screen.getByLabelText('Token'), {
+      target: { value: 'sk-ant-oat01-pasted' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await flush()
+
+    const pasteCall = fetchMock.mock.calls.find(
+      ([url]) => url === '/api/providers/anthropic/sign-in/token',
+    )
+    expect(pasteCall?.[1]?.method).toBe('POST')
+    expect(JSON.parse(String(pasteCall?.[1]?.body))).toEqual({ token: 'sk-ant-oat01-pasted' })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['providerSubscriptions'] })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['usage'] })
+    expect(screen.queryByLabelText('Token')).toBeNull()
+  })
+
+  it('a pasted token shows its method and expiry, and an expired one asks for a new paste', () => {
+    const pasted = subscription({ providerEmail: null, expiresAt: '2027-10-19T00:00:00Z' })
+    const { view } = renderCard(provider({ signIn: 'token' }), { subscription: pasted })
+
+    expect(screen.getByText(/Pasted token · expires/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Paste token' })).toBeNull()
+
+    view.unmount()
+    renderCard(provider({ signIn: 'token' }), {
+      subscription: { ...pasted, connected: false },
+    })
+
+    expect(screen.getByText('Expired')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Paste token' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Sign in|Reconnect/ })).toBeNull()
   })
 })

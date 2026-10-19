@@ -102,6 +102,8 @@ class Harness(ABC):
         identity: dict,
         sandbox_home: str,
         conversation_root: str,
+        *,
+        include_apps: bool = False,
     ) -> dict:
         """The ACP session of an ``account_type`` conversation: what the bridge spawns
         the adapter with, and the session's file patterns, as absolute paths."""

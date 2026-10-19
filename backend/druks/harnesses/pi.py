@@ -54,6 +54,7 @@ class PiHarness(Harness):
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         identity: dict | None = None,
+        include_apps: bool = False,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         model = self.model_id

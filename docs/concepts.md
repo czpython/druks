@@ -226,8 +226,10 @@ GitHub App key, a pasted token, or a provider subscription. A replay after a
 crash finds the sandbox through the run's live identity with the same scope.
 Drukbox holds the bearer in the sandbox's issuer entry and fetches the token
 from the Druks issuer, `GET /api/secrets/<identity id>/<name>`. The sandbox
-sees a placeholder in the variable the entry names. Claude reads it from
-`ANTHROPIC_AUTH_TOKEN`. The Codex run wrapper writes it into
+sees a placeholder in the variable the entry names. Claude gets it in
+`ANTHROPIC_AUTH_TOKEN`. A run that includes the person's subscription apps
+moves it to `CLAUDE_CODE_OAUTH_TOKEN` before the command. The Codex run wrapper
+writes it into
 `~/.codex/auth.json` beside a sentinel refresh token, so Codex never refreshes
 inside the sandbox. The issuer answers a fresh token at once. A token inside
 its refresh margin rotates first, while the subscription is idle or the token

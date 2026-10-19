@@ -10,7 +10,7 @@ const onConnected = vi.fn()
 beforeEach(() => {
   vi.useFakeTimers()
   vi.spyOn(api, 'providers').mockResolvedValue([
-    { id: 'openai', label: 'OpenAI', billingOptions: ['subscription', 'api_key'] },
+    { id: 'openai', label: 'OpenAI', billingOptions: ['subscription', 'api_key'], signIn: 'login' },
   ])
   vi.spyOn(api, 'startProviderConnect').mockResolvedValue({
     method: 'device',

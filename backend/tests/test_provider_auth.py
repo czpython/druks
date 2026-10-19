@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -1000,3 +1001,15 @@ async def test_an_expired_codex_token_with_a_failed_rotation_answers_nothing(mon
     with pytest.raises(OAuthTokenError) as error:
         await OpenAiProvider.issue_token(druks_db, connection.id)
     assert error.value.tag == "token_expired"
+
+
+async def test_the_rotation_tick_passes_a_setup_token_without_a_word(monkeypatch, druks_db, caplog):
+    await _seed_claude(access="oat", refresh=None, expires_at=_in(timedelta(days=365)))
+    calls = _mock_post(monkeypatch, _resp(200, _REFRESHED))
+
+    with caplog.at_level(logging.INFO, logger="druks.core.tasks"):
+        report = await tasks._refresh()
+
+    assert [result["action"] for result in report["results"]] == ["no_refresh_token"]
+    assert calls == []
+    assert [record.message for record in caplog.records] == []

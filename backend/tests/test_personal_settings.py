@@ -108,9 +108,9 @@ async def test_migrations_preserve_preferences_and_installation_execution(druks_
                 text(
                     "INSERT INTO settings (id, account_id, timezone, gate_park_destination_id, "
                     "default_harness, default_model, default_billing, default_effort, fast_mode, "
-                    "default_timeout, updated_at) VALUES (:id, :account_id, :timezone, "
-                    ":destination_id, 'codex', 'openai/gpt-5.5', 'api_key', "
-                    "'high', true, 600, '2026-09-01T12:00:00Z')"
+                    "include_apps, default_timeout, updated_at) VALUES (:id, :account_id, "
+                    ":timezone, :destination_id, 'codex', 'openai/gpt-5.5', 'api_key', "
+                    "'high', true, false, 600, '2026-09-01T12:00:00Z')"
                 ),
                 dict(
                     id=row_id,

@@ -317,6 +317,8 @@ class CodexHarness(Harness):
         identity: dict,
         sandbox_home: str,
         conversation_root: str,
+        *,
+        include_apps: bool = False,
     ) -> dict:
         """The adapter reads no _meta: the config rides CODEX_CONFIG and the starting mode
         INITIAL_AGENT_MODE. The login goes to auth.json, which the adapter reads at start."""
@@ -326,18 +328,21 @@ class CodexHarness(Harness):
         else:
             login = json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": "${CODEX_API_KEY}"})
         files = {f"{sandbox_home}/.codex/auth.json": login}
+        features: dict[str, bool] = {} if include_apps else {"apps": False}
         if account_type == AccountKind.OPERATOR:
             # Codex records developer instructions in the rollout and replays them on resume,
             # while it reads AGENTS.md again every turn.
             files[f"{conversation_root}/AGENTS.md"] = prompt
             config: dict[str, object] = {"model": model_id}
+            if features:
+                config["features"] = features
             mode = "agent-full-access"
         else:
             files[f"{conversation_root}/instructions.md"] = prompt
             config = {
                 "model": model_id,
                 "model_instructions_file": f"{conversation_root}/instructions.md",
-                "features": {"shell_tool": False},
+                "features": {"shell_tool": False, **features},
                 "web_search": "disabled",
                 "tools": {"view_image": False},
                 "sandbox_mode": "read-only",
@@ -466,13 +471,17 @@ class CodexHarness(Harness):
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         identity: dict | None = None,
+        include_apps: bool = False,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         cmd = self._build_codex_wrapper(
             ssh_username=ssh_username,
             schema=schema,
             run_id=run_id,
-            codex_flags=(*self._prompt_flags(), *self._mcp_flags(mcp_servers)),
+            codex_flags=(
+                *self._prompt_flags(include_apps=include_apps),
+                *self._mcp_flags(mcp_servers),
+            ),
             cwd=get_work_root(ssh_username),
             identity=identity,
         )
@@ -540,11 +549,13 @@ class CodexHarness(Harness):
                 )
         return flags
 
-    def _prompt_flags(self) -> tuple[str, ...]:
+    def _prompt_flags(self, *, include_apps: bool) -> tuple[str, ...]:
         args = (self.command, "exec")
 
         if self.model:
             args = (*args, "--model", self.model_id)
+        if not include_apps:
+            args = (*args, "-c", "features.apps=false")
         if self.fast_mode:
             args = (*args, "-c", "features.fast_mode=true", "-c", 'service_tier="fast"')
         # Emit a human-readable reasoning summary. Codex encrypts the raw

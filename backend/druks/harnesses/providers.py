@@ -27,6 +27,7 @@ from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
+from druks.settings import load_settings
 from druks.usage.models import UsageScrape
 
 from . import exceptions
@@ -92,6 +93,19 @@ class Provider:
         """The Drukbox entry that puts ``key`` in a box as a placeholder: the
         host, variable, header, and prefix this provider's API takes."""
         raise NotImplementedError
+
+    @property
+    def sign_in(self) -> str:
+        """How a person signs in with a subscription: ``login`` runs this provider's own
+        flow, ``token`` takes a pasted token."""
+        return "login"
+
+    @classmethod
+    def parse_token(cls, token: str) -> tuple[dict, datetime]:
+        """The credentials a pasted subscription token grants, and their expiry. Raises
+        :class:`ConnectError` for a token of another shape, or for a provider that signs
+        in through its flow only."""
+        raise exceptions.ConnectError(f"{cls.label} does not sign in with a pasted token.")
 
     @classmethod
     async def start_connection(cls, *, account_id: str | None = None) -> dict:
@@ -374,6 +388,11 @@ class Provider:
         """Merge the grant response into ``data`` in place; return the new
         expiry. Raise ``ValueError`` if the response is unusable."""
         raise NotImplementedError
+
+    @classmethod
+    def has_usage(cls, subscription: VaultSecret) -> bool:
+        """Whether the provider answers the usage endpoint for this subscription's token."""
+        return True
 
     @classmethod
     async def fetch_usage(
@@ -692,6 +711,9 @@ _ANTHROPIC_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 _OAUTH_BETA = "oauth-2025-04-20"
 _ANTHROPIC_VERSION = "2023-06-01"
 _CLAUDE_CODE_USER_AGENT = "claude-code/2.1.0"
+_SETUP_TOKEN_PREFIX = "sk-ant-oat01-"
+# Anthropic documents one year for a ``claude setup-token``.
+_SETUP_TOKEN_LIFETIME = timedelta(days=365)
 
 
 class AnthropicProvider(Provider):
@@ -720,6 +742,75 @@ class AnthropicProvider(Provider):
             auth_header="x-api-key",
             auth_prefix="",
         )
+
+    @property
+    def sign_in(self) -> str:
+        if load_settings().providers.anthropic.sign_in == "setup_token":
+            return "token"
+        return "login"
+
+    @classmethod
+    def check_sign_in(cls, method: str) -> None:
+        """Refuse a sign-in method other than the one this installation offers."""
+        offered = load_settings().providers.anthropic.sign_in
+        if offered != method:
+            raise exceptions.ConnectError(
+                f"This installation signs in with {offered}, not {method}. "
+                "See providers.anthropic.sign_in in druks.toml."
+            )
+
+    @classmethod
+    async def start_connection(cls, *, account_id: str | None = None) -> dict:
+        cls.check_sign_in("oauth")
+        return await super().start_connection(account_id=account_id)
+
+    @classmethod
+    async def complete_connection(cls, *, flow_id: str, pasted: str) -> CompletedConnect:
+        cls.check_sign_in("oauth")
+        return await super().complete_connection(flow_id=flow_id, pasted=pasted)
+
+    @classmethod
+    def parse_token(cls, token: str) -> tuple[dict, datetime]:
+        cls.check_sign_in("setup_token")
+        token = token.strip()
+        if not token.startswith(_SETUP_TOKEN_PREFIX):
+            raise exceptions.ConnectError(
+                "That is not a setup token. Run `claude setup-token` and paste the token it prints."
+            )
+        expires_at = datetime.now(UTC) + _SETUP_TOKEN_LIFETIME
+        credentials = cls._credentials(
+            access_token=token, scopes=["user:inference"], expires_at=expires_at
+        )
+        return credentials, expires_at
+
+    @classmethod
+    def _credentials(
+        cls,
+        *,
+        access_token: str,
+        scopes: list[str],
+        expires_at: datetime | None,
+        refresh_token: str = "",
+    ) -> dict:
+        """The payload a subscription row stores, in the shape of Claude Code's
+        credentials file."""
+        block: dict[str, object] = {"accessToken": access_token, "scopes": scopes}
+        if refresh_token:
+            block["refreshToken"] = refresh_token
+        if expires_at:
+            block["expiresAt"] = int(expires_at.timestamp() * 1000)
+        return {"claudeAiOauth": block}
+
+    @classmethod
+    def get_identity(cls, subscription: VaultSecret) -> dict:
+        token = cls._token_from_credentials(dict(subscription.secrets))
+        return {**super().get_identity(subscription), "scopes": list(token.scopes)}
+
+    @classmethod
+    def has_usage(cls, subscription: VaultSecret) -> bool:
+        # The usage endpoint reads the account. A setup token carries user:inference only.
+        token = cls._token_from_credentials(dict(subscription.secrets))
+        return token.scopes != ("user:inference",)
 
     @classmethod
     def _token_from_credentials(cls, data: dict) -> OAuthToken:
@@ -780,17 +871,16 @@ class AnthropicProvider(Provider):
             },
             form=False,
         )
-        block: dict[str, object] = {
-            "accessToken": grant["access_token"],
-            "refreshToken": grant["refresh_token"],
-            "scopes": (grant.get("scope") or "").split(),
-        }
         expires_in = grant.get("expires_in")
-        if expires_in:
-            expiry = datetime.now(UTC) + timedelta(seconds=expires_in)
-            block["expiresAt"] = int(expiry.timestamp() * 1000)
+        expires_at = datetime.now(UTC) + timedelta(seconds=expires_in) if expires_in else None
+        credentials = cls._credentials(
+            access_token=grant["access_token"],
+            scopes=(grant.get("scope") or "").split(),
+            expires_at=expires_at,
+            refresh_token=grant["refresh_token"],
+        )
         account = (grant.get("account") or {}).get("email_address")
-        return {"claudeAiOauth": block}, account
+        return credentials, account
 
     @classmethod
     def _apply_refresh(cls, data: dict, grant: dict, now: datetime) -> datetime | None:

@@ -514,6 +514,7 @@ def agent_config():
         effort="high",
         timeout=60,
         fast_mode=False,
+        include_apps=False,
     )
 
 

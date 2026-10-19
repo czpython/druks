@@ -152,6 +152,35 @@ async def check_connection(
         )
 
 
+@router.post(
+    "/{provider_id}/sign-in/token",
+    response_model=ProviderSubscriptionResponse,
+    response_model_by_alias=True,
+)
+async def sign_in_with_token(
+    session: SessionDep,
+    provider_id: str,
+    account: Account = Depends(current_session_account),
+    token: str = Body(..., embed=True),
+) -> VaultSecret:
+    """The requesting account's subscription from a pasted token."""
+    provider = _resolve_provider(provider_id)
+    try:
+        credentials, expires_at = provider.parse_token(token)
+    except ConnectError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return await VaultSecret.store(
+        session,
+        SecretKind.SUBSCRIPTION,
+        Audience.provider(provider.id),
+        account_id=account.id,
+        secrets=credentials,
+        # The token names no email, and Druks fetches no profile with it.
+        identity={"email": None},
+        expires_at=expires_at,
+    )
+
+
 async def _store_connection(
     session: AsyncSession,
     *,

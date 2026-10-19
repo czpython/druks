@@ -147,8 +147,8 @@
 .settings-default-execution > p { margin: 0 0 24px; color: var(--text-mid); }
 .settings-default-execution .set-defaults { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 .settings-default-execution .mcp-field { min-width: 0; }
-.settings-fast-mode { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
-.settings-fast-mode > div { display: flex; flex-direction: column; gap: 6px; }
+.settings-switch { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
+.settings-switch > div { display: flex; flex-direction: column; gap: 6px; }
 .settings-pane :is(.model-chooser-search, .model-chooser-provider, .model-chooser-option, .model-chooser-empty, .model-chooser-setup) { font-family: var(--font-sans); font-size: 15px; }
 .settings-pane :is(.model-chooser-provider code, .model-chooser-option small, .menu-opt .mo-sub, .menu-inherit-note, .harness-chip) { font-size: 13px; }
 .settings-pane .model-chooser-option > span { min-width: 0; overflow-wrap: anywhere; }

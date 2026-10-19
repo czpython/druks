@@ -637,7 +637,7 @@ export function AgentsPane({
             </span>
           </div>
         </div>
-        <div className="settings-fast-mode" data-setting={SETTINGS_FIELDS.fastMode.field}>
+        <div className="settings-switch" data-setting={SETTINGS_FIELDS.fastMode.field}>
           <div>
             <label className="mcp-label" htmlFor={id('fast')}>
               Fast mode
@@ -652,6 +652,24 @@ export function AgentsPane({
             onClick={() => set({ fastMode: !defaults.fastMode })}
             disabled={busy}
             label="Fast mode"
+          />
+        </div>
+        <div className="settings-switch" data-setting={SETTINGS_FIELDS.includeApps.field}>
+          <div>
+            <label className="mcp-label" htmlFor={id('include-apps')}>
+              Include apps
+            </label>
+            <span className="set-field-help">
+              claude.ai connectors and ChatGPT apps in sandboxes, from the subscription a run
+              uses.
+            </span>
+          </div>
+          <Switch
+            id={id('include-apps')}
+            on={defaults.includeApps}
+            onClick={() => set({ includeApps: !defaults.includeApps })}
+            disabled={busy}
+            label="Include apps"
           />
         </div>
         {!models.some((model) => model.id === defaults.defaultModel && model.enabled) && (
@@ -1501,6 +1519,7 @@ export function ProvidersPane({
                 id: entry.provider,
                 label: entry.label,
                 billingOptions: ['api_key'],
+                signIn: '',
               }
               const endpoint = providerWebUrl(entry.apiUrl)
               const documentation = providerWebUrl(entry.documentationUrl)
@@ -1596,8 +1615,11 @@ export function ProvidersPane({
                   <div>
                     <h3 className="hr-name">{provider.label}</h3>
                     <p className="provider-account">
-                      {subscription?.providerEmail ||
-                        (apiKey ? `API key …${apiKey.keyTail}` : 'Setup incomplete')}
+                      {subscription
+                        ? (subscription.providerEmail ?? 'Pasted token')
+                        : apiKey
+                          ? `API key …${apiKey.keyTail}`
+                          : 'Setup incomplete'}
                     </p>
                   </div>
                 </header>
@@ -1730,6 +1752,8 @@ export function ProviderConnect({
   const [key, setKey] = useState('')
   const [replacing, setReplacing] = useState(false)
   const [keyFormOpen, setKeyFormOpen] = useState(false)
+  const [token, setToken] = useState('')
+  const [tokenFormOpen, setTokenFormOpen] = useState(false)
   const [notice, setNotice] = useState('')
 
   const refresh = async () => {
@@ -1746,6 +1770,7 @@ export function ProviderConnect({
   })
   const acceptsSubscription = provider.billingOptions.includes('subscription')
   const acceptsApiKey = provider.billingOptions.includes('api_key')
+  const pastesToken = provider.signIn === 'token'
 
   const run = (action: () => Promise<unknown>, after: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -1786,9 +1811,21 @@ export function ProviderConnect({
     }, refreshKeys, 'API key saved.')
   }
 
+  const pasteToken = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    run(async () => {
+      await api.signInWithToken(provider.id, token)
+      setToken('')
+      setTokenFormOpen(false)
+    }, refresh, 'Token saved.')
+  }
+
   const unavailableLabel = subscription?.revokedAt ? 'Disconnected' : 'Expired'
   const connected = Boolean(subscription?.connected)
   const disconnected = Boolean(subscription) && !connected
+  const needsSignIn = !subscription || disconnected
+  // A pasted token names no email.
+  const pasted = subscription?.providerEmail === null
   const showKeyForm = acceptsApiKey && (keyFormOpen || replacing)
   return (
     <div className="hr-connect">
@@ -1800,38 +1837,34 @@ export function ProviderConnect({
               <ServiceStatus connected={connected} label={disconnected ? unavailableLabel : undefined} />
             )}
             <div className="hr-conn-actions">
-              {subscription ? (
-                <>
-                  {disconnected && !flow.challenge && (
-                    <button
-                      className="set-btn primary"
-                      onClick={() => void flow.start()}
-                      disabled={busy || flow.busy}
-                    >
-                      Reconnect
-                    </button>
-                  )}
-                  {!subscription.revokedAt && (
-                    <button
-                      className="set-btn danger"
-                      aria-label={`Disconnect ${provider.label} subscription`}
-                      onClick={disconnect}
-                      disabled={busy || flow.busy}
-                    >
-                      Disconnect
-                    </button>
-                  )}
-                </>
-              ) : (
-                !flow.challenge && (
-                  <button
-                    className="set-btn primary"
-                    onClick={() => void flow.start()}
-                    disabled={busy || flow.busy}
-                  >
-                    Sign in with {provider.label}
-                  </button>
-                )
+              {needsSignIn && !pastesToken && !flow.challenge && (
+                <button
+                  className="set-btn primary"
+                  onClick={() => void flow.start()}
+                  disabled={busy || flow.busy}
+                >
+                  {subscription ? 'Reconnect' : `Sign in with ${provider.label}`}
+                </button>
+              )}
+              {needsSignIn && pastesToken && !tokenFormOpen && (
+                <button
+                  className="set-btn primary"
+                  type="button"
+                  onClick={() => setTokenFormOpen(true)}
+                  disabled={busy}
+                >
+                  Paste token
+                </button>
+              )}
+              {subscription && !subscription.revokedAt && (
+                <button
+                  className="set-btn danger"
+                  aria-label={`Disconnect ${provider.label} subscription`}
+                  onClick={disconnect}
+                  disabled={busy || flow.busy}
+                >
+                  Disconnect
+                </button>
               )}
             </div>
           </div>
@@ -1839,7 +1872,13 @@ export function ProviderConnect({
             <>
               <p className="provider-account">
                 {usage?.planTier ? `${usage.planTier} · ` : ''}
-                {subscription.providerEmail}
+                {subscription.providerEmail ?? 'Pasted token'}
+                {pasted && subscription.expiresAt && (
+                  <>
+                    {' · '}expires{' '}
+                    <time dateTime={subscription.expiresAt}>{absTime(subscription.expiresAt)}</time>
+                  </>
+                )}
               </p>
               {subscription.revokedAt && (
                 <p className="provider-stale">
@@ -1866,6 +1905,38 @@ export function ProviderConnect({
             </>
           ) : (
             <p className="provider-account">Not connected</p>
+          )}
+          {tokenFormOpen && (
+            <form
+              className="provider-key-form"
+              aria-label={`${provider.label} token`}
+              onSubmit={pasteToken}
+            >
+              <input
+                aria-label="Token"
+                autoComplete="off"
+                className="hr-conn-input"
+                disabled={busy}
+                onChange={(event) => setToken(event.target.value)}
+                placeholder="Paste token"
+                spellCheck={false}
+                type="password"
+                value={token}
+              />
+              <button className="hr-conn-btn" disabled={busy || !token.trim()} type="submit">
+                {busy ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                className="set-btn ghost"
+                type="button"
+                onClick={() => {
+                  setToken('')
+                  setTokenFormOpen(false)
+                }}
+              >
+                Cancel
+              </button>
+            </form>
           )}
           <ConnectSteps flow={flow} />
         </section>

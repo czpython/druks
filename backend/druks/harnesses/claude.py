@@ -52,6 +52,8 @@ class ClaudeHarness(Harness):
         identity: dict,
         sandbox_home: str,
         conversation_root: str,
+        *,
+        include_apps: bool = False,
     ) -> dict:
         """Chat has no asks, and the model goes in the _meta because the adapter's model
         option takes only the models its CLI lists."""
@@ -72,9 +74,20 @@ class ClaudeHarness(Harness):
                 "settingSources": [],
                 "strictMcpConfig": True,
             }
+        env: dict[str, str | None] = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+        if identity and include_apps:
+            # Claude Code loads a person's connectors only from CLAUDE_CODE_OAUTH_TOKEN, and
+            # ANTHROPIC_API_KEY outranks it. The bridge fills the placeholder and removes a
+            # variable set to None.
+            env |= {
+                "CLAUDE_CODE_OAUTH_TOKEN": "${ANTHROPIC_AUTH_TOKEN}",
+                "CLAUDE_CODE_OAUTH_SCOPES": " ".join(identity["scopes"]),
+                "ANTHROPIC_AUTH_TOKEN": None,
+                "ANTHROPIC_API_KEY": None,
+            }
         return {
             "meta": {"claudeCode": {"options": options}},
-            "env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"},
+            "env": env,
             "files": {},
             "mode": cls.no_ask_mode,
             "model": model_id,
@@ -117,6 +130,7 @@ class ClaudeHarness(Harness):
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         identity: dict | None = None,
+        include_apps: bool = False,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         in_vm_run_dir = f"{get_runs_root(ssh_username)}/{run_id}"
@@ -152,9 +166,22 @@ class ClaudeHarness(Harness):
         claude_cmdline = " ".join(shlex.quote(a) for a in claude_argv)
         run_dir_q = shlex.quote(in_vm_run_dir)
         session_q = shlex.quote(in_vm_session)
+        # Drukbox delivers the placeholder as ANTHROPIC_AUTH_TOKEN, and Claude Code loads no
+        # connectors from there. A run that loads the person's subscription apps needs
+        # CLAUDE_CODE_OAUTH_TOKEN, which ANTHROPIC_API_KEY, set by docker-sbx in every box,
+        # outranks.
+        login = ""
+        if identity and include_apps:
+            scopes = shlex.quote(" ".join(identity["scopes"]))
+            login = (
+                "env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY "
+                'CLAUDE_CODE_OAUTH_TOKEN="$ANTHROPIC_AUTH_TOKEN" '
+                f"CLAUDE_CODE_OAUTH_SCOPES={scopes} "
+            )
         wrapper = (
             f"mkdir -p {run_dir_q} && "
             f"touch {run_dir_q}/.start && "
+            f"{login}"
             f"{claude_cmdline}; "
             "ec=$?; "
             f"sf=$(find $HOME/.claude/projects -name '*.jsonl' -type f "

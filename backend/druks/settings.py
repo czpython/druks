@@ -264,6 +264,16 @@ class Browser(BaseModel):
     timezone: str = ""
 
 
+class Anthropic(BaseModel):
+    # How a person signs in with a subscription: the OAuth login on the Connect page, or
+    # a pasted ``claude setup-token``.
+    sign_in: Literal["oauth", "setup_token"] = "oauth"
+
+
+class Providers(BaseModel):
+    anthropic: Anthropic = Anthropic()
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         populate_by_name=True,
@@ -286,6 +296,7 @@ class Settings(BaseSettings):
     urls: Urls = Urls()
     sandbox: Sandbox = Sandbox()
     browser: Browser = Browser()
+    providers: Providers = Providers()
     # A [services.<slug>] table makes the card of that service managed. Each table holds
     # its secrets as plain text, so no output shows the field.
     services: dict[str, dict] = Field(default={}, repr=False, exclude=True)

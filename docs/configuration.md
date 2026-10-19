@@ -46,6 +46,7 @@ host-run development template for that environment plane.
 | `[sandbox]` | Drukbox provider, service URL, image override, registry host and user name, and the proxy and issuer addresses |
 | `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
 | `[browser]` | Browser egress proxy scope and timezone |
+| `[providers.anthropic]` | The Claude sign-in method the installation offers |
 | `[env]` | Additional deployment environment settings rendered verbatim |
 
 A blank string means unset, and the renderer omits it from `.env`. Use `[env]` for settings
@@ -143,6 +144,10 @@ separate installations. **Settings → Agents** owns the shared harness, model,
 billing, effort, fast mode, and timeout defaults. Every account uses these
 defaults. Shared agent overrides take priority. A declared agent timeout also
 takes priority over the installation default.
+
+**Include apps** is off by default. When it is on, a run loads the apps of the
+subscription it runs on in its sandbox: claude.ai connectors or ChatGPT apps.
+See [Harnesses](#harnesses) for what the switch changes in a sandbox.
 
 **Settings → Preferences** edits the timezone on your `Account`. The personal
 settings API also edits your account's gate notification destination. Druks
@@ -687,19 +692,38 @@ requesting account. In a fresh `none`-mode install, the first completed
 subscription connection also creates the operator account. See
 [access control](#public-urls-and-access-control).
 
+Anthropic signs in with `oauth`, the login on the Connect page, or with
+`setup_token`, a token that `claude setup-token` prints and you paste on the
+Providers page. A setup token lasts one year, has no refresh token, and carries
+the `user:inference` scope only: Druks does not refresh it, shows no quota for
+it, and asks for a new token when it expires. The `[providers.anthropic]` table
+in `druks.toml` selects the method, `oauth` by default. An installation on
+`setup_token` in `none` identity mode gets its first account from another
+provider's login, because the paste needs a signed-in account.
+
+```toml
+[providers.anthropic]
+sign_in = "setup_token"
+```
+
 OpenAI connects through Codex device authorization. Before you connect, open
 **Settings → Security** in ChatGPT and enable **device code authorization for
 Codex**. In a managed workspace, an administrator must allow it.
 
-A `claude` sandbox reads its placeholder from `ANTHROPIC_AUTH_TOKEN`. A
-`codex` sandbox reads its placeholder from `CODEX_SUBSCRIPTION_TOKEN`. The
-Codex run wrapper writes `~/.codex/auth.json` from that variable before the
-command. The file carries the account id, the sentinel refresh token
+A `claude` sandbox reads its placeholder from `ANTHROPIC_AUTH_TOKEN`. With
+include apps on, the run starts `claude` with the placeholder in
+`CLAUDE_CODE_OAUTH_TOKEN`, the grant's scopes in `CLAUDE_CODE_OAUTH_SCOPES`,
+and `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` unset, so Claude Code runs
+as a subscription login and loads the subscription's connectors. The Chat adapter
+starts with the same variables. A `codex` sandbox reads its placeholder from
+`CODEX_SUBSCRIPTION_TOKEN`. The Codex run wrapper writes `~/.codex/auth.json`
+from that variable before the command. The file carries the account id, the
+sentinel refresh token
 `druks-placeholder`, and an unsigned id token with the account id, the plan,
 and the email. Codex sends the placeholder to `chatgpt.com` on every request.
 Codex never refreshes it: the one refresh it attempts after a 401 fails on
 the sentinel, and the turn ends. The real refresh token and id token stay in
-Postgres.
+Postgres. With include apps off, a Codex run gets `features.apps = false`.
 
 An API key never enters the sandbox. Druks gives the key to Drukbox as a
 secret entry when it creates the sandbox. The sandbox holds a placeholder in
@@ -709,7 +733,7 @@ on each request to the entry's host.
 
 | Harness | Credential | Variable | Host | Header |
 | --- | --- | --- | --- | --- |
-| `claude` | Anthropic subscription | `ANTHROPIC_AUTH_TOKEN` | `api.anthropic.com` | `Authorization: Bearer` |
+| `claude` | Anthropic subscription | `ANTHROPIC_AUTH_TOKEN`, moved to `CLAUDE_CODE_OAUTH_TOKEN` with include apps on | `api.anthropic.com` | `Authorization: Bearer` |
 | `codex` | OpenAI subscription | `CODEX_SUBSCRIPTION_TOKEN` | `chatgpt.com` | `Authorization: Bearer` |
 | `claude`, `pi`, `opencode` | Anthropic API key | `ANTHROPIC_API_KEY` | `api.anthropic.com` | `x-api-key` |
 | `pi`, `opencode` | OpenAI API key | `OPENAI_API_KEY` | `api.openai.com` | `Authorization: Bearer` |

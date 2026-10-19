@@ -20,6 +20,7 @@ export const SETTINGS_FIELDS = {
   timeout: { section: 'agents', label: 'Timeout', field: 'timeout', terms: 'execution' },
   unattendedAccount: { section: 'agents', label: 'Unattended account', field: 'unattended-account', terms: 'execution' },
   fastMode: { section: 'agents', label: 'Fast mode', field: 'fast', terms: 'execution' },
+  includeApps: { section: 'agents', label: 'Include apps', field: 'include-apps', terms: 'claude.ai connectors ChatGPT apps MCP sandbox' },
 } as const
 
 export interface CatalogChoice extends CatalogModel {
@@ -42,6 +43,7 @@ export function knownProviders(providers: Provider[], catalogs: ProviderCatalog[
         id: catalog.provider,
         label: catalog.label,
         billingOptions: ['api_key'],
+        signIn: '',
       }),
     )
   return [...providers, ...added].sort((left, right) => left.label.localeCompare(right.label))
@@ -97,6 +99,7 @@ export type Defaults = Pick<
   | 'defaultBilling'
   | 'defaultEffort'
   | 'fastMode'
+  | 'includeApps'
   | 'defaultTimeout'
 >
 
@@ -106,6 +109,7 @@ export const defaultsOf = (settings: InstallationSettings): Defaults => ({
   defaultBilling: settings.defaultBilling,
   defaultEffort: settings.defaultEffort,
   fastMode: settings.fastMode,
+  includeApps: settings.includeApps,
   defaultTimeout: settings.defaultTimeout,
 })
 

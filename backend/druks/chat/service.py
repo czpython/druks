@@ -439,7 +439,13 @@ async def send_turn(
         headers=[{"name": CONVERSATION_HEADER, "value": conversation.id}],
         mcpServers=session_servers,
         **config.harness_class.get_acp_session(
-            account_type, config.model, prompt, config.identity, sandbox_home, conversation_root
+            account_type,
+            config.model,
+            prompt,
+            config.identity,
+            sandbox_home,
+            conversation_root,
+            include_apps=config.include_apps,
         ),
     )
     expires_at = Base.utc_now() + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)

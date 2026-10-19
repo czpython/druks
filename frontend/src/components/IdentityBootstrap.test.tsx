@@ -90,6 +90,7 @@ describe('IdentityBootstrap', () => {
             id: 'anthropic',
             label: 'Anthropic',
             billingOptions: ['subscription'],
+            signIn: 'login',
           },
         ],
       }),
