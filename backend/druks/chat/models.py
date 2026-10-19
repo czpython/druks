@@ -21,7 +21,6 @@ from druks.models import Base
 from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
 
-from .constants import DELIVERY_FAILED_MESSAGE
 from .enums import ConversationSource, MessageRole, MessageState
 from .exceptions import ReminderError
 
@@ -58,7 +57,7 @@ class Message(Base, Uuid7Pk):
         """The text after the agent's last tool call. The text before it is the agent's
         notes."""
         start = max((call["textOffset"] for call in self.tool_calls), default=0)
-        return self.body[start:] or DELIVERY_FAILED_MESSAGE
+        return self.body[start:]
 
     @classmethod
     async def get_for_source_id(cls, session: AsyncSession, source_id: str) -> "Message | None":

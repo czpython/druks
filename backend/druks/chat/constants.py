@@ -34,6 +34,11 @@ FAILURE_MESSAGE = (
     "[Internal: Run {run} failed: {failure}. Tell the person in one short line, with no "
     "error details, and offer what they can do next. Do not retry it.]"
 )
+# A channel turn that ends with no answer gets this once; the next empty turn fails.
+NO_ANSWER_MESSAGE = (
+    "[Internal: Your turn ended with no answer for the person. Write the answer now from "
+    "what you already did. Do not repeat a tool call you already made.]"
+)
 # The line between what a person typed and what they said in the same message.
 VOICE_NOTE_MARKER = "[Voice note]"
 # The person reads this, so it holds no error details.

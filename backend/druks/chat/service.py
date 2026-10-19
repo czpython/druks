@@ -59,6 +59,7 @@ from .constants import (
     DELIVERY_FAILED_MESSAGE,
     FAILURE_MESSAGE,
     INTERNAL_MESSAGES_PROMPT,
+    NO_ANSWER_MESSAGE,
     NO_RESULT_MESSAGE,
     NO_RESULT_ON_SUBJECT_MESSAGE,
     RESULT_MESSAGE,
@@ -605,7 +606,17 @@ async def finish_turn(
     if conversation.connection:
         # A person who took the chat over during the turn answers it instead.
         if state == MessageState.REPLIED and not await conversation.is_held(session):
-            await conversation.channel.send_reply(session, conversation, reply)
+            if reply.answer:
+                await conversation.channel.send_reply(session, conversation, reply)
+            elif message.body == NO_ANSWER_MESSAGE:
+                failure = await conversation.create_message(
+                    session, DELIVERY_FAILED_MESSAGE, role=MessageRole.ASSISTANT, reply_to=message
+                )
+                await session.commit()
+                await conversation.channel.send_reply(session, conversation, failure)
+            else:
+                await conversation.create_message(session, NO_ANSWER_MESSAGE, is_internal=True)
+                await session.commit()
     elif not conversation.title:
         harness = get_harness(status["harness"])
         await name_conversation(session, conversation, bridge.host, message, body, harness)

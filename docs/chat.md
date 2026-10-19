@@ -101,8 +101,9 @@ Tool rows have no timestamps. Saved replies retain their tool details and
 their position between text segments. Slack, GitHub, and WhatsApp get only the
 text after the agent's last tool call. The text before it holds the agent's
 notes. Only the Chat page shows them. When the agent writes nothing after its
-last tool call, the channel gets "The reply is unavailable. Send the message
-again to retry."
+last tool call, Druks asks it once for the answer in an internal message. When
+that turn ends without text too, the channel gets "The reply is unavailable.
+Send the message again to retry."
 
 An agent plan shows the latest complete plan. A plan update replaces the
 previous list. Tool updates instead change only the fields that the adapter

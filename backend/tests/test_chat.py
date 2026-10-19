@@ -11,6 +11,7 @@ import asyncssh
 import pytest
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
+from druks.apps.registry import channels, services
 from druks.chat import service, sockets
 from druks.chat.bridge import Bridge
 from druks.chat.constants import (
@@ -18,6 +19,7 @@ from druks.chat.constants import (
     CHAT_KEY_NAME,
     CONVERSATION_HEADER,
     DELIVERY_FAILED_MESSAGE,
+    NO_ANSWER_MESSAGE,
 )
 from druks.chat.enums import ConversationSource, MessageRole, MessageState
 from druks.chat.exceptions import (
@@ -408,9 +410,7 @@ async def test_recovery_reads_live_events_then_saves_reply_and_replaces_archive(
     assert host.upload_file.await_count == 0
 
 
-@pytest.mark.parametrize(
-    ("offsets", "answer"), [([14, 28], "Done."), ([14, 28, 33], DELIVERY_FAILED_MESSAGE)]
-)
+@pytest.mark.parametrize(("offsets", "answer"), [([14, 28], "Done."), ([14, 28, 33], "")])
 def test_a_reply_answers_with_the_text_after_its_last_tool_call(offsets, answer):
     reply = Message(
         body="Still running.Still running.Done.",
@@ -418,6 +418,39 @@ def test_a_reply_answers_with_the_text_after_its_last_tool_call(offsets, answer)
     )
 
     assert reply.answer == answer
+
+
+async def test_a_channel_turn_with_no_answer_is_asked_once(druks_db, conversation, monkeypatch):
+    conversation.source = "slack"
+    conversation.connection = await VaultSecret.store(
+        druks_db,
+        services.get("slack").secret_kind,
+        Audience.service("slack"),
+        identity={},
+        secrets={},
+    )
+    await druks_db.commit()
+    send_reply = AsyncMock()
+    monkeypatch.setattr(channels.get("slack"), "send_reply", send_reply)
+    monkeypatch.setattr(Conversation, "is_held", AsyncMock(return_value=False))
+    tool_calls = [{"toolCallId": "tool-1", "textOffset": 14}]
+    monkeypatch.setattr(Bridge, "reply", AsyncMock(return_value=("Still running.", tool_calls)))
+    status = {"status": "replied", "archivePath": "", "harness": "claude"}
+    message = await conversation.get_unanswered_message(druks_db)
+    message.state = MessageState.DELIVERED
+
+    await service.finish_turn(druks_db, conversation, message, Bridge(None), status)
+
+    send_reply.assert_not_awaited()
+    asked = await conversation.get_unanswered_message(druks_db)
+    assert (asked.is_internal, asked.state, asked.body) == (True, "pending", NO_ANSWER_MESSAGE)
+
+    asked.state = MessageState.DELIVERED
+    await service.finish_turn(druks_db, conversation, asked, Bridge(None), status)
+
+    failure = send_reply.await_args.args[2]
+    assert (failure.body, failure.reply_to) == (DELIVERY_FAILED_MESSAGE, asked.id)
+    assert not await conversation.get_unanswered_message(druks_db)
 
 
 def channel(answer: bytes) -> tuple[asyncio.StreamReader, MagicMock]:
