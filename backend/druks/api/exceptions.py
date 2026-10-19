@@ -85,3 +85,10 @@ class ToolNotAvailable(AgentApiError):
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
+
+
+class InvalidToolArguments(AgentApiError):
+    code = "INVALID_TOOL_ARGUMENTS"
+
+    def __init__(self, tool: str, reason: str) -> None:
+        super().__init__(f"{tool}: {reason}. Call it with the arguments its input schema declares.")
