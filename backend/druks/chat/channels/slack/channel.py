@@ -1,8 +1,10 @@
 import json
+import logging
 import secrets
 from datetime import timedelta
 
 from dbos import DBOS
+from slack_sdk.errors import SlackApiError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.models import Account
@@ -29,6 +31,8 @@ from .constants import (
     UNLINKED_REPLY,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def get_thread_id(message: dict) -> str:
     """Where a message lives, as the room and the thread in one id. A direct message
@@ -42,6 +46,7 @@ class SlackChannel(Channel):
     name = ConversationSource.SLACK
     service = Slack
     has_readable_threads = True
+    reaction_ack = "eyes"
 
     @classmethod
     async def lookup_account(
@@ -166,6 +171,21 @@ class SlackChannel(Channel):
         ]
         reply.source_id = f"{posted[0]['channel']}:{posted[0]['ts']}"
         await session.commit()
+
+    @classmethod
+    async def acknowledge(
+        cls, session: AsyncSession, conversation: Conversation, message: Message
+    ) -> None:
+        """React to the person's message."""
+        client = SlackClient(token=conversation.connection.secrets["bot_token"])
+        room, ts = message.source_id.split(":")[:2]
+        try:
+            await client.reactions_add(channel=room, timestamp=ts, name=cls.reaction_ack)
+        except SlackApiError as error:
+            if error.response["error"] == "already_reacted":
+                logger.info("Slack message %s already has the reaction", message.source_id)
+                return
+            raise
 
     @classmethod
     async def read_thread(cls, session: AsyncSession, conversation: Conversation) -> list[dict]:

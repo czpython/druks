@@ -237,6 +237,11 @@ async def reset_live_stream(conversation_id: str) -> None:
 
 @DBOS.workflow(name="chat.deliver")
 async def deliver(conversation_id: str) -> None:
+    async def acknowledge_messages() -> None:
+        async with step_session() as session:
+            conversation = await session.get(Conversation, conversation_id)
+            await acknowledge_pending(session, conversation)
+
     async def deliver_turns() -> None:
         async with step_session() as session:
             conversation = await session.get(Conversation, conversation_id)
@@ -289,6 +294,11 @@ async def deliver(conversation_id: str) -> None:
                 reply_id,
             )
 
+    # Before the lock, so a message behind a running turn is acknowledged at once.
+    await DBOS.run_step_async(
+        StepOptions(name="chat.deliver.acknowledge", retries_allowed=True, max_attempts=5),
+        acknowledge_messages,
+    )
     # The lock covers the retries and the failure. Another delivery cannot take the
     # messages between them.
     async with lock(f"chat:{conversation_id}:delivery"):
@@ -307,6 +317,18 @@ async def deliver(conversation_id: str) -> None:
         except Exception:
             logger.exception("Chat delivery failed for conversation %s", conversation_id)
             await record_failed(DELIVERY_FAILED_MESSAGE)
+
+
+async def acknowledge_pending(session: AsyncSession, conversation: Conversation) -> None:
+    """Acknowledge each pending channel message. A failure only logs."""
+    messages = await conversation.list_pending_messages(session)
+    channel_messages = [message for message in messages if message.source_id]
+    if channel_messages and not await conversation.is_held(session):
+        for message in channel_messages:
+            try:
+                await conversation.channel.acknowledge(session, conversation, message)
+            except Exception as error:
+                logger.warning("Chat could not acknowledge message %s: %s", message.id, error)
 
 
 async def deliver_pending(session: AsyncSession, conversation: Conversation) -> None:

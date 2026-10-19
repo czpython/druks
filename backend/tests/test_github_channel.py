@@ -44,7 +44,7 @@ async def card(druks_db):
 
 @pytest.fixture
 def github(monkeypatch):
-    """GitHub's REST API, answered locally. Records each comment Druks posts."""
+    """GitHub's REST API, answered locally. Records each comment and reaction Druks posts."""
     posts = []
 
     async def create_comment(client, repo, number, body):
@@ -55,8 +55,18 @@ def github(monkeypatch):
         posts.append(("reply_to_review_comment", repo, number, comment_id, body))
         return {"id": 900 + len(posts)}
 
+    async def create_reaction(client, repo, comment_id, content):
+        posts.append(("create_reaction", repo, comment_id, content))
+
+    async def create_review_comment_reaction(client, repo, comment_id, content):
+        posts.append(("create_review_comment_reaction", repo, comment_id, content))
+
     monkeypatch.setattr(GitHubClient, "create_comment", create_comment)
     monkeypatch.setattr(GitHubClient, "reply_to_review_comment", reply_to_review_comment)
+    monkeypatch.setattr(GitHubClient, "create_reaction", create_reaction)
+    monkeypatch.setattr(
+        GitHubClient, "create_review_comment_reaction", create_review_comment_reaction
+    )
     return posts
 
 
@@ -292,6 +302,23 @@ async def test_a_reply_goes_where_the_tag_was(card, druks_db, github):
         "review_comment:50:902",
         "review_comment:50:903",
         "review_comment:70:904",
+    ]
+
+
+async def test_the_app_reacts_with_eyes_where_the_comment_sits(card, druks_db, github):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    conversation = await issue_conversation(druks_db, card, ana)
+    comments = [
+        await conversation.create_message(druks_db, f"@{HANDLE} why?", source_id=source_id)
+        for source_id in ("issue_comment:2", "review_comment:50:51")
+    ]
+
+    for comment in comments:
+        await GitHubChannel.acknowledge(druks_db, conversation, comment)
+
+    assert github == [
+        ("create_reaction", "acme/app", 2, "eyes"),
+        ("create_review_comment_reaction", "acme/app", 51, "eyes"),
     ]
 
 

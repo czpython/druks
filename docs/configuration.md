@@ -619,9 +619,9 @@ its keys.
    refused it.
 
 The manifest asks for the bot scopes `chat:write`, `channels:history`,
-`groups:history`, `im:history`, `mpim:history`, `users:read`, and `files:read`.
-It subscribes the bot to direct messages and to the rooms it is invited to,
-leaves token rotation off, and names these URLs:
+`groups:history`, `im:history`, `mpim:history`, `users:read`, `files:read`, and
+`reactions:write`. It subscribes the bot to direct messages and to the rooms it
+is invited to, leaves token rotation off, and names these URLs:
 
 Events URL:
 `https://<webhook-host>/_external/slack/events/`
@@ -633,6 +633,9 @@ Druks checks each event's signature with the signing secret, and refuses an
 event older than five minutes. With rotation off, the pasted bot token and each
 person's Slack token live until someone revokes them. A person connects their
 own Slack account through the same app: see [Chat](chat.md#slack).
+
+An app created from an earlier manifest needs `reactions:write`: add it under
+**OAuth & Permissions** and reinstall the app.
 
 ## Speech to text
 

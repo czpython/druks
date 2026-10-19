@@ -371,6 +371,17 @@ class GitHubClient:
         )
 
     @_retry_on_401
+    async def create_review_comment_reaction(
+        self, repo: str, comment_id: int, content: str
+    ) -> None:
+        """React to a comment in a pull request review."""
+        owner, name = repo.split("/", 1)
+        github = await self._for_repo(repo)
+        await github.rest.reactions.async_create_for_pull_request_review_comment(
+            owner, name, comment_id, content=content
+        )
+
+    @_retry_on_401
     async def reply_to_review_comment(
         self, repo: str, pr_number: int, comment_id: int, body: str
     ) -> dict[str, Any]:
