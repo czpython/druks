@@ -23,6 +23,11 @@ INTERNAL_MESSAGES_PROMPT = (
 )
 # Each turn opens with the time, so the agent never guesses it.
 TIME_MESSAGE = "[Internal: The time is {now} ({timezone}).]"
+# A new web conversation is named from its first message, so the name can arrive while the
+# first reply runs.
+NAMING_PROMPT = (
+    "Name this conversation in at most six words. Reply with the name only.\n\nMessage: {message}"
+)
 # Druks tells a run's conversation how the run ended with one of these templates.
 RESULT_MESSAGE = "[Internal: Run {run} ended. Its result:\n{result}]"
 NO_RESULT_MESSAGE = "[Internal: Run {run} ended with no result. Tell the person it is done.]"

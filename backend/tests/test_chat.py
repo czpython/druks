@@ -18,6 +18,7 @@ from druks.chat.constants import (
     CHAT_KEY_NAME,
     CONVERSATION_HEADER,
     DELIVERY_FAILED_MESSAGE,
+    NAMING_PROMPT,
 )
 from druks.chat.enums import ConversationSource, MessageRole, MessageState
 from druks.chat.exceptions import (
@@ -398,8 +399,7 @@ async def test_recovery_reads_live_events_then_saves_reply_and_replaces_archive(
             "textOffset": 9,
         }
     ]
-    assert conversation.title == "Gate check"
-    assert await get_client().xlen(service.events_key(conversation.id)) == 2
+    assert await get_client().xlen(service.events_key(conversation.id)) == 1
     assert previous.deleted_at
     archive = await druks_db.get(FileRecord, conversation.session_file.id)
     assert not archive.agent_call_id
@@ -548,6 +548,9 @@ async def test_new_sandbox_restores_archive_and_drains_pending_messages(
     assert starts[0]["headers"] == [{"name": CONVERSATION_HEADER, "value": conversation.id}]
     assert host.upload_file.await_count == 1
     assert previous.deleted_at
+    assert conversation.title == "Gate check"
+    [naming] = host.exec.await_args_list
+    assert naming.args[0] == ["claude", "-p", NAMING_PROMPT.format(message="Find the issue")]
 
 
 LINEAR = {
