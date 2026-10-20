@@ -29,21 +29,12 @@ You need no Tailscale account or remote VM provider.
 The image registry provides Druks service and sandbox images for both
 `linux/amd64` and `linux/arm64`.
 
-### macOS: enable host networking first
+### macOS: set up
 
-The Compose services use `network_mode: host`. On macOS, Docker Desktop needs
-host networking for the dashboard and health endpoint at `127.0.0.1:8001`.
-Docker Desktop 4.34 or later supports this feature.
+Set up one of these before you run the installer:
 
-Before you run the installer:
-
-1. Open Docker Desktop and sign in to your Docker account.
-2. Open **Settings → Resources → Network**.
-3. Select **Enable host networking**.
-4. Select **Apply & restart**.
-
-See [Docker's host networking guide](https://docs.docker.com/engine/network/drivers/host/#docker-desktop)
-for the platform requirements and limitations.
+- [Docker Desktop](container-runtimes/docker-desktop.md)
+- [Colima](container-runtimes/colima.md)
 
 ## 1. Install the local Druks profile
 
