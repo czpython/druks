@@ -697,14 +697,14 @@ wheels = [
 
 [[package]]
 name = "drukbox-python-sdk"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c1/a6/eb2d100aa58c3d3e29b17270d60ce8d60723f12f5e4790f12c069dd13289/drukbox_python_sdk-0.4.0.tar.gz", hash = "sha256:484cdeb14c3e19d808100443b77bfa3aaa11522e70a0651526af1bfe18f95d42", size = 21765, upload-time = "2026-10-12T20:45:24.928Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/7d/dae545591d24dcd566d2ba449dbd7511a9d1b71e18d0a41fa5231d7d2557/drukbox_python_sdk-0.5.0.tar.gz", hash = "sha256:3c4fee54a22d36c8b5e3e6a97abce8f0ecb29e6b7a752db1e470452cec9b07f7", size = 21886, upload-time = "2026-10-19T19:37:28.136Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2e/72/f9f9ad626ed55deed794f33f8d9852a9e54f97d6c069abe1aaba4476d90a/drukbox_python_sdk-0.4.0-py3-none-any.whl", hash = "sha256:63d419e0caa1ed6be3ec3a145cc0f51216b49ca93e74bb67166a3c87e797a7d3", size = 14085, upload-time = "2026-10-12T20:45:23.726Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/9c/5f0736687fdffbbddb8339783ad90a200a0eea3b6a6c5a73bcee94e52745/drukbox_python_sdk-0.5.0-py3-none-any.whl", hash = "sha256:49e8b3773af546a0536562a3d5ef1c222d7cfadfceb0c110ed88c5df5bb3d986", size = 14147, upload-time = "2026-10-19T19:37:26.848Z" },
 ]
 
 [[package]]
@@ -767,7 +767,7 @@ requires-dist = [
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=48.0.1" },
     { name = "dbos", specifier = ">=3.2,<4" },
-    { name = "drukbox-python-sdk", specifier = ">=0.4.0" },
+    { name = "drukbox-python-sdk", specifier = ">=0.5.0" },
     { name = "fastapi", specifier = ">=0.138.0" },
     { name = "fastmcp", specifier = ">=4.1.0,<5" },
     { name = "githubkit", extras = ["auth-app"], specifier = ">=0.15.5" },
