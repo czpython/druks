@@ -34,8 +34,8 @@ async def test_the_defaults_come_from_the_first_harness_row(druks_db):
         "effort varchar NOT NULL, timeout integer NOT NULL, updated_at timestamptz NOT NULL)",
         "INSERT INTO harnesses VALUES ('codex', false, 'high', 1800, now()), "
         "('claude', true, 'low', 600, now())",
-        "INSERT INTO user_settings (id, timezone, default_model, updated_at) "
-        "VALUES (1, 'UTC', 'anthropic/claude-opus-4-7', now()) ON CONFLICT (id) DO NOTHING",
+        "INSERT INTO user_settings (id, timezone, default_model, include_apps, updated_at) "
+        "VALUES (1, 'UTC', 'anthropic/claude-opus-4-7', false, now()) ON CONFLICT (id) DO NOTHING",
     ):
         await druks_db.execute(text(statement))
 

@@ -33,6 +33,8 @@ class InstallationSettings(Base):
     default_billing: Mapped[str] = mapped_column(String, default=DEFAULT_BILLING)
     default_effort: Mapped[str] = mapped_column(String, default=DEFAULT_EFFORT)
     fast_mode: Mapped[bool] = mapped_column(default=False)
+    # Whether a run loads the apps of its subscription: claude.ai connectors or ChatGPT apps.
+    include_apps: Mapped[bool] = mapped_column(default=False)
     default_timeout: Mapped[int] = mapped_column(default=DEFAULT_TIMEOUT)
     gate_park_destination_id: Mapped[str | None] = mapped_column(
         ForeignKey("notification_destinations.id", ondelete="SET NULL"), default=None

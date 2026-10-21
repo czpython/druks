@@ -33,8 +33,11 @@ async def refresh_tokens() -> None:
 @task(every="*/5 * * * *")
 async def refresh_usage() -> None:
     for subscription in await VaultSecret.list_subscriptions(db_session()):
-        if await UsageScrape.is_due(db_session(), subscription, now=Base.utc_now()):
-            await get_provider(subscription.audience_name).poll_usage(db_session(), subscription)
+        provider = get_provider(subscription.audience_name)
+        if provider.has_usage(subscription) and await UsageScrape.is_due(
+            db_session(), subscription, now=Base.utc_now()
+        ):
+            await provider.poll_usage(db_session(), subscription)
 
 
 @task(every="0 * * * *")
@@ -121,10 +124,4 @@ def _log_result(result: RotationResult) -> None:
             result.provider,
             result.subscription_id,
             result.error,
-        )
-    elif result.action == "no_refresh_token":
-        logger.warning(
-            "%s subscription %s has no refresh token; cannot keep it alive",
-            result.provider,
-            result.subscription_id,
         )

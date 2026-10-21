@@ -191,7 +191,7 @@ async def test_config_delivery_does_not_copy_host_provider_credentials(
         host.upload_file.assert_not_awaited()
     host.upload_dir.assert_not_awaited()
     host.write_secret.assert_not_awaited()
-    assert not invocation.env
+    assert "host-token" not in repr(invocation)
 
 
 async def test_a_codex_subscription_binds_a_custom_entry_on_chatgpt(druks_db):
@@ -312,3 +312,69 @@ async def test_credential_for_a_deleted_row_raises(druks_db):
     # fall through to another account's payload.
     with pytest.raises(HarnessNotConnectedError, match="removed"):
         await AnthropicProvider.get_subscription(druks_db, None, subscription_id=gone_id)
+
+
+async def _build_claude(druks_db, **kwargs):
+    return await ClaudeHarness(
+        model=ClaudeHarness.default_model, fast_mode=False, effort=None
+    ).build_invocation(
+        db_session(),
+        prompt="hello",
+        schema={"type": "object"},
+        run_id="run-1",
+        ssh_username="druks",
+        **kwargs,
+    )
+
+
+_LOGIN = (
+    "env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY "
+    'CLAUDE_CODE_OAUTH_TOKEN="$ANTHROPIC_AUTH_TOKEN" '
+    "CLAUDE_CODE_OAUTH_SCOPES='user:inference user:mcp_servers' "
+)
+
+
+async def test_a_run_with_include_apps_moves_the_login_before_the_command(druks_db, config_root):
+    subscription = await _seed_claude(access="live", refresh="R0")
+    subscription.secrets["claudeAiOauth"]["scopes"] = ["user:inference", "user:mcp_servers"]
+    identity = AnthropicProvider.get_identity(subscription)
+    assert identity == {"email": "op@example.com", "scopes": ["user:inference", "user:mcp_servers"]}
+
+    invocation = await _build_claude(druks_db, identity=identity, include_apps=True)
+
+    wrapper = invocation.args[2]
+    assert wrapper.index(_LOGIN) < wrapper.index("claude ")
+    assert invocation.env is None
+    assert "live" not in wrapper
+
+
+async def test_a_run_without_include_apps_keeps_the_bearer_where_the_box_put_it(
+    druks_db, config_root
+):
+    identity = {"email": "op@example.com", "scopes": ["user:inference", "user:mcp_servers"]}
+
+    invocation = await _build_claude(druks_db, identity=identity)
+
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in invocation.args[2]
+    assert "env -u" not in invocation.args[2]
+    assert invocation.env is None
+
+
+async def test_an_api_key_run_keeps_its_key_whatever_the_switch_says(druks_db, config_root):
+    invocation = await _build_claude(druks_db, include_apps=True)
+
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in invocation.args[2]
+    assert "env -u" not in invocation.args[2]
+
+
+async def test_codex_exec_turns_apps_off_without_include_apps(druks_db):
+    harness = CodexHarness(model=CodexHarness.default_model, fast_mode=False, effort=None)
+    kwargs = {"prompt": "hello", "schema": {"type": "object"}, "run_id": "run-1"}
+
+    off = await harness.build_invocation(db_session(), ssh_username="druks", **kwargs)
+    on = await harness.build_invocation(
+        db_session(), ssh_username="druks", include_apps=True, **kwargs
+    )
+
+    assert "-c features.apps=false" in off.args[2]
+    assert "features.apps" not in on.args[2]

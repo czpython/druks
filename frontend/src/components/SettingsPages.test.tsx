@@ -39,6 +39,7 @@ const userSettings = {
   defaultBilling: 'subscription',
   defaultEffort: 'high',
   fastMode: false,
+  includeApps: false,
   defaultTimeout: 1800,
   gateParkDestinationId: null,
   updatedAt: '2026-08-01T00:00:00Z',
@@ -392,8 +393,18 @@ function stubFetch(
       if (path === '/api/providers') {
         return new Response(
           JSON.stringify([
-            { id: 'anthropic', label: 'Anthropic', billingOptions: ['api_key', 'subscription'] },
-            { id: 'openai', label: 'OpenAI', billingOptions: ['api_key', 'subscription'] },
+            {
+              id: 'anthropic',
+              label: 'Anthropic',
+              billingOptions: ['api_key', 'subscription'],
+              signIn: 'login',
+            },
+            {
+              id: 'openai',
+              label: 'OpenAI',
+              billingOptions: ['api_key', 'subscription'],
+              signIn: 'login',
+            },
           ]),
           { status: 200 },
         )

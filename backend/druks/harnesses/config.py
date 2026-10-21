@@ -37,6 +37,9 @@ class AgentConfig:
     effort: str
     timeout: int
     fast_mode: bool
+    # Whether the run loads the apps of its subscription: claude.ai connectors or
+    # ChatGPT apps.
+    include_apps: bool
 
     @property
     def harness(self) -> str:
@@ -119,6 +122,7 @@ async def get_config(session: AsyncSession, agent_name: str, account_id: str | N
         effort=effort.value,
         timeout=timeout.value,
         fast_mode=settings.fast_mode,
+        include_apps=settings.include_apps,
     )
 
 
@@ -135,6 +139,7 @@ async def get_default_config(session: AsyncSession, account_id: str | None) -> A
         effort=settings.default_effort,
         timeout=settings.default_timeout,
         fast_mode=settings.fast_mode,
+        include_apps=settings.include_apps,
     )
 
 
@@ -148,6 +153,7 @@ async def _build_config(
     effort: str,
     timeout: int,
     fast_mode: bool,
+    include_apps: bool,
 ) -> AgentConfig:
     account = await Account.get_secrets_owner(session, account_id)
     account_id = account.id if account else None
@@ -184,4 +190,5 @@ async def _build_config(
         # Capped so a single call always fits inside a fresh sandbox lease.
         timeout=min(timeout, MAX_AGENT_TIMEOUT_SECONDS),
         fast_mode=fast_mode,
+        include_apps=include_apps,
     )

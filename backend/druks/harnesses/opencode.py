@@ -50,6 +50,8 @@ class OpenCodeHarness(Harness):
         identity: dict,
         sandbox_home: str,
         conversation_root: str,
+        *,
+        include_apps: bool = False,
     ) -> dict:
         """The adapter reads no _meta: the config rides OPENCODE_CONFIG_CONTENT, and a mode
         is an agent. A database under the conversation root keeps its session apart."""
@@ -95,6 +97,7 @@ class OpenCodeHarness(Harness):
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         identity: dict | None = None,
+        include_apps: bool = False,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         mcp = {}

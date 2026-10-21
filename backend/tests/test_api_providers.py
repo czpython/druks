@@ -22,7 +22,9 @@ def test_list_carries_billing_options_and_no_connection(tmp_path: Path):
         providers = {provider["id"]: provider for provider in client.get("/api/providers").json()}
     assert list(providers) == ["anthropic", "openai"]
     assert providers["anthropic"]["billingOptions"] == ["api_key", "subscription"]
+    assert providers["anthropic"]["signIn"] == "login"
     assert providers["openai"]["billingOptions"] == ["api_key", "subscription"]
+    assert providers["openai"]["signIn"] == "login"
     assert providers["openai"]["label"] == "OpenAI"
 
 
@@ -224,3 +226,73 @@ async def test_catalogs_list_what_each_provider_offers(tmp_path: Path, druks_db)
     assert catalog["label"] == "Anthropic"
     assert catalog["models"] == [{"id": "anthropic/claude-fable-5", "label": "Claude Fable 5"}]
     assert catalog["fetchedAt"]
+
+
+def _sign_in_with(monkeypatch, tmp_path: Path, method: str) -> None:
+    settings = make_settings(tmp_path, providers={"anthropic": {"sign_in": method}})
+    monkeypatch.setattr("druks.harnesses.providers.load_settings", lambda: settings)
+
+
+async def test_a_pasted_setup_token_is_the_requesting_accounts_subscription(
+    tmp_path: Path, druks_db, monkeypatch
+):
+    _sign_in_with(monkeypatch, tmp_path, "setup_token")
+    with _build_client(tmp_path) as client:
+        response = client.post(
+            "/api/providers/anthropic/sign-in/token", json={"token": " sk-ant-oat01-pasted \n"}
+        )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["providerEmail"], body["connected"]) == (None, True)
+    expires_at = datetime.fromisoformat(body["expiresAt"])
+    assert timedelta(days=364) < expires_at - datetime.now(UTC) <= timedelta(days=365)
+
+    account = await Account.get_or_create(druks_db, "op@example.com")
+    row = await VaultSecret.lookup(
+        druks_db, SecretKind.SUBSCRIPTION, Audience.provider("anthropic"), account.id
+    )
+    assert row.secrets["claudeAiOauth"]["accessToken"] == "sk-ant-oat01-pasted"
+    assert row.secrets["claudeAiOauth"]["scopes"] == ["user:inference"]
+    assert "refreshToken" not in row.secrets["claudeAiOauth"]
+    assert row.identity == {"email": None}
+
+
+def test_a_token_of_another_shape_is_refused(tmp_path: Path, monkeypatch):
+    _sign_in_with(monkeypatch, tmp_path, "setup_token")
+    with _build_client(tmp_path) as client:
+        response = client.post(
+            "/api/providers/anthropic/sign-in/token", json={"token": "sk-ant-api03-key"}
+        )
+        openai = client.post(
+            "/api/providers/openai/sign-in/token", json={"token": "sk-ant-oat01-x"}
+        )
+    assert response.status_code == 422
+    assert response.json()["detail"].startswith("That is not a setup token.")
+    assert openai.status_code == 422
+    assert openai.json()["detail"] == "OpenAI does not sign in with a pasted token."
+
+
+def test_the_installation_offers_one_sign_in_method(tmp_path: Path, monkeypatch):
+    _sign_in_with(monkeypatch, tmp_path, "setup_token")
+    with _build_client(tmp_path) as client:
+        [anthropic, _] = client.get("/api/providers").json()
+        start = client.post("/api/providers/anthropic/connection/start")
+        complete = client.post(
+            "/api/providers/anthropic/connection/complete",
+            json={"code": "code", "connectionId": "flow"},
+        )
+    assert anthropic["signIn"] == "token"
+    assert (start.status_code, complete.status_code) == (422, 422)
+    assert start.json()["detail"].startswith(
+        "This installation signs in with setup_token, not oauth."
+    )
+
+    _sign_in_with(monkeypatch, tmp_path, "oauth")
+    with _build_client(tmp_path) as client:
+        paste = client.post(
+            "/api/providers/anthropic/sign-in/token", json={"token": "sk-ant-oat01-x"}
+        )
+    assert paste.status_code == 422
+    assert paste.json()["detail"].startswith(
+        "This installation signs in with oauth, not setup_token."
+    )

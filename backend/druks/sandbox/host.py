@@ -254,6 +254,7 @@ class Host:
                 mcp_servers=mcp_servers,
                 call_id=run_id,
                 identity=config.identity,
+                include_apps=config.include_apps,
             )
         except HarnessError as exc:
             error = exc
@@ -293,6 +294,7 @@ class Host:
         mcp_servers: tuple[McpServer, ...] = (),
         call_id: str | None = None,
         identity: dict | None = None,
+        include_apps: bool = False,
     ) -> Any:
         """Drive one prompt through ``harness`` on this VM: the harness
         builds the invocation and parses the result; this sandbox executes it."""
@@ -317,6 +319,7 @@ class Host:
             extra_env=extra_env,
             mcp_servers=mcp_servers,
             identity=identity,
+            include_apps=include_apps,
             timeout=timeout,
         )
         result = await self._exec(

@@ -57,6 +57,7 @@ SESSION_ONLY_API_ROUTES = {
     ("GET", "/api/providers/keys"),
     ("POST", "/api/providers/{provider_id}/key"),
     ("DELETE", "/api/providers/{provider_id}/key"),
+    ("POST", "/api/providers/{provider_id}/sign-in/token"),
     ("DELETE", "/api/providers/{provider_id}/connection"),
     ("PATCH", "/api/settings/apps"),
     ("POST", "/api/services/{slug}"),

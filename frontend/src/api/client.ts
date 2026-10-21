@@ -326,6 +326,10 @@ export const api = {
   removeProviderKey: (id: string) => deleteRequest(`/api/providers/${encodeURIComponent(id)}/key`),
   disconnectProvider: (id: string) =>
     deleteRequest(`/api/providers/${encodeURIComponent(id)}/connection`),
+  signInWithToken: (id: string, token: string) =>
+    postJSON<ProviderSubscription>(`/api/providers/${encodeURIComponent(id)}/sign-in/token`, {
+      token,
+    }),
   // The appliance's own identities at external services — connect verifies the
   // pasted credentials against the provider before anything replaces a working
   // identity. Field names come from each entry's spec.

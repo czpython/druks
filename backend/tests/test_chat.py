@@ -104,6 +104,7 @@ async def sandbox(druks_db, conversation, monkeypatch):
         identity={},
         effort="",
         fast_mode=False,
+        include_apps=False,
         timeout=600,
     )
     monkeypatch.setattr(service, "get_agent", AsyncMock(return_value=("chat.bot", "", Toolkit.ALL)))
@@ -728,7 +729,7 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
             {
                 "meta": {},
                 "env": {
-                    "CODEX_CONFIG": json.dumps({"model": "gpt-5.5"}),
+                    "CODEX_CONFIG": json.dumps({"model": "gpt-5.5", "features": {"apps": False}}),
                     "INITIAL_AGENT_MODE": "agent-full-access",
                 },
                 "files": {
@@ -751,7 +752,7 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
                         {
                             "model": "gpt-5.5",
                             "model_instructions_file": "/home/druks/work/chat/one/instructions.md",
-                            "features": {"shell_tool": False},
+                            "features": {"shell_tool": False, "apps": False},
                             "web_search": "disabled",
                             "tools": {"view_image": False},
                             "sandbox_mode": "read-only",
@@ -836,6 +837,26 @@ def test_a_codex_subscription_writes_its_login_before_the_spawn():
     login = json.loads(session["files"]["/home/druks/.codex/auth.json"])
     assert login["tokens"]["access_token"] == "${CODEX_SUBSCRIPTION_TOKEN}"
     assert login["tokens"]["account_id"] == "acc-1"
+
+
+def test_a_claude_subscription_moves_its_login_for_the_adapter():
+    identity = {"email": "op@example.com", "scopes": ["user:inference", "user:mcp_servers"]}
+    session = ClaudeHarness.get_acp_session(
+        AccountKind.OPERATOR,
+        "anthropic/claude-opus-4-7",
+        "Be kind.",
+        identity,
+        "/home/druks",
+        "/root/one",
+        include_apps=True,
+    )
+    assert session["env"] == {
+        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+        "CLAUDE_CODE_OAUTH_TOKEN": "${ANTHROPIC_AUTH_TOKEN}",
+        "CLAUDE_CODE_OAUTH_SCOPES": "user:inference user:mcp_servers",
+        "ANTHROPIC_AUTH_TOKEN": None,
+        "ANTHROPIC_API_KEY": None,
+    }
 
 
 async def test_a_bot_on_a_harness_with_no_adapter_fails_at_the_first_turn(druks_db, conversation):

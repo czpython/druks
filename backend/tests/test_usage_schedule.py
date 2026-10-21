@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from conftest import (
@@ -236,3 +237,18 @@ async def test_task_polls_only_due_subscriptions(subscription, monkeypatch) -> N
     assert (
         await UsageScrape.latest_for(db_session(), "openai", openai.account_id)
     ).scraped_at == NOW
+
+
+async def test_the_task_skips_a_token_the_usage_endpoint_refuses(druks_db, monkeypatch) -> None:
+    inference_only = await connect_provider(
+        AnthropicProvider,
+        {"claudeAiOauth": {"accessToken": "oat", "scopes": ["user:inference"]}},
+        provider_email="paste@example.com",
+    )
+    fetch_usage = AsyncMock()
+    monkeypatch.setattr(AnthropicProvider, "fetch_usage", fetch_usage)
+
+    await refresh_usage._function()
+
+    fetch_usage.assert_not_awaited()
+    assert not await UsageScrape.latest_for(db_session(), "anthropic", inference_only.account_id)

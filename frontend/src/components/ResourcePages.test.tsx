@@ -10,6 +10,7 @@ const provider: Provider = {
   id: 'anthropic',
   label: 'Anthropic',
   billingOptions: ['subscription', 'api_key'],
+  signIn: 'login',
 }
 
 const usage: UsageProviderSummary = {

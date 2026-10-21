@@ -148,7 +148,8 @@ async def test_a_subscription_agent_runs_as_its_actor_or_the_default_account(dru
     assert as_actor.subscription.id == actor.id
     assert as_actor.charged_account_id == actor.account_id
     assert unattended.subscription.id == default_subscription.id
-    assert as_actor.identity == {"email": "b@example.com"}
+    assert as_actor.identity == {"email": "b@example.com", "scopes": []}
+    assert not as_actor.include_apps
     assert not as_actor.secrets
     [secret] = as_actor.secret_refs
     assert secret.key == ("anthropic", actor.id, "", "")
@@ -244,6 +245,7 @@ def test_a_key_box_serves_another_harness_only_when_it_reads_the_same_variable(
             effort="high",
             timeout=60,
             fast_mode=False,
+            include_apps=False,
         ).secrets_hash
         for harness in (first, second)
     )
@@ -409,3 +411,12 @@ async def test_two_apps_declare_the_same_agent_name(druks_db):
         ("ticketing.file_tickets", "file_tickets", "high"),
         ("bug_hunter.file_tickets", "File tickets", "low"),
     ]
+
+
+async def test_include_apps_follow_the_installation_switch(druks_db):
+    await connect_anthropic_subscription("a@example.com")
+    actor = await connect_anthropic_subscription("b@example.com")
+    await (await InstallationSettings.get_or_create(druks_db)).update(include_apps=True)
+
+    assert (await get_config(druks_db, CONFIG_PROBE.id, actor.account_id)).include_apps
+    assert (await get_config(druks_db, CONFIG_PROBE.id, None)).include_apps

@@ -79,7 +79,11 @@ async def refresh_usage(session: SessionDep, account: Account = Depends(current_
         )
         row = await UsageScrape.latest_for(session, provider.id, account.id)
         age = _age_seconds(row.scraped_at, now=now) if row else None
-        if subscription and (age is None or age >= _REFRESH_FLOOR_SECONDS):
+        if (
+            subscription
+            and provider.has_usage(subscription)
+            and (age is None or age >= _REFRESH_FLOOR_SECONDS)
+        ):
             await provider.poll_usage(session, subscription)
 
 

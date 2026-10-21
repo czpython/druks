@@ -47,6 +47,7 @@ class SettingsResponse(Schema):
     default_billing: str
     default_effort: str
     fast_mode: bool
+    include_apps: bool
     default_timeout: int
 
 
@@ -72,6 +73,7 @@ class UpdateSettingsRequest(BaseModel):
     default_billing: Billing | None = Field(default=None, validation_alias="defaultBilling")
     default_effort: Effort | None = Field(default=None, validation_alias="defaultEffort")
     fast_mode: bool | None = Field(default=None, validation_alias="fastMode")
+    include_apps: bool | None = Field(default=None, validation_alias="includeApps")
     default_timeout: PositiveInt | None = Field(default=None, validation_alias="defaultTimeout")
 
 

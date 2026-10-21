@@ -20,7 +20,7 @@ async def test_claude_build_invocation_carries_every_flag():
         effort="high",
     ).build_invocation(
         db_session(),
-        identity={"email": "op@example.com"},
+        identity={"email": "op@example.com", "scopes": ["user:inference"]},
         prompt="hello",
         schema=schema,
         run_id="run-1",
@@ -190,7 +190,7 @@ def test_codex_emits_summary_effort_and_json_stream():
         model=_CODEX_MODEL,
         fast_mode=False,
         effort="high",
-    )._prompt_flags()
+    )._prompt_flags(include_apps=False)
     assert "model_reasoning_summary=auto" in flags
     assert "model_reasoning_effort=high" in flags
     assert "--json" in flags  # streams the rollout to stdout for the live tail

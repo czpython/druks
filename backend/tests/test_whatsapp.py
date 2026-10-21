@@ -605,6 +605,7 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
         identity={},
         effort="",
         fast_mode=False,
+        include_apps=False,
         timeout=60,
     )
     tools = ("helpdesk_get_ticket",)
@@ -1004,6 +1005,7 @@ async def test_operator_turns_use_the_apps_prompt_and_settings_without_a_timeout
         identity={},
         effort="low",
         fast_mode=False,
+        include_apps=False,
         timeout=30,
     )
     render_prompt = AsyncMock(return_value="Operator prompt")

@@ -580,6 +580,8 @@ export interface Provider {
   id: string
   label: string
   billingOptions: string[]
+  /** `login` runs the provider's own flow; `token` takes a pasted token. Empty for a key-only provider. */
+  signIn: string
 }
 
 /** One provider's model list; `label` names the provider. */
@@ -602,8 +604,8 @@ export interface ProviderDirectoryEntry {
 /** The requester's subscription at a provider. */
 export interface ProviderSubscription {
   provider: string
-  /** The email the provider reported at connect — display, never authority. */
-  providerEmail: string
+  /** The email the provider reported at connect — display, never authority. Null for a pasted token. */
+  providerEmail: string | null
   expiresAt: string | null
   updatedAt: string
   lastRefreshedAt: string | null
@@ -760,6 +762,7 @@ export interface InstallationSettings {
   defaultBilling: Billing
   defaultEffort: string
   fastMode: boolean
+  includeApps: boolean
   defaultTimeout: number
 }
 
@@ -776,6 +779,7 @@ export interface UpdateSettingsRequest {
   defaultBilling?: Billing
   defaultEffort?: string
   fastMode?: boolean
+  includeApps?: boolean
   defaultTimeout?: number
 }
 

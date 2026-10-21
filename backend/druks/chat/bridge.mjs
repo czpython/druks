@@ -138,7 +138,13 @@ class Conversation {
       fs.writeFileSync(filename, fillPlaceholders(content), { mode: 0o600 });
     }
     const [command, ...args] = request.command;
-    const child = spawn(command, args, { cwd: this.root, env: { ...process.env, ...request.env }, stdio: ["pipe", "pipe", "pipe"] });
+    // An env value refers to a placeholder the same way, and null removes the variable.
+    const env = { ...process.env };
+    for (const [name, value] of Object.entries(request.env)) {
+      if (value === null) delete env[name];
+      else env[name] = fillPlaceholders(value);
+    }
+    const child = spawn(command, args, { cwd: this.root, env, stdio: ["pipe", "pipe", "pipe"] });
     child.stderr.pipe(fs.createWriteStream(path.join(this.root, "adapter.log"), { flags: "a", mode: 0o600 }));
     const connection = new ClientSideConnection(() => ({
       sessionUpdate: async notification => {

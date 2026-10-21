@@ -46,6 +46,7 @@ def test_get_settings_carries_the_execution_defaults(tmp_path: Path):
         False,
         1800,
     )
+    assert body["includeApps"] is False
     assert "accountId" not in body
 
 
@@ -94,10 +95,16 @@ def test_patch_settings_updates_the_defaults_every_agent_inherits(tmp_path: Path
     with settings_client(tmp_path) as client:
         patch = client.patch(
             "/api/settings",
-            json={"defaultHarness": "codex", "defaultModel": "openai/gpt-5.5", "fastMode": True},
+            json={
+                "defaultHarness": "codex",
+                "defaultModel": "openai/gpt-5.5",
+                "fastMode": True,
+                "includeApps": True,
+            },
         )
         assert patch.status_code == 200
         assert patch.json()["defaultModel"] == "openai/gpt-5.5"
+        assert patch.json()["includeApps"] is True
         agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
     assert agents["software_factory.implement"]["harness"] == "codex"
     assert agents["software_factory.implement"]["harnessSource"] == "default"

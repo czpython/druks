@@ -60,6 +60,7 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     "new AgentSideConnection(client => ({",
     "initialize: async () => ({protocolVersion: PROTOCOL_VERSION, agentCapabilities: {loadSession: true}}),",
     "newSession: async p => { cwd=p.cwd; sessionId=randomUUID();",
+    " fs.writeFileSync(path.join(cwd, 'env.json'), JSON.stringify([process.env.FAKE_TOKEN ?? null, 'MCP_DRUKS_TOKEN' in process.env]));",
     " if (p._meta.harness !== 'options') throw Error('meta');",
     " if (p.mcpServers[0].headers[0].value !== 'placeholder') throw Error('token');",
     " fs.writeFileSync(path.join(cwd, 'setup.json'), JSON.stringify(p.mcpServers));",
@@ -135,6 +136,9 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
   assert.deepEqual(servers[1], { name: "linear", type: "http", url: linear.url, headers: [{ name: "Authorization", value: "Bearer placeholder" }] });
   // A file names a placeholder variable, and the bridge fills it from the sandbox environment.
   assert.equal(await fs.readFile(login, "utf8"), '{"token": "placeholder"}');
+  // An env value names a placeholder the same way, and null removes the variable.
+  assert.equal((await request(port, { ...start(id(3)), env: { FAKE_TOKEN: "${MCP_DRUKS_TOKEN}", MCP_DRUKS_TOKEN: null } })).ok, true);
+  assert.deepEqual(JSON.parse(await read(id(3), "env.json")), ["placeholder", false]);
   assert.equal((await request(port, { ...start(id(1)), model: "claude-sonnet-5", effort: "low", fastMode: false })).ok, true);
   const settings = await read(id(1), "config.log");
   // The session opens on its model at session/new; the model option only switches it.

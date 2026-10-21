@@ -15,6 +15,8 @@ class ProviderResponse(Schema):
     id: str
     label: str
     billing_options: SortedNames
+    # ``login`` runs the provider's own flow; ``token`` takes a pasted token.
+    sign_in: Literal["login", "token"]
 
 
 class ConnectChallengeResponse(Schema):
@@ -29,8 +31,8 @@ class ProviderSubscriptionResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     provider: str = Field(validation_alias="audience_name")
-    # Display only. Druks never authorizes by it.
-    provider_email: str = Field(validation_alias=AliasPath("identity", "email"))
+    # Display only. Druks never authorizes by it. None for a pasted token, which names no email.
+    provider_email: str | None = Field(validation_alias=AliasPath("identity", "email"))
     expires_at: datetime | None
     updated_at: datetime
     last_refreshed_at: datetime | None
