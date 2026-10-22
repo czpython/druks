@@ -47,6 +47,8 @@ class LinearEvents(Webhook):
         return "ticket_change"
 
     async def on_state_transition(self) -> Response:
+        if not await self._is_from_the_cards_workspace("state_transition"):
+            return JSONResponse({"accepted": False})
         issue = self.data["data"]
         state = issue["state"]
         # An issue outside a project has no project. An unassigned issue has no assignee.
@@ -72,6 +74,8 @@ class LinearEvents(Webhook):
         return _accepted()
 
     async def on_comment_created(self) -> Response:
+        if not await self._is_from_the_cards_workspace("comment_created"):
+            return JSONResponse({"accepted": False})
         comment = self.data["data"]
         await publish(
             "ticket.commented",
@@ -83,6 +87,19 @@ class LinearEvents(Webhook):
             },
         )
         return _accepted()
+
+    async def _is_from_the_cards_workspace(self, event: str) -> bool:
+        """A card names no workspace before its install."""
+        card_workspace_id = (await services.Linear.get()).identity.get("workspace_id", "")
+        if self.data["organizationId"] == card_workspace_id:
+            return True
+        self.log_ignored(
+            event=event,
+            reason="workspace_mismatch",
+            organization_id=self.data["organizationId"],
+            card_workspace_id=card_workspace_id,
+        )
+        return False
 
 
 def _accepted() -> Response:

@@ -73,9 +73,7 @@ async def check_service_identities(settings: Settings) -> list[CheckResult]:
             results: list[CheckResult] = []
             for service in services.all():
                 name = f"{service.slug}_identity"
-                try:
-                    row = await service.get()
-                except ServiceNotConnectedError:
+                if not await service.is_connected():
                     results.append(
                         CheckResult(
                             name=name,
@@ -86,6 +84,7 @@ async def check_service_identities(settings: Settings) -> list[CheckResult]:
                         )
                     )
                     continue
+                row = await service.get()
                 facts = " ".join(f"{key}={value}" for key, value in row.identity.items())
                 results.append(CheckResult(name=name, ok=True, detail=f"connected; {facts}"))
             return results

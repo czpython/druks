@@ -9,10 +9,9 @@ import druks.core.apis.github as github_api
 import httpx
 import jwt as pyjwt
 import pytest
-from conftest import bind_ambient_session
+from conftest import PORTAL_KEY, bind_ambient_session
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from druks.accounts import jwt as assertion
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.apis.github import GITHUB_API_URL
 from druks.core.services import Github
@@ -22,7 +21,6 @@ from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.services import Connection, Service
 from druks.testing import asgi_client, configure_app_for_test, make_settings
-from fastmcp.server.auth.providers.jwt import JWTVerifier
 from githubkit import AppAuthStrategy, TokenAuthStrategy
 from githubkit.exception import RequestFailed
 
@@ -50,15 +48,6 @@ slug = "druks"
 INSTALLATIONS = {"acme": 11, "paulo": 22}
 EVENTS = "/_external/github/events/"
 
-_PORTAL_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-_JWKS = {
-    "keys": [
-        {
-            **pyjwt.algorithms.RSAAlgorithm.to_jwk(_PORTAL_KEY.public_key(), as_dict=True),
-            "kid": "portal-1",
-        }
-    ]
-}
 # The instance's own key signs the App's calls at the relay.
 _INSTANCE_PEM = (
     rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -180,18 +169,6 @@ def relay(monkeypatch):
 
 
 @pytest.fixture
-def portal_keys(monkeypatch):
-    assertion._verifier.cache_clear()
-
-    async def fetch_jwks(self):
-        return _JWKS
-
-    monkeypatch.setattr(JWTVerifier, "_fetch_jwks", fetch_jwks)
-    yield
-    assertion._verifier.cache_clear()
-
-
-@pytest.fixture
 def github_identity(monkeypatch):
     async def identity(cls, access_token: str) -> dict:
         return {"authority": "https://github.com", "subject": "1", "login": "paulo"}
@@ -211,7 +188,7 @@ def _signature(body: bytes, delivery_id: str = "d-1", **claims) -> str:
             "exp": issued_at + 300,
             **claims,
         },
-        _PORTAL_KEY,
+        PORTAL_KEY,
         algorithm="RS256",
         headers={"kid": "portal-1"},
     )

@@ -5,7 +5,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, ValidationError, create_model
+from pydantic import BaseModel, ValidationError, create_model
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.apps.base import NAME_RE
@@ -167,7 +167,7 @@ class Service:
     # server uses the service's credential instead of registering its own client.
     mcp_host: ClassVar[str] = ""
     # Set both endpoints when the registered app is an OAuth client;
-    # ``get_oauth_client()`` then hands back the connected identity as a
+    # ``get_oauth_client()`` then hands back the card as a
     # configured ``OauthClient``. Scopes are not declared here — the
     # apps that use the service declare them (``with_scopes``), and
     # the connect door asks for their union.
@@ -175,6 +175,7 @@ class Service:
     token_endpoint: ClassVar[str] = ""
     # HTTP Basic on the token endpoint; False sends the secret in the body.
     basic_auth: ClassVar[bool] = False
+    pkce: ClassVar[bool] = True
     # The provider's consent-query quirks — Google grants a refresh token
     # only with access_type=offline and prompt=consent.
     extra_authorize_params: ClassVar[dict[str, str]] = {}
@@ -190,6 +191,10 @@ class Service:
     # The app that the create page registers at the provider. A service with one
     # offers that page on its card; without one, the person pastes credentials.
     manifest: ClassVar[dict[str, Any]] = {}
+    # The card secret that an install stores, when the install grants the app its own
+    # token. A managed card connects only once it holds it. Empty when an install links
+    # the person who installs, as GitHub's does.
+    install_secret: ClassVar[str] = ""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -275,7 +280,7 @@ class Service:
 
     @classmethod
     async def get(cls) -> VaultSecret:
-        """The connected identity's vault row, or ServiceNotConnectedError."""
+        """The service's card, or ServiceNotConnectedError when it has none."""
         if row := await VaultSecret.lookup(
             db_session(), cls.secret_kind, Audience.service(cls.slug)
         ):
@@ -295,7 +300,8 @@ class Service:
     @classmethod
     async def sync_configuration(cls, session: AsyncSession) -> None:
         """Store each service that druks.toml configures as its card. An entry replaces
-        the credentials of a card that exists; the facts the card learned since stay."""
+        the credentials of a card that exists; the facts the card learned since, and the
+        secret its install stored, stay."""
         configuration = load_settings()
         undeclared = [slug for slug in configuration.manager.services if not services.get(slug)]
         for slug in undeclared:
@@ -311,18 +317,14 @@ class Service:
                 )
             model = service.settings_model
             if service.is_managed():
-                # The card is the plain fields, the ``url``, and the secrets the table gives;
-                # any other key is a fact.
+                # The model takes the plain fields, the ``url``, and the secrets the table
+                # gives.
                 fields = {
                     name: (field.annotation, field)
                     for name, field in model.model_fields.items()
                     if field_kind(field) != "secret" or name in entry
                 }
-                model = create_model(
-                    model.__name__,
-                    __config__=ConfigDict(extra="allow"),
-                    **{"url": (str, ...), **fields},
-                )
+                model = create_model(model.__name__, **{"url": (str, ...), **fields})
             try:
                 settings = model.model_validate(entry)
             except ValidationError as error:
@@ -335,13 +337,35 @@ class Service:
                 ) from None
             card = await VaultSecret.lookup(session, service.secret_kind, Audience.service(slug))
             facts = card.identity if card else {}
-            learned = {name: value for name, value in facts.items() if name not in entry}
-            await service._store(session, settings, proven=learned)
+            # Any other key of the table is a fact, such as the workspace that a Linear
+            # card takes events from.
+            table_facts = {
+                name: value for name, value in entry.items() if name not in model.model_fields
+            }
+            await service._store(
+                session,
+                settings,
+                proven_facts={
+                    **{name: value for name, value in facts.items() if name not in entry},
+                    **table_facts,
+                },
+                install_secrets=(
+                    {service.install_secret: card.secrets[service.install_secret]}
+                    if card and service.install_secret in card.secrets
+                    else {}
+                ),
+            )
 
     @classmethod
-    async def _store(cls, session: AsyncSession, settings: BaseModel, proven: dict) -> VaultSecret:
-        """Store the card from its validated ``settings``: secrets encrypted, the rest as
-        identity facts beside the ``proven`` ones."""
+    async def _store(
+        cls,
+        session: AsyncSession,
+        settings: BaseModel,
+        proven_facts: dict,
+        install_secrets: dict | None = None,
+    ) -> VaultSecret:
+        """Store the card from its validated ``settings``: secrets encrypted beside the
+        ``install_secrets``, the rest as identity facts beside the ``proven_facts``."""
         secrets = {
             name: getattr(settings, name).get_secret_value()
             for name, field in type(settings).model_fields.items()
@@ -354,8 +378,8 @@ class Service:
             session,
             cls.secret_kind,
             Audience.service(cls.slug),
-            identity={**identity, **proven},
-            secrets=secrets,
+            identity={**identity, **proven_facts},
+            secrets={**(install_secrets or {}), **secrets},
         )
 
     @classmethod
@@ -439,33 +463,36 @@ class Service:
 
     @classmethod
     async def get_oauth_client(cls) -> OauthClient:
-        """The connected identity as a configured ``OauthClient``, keyed by
-        the service slug. Raises ``ServiceNotConnectedError`` until the
-        operator connects the service."""
-        if not cls.token_endpoint:
+        """The service's card as a configured ``OauthClient``, keyed by the
+        service slug. Raises ``ServiceNotConnectedError`` while the service has
+        no card. Under a manager, the card's URL serves the token endpoint, also for a
+        service that declares no OAuth endpoints of its own."""
+        if not cls.token_endpoint and not cls.is_managed():
             raise TypeError(f"{cls.__name__} declares no OAuth endpoints")
-        connected = await cls.get()
+        card = await cls.get()
         if cls.is_managed():
             manager = load_settings().manager
             return OauthClient(
                 provider=cls.slug,
                 authorization_endpoint=cls.authorization_endpoint,
-                token_endpoint=f"{connected.identity['url'].rstrip('/')}/oauth/token",
-                client_id=connected.identity["client_id"],
+                token_endpoint=f"{card.identity['url'].rstrip('/')}/oauth/token",
+                client_id=card.identity["client_id"],
                 extra_authorize_params=cls.extra_authorize_params,
                 token_headers={"Authorization": f"Bearer {manager.token.get_secret_value()}"},
                 state_prefix=f"{manager.audience}.",
                 redirect_uri=f"{manager.issuer.rstrip('/')}/{cls.slug}/oauth/callback",
+                pkce=cls.pkce,
                 is_grant_revoked=cls.is_grant_revoked,
             )
         return OauthClient(
             provider=cls.slug,
             authorization_endpoint=cls.authorization_endpoint,
             token_endpoint=cls.token_endpoint,
-            client_id=connected.identity["client_id"],
-            client_secret=connected.secrets["client_secret"],
+            client_id=card.identity["client_id"],
+            client_secret=card.secrets["client_secret"],
             basic_auth=cls.basic_auth,
             extra_authorize_params=cls.extra_authorize_params,
+            pkce=cls.pkce,
             is_grant_revoked=cls.is_grant_revoked,
         )
 
@@ -476,8 +503,16 @@ class Service:
         return ""
 
     @classmethod
-    async def sync_installations(cls) -> None:
-        """Record the app's installations on the card. Runs after an install exchange."""
+    def get_install_params(cls) -> dict[str, str]:
+        """What an install asks for the app itself, in place of a person's scopes. The
+        code exchange repeats it, so the token endpoint tells an install from a sign-in.
+        Empty when the install page asks nothing more."""
+        return {}
+
+    @classmethod
+    async def complete_install(cls, tokens: dict[str, Any]) -> None:
+        """Keep what the install exchange's answer teaches on the card. Runs before the
+        callback links anyone."""
 
     @classmethod
     async def issue_token(cls, resource: str) -> tuple[str, datetime | None]:
@@ -492,8 +527,23 @@ class Service:
         raise NotImplementedError(f"{cls.slug} has no pasted login")
 
     @classmethod
+    def get_login_resource(cls, login: VaultSecret) -> str:
+        """The resource that the token of a managed card is for. The default account fetches
+        that token from ``issue_token`` and sends it to the server at ``mcp_host``. A
+        service whose managed card holds no login raises."""
+        raise NotImplementedError(f"{cls.slug} has no managed login")
+
+    @classmethod
+    def is_card_connected(cls, card: VaultSecret | None) -> bool:
+        """Whether the card connects the service. A managed card connects only once it
+        holds its ``install_secret``."""
+        if card and cls.install_secret and cls.is_managed():
+            return cls.install_secret in card.secrets
+        return bool(card)
+
+    @classmethod
     async def is_connected(cls) -> bool:
-        return bool(
+        return cls.is_card_connected(
             await VaultSecret.lookup(db_session(), cls.secret_kind, Audience.service(cls.slug))
         )
 
@@ -523,7 +573,7 @@ class Service:
             labels = {spec["name"]: spec["label"] for spec in cls.connect_fields()}
             missing = ", ".join(labels[err["loc"][0]] for err in error.errors())
             raise ServiceConnectError(f"Enter {missing}.") from error
-        row = await cls._store(session, settings, proven=await cls.verify(settings))
+        row = await cls._store(session, settings, proven_facts=await cls.verify(settings))
         if cls.token_endpoint and row.identity["client_id"] != previous_client_id:
             client = OauthClient(provider=cls.slug)
             for connection in await VaultSecret.list_connections(

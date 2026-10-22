@@ -119,10 +119,11 @@ environment and in a file. The installer does not use files.
 ## Managed services
 
 A `[services.<slug>]` table makes that service managed. `druks.toml` and the
-secret files own its card, and the Services page cannot change or disconnect it.
+secret files own its card. The Services page cannot change or disconnect it,
+but it can install the app (see below).
 The table is for a platform that writes `druks.toml` itself: the installer
-refuses it. The table holds the plain fields of the card. Each secret field of
-the card is a file in `DRUKS_SECRETS_DIR`:
+refuses it. The table holds the plain fields of the card, and any other key is a
+fact of the card. Each secret field of the card is a file in `DRUKS_SECRETS_DIR`:
 
 ```toml
 [services.waha]
@@ -131,11 +132,20 @@ url = "http://control.example/_instance/<uuid>/waha"
 
 Here the key is the file `services.waha.key`. Druks does not start when a table
 names an unknown service or holds an invalid field. Each managed card shows
-**Managed by configuration**.
+**Managed by** and the manager's name, or **Managed by configuration** without a
+`[manager]` table.
 
 Druks reads the tables at startup, so restart Druks after a change. When you
 remove a table, the card keeps its credentials, and you can change it on the
 Services page again.
+
+A restart keeps the facts that a card learned and the secret that its install
+stored, such as a Slack bot token or a Linear refresh token. The table and its
+secret files give every other value. When `[manager]` lists the service in
+`manager.services`, the manager owns the app: its table names the manager's
+`url`, and the manager signs the service's events. A managed Slack or Linear
+card shows **Installation needed** until someone selects **Install** on it: see
+[Slack](#slack) and [Ticketing integrations](#ticketing-integrations).
 
 ## Personal and installation settings
 
@@ -502,6 +512,16 @@ and lists its statuses, the settings page offers them as choices. After you
 change the tracker, save the settings to list the statuses of the new tracker.
 An empty in review or resting status leaves the ticket where it is.
 
+Under a manager, the manager's Linear app replaces the API key. The
+`[services.linear]` table holds the manager's `url` and the app's `client_id`,
+and Druks needs no API key, client secret, or webhook secret. Select **Install**
+on the Linear card and approve the app in your workspace. The app acts as itself
+with read and write access. Druks keeps the app's refresh token on the card, with
+the workspace as its facts, and gets each access token through the manager. When
+Linear or the manager refuses the refresh token, Druks removes it, and the card
+shows **Installation needed** again. The manager forwards each event with its own
+signature.
+
 Select **druks** to use the ticket board on this appliance. That choice needs no
 credentials. The status settings stay hidden. The trigger status is
 Ready for Agent, and it is not a setting.
@@ -533,8 +553,10 @@ The agent reads a ticket with
 `software_factory_get_ticket` and posts with `software_factory_add_comment`.
 
 Webhook URLs remain `/_external/linear/events/` and
-`/_external/jira/events/`. The Jira webhook uses a Jira Automation
-**Send web request** action.
+`/_external/jira/events/`. Druks takes a Linear event only from the workspace of
+the Linear card. A `[services.linear]` table that `manager.services` does not
+list names the ID of that workspace in `workspace_id`. The Jira webhook uses a
+Jira Automation **Send web request** action.
 
 Select **Issue data (Jira format)** as its body.
 Druks accepts the REST issue JSON under `issue`. Put the shared token in the
@@ -631,16 +653,30 @@ is invited to, leaves token rotation off, and names these URLs:
 Events URL:
 `https://<webhook-host>/_external/slack/events/`
 
+Interactivity URL:
+`https://<webhook-host>/_external/slack/interactivity/`
+
 Redirect URL:
 `<endpoint>/api/oauth/callback`
 
 Druks checks each event's signature with the signing secret, and refuses an
 event older than five minutes. With rotation off, the pasted bot token and each
 person's Slack token live until someone revokes them. A person connects their
-own Slack account through the same app: see [Chat](chat.md#slack).
+own Slack account through the same app: see [Chat](chat.md#slack). Leave PKCE
+off in the Slack app.
 
-An app created from an earlier manifest needs `reactions:write`: add it under
-**OAuth & Permissions** and reinstall the app.
+An app created from an earlier manifest needs `reactions:write` and the
+Interactivity URL. Add the scope under **OAuth & Permissions** and reinstall the
+app. Under **Interactivity & Shortcuts**, turn on Interactivity and set the
+Request URL to the Interactivity URL.
+
+Under a manager, the manager's Slack app replaces the one you create. The
+`[services.slack]` table holds the manager's `url` and the app's `client_id`,
+and Druks needs no client secret, signing secret, or pasted bot token. Select
+**Install** on the Slack card and approve the app in your workspace. Druks keeps
+the bot token on the card, with the workspace and the bot as its facts. The
+manager forwards each event and button click with its own signature, and Druks
+ignores a payload from another workspace.
 
 ## Speech to text
 
@@ -893,10 +929,16 @@ container default timezone.
 ## Notifications
 
 The dashboard has no notifications page yet. Manage destinations through the
-API. The current destination type is a Slack incoming webhook. Actionable
-messages use Slack Block Kit. Other messages use the same URL through Apprise.
-The [Slack card](#slack)'s signing secret authenticates the button clicks that
-Slack sends back.
+API. A destination is a Slack channel. Druks posts to it as the bot of the
+[Slack card](#slack), so connect Slack first. A message that asks for an answer
+has buttons. The card's signing secret authenticates the button clicks that
+Slack sends back. Under a manager, the manager's signature authenticates them.
+
+To add a destination, invite the bot to the channel. Then send `name`, `kind`
+set to `slack_channel`, and `channelId` to `POST /api/notifications/destinations`.
+Slack shows the channel ID at the bottom of the channel details. Druks posts a
+first message to the channel before it saves the destination. If Slack refuses
+that message, Druks refuses the destination and shows the reason.
 
 Select one enabled destination as the gate-notification destination through
 the API. A parked subjected run then produces a durable notification. Failure
@@ -960,12 +1002,12 @@ A service can own the host of an OAuth server: GitHub owns
 
 - GitHub has sign-ins. Each account uses its own GitHub sign-in, and **Connect**
   opens it. Druks refuses a connection for everyone.
-- Jira and Linear hold a pasted login. When the service is connected, the runs
-  of the default account send that login. A run that no person starts uses the
-  default account, so scheduled runs act as the service's login. Every other
-  account connects its own OAuth grant. Atlassian accepts the Jira login only
-  after an organization admin turns on API token authentication for its MCP
-  server.
+- Jira and Linear hold a login: a pasted one, or the current access token of a
+  managed Linear app. When the service is connected, the runs of the default
+  account send that login. A run that no person starts uses the default
+  account, so scheduled runs act as the service's login. Every other account
+  connects its own OAuth grant. Atlassian accepts the Jira login only after an
+  organization admin turns on API token authentication for its MCP server.
 
 Druks gives OAuth discovery and client registration 30 seconds in total.
 A timeout names the stage that was pending. Retry the connection.
@@ -1068,7 +1110,5 @@ values.
 Drukbox database. The installer generates it for the Drukbox API and the secrets
 exchange. Rotate it as you rotate `secrets_key`, with the new key first.
 
-The envelope does **not** cover notification webhook URLs. Postgres stores
-them as ordinary fields, although the API masks their values. Treat access to
-Postgres and its backups as access to those values. GitHub App private keys,
-the operator identity's and the review identity's, are encrypted vault rows.
+GitHub App private keys, the operator identity's and the review identity's,
+are encrypted vault rows.

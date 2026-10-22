@@ -164,8 +164,8 @@ class SoftwareFactory(App):
         }
         try:
             if settings.tracker == "linear":
-                row = await services.Linear.get()
-                return Linear(api_key=row.secrets["api_key"], status_names=status_names)
+                client = await services.Linear.get_client()
+                return Linear(client=client, status_names=status_names)
             if settings.tracker == "jira":
                 row = await services.Jira.get()
                 return Jira(

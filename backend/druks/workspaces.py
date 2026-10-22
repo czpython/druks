@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.models import Account
+from druks.apps.registry import services
 from druks.core.models import uuid7_str
 from druks.core.services import Github
 from druks.db import db_session
@@ -219,21 +220,31 @@ class Workspace:
             if name in workspace_names:
                 continue
             host = urlsplit(access.url).hostname
-            # A service login rides as a header row and a grant as a bearer, each
-            # loud when the account has none. A server without OAuth rides its
+            # A pasted service login rides as a header row and a grant as a bearer, each
+            # loud when the account has none. A managed service's login rides as a bearer
+            # that the service issues for its resource. A server without OAuth rides its
             # header rows, loud when it has none.
             bearer_token_env_var = ""
             secret_headers = access.secret_headers
-            if access.credential == Credential.SERVICE_LOGIN:
+            if (
+                access.credential == Credential.SERVICE_LOGIN
+                and not services.get(access.service).is_managed()
+            ):
                 login = await mcp_models.McpServer.store_login(
                     session, name, access.secret, run_account
                 )
                 secret_headers = {login.header: login}
             elif access.secret:
                 bearer_token_env_var = get_bearer_token_env_var(name)
+                resource = ""
+                if access.credential == Credential.SERVICE_LOGIN:
+                    resource = services.get(access.service).get_login_resource(access.secret)
                 refs.append(
                     SecretRef(
-                        name=bearer_token_env_var.lower(), secret_id=access.secret.id, host=host
+                        name=bearer_token_env_var.lower(),
+                        secret_id=access.secret.id,
+                        resource=resource,
+                        host=host,
                     )
                 )
             elif access.credential != Credential.HEADERS:

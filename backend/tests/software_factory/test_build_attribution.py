@@ -100,13 +100,14 @@ async def test_tracker_webhook_starts_under_the_connected_account(
     else:
         await connect_service(
             "linear",
-            identity={"actor": "druks", "workspace": "Company"},
+            identity={"actor": "druks", "workspace": "Company", "workspace_id": "org-1"},
             secrets={"api_key": "key", "webhook_secret": "hook"},
         )
         events = LinearEvents(
             request=SimpleNamespace(), kwargs={}, settings=make_settings(tmp_path)
         )
         events._data_cached = {
+            "organizationId": "org-1",
             "actor": {"id": "provider-actor-1"},
             "data": {
                 "identifier": item.ticket_key,

@@ -26,6 +26,7 @@ def _transition():
     return {
         "action": "update",
         "type": "Issue",
+        "organizationId": "org-1",
         "updatedFrom": {"stateId": "old-state"},
         "actor": {"id": "actor-1", "type": "user"},
         "data": {
@@ -87,7 +88,12 @@ async def test_rejects_when_not_connected(tmp_path, druks_db):
     assert "not connected" in error.value.detail
 
 
-async def test_emits_normalized_ticket_transition(tmp_path, monkeypatch):
+async def test_emits_normalized_ticket_transition(tmp_path, monkeypatch, druks_db):
+    await connect_service(
+        "linear",
+        identity={"actor": "druks", "workspace": "Acme", "workspace_id": "org-1"},
+        secrets={"api_key": "lin_secret", "webhook_secret": "linear-secret"},
+    )
     events = _capture(monkeypatch)
 
     await _provider(tmp_path, payload=_transition()).on_state_transition()

@@ -17,15 +17,15 @@ from druks.accounts.models import Account
 from druks.core.apis.exceptions import GitHubAppNotInstalledError, TwilioError, TwilioNotFoundError
 from druks.core.apis.github import GITHUB_API_URL, GITHUB_AUTHORITY, GitHubClient
 from druks.core.apis.jira import SERVICE_ACCOUNT_DOMAIN, JiraClient
-from druks.core.apis.linear import LINEAR_GRAPHQL_URL
+from druks.core.apis.linear import LINEAR_GRAPHQL_URL, LinearClient
 from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
 from druks.core.apis.twilio import TwilioClient
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
-from druks.services import Service, ServiceConnectError
-from druks.services.exceptions import ServiceNotConnectedError
+from druks.services import OauthClient, Service, ServiceConnectError
+from druks.services.exceptions import OauthExchangeError, ServiceNotConnectedError
 from druks.settings import load_settings
 
 logger = logging.getLogger(__name__)
@@ -129,7 +129,7 @@ class Github(Service):
         return f"https://github.com/apps/{quote(slug, safe='')}/installations/new"
 
     @classmethod
-    async def sync_installations(cls) -> None:
+    async def complete_install(cls, tokens: dict[str, Any]) -> None:
         """The accounts the App is installed on, as the fact ``installations``."""
         accounts = await (await cls.get_client()).list_installation_accounts(cached=False)
         card = await cls.get()
@@ -157,12 +157,12 @@ class Github(Service):
 
 
 class Linear(Service):
-    description = (
-        "The Linear identity druks reads and updates tickets as; its webhook "
-        "secret verifies inbound deliveries."
-    )
+    description = "The Linear identity that Druks reads and updates tickets as."
     required = False
     mcp_host = "mcp.linear.app"
+    # Under a manager, the install grants the app a refresh token. The token path
+    # rotates it through the manager under this name.
+    install_secret = "refresh_token"
 
     class Settings(BaseModel):
         api_key: SecretStr = Field(title="API key")
@@ -175,19 +175,92 @@ class Linear(Service):
     @classmethod
     async def verify(cls, settings: Settings) -> dict[str, Any]:
         try:
-            async with httpx.AsyncClient(timeout=_VERIFY_TIMEOUT) as client:
-                response = await client.post(
-                    LINEAR_GRAPHQL_URL,
-                    json={"query": "{ viewer { name } organization { name } }"},
-                    headers={"Authorization": settings.api_key.get_secret_value()},
-                )
-            response.raise_for_status()
-            data = response.json()["data"]
-            facts = {"actor": data["viewer"]["name"], "workspace": data["organization"]["name"]}
+            facts = await cls._get_facts(settings.api_key.get_secret_value())
         except Exception as error:  # noqa: BLE001 — any auth/transport failure is a rejected paste
             logger.warning("Linear service-identity connect rejected: %s", type(error).__name__)
             raise ServiceConnectError("Linear did not accept this API key.") from error
         return facts
+
+    @classmethod
+    async def get_install_endpoint(cls) -> str:
+        """Under a manager, Linear's consent page installs the manager's app in a workspace.
+        A self-hosted operator pastes an API key."""
+        return "https://linear.app/oauth/authorize" if cls.is_managed() else ""
+
+    @classmethod
+    def get_install_params(cls) -> dict[str, str]:
+        # The app acts as itself, and an app cannot hold admin.
+        return {"actor": "app", "scope": "read,write"}
+
+    @classmethod
+    async def complete_install(cls, tokens: dict[str, Any]) -> None:
+        """Keep the app's grant on the card, where the token path refreshes it, with the
+        workspace that the app acts in."""
+        grant = cls.read_grant(tokens)
+        try:
+            facts = await cls._get_facts(f"Bearer {grant['access_token']}")
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+            raise OauthExchangeError(
+                cls.slug,
+                "Linear did not accept the new access token. Install the app again.",
+                context={},
+            ) from error
+        card = await cls.get()
+        card.secrets = {**card.secrets, cls.install_secret: grant["refresh_token"]}
+        card.identity = {**card.identity, **facts}
+        # A token cached for an earlier install must not serve this one.
+        await OauthClient(provider=cls.slug).evict_access_token(card.id)
+
+    @classmethod
+    async def get_client(cls) -> LinearClient:
+        """It fetches no token before its first request."""
+        card = await cls.get()
+        if not cls.is_card_connected(card):
+            raise ServiceNotConnectedError(cls.slug)
+        if cls.is_managed():
+            return LinearClient(get_access_token=cls.get_access_token)
+        return LinearClient(api_key=card.secrets["api_key"])
+
+    @classmethod
+    async def get_access_token(cls, cached: bool = True) -> tuple[str, datetime | None]:
+        """The manager refreshes the grant on the card."""
+        card = await cls.get()
+        client = await cls.get_oauth_client()
+        return await client.get_access_token(card.session, connection=card, cached=cached)
+
+    @classmethod
+    def get_login_resource(cls, login: VaultSecret) -> str:
+        # The app's grant acts in the card's workspace.
+        return login.identity["workspace_id"]
+
+    @classmethod
+    async def issue_token(cls, resource: str) -> tuple[str, datetime | None]:
+        if not await cls.is_connected():
+            raise MissingSecretError(
+                "The Linear app is not installed. Select Install on the Linear card."
+            )
+        return await cls.get_access_token()
+
+    @classmethod
+    def is_grant_revoked(cls, status: int, tokens: dict[str, Any]) -> bool:
+        # The manager refuses the refresh of an installation that Linear revoked.
+        return status != 200 and tokens.get("error") in ("invalid_grant", "access_denied")
+
+    @classmethod
+    async def _get_facts(cls, authorization: str) -> dict[str, str]:
+        async with httpx.AsyncClient(timeout=_VERIFY_TIMEOUT) as client:
+            response = await client.post(
+                LINEAR_GRAPHQL_URL,
+                json={"query": "{ viewer { name } organization { id name } }"},
+                headers={"Authorization": authorization},
+            )
+        response.raise_for_status()
+        data = response.json()["data"]
+        return {
+            "actor": data["viewer"]["name"],
+            "workspace": data["organization"]["name"],
+            "workspace_id": data["organization"]["id"],
+        }
 
 
 class Jira(Service):
@@ -240,20 +313,22 @@ class Jira(Service):
 
 class Slack(Service):
     """The Slack app that Druks answers as, in one workspace. The operator creates it
-    from the manifest, installs it, and pastes its keys. People connect their own
-    Slack account through the same app."""
+    from the manifest, installs it, and pastes its keys. Under a manager, the operator
+    installs the manager's app from the card instead. People connect their own Slack
+    account through the same app."""
 
-    description = (
-        "The Slack app that Druks answers as. Create it in Slack from the manifest, "
-        "install it in your workspace, and paste its keys here."
-    )
+    description = "The Slack app that Druks answers as, in one workspace."
     required = False
     authorization_endpoint = "https://slack.com/oauth/v2/authorize"
     token_endpoint = "https://slack.com/api/oauth.v2.access"
+    # Slack refuses PKCE unless the app turns it on, which makes the app a public client
+    # for good.
+    pkce = False
     # Slack issues a person's token only with a scope. This one reads the identity.
     identity_scopes = ("users:read",)
     # A fresh sign-in by the same Slack user updates their row.
     identity_key = "subject"
+    install_secret = "bot_token"
 
     class Settings(BaseModel):
         client_id: str = Field(title="Client ID")
@@ -264,24 +339,63 @@ class Slack(Service):
     @classmethod
     async def verify(cls, settings: Settings) -> dict[str, Any]:
         try:
-            bot = await SlackClient(token=settings.bot_token.get_secret_value()).auth_test()
+            facts = await cls._get_bot_facts(settings.bot_token.get_secret_value())
         except SlackApiError as error:
             logger.warning("Slack connect rejected: %s", error)
             raise ServiceConnectError(
                 "Slack did not accept the bot token. Paste the Bot User OAuth Token from the "
                 "app's OAuth & Permissions page."
             ) from error
-        return {
-            "team": bot["team"],
-            "team_id": bot["team_id"],
-            "bot_name": bot["user"],
-            "bot_user_id": bot["user_id"],
-        }
+        return facts
+
+    @classmethod
+    async def get_install_endpoint(cls) -> str:
+        """Under a manager, Slack's sign-in page installs the app with the bot's scopes. A
+        self-hosted operator installs the app in Slack and pastes its token."""
+        return cls.authorization_endpoint if cls.is_managed() else ""
+
+    @classmethod
+    def get_install_params(cls) -> dict[str, str]:
+        return {"scope": ",".join(SLACK_BOT_SCOPES)}
+
+    @classmethod
+    async def complete_install(cls, tokens: dict[str, Any]) -> None:
+        """Keep the bot's token on the card, where a paste keeps it, with the workspace and
+        the bot that it acts as."""
+        cls._check_answer(tokens)
+        bot_token = tokens["access_token"]
+        try:
+            facts = await cls._get_bot_facts(bot_token)
+        except SlackApiError as error:
+            raise OauthExchangeError(
+                cls.slug,
+                "Slack did not accept the new bot token. Install the app again.",
+                context={},
+            ) from error
+        card = await cls.get()
+        card.secrets = {**card.secrets, cls.install_secret: bot_token}
+        card.identity = {**card.identity, **facts}
+
+    @classmethod
+    async def get_client(cls) -> SlackClient:
+        card = await cls.get()
+        if not cls.is_card_connected(card):
+            raise ServiceNotConnectedError(cls.slug)
+        return SlackClient(token=card.secrets["bot_token"])
 
     @classmethod
     async def get_identity(cls, access_token: str) -> dict[str, Any]:
-        """The person behind a user token, keyed the way ``Account.lookup`` finds them."""
+        """The person behind a user token, keyed the way ``Account.lookup`` finds them.
+        Only a person in the card's workspace links: a managed card names none before
+        its install."""
         person = await SlackClient(token=access_token).auth_test()
+        if person["team_id"] != (await cls.get()).identity.get("team_id"):
+            raise OauthExchangeError(
+                cls.slug,
+                "the Slack account is in another workspace. Connect your account in the "
+                "workspace that Druks answers in.",
+                context={},
+            )
         return {
             "authority": SLACK_AUTHORITY.format(team_id=person["team_id"]),
             "subject": person["user_id"],
@@ -297,6 +411,7 @@ class Slack(Service):
     def read_grant(cls, tokens: dict[str, Any]) -> dict[str, Any]:
         """A person's grant sits under ``authed_user``, with its scopes joined by commas.
         Token rotation stays off, as on every peer, so the access token never expires."""
+        cls._check_answer(tokens)
         person = tokens["authed_user"]
         return {
             "access_token": person["access_token"],
@@ -332,8 +447,31 @@ class Slack(Service):
                         "message.mpim",
                     ],
                 },
+                "interactivity": {
+                    "is_enabled": True,
+                    "request_url": f"{urls.webhook_base}/_external/slack/interactivity/",
+                },
                 "token_rotation_enabled": False,
             },
+        }
+
+    @classmethod
+    def _check_answer(cls, tokens: dict[str, Any]) -> None:
+        # Slack refuses an exchange with HTTP 200 and ``ok`` false.
+        if not tokens.get("ok"):
+            raise OauthExchangeError(
+                cls.slug, f"Slack refused the exchange: {tokens.get('error')}", context={}
+            )
+
+    @classmethod
+    async def _get_bot_facts(cls, bot_token: str) -> dict[str, str]:
+        """The workspace and the bot that ``bot_token`` acts as."""
+        bot = await SlackClient(token=bot_token).auth_test()
+        return {
+            "team": bot["team"],
+            "team_id": bot["team_id"],
+            "bot_name": bot["user"],
+            "bot_user_id": bot["user_id"],
         }
 
 

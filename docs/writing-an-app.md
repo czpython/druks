@@ -1593,6 +1593,8 @@ class Acme(Service):
     token_endpoint = "https://acme.example/oauth/token"
     # True = HTTP Basic on the token endpoint. False = secret in the body.
     basic_auth = True
+    # False for a provider that refuses PKCE from a client with a secret.
+    pkce = True
     identity_endpoint = "https://acme.example/oauth/userinfo"
     identity_scopes = ("openid", "email")
     # Query parameters the provider's consent URL must carry.
@@ -1764,8 +1766,9 @@ the old client's tokens, but the consents stay on record.
 `get_access_token` serves a Redis-cached access token and lets only one
 refresher run per connection and scope set. This is necessary: two
 refreshes at the same time can make the provider revoke the whole
-connection. It raises `OauthRefreshError` when the refresh fails. Then ask
-the user to reconnect.
+connection. After a network failure or a 5xx answer, it sends the same refresh
+once more. It raises `OauthRefreshError` when the refresh fails. Then ask the
+user to reconnect.
 
 `get_access_token(scopes=("profile.read",))` asks the provider for a token with
 fewer scopes than the grant. If the token goes to untrusted compute, use it.

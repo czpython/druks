@@ -198,6 +198,8 @@ If no notification arrived:
 
 - Make sure that an enabled destination is the gate destination.
 - Read the notification through the API and examine its recorded delivery error.
+  If the bot is not in the channel, invite it. If Slack finds no channel, check
+  the channel ID.
 - If it is an in-app gate, answer from the subject page.
 
 Notification failure deliberately leaves the run parked and resumable.

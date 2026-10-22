@@ -243,6 +243,16 @@ async def test_sync_keeps_the_facts_the_card_learned(acme, configuration, secret
     }
 
 
+async def test_any_other_key_of_a_table_is_a_fact(acme, configuration, secrets, druks_db):
+    bind_ambient_session(druks_db)
+    configuration.write_text('[services.acme]\nurl = "https://acme.test"\nworkspace_id = "org-1"')
+    (secrets / "services.acme.key").write_text("configured-key")
+
+    await Service.sync_configuration(druks_db)
+
+    assert (await acme.get()).identity == {"url": "https://acme.test", "workspace_id": "org-1"}
+
+
 async def test_managed_card_is_read_only(acme, configuration, secrets, druks_db, tmp_path, caplog):
     configuration.write_text(MANAGER + '[services.acme]\nurl = "https://acme.test"')
     (secrets / "manager.token").write_text("manager-secret")
