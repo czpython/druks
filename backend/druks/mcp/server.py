@@ -293,6 +293,9 @@ def _annotate(
         destructive_hint=not is_read and route.extensions.get("x-destructive", True),
         idempotent_hint=route.extensions.get("x-idempotent", False),
     )
+    # Claude Code defers every MCP tool until the agent searches for it, and an agent that
+    # never searches denies the tool. This key loads the tool upfront; other clients ignore it.
+    tool.meta = {"anthropic/alwaysLoad": True}
     if preconditions := tool_preconditions[route.operation_id]:
         tool.auth = _visible_while(preconditions)
 
