@@ -19,6 +19,8 @@ class Channel:
     has_turns: ClassVar[bool] = True
     # Whether chat_read_thread reads the channel's threads, where other people write too.
     has_readable_threads: ClassVar[bool] = False
+    # The reaction that acknowledges a person's message, as the channel names it.
+    reaction_ack: ClassVar[str]
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
@@ -34,6 +36,13 @@ class Channel:
         cls, session: AsyncSession, conversation: Conversation, reply: Message
     ) -> None:
         """Send the agent's reply to where the conversation lives."""
+        raise NotImplementedError
+
+    @classmethod
+    async def acknowledge(
+        cls, session: AsyncSession, conversation: Conversation, message: Message
+    ) -> None:
+        """Show the person that the agent has their message."""
         raise NotImplementedError
 
     @classmethod

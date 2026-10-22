@@ -346,6 +346,33 @@ async def test_only_self_chat_replies_have_a_prefix(druks_db, waha, sender, pref
     assert reply.body == "Your ticket is open."
 
 
+@pytest.mark.parametrize(
+    ("sender", "thread_id", "message_id"),
+    [
+        (ANA, "", f"false_{ANA}_M1"),
+        (ANA, GROUP, f"false_{GROUP}_M1_{ANA}"),
+        (NUMBER, "", f"true_{NUMBER}_M1"),
+    ],
+)
+async def test_the_reaction_names_the_message_by_its_full_waha_id(
+    druks_db, waha, sender, thread_id, message_id
+):
+    owner = await bot_account(druks_db)
+    connection = await link(druks_db, owner)
+    conversation = await Conversation.get_or_create_for_user(
+        druks_db, connection, owner.id, **{**user(sender), "thread_id": thread_id}
+    )
+    message = await conversation.create_message(druks_db, "Hello", source_id="M1")
+
+    await WhatsAppChannel.acknowledge(druks_db, conversation, message)
+
+    assert waha.calls[-1] == (
+        "PUT",
+        "/api/reaction",
+        {"session": "session_one", "messageId": message_id, "reaction": "👀"},
+    )
+
+
 async def test_a_group_reaches_the_bot_after_its_admin_tags_it_there(
     druks_db, helpdesk, waha, monkeypatch
 ):

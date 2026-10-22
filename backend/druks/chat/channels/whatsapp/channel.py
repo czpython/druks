@@ -35,6 +35,7 @@ class WhatsAppChannel(Channel):
     name = ConversationSource.WHATSAPP
     service = Waha
     has_readable_threads = True
+    reaction_ack = "👀"
 
     @classmethod
     async def send_reply(
@@ -52,6 +53,23 @@ class WhatsAppChannel(Channel):
         tags = dict.fromkeys(re.findall(r"@(\d+)\b", text))
         mentions = [await client.get_chat_id_for_tag(digits) for digits in tags]
         await client.send_text(chat_id, text, message_id=reply.source_id, mentions=mentions)
+
+    @classmethod
+    async def acknowledge(
+        cls, session: AsyncSession, conversation: Conversation, message: Message
+    ) -> None:
+        """React to the person's message, under WAHA's full id."""
+        is_self_chat = conversation.user_id == conversation.connection.identity["user_id"]
+        chat_id = conversation.thread_id or conversation.user_id
+        if conversation.thread_id:
+            message_id = f"false_{chat_id}_{message.source_id}_{conversation.user_id}"
+        elif is_self_chat:
+            # Only the phone writes in its chat with itself.
+            message_id = f"true_{chat_id}_{message.source_id}"
+        else:
+            message_id = f"false_{chat_id}_{message.source_id}"
+        client = await Waha.get_client(session, conversation.connection)
+        await client.send_reaction(message_id, cls.reaction_ack)
 
     @classmethod
     async def read_thread(cls, session: AsyncSession, conversation: Conversation) -> list[dict]:

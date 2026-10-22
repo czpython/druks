@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -10,6 +11,7 @@ import pytest
 from conftest import bind_ambient_session, connect_service
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.dependencies import request_session
+from druks.chat import service
 from druks.chat.channels.slack.channel import SlackChannel
 from druks.chat.channels.slack.constants import LINK_KEY
 from druks.chat.constants import CONVERSATION_HEADER
@@ -27,6 +29,7 @@ from druks.secrets.models import VaultSecret
 from druks.testing import asgi_client, configure_app_for_test, make_settings
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from slack_sdk.errors import SlackApiError
 
 SLACK_AUDIENCE = Audience.service("slack")
 AUTHORITY = "https://slack.com/T1"
@@ -215,6 +218,50 @@ async def test_a_reply_posts_markdown_in_pieces_and_records_its_slack_id(card, d
         for method, sent in slack
     ] == [("chat.postMessage", ANA, 12_000, "markdown"), ("chat.postMessage", ANA, 1, "markdown")]
     assert reply.source_id == "D1:1.0"
+
+
+async def test_delivery_reacts_with_eyes_to_each_message_from_slack(
+    card, druks_db, monkeypatch, caplog
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    conversation = await Conversation.get_or_create_for_user(
+        druks_db,
+        card,
+        ana.id,
+        source=ConversationSource.SLACK,
+        user_id=ANA,
+        user_name="",
+        user_phone="",
+        thread_id="",
+    )
+    # A Slack message with two files is two Druks messages.
+    messages = [
+        await conversation.create_message(druks_db, "Hi", source_id=source_id)
+        for source_id in ("D1:1.0", "D1:2.0", "D1:2.0:F2")
+    ]
+    await conversation.create_message(druks_db, "[Internal: ...]", is_internal=True)
+    reactions = []
+
+    async def api_call(client, api_method, *, params=None, **request):
+        reaction = (api_method, params["channel"], params["timestamp"], params["name"])
+        if reaction in reactions:
+            raise SlackApiError("", {"ok": False, "error": "already_reacted"})
+        reactions.append(reaction)
+        if params["timestamp"] == "1.0":
+            raise SlackApiError("", {"ok": False, "error": "ratelimited"})
+        return {"ok": True}
+
+    monkeypatch.setattr(SlackClient, "api_call", api_call)
+
+    with caplog.at_level(logging.WARNING):
+        await service.acknowledge_pending(druks_db, conversation)
+
+    assert reactions == [
+        ("reactions.add", "D1", "1.0", "eyes"),
+        ("reactions.add", "D1", "2.0", "eyes"),
+    ]
+    failures = [record.args[0] for record in caplog.records if record.name == service.__name__]
+    assert failures == [messages[0].id]
 
 
 @pytest.fixture

@@ -61,6 +61,9 @@ Replies use the **Agent** label. Messages that Druks writes for the agent use
 The first message can take longer than later messages. The composer stays
 available while you wait.
 
+On Slack, GitHub, and WhatsApp, Druks reacts with 👀 to your message when
+delivery starts, before the sandbox is ready. A paused conversation gets none.
+
 ## Send, stop, and send again
 
 You can send a message while the agent replies. Druks saves the message and

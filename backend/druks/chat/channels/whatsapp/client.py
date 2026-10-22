@@ -128,5 +128,12 @@ class WahaClient:
             },
         )
 
+    async def send_reaction(self, message_id: str, reaction: str) -> None:
+        await self.request(
+            "PUT",
+            "/api/reaction",
+            json={"session": self.session_name, "messageId": message_id, "reaction": reaction},
+        )
+
     async def download(self, path: str) -> bytes:
         return (await self.request("GET", path)).content
