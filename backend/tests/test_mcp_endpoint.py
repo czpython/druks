@@ -213,6 +213,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
             annotations.idempotent_hint,
         ) == expected
         assert tools[name].description
+        assert tools[name].meta["anthropic/alwaysLoad"] is True
 
     for name in ("software_factory_review", "software_factory_start"):
         app_tool = tools[name]
