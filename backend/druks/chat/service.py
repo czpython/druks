@@ -3,10 +3,11 @@ import base64
 import hashlib
 import json
 import logging
+import tempfile
 from collections.abc import Sequence
 from contextlib import suppress
 from datetime import timedelta
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -524,6 +525,24 @@ async def get_transcript(session: AsyncSession, file: File) -> str:
     return await SpeechToText.transcribe(
         session, name=file.name, content_type=file.content_type, content=content
     )
+
+
+async def upload_file(
+    session: AsyncSession, conversation: Conversation, file_id: str, name: str, content: bytes
+) -> str:
+    """Put a thread file in the conversation's folder in the agent's sandbox, beside the
+    files its messages carry. The path the agent opens."""
+    host = await get_running_sandbox(session, conversation.account_id)
+    try:
+        conversation_root = f"{get_work_root(host.ssh_username)}/chat/{conversation.id}"
+        # The poster names the file. Only the base name joins the sandbox path.
+        remote = f"{conversation_root}/files/{file_id}/{PurePosixPath(name).name}"
+        with tempfile.NamedTemporaryFile() as staged:
+            await asyncio.to_thread(Path(staged.name).write_bytes, content)
+            await host.upload_file(local=Path(staged.name), remote=remote)
+    finally:
+        await host.aclose()
+    return remote
 
 
 async def get_turn_content(

@@ -10,7 +10,7 @@ ADMIN_TOOLS = (
 # The admin's system prompt, a template of the chat app.
 ADMIN_PROMPT = "chat/bots/admin.md"
 # A Bot's tools and prompt paragraph in a group, beside its own.
-THREAD_TOOLS = ("chat_read_thread",)
+THREAD_TOOLS = ("chat_read_thread", "chat_read_file")
 THREAD_PROMPT = (
     "This chat is a group. Other people write in it, and everyone in it reads your "
     "replies. Only the messages that tag you or reply to you reach you, so your first "

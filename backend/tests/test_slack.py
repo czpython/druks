@@ -18,12 +18,13 @@ from druks.chat.constants import CONVERSATION_HEADER
 from druks.chat.enums import ConversationSource, MessageRole
 from druks.chat.exceptions import ChannelHasNoThreadsError
 from druks.chat.models import Conversation
-from druks.chat.routes import read_thread, require_tag
+from druks.chat.routes import read_file, read_thread, require_tag
 from druks.core.apis.slack import SlackClient
 from druks.core.services import Slack
 from druks.core.webhooks.slack import SlackEvents
 from druks.models import Base
 from druks.redis import close_client, get_client
+from druks.sandbox.layout import get_work_root
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.testing import asgi_client, configure_app_for_test, make_settings
@@ -77,7 +78,8 @@ def delivery(monkeypatch):
 
 @pytest.fixture
 def endpoint(monkeypatch):
-    settings = SimpleNamespace(urls=SimpleNamespace(endpoint="https://druks.example"))
+    urls = SimpleNamespace(endpoint="https://druks.example", webhook_base="https://druks.example")
+    settings = SimpleNamespace(urls=urls)
     monkeypatch.setattr("druks.chat.channels.slack.channel.load_settings", lambda: settings)
 
 
@@ -434,14 +436,14 @@ async def test_an_unlinked_person_who_tags_the_bot_gets_the_link_by_direct_messa
 
 async def test_the_agent_reads_its_thread_and_knows_who_wrote_what(card, druks_db, monkeypatch):
     """Ben's agent answers in the same thread as the same bot: only the replies this
-    conversation recorded are the agent's own."""
+    conversation recorded are the agent's own. A file on a message is listed by id."""
     ana = await Account.get_or_create(druks_db, "ana@example.com")
     reads = thread_reads(
         monkeypatch,
         [
             {"ts": "10.0", "user": ANA, "text": f"<@{BOT}> read my runs"},
             {"ts": "10.1", "user": BOT, "text": "Sure."},
-            {"ts": "10.2", "user": "U200", "text": "me too"},
+            {"ts": "10.2", "user": "U200", "text": "", "files": [shared_file()]},
             {"ts": "10.3", "user": BOT, "text": "Hi Ben."},
         ],
     )
@@ -461,6 +463,12 @@ async def test_the_agent_reads_its_thread_and_knows_who_wrote_what(card, druks_d
         ("10.1", "Druks", True, False),
         ("10.2", "Ben", False, False),
         ("10.3", "Druks", False, False),
+    ]
+    assert [message["files"] for message in thread] == [
+        [],
+        [],
+        [{"id": "F1", "name": "plan.pdf", "content_type": "application/pdf"}],
+        [],
     ]
     assert reads.count("users.info") == 3
     direct = await thread_conversation(druks_db, card, ana, thread_id="")
@@ -496,6 +504,46 @@ async def test_chat_read_thread_reads_the_callers_own_conversation(
     assert [(message["ts"], message["is_from_user"]) for message in thread.json()] == [
         ("10.0", True)
     ]
+
+
+async def test_chat_read_file_puts_a_thread_file_in_the_agents_workspace(
+    card, druks_db, tmp_path, monkeypatch
+):
+    """The tool fetches the file from Slack once Slack confirms it is shared where the
+    thread lives, and uploads it to the conversation's folder in the caller's sandbox."""
+    configure_app_for_test(settings=make_settings(tmp_path), authenticated=False)
+    api = FastAPI(dependencies=[Depends(request_session)])
+    api.add_api_route("/thread/files/{file_id}", read_file, methods=["GET"])
+    rooms = {"F1": ["C1"], "F2": ["C2"]}
+
+    async def api_call(client, api_method, *, params=None, json=None, **request):
+        shared = {**shared_file(params["file"]), "channels": rooms[params["file"]], "groups": []}
+        return Answer(ok=True, file=shared)
+
+    uploads = []
+
+    async def upload_file(*, local, remote, mode=0o600):
+        uploads.append((local.read_bytes(), remote))
+
+    host = SimpleNamespace(ssh_username="agent", upload_file=upload_file, aclose=AsyncMock())
+    monkeypatch.setattr(SlackClient, "api_call", api_call)
+    monkeypatch.setattr(SlackClient, "download", AsyncMock(return_value=b"%PDF"))
+    monkeypatch.setattr("druks.chat.service.get_running_sandbox", AsyncMock(return_value=host))
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    conversation = await thread_conversation(druks_db, card, ana)
+    _, token = await PersonalAccessToken.create(druks_db, account_id=ana.id, name="chat")
+    await druks_db.commit()
+    headers = {"Authorization": f"Bearer {token}", CONVERSATION_HEADER: conversation.id}
+
+    async with asgi_client(api) as client:
+        served = await client.get("/thread/files/F1", headers=headers)
+        elsewhere = await client.get("/thread/files/F2", headers=headers)
+        outside = await client.get("/thread/files/F1", headers={"Authorization": f"Bearer {token}"})
+
+    path = f"{get_work_root('agent')}/chat/{conversation.id}/files/F1/plan.pdf"
+    assert served.json() == {"path": path, "name": "plan.pdf", "content_type": "application/pdf"}
+    assert uploads == [(b"%PDF", path)]
+    assert (elsewhere.status_code, outside.status_code) == (404, 409)
 
 
 async def test_a_person_who_requires_a_tag_is_answered_only_when_they_tag(

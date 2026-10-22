@@ -610,7 +610,8 @@ class Helpdesk(App):
   direct chat. Druks gives the result to the agent as its system prompt, and
   adds one paragraph at the end. It explains the `[Internal: …]` messages that
   Druks writes to the agent. In a group, Druks first adds a paragraph that tells
-  the agent to read the group with `chat_read_thread`, and gives it that tool.
+  the agent to read the group with `chat_read_thread`, and gives it that tool
+  and `chat_read_file`.
 - `user_tools` are the tools of each person who writes to the connection.
 - `admin_tools` are the tools of the number's admin. The admin also gets
   Druks's admin prompt, `answer_gate`, `chat_resume_conversation`, and the
