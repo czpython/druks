@@ -1,4 +1,4 @@
-import { CircleDot, CircleX, Clock3, MessageCircleQuestion, MessageSquareReply, Square, type LucideIcon } from 'lucide-react'
+import { CircleCheck, CircleDot, CircleX, Clock3, MessageCircleQuestion, MessageSquareReply, Square, type LucideIcon } from 'lucide-react'
 import type { EventTopic, FeedItem } from '../api/types'
 import { getAppUI, type Tone } from '../apps/registry'
 import { zonedParts } from './format'
@@ -7,6 +7,7 @@ const LIFECYCLE_VERBS: Record<string, string> = {
   'workflow.scheduled': 'queued',
   'workflow.running': 'response received',
   'workflow.parked': 'input requested',
+  'workflow.finished': 'finished',
   'workflow.failed': 'failed',
   'workflow.cancelled': 'cancelled',
 }
@@ -15,6 +16,7 @@ const LIFECYCLE_ICONS: Record<string, LucideIcon> = {
   'workflow.scheduled': Clock3,
   'workflow.running': MessageSquareReply,
   'workflow.parked': MessageCircleQuestion,
+  'workflow.finished': CircleCheck,
   'workflow.failed': CircleX,
   'workflow.cancelled': Square,
 }

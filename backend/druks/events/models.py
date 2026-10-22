@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ColumnElement, Index, Select, Text, and_, cast, func, not_, or_, select, text
+from sqlalchemy import ColumnElement, Index, Select, Text, and_, cast, func, not_, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -67,26 +67,8 @@ class Event(Base):
     ) -> Select[tuple["Event"]]:
         """The recorded Activity that matches these filters, as a query. Search reads the
         recorded key literally; from is inclusive and until is exclusive."""
-        # The durable package imports this module.
-        from druks.durable.enums import WorkflowEvent
-
         owners = [owner.name for owner in iter_apps() if not owner.builtin]
-        statement = select(cls).where(
-            cls.app.in_(owners),
-            or_(
-                cls.type.not_like("workflow.%"),
-                cls.type.in_(
-                    [
-                        WorkflowEvent.SCHEDULED,
-                        WorkflowEvent.PARKED,
-                        WorkflowEvent.FAILED,
-                        WorkflowEvent.CANCELLED,
-                    ]
-                ),
-                # A validated gate reply records its result; a routine start records none.
-                and_(cls.type == WorkflowEvent.RUNNING, cls.payload.has_key("result")),
-            ),
-        )
+        statement = select(cls).where(cls.app.in_(owners))
         if app:
             statement = statement.where(cls.app == app)
         if search and search.strip():
