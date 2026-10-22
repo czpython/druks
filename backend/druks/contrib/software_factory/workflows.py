@@ -39,6 +39,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+async def get_project_repos(repo: str) -> tuple[str, ...]:
+    # The repo, then the project's other repos, which agents clone on demand.
+    project_repo = await ProjectRepo.get_for_repo(repo)
+    siblings = await project_repo.get_siblings() if project_repo else []
+    return (repo, *(sibling.full_name for sibling in siblings))
+
+
 @dataclass(frozen=True, kw_only=True)
 class BuildWorkspace(RepoWorkspace):
     skills: tuple[str, ...]
@@ -48,6 +55,17 @@ class BuildWorkspace(RepoWorkspace):
         return get_work_root(self.host.ssh_username)
 
     @classmethod
+    async def get_secrets(cls, subject: Any) -> list[SandboxSecret]:
+        return [
+            SandboxSecret(
+                name=cls.github.slug,
+                secret_id=(await cls.github.get()).id,
+                resources=await get_project_repos(cls.get_repo(subject)),
+                host=cls.github.host,
+            )
+        ]
+
+    @classmethod
     async def get_mcp_servers(cls, subject: Any) -> tuple[SandboxMcpServer, ...]:
         # GitHub MCP acts as the review actor. The clone acts as the operator.
         actor = await get_review_actor()
@@ -55,7 +73,7 @@ class BuildWorkspace(RepoWorkspace):
             name=GITHUB_MCP_NAME,
             url=GITHUB_MCP_URL,
             secret_id=(await actor.service.get()).id,
-            resource=cls.get_repo(subject),
+            resources=await get_project_repos(cls.get_repo(subject)),
         )
         if (await SoftwareFactory.settings()).tracker == "druks":
             return (github, get_druks_mcp_server(allowed_tools=TICKET_TOOLS))
@@ -225,7 +243,7 @@ class Build(Workflow):
             source=work_item.source,
             assignee_name=self.input.assignee_name,
             assignee_email=self.input.assignee_email,
-            related_repos=await project_repo.siblings(),
+            related_repos=await project_repo.get_siblings(),
             skills=await Skill.list_delivered(
                 db_session(), self._profile.get("recommended_skills", [])
             ),
@@ -487,7 +505,7 @@ class ReviewWorkspace(RepoWorkspace):
             SandboxSecret(
                 name=actor.service.slug,
                 secret_id=(await actor.service.get()).id,
-                resource=cls.get_repo(subject),
+                resources=await get_project_repos(cls.get_repo(subject)),
                 host=actor.service.host,
             )
         ]
@@ -500,7 +518,7 @@ class ReviewWorkspace(RepoWorkspace):
                 name=GITHUB_MCP_NAME,
                 url=GITHUB_MCP_URL,
                 secret_id=(await actor.service.get()).id,
-                resource=cls.get_repo(subject),
+                resources=await get_project_repos(cls.get_repo(subject)),
             ),
         )
 
@@ -547,7 +565,7 @@ class PullRequestReview(Workflow):
         sign_ins = await Github.list_for_account(account.id)
         requested_by = sign_ins[0].identity["login"] if sign_ins else account.username
         return {
-            "siblings": await project_repo.siblings(),
+            "siblings": await project_repo.get_siblings(),
             "review_mode": (await get_review_actor()).mode,
             "requested_by": requested_by,
             **await super().get_prompt_context(**context),

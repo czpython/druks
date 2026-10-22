@@ -164,7 +164,7 @@ async def test_the_requester_goes_by_their_github_login_once_linked(druks_db, mo
     await _connect_operator()
     project = await Project.create(name="Acme")
     await ProjectRepo.create(project_id=project.id, full_name="acme/app")
-    monkeypatch.setattr(ProjectRepo, "siblings", AsyncMock(return_value=[]))
+    monkeypatch.setattr(ProjectRepo, "get_siblings", AsyncMock(return_value=[]))
     dev = await Account.get_or_create(druks_db, "dev@example.com")
     review, _ = _bind_instance(
         PullRequestReview, PullRequest(id="acme/app#7").identity, {}, account_id=dev.id

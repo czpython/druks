@@ -405,7 +405,7 @@ class Agent:
                     SecretRef(
                         name=secret.name,
                         secret_id=secret.secret_id,
-                        resource=secret.resource,
+                        resources=list(secret.resources),
                         host=secret.host,
                     )
                     for secret in await workspace_class.get_secrets(subject)

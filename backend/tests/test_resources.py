@@ -196,10 +196,10 @@ async def test_a_box_rebuilds_the_resource_from_its_key(acme, managed, manager):
     site = acme.Sites("site-id")
 
     [secret] = await site.get_secrets()
-    value, _ = await card.issue_token(secret.resource, name=secret.name)
+    value, _ = await card.issue_token(secret.resources, name=secret.name)
 
     assert secret == SandboxSecret(
-        name="acme_api_token", secret_id=card.id, resource="sites/site-id", host="api.acme.test"
+        name="acme_api_token", secret_id=card.id, resources=("sites/site-id",), host="api.acme.test"
     )
     assert site.name == f"6f2c-{sha256(b'site-id').hexdigest()[:12]}"
     assert value == "token-1"

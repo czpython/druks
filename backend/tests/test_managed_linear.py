@@ -299,7 +299,7 @@ async def test_a_revoked_grant_asks_for_the_install_again(
     row = await Linear.get()
     assert (row.identity, row.secrets) == (MANAGED_FACTS, {})
     with pytest.raises(MissingSecretError):
-        await row.issue_token("")
+        await row.issue_token(())
     async with asgi_client(configure_app_for_test(settings=managed_linear)) as client:
         entry = await _get_entry(client)
     assert not entry["connected"]
@@ -320,7 +320,7 @@ async def test_the_default_account_sends_the_apps_token_to_linears_mcp_server(
     [server], [ref] = await Workspace.get_all_mcp_servers(druks_db, None, default_account.id)
 
     assert (ref.secret_id, ref.name) == (row.id, server.bearer_token_env_var.lower())
-    token, expires_at = await row.issue_token(ref.resource, name=ref.name)
+    token, expires_at = await row.issue_token((), name=ref.name)
     assert token == "at-1" and expires_at
 
 

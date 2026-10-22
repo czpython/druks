@@ -33,11 +33,11 @@ async def secret(
     credential = bearer.credentials if bearer else ""
     try:
         identity = await SandboxIdentity.authenticate(session, identity_id, credential, name)
-        # The ref is the whole selection: the vault row and the resource.
+        # The ref is the whole selection: the vault row and the resources.
         # Nothing in the request can pick another.
         ref = identity.get_secret_ref(name)
         value, expires_at = await ref.secret.issue_token(
-            ref.resource, name=ref.name, host_id=identity.host_id or ""
+            tuple(ref.resources), name=ref.name, host_id=identity.host_id or ""
         )
         # The identity can die during the source I/O.
         await SandboxIdentity.authenticate(session, identity_id, credential, name)

@@ -451,11 +451,11 @@ async def test_401_on_retry_surfaces_to_caller() -> None:
     assert client.invalidate_calls == 1
 
 
-async def test_token_for_repo_retries_on_401_and_succeeds() -> None:
+async def test_a_repo_token_retries_on_401_and_succeeds() -> None:
     calls = {"n": 0}
 
     class _AppApps:
-        async def async_create_installation_access_token(self, _id: int) -> Any:
+        async def async_create_installation_access_token(self, _id: int, **_: Any) -> Any:
             calls["n"] += 1
             if calls["n"] == 1:
                 raise _make_request_failed(401)
@@ -485,12 +485,44 @@ async def test_token_for_repo_retries_on_401_and_succeeds() -> None:
             self._installation_cache.pop(repo, None)
 
     client = _Client()
-    token = await client.token_for_repo("ClawHaven/example")
+    token = await client.get_token_for_repos("ClawHaven/example")
 
     # GitHub's expiry rides with the token, so a mint can answer it.
     assert token == ("ghs_fresh_token", datetime(2026, 9, 7, 18, 0, tzinfo=UTC))
     assert calls["n"] == 2
     assert client.invalidated == ["ClawHaven/example"]
+
+
+async def test_a_repo_token_names_the_repos_the_first_ones_installation_covers() -> None:
+    minted: list[list[str]] = []
+
+    async def mint(installation_id: int, *, repositories: list[str]) -> Any:
+        minted.append(repositories)
+        return SimpleNamespace(
+            parsed_data=SimpleNamespace(
+                token=f"ghs_{len(minted)}", expires_at="2099-09-07T18:00:00Z"
+            )
+        )
+
+    installations = {"acme/api": 7, "acme/web": 7, "other/worker": 8}
+
+    async def installation_id(repo: str) -> int:
+        if repo in installations:
+            return installations[repo]
+        raise GitHubAppNotInstalledError(repo, app="druks-operator")
+
+    client = GitHubClient.__new__(GitHubClient)
+    client._app = SimpleNamespace(
+        rest=SimpleNamespace(apps=SimpleNamespace(async_create_installation_access_token=mint))
+    )
+    client._installation_id = installation_id  # type: ignore[method-assign]
+
+    token, _ = await client.get_token_for_repos("acme/api", "acme/web", "other/worker", "acme/gone")
+    alone, _ = await client.get_token_for_repos("acme/api")
+
+    assert minted == [["api", "web"], ["api"]]
+    assert (token, alone) == ("ghs_1", "ghs_2")
+    assert (await client.get_token_for_repos("acme/web", "acme/api"))[0] == "ghs_1"
 
 
 async def test_github_client_aclose_drops_cache_without_raising() -> None:

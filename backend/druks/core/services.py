@@ -75,15 +75,15 @@ class GithubApp(Service):
 
         @classmethod
         async def issue_token(
-            cls, resource: str = "", *, name: str = ""
+            cls, resources: tuple[str, ...] = (), *, name: str = ""
         ) -> tuple[str, datetime | None]:
-            if not resource:
+            if not resources:
                 raise MissingSecretError(
-                    "GitHub issues a token for one repository. This entry names none."
+                    "GitHub issues a token for repositories. This entry names none."
                 )
             client = await cls.service.get_client()
             try:
-                return await client.token_for_repo(resource)
+                return await client.get_token_for_repos(*resources)
             except GitHubAppNotInstalledError as error:
                 raise MissingSecretError(str(error)) from error
 
