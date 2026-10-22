@@ -25,6 +25,8 @@ import { appLabel } from '../apps/registry'
 import { useTicker } from '../lib/useTicker'
 import { absTime } from '../lib/format'
 import { harnessColors } from '../lib/harnessColors'
+import { useThemePreference, type ThemePreference } from '../lib/preferences'
+import { queuePersonalSettingsWrite } from '../lib/personalSettingsWriteQueue'
 import { Page } from './Page'
 import { Sidebar } from './Sidebar'
 import { BrowserProfilesPane } from './BrowserProfilesPane'
@@ -174,6 +176,14 @@ export function SettingsPages({
   const errorNotice = useRef<HTMLParagraphElement>(null)
   const effectiveDefaults = defaults ?? savedDefaults
   const personalTimezone = personalEdits.timezone ?? personalQuery.data?.timezone ?? 'UTC'
+  const {
+    theme: savedTheme,
+    themePendingSync,
+    previewTheme,
+    acceptThemePreference,
+    persistThemeFallback,
+  } = useThemePreference()
+  const personalTheme = personalEdits.theme ?? savedTheme
   const personalChanges = Object.fromEntries(
     Object.entries(personalEdits).filter(([field, value]) =>
       value !== personalQuery.data?.[field as keyof UpdatePersonalSettingsRequest],
@@ -283,8 +293,11 @@ export function SettingsPages({
     return () => window.removeEventListener('beforeunload', beforeUnload)
   }, [dirtyPages.length])
 
-  function discard(page: string) {
-    if (page === 'personal') setPersonalEdits({})
+  function discard(page: string, theme = savedTheme) {
+    if (page === 'personal') {
+      setPersonalEdits({})
+      previewTheme(theme)
+    }
     else if (page === 'agents') setDefaults(null)
     else
       setAppEdits((current) => {
@@ -315,6 +328,7 @@ export function SettingsPages({
     if (saving || (pages.some((page) => page !== 'personal') && !settingsQuery.data)) return
     setSaving(true)
     let page = pages[0] ?? section
+    let savedPersonalTheme: ThemePreference | undefined
     try {
       for (const currentPage of pages) {
         page = currentPage
@@ -324,8 +338,12 @@ export function SettingsPages({
           return next
         })
         if (page === 'personal') {
-          const saved = await api.updatePersonalSettings(personalChanges)
+          const saved = await queuePersonalSettingsWrite(account.id, () =>
+            api.updatePersonalSettings(personalChanges),
+          )
           queryClient.setQueryData(['personalSettings'], saved)
+          savedPersonalTheme = saved.theme
+          acceptThemePreference(saved.theme)
         } else if (page === 'agents' && defaults && savedDefaults) {
           if (executionInvalid)
             throw new Error('Choose a model with a connected credential before you save.')
@@ -381,10 +399,13 @@ export function SettingsPages({
           void queryClient.invalidateQueries({ queryKey: ['appSettingChoices'] })
           await queryClient.invalidateQueries({ queryKey: ['agents'] })
         }
-        discard(page)
+        discard(page, savedPersonalTheme)
       }
       proceed?.()
     } catch (caught) {
+      if (page === 'personal' && personalChanges.theme) {
+        persistThemeFallback(personalChanges.theme)
+      }
       let message = caught instanceof Error ? caught.message : 'Could not save settings. Try again.'
       if (
         caught instanceof ApiError &&
@@ -691,6 +712,12 @@ export function SettingsPages({
                 <PreferencesPane
                   timezone={personalTimezone}
                   setTimezone={(value) => setPersonalEdits((current) => ({ ...current, timezone: value }))}
+                  theme={personalTheme}
+                  themePendingSync={themePendingSync}
+                  setTheme={(value) => {
+                    setPersonalEdits((current) => ({ ...current, theme: value }))
+                    previewTheme(value)
+                  }}
                   timezones={timezones}
                   clock={clock}
                   busy={saving}
@@ -924,7 +951,7 @@ export function SettingsPages({
             className="set-btn ghost"
             disabled={saving}
             onClick={() => {
-              dirtyPages.forEach(discard)
+              dirtyPages.forEach((page) => discard(page))
               finishLeaving()
             }}
           >

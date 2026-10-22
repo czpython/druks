@@ -42,7 +42,7 @@ import { appLabel } from '../apps/registry'
 import { money, relTimeFromIso, secondsUntil } from '../lib/format'
 import { useUsageToday } from '../lib/useUsage'
 import { useTicker } from '../lib/useTicker'
-import { useFormatters } from '../lib/preferences'
+import { useFormatters, type ThemePreference } from '../lib/preferences'
 import { Bar } from './UsagePanel'
 import { harnessColors } from '../lib/harnessColors'
 import {
@@ -428,12 +428,18 @@ function InheritCell({
 export function PreferencesPane({
   timezone,
   setTimezone,
+  theme,
+  themePendingSync,
+  setTheme,
   timezones,
   clock,
   busy,
 }: {
   timezone: string
   setTimezone: (timezone: string) => void
+  theme: ThemePreference
+  themePendingSync?: boolean
+  setTheme: (theme: ThemePreference) => void
   timezones: string[]
   clock: string
   busy: boolean
@@ -468,6 +474,29 @@ export function PreferencesPane({
             now · <b>{clock}</b>
           </span>
         </div>
+      </div>
+      <div className="set-group">
+        <label className="set-group-label" htmlFor="personal-theme">
+          Theme
+        </label>
+        <div className="set-field" style={{ maxWidth: 320 }}>
+          <select
+            id="personal-theme"
+            className="set-select"
+            value={theme}
+            onChange={(event) => setTheme(event.target.value as ThemePreference)}
+            disabled={busy}
+          >
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+        {themePendingSync && (
+          <p className="set-field-help" role="status">
+            Theme saved on this device. It will sync when the connection returns.
+          </p>
+        )}
       </div>
     </div>
   )

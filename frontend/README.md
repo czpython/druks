@@ -62,8 +62,8 @@ keeps streamed replies visible until the operator scrolls up. See the
 Settings use `/settings/<section>` routes. `/settings/personal` edits the current
 account's preferences through `/api/settings/personal`. `/settings/agents` edits
 shared execution defaults through `/api/settings`. The
-preferences provider uses the personal endpoint for timestamp display. Preferences
-contains only timezone and does not depend on execution catalogs. All accounts
+preferences provider uses the personal endpoint for timestamp display and theme
+selection. Preferences does not depend on execution catalogs. All accounts
 use the shared execution defaults in Agents and the app agent overrides. Search
 matches section names and app field labels. Preferences and Agents
 retain separate drafts across settings pages. Save changes applies only the current page.

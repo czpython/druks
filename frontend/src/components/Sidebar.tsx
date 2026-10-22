@@ -3,6 +3,7 @@ import { Menu, X } from 'lucide-react'
 import { Link, useLocation } from 'wouter'
 
 import type { Account } from '../api/types'
+import { BrandLockup } from './BrandLockup'
 
 export function Sidebar({
   account,
@@ -33,8 +34,7 @@ export function Sidebar({
   const content = (
     <>
       <Link href={home} className="sidebar-brand" aria-label="Druks home">
-        <span className="brand-glyph" aria-hidden="true" />
-        <span>druks</span>
+        <BrandLockup />
       </Link>
       {children}
       <div className="sidebar-account" title={account.username}>

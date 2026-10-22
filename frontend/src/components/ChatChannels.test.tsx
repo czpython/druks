@@ -4,6 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Router } from 'wouter'
 
+import { UserPreferencesProvider } from '../lib/preferences'
 import { SettingsPages } from './SettingsPages'
 
 const account = { id: 'operator', username: 'ana@example.com', isDefault: true }
@@ -12,9 +13,9 @@ let channels = ['whatsapp']
 function mount(path: string, appName?: string) {
   window.history.replaceState(null, '', path)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={client}><Router>
+  render(<QueryClientProvider client={client}><UserPreferencesProvider><Router>
     <SettingsPages account={account} returnTo="/chat" unsavedFormRef={createRef()} appName={appName} />
-  </Router></QueryClientProvider>)
+  </Router></UserPreferencesProvider></QueryClientProvider>)
 }
 
 beforeEach(() => {
@@ -28,7 +29,7 @@ beforeEach(() => {
       defaultHarness: 'claude', defaultModel: '', defaultBilling: 'subscription',
       defaultEffort: '', defaultTimeout: 1800, fastMode: false,
     }
-    if (url === '/api/settings/personal') response = { timezone: 'UTC', gateParkDestinationId: null, isTagRequired: false }
+    if (url === '/api/settings/personal') response = { timezone: 'UTC', theme: 'system', gateParkDestinationId: null, isTagRequired: false }
     if (url === '/api/settings/apps') response = {
       allowedEfforts: [], channels, apps: [{
         name: 'chat', description: 'Live agent conversations.', icon: 'messages-square',

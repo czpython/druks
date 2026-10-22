@@ -28,7 +28,6 @@ import { ChatPage } from './pages/ChatPage'
 import { LoginWindowPage } from './pages/LoginWindowPage'
 import { UsagePage } from './pages/UsagePage'
 import { SchedulesPage } from './pages/SchedulesPage'
-import { appAccent } from './lib/appColors'
 import './apps'
 import { registerInstalledApps } from './apps/installed'
 import { appHome, appLabel, appOwning, getAppUI, registeredApps } from './apps/registry'
@@ -224,7 +223,6 @@ function AppShell({
     registerInstalledApps(rosterQuery.data)
     return registeredApps().map((entry) => entry.name)
   }, [rosterQuery.data])
-  const accent = useMemo(() => appAccent(registered), [registered])
   const defaultApp = registered[0] ?? null
   const [lastApp, setLastApp] = useState<string | null>(null)
   const urlApp = appOwning(location, rosterQuery.data)
@@ -423,7 +421,7 @@ function AppShell({
               href={url}
               className="command-tab"
               aria-current={url === activeTab ? 'page' : undefined}
-              style={url === activeTab ? { borderBottomColor: accent[urlApp] } : undefined}
+              style={url === activeTab ? { borderBottomColor: 'var(--accent)' } : undefined}
             >
               {name}
             </Link>

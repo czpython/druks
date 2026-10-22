@@ -5,7 +5,7 @@ import logging
 import secrets
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, LargeBinary, String, select, text
+from sqlalchemy import CheckConstraint, ForeignKey, Index, LargeBinary, String, select, text
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 class Account(Base, Uuid7Pk):
     __tablename__ = "accounts"
     __table_args__ = (
+        CheckConstraint("theme IN ('system', 'light', 'dark')", name="accounts_theme_allowed"),
         Index(
             "accounts_default_idx", "is_default", unique=True, postgresql_where=text("is_default")
         ),
@@ -47,6 +48,7 @@ class Account(Base, Uuid7Pk):
     )
     is_default: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     timezone: Mapped[str] = mapped_column(String, default="UTC")
+    theme: Mapped[str] = mapped_column(String, default="system", server_default=text("'system'"))
     gate_park_destination_id: Mapped[str | None] = mapped_column(
         ForeignKey("notification_destinations.id", ondelete="SET NULL"), default=None
     )

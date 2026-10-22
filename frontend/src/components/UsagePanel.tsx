@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 
-import { harnessColors } from '../lib/harnessColors'
+import { providerChartColors } from '../lib/providerChartColors'
 import { usageTone, type UsageTone } from '../lib/usageHealth'
 import { useUsage, useUsageHistory, useUsageToday } from '../lib/useUsage'
 import type {
@@ -54,7 +54,7 @@ export function UsagePanel() {
   }))
   const ages = providers.map((h) => h.ageSeconds).filter((v): v is number => v !== null)
   const updatedLabel = ages.length > 0 ? `updated ${formatAge(Math.min(...ages))} ago` : ''
-  const harnessColor = harnessColors(providers.map((h) => h.id))
+  const chartColor = providerChartColors(providers.map((provider) => provider.id))
 
   return (
     <section className="us-col">
@@ -90,7 +90,7 @@ export function UsagePanel() {
           <ProviderPanel
             key={usage.id}
             usage={usage}
-            color={harnessColor[usage.id]}
+            color={chartColor[usage.id]}
             history={history?.providers.find((h) => h.id === usage.id)}
             today={today?.providers.find((t) => t.id === usage.id)}
           />
@@ -543,7 +543,7 @@ function Spark({ data, tone, id }: { data: number[]; tone: UsageTone; id: string
 function TodaySection({ today }: { today: UsageTodayResponse }) {
   const totalSpend = today.providers.reduce((sum, h) => sum + h.spendUsd, 0)
   const totalTokens = today.providers.reduce((sum, h) => sum + h.tokens, 0)
-  const harnessColor = harnessColors(today.providers.map((h) => h.id))
+  const chartColor = providerChartColors(today.providers.map((provider) => provider.id))
 
   return (
     <>
@@ -559,7 +559,7 @@ function TodaySection({ today }: { today: UsageTodayResponse }) {
           entries={today.providers.map((h) => ({
             name: h.id,
             amount: h.spendUsd,
-            color: harnessColor[h.id],
+            color: chartColor[h.id],
           }))}
           fmt={fmtUsd}
         />
@@ -569,11 +569,11 @@ function TodaySection({ today }: { today: UsageTodayResponse }) {
           entries={today.providers.map((h) => ({
             name: h.id,
             amount: h.tokens,
-            color: harnessColor[h.id],
+            color: chartColor[h.id],
           }))}
           fmt={fmtTokens}
         />
-        <HoursTile today={today} harnessColor={harnessColor} total={`${fmtUsd(totalSpend)} today`} />
+        <HoursTile today={today} chartColor={chartColor} total={`${fmtUsd(totalSpend)} today`} />
       </div>
     </>
   )
@@ -635,11 +635,11 @@ function SplitTile({
 
 function HoursTile({
   today,
-  harnessColor,
+  chartColor,
   total,
 }: {
   today: UsageTodayResponse
-  harnessColor: Record<string, string>
+  chartColor: Record<string, string>
   total: string
 }) {
   const stacked = Array.from({ length: 24 }, (_, i) =>
@@ -665,7 +665,7 @@ function HoursTile({
           >
             {today.providers.map((h) => {
               const amount = h.hours[i] ?? 0
-              const color = harnessColor[h.id]
+              const color = chartColor[h.id]
               return (
                 amount > 0 && (
                   <div
