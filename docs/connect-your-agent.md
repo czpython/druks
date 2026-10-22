@@ -65,10 +65,12 @@ Three details matter when an agent uses the MCP endpoint:
 - **Bounded responses.** Tool reads use fixed windows. Call detail contains an
   8KiB transcript tail, a 4KiB stderr tail, and a 4KiB artifact section. These
   values are tails, not full payloads.
-- **Stable error shapes.** Gateway and run tool errors contain the agent-route
-  body `{"code", "message", "retryable"}`. Codes such as `GATE_ROUND_STALE`
-  and `RUN_NOT_ACTIVE` are stable match values. App tools use the API shape
-  `{"error", "detail"}` for refusals. Shape errors contain
-  `VALIDATION_ERROR` detail. A call with an argument that the tool does not
-  declare, or without a path argument, fails before Druks sends a request. The
-  error names the argument.
+- **One error shape.** Every tool failure is one JSON object,
+  `{"code", "message", "retryable"}`. Codes such as `GATE_ROUND_STALE` and
+  `RUN_NOT_ACTIVE` are stable match values. A refusal without its own code
+  has `HTTP_<status>`. A value that the route refuses has `VALIDATION_ERROR`,
+  and the message names each field. A call with an argument that the tool
+  does not declare, without a required argument, or with a path value such as
+  `..` has `INVALID_TOOL_ARGUMENTS` and fails before Druks sends a request.
+  `retryable` is `true` only when the agent can read the state again and
+  retry.
