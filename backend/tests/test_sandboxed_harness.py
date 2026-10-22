@@ -668,7 +668,7 @@ async def test_claude_subscription_token_stays_on_the_server(
 
     assert result.status is AgentCallStatus.SUCCEEDED
     [secret] = config.secret_refs
-    assert secret.key == ("anthropic", config.subscription.id, "", "")
+    assert secret.key == ("anthropic", config.subscription.id, (), "")
     [start] = sandbox.calls
     assert not start.kwargs["extra_env"]
     bundle = start.kwargs["credentials_bundle"]
@@ -725,7 +725,7 @@ async def test_codex_subscription_token_stays_on_the_server(
     assert result.status is AgentCallStatus.SUCCEEDED
     assert result.output == {"ok": True}
     [secret] = config.secret_refs
-    assert secret.key == ("codex_subscription_token", config.subscription.id, "", "chatgpt.com")
+    assert secret.key == ("codex_subscription_token", config.subscription.id, (), "chatgpt.com")
     [start] = sandbox.calls
     assert not start.kwargs["extra_env"]
     bundle = start.kwargs["credentials_bundle"]

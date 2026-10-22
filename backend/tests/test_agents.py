@@ -343,7 +343,7 @@ async def test_an_agent_holds_its_declared_service_secrets(
     # The optional service is not connected, so its secret stays out.
     [ref] = list(refs)
     assert (ref.name, ref.secret_id, ref.host) == ("acme_api_key", card.id, "api.acme.test")
-    assert await ref.secret.issue_token(ref.resource, name=ref.name) == ("key-1", None)
+    assert await ref.secret.issue_token(tuple(ref.resources), name=ref.name) == ("key-1", None)
 
 
 async def test_an_agent_holds_a_resource_secret_from_its_workspace(
@@ -376,8 +376,8 @@ async def test_an_agent_holds_a_resource_secret_from_its_workspace(
             SecretRef.identity_id == identity.id, SecretRef.name == "acme_api_token"
         )
     )
-    assert (ref.secret_id, ref.resource, ref.host) == (card.id, "workers/site", "api.acme.test")
-    assert await ref.secret.issue_token(ref.resource, name=ref.name) == ("site-token", None)
+    assert (ref.secret_id, ref.resources, ref.host) == (card.id, ["workers/site"], "api.acme.test")
+    assert await ref.secret.issue_token(tuple(ref.resources), name=ref.name) == ("site-token", None)
 
 
 async def test_runner_comes_from_workflow_workspace_factory(

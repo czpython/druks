@@ -715,8 +715,8 @@ async def test_delivery_binds_the_grant_and_the_row_issues_the_token(
     assert entry.url == _SERVER_URL
     assert entry.bearer_token_env_var == var
     [ref] = refs
-    assert ref.key == (var.lower(), grant.id, "", "mcp.linear.test")
-    token, expires_at = await grant.issue_token("")
+    assert ref.key == (var.lower(), grant.id, (), "mcp.linear.test")
+    token, expires_at = await grant.issue_token(())
     assert token == "at-1"
     assert expires_at > datetime.now(UTC)
     assert "at-1" not in repr(servers) + repr(refs)
@@ -807,7 +807,7 @@ async def test_the_default_account_sends_the_service_login_and_others_their_gran
     assert entry.env_headers == {"Authorization": ref.name.upper()}
     login = await druks_db.get(VaultSecret, ref.secret_id)
     expected = base64.b64encode(b"svc@example.com:jira-token").decode()
-    assert await login.issue_token("") == (f"Basic {expected}", None)
+    assert await login.issue_token(()) == (f"Basic {expected}", None)
     [entry], [ref] = await Workspace.get_all_mcp_servers(druks_db, None, person.id)
     assert entry.bearer_token_env_var
     assert ref.secret_id == grant.id
@@ -865,7 +865,7 @@ async def test_a_disconnected_grant_issues_nothing(auth_server, druks_db):
     await oauth.disconnect(druks_db, _NAME, None)
 
     with pytest.raises(SecretRevokedError, match=_NAME):
-        await (await druks_db.get(VaultSecret, ref.secret_id)).issue_token("")
+        await (await druks_db.get(VaultSecret, ref.secret_id)).issue_token(())
 
 
 # --- API: connect / callback / disconnect / badge ---------------------------

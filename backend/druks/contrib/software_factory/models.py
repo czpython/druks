@@ -138,7 +138,7 @@ class ProjectRepo(StoredSubject):
         stmt = select(cls).order_by(cls.full_name)
         return [project_repo.get_summary() for project_repo in await db_session().scalars(stmt)]
 
-    async def siblings(self) -> list["ProjectRepo"]:
+    async def get_siblings(self) -> list["ProjectRepo"]:
         # A fresh query, not ``self.project.repos``: the loaded collection goes
         # stale when a repo is registered through its FK in the same session.
         stmt = select(ProjectRepo).where(

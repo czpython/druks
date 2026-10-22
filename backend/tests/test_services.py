@@ -502,10 +502,10 @@ async def test_a_service_secret_issues_under_its_field_name(declared_services, d
         "acme", identity={}, secrets={"api_token": "token-1", "webhook_secret": "hook-1"}
     )
 
-    assert await row.issue_token("", name=Acme.fields.api_token.secret_name) == ("token-1", None)
+    assert await row.issue_token((), name=Acme.fields.api_token.secret_name) == ("token-1", None)
     # No other name says which of the two secrets a box gets.
     with pytest.raises(ValueError):
-        await row.issue_token("", name="acme")
+        await row.issue_token((), name="acme")
 
 
 async def test_a_service_with_one_secret_issues_it_under_any_name(declared_services, druks_db):
@@ -515,7 +515,7 @@ async def test_a_service_with_one_secret_issues_it_under_any_name(declared_servi
 
     row = await connect_service("acme", identity={}, secrets={"api_key": "key-1"})
 
-    assert await row.issue_token("", name="billing_token") == ("key-1", None)
+    assert await row.issue_token((), name="billing_token") == ("key-1", None)
 
 
 async def test_github_issues_no_token_without_a_repo(druks_db):
@@ -524,7 +524,7 @@ async def test_github_issues_no_token_without_a_repo(druks_db):
     )
 
     with pytest.raises(MissingSecretError, match="names none"):
-        await row.issue_token("", name="github")
+        await row.issue_token((), name="github")
 
 
 def test_an_agent_holds_only_a_secret_of_a_service_with_a_host(declared_services):

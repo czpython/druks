@@ -65,4 +65,4 @@ async def test_siblings_returns_only_other_repos_in_the_project(druks_db):
     other_project = await Project.create(name="Other")
     await ProjectRepo.create(project_id=other_project.id, full_name="other/worker")
 
-    assert await target.siblings() == [sibling]
+    assert await target.get_siblings() == [sibling]

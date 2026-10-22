@@ -2,13 +2,15 @@ import base64
 import functools
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, TypeVar
 
 from githubkit import AppAuthStrategy, GitHub, TokenAuthStrategy
 from githubkit.exception import GraphQLFailed, RequestFailed
+from githubkit.utils import UNSET
 
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.utils.time import ensure_utc
@@ -260,15 +262,17 @@ class GitHubClient:
         self._installation_cache[repo] = installation_id
         return installation_id
 
-    async def _get_installation_token(self, installation_id: int) -> tuple[str, datetime]:
-        """The installation's token and its expiry, kept in Redis until the skew before it
-        expires."""
+    async def _get_installation_token(
+        self, installation_id: int, repositories: Sequence[str] = ()
+    ) -> tuple[str, datetime]:
+        """The token and its expiry, kept in Redis until the skew before it expires. Named
+        ``repositories`` limit it to them; without them it covers the whole installation."""
         redis = get_client()
-        key = f"github:installation_token:{installation_id}"
+        key = ":".join(("github:installation_token", str(installation_id), *sorted(repositories)))
         if token := await redis.get(key):
             return token.decode(), datetime.now(UTC) + timedelta(seconds=await redis.ttl(key))
         response = await self._app.rest.apps.async_create_installation_access_token(
-            installation_id,
+            installation_id, repositories=list(repositories) or UNSET
         )
         minted = response.parsed_data
         expires_at = ensure_utc(datetime.fromisoformat(str(minted.expires_at)))
@@ -303,11 +307,19 @@ class GitHubClient:
                 )
 
     @_retry_on_401
-    async def token_for_repo(self, repo: str) -> tuple[str, datetime]:
-        """The installation token for ``repo`` and the expiry GitHub gave it."""
+    async def get_token_for_repos(self, *repos: str) -> tuple[str, datetime]:
+        """A token limited to ``repos``, and the expiry GitHub gave it. The first repo's
+        installation mints it, and leaves out each other repo that it does not cover."""
         # git holds the token after this call, so a 401 here is the one chance to drop
         # a stale installation id (the App was reinstalled) and mint again.
-        return await self._get_installation_token(await self._installation_id(repo))
+        installation_id = await self._installation_id(repos[0])
+        names = []
+        for repo in repos:
+            # GitHub refuses the whole token when one named repository is out of reach.
+            with suppress(GitHubAppNotInstalledError):
+                if await self._installation_id(repo) == installation_id:
+                    names.append(repo.split("/", 1)[1])
+        return await self._get_installation_token(installation_id, names)
 
     @_retry_on_401
     async def get_repository(self, repo: str) -> dict[str, Any]:
