@@ -1,4 +1,5 @@
 import inspect
+import json
 from collections import defaultdict
 from collections.abc import Callable, Generator
 from functools import partial
@@ -7,7 +8,7 @@ import httpx2
 from fastapi import FastAPI
 from fastapi.routing import APIRoute, iter_route_contexts
 from fastmcp import FastMCP
-from fastmcp.exceptions import ValidationError
+from fastmcp.exceptions import ToolError
 from fastmcp.server.auth import AccessToken, TokenVerifier
 from fastmcp.server.dependencies import get_http_request
 from fastmcp.server.http import StarletteWithLifespan
@@ -20,7 +21,7 @@ from mcp.types import CallToolRequestParams, ToolAnnotations
 
 from druks.accounts.exceptions import InvalidPatError
 from druks.accounts.models import PersonalAccessToken
-from druks.api.exceptions import ToolNotAvailable
+from druks.api.exceptions import AgentApiError, InvalidToolArguments, ToolNotAvailable
 from druks.apps.exceptions import AppBotError
 from druks.apps.loader import iter_apps
 from druks.apps.registry import bots
@@ -40,8 +41,7 @@ returns bounded transcript and stderr tails, never full payloads. cancel_run
 records its reason as the run's failure. retry_run reruns a failed run from
 the step that killed it. get_usage is the caller's quota and today's spend.
 There is no push channel; poll list_open_subjects at ~30s intervals while
-waiting. Tool failures embed {code, message, retryable} from the HTTP
-surface.
+waiting. A tool failure is one JSON object, {code, message, retryable}.
 """
 
 
@@ -82,6 +82,39 @@ class CallerPat(httpx2.Auth):
         yield request
 
 
+class ToolErrors(Middleware):
+    # Every tool failure reaches the agent as the agent routes' JSON body,
+    # {code, message, retryable}. fastmcp writes a route's refusal into the error
+    # text as a Python dict, but it keeps the response on the error's cause.
+    async def on_call_tool(
+        self,
+        context: MiddlewareContext[CallToolRequestParams],
+        call_next: CallNext[CallToolRequestParams, ToolResult],
+    ) -> ToolResult:
+        try:
+            return await call_next(context)
+        except AgentApiError as error:
+            body = {"code": error.code, "message": str(error), "retryable": error.retryable}
+        except ToolError as error:
+            body = self._parse_refusal(error.__cause__.response)
+        raise ToolError(json.dumps(body))
+
+    @staticmethod
+    def _parse_refusal(response: httpx2.Response) -> dict:
+        # An agent route answers in this shape already. Every other route answers
+        # {error, detail}, and a validation error's detail lists the refused fields.
+        refusal = response.json()
+        if "code" in refusal:
+            return refusal
+        message = refusal["detail"]
+        if refusal["error"] == "VALIDATION_ERROR":
+            message = "; ".join(
+                f"{'.'.join(map(str, field_error['loc'][1:]))}: {field_error['msg']}"
+                for field_error in refusal["detail"]
+            )
+        return {"code": refusal["error"], "message": message, "retryable": False}
+
+
 class StrictInputValidation(Middleware):
     # A derived tool drops an argument its route does not declare, so a misnamed
     # argument reaches the route as absent. fastmcp's strict_input_validation
@@ -93,12 +126,26 @@ class StrictInputValidation(Middleware):
     ) -> ToolResult:
         tool = await context.fastmcp_context.fastmcp.get_tool(context.message.name)
         arguments = context.message.arguments or {}
-        if unknown := sorted(arguments.keys() - tool.parameters["properties"].keys()):
-            raise ValidationError(
-                f"{tool.name} has no argument {', '.join(map(repr, unknown))}. Call it "
-                "with the arguments its input schema declares."
-            )
-        return await call_next(context)
+        problems = [
+            f"unknown argument {name!r}"
+            for name in sorted(arguments.keys() - tool.parameters["properties"].keys())
+        ]
+        # The request drops a null argument, so a required one sent as null is missing.
+        problems += [
+            f"missing argument {name!r}"
+            for name in tool.parameters["required"]
+            if arguments.get(name) is None
+        ]
+        if problems:
+            raise InvalidToolArguments(tool.name, reason="; ".join(problems))
+        try:
+            return await call_next(context)
+        except ToolError as error:
+            # A route refusal keeps its response. Without one, fastmcp refused to build
+            # the request from these arguments, and its wrapper holds the reason.
+            if isinstance(error.__cause__, httpx2.HTTPStatusError):
+                raise
+            raise InvalidToolArguments(tool.name, reason=str(error.__cause__.__cause__)) from error
 
 
 _TOOL_TAGS = frozenset({"agent", "bot", "browser"})
@@ -162,18 +209,13 @@ def _namespace_app_operations(spec: dict, app_names: set[str]) -> None:
     # derivation the clash was visible in the author's code, so the framework
     # must surface it now that it owns the naming.
     existing_ids = {
-        op.get("operationId")
-        for ops in spec.get("paths", {}).values()
-        for op in ops.values()
-        if isinstance(op, dict) and op.get("operationId")
+        operation["operationId"]
+        for operations in spec["paths"].values()
+        for operation in operations.values()
     }
-    for path, operations in spec.get("paths", {}).items():
+    for path, operations in spec["paths"].items():
         for operation in operations.values():
-            if not isinstance(operation, dict):
-                continue
-            operation_id = operation.get("operationId")
-            if not operation_id:
-                continue
+            operation_id = operation["operationId"]
             derived = get_tool_name(operation_id, operation.get("tags", []), app_names)
             if derived != operation_id:
                 if derived in existing_ids:
@@ -243,17 +285,19 @@ def _visible_while(preconditions: list[Callable]) -> AuthCheck:
 
 
 def _annotate(
-    tool_preconditions: dict[str, list[Callable]], route: HTTPRoute, component: object
+    tool_preconditions: dict[str, list[Callable]], route: HTTPRoute, tool: OpenAPITool
 ) -> None:
-    if isinstance(component, OpenAPITool):
-        is_read = route.method == "GET"
-        component.annotations = ToolAnnotations(
-            read_only_hint=is_read,
-            destructive_hint=not is_read and route.extensions.get("x-destructive", True),
-            idempotent_hint=route.extensions.get("x-idempotent", False),
-        )
-        if preconditions := tool_preconditions[route.operation_id]:
-            component.auth = _visible_while(preconditions)
+    is_read = route.method == "GET"
+    tool.annotations = ToolAnnotations(
+        read_only_hint=is_read,
+        destructive_hint=not is_read and route.extensions.get("x-destructive", True),
+        idempotent_hint=route.extensions.get("x-idempotent", False),
+    )
+    # Claude Code defers every MCP tool until the agent searches for it, and an agent that
+    # never searches denies the tool. This key loads the tool upfront; other clients ignore it.
+    tool.meta = {"anthropic/alwaysLoad": True}
+    if preconditions := tool_preconditions[route.operation_id]:
+        tool.auth = _visible_while(preconditions)
 
 
 def _is_visible(context: AuthContext) -> bool:
@@ -294,7 +338,7 @@ def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
         providers=[provider],
         instructions=_INSTRUCTIONS,
         auth=PatTokenVerifier(),
-        middleware=[AuthMiddleware(auth=_is_visible), StrictInputValidation()],
+        middleware=[AuthMiddleware(auth=_is_visible), ToolErrors(), StrictInputValidation()],
     )
     # Derivation primed app.openapi()'s cache mid-assembly; drop it.
     api.openapi_schema = None

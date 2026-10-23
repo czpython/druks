@@ -33,6 +33,7 @@ class GitHubChannel(Channel):
     name = ConversationSource.GITHUB
     service = Github
     has_readable_threads = True
+    reaction_ack = "eyes"
 
     @classmethod
     async def lookup_account(cls, session: AsyncSession, payload: dict) -> Account | None:
@@ -106,6 +107,20 @@ class GitHubChannel(Channel):
         source_id = await conversation.get_answered_source_id(session, asked)
         reply.source_id = await cls.post(conversation.thread_id, reply.answer, source_id=source_id)
         await session.commit()
+
+    @classmethod
+    async def acknowledge(
+        cls, session: AsyncSession, conversation: Conversation, message: Message
+    ) -> None:
+        """React to the person's comment."""
+        client = await Github.get_client()
+        repo = conversation.thread_id.partition("#")[0]
+        kind, *place = message.source_id.split(":")
+        comment_id = int(place[-1])
+        if kind == "review_comment":
+            await client.create_review_comment_reaction(repo, comment_id, cls.reaction_ack)
+        else:
+            await client.create_reaction(repo, comment_id, cls.reaction_ack)
 
     @classmethod
     async def get_prompt_context(cls, session: AsyncSession, conversation: Conversation) -> dict:

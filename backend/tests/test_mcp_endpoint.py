@@ -1,4 +1,3 @@
-import ast
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -125,13 +124,9 @@ def _client(
 
 
 async def _call_error(client: Client, name: str, arguments: dict) -> dict:
-    # The route's sanitized taxonomy dict rides after " - " in the error text.
     result = await client.call_tool(name, arguments, raise_on_error=False)
     assert result.is_error
-    text = result.content[0].text
-    _, _, embedded = text.partition(" - ")
-    assert embedded, text
-    return ast.literal_eval(embedded)
+    return json.loads(result.content[0].text)
 
 
 def _wire_size(structured: dict) -> int:
@@ -191,6 +186,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
     assert list(tools)[7:] == [
         "chat_list_conversations",
         "chat_read_thread",
+        "chat_read_file",
         "chat_require_tag",
         "chat_start_conversation",
         "chat_list_reminders",
@@ -217,6 +213,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
             annotations.idempotent_hint,
         ) == expected
         assert tools[name].description
+        assert tools[name].meta["anthropic/alwaysLoad"] is True
 
     for name in ("software_factory_review", "software_factory_start"):
         app_tool = tools[name]
@@ -624,13 +621,32 @@ async def test_get_agent_call_serves_bounded_tails(app, pat_token, druks_db):
     }
 
 
-async def test_an_undeclared_argument_fails_before_the_request(app, pat_token):
+async def test_every_tool_failure_answers_the_agent_route_shape(app, pat_token):
     async with live(app), _client(app, pat_token) as client:
-        result = await client.call_tool("get_agent_call", {"id": "abc"}, raise_on_error=False)
-    assert result.is_error
-    assert result.content[0].text == (
-        "get_agent_call has no argument 'id'. Call it with the arguments its input schema declares."
-    )
+        invalid = await _call_error(client, "get_agent_call", {"id": "abc"})
+        unsendable = await _call_error(client, "get_agent_call", {"call": ".."})
+        refused = await _call_error(client, "chat_read_thread", {})
+    assert invalid == {
+        "code": "INVALID_TOOL_ARGUMENTS",
+        "message": (
+            "get_agent_call: unknown argument 'id'; missing argument 'call'. "
+            "Call it with the arguments its input schema declares."
+        ),
+        "retryable": False,
+    }
+    assert unsendable == {
+        "code": "INVALID_TOOL_ARGUMENTS",
+        "message": (
+            "get_agent_call: Path parameter 'call' cannot contain dot segments. "
+            "Call it with the arguments its input schema declares."
+        ),
+        "retryable": False,
+    }
+    assert refused == {
+        "code": "HTTP_409",
+        "message": "This tool reads a channel conversation's thread. Call it from one.",
+        "retryable": False,
+    }
 
 
 async def test_cancel_run_is_destructive_but_repeatable(app, pat_token, druks_db, monkeypatch):
@@ -663,10 +679,12 @@ async def test_cancel_run_is_destructive_but_repeatable(app, pat_token, druks_db
         assert terminal["code"] == "RUN_NOT_ACTIVE"
 
         # A blank reason dies at route validation (422), before the service.
-        blank = await client.call_tool(
-            "cancel_run", {"run": active.id, "reason": ""}, raise_on_error=False
-        )
-    assert blank.is_error
+        blank = await _call_error(client, "cancel_run", {"run": active.id, "reason": ""})
+    assert blank == {
+        "code": "VALIDATION_ERROR",
+        "message": "reason: String should have at least 1 character",
+        "retryable": False,
+    }
     assert cancels == [{"id": active.id, "failure": "wrong branch"}]
 
 

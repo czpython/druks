@@ -132,10 +132,8 @@ async def test_pages_follow_the_cursor(druks_client, history):
     assert hidden.status_code == 404
 
 
-async def test_activity_keeps_decisions_failures_and_stops(druks_db, druks_client):
+async def test_activity_carries_recorded_facts(druks_db, druks_client):
     db_session.registry.set(druks_db)
-    for kind in ["workflow.running", "workflow.finished", "workflow.step", "workflow.retry"]:
-        await Event.emit(druks_db, type=kind, app="field_notes", run="gone")
     round_facts = {"gate": "review", "input_requested_at": "2026-09-09T01:00:00Z"}
     await Event.emit(druks_db, type="workflow.scheduled", app="field_notes", run="gone")
     await Event.emit(

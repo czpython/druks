@@ -32,6 +32,10 @@ class ChannelHasNoThreadsError(ChatError):
     """The conversation's channel has no thread to read."""
 
 
+class FileNotInThreadError(ChatError):
+    """The file is not shared where the conversation's thread lives."""
+
+
 class ChannelStartsNoConversationsError(ChatError):
     """The conversation's channel cannot start a chat with a person."""
 

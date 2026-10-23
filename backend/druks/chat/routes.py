@@ -18,6 +18,7 @@ from .exceptions import (
     ChannelHasNoThreadsError,
     ChannelStartsNoConversationsError,
     ChatSandboxGone,
+    FileNotInThreadError,
     ReminderError,
 )
 from .models import Conversation, Message, Reminder
@@ -27,7 +28,7 @@ from .schemas import (
     MessageResponse,
     ReminderResponse,
 )
-from .service import cancel_turn, deliver, publish
+from .service import cancel_turn, deliver, publish, upload_file
 
 router = APIRouter()
 
@@ -193,7 +194,8 @@ async def read_thread(
     session: SessionDep, account: Account = Depends(current_account)
 ) -> list[dict]:
     """Read the thread of the conversation this call comes from: its newest 200
-    messages, oldest first. Each one has ts, user_id, user_name, text, is_from_you (you
+    messages, oldest first. Each one has ts, user_id, user_name, text, files (each
+    file's id, name, and content_type; chat_read_file reads one), is_from_you (you
     wrote it), and is_from_user (the person you answer wrote it). A direct message has
     no thread."""
     conversation_id = current_conversation_id.get()
@@ -210,6 +212,35 @@ async def read_thread(
         raise HTTPException(409, str(error)) from error
     except (SlackApiError, RequestFailed, WahaError) as error:
         raise HTTPException(502, str(error)) from error
+
+
+@router.get("/thread/files/{file_id}", operation_id="read_file", tags=["agent", "bot"])
+async def read_file(
+    session: SessionDep, file_id: str, account: Account = Depends(current_account)
+) -> dict:
+    """Read a file on the thread of the conversation this call comes from, by the id
+    chat_read_thread lists. The file lands in your workspace; the answer is its path,
+    name, and content_type. Open the path to read it."""
+    conversation_id = current_conversation_id.get()
+    if not conversation_id:
+        raise HTTPException(
+            409, "This tool reads a channel conversation's thread. Call it from one."
+        )
+    conversation = await session.get(Conversation, conversation_id)
+    if not conversation.channel:
+        raise HTTPException(409, "A web conversation has no thread.")
+    try:
+        content, name, content_type = await conversation.channel.download_file(
+            session, conversation, file_id
+        )
+    except ChannelHasNoThreadsError as error:
+        raise HTTPException(409, str(error)) from error
+    except FileNotInThreadError as error:
+        raise HTTPException(404, str(error)) from error
+    except (SlackApiError, RequestFailed, WahaError) as error:
+        raise HTTPException(502, str(error)) from error
+    path = await upload_file(session, conversation, file_id, name, content)
+    return {"path": path, "name": name, "content_type": content_type}
 
 
 @router.put("/thread/tag", operation_id="require_tag", status_code=204, tags=["agent"])

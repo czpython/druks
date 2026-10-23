@@ -19,6 +19,7 @@ SLACK_BOT_SCOPES = (
     "mpim:history",
     "users:read",
     "files:read",
+    "reactions:write",
 )
 USER_NAME_TTL_SECONDS = 24 * 60 * 60
 

@@ -1,14 +1,16 @@
 import json
+import logging
 import secrets
 from datetime import timedelta
 
 from dbos import DBOS
+from slack_sdk.errors import SlackApiError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.models import Account
 from druks.chat.channels.base import Channel
 from druks.chat.enums import ConversationSource
-from druks.chat.exceptions import ChannelHasNoThreadsError
+from druks.chat.exceptions import ChannelHasNoThreadsError, FileNotInThreadError
 from druks.chat.models import Conversation, Message
 from druks.chat.service import deliver
 from druks.core.apis.slack import SLACK_AUTHORITY, SlackClient
@@ -29,6 +31,8 @@ from .constants import (
     UNLINKED_REPLY,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def get_thread_id(message: dict) -> str:
     """Where a message lives, as the room and the thread in one id. A direct message
@@ -42,6 +46,7 @@ class SlackChannel(Channel):
     name = ConversationSource.SLACK
     service = Slack
     has_readable_threads = True
+    reaction_ack = "eyes"
 
     @classmethod
     async def lookup_account(
@@ -168,10 +173,26 @@ class SlackChannel(Channel):
         await session.commit()
 
     @classmethod
+    async def acknowledge(
+        cls, session: AsyncSession, conversation: Conversation, message: Message
+    ) -> None:
+        """React to the person's message."""
+        client = SlackClient(token=conversation.connection.secrets["bot_token"])
+        room, ts = message.source_id.split(":")[:2]
+        try:
+            await client.reactions_add(channel=room, timestamp=ts, name=cls.reaction_ack)
+        except SlackApiError as error:
+            if error.response["error"] == "already_reacted":
+                logger.info("Slack message %s already has the reaction", message.source_id)
+                return
+            raise
+
+    @classmethod
     async def read_thread(cls, session: AsyncSession, conversation: Conversation) -> list[dict]:
-        """The thread's newest messages, oldest first, with who wrote each one. Every
-        agent in the thread posts as the one bot, so a reply is this conversation's by
-        its recorded Slack id. A webhook's post has no author and is left out."""
+        """The thread's newest messages, oldest first, with who wrote each one and the
+        files on it. Every agent in the thread posts as the one bot, so a reply is this
+        conversation's by its recorded Slack id. A webhook's post has no author and is
+        left out."""
         room, _, thread_ts = conversation.thread_id.partition(":")
         if not room:
             raise ChannelHasNoThreadsError("A direct message has no thread to read.")
@@ -184,9 +205,33 @@ class SlackChannel(Channel):
                 "user_id": message["user"],
                 "user_name": await client.get_user_name(message["user"]),
                 "text": message["text"],
+                "files": [
+                    {
+                        "id": shared["id"],
+                        "name": shared["name"],
+                        "content_type": shared["mimetype"],
+                    }
+                    for shared in message.get("files", [])
+                ],
                 "is_from_you": f"{room}:{message['ts']}" in own_replies,
                 "is_from_user": message["user"] == conversation.user_id,
             }
             for message in messages
             if "user" in message
         ]
+
+    @classmethod
+    async def download_file(
+        cls, session: AsyncSession, conversation: Conversation, file_id: str
+    ) -> tuple[bytes, str, str]:
+        """A file shared in the room where the conversation's thread lives, by its
+        Slack id, as its bytes, name, and content type."""
+        room, _, _ = conversation.thread_id.partition(":")
+        if not room:
+            raise ChannelHasNoThreadsError("A direct message has no thread to read.")
+        client = SlackClient(token=conversation.connection.secrets["bot_token"])
+        shared = (await client.files_info(file=file_id))["file"]
+        if room not in shared["channels"] + shared["groups"]:
+            raise FileNotInThreadError(f"File {file_id} is not shared where this thread lives.")
+        content = await client.download(shared["url_private_download"])
+        return content, shared["name"], shared["mimetype"]

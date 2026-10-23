@@ -19,6 +19,8 @@ class Channel:
     has_turns: ClassVar[bool] = True
     # Whether chat_read_thread reads the channel's threads, where other people write too.
     has_readable_threads: ClassVar[bool] = False
+    # The reaction that acknowledges a person's message, as the channel names it.
+    reaction_ack: ClassVar[str]
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
@@ -37,9 +39,24 @@ class Channel:
         raise NotImplementedError
 
     @classmethod
+    async def acknowledge(
+        cls, session: AsyncSession, conversation: Conversation, message: Message
+    ) -> None:
+        """Show the person that the agent has their message."""
+        raise NotImplementedError
+
+    @classmethod
     async def read_thread(cls, session: AsyncSession, conversation: Conversation) -> list[dict]:
         """The conversation's thread at its source, oldest first."""
         raise ChannelHasNoThreadsError(f"A {cls.name} conversation has no thread to read.")
+
+    @classmethod
+    async def download_file(
+        cls, session: AsyncSession, conversation: Conversation, file_id: str
+    ) -> tuple[bytes, str, str]:
+        """A file on the conversation's thread, by the id its source gave it, as its
+        bytes, name, and content type."""
+        raise ChannelHasNoThreadsError(f"A {cls.name} conversation has no thread files to read.")
 
     @classmethod
     async def start_conversation(
