@@ -9,10 +9,9 @@ import druks.core.apis.github as github_api
 import httpx
 import jwt as pyjwt
 import pytest
-from conftest import bind_ambient_session
+from conftest import MANAGER_KEY, bind_ambient_session
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from druks.accounts import jwt as assertion
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.apis.github import GITHUB_API_URL
 from druks.core.services import Github
@@ -22,18 +21,17 @@ from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.services import Connection, Service
 from druks.testing import asgi_client, configure_app_for_test, make_settings
-from fastmcp.server.auth.providers.jwt import JWTVerifier
 from githubkit import AppAuthStrategy, TokenAuthStrategy
 from githubkit.exception import RequestFailed
 
 INSTANCE_ID = "6f2c1c1e-9b8e-4b65-9d3c-7a2b1f4e8d10"
-PORTAL = "https://portal.test"
-RELAY = f"http://cloud.test/_instance/{INSTANCE_ID}/github"
+MANAGER = "https://manager.test"
+CARD_URL = f"{MANAGER}/github"
 MANAGER_TOKEN = "manager-secret"
 CONFIGURATION = f"""[manager]
-name = "Druks Cloud"
-jwks_url = "{PORTAL}/.well-known/jwks.json"
-issuer = "{PORTAL}"
+name = "Manager"
+jwks_url = "{MANAGER}/.well-known/jwks.json"
+issuer = "{MANAGER}"
 audience = "{INSTANCE_ID}"
 services = ["github"]
 
@@ -41,7 +39,7 @@ services = ["github"]
 endpoint = "https://instance.test"
 
 [services.github]
-url = "{RELAY}"
+url = "{CARD_URL}"
 app_id = "4242"
 client_id = "Iv1.abc"
 slug = "druks"
@@ -50,16 +48,6 @@ slug = "druks"
 INSTALLATIONS = {"acme": 11, "paulo": 22}
 EVENTS = "/_external/github/events/"
 
-_PORTAL_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-_JWKS = {
-    "keys": [
-        {
-            **pyjwt.algorithms.RSAAlgorithm.to_jwk(_PORTAL_KEY.public_key(), as_dict=True),
-            "kid": "portal-1",
-        }
-    ]
-}
-# The instance's own key signs the App's calls at the relay.
 _INSTANCE_PEM = (
     rsa.generate_private_key(public_exponent=65537, key_size=2048)
     .private_bytes(
@@ -129,10 +117,7 @@ class _GitHubKit:
         pass
 
 
-class _Relay:
-    """The relay's token exchange, answering at the transport: what it was asked, and the
-    ``status`` and ``answer`` it gives."""
-
+class _Manager:
     def __init__(self) -> None:
         self.requests: list[httpx.Request] = []
         self.exchanges: list[dict] = []
@@ -140,7 +125,7 @@ class _Relay:
         self.answer = {"access_token": "ghu-1", "refresh_token": "ghr-1", "expires_in": 28800}
 
     async def handle(self, request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == f"{RELAY}/oauth/token"
+        assert str(request.url) == f"{CARD_URL}/oauth/token"
         self.requests.append(request)
         self.exchanges.append(dict(parse_qsl(request.content.decode())))
         return httpx.Response(self.status, request=request, json=self.answer)
@@ -169,26 +154,14 @@ def githubkit(monkeypatch):
 
 
 @pytest.fixture
-def relay(monkeypatch):
-    fake = _Relay()
+def manager(monkeypatch):
+    fake = _Manager()
 
     async def handle_async_request(transport, request):
         return await fake.handle(request)
 
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", handle_async_request)
     return fake
-
-
-@pytest.fixture
-def portal_keys(monkeypatch):
-    assertion._verifier.cache_clear()
-
-    async def fetch_jwks(self):
-        return _JWKS
-
-    monkeypatch.setattr(JWTVerifier, "_fetch_jwks", fetch_jwks)
-    yield
-    assertion._verifier.cache_clear()
 
 
 @pytest.fixture
@@ -203,7 +176,7 @@ def _signature(body: bytes, delivery_id: str = "d-1", **claims) -> str:
     issued_at = int(time.time())
     return pyjwt.encode(
         {
-            "iss": PORTAL,
+            "iss": MANAGER,
             "aud": INSTANCE_ID,
             "sub": f"github:{delivery_id}",
             "body_sha256": hashlib.sha256(body).hexdigest(),
@@ -211,9 +184,9 @@ def _signature(body: bytes, delivery_id: str = "d-1", **claims) -> str:
             "exp": issued_at + 300,
             **claims,
         },
-        _PORTAL_KEY,
+        MANAGER_KEY,
         algorithm="RS256",
-        headers={"kid": "portal-1"},
+        headers={"kid": "manager-1"},
     )
 
 
@@ -222,7 +195,7 @@ async def test_the_managed_card_holds_the_apps_public_identity_and_the_instance_
 ):
     card = await Github.get()
     assert card.identity == {
-        "url": RELAY,
+        "url": CARD_URL,
         "app_id": "4242",
         "client_id": "Iv1.abc",
         "slug": "druks",
@@ -234,13 +207,13 @@ async def test_the_managed_card_holds_the_apps_public_identity_and_the_instance_
 
     [entry] = [entry for entry in response.json() if entry["slug"] == "github"]
     assert entry["connected"] and entry["managed"]
-    assert entry["managedBy"] == "Druks Cloud"
+    assert entry["managedBy"] == "Manager"
     assert entry["facts"] == card.identity
     assert MANAGER_TOKEN not in response.text
     assert _INSTANCE_PEM not in response.text
 
 
-async def test_app_calls_go_to_the_relay_with_the_instance_key_and_repo_calls_to_github(
+async def test_app_calls_go_to_the_manager_with_the_instance_key_and_repo_calls_to_github(
     managed_github, githubkit
 ):
     client = await Github.get_client()
@@ -254,9 +227,9 @@ async def test_app_calls_go_to_the_relay_with_the_instance_key_and_repo_calls_to
     assert token == "ghs_11_1"
     assert expires_at > datetime.now(UTC)
     assert githubkit.clients == [
-        (INSTANCE_KEY, RELAY),
+        (INSTANCE_KEY, CARD_URL),
         (TokenAuthStrategy("ghs_11_1"), GITHUB_API_URL),
-        (INSTANCE_KEY, RELAY),
+        (INSTANCE_KEY, CARD_URL),
         (TokenAuthStrategy("ghs_22_2"), GITHUB_API_URL),
     ]
     assert githubkit.calls == [
@@ -305,7 +278,7 @@ async def test_a_rejected_token_is_minted_once_more(managed_github, githubkit):
 
 
 async def test_install_binds_at_the_manager_and_links_the_installer(
-    managed_github, githubkit, relay, github_identity
+    managed_github, githubkit, manager, github_identity
 ):
     async with asgi_client(configure_app_for_test(settings=managed_github)) as client:
         response = await client.get("/api/oauth/github/connect", params={"install": "1"})
@@ -314,7 +287,7 @@ async def test_install_binds_at_the_manager_and_links_the_installer(
         query = dict(parse_qsl(consent.query))
         assert consent.geturl().startswith("https://github.com/apps/druks/installations/new?")
         assert query["state"].startswith(f"{INSTANCE_ID}.")
-        assert query["redirect_uri"] == f"{PORTAL}/github/oauth/callback"
+        assert query["redirect_uri"] == f"{MANAGER}/github/oauth/callback"
         assert query["client_id"] == "Iv1.abc"
 
         page = await client.get(
@@ -323,19 +296,19 @@ async def test_install_binds_at_the_manager_and_links_the_installer(
         )
         assert page.status_code == 200
 
-    [exchange] = relay.exchanges
+    [exchange] = manager.exchanges
     assert (
         exchange.items()
         >= {
             "grant_type": "authorization_code",
             "code": "c-1",
-            "redirect_uri": f"{PORTAL}/github/oauth/callback",
+            "redirect_uri": f"{MANAGER}/github/oauth/callback",
             "installation_id": "11",
             "client_id": "Iv1.abc",
         }.items()
     )
     assert "client_secret" not in exchange
-    [token_request] = relay.requests
+    [token_request] = manager.requests
     assert token_request.headers["Authorization"] == f"Bearer {MANAGER_TOKEN}"
     assert githubkit.calls == ["GET app/installations"]
     db_session().expunge_all()
@@ -346,8 +319,8 @@ async def test_install_binds_at_the_manager_and_links_the_installer(
     assert connection.identity["login"] == "paulo"
 
 
-async def test_a_personal_link_and_its_refresh_go_through_the_relay(
-    managed_github, relay, github_identity
+async def test_a_personal_link_and_its_refresh_go_through_the_manager(
+    managed_github, manager, github_identity
 ):
     async with asgi_client(configure_app_for_test(settings=managed_github)) as client:
         response = await client.get("/api/oauth/github/connect")
@@ -363,23 +336,23 @@ async def test_a_personal_link_and_its_refresh_go_through_the_relay(
     db_session().expunge_all()
     [connection] = await VaultSecret.list_connections(db_session(), Audience.service("github"))
     assert "installations" not in (await Github.get()).identity
-    assert "installation_id" not in relay.exchanges[0]
+    assert "installation_id" not in manager.exchanges[0]
 
-    relay.answer = {"access_token": "ghu-2", "refresh_token": "ghr-2", "expires_in": 3600}
+    manager.answer = {"access_token": "ghu-2", "refresh_token": "ghr-2", "expires_in": 3600}
     assert await Connection(Github, connection).get_access_token() == "ghu-2"
-    assert relay.exchanges[1] == {
+    assert manager.exchanges[1] == {
         "grant_type": "refresh_token",
         "refresh_token": "ghr-1",
         "client_id": "Iv1.abc",
     }
-    [_, refresh] = relay.requests
+    [_, refresh] = manager.requests
     assert refresh.headers["Authorization"] == f"Bearer {MANAGER_TOKEN}"
     assert connection.account.username == "op@example.com"
 
 
-async def test_a_refused_exchange_links_nothing(managed_github, relay):
-    relay.status = 403
-    relay.answer = {"error": "access_denied"}
+async def test_a_refused_exchange_links_nothing(managed_github, manager):
+    manager.status = 403
+    manager.answer = {"error": "access_denied"}
 
     async with asgi_client(configure_app_for_test(settings=managed_github)) as client:
         response = await client.get("/api/oauth/github/connect", params={"install": "1"})
@@ -395,7 +368,7 @@ async def test_a_refused_exchange_links_nothing(managed_github, relay):
     assert "installations" not in (await Github.get()).identity
 
 
-async def test_forwarded_events_carry_the_managers_signature(managed_github, portal_keys):
+async def test_forwarded_events_carry_the_managers_signature(managed_github, manager_keys):
     body = json.dumps({"action": "labeled", "repository": {"full_name": "acme/app"}}).encode()
     headers = {"X-GitHub-Event": "pull_request", "Content-Type": "application/json"}
 

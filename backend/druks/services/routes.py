@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.context import current_account_id
 from druks.accounts.dependencies import current_session_account
@@ -45,6 +46,7 @@ async def list_services(session: SessionDep) -> list[ServiceResponse]:
                 service,
                 row,
                 connections,
+                connected=await service.is_connected(),
                 managed=service.is_configured(),
                 managed_by=managed_by,
                 install_url=install_url,
@@ -68,7 +70,7 @@ async def connect_service(slug: str, payload: dict[str, str]) -> ServiceResponse
         row = await service.connect(payload)
     except ServiceConnectError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    return ServiceResponse.from_row(service, row)
+    return ServiceResponse.from_row(service, row, connected=await service.is_connected())
 
 
 @router.delete("/{slug}", status_code=204, dependencies=[Depends(current_session_account)])
@@ -90,8 +92,7 @@ async def connect_oauth_service(
     next: str = "",
     install: bool = False,
 ) -> RedirectResponse:
-    """Start a sign-in at the provider. ``install`` starts it from the provider's
-    install page, so the callback also names the installation."""
+    """Start a sign-in or an install at the provider."""
     service = services.get(slug)
     if not service or not service.token_endpoint:
         raise OauthPageError(f"No OAuth service {slug!r}.", status_code=404)
@@ -115,17 +116,26 @@ async def connect_oauth_service(
     except ServiceNotConnectedError as error:
         raise OauthPageError(str(error), status_code=409) from error
     authorization_endpoint = ""
+    install_params: dict[str, str] = {}
     if install:
         authorization_endpoint = await service.get_install_endpoint()
         if not authorization_endpoint:
             raise OauthPageError(f"{slug} has no install page.", status_code=404)
-    scopes = service.scopes()
+        install_params = service.get_install_params()
+    scopes = () if install and service.actor_token_name else service.scopes()
     url = await client.begin_connect(
         redirect_uri=client.redirect_uri or f"{endpoint.rstrip('/')}/api/oauth/callback",
         scopes=scopes,
         consent_query=service.get_consent_query(scopes),
-        context={"account_id": account_id, "connection_id": connection, "next": next},
+        context={
+            "account_id": account_id,
+            "connection_id": connection,
+            "next": next,
+            "install": install,
+        },
         authorization_endpoint=authorization_endpoint,
+        extra_authorize_params=install_params,
+        extra_token_params=install_params,
     )
     return RedirectResponse(url)
 
@@ -160,15 +170,15 @@ async def oauth_callback(
         # A state begun by another door (an MCP connect) finishes at its own callback.
         raise OauthPageError(f"No OAuth service {provider!r}.", status_code=400)
     try:
+        if pending["install"]:
+            await service.complete_install(tokens)
+            if service.actor_token_name:
+                return await _finish_consent(session, pending)
         grant = service.read_grant(tokens)
+        identity = await service.get_identity(grant["access_token"])
     except OauthExchangeError as exchange_error:
         raise OauthPageError(str(exchange_error), status_code=400) from exchange_error
-    if installation_id:
-        # Learn the installation before the grant is stored, so a failure leaves nothing
-        # half done.
-        await service.sync_installations()
     granted = grant["scopes"] or pending["scopes"]
-    identity = await service.get_identity(grant["access_token"])
     # A grant refreshes through its refresh token. Without one, the access token
     # never expires and is the grant itself.
     refresh_token = grant["refresh_token"]
@@ -211,12 +221,16 @@ async def oauth_callback(
         account_id=row.account_id,
         reconsent=reconsent,
     )
+    return await _finish_consent(session, pending)
+
+
+async def _finish_consent(session: AsyncSession, pending: dict) -> Response:
     if pending["next"]:
         # The request's session commits after the response leaves, and the browser
         # follows a redirect at once: the next page must find the grant.
         await session.commit()
         return RedirectResponse(pending["next"])
-    return render_page("service_oauth_callback.html", slug=provider)
+    return render_page("service_oauth_callback.html", slug=pending["provider"])
 
 
 @oauth_router.get(

@@ -25,7 +25,7 @@ from druks.secrets.enums import SecretKind
 from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
 from druks.services import Service, ServiceConnectError
-from druks.services.exceptions import ServiceNotConnectedError
+from druks.services.exceptions import OauthExchangeError, ServiceNotConnectedError
 from druks.settings import load_settings
 
 logger = logging.getLogger(__name__)
@@ -129,11 +129,10 @@ class Github(Service):
         return f"https://github.com/apps/{quote(slug, safe='')}/installations/new"
 
     @classmethod
-    async def sync_installations(cls) -> None:
-        """The accounts the App is installed on, as the fact ``installations``."""
+    async def complete_install(cls, tokens: dict[str, Any]) -> None:
         accounts = await (await cls.get_client()).list_installation_accounts(cached=False)
-        card = await cls.get()
-        card.identity = {**card.identity, "installations": list(accounts)}
+        row = await cls.get()
+        row.identity = {**row.identity, "installations": list(accounts)}
 
     @classmethod
     async def issue_token(cls, resource: str) -> tuple[str, datetime]:
@@ -239,14 +238,7 @@ class Jira(Service):
 
 
 class Slack(Service):
-    """The Slack app that Druks answers as, in one workspace. The operator creates it
-    from the manifest, installs it, and pastes its keys. People connect their own
-    Slack account through the same app."""
-
-    description = (
-        "The Slack app that Druks answers as. Create it in Slack from the manifest, "
-        "install it in your workspace, and paste its keys here."
-    )
+    description = "The Slack app that Druks answers as, in one workspace."
     required = False
     authorization_endpoint = "https://slack.com/oauth/v2/authorize"
     token_endpoint = "https://slack.com/api/oauth.v2.access"
@@ -254,6 +246,7 @@ class Slack(Service):
     identity_scopes = ("users:read",)
     # A fresh sign-in by the same Slack user updates their row.
     identity_key = "subject"
+    actor_token_name = "bot_token"
 
     class Settings(BaseModel):
         client_id: str = Field(title="Client ID")
@@ -264,24 +257,51 @@ class Slack(Service):
     @classmethod
     async def verify(cls, settings: Settings) -> dict[str, Any]:
         try:
-            bot = await SlackClient(token=settings.bot_token.get_secret_value()).auth_test()
+            bot = await cls._get_bot_info(settings.bot_token.get_secret_value())
         except SlackApiError as error:
             logger.warning("Slack connect rejected: %s", error)
             raise ServiceConnectError(
                 "Slack did not accept the bot token. Paste the Bot User OAuth Token from the "
                 "app's OAuth & Permissions page."
             ) from error
-        return {
-            "team": bot["team"],
-            "team_id": bot["team_id"],
-            "bot_name": bot["user"],
-            "bot_user_id": bot["user_id"],
-        }
+        return bot
+
+    @classmethod
+    async def get_install_endpoint(cls) -> str:
+        # A self-hosted operator pastes the bot token instead.
+        return cls.authorization_endpoint if cls.is_managed() else ""
+
+    @classmethod
+    def get_install_params(cls) -> dict[str, str]:
+        return {"scope": ",".join(SLACK_BOT_SCOPES)}
+
+    @classmethod
+    async def complete_install(cls, tokens: dict[str, Any]) -> None:
+        cls._check_answer(tokens)
+        bot_token = tokens["access_token"]
+        try:
+            bot = await cls._get_bot_info(bot_token)
+        except SlackApiError as error:
+            raise OauthExchangeError(
+                cls.slug,
+                "Slack did not accept the new bot token. Install the app again.",
+                context={},
+            ) from error
+        row = await cls.get()
+        row.secrets = {**row.secrets, cls.actor_token_name: bot_token}
+        row.identity = {**row.identity, **bot}
 
     @classmethod
     async def get_identity(cls, access_token: str) -> dict[str, Any]:
         """The person behind a user token, keyed the way ``Account.lookup`` finds them."""
         person = await SlackClient(token=access_token).auth_test()
+        if person["team_id"] != (await cls.get()).identity.get("team_id"):
+            raise OauthExchangeError(
+                cls.slug,
+                "the Slack account is in another workspace. Connect your account in the "
+                "workspace that Druks answers in.",
+                context={},
+            )
         return {
             "authority": SLACK_AUTHORITY.format(team_id=person["team_id"]),
             "subject": person["user_id"],
@@ -297,6 +317,7 @@ class Slack(Service):
     def read_grant(cls, tokens: dict[str, Any]) -> dict[str, Any]:
         """A person's grant sits under ``authed_user``, with its scopes joined by commas.
         Token rotation stays off, as on every peer, so the access token never expires."""
+        cls._check_answer(tokens)
         person = tokens["authed_user"]
         return {
             "access_token": person["access_token"],
@@ -334,6 +355,24 @@ class Slack(Service):
                 },
                 "token_rotation_enabled": False,
             },
+        }
+
+    @classmethod
+    def _check_answer(cls, tokens: dict[str, Any]) -> None:
+        # Slack answers a refused exchange with HTTP 200 and ``ok`` false.
+        if not tokens.get("ok"):
+            raise OauthExchangeError(
+                cls.slug, f"Slack answered {tokens.get('error')}. Try again.", context={}
+            )
+
+    @classmethod
+    async def _get_bot_info(cls, bot_token: str) -> dict[str, str]:
+        bot = await SlackClient(token=bot_token).auth_test()
+        return {
+            "team": bot["team"],
+            "team_id": bot["team_id"],
+            "bot_name": bot["user"],
+            "bot_user_id": bot["user_id"],
         }
 
 

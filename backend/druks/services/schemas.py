@@ -48,7 +48,6 @@ class ServiceResponse(Schema):
     connected_at: datetime | None
     fields: list[ServiceFieldSpec]
     create_url: str
-    # Where the connected app is installed at the provider; empty for one without installs.
     install_url: str
     is_oauth: bool
     scopes: list[str]
@@ -62,6 +61,7 @@ class ServiceResponse(Schema):
         row: "VaultSecret | None",
         connections: "list[VaultSecret] | None" = None,
         *,
+        connected: bool,
         managed: bool = False,
         managed_by: str = "",
         install_url: str = "",
@@ -71,11 +71,11 @@ class ServiceResponse(Schema):
             title=service.title,
             description=service.description,
             required=service.required,
-            connected=bool(row),
+            connected=connected,
             managed=managed,
             managed_by=managed_by if managed else "",
             facts=row.identity if row else {},
-            connected_at=row.updated_at if row else None,
+            connected_at=row.updated_at if connected else None,
             fields=[ServiceFieldSpec(**spec) for spec in service.connect_fields()],
             create_url=service.get_create_url() if service.manifest else "",
             install_url=install_url,

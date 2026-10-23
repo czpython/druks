@@ -340,7 +340,7 @@ describe('ServicesPane', () => {
     const installed: Service = {
       ...connected,
       managed: true,
-      managedBy: 'Druks Cloud',
+      managedBy: 'Manager',
       facts: { app_id: '12345', slug: 'druks', installations: ['acme', 'paulo'] },
     }
     stubFetch([[installed]])
@@ -351,7 +351,36 @@ describe('ServicesPane', () => {
     expect(screen.getByText('acme, paulo')).toBeTruthy()
   })
 
-  it.each(['Druks Cloud', ''])('locks a managed service with manager %j', async (managedBy) => {
+  it('offers Install on a managed Slack service before its install, then shows its workspace', async () => {
+    const waiting: Service = {
+      ...pasteOnly,
+      slug: 'slack',
+      title: 'Slack',
+      managed: true,
+      managedBy: 'Manager',
+      facts: { url: 'https://manager.test/slack', client_id: '1234.5678' },
+      installUrl: '/api/oauth/slack/connect?install=1',
+    }
+    const ready: Service = { ...waiting, connected: true, facts: { ...waiting.facts, team: 'Acme' } }
+    stubFetch([[waiting], [ready]])
+    renderPane()
+
+    expect(await screen.findByText('Not installed')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Slack' }))
+    expect(screen.getByText('Install').getAttribute('href')).toBe(waiting.installUrl)
+    expect(screen.queryByRole('button', { name: 'Connect Slack' })).toBeNull()
+    expect(screen.queryByText('Create Slack App')).toBeNull()
+
+    act(() => {
+      new BroadcastChannel('druks-service-connect').postMessage('slack')
+    })
+
+    expect(await screen.findByText('Acme')).toBeTruthy()
+    expect(screen.getByText('Managed by Manager')).toBeTruthy()
+    expect(screen.queryByText('Create Slack App')).toBeNull()
+  })
+
+  it.each(['Manager', ''])('locks a managed service with manager %j', async (managedBy) => {
     stubFetch([[{ ...pasteOnly, connected: true, managed: true, managedBy }]])
     renderPane()
 

@@ -1,26 +1,42 @@
 import base64
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
+import jwt as pyjwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 from druks import agents
+from druks.accounts import jwt as assertion
 from druks.accounts.models import Account
+from druks.api.server import app
 from druks.apps.loader import (
     iter_apps,
     register_workflow_package,
 )
-from druks.apps.registry import services
+from druks.apps.registry import browser_sessions, mcp_servers, services
 from druks.database import create_engine_from_url
 from druks.db import db_session
-from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
+from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA, workflow_status
+from druks.durable.enums import AgentCallStatus
 from druks.harnesses.providers import AnthropicProvider
 from druks.models import Base
+from druks.sandbox.datastructures import AgentResult
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
-from druks.testing import TEST_DATABASE_URL, configure_app_for_test, make_settings
+from druks.testing import (
+    TEST_DATABASE_URL,
+    configure_app_for_test,
+    make_settings,
+    seed_call,
+    seed_run,
+)
+from druks.workflows import Workflow
 from fastapi.testclient import TestClient
+from fastmcp.server.auth.providers.jwt import JWTVerifier
+from sqlalchemy import update
 
 # A Workflow class resolves its declaring app at definition time, from
 # packages the loader registers before importing. Tests import workflow modules
@@ -32,6 +48,15 @@ for test_module in ("test_durable_sdk", "test_notifications_durable"):
 
 
 IDENTITY_HEADER = "X-ExeDev-Email"
+MANAGER_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_MANAGER_JWKS = {
+    "keys": [
+        {
+            **pyjwt.algorithms.RSAAlgorithm.to_jwk(MANAGER_KEY.public_key(), as_dict=True),
+            "kid": "manager-1",
+        }
+    ]
+}
 
 
 class ConfigOutput(agents.AgentOutput):
@@ -98,8 +123,6 @@ def _no_durable_dispatch(request):
         yield
         return
 
-    from druks.workflows import Workflow
-
     async def _noop(*args, **kwargs):
         return ""
 
@@ -109,10 +132,6 @@ def _no_durable_dispatch(request):
     async def _dbos_cancel(workflow_id: str) -> None:
         # DBOS's half of Run.cancel(): without a launched engine the real call
         # raises, and derived state needs the terminal status it would write.
-        from druks.db import db_session
-        from druks.durable.dbos_state import workflow_status
-        from sqlalchemy import update
-
         await db_session().execute(
             update(workflow_status)
             .where(workflow_status.c.workflow_uuid == workflow_id)
@@ -149,8 +168,6 @@ def registry_state():
     # Catalog loads and test registrations mutate the process-global MCP
     # registry; snapshot and restore so a test's entries don't leak into the
     # rest of the suite.
-    from druks.apps.registry import mcp_servers
-
     saved = dict(mcp_servers._items)
     yield
     mcp_servers._items.clear()
@@ -162,8 +179,6 @@ def browser_session_declarations():
     # BrowserSession declarations self-register at class definition, so what a
     # test module defines at import time would leak into every merged-list
     # read; tests declare inside this fixture and leave the registry as found.
-    from druks.apps.registry import browser_sessions
-
     saved = dict(browser_sessions._items)
     yield browser_sessions
     browser_sessions._items.clear()
@@ -186,10 +201,9 @@ _OWN_DATABASE_MODULES = {
 
 
 def pytest_collection_modifyitems(items):
-    # druks_db is async, so a sync fixture can't getfixturevalue it any more;
-    # injecting it into each test's fixture list keeps the same guarantee —
-    # every test outside the own-database modules runs inside the rollback
-    # transaction.
+    # A sync fixture cannot call getfixturevalue on the async druks_db. Each test
+    # outside the own-database modules gets it in its fixture list, so the test
+    # runs inside the rollback transaction.
     for item in items:
         module = item.module.__name__.rsplit(".", 1)[-1]
         if module in _OWN_DATABASE_MODULES:
@@ -201,10 +215,7 @@ def pytest_collection_modifyitems(items):
 
 @pytest.fixture(autouse=True)
 def _reset_app_overrides():
-
     yield
-    from druks.api.server import app
-
     app.dependency_overrides.clear()
 
 
@@ -223,9 +234,19 @@ def _no_druks_namespace_fetches(monkeypatch):
     monkeypatch.setattr("druks.apps.config.fetch_file", _none)
 
 
-def bind_ambient_session(session) -> None:
-    from druks.db import db_session
+@pytest.fixture
+def manager_keys(monkeypatch):
+    assertion._verifier.cache_clear()
 
+    async def fetch_jwks(self):
+        return _MANAGER_JWKS
+
+    monkeypatch.setattr(JWTVerifier, "_fetch_jwks", fetch_jwks)
+    yield
+    assertion._verifier.cache_clear()
+
+
+def bind_ambient_session(session) -> None:
     db_session.registry.set(session)
 
 
@@ -254,11 +275,6 @@ async def connect_provider(provider_cls, payload: dict, *, provider_email: str =
 def make_agent_result(output, *, agent="agent", error=None, cost_usd=None, cost_metadata=None):
     # An AgentResult to return from a faked run_agent, so the agent call records/parses it.
     # Status follows the error, as the sandbox does it — a failed result always says why.
-    from datetime import UTC, datetime
-
-    from druks.durable.enums import AgentCallStatus
-    from druks.sandbox.datastructures import AgentResult
-
     return AgentResult(
         output=output,
         run_id="run-test",
@@ -275,9 +291,6 @@ def make_agent_result(output, *, agent="agent", error=None, cost_usd=None, cost_
 
 async def finish_agent_run(call, *, status=None, last_error=None):
     # Mark a seeded AgentCall finished (prod builds finished rows via AgentCall.record).
-    from druks.db import db_session
-    from druks.durable.enums import AgentCallStatus
-
     call.status = (status or AgentCallStatus.SUCCEEDED).value
     call.last_error = last_error
     call.finished_at = Base.utc_now()
@@ -295,7 +308,6 @@ async def make_test_note(body: str = "a note"):
 
 async def seed_note_run(session, *, note=None, state: str = "running", **kwargs):
     """A run on a note, seeding one if the caller has none."""
-    from druks.testing import seed_run
     from druks_field_notes.workflows import Summarize
 
     subject = note or await make_test_note()
@@ -304,9 +316,6 @@ async def seed_note_run(session, *, note=None, state: str = "running", **kwargs)
 
 async def seed_note_agent_run(*, agent: str = "implement", model: str = "openai/gpt-5.5", **kwargs):
     """A run on a fresh note with one agent call on it — the call is what the caller wants."""
-    from druks.db import db_session
-    from druks.testing import seed_call
-
     session = db_session()
     run = await seed_note_run(session, **kwargs)
     return await seed_call(session, run, agent, status="running", model=model)

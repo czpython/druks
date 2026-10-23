@@ -32,8 +32,6 @@ def verify_slack_signature(
     timestamp: str | None,
     secret: str,
 ) -> None:
-    # HMAC-SHA256 over v0:{ts}:{body}; raises HTTPException directly so
-    # request_is_authentic can call it inline.
     if not secret:
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -67,31 +65,29 @@ def verify_slack_signature(
 
 
 class SlackWebhook(Webhook):
-    """A delivery from the installation's Slack app, signed with the card's secret."""
-
     abstract = True
     provider = "slack"
 
     async def request_is_authentic(self) -> bool:
         try:
-            self.card = await Slack.get()
+            signing_secret = (await Slack.get()).secrets["signing_secret"]
         except ServiceNotConnectedError as error:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(error)) from error
         verify_slack_signature(
             self.raw_body,
             self.request.headers.get("x-slack-signature"),
             self.request.headers.get("x-slack-request-timestamp"),
-            self.card.secrets["signing_secret"],
+            signing_secret,
         )
         return True
 
 
 class SlackInteractivity(SlackWebhook):
-    # A button click on a delivered notification: decode the action_id back to
-    # (token, choice) and route it through the same respond core as the HTTP
-    # rail. Slack sends no stable interactivity id, so the base get_delivery_key
-    # stays None — the DBOS round key is the one-answer guard.
     category = "interactivity"
+
+    def get_delivery_key(self) -> str:
+        # Slack gives an interaction no ID. A retry sends the same bytes.
+        return "interaction:" + hashlib.sha256(self.raw_body).hexdigest()
 
     def get_data(self) -> dict:
         # Interactivity arrives form-encoded as payload=<json>.
@@ -139,10 +135,8 @@ class SlackEvents(SlackWebhook):
     category = "events"
 
     def get_delivery_key(self) -> str | None:
-        """A message's room and timestamp. A timestamp is unique in one room only."""
         if self.data["type"] == "event_callback":
-            event = self.data["event"]
-            return f"{event['channel']}:{event['ts']}"
+            return self.data["event_id"]
         return
 
     def get_action(self) -> str:
@@ -155,11 +149,12 @@ class SlackEvents(SlackWebhook):
         """Publish a person's message. Edits, deletes, joins, hidden events, the bot's
         own messages, and people from other workspaces are not facts for anyone."""
         event = self.data["event"]
+        bot_user_id = (await Slack.get()).identity["bot_user_id"]
         is_from_person = (
             (not event.get("subtype") or event["subtype"] in ("file_share", "thread_broadcast"))
             and not event.get("hidden")
             and not event.get("bot_id")
-            and event.get("user") != self.card.identity["bot_user_id"]
+            and event.get("user") != bot_user_id
             and event.get("user_team", self.data["team_id"]) == self.data["team_id"]
         )
         if is_from_person:

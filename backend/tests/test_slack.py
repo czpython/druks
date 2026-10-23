@@ -114,10 +114,9 @@ def message_event(
     }
 
 
-async def receive(card, data):
+async def receive(data):
     webhook = SlackEvents(None, {}, None)
     webhook.raw_body = json.dumps(data).encode()
-    webhook.card = card
     await webhook.on_event_callback()
 
 
@@ -127,7 +126,7 @@ async def test_a_linked_persons_message_reaches_their_own_conversation(
     ana = await Account.get_or_create(druks_db, "ana@example.com")
     await link_person(druks_db, ana)
 
-    await receive(card, message_event())
+    await receive(message_event())
 
     [conversation] = await Conversation.list_for_account(druks_db, ana)
     assert (conversation.source, conversation.connection_id, conversation.user_id) == (
@@ -150,7 +149,7 @@ async def test_the_webhook_drops_what_is_not_for_the_bot(card, druks_db, slack, 
     ana = await Account.get_or_create(druks_db, "ana@example.com")
     await link_person(druks_db, ana)
 
-    await receive(card, message_event(**event))
+    await receive(message_event(**event))
 
     assert not await Conversation.list_for_account(druks_db, ana)
     assert not slack
@@ -160,7 +159,7 @@ async def test_the_webhook_drops_what_is_not_for_the_bot(card, druks_db, slack, 
 async def test_an_unlinked_person_gets_a_link_that_answers_their_message_once_they_connect(
     card, druks_db, druks_client, slack, delivery, endpoint
 ):
-    await receive(card, message_event())
+    await receive(message_event())
 
     [(method, sent)] = slack
     assert (method, sent["channel"]) == ("chat.postMessage", ANA)
@@ -185,7 +184,7 @@ async def test_an_unlinked_person_gets_a_link_that_answers_their_message_once_th
 async def test_a_forwarded_link_links_only_the_person_who_opens_it(
     card, druks_db, druks_client, slack, delivery, endpoint
 ):
-    await receive(card, message_event())
+    await receive(message_event())
     [(_, sent)] = slack
     link = sent["text"].partition("https://druks.example")[2]
     operator = await Account.get_or_create(druks_db, "op@example.com")
@@ -271,7 +270,8 @@ def slack_oauth(monkeypatch):
     """Slack's token endpoint and ``auth.test``, answered locally for Ana's consent."""
 
     def token_endpoint(request: httpx.Request) -> httpx.Response:
-        assert dict(parse_qsl(request.content.decode()))["client_id"] == "c1"
+        exchange = dict(parse_qsl(request.content.decode()))
+        assert exchange["client_id"] == "c1"
         authed_user = {"id": ANA, "scope": "users:read", "access_token": "xoxp-1"}
         return httpx.Response(
             200, json={"ok": True, "access_token": "xoxb-1", "authed_user": authed_user}
@@ -296,7 +296,8 @@ async def test_connect_slack_asks_for_user_scopes_and_keeps_the_token_from_authe
     with TestClient(configure_app_for_test(settings=settings)) as client:
         consent = client.get("/api/oauth/slack/connect", follow_redirects=False).headers["location"]
         query = dict(parse_qsl(urlparse(consent).query))
-        assert (query["user_scope"], "scope" in query) == ("users:read", False)
+        assert query["user_scope"] == "users:read"
+        assert "scope" not in query
         page = client.get("/api/oauth/callback", params={"state": query["state"], "code": "c-1"})
         assert page.status_code == 200
 
@@ -375,8 +376,8 @@ async def test_each_person_who_tags_the_bot_gets_their_own_conversation_for_the_
     await link_person(druks_db, ana)
     await link_person(druks_db, ben, user_id="U200")
 
-    await receive(card, room_event())
-    await receive(card, room_event(user="U200", ts="11.0", thread_ts="10.0"))
+    await receive(room_event())
+    await receive(room_event(user="U200", ts="11.0", thread_ts="10.0"))
 
     conversations = await Conversation.list_for_connection(druks_db, card.id)
     assert sorted((chat.account_id, chat.user_id, chat.thread_id) for chat in conversations) == (
@@ -396,11 +397,11 @@ async def test_only_a_linked_persons_untagged_reply_in_a_fresh_thread_reaches_th
     ben = await Account.get_or_create(druks_db, "ben@example.com")
     await link_person(druks_db, ana)
     await link_person(druks_db, ben, user_id="U200")
-    await receive(card, room_event())
+    await receive(room_event())
 
-    await receive(card, room_event(text="more", ts="12.0", thread_ts="10.0"))
-    await receive(card, room_event(user="U200", text="me too", ts="13.0", thread_ts="10.0"))
-    await receive(card, room_event(text="a new topic", ts="14.0"))
+    await receive(room_event(text="more", ts="12.0", thread_ts="10.0"))
+    await receive(room_event(user="U200", text="me too", ts="13.0", thread_ts="10.0"))
+    await receive(room_event(text="a new topic", ts="14.0"))
 
     [conversation] = await Conversation.list_for_connection(druks_db, card.id)
     await druks_db.refresh(conversation, ["messages"])
@@ -414,7 +415,7 @@ async def test_only_a_linked_persons_untagged_reply_in_a_fresh_thread_reaches_th
     conversation.created_at = a_day_ago
     await druks_db.commit()
     await druks_db.refresh(conversation)
-    await receive(card, room_event(text="still there?", ts="15.0", thread_ts="10.0"))
+    await receive(room_event(text="still there?", ts="15.0", thread_ts="10.0"))
 
     await druks_db.refresh(conversation, ["messages"])
     assert len(conversation.messages) == 2
@@ -423,8 +424,8 @@ async def test_only_a_linked_persons_untagged_reply_in_a_fresh_thread_reaches_th
 async def test_an_unlinked_person_who_tags_the_bot_gets_the_link_by_direct_message(
     card, druks_db, slack, delivery, endpoint
 ):
-    await receive(card, room_event(ts="10.0"))
-    await receive(card, room_event(text="hello?", ts="11.0", thread_ts="10.0"))
+    await receive(room_event(ts="10.0"))
+    await receive(room_event(text="hello?", ts="11.0", thread_ts="10.0"))
 
     [(_, direct_message), (_, reply)] = slack
     assert direct_message["channel"] == ANA
@@ -554,7 +555,7 @@ async def test_a_person_who_requires_a_tag_is_answered_only_when_they_tag(
     api.add_api_route("/thread/tag", require_tag, methods=["PUT"], status_code=204)
     ana = await Account.get_or_create(druks_db, "ana@example.com")
     await link_person(druks_db, ana)
-    await receive(card, room_event())
+    await receive(room_event())
     [conversation] = await Conversation.list_for_connection(druks_db, card.id)
     direct = await thread_conversation(druks_db, card, ana, thread_id="")
     _, token = await PersonalAccessToken.create(druks_db, account_id=ana.id, name="chat")
@@ -567,11 +568,11 @@ async def test_a_person_who_requires_a_tag_is_answered_only_when_they_tag(
 
     async with asgi_client(api) as client:
         required = await client.put("/thread/tag", json={"is_required": True}, headers=headers)
-        await receive(card, room_event(text="more", ts="12.0", thread_ts="10.0"))
-        await receive(card, room_event(ts="13.0", thread_ts="10.0"))
+        await receive(room_event(text="more", ts="12.0", thread_ts="10.0"))
+        await receive(room_event(ts="13.0", thread_ts="10.0"))
         assert await bodies() == ["read my runs", "read my runs"]
         optional = await client.put("/thread/tag", json={"is_required": False}, headers=headers)
-        await receive(card, room_event(text="and more", ts="14.0", thread_ts="10.0"))
+        await receive(room_event(text="and more", ts="14.0", thread_ts="10.0"))
         assert await bodies() == ["read my runs", "read my runs", "and more"]
         no_thread = await client.put(
             "/thread/tag",
@@ -588,9 +589,9 @@ async def test_a_persons_new_thread_conversation_starts_with_their_tag_preferenc
     ana = await Account.get_or_create(druks_db, "ana@example.com")
     await ana.update_preferences(is_tag_required=True)
     await link_person(druks_db, ana)
-    await receive(card, room_event())
-    await receive(card, room_event(text="more", ts="12.0", thread_ts="10.0"))
-    await receive(card, room_event(ts="13.0", thread_ts="10.0"))
+    await receive(room_event())
+    await receive(room_event(text="more", ts="12.0", thread_ts="10.0"))
+    await receive(room_event(ts="13.0", thread_ts="10.0"))
 
     [conversation] = await Conversation.list_for_connection(druks_db, card.id)
     await druks_db.refresh(conversation, ["messages"])
@@ -621,9 +622,8 @@ async def test_a_file_a_linked_person_sends_is_a_druks_file_on_their_message(
     ana = await Account.get_or_create(druks_db, "ana@example.com")
     await link_person(druks_db, ana)
 
-    await receive(card, message_event(text="", subtype="file_share", files=[shared_file()]))
+    await receive(message_event(text="", subtype="file_share", files=[shared_file()]))
     await receive(
-        card,
         message_event(
             text="both of these",
             ts="2.0",
@@ -631,7 +631,7 @@ async def test_a_file_a_linked_person_sends_is_a_druks_file_on_their_message(
             files=[shared_file("F2", "a.pdf"), shared_file("F3", "b.pdf")],
         ),
     )
-    await receive(card, message_event(text="", ts="3.0"))
+    await receive(message_event(text="", ts="3.0"))
 
     [conversation] = await Conversation.list_for_account(druks_db, ana)
     await druks_db.refresh(conversation, ["messages"])

@@ -139,15 +139,17 @@ class OauthClient:
         consent_query: dict[str, str] | None = None,
         context: dict[str, Any] | None = None,
         extra_authorize_params: dict[str, str] | None = None,
+        extra_token_params: dict[str, str] | None = None,
         authorization_endpoint: str = "",
     ) -> str:
         """Stash the pending exchange in Redis under a new single-use state, and
         return the consent URL. ``consent_query`` is the query that asks for ``scopes``,
         when the provider names them otherwise than RFC 6749's ``scope``. ``context``
-        comes back from ``complete_connect``. ``extra_authorize_params`` override the
-        client's declared ones on the same key. ``authorization_endpoint`` is another
-        provider page that starts the same flow, such as GitHub's install page.
-        Nothing durable is written, so an abandoned consent expires."""
+        comes back from ``complete_connect``. ``extra_authorize_params`` and
+        ``extra_token_params`` override the client's declared ones on the same key.
+        ``authorization_endpoint`` is another provider page that starts the same flow,
+        such as GitHub's install page. Nothing durable is written, so an abandoned
+        consent expires."""
         state = self.state_prefix + secrets.token_urlsafe(32)
         code_verifier = secrets.token_urlsafe(64)
         code_challenge = (
@@ -165,7 +167,7 @@ class OauthClient:
             "client_id": self.client_id,
             "client_secret": self.client_secret,
             "basic_auth": self.basic_auth,
-            "extra_token_params": self.extra_token_params,
+            "extra_token_params": {**self.extra_token_params, **(extra_token_params or {})},
             "token_headers": self.token_headers,
         }
         await get_client().set(

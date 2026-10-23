@@ -447,7 +447,7 @@ bot, and your Slack account while the card is connected.
 Druks knows you by your Slack account. Select **Connect Slack** on the Slack
 pane. Slack asks you to sign in, and Druks saves your Slack token under your
 account, like a Gmail connection. Other apps can use that grant. **Disconnect**
-revokes it.
+revokes it. Druks refuses a Slack account from another workspace.
 
 When you write to the bot before you connect, the bot answers with a private
 link. Open it, sign in to Druks, and connect Slack. Druks then answers the
@@ -458,7 +458,7 @@ person who wrote it.
 ### Direct messages
 
 You have one conversation with the bot in your direct message. Druks drops a
-repeated event by its room and timestamp. The agent writes Markdown, and Druks
+repeated event by its event ID. The agent writes Markdown, and Druks
 posts each reply in the direct message, in pieces of at most 12,000 characters.
 Druks ignores the bot's own messages, edits, deletes, joins, hidden events, and
 people from other workspaces.
