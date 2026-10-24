@@ -1599,25 +1599,38 @@ acts.
 
 ## Connect provider accounts (OAuth)
 
-Declare the OAuth endpoints on the service that holds the client
-credentials. The `Settings` model must have `client_id` and `client_secret`
-fields:
+The service's app at the provider is its `Integration`, an `Oauth`. It
+declares the OAuth endpoints. `Settings` holds the client's `client_id` and
+`client_secret`:
 
 ```python
+from druks.services import Oauth, Service
+
+
 class Acme(Service):
-    authorization_endpoint = "https://acme.example/oauth/authorize"
-    token_endpoint = "https://acme.example/oauth/token"
-    # True = HTTP Basic on the token endpoint. False = secret in the body.
-    basic_auth = True
-    identity_endpoint = "https://acme.example/oauth/userinfo"
-    identity_scopes = ("openid", "email")
-    # Query parameters the provider's consent URL must carry.
-    extra_authorize_params = {"access_type": "offline", "prompt": "consent"}
+    class Integration(Oauth):
+        authorization_endpoint = "https://acme.example/oauth/authorize"
+        token_endpoint = "https://acme.example/oauth/token"
+        # True = HTTP Basic on the token endpoint. False = secret in the body.
+        basic_auth = True
+        identity_endpoint = "https://acme.example/oauth/userinfo"
+        identity_scopes = ("openid", "email")
+        # Query parameters the provider's consent URL must carry.
+        extra_authorize_params = {"access_type": "offline", "prompt": "consent"}
 
     class Settings(BaseModel):
         client_id: str = Field(title="Client ID")
         client_secret: SecretStr = Field(title="Client secret")
 ```
+
+An `Integration` can also install the app, so the service acts as the app
+itself. `install_params` join the install request, `get_install_endpoint`
+names where it starts, `read_install` reads the grant from the token answer,
+and `complete_install(grant)` records what the install proves. The grant is
+the service's own OAuth connection: `get_grant()` and `get_access_token()`
+read it, and the service acts with it when it has one, else with its pasted
+`Settings`. A `PrivateKey` is an app with a private key, as a GitHub App: it
+mints its own tokens, and its install grants none.
 
 `extra_authorize_params` declares special consent-query values for the provider. The
 platform adds them to every sign-in it starts for the service. The example
@@ -1655,12 +1668,14 @@ included, and needs nothing beyond its class name:
 ```python
 class GoogleOauth(Service):
     abstract = True
-    authorization_endpoint = "https://accounts.google.com/o/oauth2/v2/auth"
-    token_endpoint = "https://oauth2.googleapis.com/token"
-    extra_authorize_params = {"access_type": "offline", "prompt": "consent"}
-    identity_endpoint = "https://openidconnect.googleapis.com/v1/userinfo"
-    identity_scopes = ("openid", "email")
-    identity_key = "sub"
+
+    class Integration(Oauth):
+        authorization_endpoint = "https://accounts.google.com/o/oauth2/v2/auth"
+        token_endpoint = "https://oauth2.googleapis.com/token"
+        extra_authorize_params = {"access_type": "offline", "prompt": "consent"}
+        identity_endpoint = "https://openidconnect.googleapis.com/v1/userinfo"
+        identity_scopes = ("openid", "email")
+        identity_key = "sub"
 
     class Settings(BaseModel):
         client_id: str = Field(title="Client ID")
@@ -2227,7 +2242,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | --- | --- |
 | `druks.accounts` | `current_account_id` |
 | `druks.apps` | `App`, `AppSettings`, `Choices`, `Secret` |
-| `druks.services` | `Service`, `Connection`, `Resource`, `ResourceError`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
+| `druks.services` | `Service`, `Connection`, `Oauth`, `PrivateKey`, `Resource`, `ResourceError`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
 | `druks.browser` | `BrowserClient`, `BrowserCommandError`, `BrowserSession`, `BrowserSessionSignedOutError`, `BrowserSessionStatus` |
 | `druks.agents` | `Agent`, `AgentOutput`, `Bot`, `BotUser` |
 | `druks.workflows` | `Workflow`, `Gate`, `GateTimeout`, `step`, run/agent response types, lifecycle enums and workflow errors |

@@ -89,6 +89,6 @@ async def github_manifest_callback(slug: str, code: str = "") -> HTMLResponse:
     return render_page(
         "github_manifest_callback.html",
         slug=row.identity["slug"],
-        install_url=await service.get_install_endpoint(),
+        install_url=await service.Integration.get_install_endpoint(),
         service=slug,
     )

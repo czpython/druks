@@ -15,9 +15,11 @@ AUTHOR_SURFACE = {
     },
     "druks.services": {
         "Connection",
+        "Oauth",
         "OauthClient",
         "OauthExchangeError",
         "OauthRefreshError",
+        "PrivateKey",
         "Resource",
         "ResourceError",
         "Service",

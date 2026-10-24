@@ -72,6 +72,12 @@ For app-surface changes, inspect the proof app at
   a key, or a verifier. Any manager that serves the same routes and publishes a
   JWKS works. The docs describe Druks as an operator runs it: the
   `[services.<slug>]` table and the Services page. They name no manager.
+  A service's app at the provider is its nested `Integration`, an `Oauth` or
+  a `PrivateKey`: the OAuth facts and the install. An install stores the service's
+  own grant, an OAuth connection with no account, and the service acts with its
+  grant when it has one, else with its pasted `Settings`. A service never asks
+  `is_managed()`; only the manager seams do: the OAuth client, the configuration
+  sync, resources, and webhooks.
 - Do not type-switch over a typed stream in app code. When a projection needs
   ordering or anchoring, grow the SDK primitive instead of an `isinstance` chain.
 - Put only identity and facts in a read-side field. Keep UI wording in the app pages.

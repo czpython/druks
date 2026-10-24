@@ -37,10 +37,14 @@ async def list_services(session: SessionDep) -> list[ServiceResponse]:
         connections = [
             connection for connection in account_connections if connection.audience == audience
         ]
-        install_url = await service.get_install_endpoint() if row else ""
-        if install_url and service.is_managed():
-            # The manager binds the installation, so the install starts at the sign-in door.
-            install_url = f"/api/oauth/{service.slug}/connect?install=1"
+        install_url = ""
+        if row and service.Integration:
+            # An app people sign in through installs at the sign-in door. One without a
+            # sign-in links to the provider's install page.
+            if service.token_endpoint:
+                install_url = f"/api/oauth/{service.slug}/connect?install=1"
+            else:
+                install_url = await service.Integration.get_install_endpoint()
         entries.append(
             ServiceResponse.from_row(
                 service,
@@ -118,11 +122,11 @@ async def connect_oauth_service(
     authorization_endpoint = ""
     install_params: dict[str, str] = {}
     if install:
-        authorization_endpoint = await service.get_install_endpoint()
-        if not authorization_endpoint:
+        if not service.Integration:
             raise OauthPageError(f"{slug} has no install page.", status_code=404)
-        install_params = service.get_install_params()
-    scopes = () if install and service.actor_token_name else service.scopes()
+        authorization_endpoint = await service.Integration.get_install_endpoint()
+        install_params = service.Integration.install_params
+    scopes = () if install else service.scopes()
     url = await client.begin_connect(
         redirect_uri=client.redirect_uri or f"{endpoint.rstrip('/')}/api/oauth/callback",
         scopes=scopes,
@@ -170,10 +174,9 @@ async def oauth_callback(
         # A state begun by another door (an MCP connect) finishes at its own callback.
         raise OauthPageError(f"No OAuth service {provider!r}.", status_code=400)
     try:
-        if pending["install"]:
-            await service.complete_install(tokens)
-            if service.actor_token_name:
-                return await _finish_consent(session, pending)
+        if pending["install"] and await service.install(session, tokens):
+            # The app's own grant is the install; nobody signs in.
+            return await _finish_consent(session, pending)
         grant = service.read_grant(tokens)
         identity = await service.get_identity(grant["access_token"])
     except OauthExchangeError as exchange_error:

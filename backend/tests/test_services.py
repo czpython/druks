@@ -21,7 +21,7 @@ from druks.redis import close_client, get_client
 from druks.secrets.datastructures import Audience
 from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
-from druks.services import Service
+from druks.services import Oauth, Service
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.services.oauth import OauthClient
 from druks.testing import configure_app_for_test, make_settings
@@ -160,30 +160,30 @@ async def test_list_reports_each_declared_service(druks_client: httpx.AsyncClien
     assert not entry["connectedAt"]
     assert [field["name"] for field in entry["fields"]] == [
         "app_id",
+        "private_key",
         "client_id",
         "client_secret",
-        "private_key",
         "webhook_secret",
     ]
     assert [field["type"] for field in entry["fields"]] == [
         "str",
-        "str",
         "secret",
+        "str",
         "secret",
         "secret",
     ]
     assert [field["label"] for field in entry["fields"]] == [
         "App ID",
+        "Private key (PEM)",
         "Client ID",
         "Client secret",
-        "Private key (PEM)",
         "Webhook secret",
     ]
     assert [field["multiline"] for field in entry["fields"]] == [
         False,
-        False,
-        False,
         True,
+        False,
+        False,
         False,
     ]
 
@@ -309,7 +309,7 @@ async def test_blank_fields_are_rejected_without_touching_github(
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"].startswith("Enter App ID, Client ID, Client secret, ")
+    assert response.json()["detail"].startswith("Enter App ID, Private key (PEM), Client ID, ")
     with pytest.raises(ServiceNotConnectedError):
         await Github.get()
 
@@ -457,10 +457,11 @@ async def test_manifest_callback_rejects_a_dead_code(
 
 async def test_get_oauth_client_reads_the_connected_identity(declared_services, druks_db):
     class Acme(Service):
-        authorization_endpoint = "https://acme.test/authorize"
-        token_endpoint = "https://acme.test/token"
-        basic_auth = True
-        extra_authorize_params = {"access_type": "offline"}
+        class Integration(Oauth):
+            authorization_endpoint = "https://acme.test/authorize"
+            token_endpoint = "https://acme.test/token"
+            basic_auth = True
+            extra_authorize_params = {"access_type": "offline"}
 
         class Settings(BaseModel):
             client_id: str
@@ -547,8 +548,9 @@ async def test_oauth_service_declarations_fail_loudly(declared_services):
     with pytest.raises(TypeError, match="client_id and client_secret"):
 
         class Keyless(Service):
-            authorization_endpoint = "https://acme.test/authorize"
-            token_endpoint = "https://acme.test/token"
+            class Integration(Oauth):
+                authorization_endpoint = "https://acme.test/authorize"
+                token_endpoint = "https://acme.test/token"
 
             class Settings(BaseModel):
                 api_key: SecretStr
@@ -556,7 +558,8 @@ async def test_oauth_service_declarations_fail_loudly(declared_services):
     with pytest.raises(TypeError, match="both OAuth endpoints"):
 
         class HalfDeclared(Service):
-            token_endpoint = "https://acme.test/token"
+            class Integration(Oauth):
+                token_endpoint = "https://acme.test/token"
 
             class Settings(BaseModel):
                 client_id: str
@@ -581,8 +584,10 @@ async def test_oauth_service_declarations_fail_loudly(declared_services):
 def test_abstract_base_shares_declarations_without_registering(declared_services):
     class AcmeBase(Service):
         abstract = True
-        authorization_endpoint = "https://acme.test/authorize"
-        token_endpoint = "https://acme.test/token"
+
+        class Integration(Oauth):
+            authorization_endpoint = "https://acme.test/authorize"
+            token_endpoint = "https://acme.test/token"
 
         class Settings(BaseModel):
             client_id: str
@@ -604,8 +609,9 @@ def test_abstract_base_shares_declarations_without_registering(declared_services
 
 async def test_with_scopes_declares_the_union_and_reads_connections(declared_services, monkeypatch):
     class Acme(Service):
-        authorization_endpoint = "https://acme.test/authorize"
-        token_endpoint = "https://acme.test/token"
+        class Integration(Oauth):
+            authorization_endpoint = "https://acme.test/authorize"
+            token_endpoint = "https://acme.test/token"
 
         class Settings(BaseModel):
             client_id: str
@@ -653,8 +659,9 @@ async def test_with_scopes_declares_the_union_and_reads_connections(declared_ser
 
 async def test_get_identity_without_a_declared_endpoint_is_empty(declared_services):
     class Quiet(Service):
-        authorization_endpoint = "https://quiet.test/authorize"
-        token_endpoint = "https://quiet.test/token"
+        class Integration(Oauth):
+            authorization_endpoint = "https://quiet.test/authorize"
+            token_endpoint = "https://quiet.test/token"
 
         class Settings(BaseModel):
             client_id: str
@@ -675,11 +682,12 @@ def test_with_scopes_requires_oauth_endpoints(declared_services):
 @pytest.fixture
 def acme(declared_services, monkeypatch):
     class Acme(Service):
-        authorization_endpoint = "https://acme.test/authorize"
-        token_endpoint = "https://acme.test/token"
-        identity_endpoint = "https://acme.test/whoami"
-        identity_scopes = ("openid",)
-        identity_key = "sub"
+        class Integration(Oauth):
+            authorization_endpoint = "https://acme.test/authorize"
+            token_endpoint = "https://acme.test/token"
+            identity_endpoint = "https://acme.test/whoami"
+            identity_scopes = ("openid",)
+            identity_key = "sub"
 
         class Settings(BaseModel):
             client_id: str
