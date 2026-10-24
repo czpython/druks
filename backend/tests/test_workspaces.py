@@ -81,7 +81,7 @@ async def test_repo_workspace_names_its_github_secret_and_repo_before_the_box_ex
     [secret] = await RepoWorkspace.get_secrets(subject)
 
     assert secret == SandboxSecret(
-        name="github", secret_id=row.id, resource="acme/widgets", host="github.com"
+        name="github", secret_id=row.id, resources=("acme/widgets",), host="github.com"
     )
     assert await Workspace.get_secrets(subject) == []
 
@@ -94,7 +94,7 @@ async def test_a_workspace_selects_its_github_identity_by_service(druks_db):
 
     [secret] = await Reviewing.get_secrets(SimpleNamespace(repo="o/r"))
 
-    assert (secret.secret_id, secret.resource) == (row.id, "o/r")
+    assert (secret.secret_id, secret.resources) == (row.id, ("o/r",))
 
 
 async def test_the_github_service_issues_its_installation_token(
@@ -103,16 +103,16 @@ async def test_the_github_service_issues_its_installation_token(
     expiry = datetime(2026, 9, 7, 18, 0, tzinfo=UTC)
     asked: list[tuple[str, str]] = []
 
-    async def token_for_repo(self, repo: str) -> tuple[str, datetime]:
-        asked.append((self._app_id, repo))
+    async def get_token_for_repos(self, *repos: str) -> tuple[str, datetime]:
+        asked.append((self._app_id, *repos))
         return "ghs_operator", expiry
 
-    monkeypatch.setattr(GitHubClient, "token_for_repo", token_for_repo)
+    monkeypatch.setattr(GitHubClient, "get_token_for_repos", get_token_for_repos)
     await connect_service(
         "github",
         identity={"app_id": "1", "slug": "druks-operator"},
         secrets={"private_key": "operator-pem"},
     )
 
-    assert await Github.issue_token("acme/widgets") == ("ghs_operator", expiry)
+    assert await Github.issue_token(("acme/widgets",)) == ("ghs_operator", expiry)
     assert asked == [("1", "acme/widgets")]

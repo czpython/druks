@@ -484,12 +484,14 @@ class Service:
 
     @classmethod
     async def issue_token(
-        cls, resource: str = "", *, name: str = ""
+        cls, resources: tuple[str, ...] = (), *, name: str = ""
     ) -> tuple[str, datetime | None]:
-        """The token a sandbox fetches under ``name``, and its expiry. ``resource`` names
+        """The token a sandbox fetches under ``name``, and its expiry. ``resources`` names
         a resource of the service. ``name`` is ``<slug>_<field>`` for a pasted field;
         under any other name the row gives the one secret it holds."""
-        if resource:
+        if resources:
+            # A resource's token covers that resource alone.
+            [resource] = resources
             slug, _, key = resource.partition("/")
             return await cls.resources[slug](key).get_token()
         row = await cls.get()

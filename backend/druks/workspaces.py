@@ -204,7 +204,7 @@ class Workspace:
                 SecretRef(
                     name=variable.lower(),
                     secret_id=secret_id,
-                    resource=server.resource,
+                    resources=list(server.resources),
                     host=urlsplit(server.url).hostname,
                 )
             )
@@ -289,7 +289,7 @@ class RepoWorkspace(Workspace):
             SandboxSecret(
                 name=cls.github.slug,
                 secret_id=(await cls.github.get()).id,
-                resource=cls.get_repo(subject),
+                resources=(cls.get_repo(subject),),
                 host=cls.github.host,
             )
         ]

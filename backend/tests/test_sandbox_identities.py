@@ -118,7 +118,7 @@ async def test_an_identity_keeps_the_hash_and_puts_the_bearer_in_the_issuer_entr
         seconds=SANDBOX_HOST_LEASE_SECONDS
     )
     [secret] = identity.secret_refs
-    assert secret.key == ("anthropic", subscription.id, "", "")
+    assert secret.key == ("anthropic", subscription.id, (), "")
     rows = [identity, secret]
     columns = {
         column.name: getattr(row, column.name) for row in rows for column in row.__table__.columns
@@ -338,7 +338,7 @@ async def test_lookup_finds_the_live_bound_identity_of_a_scope(druks_db) -> None
 
     assert found is not None
     assert found.id == live.id
-    more = [*secrets, SecretRef(name="github", secret_id="other", resource="acme/widgets")]
+    more = [*secrets, SecretRef(name="github", secret_id="other", resources=["acme/widgets"])]
     assert (
         await SandboxIdentity.lookup(
             db_session(),
@@ -377,7 +377,7 @@ async def _github_identity() -> tuple[SandboxIdentity, str]:
         account_id=(await Account.get_for_run(db_session(), None)).id,
         run_id="run-1",
         scoped_to="workflow",
-        secret_refs=[SecretRef(name="github", secret_id=secret_id, resource="acme/widgets")],
+        secret_refs=[SecretRef(name="github", secret_id=secret_id, resources=["acme/widgets"])],
         secrets_hash="",
     )
     await identity.bind("host-1")
@@ -391,11 +391,11 @@ async def test_the_issuer_answers_github_through_the_stored_service_and_repo(
     identity. The request selects nothing, and the same box renews across
     short lifetimes."""
     expiry = datetime(2026, 9, 7, 18, 0, tzinfo=UTC)
-    asked: list[str] = []
+    asked: list[tuple[str, ...]] = []
     values = iter(("ghs_one", "ghs_two"))
 
-    async def issue_token(resource, *, name):
-        asked.append(resource)
+    async def issue_token(resources, *, name):
+        asked.append(resources)
         return next(values), expiry
 
     monkeypatch.setattr(Github, "issue_token", issue_token)
@@ -407,7 +407,7 @@ async def test_the_issuer_answers_github_through_the_stored_service_and_repo(
 
     assert first.json() == {"value": "ghs_one", "expires_at": expiry.isoformat()}
     assert second.json()["value"] == "ghs_two"
-    assert asked == ["acme/widgets", "acme/widgets"]
+    assert asked == [("acme/widgets",), ("acme/widgets",)]
 
 
 async def test_a_disconnected_service_ends_its_secrets(druks_db, tmp_path):
@@ -422,7 +422,7 @@ async def test_a_disconnected_service_ends_its_secrets(druks_db, tmp_path):
 
 
 async def test_the_issuer_answers_503_when_github_refuses(druks_db, tmp_path, monkeypatch):
-    async def issue_token(resource, *, name):
+    async def issue_token(resources, *, name):
         raise RuntimeError("app not installed on acme/widgets")
 
     monkeypatch.setattr(Github, "issue_token", issue_token)
@@ -438,10 +438,10 @@ async def test_the_issuer_answers_503_when_github_refuses(druks_db, tmp_path, mo
 async def test_the_issuer_answers_422_with_the_reason_when_the_app_is_not_on_the_repo(
     druks_db, tmp_path, monkeypatch
 ):
-    async def token_for_repo(self, repo: str) -> tuple[str, datetime]:
-        raise GitHubAppNotInstalledError(repo, app="druks-reviewer")
+    async def get_token_for_repos(self, *repos: str) -> tuple[str, datetime]:
+        raise GitHubAppNotInstalledError(repos[0], app="druks-reviewer")
 
-    monkeypatch.setattr(GitHubClient, "token_for_repo", token_for_repo)
+    monkeypatch.setattr(GitHubClient, "get_token_for_repos", get_token_for_repos)
     await _connect_github()
     identity, bearer = await _github_identity()
 
@@ -540,7 +540,7 @@ async def test_the_gateway_key_entry_sends_its_bearer_verbatim(druks_db):
 
     entry = entries["mcp_druks_token"].entry()
     assert (entry["auth_header"], entry["auth_prefix"]) == ("Authorization", "")
-    assert (await row.issue_token(""))[0].startswith("Bearer ")
+    assert (await row.issue_token(()))[0].startswith("Bearer ")
 
 
 async def test_the_issuer_answers_422_for_a_disconnected_mcp_grant(druks_db, tmp_path):

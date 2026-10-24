@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from drukbox_sdk import Issuer
 from sqlalchemy import ForeignKey, LargeBinary, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
@@ -43,8 +44,8 @@ class SecretRef(Base):
     # The Drukbox catalog name: the key of the box's secret and its variable.
     name: Mapped[str] = mapped_column(primary_key=True)
     secret_id: Mapped[str] = mapped_column(ForeignKey("vault.id", ondelete="CASCADE"))
-    # What the token is for: the repo. Empty for a subscription.
-    resource: Mapped[str] = mapped_column(default="")
+    # What the one token covers, such as repos. Empty for a subscription.
+    resources: Mapped[list[str]] = mapped_column(JSONB, default=list)
     # The host the box's placeholder is swapped at, for a custom entry such
     # as an MCP server, or ``github.com`` for Drukbox's GitHub service. Empty
     # for a Drukbox catalog entry.
@@ -54,8 +55,8 @@ class SecretRef(Base):
     secret: Mapped[VaultSecret] = relationship(lazy="selectin")
 
     @property
-    def key(self) -> tuple[str, str, str, str]:
-        return (self.name, self.secret_id, self.resource or "", self.host or "")
+    def key(self) -> tuple[str, str, tuple[str, ...], str]:
+        return (self.name, self.secret_id, tuple(self.resources or ()), self.host or "")
 
 
 class SandboxIdentity(Base, Uuid7Pk):
@@ -108,7 +109,7 @@ class SandboxIdentity(Base, Uuid7Pk):
                 SecretRef(
                     name=ref.name,
                     secret_id=ref.secret_id,
-                    resource=ref.resource or "",
+                    resources=list(ref.resources or ()),
                     host=ref.host or "",
                 )
                 for ref in secret_refs

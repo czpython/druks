@@ -708,6 +708,11 @@ class SweepWorkspace(RepoWorkspace):
         return subject.full_name
 ```
 
+The sandbox's GitHub token reaches only that repository. To let the agent clone
+other repositories, override `get_secrets(subject)` and name them after it in
+the secret's `resources`. The token also reaches each one that the same App
+installation covers.
+
 The sandbox's GitHub token comes from a connected service of the appliance.
 `RepoWorkspace` names the operator App, `Github`. An app that acts as another
 identity declares its own service in its `services` module, a subclass with
@@ -733,8 +738,8 @@ class ReviewWorkspace(RepoWorkspace):
 ```
 
 The operator connects the service in **Settings → Connections → Services**. The
-sandbox's identity stores the service and the repo. The issuer reads only
-those two, so a request cannot select another repo or identity.
+sandbox's identity stores the service and the repos. The issuer reads only
+those, so a request cannot select another repo or identity.
 
 Override `Workflow.get_workspace_kwargs()` to pass `branch` or the fields a
 subclass adds. Extend `RepoWorkspace` by adding fields, not by cloning again.
@@ -779,8 +784,9 @@ host. A header row supplies its own header. Any other row goes out as
 `Authorization: Bearer <token>`. An entry for `github.com` is Drukbox's GitHub
 service under any name: `GH_TOKEN`, with git and `gh` set up. Without a `host`,
 the name is a Drukbox catalog entry, and Drukbox sets its variable and hosts.
-`resource` tells the issuer what the token is for, such as a repo. Druks reads
-the secrets before the sandbox exists, so read them from the subject alone.
+`resources` tells the issuer what the one token covers, such as repos. Druks
+reads the secrets before the sandbox exists, so read them from the subject
+alone.
 
 A vault row with one secret issues it under any name. For the secret of a
 service that does not depend on the subject,
@@ -802,13 +808,13 @@ class BuildWorkspace(RepoWorkspace):
                 name="github",
                 url="https://api.githubcopilot.com/mcp/",
                 secret_id=(await actor.service.get()).id,
-                resource=cls.get_repo(subject),
+                resources=(cls.get_repo(subject),),
             ),
         )
 ```
 
-The server names the vault row the issuer answers from and what the token is
-for: here a connected GitHub service and its repo. Druks binds the server's
+The server names the vault row the issuer answers from and what the token
+covers: here a connected GitHub service and its repo. Druks binds the server's
 host and the variable `MCP_GITHUB_TOKEN` to the entry when it creates the
 sandbox. The harness configuration names the variable, and the sandbox never
 holds the token. A workspace server owns its name, so a same-named registry
@@ -1587,10 +1593,12 @@ service:
 
 ```python
 @classmethod
-async def issue_token(cls, resource: str = "", *, name: str = "") -> tuple[str, datetime | None]:
+async def issue_token(
+    cls, resources: tuple[str, ...] = (), *, name: str = ""
+) -> tuple[str, datetime | None]:
 ```
 
-The base answers a resource recipe when `resource` names one, a pasted field
+The base answers a resource recipe when `resources` names one, a pasted field
 when `name` is the service slug and the field name, and the one secret of the
 row under any other name. Override `issue_token` when the row holds a
 credential that no sandbox must get, and return the token and its expiry.

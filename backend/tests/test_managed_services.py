@@ -205,7 +205,7 @@ async def test_sync_keeps_the_vault_id_and_replaces_credentials(
         assert row.id == original_id
         assert row.identity == {"url": "https://acme.test"}
         assert row.secrets == {"key": "configured-key"}
-        assert await row.issue_token("", name="acme_key") == ("configured-key", None)
+        assert await row.issue_token((), name="acme_key") == ("configured-key", None)
 
     (secrets / "services.acme.key").write_text("rotated-key")
     await Service.sync_configuration(druks_db)

@@ -95,8 +95,9 @@ class _GitHubKit:
             raise _refused(404)
         return SimpleNamespace(parsed_data=SimpleNamespace(id=INSTALLATIONS[owner]))
 
-    async def _mint(self, installation_id: int) -> SimpleNamespace:
-        self.calls.append(f"POST app/installations/{installation_id}/access_tokens")
+    async def _mint(self, installation_id: int, repositories: object) -> SimpleNamespace:
+        call = f"POST app/installations/{installation_id}/access_tokens"
+        self.calls.append(f"{call} {repositories}" if repositories else call)
         self.minted += 1
         expires_at = (datetime.now(UTC) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
         token = SimpleNamespace(token=f"ghs_{installation_id}_{self.minted}", expires_at=expires_at)
@@ -219,24 +220,26 @@ async def test_app_calls_go_to_the_manager_with_the_instance_key_and_repo_calls_
     client = await Github.get_client()
 
     assert await client.delete_branch("acme/app", "feature")
-    token, expires_at = await Github.issue_token("acme/app")
+    token, expires_at = await Github.issue_token(("acme/app",))
     assert await client.delete_branch("paulo/site", "feature")
     with pytest.raises(GitHubAppNotInstalledError, match="other/repo"):
         await client.delete_branch("other/repo", "feature")
 
-    assert token == "ghs_11_1"
+    # The box's token names its repo, so it is not the instance's token for the installation.
+    assert token == "ghs_11_2"
     assert expires_at > datetime.now(UTC)
     assert githubkit.clients == [
         (INSTANCE_KEY, CARD_URL),
         (TokenAuthStrategy("ghs_11_1"), GITHUB_API_URL),
         (INSTANCE_KEY, CARD_URL),
-        (TokenAuthStrategy("ghs_22_2"), GITHUB_API_URL),
+        (TokenAuthStrategy("ghs_22_3"), GITHUB_API_URL),
     ]
     assert githubkit.calls == [
         "GET repos/acme/app/installation",
         "POST app/installations/11/access_tokens",
         "DELETE repos/acme/app/git/heads/feature",
         "GET repos/acme/app/installation",
+        "POST app/installations/11/access_tokens ['app']",
         "GET repos/paulo/site/installation",
         "POST app/installations/22/access_tokens",
         "DELETE repos/paulo/site/git/heads/feature",
