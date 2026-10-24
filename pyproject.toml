@@ -118,7 +118,7 @@ ignore = ["SIM108"]
 # The seams that bind the registry, the author surface, and the author-style
 # entry points (tasks, subscribers, webhooks) read the ambient session.
 "backend/druks/database.py" = ["TID251"]
-"backend/druks/testing.py" = ["TID251"]
+"backend/druks/testing.py" = ["E402", "TID251"]  # E402: the plugin sets the environment before its druks imports
 "backend/druks/models.py" = ["TID251"]
 "backend/druks/durable/datastructures.py" = ["TID251"]
 "backend/druks/durable/engine.py" = ["TID251"]

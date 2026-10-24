@@ -222,7 +222,13 @@ function AppShell({
   })
   const registered = useMemo(() => {
     registerInstalledApps(rosterQuery.data)
-    return registeredApps().map((entry) => entry.name)
+    // A bundled UI registers at import; the roster says whether its app is installed.
+    const installed = new Set(
+      rosterQuery.data?.filter((entry) => !entry.builtin).map((entry) => entry.name),
+    )
+    return registeredApps()
+      .map((entry) => entry.name)
+      .filter((name) => installed.has(name))
   }, [rosterQuery.data])
   const accent = useMemo(() => appAccent(registered), [registered])
   const defaultApp = registered[0] ?? null

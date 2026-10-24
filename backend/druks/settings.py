@@ -113,6 +113,20 @@ class _TomlSource(TomlConfigSettingsSource):
                 )
         if "managed_by" in document:
             raise ValueError("druks.toml: managed_by is now the [manager] table.")
+        for name, table in document.get("apps", {}).items():
+            if set(table) - {"enabled"}:
+                raise ValueError(
+                    f"druks.toml: [apps.{name}] holds a key other than enabled. Remove it."
+                )
+        for section in ("apps", "services"):
+            for name, table in document.get(section, {}).items():
+                if not isinstance(table.get("enabled", True), bool):
+                    raise ValueError(f"druks.toml: {section}.{name}.enabled must be true or false.")
+        for slug, table in document.get("services", {}).items():
+            if not table.get("enabled", True) and set(table) - {"enabled"}:
+                raise ValueError(
+                    f"druks.toml: [services.{slug}] is disabled and holds a card field. Remove it."
+                )
         return document
 
 
@@ -297,8 +311,11 @@ class Settings(BaseSettings):
     sandbox: Sandbox = Sandbox()
     browser: Browser = Browser()
     providers: Providers = Providers()
-    # A [services.<slug>] table makes the card of that service managed. Each table holds
-    # its secrets as plain text, so no output shows the field.
+    # An [apps.<name>] table with enabled = false leaves that app out of this installation.
+    apps: dict[str, dict] = {}
+    # A [services.<slug>] table makes the card of that service managed, or leaves the
+    # service out of this installation when enabled = false. Each table holds its
+    # secrets as plain text, so no output shows the field.
     services: dict[str, dict] = Field(default={}, repr=False, exclude=True)
 
     # Encrypts stored secrets at rest. A missing or malformed key refuses boot;

@@ -169,6 +169,17 @@ describe('command center navigation', () => {
     ).toBe('page')
   })
 
+  it('leaves a bundled UI out of the rail when the roster does not list its app', async () => {
+    registerAppUI({
+      name: 'bundled',
+      routes: [{ path: '/bundled', render: () => <h1>Bundled home</h1> }],
+    })
+    renderApp()
+    const apps = await screen.findByRole('navigation', { name: 'Apps' })
+    await within(apps).findByRole('link', { name: 'External' })
+    expect(within(apps).queryByRole('link', { name: 'Bundled' })).toBeNull()
+  })
+
   it('opens installed generic and standalone apps', async () => {
     renderApp()
     fireEvent.click(await screen.findByRole('link', { name: 'Headless' }))

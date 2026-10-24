@@ -17,6 +17,15 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from uuid_utils import uuid7
 
+# Under pytest, druks IS the test instance. A Service class reads druks.toml when it is
+# defined, and the imports below define the core ones, so the file and the key come
+# first: an empty file, so the app under test never reads a druks.toml from the working
+# directory, and a key, so Settings builds without an operator's environment.
+with tempfile.NamedTemporaryFile(suffix=".toml", delete=False) as _settings_file:
+    _settings_path = Path(_settings_file.name)
+os.environ.setdefault("DRUKS_CONFIG", str(_settings_path))
+os.environ.setdefault("DRUKS_SECRETS_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
+
 import druks.browser.models  # noqa: F401
 import druks.durable.models  # noqa: F401
 import druks.files.models  # noqa: F401
@@ -108,27 +117,15 @@ class _ProductionRequest:
                 db_session.registry.set(previous)
 
 
-def pytest_configure(config) -> None:
-    """Put druks into test mode before collection imports anything. Importing this
-    module does nothing on its own — it loads in every pytest run in the environment,
-    including suites that never touch druks."""
+def pytest_load_initial_conftests(early_config, parser, args) -> None:
+    """Finish the test mode the module began at import, before collection imports
+    anything: the parts that need the pytest config or the test database."""
     global _discovery_error
 
-    # A Workflow resolves its declaring app at definition, so collection cannot
-    # import an app's workflows module before every installed package is claimed.
-    iter_apps()
-
-    # An empty file, so the app under test never reads a druks.toml from the
-    # working directory.
-    with tempfile.NamedTemporaryFile(suffix=".toml", delete=False) as settings_file:
-        settings_path = Path(settings_file.name)
-    os.environ.setdefault("DRUKS_CONFIG", str(settings_path))
-    config.add_cleanup(settings_path.unlink)
-    # Under pytest, druks IS the test instance. Infrastructure settings are read from
-    # the environment wherever they're needed — the app's Redis dialer among them — so
-    # overriding here keeps the code under test on the database and Redis the fixtures
-    # own.
-    os.environ.setdefault("DRUKS_SECRETS_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
+    early_config.add_cleanup(_settings_path.unlink)
+    # Infrastructure settings are read from the environment wherever they're needed — the
+    # app's Redis dialer among them — so overriding here keeps the code under test on the
+    # database and Redis the fixtures own.
     os.environ["DRUKS_DATABASE_URL"] = TEST_DATABASE_URL
     os.environ["DRUKS_REDIS_URL"] = TEST_REDIS_URL
     # App commits become savepoints inside the fixture's outer transaction, which

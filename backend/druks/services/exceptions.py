@@ -5,10 +5,21 @@ class ServiceNotConnectedError(DruksError):
     """No identity is connected for this service — the appliance has nothing to
     act as there. The message names the service so any refusal is actionable."""
 
-    def __init__(self, service: str) -> None:
+    def __init__(self, service: str, message: str = "") -> None:
         self.service = service
         super().__init__(
-            f"{service} is not connected — connect it in Settings → Connections → Services."
+            message
+            or f"{service} is not connected — connect it in Settings → Connections → Services."
+        )
+
+
+class ServiceDisabledError(ServiceNotConnectedError):
+    """druks.toml disables the service, so this installation has nothing to act as
+    there. A caller that copes with a missing identity copes with this the same way."""
+
+    def __init__(self, service: str) -> None:
+        super().__init__(
+            service, f"{service} is disabled by configuration. Remove [services.{service}]."
         )
 
 

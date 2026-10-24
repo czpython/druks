@@ -1,7 +1,11 @@
+import importlib
+import importlib.util
 from importlib.metadata import entry_points
 from typing import TYPE_CHECKING
 
 from druks.apps import App
+from druks.models import Base
+from druks.settings import load_settings
 
 from .exceptions import AppImportError, AppNotFound, MalformedApp
 
@@ -51,14 +55,26 @@ def resolve_workflow_app(module: str) -> str:
 
 
 def iter_apps() -> list[type[App]]:
-    """Every installed app, resolved from the ``druks.apps`` entry points.
-    Loading an entry point imports the app's class. An app that fails to
-    import, resolves to a non-``App``, or collides on ``name`` raises — there
-    is no per-app fault tolerance yet (deferred until a real external app
-    exists)."""
+    """Every installed app that druks.toml leaves enabled, resolved from the
+    ``druks.apps`` entry points. A disabled entry point never loads, so nothing it
+    declares registers; a table that names no entry point raises. Loading an entry
+    point imports the app's class. An app that fails to import, resolves to a
+    non-``App``, or collides on ``name`` raises — there is no per-app fault
+    tolerance yet (deferred until a real external app exists)."""
+    tables = load_settings().apps
+    entries = entry_points(group=_GROUP)
+    for name in tables:
+        if name not in entries.names:
+            raise AppNotFound(
+                f"druks.toml configures the app {name!r}, and no installed package "
+                f"provides it. Remove [apps.{name}]."
+            )
+    disabled = {name for name, table in tables.items() if not table.get("enabled", True)}
     apps: list[type[App]] = []
     seen: set[str] = set()
-    for entry in entry_points(group=_GROUP):
+    for entry in entries:
+        if entry.name in disabled:
+            continue
         app = entry.load()
         if not (isinstance(app, type) and issubclass(app, App)):
             raise TypeError(f"app entry point {entry.name!r} is not an App")
@@ -143,8 +159,6 @@ def _load_entry(entry: "EntryPoint") -> type[App]:
     target module or attribute is ``MalformedApp`` (bad metadata); the
     target module existing but raising on import is ``AppImportError`` (the
     app's code) — the two the caller's taxonomy must tell apart."""
-    import importlib
-
     try:
         module = importlib.import_module(entry.module)
     except ModuleNotFoundError as error:
@@ -177,8 +191,6 @@ def _load_entry(entry: "EntryPoint") -> type[App]:
 def _tables_declared_in(package: str) -> set[str]:
     # A table belongs to whoever declared its model, not to whoever happened to import
     # it first: an app entry module pulls its own models in, and a sibling's.
-    from druks.models import Base
-
     return {
         mapper.local_table.name
         for mapper in Base.registry.mappers
@@ -194,9 +206,6 @@ def import_app_models(only: type[App] | None = None) -> None:
     ``<name>_`` prefix — the platform scopes its migrations by that prefix, so an
     unprefixed table would be invisible to them and fails the load instead. Builtin
     apps are exempt: their schema is core's."""
-    import importlib
-    import importlib.util
-
     apps = [only] if only else iter_apps()
     for app in apps:
         name = f"{app.package}.models"

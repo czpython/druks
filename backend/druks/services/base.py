@@ -22,6 +22,7 @@ from druks.settings import load_settings
 from .exceptions import (
     OauthExchangeError,
     ServiceConnectError,
+    ServiceDisabledError,
     ServiceManagedError,
     ServiceNotConnectedError,
 )
@@ -241,7 +242,8 @@ class Service:
             if isinstance(value, type) and issubclass(value, Resource):
                 value.service = cls
                 cls.resources[value.slug] = value
-        services.register(cls)
+        if cls.is_enabled():
+            services.register(cls)
 
     @classmethod
     async def verify(cls, settings: Any) -> dict[str, Any]:
@@ -274,12 +276,21 @@ class Service:
 
     @classmethod
     async def get(cls) -> VaultSecret:
-        """The service's vault row, or ServiceNotConnectedError."""
+        """The service's vault row. ``ServiceDisabledError`` when druks.toml disables the
+        service, ``ServiceNotConnectedError`` when nobody connected it."""
+        if cls.slug not in services:
+            raise ServiceDisabledError(cls.slug)
         if row := await VaultSecret.lookup(
             db_session(), cls.secret_kind, Audience.service(cls.slug)
         ):
             return row
         raise ServiceNotConnectedError(cls.slug)
+
+    @classmethod
+    def is_enabled(cls) -> bool:
+        """Whether druks.toml leaves this service in the installation. A disabled
+        service never registers."""
+        return load_settings().services.get(cls.slug, {}).get("enabled", True)
 
     @classmethod
     def is_configured(cls) -> bool:
@@ -299,7 +310,7 @@ class Service:
         for slug in undeclared:
             logger.info("No installed app declares the managed service %r. Druks ignores it.", slug)
         for slug, entry in configuration.services.items():
-            if slug in undeclared:
+            if slug in undeclared or not entry.get("enabled", True):
                 continue
             service = services.get(slug)
             if not service:
@@ -366,9 +377,9 @@ class Service:
     def with_scopes(cls, *scopes: str) -> ScopedService:
         """Declare this app's use of the service and the scopes its
         calls need."""
-        if not cls.token_endpoint:
-            raise TypeError(f"{cls.__name__} declares no OAuth endpoints")
-        return ScopedService(cls, scopes)
+        if cls.token_endpoint:
+            return ScopedService(cls, scopes)
+        raise TypeError(f"{cls.__name__} declares no OAuth endpoints")
 
     @classmethod
     async def list_for_account(cls, account_id: str) -> list[Connection]:
@@ -423,17 +434,17 @@ class Service:
         token, and its scopes. Override for a provider that shapes the answer
         differently. A grant whose refresh token is empty is one access token that
         never expires."""
-        if not tokens.get("refresh_token"):
-            raise OauthExchangeError(
-                cls.slug,
-                "the authorization server granted no refresh token; druks needs offline access",
-                context={},
-            )
-        return {
-            "access_token": tokens["access_token"],
-            "refresh_token": tokens["refresh_token"],
-            "scopes": tokens.get("scope", "").split(),
-        }
+        if tokens.get("refresh_token"):
+            return {
+                "access_token": tokens["access_token"],
+                "refresh_token": tokens["refresh_token"],
+                "scopes": tokens.get("scope", "").split(),
+            }
+        raise OauthExchangeError(
+            cls.slug,
+            "the authorization server granted no refresh token; druks needs offline access",
+            context={},
+        )
 
     @classmethod
     def is_grant_revoked(cls, status: int, tokens: dict[str, Any]) -> bool:
@@ -526,12 +537,11 @@ class Service:
         previous_client_id = card.identity.get("client_id") if card else None
         pasted = dict(card.secrets) if card else {}
         for name, value in payload.items():
-            if name not in fields:
-                continue
-            if field_kind(fields[name]) != "secret":
-                value = value.strip()
-            if value:
-                pasted[name] = value
+            if name in fields:
+                if field_kind(fields[name]) != "secret":
+                    value = value.strip()
+                if value:
+                    pasted[name] = value
         try:
             settings = cls.settings_model.model_validate(pasted)
         except ValidationError as error:
