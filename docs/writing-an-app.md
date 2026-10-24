@@ -1582,6 +1582,21 @@ variable is the service slug and `API_TOKEN`, in upper case. On requests to
 `host`, the secrets proxy replaces the placeholder with the token. A sandbox can
 hold only one resource of each service.
 
+Druks asks the service for each token that a sandbox fetches from the row of the
+service:
+
+```python
+@classmethod
+async def issue_token(cls, resource: str = "", *, name: str = "") -> tuple[str, datetime | None]:
+```
+
+The base answers a resource recipe when `resource` names one, a pasted field
+when `name` is the service slug and the field name, and the one secret of the
+row under any other name. Override `issue_token` when the row holds a
+credential that no sandbox must get, and return the token and its expiry.
+Raise `MissingSecretError` when the row cannot give a token until a person
+acts.
+
 ## Connect provider accounts (OAuth)
 
 Declare the OAuth endpoints on the service that holds the client

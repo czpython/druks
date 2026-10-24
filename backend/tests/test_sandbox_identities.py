@@ -394,7 +394,7 @@ async def test_the_issuer_answers_github_through_the_stored_service_and_repo(
     asked: list[str] = []
     values = iter(("ghs_one", "ghs_two"))
 
-    async def issue_token(resource: str) -> tuple[str, datetime]:
+    async def issue_token(resource, *, name):
         asked.append(resource)
         return next(values), expiry
 
@@ -422,7 +422,7 @@ async def test_a_disconnected_service_ends_its_secrets(druks_db, tmp_path):
 
 
 async def test_the_issuer_answers_503_when_github_refuses(druks_db, tmp_path, monkeypatch):
-    async def issue_token(resource: str) -> tuple[str, datetime]:
+    async def issue_token(resource, *, name):
         raise RuntimeError("app not installed on acme/widgets")
 
     monkeypatch.setattr(Github, "issue_token", issue_token)

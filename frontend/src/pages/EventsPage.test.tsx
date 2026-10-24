@@ -399,18 +399,18 @@ it('groups consecutive rows by the account day across daylight saving and pagina
   settings.mockResolvedValue({ timezone: 'Europe/Madrid', gateParkDestinationId: null, isTagRequired: false })
   history.mockImplementation(async (params) => params?.before
     ? { items: [
-      { ...result, id: 'event:8', seq: 8, at: '2026-10-25T00:30:00Z' },
-      { ...result, id: 'event:7', seq: 7, at: '2026-10-24T21:30:00Z' },
+      { ...result, id: 'event:8', seq: 8, at: '2025-10-26T00:30:00Z' },
+      { ...result, id: 'event:7', seq: 7, at: '2025-10-25T21:30:00Z' },
     ], cursor: '10:20:10', nextCursor: null }
     : { items: [
-      { ...result, at: '2026-10-25T23:30:00Z' },
-      { ...result, id: 'event:9', seq: 9, at: '2026-10-25T01:30:00Z' },
+      { ...result, at: '2025-10-26T23:30:00Z' },
+      { ...result, id: 'event:9', seq: 9, at: '2025-10-26T01:30:00Z' },
     ], cursor: '10:20:10', nextCursor: '9' })
   mount()
-  await screen.findByRole('heading', { name: '26 October 2026' })
+  await screen.findByRole('heading', { name: '27 October 2025' })
   fireEvent.click(screen.getByRole('button', { name: 'Load older activity' }))
-  await screen.findByRole('heading', { name: '24 October 2026' })
-  expect(screen.getAllByRole('heading', { name: '25 October 2026' })).toHaveLength(1)
+  await screen.findByRole('heading', { name: '25 October 2025' })
+  expect(screen.getAllByRole('heading', { name: '26 October 2025' })).toHaveLength(1)
   expect(screen.getAllByText('02:30')).toHaveLength(2)
   expect(screen.getByText('00:30')).toBeTruthy()
   expect(screen.getByText('23:30')).toBeTruthy()

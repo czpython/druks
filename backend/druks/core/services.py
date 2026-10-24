@@ -135,8 +135,14 @@ class Github(Service):
         row.identity = {**row.identity, "installations": list(accounts)}
 
     @classmethod
-    async def issue_token(cls, resource: str) -> tuple[str, datetime]:
-        """The installation token for the repo, and the expiry GitHub gave it."""
+    async def issue_token(
+        cls, resource: str = "", *, name: str = ""
+    ) -> tuple[str, datetime | None]:
+        """The installation token for the repo that ``resource`` names, and its expiry."""
+        if not resource:
+            raise MissingSecretError(
+                "GitHub issues a token for one repository. This entry names none."
+            )
         try:
             return await (await cls.get_client()).token_for_repo(resource)
         except GitHubAppNotInstalledError as error:
