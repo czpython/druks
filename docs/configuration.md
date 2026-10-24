@@ -41,7 +41,8 @@ host-run development template for that environment plane.
 | --- | --- |
 | `[identity]` | Browser identity mode and header or JWT verification inputs |
 | `[urls]` | Dashboard callback base URL and public webhook hostname |
-| `[services.<slug>]` | Service credentials managed by deployment configuration |
+| `[apps.<name>]` | An app switched off in this installation |
+| `[services.<slug>]` | Service credentials managed by deployment configuration, or a service switched off |
 | `[paths]` | Host data and harness configuration paths |
 | `[sandbox]` | Drukbox provider, service URL, image override, registry host and user name, and the proxy and issuer addresses |
 | `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
@@ -136,6 +137,39 @@ names an unknown service or holds an invalid field. Each managed card shows
 Druks reads the tables at startup, so restart Druks after a change. When you
 remove a table, the card keeps its credentials, and you can change it on the
 Services page again.
+
+## Disabled apps and services
+
+One Druks image serves installations with different purposes. A platform that
+writes `druks.toml` itself switches an app or a service off for one
+installation. The installer refuses these tables, as it refuses
+`[services.<slug>]`.
+
+```toml
+[apps.software_factory]
+enabled = false
+
+[services.jira]
+enabled = false
+```
+
+`enabled` defaults to true. A disabled app or service does not exist in this
+installation. Druks does not load a disabled app, so its pages, its settings,
+and the services it declares are absent. A disabled service is absent from the
+Services page and from `druks doctor`. An app that uses it fails as it fails
+when nobody connected the service. Nothing changes stored data: the card and
+the sign-ins of a disabled service stay in the vault, and the runs of a disabled
+app stay as they are.
+
+Druks does not start when:
+
+- `[apps.<name>]` names an app that no installed package provides.
+- `[apps.<name>]` holds a key other than `enabled`.
+- `enabled` is not a boolean, in either table.
+- `[services.<slug>]` sets `enabled = false` and holds a card field.
+
+Generate migrations with every app enabled. With an app disabled,
+`makemigrations` proposes to drop its tables.
 
 ## Personal and installation settings
 
