@@ -6,7 +6,7 @@
  */
 
 import { getJSON, subjectApi } from '../../api/client'
-import type { SubjectResponse, SubjectRow, SubjectSummary } from '../../api/types'
+import type { SubjectResponse, SubjectSummary } from '../../api/types'
 
 // Software Factory's identity on the platform: the name that keys its ``/api/software_factory`` namespace
 // and the subject type its runs are about. The only place these literals live — the
@@ -14,11 +14,11 @@ import type { SubjectResponse, SubjectRow, SubjectSummary } from '../../api/type
 export const SOFTWARE_FACTORY = 'software_factory'
 export const WORK_ITEM = 'work_item'
 export const PROJECT_REPO = 'project_repo'
+export const PULL_REQUEST = 'pull_request'
 
 // build's read-side, specialised from the platform's generic subject endpoints.
 export const buildApi = {
   workItem: (id: number) => subjectApi.read<WorkItemSummary>(SOFTWARE_FACTORY, WORK_ITEM, id),
-  boardStreamUrl: () => subjectApi.boardStream(SOFTWARE_FACTORY, WORK_ITEM),
   subjectStreamUrl: (id: number) => subjectApi.stream(SOFTWARE_FACTORY, WORK_ITEM, id),
   transcriptBase: (callId: string) => subjectApi.transcriptBase(SOFTWARE_FACTORY, callId),
   transcriptFiles: (callId: string) => subjectApi.transcriptFiles(SOFTWARE_FACTORY, callId),
@@ -66,9 +66,8 @@ export interface DashboardItem {
   updatedAt: string
 }
 
-// Build's concrete subject views — the platform's generic board row and timeline
-// read, specialised to build's work-item summary.
-export type WorkItemRow = SubjectRow<WorkItemSummary>
+// Build's concrete subject view — the platform's generic timeline read, specialised
+// to build's work-item summary.
 export type WorkItemDetail = SubjectResponse<WorkItemSummary>
 
 // --- History endpoints (dedicated, not piggy-backed on /api/dashboard) ----
