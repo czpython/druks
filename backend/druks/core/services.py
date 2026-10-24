@@ -24,7 +24,7 @@ from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
-from druks.services import Service, ServiceConnectError
+from druks.services import Oauth, PrivateKey, Service, ServiceConnectError
 from druks.services.exceptions import OauthExchangeError, ServiceNotConnectedError
 from druks.settings import load_settings
 
@@ -33,57 +33,25 @@ logger = logging.getLogger(__name__)
 _VERIFY_TIMEOUT = 10.0
 
 
-class Github(Service):
-    """The GitHub App that Druks acts as, and that people sign in to Druks through. A
-    person's sign-in through it links their GitHub account to their Druks account."""
+class GithubApp(Service):
+    """A GitHub App that Druks acts as. Its private key mints an installation token per
+    repo, and GitHub's page for the App installs it."""
 
-    secret_kind = SecretKind.APP_KEY
+    abstract = True
     # Drukbox knows this host: a token for it reaches git and gh.
     host = "github.com"
-    description = (
-        "The GitHub App druks acts as. Create it from here, or paste an existing "
-        "App's credentials from the GitHub developer settings page."
-    )
-    authorization_endpoint = "https://github.com/login/oauth/authorize"
-    token_endpoint = "https://github.com/login/oauth/access_token"
-    mcp_host = "api.githubcopilot.com"
-    # A fresh sign-in by the same GitHub user updates their row.
-    identity_key = "subject"
-    # What the created App is: the single operator identity documented in
-    # docs/configuration.md — keep the two in step. The manifest flow adds the
-    # appliance's own URLs before handing it to GitHub.
-    manifest = {
-        "name": "druks",
-        "description": "Druks operator — receives webhooks, writes branches, PRs, and comments.",
-        "public": False,
-        "default_events": [
-            "issue_comment",
-            "issues",
-            "pull_request",
-            "pull_request_review",
-            "pull_request_review_comment",
-            "push",
-        ],
-        "default_permissions": {
-            "metadata": "read",
-            "contents": "write",
-            # Generating a repo from a template is Administration, not Contents.
-            "administration": "write",
-            "pull_requests": "write",
-            "issues": "write",
-            "checks": "read",
-            "statuses": "read",
-        },
-    }
+
+    class Integration(PrivateKey):
+        @classmethod
+        async def get_install_endpoint(cls) -> str:
+            slug = (await cls.service.get()).identity["slug"]
+            return f"https://github.com/apps/{quote(slug, safe='')}/installations/new"
 
     class Settings(BaseModel):
         app_id: str = Field(title="App ID")
-        client_id: str = Field(title="Client ID")
-        client_secret: SecretStr = Field(title="Client secret")
         private_key: SecretStr = Field(
             title="Private key (PEM)", json_schema_extra={"multiline": True}
         )
-        webhook_secret: SecretStr = Field(title="Webhook secret")
 
     @classmethod
     def get_manifest(cls, *, endpoint: str, webhook_base: str) -> dict[str, Any]:
@@ -92,8 +60,6 @@ class Github(Service):
             **cls.manifest,
             "url": endpoint,
             "redirect_url": f"{endpoint}{cls.get_create_url()}/callback",
-            "callback_urls": [f"{endpoint}/api/oauth/callback"],
-            "hook_attributes": {"url": f"{webhook_base}/_external/github/events/", "active": True},
         }
 
     @classmethod
@@ -124,12 +90,7 @@ class Github(Service):
         )
 
     @classmethod
-    async def get_install_endpoint(cls) -> str:
-        slug = (await cls.get()).identity["slug"]
-        return f"https://github.com/apps/{quote(slug, safe='')}/installations/new"
-
-    @classmethod
-    async def complete_install(cls, tokens: dict[str, Any]) -> None:
+    async def complete_install(cls, grant: VaultSecret | None) -> None:
         accounts = await (await cls.get_client()).list_installation_accounts(cached=False)
         row = await cls.get()
         row.identity = {**row.identity, "installations": list(accounts)}
@@ -147,6 +108,66 @@ class Github(Service):
             return await (await cls.get_client()).token_for_repo(resource)
         except GitHubAppNotInstalledError as error:
             raise MissingSecretError(str(error)) from error
+
+
+class Github(GithubApp):
+    """The GitHub App that Druks acts as, and that people sign in to Druks through. A
+    person's sign-in through it links their GitHub account to their Druks account."""
+
+    description = (
+        "The GitHub App druks acts as. Create it from here, or paste an existing "
+        "App's credentials from the GitHub developer settings page."
+    )
+    mcp_host = "api.githubcopilot.com"
+
+    class Integration(GithubApp.Integration):
+        authorization_endpoint = "https://github.com/login/oauth/authorize"
+        token_endpoint = "https://github.com/login/oauth/access_token"
+        # A fresh sign-in by the same GitHub user updates their row.
+        identity_key = "subject"
+
+    # What the created App is: the single operator identity documented in
+    # docs/configuration.md — keep the two in step. The manifest flow adds the
+    # appliance's own URLs before handing it to GitHub.
+    manifest = {
+        "name": "druks",
+        "description": "Druks operator — receives webhooks, writes branches, PRs, and comments.",
+        "public": False,
+        # GitHub sends the installer back through the sign-in door with a code.
+        "request_oauth_on_install": True,
+        "default_events": [
+            "issue_comment",
+            "issues",
+            "pull_request",
+            "pull_request_review",
+            "pull_request_review_comment",
+            "push",
+        ],
+        "default_permissions": {
+            "metadata": "read",
+            "contents": "write",
+            # Generating a repo from a template is Administration, not Contents.
+            "administration": "write",
+            "pull_requests": "write",
+            "issues": "write",
+            "checks": "read",
+            "statuses": "read",
+        },
+    }
+
+    class Settings(GithubApp.Settings):
+        client_id: str = Field(title="Client ID")
+        client_secret: SecretStr = Field(title="Client secret")
+        webhook_secret: SecretStr = Field(title="Webhook secret")
+
+    @classmethod
+    def get_manifest(cls, *, endpoint: str, webhook_base: str) -> dict[str, Any]:
+        """The App to create: it also takes sign-ins and webhooks."""
+        return {
+            **super().get_manifest(endpoint=endpoint, webhook_base=webhook_base),
+            "callback_urls": [f"{endpoint}/api/oauth/callback"],
+            "hook_attributes": {"url": f"{webhook_base}/_external/github/events/", "active": True},
+        }
 
     @classmethod
     def is_grant_revoked(cls, status: int, tokens: dict[str, Any]) -> bool:
@@ -246,13 +267,15 @@ class Jira(Service):
 class Slack(Service):
     description = "The Slack app that Druks answers as, in one workspace."
     required = False
-    authorization_endpoint = "https://slack.com/oauth/v2/authorize"
-    token_endpoint = "https://slack.com/api/oauth.v2.access"
-    # Slack issues a person's token only with a scope. This one reads the identity.
-    identity_scopes = ("users:read",)
-    # A fresh sign-in by the same Slack user updates their row.
-    identity_key = "subject"
-    actor_token_name = "bot_token"
+
+    class Integration(Oauth):
+        authorization_endpoint = "https://slack.com/oauth/v2/authorize"
+        token_endpoint = "https://slack.com/api/oauth.v2.access"
+        # Slack issues a person's token only with a scope. This one reads the identity.
+        identity_scopes = ("users:read",)
+        # A fresh sign-in by the same Slack user updates their row.
+        identity_key = "subject"
+        install_params = {"scope": ",".join(SLACK_BOT_SCOPES)}
 
     class Settings(BaseModel):
         client_id: str = Field(title="Client ID")
@@ -273,20 +296,19 @@ class Slack(Service):
         return bot
 
     @classmethod
-    async def get_install_endpoint(cls) -> str:
-        # A self-hosted operator pastes the bot token instead.
-        return cls.authorization_endpoint if cls.is_managed() else ""
-
-    @classmethod
-    def get_install_params(cls) -> dict[str, str]:
-        return {"scope": ",".join(SLACK_BOT_SCOPES)}
-
-    @classmethod
-    async def complete_install(cls, tokens: dict[str, Any]) -> None:
+    def read_install(cls, tokens: dict[str, Any]) -> dict[str, Any]:
+        """The bot token is the install's grant. Slack rotates no token, so it never expires."""
         cls._check_answer(tokens)
-        bot_token = tokens["access_token"]
+        return {
+            "access_token": tokens["access_token"],
+            "refresh_token": "",
+            "scopes": tokens["scope"].split(",") if tokens.get("scope") else [],
+        }
+
+    @classmethod
+    async def complete_install(cls, grant: VaultSecret) -> None:
         try:
-            bot = await cls._get_bot_info(bot_token)
+            bot = await cls._get_bot_info(grant.secrets["access_token"])
         except SlackApiError as error:
             raise OauthExchangeError(
                 cls.slug,
@@ -294,8 +316,14 @@ class Slack(Service):
                 context={},
             ) from error
         row = await cls.get()
-        row.secrets = {**row.secrets, cls.actor_token_name: bot_token}
         row.identity = {**row.identity, **bot}
+
+    @classmethod
+    async def get_bot_token(cls) -> str:
+        """The installed app's bot token, or the pasted one."""
+        if await cls.get_grant():
+            return await cls.get_access_token()
+        return (await cls.get()).secrets["bot_token"]
 
     @classmethod
     async def get_identity(cls, access_token: str) -> dict[str, Any]:

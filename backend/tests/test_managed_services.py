@@ -9,7 +9,7 @@ from druks.apps.registry import webhooks
 from druks.chat.channels.whatsapp.services import Waha
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
-from druks.services import Service
+from druks.services import Oauth, Service
 from druks.services.exceptions import ServiceConnectError, ServiceManagedError
 from druks.settings import Settings
 from druks.testing import asgi_client, configure_app_for_test
@@ -130,8 +130,9 @@ async def test_a_configured_service_keeps_its_own_verifier_and_oauth_client(
     declared_services, declared_webhooks, configuration, secrets, druks_db, tmp_path
 ):
     class Acme(Service):
-        authorization_endpoint = "https://acme.test/authorize"
-        token_endpoint = "https://acme.test/token"
+        class Integration(Oauth):
+            authorization_endpoint = "https://acme.test/authorize"
+            token_endpoint = "https://acme.test/token"
 
         class Settings(BaseModel):
             client_id: str

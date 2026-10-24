@@ -244,13 +244,15 @@ async def test_slack_waits_for_its_install_and_keeps_it_across_a_restart(
     [token_request] = manager.requests
     assert token_request.headers["Authorization"] == f"Bearer {MANAGER_TOKEN}"
     db_session().expunge_all()
-    assert not await VaultSecret.list_connections(db_session(), Audience.service("slack"))
+    [grant] = await VaultSecret.list_connections(db_session(), Audience.service("slack"))
+    assert grant.account_id is None and grant.secrets["access_token"] == BOT_TOKEN
 
     await Service.sync_configuration(db_session())
 
     row = await Slack.get()
-    assert (row.identity, row.secrets) == (FACTS_AFTER_INSTALL, {"bot_token": BOT_TOKEN})
+    assert (row.identity, row.secrets) == (FACTS_AFTER_INSTALL, {})
     assert await Slack.is_connected()
+    assert await Slack.get_bot_token() == BOT_TOKEN
     assert slack == [(BOT_TOKEN, "auth.test", {})]
 
 

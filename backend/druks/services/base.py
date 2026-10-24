@@ -26,12 +26,24 @@ from .exceptions import (
     ServiceManagedError,
     ServiceNotConnectedError,
 )
+from .integrations import BaseIntegration, Oauth
 from .oauth import OauthClient, fetch_identity, is_grant_revoked
 from .resources import Resource
 
 logger = logging.getLogger(__name__)
 
 # GoogleCalendar -> google_calendar, HTTPServer -> http_server.
+_OAUTH_FACTS = frozenset(
+    {
+        "authorization_endpoint",
+        "token_endpoint",
+        "basic_auth",
+        "extra_authorize_params",
+        "identity_endpoint",
+        "identity_scopes",
+        "identity_key",
+    }
+)
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
@@ -152,8 +164,9 @@ class Service:
     description: ClassVar[str] = ""
     # Whether doctor fails when this service is not connected.
     required: ClassVar[bool] = True
-    # What the connected credential is in the vault: a pasted value, or an
-    # App key that issues tokens.
+    # The service's app at the provider, when it has one: an ``Oauth`` or an ``PrivateKey``.
+    # The OAuth facts below and ``secret_kind`` follow it.
+    Integration: ClassVar[type[BaseIntegration] | None] = None
     secret_kind: ClassVar[SecretKind] = SecretKind.STATIC
     # True marks a shared provider base. It never registers; its subclasses do.
     abstract: ClassVar[bool] = False
@@ -167,29 +180,17 @@ class Service:
     # The host of the MCP server that this identity also signs in to. That
     # server uses the service's credential instead of registering its own client.
     mcp_host: ClassVar[str] = ""
-    # If the registered app is an OAuth client, set both endpoints.
+    # The OAuth facts of ``Integration``, copied here for their readers.
     authorization_endpoint: ClassVar[str] = ""
     token_endpoint: ClassVar[str] = ""
-    # HTTP Basic on the token endpoint; False sends the secret in the body.
     basic_auth: ClassVar[bool] = False
-    # The provider's consent-query quirks — Google grants a refresh token
-    # only with access_type=offline and prompt=consent.
     extra_authorize_params: ClassVar[dict[str, str]] = {}
-    # The endpoint that returns the signed-in account's facts;
-    # identity_scopes join the consent ask.
     identity_endpoint: ClassVar[str] = ""
     identity_scopes: ClassVar[tuple[str, ...]] = ()
-    # The identity fact that names the provider account — "sub" for Google,
-    # "subject" for GitHub. When set, a fresh sign-in that matches an existing
-    # connection for the same owner updates that row; a revoked row becomes
-    # live again. When empty, each fresh sign-in creates a new connection.
     identity_key: ClassVar[str] = ""
     # The app that the create page registers at the provider. A service with one
     # offers that page on its card; without one, the person pastes credentials.
     manifest: ClassVar[dict[str, Any]] = {}
-    # The install stores the actor's token under this name. The service is connected only
-    # when its row holds it.
-    actor_token_name: ClassVar[str] = ""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -222,18 +223,36 @@ class Service:
         declared = getattr(cls, "Settings", None)
         if not isinstance(declared, type) or not issubclass(declared, BaseModel):
             raise TypeError(f"{cls.__name__}.Settings must be a pydantic model")
-        if bool(cls.authorization_endpoint) != bool(cls.token_endpoint):
-            raise TypeError(f"{cls.__name__} must declare both OAuth endpoints or neither")
-        if cls.token_endpoint and not {"client_id", "client_secret"} <= set(declared.model_fields):
-            raise TypeError(
-                f"{cls.__name__}.Settings must declare client_id and client_secret "
-                "fields — get_oauth_client() reads the OAuth client from them"
-            )
+        if _OAUTH_FACTS & set(cls.__dict__):
+            raise TypeError(f"{cls.__name__} declares OAuth facts. Declare them in Integration.")
+        integration = cls.Integration
+        if integration is not None:
+            if not (isinstance(integration, type) and issubclass(integration, BaseIntegration)):
+                raise TypeError(f"{cls.__name__}.Integration must subclass Oauth or PrivateKey")
+            has_oauth = bool(integration.token_endpoint)
+            if bool(integration.authorization_endpoint) != has_oauth or (
+                issubclass(integration, Oauth) and not has_oauth
+            ):
+                raise TypeError(
+                    f"{cls.__name__}.Integration must declare both OAuth endpoints: an Oauth "
+                    "always, a PrivateKey when people sign in through it"
+                )
+            if integration.token_endpoint and not {"client_id", "client_secret"} <= set(
+                declared.model_fields
+            ):
+                raise TypeError(
+                    f"{cls.__name__}.Settings must declare client_id and client_secret "
+                    "fields — get_oauth_client() reads the OAuth client from them"
+                )
+            integration.service = cls
+            for name in _OAUTH_FACTS:
+                setattr(cls, name, getattr(integration, name))
         # A registered service is concrete even under an abstract base.
         cls.abstract = False
         cls.slug = slug
         cls.title = slug.replace("_", " ").title()
         cls.settings_model = declared
+        cls.secret_kind = integration.secret_kind if integration else SecretKind.STATIC
         cls.fields = SimpleNamespace(
             **{name: ServiceField(cls, name) for name in declared.model_fields}
         )
@@ -303,6 +322,22 @@ class Service:
         return cls.slug in load_settings().manager.services
 
     @classmethod
+    async def get_grant(cls) -> VaultSecret | None:
+        """The installed app's grant: the service's own OAuth connection."""
+        grants = await VaultSecret.list_account_connections(
+            db_session(), Audience.service(cls.slug), None
+        )
+        return grants[-1] if grants else None
+
+    @classmethod
+    async def get_access_token(cls) -> str:
+        """The access token of the installed app's grant."""
+        grant = await cls.get_grant()
+        if not grant:
+            raise ServiceNotConnectedError(cls.slug)
+        return await Connection(cls, grant).get_access_token()
+
+    @classmethod
     async def sync_configuration(cls, session: AsyncSession) -> None:
         """Store each service that druks.toml configures as its card."""
         configuration = load_settings()
@@ -343,14 +378,11 @@ class Service:
                 ) from None
             row = await VaultSecret.lookup(session, service.secret_kind, Audience.service(slug))
             facts = row.identity if row else {}
-            kept_secrets = {}
-            if row and service.actor_token_name in row.secrets:
-                kept_secrets = {service.actor_token_name: row.secrets[service.actor_token_name]}
             await service._store(
                 session,
                 settings,
                 proven_facts={name: value for name, value in facts.items() if name not in entry},
-                kept_secrets=kept_secrets,
+                kept_secrets={},
             )
 
     @classmethod
@@ -482,15 +514,40 @@ class Service:
         )
 
     @classmethod
-    async def get_install_endpoint(cls) -> str:
-        return ""
+    def read_install(cls, tokens: dict[str, Any]) -> dict[str, Any]:
+        """The grant in the install's token answer. Without a refresh token it is one access
+        token that never expires."""
+        return {
+            "access_token": tokens["access_token"],
+            "refresh_token": tokens.get("refresh_token", ""),
+            "scopes": tokens.get("scope", "").split(),
+        }
 
     @classmethod
-    def get_install_params(cls) -> dict[str, str]:
-        return {}
+    async def install(cls, session: AsyncSession, tokens: dict[str, Any]) -> VaultSecret | None:
+        """Keep the installed app's grant in place of the previous install's, then record
+        what the install proves. An ``PrivateKey`` keeps no grant."""
+        grant = None
+        if cls.Integration.stores_grant:
+            installed = cls.read_install(tokens)
+            audience = Audience.service(cls.slug)
+            client = OauthClient(provider=cls.slug)
+            for previous in await VaultSecret.list_account_connections(session, audience, None):
+                await client.disconnect(previous, reason="reinstalled")
+            refresh_token = installed["refresh_token"]
+            grant = await VaultSecret.connect(
+                session,
+                audience,
+                account_id=None,
+                refresh_token=refresh_token,
+                scopes=installed["scopes"],
+                secrets={} if refresh_token else {"access_token": installed["access_token"]},
+            )
+        await cls.complete_install(grant)
+        return grant
 
     @classmethod
-    async def complete_install(cls, tokens: dict[str, Any]) -> None:
+    async def complete_install(cls, grant: VaultSecret | None) -> None:
         pass
 
     @classmethod
@@ -519,9 +576,16 @@ class Service:
     @classmethod
     async def is_connected(cls) -> bool:
         row = await VaultSecret.lookup(db_session(), cls.secret_kind, Audience.service(cls.slug))
-        if row and cls.actor_token_name:
-            return cls.actor_token_name in row.secrets
-        return bool(row)
+        if not row:
+            return False
+        if not cls.Integration or not cls.Integration.stores_grant:
+            return True
+        if await cls.get_grant():
+            return True
+        # A manager's entry holds no secret, so the install's grant connects the service.
+        # A self-hosted paste holds every secret, the token the install would grant too.
+        fields = cls.settings_model.model_fields.items()
+        return all(name in row.secrets for name, field in fields if field_kind(field) == "secret")
 
     @classmethod
     async def connect(cls, payload: dict[str, str]) -> VaultSecret:

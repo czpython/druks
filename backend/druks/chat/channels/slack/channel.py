@@ -100,7 +100,7 @@ class SlackChannel(Channel):
             thread_id=get_thread_id(message),
             is_tag_required=account.is_tag_required,
         )
-        client = SlackClient(token=card.secrets["bot_token"])
+        client = SlackClient(token=await Slack.get_bot_token())
         shares = message.get("files", [])
         # Every download first: a failed one then leaves no file on disk.
         contents = [await client.download(shared["url_private_download"]) for shared in shares]
@@ -140,7 +140,7 @@ class SlackChannel(Channel):
             LINK_KEY.format(token=token), json.dumps(message), ex=LINK_TTL_SECONDS
         )
         endpoint = load_settings().urls.endpoint.rstrip("/")
-        client = SlackClient(token=card.secrets["bot_token"])
+        client = SlackClient(token=await Slack.get_bot_token())
         # Slack drops a message that only one person sees unless they are active in
         # that client, so the link goes to their DM, which keeps it.
         await client.post_markdown(
@@ -159,7 +159,7 @@ class SlackChannel(Channel):
     ) -> None:
         """Post the reply where the conversation lives, in pieces that fit a markdown
         block. The first piece's Slack id is the reply's source id."""
-        client = SlackClient(token=conversation.connection.secrets["bot_token"])
+        client = SlackClient(token=await Slack.get_bot_token())
         room, _, thread_ts = conversation.thread_id.partition(":")
         posted = [
             await client.post_markdown(
@@ -177,7 +177,7 @@ class SlackChannel(Channel):
         cls, session: AsyncSession, conversation: Conversation, message: Message
     ) -> None:
         """React to the person's message."""
-        client = SlackClient(token=conversation.connection.secrets["bot_token"])
+        client = SlackClient(token=await Slack.get_bot_token())
         room, ts = message.source_id.split(":")[:2]
         try:
             await client.reactions_add(channel=room, timestamp=ts, name=cls.reaction_ack)
@@ -196,7 +196,7 @@ class SlackChannel(Channel):
         room, _, thread_ts = conversation.thread_id.partition(":")
         if not room:
             raise ChannelHasNoThreadsError("A direct message has no thread to read.")
-        client = SlackClient(token=conversation.connection.secrets["bot_token"])
+        client = SlackClient(token=await Slack.get_bot_token())
         messages = await client.list_replies(room, thread_ts, limit=THREAD_MESSAGES)
         own_replies = await conversation.list_reply_source_ids(session)
         return [
@@ -229,7 +229,7 @@ class SlackChannel(Channel):
         room, _, _ = conversation.thread_id.partition(":")
         if not room:
             raise ChannelHasNoThreadsError("A direct message has no thread to read.")
-        client = SlackClient(token=conversation.connection.secrets["bot_token"])
+        client = SlackClient(token=await Slack.get_bot_token())
         shared = (await client.files_info(file=file_id))["file"]
         if room not in shared["channels"] + shared["groups"]:
             raise FileNotInThreadError(f"File {file_id} is not shared where this thread lives.")
