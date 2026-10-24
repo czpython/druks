@@ -413,14 +413,12 @@ class VaultSecret(Base, Uuid7Pk):
         the refresh request for ``host_id``, the box that asks."""
         if not self.is_live:
             raise SecretRevokedError(self.audience)
-        if resource and self.audience == Audience.service(self.audience_name):
-            return await services.get(self.audience_name).issue_token(resource)
+        if self.audience == Audience.service(self.audience_name) and self.kind != SecretKind.OAUTH:
+            # The service's own row: pasted fields or an App key. An OAuth row under the
+            # same audience is a grant, which the OAUTH branch below refreshes.
+            return await services.get(self.audience_name).issue_token(resource, name=name)
         if self.kind == SecretKind.STATIC:
-            # A service's entry is named ``<slug>_<field>``. Under any other name
-            # a row issues the one secret it holds.
-            field = name.removeprefix(f"{self.audience_name}_")
-            if field in self.secrets:
-                return self.secrets[field], None
+            # A header row holds one secret.
             [secret] = self.secrets.values()
             return secret, None
         if self.kind == SecretKind.OAUTH:

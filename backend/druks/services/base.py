@@ -483,10 +483,21 @@ class Service:
         pass
 
     @classmethod
-    async def issue_token(cls, resource: str) -> tuple[str, datetime | None]:
-        """The token a sandbox fetches for ``resource``, and its expiry."""
-        slug, _, key = resource.partition("/")
-        return await cls.resources[slug](key).get_token()
+    async def issue_token(
+        cls, resource: str = "", *, name: str = ""
+    ) -> tuple[str, datetime | None]:
+        """The token a sandbox fetches under ``name``, and its expiry. ``resource`` names
+        a resource of the service. ``name`` is ``<slug>_<field>`` for a pasted field;
+        under any other name the row gives the one secret it holds."""
+        if resource:
+            slug, _, key = resource.partition("/")
+            return await cls.resources[slug](key).get_token()
+        row = await cls.get()
+        field = name.removeprefix(f"{cls.slug}_")
+        if field in row.secrets:
+            return row.secrets[field], None
+        [secret] = row.secrets.values()
+        return secret, None
 
     @classmethod
     def get_authorization(cls, login: VaultSecret) -> str:

@@ -19,6 +19,7 @@ from druks.core.webhooks.github import GitHubEvents
 from druks.db import db_session
 from druks.redis import close_client, get_client
 from druks.secrets.datastructures import Audience
+from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
 from druks.services import Service
 from druks.services.exceptions import ServiceNotConnectedError
@@ -515,6 +516,15 @@ async def test_a_service_with_one_secret_issues_it_under_any_name(declared_servi
     row = await connect_service("acme", identity={}, secrets={"api_key": "key-1"})
 
     assert await row.issue_token("", name="billing_token") == ("key-1", None)
+
+
+async def test_github_issues_no_token_without_a_repo(druks_db):
+    row = await connect_service(
+        "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
+    )
+
+    with pytest.raises(MissingSecretError, match="names none"):
+        await row.issue_token("", name="github")
 
 
 def test_an_agent_holds_only_a_secret_of_a_service_with_a_host(declared_services):
