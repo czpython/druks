@@ -94,7 +94,7 @@ async def connect_oauth_service(
 ) -> RedirectResponse:
     """Start a sign-in or an install at the provider."""
     service = services.get(slug)
-    if not service or not service.token_endpoint:
+    if not service or not (service.token_endpoint or install):
         raise OauthPageError(f"No OAuth service {slug!r}.", status_code=404)
     account_id = current_account_id.get()
     if connection:
@@ -111,10 +111,6 @@ async def connect_oauth_service(
             "Set urls.endpoint to the address druks has in that browser.",
             status_code=409,
         )
-    try:
-        client = await service.get_oauth_client()
-    except ServiceNotConnectedError as error:
-        raise OauthPageError(str(error), status_code=409) from error
     authorization_endpoint = ""
     install_params: dict[str, str] = {}
     if install:
@@ -122,6 +118,10 @@ async def connect_oauth_service(
         if not authorization_endpoint:
             raise OauthPageError(f"{slug} has no install page.", status_code=404)
         install_params = service.get_install_params()
+    try:
+        client = await service.get_oauth_client()
+    except ServiceNotConnectedError as error:
+        raise OauthPageError(str(error), status_code=409) from error
     scopes = () if install and service.actor_token_name else service.scopes()
     url = await client.begin_connect(
         redirect_uri=client.redirect_uri or f"{endpoint.rstrip('/')}/api/oauth/callback",

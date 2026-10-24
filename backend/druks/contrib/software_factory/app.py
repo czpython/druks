@@ -23,7 +23,7 @@ from druks.contrib.software_factory.ticketing.jira import Jira
 from druks.contrib.software_factory.ticketing.linear import Linear
 from druks.core import services
 from druks.doctor import CheckResult
-from druks.services import ServiceNotConnectedError
+from druks.services import OauthRefreshError, ServiceNotConnectedError
 
 from .services import GithubReviewer
 
@@ -164,8 +164,8 @@ class SoftwareFactory(App):
         }
         try:
             if settings.tracker == "linear":
-                row = await services.Linear.get()
-                return Linear(api_key=row.secrets["api_key"], status_names=status_names)
+                client = await services.Linear.get_client()
+                return Linear(client=client, status_names=status_names)
             if settings.tracker == "jira":
                 row = await services.Jira.get()
                 return Jira(
@@ -178,6 +178,9 @@ class SoftwareFactory(App):
                 client = await services.Github.get_client()
                 return GitHub(client=client, status_names=status_names)
         except ServiceNotConnectedError:
+            return
+        except OauthRefreshError:
+            logger.warning("Could not get a Linear token for the tracker.", exc_info=True)
             return
 
     # Any workflow of the app can run these agents. An agent id is ``software_factory.<name>``.

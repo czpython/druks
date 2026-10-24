@@ -17,14 +17,14 @@ from druks.accounts.models import Account
 from druks.core.apis.exceptions import GitHubAppNotInstalledError, TwilioError, TwilioNotFoundError
 from druks.core.apis.github import GITHUB_API_URL, GITHUB_AUTHORITY, GitHubClient
 from druks.core.apis.jira import SERVICE_ACCOUNT_DOMAIN, JiraClient
-from druks.core.apis.linear import LINEAR_GRAPHQL_URL
+from druks.core.apis.linear import LINEAR_GRAPHQL_URL, LinearClient
 from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
 from druks.core.apis.twilio import TwilioClient
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
-from druks.services import Service, ServiceConnectError
+from druks.services import OauthClient, Service, ServiceConnectError
 from druks.services.exceptions import OauthExchangeError, ServiceNotConnectedError
 from druks.settings import load_settings
 
@@ -162,12 +162,11 @@ class Github(Service):
 
 
 class Linear(Service):
-    description = (
-        "The Linear identity druks reads and updates tickets as; its webhook "
-        "secret verifies inbound deliveries."
-    )
+    description = "The Linear identity that Druks reads and updates tickets as."
     required = False
     mcp_host = "mcp.linear.app"
+    # OauthClient reads and rotates the app's grant under this name.
+    actor_token_name = "refresh_token"
 
     class Settings(BaseModel):
         api_key: SecretStr = Field(title="API key")
@@ -180,19 +179,83 @@ class Linear(Service):
     @classmethod
     async def verify(cls, settings: Settings) -> dict[str, Any]:
         try:
-            async with httpx.AsyncClient(timeout=_VERIFY_TIMEOUT) as client:
-                response = await client.post(
-                    LINEAR_GRAPHQL_URL,
-                    json={"query": "{ viewer { name } organization { name } }"},
-                    headers={"Authorization": settings.api_key.get_secret_value()},
-                )
-            response.raise_for_status()
-            data = response.json()["data"]
-            facts = {"actor": data["viewer"]["name"], "workspace": data["organization"]["name"]}
+            facts = await cls._get_facts(settings.api_key.get_secret_value())
         except Exception as error:  # noqa: BLE001 — any auth/transport failure is a rejected paste
             logger.warning("Linear service-identity connect rejected: %s", type(error).__name__)
             raise ServiceConnectError("Linear did not accept this API key.") from error
         return facts
+
+    @classmethod
+    async def get_install_endpoint(cls) -> str:
+        # A self-hosted operator pastes an API key instead.
+        return "https://linear.app/oauth/authorize" if cls.is_managed() else ""
+
+    @classmethod
+    def get_install_params(cls) -> dict[str, str]:
+        # The app acts as itself, and an app cannot hold admin.
+        return {"actor": "app", "scope": "read,write"}
+
+    @classmethod
+    async def complete_install(cls, tokens: dict[str, Any]) -> None:
+        grant = cls.read_grant(tokens)
+        try:
+            facts = await cls._get_facts(f"Bearer {grant['access_token']}")
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+            raise OauthExchangeError(
+                cls.slug,
+                "Linear did not accept the new access token. Install the app again.",
+                context={},
+            ) from error
+        row = await cls.get()
+        row.secrets = {**row.secrets, cls.actor_token_name: grant["refresh_token"]}
+        row.identity = {**row.identity, **facts}
+        # A token cached for an earlier install must not serve this one.
+        await OauthClient(provider=cls.slug).evict_access_token(row.id)
+
+    @classmethod
+    async def get_client(cls) -> LinearClient:
+        if not await cls.is_connected():
+            raise ServiceNotConnectedError(cls.slug)
+        if cls.is_managed():
+            token, _ = await cls._get_access_token()
+            return LinearClient(authorization=f"Bearer {token}")
+        return LinearClient(authorization=(await cls.get()).secrets["api_key"])
+
+    @classmethod
+    async def issue_token(
+        cls, resource: str = "", *, name: str = ""
+    ) -> tuple[str, datetime | None]:
+        if not cls.is_managed():
+            return await super().issue_token(resource, name=name)
+        # The row holds the app's refresh token, which no sandbox gets.
+        if not await cls.is_connected():
+            raise MissingSecretError(
+                "The Linear app is not installed. Install it in Settings → Connections → Services."
+            )
+        return await cls._get_access_token()
+
+    @classmethod
+    def is_grant_revoked(cls, status: int, tokens: dict[str, Any]) -> bool:
+        # The manager refuses the refresh of an installation that Linear revoked.
+        return status != 200 and tokens.get("error") in ("invalid_grant", "access_denied")
+
+    @classmethod
+    async def _get_access_token(cls) -> tuple[str, datetime | None]:
+        row = await cls.get()
+        client = await cls.get_oauth_client()
+        return await client.get_access_token(row.session, connection=row)
+
+    @classmethod
+    async def _get_facts(cls, authorization: str) -> dict[str, str]:
+        async with httpx.AsyncClient(timeout=_VERIFY_TIMEOUT) as client:
+            response = await client.post(
+                LINEAR_GRAPHQL_URL,
+                json={"query": "{ viewer { name } organization { name } }"},
+                headers={"Authorization": authorization},
+            )
+        response.raise_for_status()
+        data = response.json()["data"]
+        return {"actor": data["viewer"]["name"], "workspace": data["organization"]["name"]}
 
 
 class Jira(Service):
