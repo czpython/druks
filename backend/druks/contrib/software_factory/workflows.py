@@ -309,8 +309,27 @@ class Build(Workflow):
     async def _work_gate(self) -> bool:
         """Park for work approval. Return True when the work is done, or False when it
         goes back to implementation."""
+        if not self.journal.is_verified:
+            # Unverified work waits in Druks with one control. Any other answer, such
+            # as a GitHub approval, cannot release it, so the work parks again.
+            label = f"Evaluation: {self.journal.evaluations[-1].verdict}"
+            if question := self.journal.triage_question:
+                label = f"Triage asks: {question}"
+            decision = await ReviewWork.wait(
+                input_request={
+                    "presentation": "in_app",
+                    "label": label,
+                    "controls": ["request_changes"],
+                }
+            )
+            if decision.action == "request_changes":
+                return await self._triage()
+            return await self._work_gate()
         if self._policy.implementation_approval_gate() == "none":
             return await self._approved_work()
+        return await self._review_on_github()
+
+    async def _review_on_github(self) -> bool:
         decision = await ReviewWork.wait(
             input_request={
                 "presentation": "external",
@@ -328,16 +347,16 @@ class Build(Workflow):
 
     async def _approved_work(self) -> bool:
         # GitHub announces the merge. The pr.closed reaction stores the result.
+        await self._clear_draft()
         if self._policy.on_approval == "merge":
             if await self.declare_merge_intent():
                 return True
             logger.warning(
-                "GitHub did not accept the merge of %s#%s. The work parks for review again.",
+                "GitHub did not accept the merge of %s#%s. The work parks for review.",
                 (await self.subject).repo,
                 self.pr_number,
             )
-            return await self._work_gate()
-        await self._clear_draft()
+            return await self._review_on_github()
         return True
 
     async def _triage(self) -> bool:
@@ -349,7 +368,9 @@ class Build(Workflow):
             return False
         if feedback.action == HumanFeedbackAction.CLOSE:
             raise FatalError("closed at human triage")
-        # NO_CHANGE and QUESTION park the work again.
+        # NO_CHANGE and QUESTION park the work again where the person answered.
+        if self.journal.is_verified:
+            return await self._review_on_github()
         return await self._work_gate()
 
     # Body code, never @step. The agent calls inside memoize themselves and write the
