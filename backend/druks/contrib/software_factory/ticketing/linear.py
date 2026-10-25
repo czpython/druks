@@ -1,5 +1,3 @@
-from typing import Any
-
 import httpx
 
 from druks.core.apis.exceptions import LinearAPIError, UnknownTicketError
@@ -13,14 +11,8 @@ class Linear(Tracker):
     known_exceptions = (LinearAPIError, UnknownTicketError, httpx.HTTPError)
     authority = "https://mcp.linear.app"
 
-    def __init__(
-        self,
-        *,
-        api_key: str,
-        status_names: dict[TicketStatus, str],
-        client: Any | None = None,
-    ) -> None:
-        self._client = LinearClient(api_key=api_key, client=client)
+    def __init__(self, *, client: LinearClient, status_names: dict[TicketStatus, str]) -> None:
+        self._client = client
         # An empty name leaves that status unmapped.
         self._status_names = {status: name for status, name in status_names.items() if name}
 

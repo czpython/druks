@@ -189,7 +189,7 @@ async def test_other_refresh_failures_leave_the_connection_live(
 
 async def test_a_service_reads_its_own_revoked_answer(token_endpoint, monkeypatch):
     token_endpoint.response = {"error": "bad_refresh_token", "error_description": "expired"}
-    client = _client(is_grant_revoked=Github.is_grant_revoked)
+    client = _client(is_grant_revoked=Github.Authentication.is_grant_revoked)
     published = []
 
     async def record(name, **kwargs):

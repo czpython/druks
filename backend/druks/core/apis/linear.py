@@ -6,6 +6,7 @@ import httpx
 from druks.core.apis.exceptions import LinearAPIError, UnknownTicketError
 
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
+LINEAR_AUTHORITY = "https://linear.app"
 
 
 def compute_delivery_key(
@@ -35,20 +36,18 @@ class LinearClient:
     def __init__(
         self,
         *,
-        api_key: str,
+        authorization: str,
         api_url: str = LINEAR_GRAPHQL_URL,
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.api_key = api_key
+        # A pasted API key goes out as it is. An app's access token goes out as a bearer.
+        self.authorization = authorization
         self.api_url = api_url
         # One AsyncClient per LinearClient pools connections across the calls of a build run.
         self._client = client or httpx.AsyncClient(
             timeout=_DEFAULT_TIMEOUT,
             limits=_DEFAULT_LIMITS,
-            headers={
-                "Authorization": api_key,
-                "Content-Type": "application/json",
-            },
+            headers={"Content-Type": "application/json"},
         )
 
     async def aclose(self) -> None:
@@ -84,7 +83,13 @@ class LinearClient:
                 "changed": False,
             }
 
-        status_id = _status_id_by_name(issue["team"]["states"]["nodes"], status_name)
+        states = issue["team"]["states"]["nodes"]
+        status_id = next((state["id"] for state in states if state["name"] == status_name), "")
+        if not status_id:
+            available = ", ".join(state["name"] for state in states)
+            raise LinearAPIError(
+                f"Linear status {status_name!r} was not found. Available: {available}"
+            )
         result = await self._execute(
             """
             mutation DruksIssueUpdateStatus($issueId: String!, $statusId: String!) {
@@ -107,7 +112,6 @@ class LinearClient:
         }
 
     async def list_workflow_states(self) -> list[dict]:
-        """The workflow states of every team in the workspace, one page after another."""
         states: list[dict] = []
         cursor = None
         while True:
@@ -132,6 +136,7 @@ class LinearClient:
         response = await self._client.post(
             self.api_url,
             json={"query": query, "variables": variables},
+            headers={"Authorization": self.authorization},
         )
         response.raise_for_status()
         body = response.json()
@@ -144,12 +149,3 @@ class LinearClient:
             raise LinearAPIError("Linear API response did not include data.")
 
         return data
-
-
-def _status_id_by_name(states: list[dict[str, Any]], status_name: str) -> str:
-    for state in states:
-        if state["name"] == status_name:
-            return state["id"]
-
-    available = ", ".join(state["name"] for state in states)
-    raise LinearAPIError(f"Linear status {status_name!r} was not found. Available: {available}")

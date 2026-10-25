@@ -21,7 +21,7 @@ from druks.redis import close_client, get_client
 from druks.secrets.datastructures import Audience
 from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
-from druks.services import Service
+from druks.services import Service, auth
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.services.oauth import OauthClient
 from druks.testing import configure_app_for_test, make_settings
@@ -160,30 +160,30 @@ async def test_list_reports_each_declared_service(druks_client: httpx.AsyncClien
     assert not entry["connectedAt"]
     assert [field["name"] for field in entry["fields"]] == [
         "app_id",
+        "webhook_secret",
+        "private_key",
         "client_id",
         "client_secret",
-        "private_key",
-        "webhook_secret",
     ]
     assert [field["type"] for field in entry["fields"]] == [
         "str",
+        "secret",
+        "secret",
         "str",
-        "secret",
-        "secret",
         "secret",
     ]
     assert [field["label"] for field in entry["fields"]] == [
         "App ID",
+        "Webhook secret",
+        "Private key (PEM)",
         "Client ID",
         "Client secret",
-        "Private key (PEM)",
-        "Webhook secret",
     ]
     assert [field["multiline"] for field in entry["fields"]] == [
         False,
         False,
-        False,
         True,
+        False,
         False,
     ]
 
@@ -309,7 +309,9 @@ async def test_blank_fields_are_rejected_without_touching_github(
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"].startswith("Enter App ID, Client ID, Client secret, ")
+    assert response.json()["detail"] == (
+        "Enter App ID, Webhook secret, Private key (PEM), Client ID, Client secret."
+    )
     with pytest.raises(ServiceNotConnectedError):
         await Github.get()
 
@@ -388,7 +390,11 @@ async def test_manifest_callback_exchanges_the_code_and_connects(
     # A new App is another OAuth client: the sign-ins through the old one go.
     await _connect()
     old_sign_in = await VaultSecret.connect(
-        db_session(), Audience.service("github"), account_id=None, refresh_token="ghr", scopes=[]
+        db_session(),
+        Audience.service("github"),
+        account_id=None,
+        refresh_token="ghr",
+        scopes=[],
     )
     _mock_authenticated_app(monkeypatch, slug="druks")
     exchanged = []
@@ -457,14 +463,13 @@ async def test_manifest_callback_rejects_a_dead_code(
 
 async def test_get_oauth_client_reads_the_connected_identity(declared_services, druks_db):
     class Acme(Service):
-        authorization_endpoint = "https://acme.test/authorize"
-        token_endpoint = "https://acme.test/token"
-        basic_auth = True
-        extra_authorize_params = {"access_type": "offline"}
-
-        class Settings(BaseModel):
-            client_id: str
-            client_secret: SecretStr
+        class Authentication(auth.Authentication):
+            sign_in = auth.SignIn(
+                authorization_endpoint="https://acme.test/authorize",
+                token_endpoint="https://acme.test/token",
+                basic_auth=True,
+                extra_authorize_params={"access_type": "offline"},
+            )
 
     await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
@@ -504,7 +509,7 @@ async def test_a_service_secret_issues_under_its_field_name(declared_services, d
 
     assert await row.issue_token("", name=Acme.fields.api_token.secret_name) == ("token-1", None)
     # No other name says which of the two secrets a box gets.
-    with pytest.raises(ValueError):
+    with pytest.raises(MissingSecretError, match="holds 2 secrets"):
         await row.issue_token("", name="acme")
 
 
@@ -544,23 +549,30 @@ def test_an_agent_holds_only_a_secret_of_a_service_with_a_host(declared_services
 
 
 async def test_oauth_service_declarations_fail_loudly(declared_services):
-    with pytest.raises(TypeError, match="client_id and client_secret"):
-
-        class Keyless(Service):
-            authorization_endpoint = "https://acme.test/authorize"
-            token_endpoint = "https://acme.test/token"
-
-            class Settings(BaseModel):
-                api_key: SecretStr
-
-    with pytest.raises(TypeError, match="both OAuth endpoints"):
+    with pytest.raises(TypeError, match="authorization_endpoint"):
 
         class HalfDeclared(Service):
-            token_endpoint = "https://acme.test/token"
+            class Authentication(auth.Authentication):
+                sign_in = auth.SignIn(token_endpoint="https://acme.test/token")
 
-            class Settings(BaseModel):
-                client_id: str
-                client_secret: SecretStr
+    with pytest.raises(TypeError, match="names a way 'key'"):
+
+        class Misnamed(Service):
+            class Authentication(auth.Authentication):
+                key = auth.ApiKey()
+
+    with pytest.raises(TypeError, match="both oauth and sign_in"):
+
+        class Both(Service):
+            class Authentication(auth.Authentication):
+                oauth = auth.Oauth(
+                    authorization_endpoint="https://acme.test/authorize",
+                    token_endpoint="https://acme.test/token",
+                )
+                sign_in = auth.SignIn(
+                    authorization_endpoint="https://acme.test/authorize",
+                    token_endpoint="https://acme.test/token",
+                )
 
     with pytest.raises(TypeError, match="keys by"):
 
@@ -574,26 +586,28 @@ async def test_oauth_service_declarations_fail_loudly(declared_services):
         class Settings(BaseModel):
             api_key: SecretStr
 
-    with pytest.raises(TypeError, match="no OAuth endpoints"):
+    with pytest.raises(TypeError, match="no OAuth client"):
         await Plain.get_oauth_client()
 
 
 def test_abstract_base_shares_declarations_without_registering(declared_services):
     class AcmeBase(Service):
         abstract = True
-        authorization_endpoint = "https://acme.test/authorize"
-        token_endpoint = "https://acme.test/token"
 
-        class Settings(BaseModel):
-            client_id: str
-            client_secret: SecretStr
+        class Authentication(auth.Authentication):
+            sign_in = auth.SignIn(
+                authorization_endpoint="https://acme.test/authorize",
+                token_endpoint="https://acme.test/token",
+            )
 
     class Mail(AcmeBase):
         slug = "acme_mail"
 
     assert services.get("acme_mail") is Mail
     assert Mail.abstract is False
-    assert Mail.settings_model is AcmeBase.Settings
+    assert Mail.Authentication.sign_in is AcmeBase.Authentication.sign_in
+    assert Mail.Authentication.service is Mail
+    assert list(Mail.settings_model.model_fields) == ["client_id", "client_secret"]
 
     with pytest.raises(TypeError, match="abstract"):
 
@@ -604,12 +618,13 @@ def test_abstract_base_shares_declarations_without_registering(declared_services
 
 async def test_with_scopes_declares_the_union_and_reads_connections(declared_services, monkeypatch):
     class Acme(Service):
-        authorization_endpoint = "https://acme.test/authorize"
-        token_endpoint = "https://acme.test/token"
-
-        class Settings(BaseModel):
-            client_id: str
-            client_secret: SecretStr
+        class Authentication(auth.Authentication):
+            sign_in = auth.SignIn(
+                authorization_endpoint="https://acme.test/authorize",
+                token_endpoint="https://acme.test/token",
+                identity_endpoint="https://acme.test/whoami",
+                identity_key="sub",
+            )
 
     class NightWatch:
         name = "night_watch"
@@ -653,14 +668,13 @@ async def test_with_scopes_declares_the_union_and_reads_connections(declared_ser
 
 async def test_get_identity_without_a_declared_endpoint_is_empty(declared_services):
     class Quiet(Service):
-        authorization_endpoint = "https://quiet.test/authorize"
-        token_endpoint = "https://quiet.test/token"
+        class Authentication(auth.Authentication):
+            sign_in = auth.SignIn(
+                authorization_endpoint="https://quiet.test/authorize",
+                token_endpoint="https://quiet.test/token",
+            )
 
-        class Settings(BaseModel):
-            client_id: str
-            client_secret: SecretStr
-
-    assert await Quiet.get_identity("at-1") == {}
+    assert await Quiet.Authentication.get_identity("at-1") == {}
 
 
 def test_with_scopes_requires_oauth_endpoints(declared_services):
@@ -668,22 +682,21 @@ def test_with_scopes_requires_oauth_endpoints(declared_services):
         class Settings(BaseModel):
             api_key: SecretStr
 
-    with pytest.raises(TypeError, match="no OAuth endpoints"):
+    with pytest.raises(TypeError, match="no sign-in"):
         Plain.with_scopes("profile.read")
 
 
 @pytest.fixture
 def acme(declared_services, monkeypatch):
     class Acme(Service):
-        authorization_endpoint = "https://acme.test/authorize"
-        token_endpoint = "https://acme.test/token"
-        identity_endpoint = "https://acme.test/whoami"
-        identity_scopes = ("openid",)
-        identity_key = "sub"
-
-        class Settings(BaseModel):
-            client_id: str
-            client_secret: SecretStr
+        class Authentication(auth.Authentication):
+            sign_in = auth.SignIn(
+                authorization_endpoint="https://acme.test/authorize",
+                token_endpoint="https://acme.test/token",
+                identity_endpoint="https://acme.test/whoami",
+                identity_scopes=("openid",),
+                identity_key="sub",
+            )
 
     class NightWatch:
         name = "night_watch"
@@ -711,12 +724,12 @@ def acme(declared_services, monkeypatch):
 
 @pytest.fixture
 def keyed_acme(acme, monkeypatch):
-    async def get_identity(service, access_token):
-        assert service is acme
+    async def get_identity(authentication, access_token):
+        assert authentication is acme.Authentication
         assert access_token == "at-1"
         return {"sub": "account-1", "email": "op@acme.test"}
 
-    monkeypatch.setattr(acme, "get_identity", classmethod(get_identity))
+    monkeypatch.setattr(acme.Authentication, "get_identity", classmethod(get_identity))
     return acme
 
 
@@ -855,7 +868,11 @@ async def test_oauth_connect_rejects_an_unknown_or_another_accounts_reconnect_ta
     )
     other = await Account.get_or_create(druks_db, "other@example.com")
     connection = await VaultSecret.connect(
-        druks_db, Audience.service("acme"), account_id=other.id, refresh_token="rt", scopes=[]
+        druks_db,
+        Audience.service("acme"),
+        account_id=other.id,
+        refresh_token="rt",
+        scopes=[],
     )
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
     with TestClient(configure_app_for_test(settings=settings)) as client:
@@ -1146,7 +1163,11 @@ async def test_replacing_the_client_credentials_revokes_its_connections(
     tmp_path, acme, druks_db, oauth_events
 ):
     row = await VaultSecret.connect(
-        db_session(), Audience.service("acme"), account_id=None, refresh_token="rt-old", scopes=[]
+        db_session(),
+        Audience.service("acme"),
+        account_id=None,
+        refresh_token="rt-old",
+        scopes=[],
     )
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
@@ -1173,7 +1194,11 @@ async def test_replacing_the_client_credentials_revokes_its_connections(
 async def test_a_paste_with_the_same_client_keeps_its_connections(tmp_path, acme, druks_db):
     await connect_service("acme", identity={"client_id": "id-1"}, secrets={"client_secret": "s"})
     row = await VaultSecret.connect(
-        db_session(), Audience.service("acme"), account_id=None, refresh_token="rt-old", scopes=[]
+        db_session(),
+        Audience.service("acme"),
+        account_id=None,
+        refresh_token="rt-old",
+        scopes=[],
     )
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:

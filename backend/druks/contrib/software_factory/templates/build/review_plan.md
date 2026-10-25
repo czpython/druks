@@ -37,7 +37,7 @@ verdict is the gate; on the human-gated paths the operator judges the redraft it
 
 ## What this repo asks of its reviewers
 
-`.druks/review/checklist.md`, when the checkout has one, is the repo's standing rules and
+`.druks/software_factory/review.md`, when the checkout has one, is the repo's standing rules and
 the last word: where it and anything else in this prompt disagree, it wins. Its rules bind
 the plan's choices too — a mechanism the checklist forbids is a shape problem to raise now,
 not a line-level finding for later.

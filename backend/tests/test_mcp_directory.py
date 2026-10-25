@@ -98,7 +98,11 @@ async def test_removing_a_connected_row_drops_its_grant(tmp_path, druks_db):
     with _client(tmp_path) as client:
         client.post("/api/mcp-servers/directory", json={"name": "grafana"})
         await VaultSecret.connect(
-            druks_db, Audience.mcp("grafana"), account_id=None, refresh_token="rt", scopes=[]
+            druks_db,
+            Audience.mcp("grafana"),
+            account_id=None,
+            refresh_token="rt",
+            scopes=[],
         )
 
         connections = client.get("/api/mcp-servers/grafana/connections").json()

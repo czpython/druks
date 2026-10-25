@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, computed_field
+from pydantic import BaseModel, ConfigDict, Field
 
 from druks.notifications.models import DestinationKind
 from druks.schemas import Schema
@@ -13,24 +13,14 @@ class DestinationResponse(Schema):
     id: str
     name: str
     kind: str
-    # The stored URL is the credential: SecretStr serializes as the mask, and
-    # has_url is the only signal the frontend needs.
-    url: SecretStr
+    channel_id: str
     is_enabled: bool
-
-    @computed_field
-    @property
-    def has_url(self) -> bool:
-        return bool(self.url.get_secret_value())
 
 
 class CreateDestinationRequest(BaseModel):
     name: str
-    # Unknown kinds are rejected by the enum; the URL is write-only, unwrapped
-    # exactly once, to persist. Whether it actually reaches anything surfaces
-    # at delivery — per-kind URL shapes are not the wire schema's business.
     kind: DestinationKind
-    url: SecretStr
+    channel_id: str = Field(alias="channelId")
 
 
 class NotificationResponse(Schema):

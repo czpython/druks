@@ -17,7 +17,7 @@ class JiraClient:
         *,
         base_url: str,
         email: str,
-        api_token: str,
+        api_key: str,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -25,7 +25,7 @@ class JiraClient:
         self._client = client or httpx.AsyncClient(
             timeout=_DEFAULT_TIMEOUT,
             limits=_DEFAULT_LIMITS,
-            auth=httpx.BasicAuth(email, api_token),
+            auth=httpx.BasicAuth(email, api_key),
             headers={"Accept": "application/json", "Content-Type": "application/json"},
         )
 
