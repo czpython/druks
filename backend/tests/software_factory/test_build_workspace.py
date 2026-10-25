@@ -13,6 +13,7 @@ from druks.contrib.software_factory.constants import (
     GITHUB_MCP_URL,
     TICKET_TOOLS,
 )
+from druks.contrib.software_factory.models import Project, ProjectRepo
 from druks.contrib.software_factory.workflows import Build, BuildWorkspace, ReviewWorkspace
 from druks.core.services import Github
 from druks.mcp.helpers import get_bearer_token_env_var
@@ -83,10 +84,10 @@ async def test_build_workspace_declares_its_github_mcp_as_the_review_actor(druks
 
     assert github.url == GITHUB_MCP_URL
     assert github.bearer_token_env_var == get_bearer_token_env_var(GITHUB_MCP_NAME)
-    assert ref.key == ("mcp_github_token", reviewer.id, "o/main", "api.githubcopilot.com")
+    assert ref.key == ("mcp_github_token", reviewer.id, ("o/main",), "api.githubcopilot.com")
     [clone] = await BuildWorkspace.get_secrets(subject)
     assert clone == SandboxSecret(
-        name="github", secret_id=operator.id, resource="o/main", host="github.com"
+        name="github", secret_id=operator.id, resources=("o/main",), host="github.com"
     )
 
 
@@ -157,11 +158,26 @@ async def test_review_mcp_and_gh_use_the_review_actor(druks_db):
 
     assert github.url == GITHUB_MCP_URL
     assert github.bearer_token_env_var == get_bearer_token_env_var(GITHUB_MCP_NAME)
-    assert ref.key == ("mcp_github_token", reviewer.id, "o/app", "api.githubcopilot.com")
+    assert ref.key == ("mcp_github_token", reviewer.id, ("o/app",), "api.githubcopilot.com")
     [clone] = await ReviewWorkspace.get_secrets(subject)
     assert clone == SandboxSecret(
-        name="github_reviewer", secret_id=reviewer.id, resource="o/app", host="github.com"
+        name="github_reviewer", secret_id=reviewer.id, resources=("o/app",), host="github.com"
     )
+
+
+@pytest.mark.parametrize("workspace_class", [BuildWorkspace, ReviewWorkspace])
+async def test_the_github_token_reaches_the_project_siblings(druks_db, workspace_class):
+    await connect_service(
+        "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
+    )
+    project = await Project.create(name="Acme")
+    await ProjectRepo.create(project_id=project.id, full_name="acme/api")
+    await ProjectRepo.create(project_id=project.id, full_name="acme/web")
+    await druks_db.flush()
+
+    [clone] = await workspace_class.get_secrets(SimpleNamespace(repo="acme/api"))
+
+    assert clone.resources == ("acme/api", "acme/web")
 
 
 class _IdentitySandbox:
