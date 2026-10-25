@@ -33,10 +33,10 @@ def _http() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=30.0, follow_redirects=True)
 
 
-def is_grant_revoked(status: int, tokens: dict[str, Any]) -> bool:
+def is_grant_revoked(response: httpx.Response) -> bool:
     """Whether a token endpoint's answer says the provider revoked the grant, as RFC
     6749 reports it. A service overrides its own method for a provider that differs."""
-    return status != 200 and tokens.get("error") == "invalid_grant"
+    return response.status_code != 200 and response.json().get("error") == "invalid_grant"
 
 
 async def _post_token(
@@ -114,7 +114,7 @@ class OauthClient:
         redirect_uri: str = "",
         mint_wait_interval_seconds: float = OAUTH_MINT_WAIT_INTERVAL_SECONDS,
         mint_wait_attempts: int = OAUTH_MINT_WAIT_ATTEMPTS,
-        is_grant_revoked: Callable[[int, dict[str, Any]], bool] = is_grant_revoked,
+        is_grant_revoked: Callable[[httpx.Response], bool] = is_grant_revoked,
     ) -> None:
         self.provider = provider
         self.authorization_endpoint = authorization_endpoint
@@ -277,7 +277,7 @@ class OauthClient:
                         self.provider, "the token endpoint returned malformed JSON"
                     )
                 tokens = {}
-            if self.is_grant_revoked(response.status_code, tokens):
+            elif self.is_grant_revoked(response):
                 # Presenting the grant again can never succeed. The revoke commits on
                 # its own: the caller's step session rolls back when this error propagates.
                 async with get_session(session.bind) as own:

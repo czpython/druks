@@ -39,7 +39,7 @@ async def test_disconnect_revokes_the_login_its_mcp_server_derived(druks_db, dru
     login = await connect_service(
         "jira",
         identity={"email": "svc@example.com", "base_url": "https://acme.atlassian.net"},
-        secrets={"api_token": "jira-token", "webhook_secret": "hook"},
+        secrets={"api_key": "jira-token", "webhook_secret": "hook"},
     )
     await McpServer.create(
         druks_db, name="atlassian", url="https://mcp.atlassian.com/v2/mcp", is_oauth=True

@@ -103,7 +103,11 @@ async def test_a_revoked_secret_issues_nothing(druks_db, kind):
 
 async def test_a_service_grant_issues_through_the_services_client(druks_db, monkeypatch):
     row = await VaultSecret.connect(
-        db_session(), "service:acme", account_id=None, refresh_token="rt", scopes=[]
+        db_session(),
+        "service:acme",
+        account_id=None,
+        refresh_token="rt",
+        scopes=[],
     )
     expiry = datetime.now(UTC) + timedelta(hours=1)
 
@@ -124,7 +128,11 @@ async def test_a_service_grant_issues_through_the_services_client(druks_db, monk
 
 async def test_an_mcp_grant_issues_through_the_servers_client(druks_db, monkeypatch):
     row = await VaultSecret.connect(
-        db_session(), "mcp:linear", account_id=None, refresh_token="rt", scopes=[]
+        db_session(),
+        "mcp:linear",
+        account_id=None,
+        refresh_token="rt",
+        scopes=[],
     )
 
     async def get_access_token(session, name, account_id):

@@ -83,7 +83,7 @@ the rest of the file.
 - `tone_instructions` and `reviews.profile` — the posture: how assertive to be, what counts as
   blocking, how to mark something optional.
 
-**`.druks/review/checklist.md`.** The repo's rules for you specifically, so it is the last word:
+**`.druks/software_factory/review.md`.** The repo's rules for you specifically, so it is the last word:
 where it and anything above disagree, it wins. A repo keeps it for what it wants from this
 review and not from the other tool, so read it as the delta, not as a restatement — it will be
 short, and everything in it is deliberate.

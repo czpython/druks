@@ -11,7 +11,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from druks.core.models import Uuid7Pk
 from druks.models import Base
 from druks.notifications.datastructures import NotificationState
-from druks.notifications.exceptions import UnknownDestinationKindError
 
 
 def mint_correlation_token() -> str:
@@ -21,7 +20,7 @@ def mint_correlation_token() -> str:
 
 
 class DestinationKind(StrEnum):
-    SLACK_WEBHOOK = "slack_webhook"
+    SLACK_CHANNEL = "slack_channel"
 
 
 class Destination(Base, Uuid7Pk):
@@ -29,9 +28,8 @@ class Destination(Base, Uuid7Pk):
 
     name: Mapped[str] = mapped_column(String, unique=True)
     kind: Mapped[str] = mapped_column(String)
-    # The webhook URL is the credential and is plaintext at rest; it leaves the
-    # row in the clear only inside deliver().
-    url: Mapped[str] = mapped_column(String)
+    # The bot posts here with the Slack card's token. The row holds no credential.
+    channel_id: Mapped[str] = mapped_column(String)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -46,13 +44,9 @@ class Destination(Base, Uuid7Pk):
 
     @classmethod
     async def create(
-        cls, session: AsyncSession, *, name: str, kind: str, url: str
+        cls, session: AsyncSession, *, name: str, kind: DestinationKind, channel_id: str
     ) -> "Destination":
-        try:
-            DestinationKind(kind)
-        except ValueError as error:
-            raise UnknownDestinationKindError(kind, tuple(DestinationKind)) from error
-        destination = cls(name=name, kind=kind, url=url)
+        destination = cls(name=name, kind=kind, channel_id=channel_id)
         session.add(destination)
         await session.flush()
         return destination

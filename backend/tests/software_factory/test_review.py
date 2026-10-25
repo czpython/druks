@@ -204,8 +204,8 @@ async def test_an_unconnected_reviewer_borrows_the_operator_in_comment_mode(druk
 def test_the_reviewer_is_an_optional_service_the_app_declares():
     assert (GithubReviewer.slug, GithubReviewer.required) == ("github_reviewer", False)
     assert GithubReviewer.host == "github.com"
-    fields = GithubReviewer.Settings.model_fields
-    assert set(fields) == {"app_id", "private_key"}
+    fields = GithubReviewer.settings_model.model_fields
+    assert set(fields) == {"app_id", "private_key", "client_id", "client_secret"}
     assert field_kind(fields["private_key"]) == "secret"
     assert field_multiline(fields["private_key"])
     assert not field_multiline(fields["app_id"])
@@ -222,7 +222,10 @@ async def test_the_reviewer_app_is_created_with_no_webhook_and_no_sign_in(
     assert manifest["redirect_url"] == (
         "https://druks.example/api/core/services/github_reviewer/manifest/callback"
     )
-    assert not {"hook_attributes", "callback_urls", "default_events"} & set(manifest)
+    assert not {"hook_attributes", "default_events"} & set(manifest)
+    assert manifest["callback_urls"] == ["https://druks.example/api/oauth/callback"]
+    assert manifest["request_oauth_on_install"] is True
+    assert not GithubReviewer.Authentication.has_sign_in()
     assert manifest["default_permissions"] == {
         "metadata": "read",
         "contents": "read",

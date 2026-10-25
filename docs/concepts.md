@@ -277,10 +277,6 @@ tokens, OAuth grants, GitHub App keys, and provider subscriptions. It decrypts
 a row only to issue or deliver a token to an agent call. API responses and
 capability manifests expose presence, never secret values.
 
-Notification webhook URLs do not use that encryption envelope. They are
-standard Postgres fields, and the API masks their values. Thus, database and
-backup access is credential access.
-
 Druks injects enabled MCP servers through the selected harness. A call receives
 the enabled skills it requests, or every enabled skill when it requests none.
 A workspace can also require an MCP server and name its vault row. Each MCP
