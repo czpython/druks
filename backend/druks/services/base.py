@@ -518,15 +518,16 @@ class Service:
 
     @classmethod
     async def issue_token(
-        cls, resource: str = "", *, name: str = ""
+        cls, resources: tuple[str, ...] = (), *, name: str = ""
     ) -> tuple[str, datetime | None]:
         """The token a sandbox fetches under ``name``, and its expiry: a resource recipe's
-        when ``resource`` names one, else what the service's ``Authentication`` gives."""
-        if resource:
+        when ``resources`` names one, else what the service's ``Authentication`` gives."""
+        if resources and resources[0].partition("/")[0] in cls.resources:
+            # A resource's token covers that resource alone.
+            [resource] = resources
             slug, _, key = resource.partition("/")
-            if slug in cls.resources:
-                return await cls.resources[slug](key).get_token()
-        return await cls.Authentication.issue_token(resource, name=name)
+            return await cls.resources[slug](key).get_token()
+        return await cls.Authentication.issue_token(resources, name=name)
 
     @classmethod
     async def is_connected(cls) -> bool:

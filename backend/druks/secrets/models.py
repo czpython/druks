@@ -426,7 +426,7 @@ class VaultSecret(Base, Uuid7Pk):
         self.secrets = {}
 
     async def issue_token(
-        self, resource: str, *, name: str = "", host_id: str = ""
+        self, resources: tuple[str, ...], *, name: str = "", host_id: str = ""
     ) -> tuple[str, datetime | None]:
         """The token a box fetches under ``name``, and its expiry. A rotation skips
         the refresh request for ``host_id``, the box that asks."""
@@ -434,7 +434,7 @@ class VaultSecret(Base, Uuid7Pk):
             raise SecretRevokedError(self.audience)
         if self.audience == Audience.service(self.audience_name) and self.kind != SecretKind.OAUTH:
             # An OAuth row at this audience is the service's grant, not its own row.
-            return await services.get(self.audience_name).issue_token(resource, name=name)
+            return await services.get(self.audience_name).issue_token(resources, name=name)
         if self.kind == SecretKind.STATIC:
             # A header row holds one secret.
             [secret] = self.secrets.values()

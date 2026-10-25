@@ -89,7 +89,7 @@ class Resource:
             SandboxSecret(
                 name=f"{self.service.slug}_api_token",
                 secret_id=(await self.service.get()).id,
-                resource=f"{self.slug}/{self.key}",
+                resources=(f"{self.slug}/{self.key}",),
                 host=self.service.host,
             )
         ]

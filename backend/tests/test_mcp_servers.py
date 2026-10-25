@@ -149,9 +149,9 @@ async def test_delivery_names_the_variable_and_binds_the_header_row(druks_db):
     assert linear.bearer_token_env_var == ""
     assert linear.env_headers == {"Authorization": "MCP_LINEAR_HEADER_0"}
     [ref] = refs.values()
-    assert ref.key == ("mcp_linear_header_0", row.id, "", "mcp.linear.app")
+    assert ref.key == ("mcp_linear_header_0", row.id, (), "mcp.linear.app")
     assert _TOKEN not in repr(linear) + repr(refs)
-    assert await row.issue_token("") == (f"Bearer {_TOKEN}", None)
+    assert await row.issue_token(()) == (f"Bearer {_TOKEN}", None)
 
 
 async def test_workspace_server_delivers_beside_the_registry(druks_db):
@@ -165,7 +165,7 @@ async def test_workspace_server_delivers_beside_the_registry(druks_db):
             name="github",
             url="https://api.githubcopilot.com/mcp/",
             secret_id=row.id,
-            resource="acme/widgets",
+            resources=("acme/widgets",),
         )
     )
 
@@ -178,7 +178,7 @@ async def test_workspace_server_delivers_beside_the_registry(druks_db):
     assert by_name["mcp_github_token"].key == (
         "mcp_github_token",
         row.id,
-        "acme/widgets",
+        ("acme/widgets",),
         "api.githubcopilot.com",
     )
     assert "linear" in {s.name for s in servers}
@@ -289,7 +289,7 @@ async def test_declared_headers_deliver_inline_and_secret_values_are_entries(dru
         "mcp.grafana.com",
         "X-Api-Key",
     )
-    assert await row.issue_token("") == ("grafana-api-secret", None)
+    assert await row.issue_token(()) == ("grafana-api-secret", None)
 
 
 async def test_three_secret_headers_bind_three_entries(druks_db):
@@ -312,9 +312,9 @@ async def test_three_secret_headers_bind_three_entries(druks_db):
     assert set(refs) == {"mcp_acme_header_0", "mcp_acme_header_1", "mcp_acme_header_2"}
     org = await druks_db.get(VaultSecret, refs["mcp_acme_header_2"].secret_id)
     assert org.header == "X-Org"
-    assert await org.issue_token("") == ("org-secret", None)
+    assert await org.issue_token(()) == ("org-secret", None)
     key = await druks_db.get(VaultSecret, refs["mcp_acme_header_1"].secret_id)
-    assert await key.issue_token("") == ("key-secret", None)
+    assert await key.issue_token(()) == ("key-secret", None)
 
 
 async def test_two_header_server_emits_both_headers_in_each_harness_config(druks_db):

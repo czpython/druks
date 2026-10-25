@@ -152,7 +152,7 @@ async def test_a_subscription_agent_runs_as_its_actor_or_the_default_account(dru
     assert not as_actor.include_apps
     assert not as_actor.secrets
     [secret] = as_actor.secret_refs
-    assert secret.key == ("anthropic", actor.id, "", "")
+    assert secret.key == ("anthropic", actor.id, (), "")
     assert as_actor.harness_class is ClaudeHarness
     assert as_actor.model == "anthropic/claude-opus-4-7"
     assert (as_actor.effort, as_actor.timeout, as_actor.fast_mode) == ("high", 1800, False)
@@ -191,7 +191,7 @@ async def test_a_codex_subscription_config_carries_its_login_facts_and_its_ref(d
     # tokens stay on the server.
     assert config.identity == {"email": "a@example.com", "account_id": "acc-1", "plan": "pro"}
     [ref] = config.secret_refs
-    assert ref.key == ("codex_subscription_token", subscription.id, "", "chatgpt.com")
+    assert ref.key == ("codex_subscription_token", subscription.id, (), "chatgpt.com")
 
 
 async def test_a_subscription_agent_refuses_without_the_actors_own_subscription(druks_db):
