@@ -409,6 +409,10 @@ class Slack(Service):
         return await cls.get_access_token()
 
     @classmethod
+    async def get_client(cls) -> SlackClient:
+        return SlackClient(token=await cls.get_bot_token())
+
+    @classmethod
     def get_manifest(cls) -> dict[str, Any]:
         urls = load_settings().urls
         return {
@@ -434,6 +438,10 @@ class Slack(Service):
                         "message.im",
                         "message.mpim",
                     ],
+                },
+                "interactivity": {
+                    "is_enabled": True,
+                    "request_url": f"{urls.webhook_base}/_external/slack/interactivity/",
                 },
                 "token_rotation_enabled": False,
             },

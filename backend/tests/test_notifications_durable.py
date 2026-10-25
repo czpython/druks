@@ -4,9 +4,11 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
+from conftest import install_service
 from dbos import DBOS
 from druks.accounts.models import Account
 from druks.apps.registry import workflows
+from druks.core.services import Slack
 from druks.database import configure_session, get_session
 from druks.db import db_session
 from druks.durable.constants import NOTIFICATIONS_QUEUE
@@ -29,7 +31,7 @@ from sqlalchemy.orm import Session
 PG_BASE = os.environ.get("DRUKS_TEST_PG", "postgresql://druks:druks@localhost:5432")
 DB = "druks_notifications_durable_test"
 URL = f"{PG_BASE.replace('postgresql://', 'postgresql+psycopg://')}/{DB}"
-_WEBHOOK_URL = "https://hooks.slack.com/services/T000/B000/durablesecret"
+_BOT_TOKEN = "xoxb-durablesecret"
 
 
 def _pg_up() -> bool:
@@ -190,16 +192,19 @@ class _DeliverSpy:
         self.calls: list[dict] = []
         self.failures_remaining = 0
         self.always_fail = False
-        self.error: Exception = DeliveryError("spy", "HTTPStatusError")
+        self.error: Exception = DeliveryError("spy", "is_archived")
 
-    async def __call__(self, destination, body, *, actions=None, token=None, idempotency_key=None):
+    async def __call__(
+        self, client, destination, body, *, actions=None, token=None, deep_link=None
+    ):
         self.calls.append(
             {
+                "bot_token": client.token,
                 "destination": destination.name,
                 "body": body,
                 "actions": actions,
                 "token": token,
-                "idempotency_key": idempotency_key,
+                "deep_link": deep_link,
             }
         )
         if self.always_fail:
@@ -235,8 +240,16 @@ async def _seed(rt, seeder):
 
 async def _seed_destination(rt, name):
     async def create():
+        # The module shares one database, and a service holds one live grant.
+        if not await Slack.get_grant():
+            await install_service(
+                "slack",
+                access_token=_BOT_TOKEN,
+                identity={"client_id": "slack-client"},
+                secrets={"client_secret": "slack-secret"},
+            )
         return await Destination.create(
-            db_session(), name=name, kind="slack_webhook", url=_WEBHOOK_URL
+            db_session(), name=name, kind="slack_channel", channel_id="C1"
         )
 
     return await _seed(rt, create)
@@ -287,7 +300,7 @@ async def _wait_for(rt, notification_id, predicate, timeout=30.0):
     raise AssertionError(f"timed out; last={await _snapshot(rt, notification_id)}")
 
 
-async def test_outbox_delivers_with_actions_token_and_key(rt, deliver_spy):
+async def test_outbox_delivers_with_the_bot_token_actions_and_token(rt, deliver_spy):
     await _seed_destination(rt, "happy")
 
     notification_id = await _deliver(
@@ -298,11 +311,11 @@ async def test_outbox_delivers_with_actions_token_and_key(rt, deliver_spy):
     assert done["attempts"] == 1
     assert done["delivered_at"] is not None
     (call,) = deliver_spy.calls
+    assert call["bot_token"] == _BOT_TOKEN
     assert call["destination"] == "happy"
     assert call["body"] == "hello"
     assert call["actions"] == [{"id": "ok", "label": "OK"}]
     assert call["token"] == done["token"]
-    assert call["idempotency_key"] == notification_id
 
 
 async def test_transient_failure_retries_to_delivered_and_touches_no_run(rt, deliver_spy):
@@ -323,7 +336,7 @@ async def test_terminal_failure_marks_failed_sanitized_and_reads_back(
     rt, deliver_spy, monkeypatch, tmp_path
 ):
     deliver_spy.always_fail = True
-    deliver_spy.error = DeliveryError("doomed", "HTTPStatusError")
+    deliver_spy.error = DeliveryError("doomed", "is_archived")
     # Two attempts instead of five: same terminal path, fraction of the backoff.
     monkeypatch.setattr(outbox, "_SEND_RETRIES", {"retries_allowed": True, "max_attempts": 2})
     await _seed_destination(rt, "doomed")
@@ -334,22 +347,20 @@ async def test_terminal_failure_marks_failed_sanitized_and_reads_back(
     assert done["attempts"] == 2
     assert len(deliver_spy.calls) == 2
     assert "doomed" in done["last_error"]
-    assert _WEBHOOK_URL not in done["last_error"]
 
     client = TestClient(configure_app_for_test(settings=make_settings(tmp_path), engine=rt.engine))
     shown = client.get(f"/api/notifications/{notification_id}")
     assert shown.status_code == 200
     assert shown.json()["state"] == "failed"
     assert shown.json()["attempts"] == 2
-    assert _WEBHOOK_URL not in shown.text
     assert done["token"] not in shown.text
 
 
 async def test_unexpected_error_reduces_to_class_name(rt, deliver_spy, monkeypatch):
-    # A misbehaving transport that leaks the URL in its message must never
+    # A misbehaving transport that leaks the bot token in its message must never
     # reach last_error verbatim.
     deliver_spy.always_fail = True
-    deliver_spy.error = RuntimeError(f"boom at {_WEBHOOK_URL}")
+    deliver_spy.error = RuntimeError(f"boom at {_BOT_TOKEN}")
     monkeypatch.setattr(outbox, "_SEND_RETRIES", {"retries_allowed": True, "max_attempts": 2})
     await _seed_destination(rt, "leaky")
 
@@ -357,7 +368,25 @@ async def test_unexpected_error_reduces_to_class_name(rt, deliver_spy, monkeypat
 
     done = await _wait_for(rt, notification_id, lambda s: s["state"] == "failed")
     assert done["last_error"] == "RuntimeError"
-    assert _WEBHOOK_URL not in done["last_error"]
+
+
+async def test_a_send_without_slack_records_that_slack_is_not_connected(
+    rt, deliver_spy, monkeypatch
+):
+    monkeypatch.setattr(outbox, "_SEND_RETRIES", {"retries_allowed": True, "max_attempts": 2})
+    await _seed_destination(rt, "unplugged")
+
+    async def revoke_grant():
+        grant = await Slack.get_grant()
+        await grant.revoke("user")
+
+    await _seed(rt, revoke_grant)
+
+    notification_id = await _deliver(rt, to="unplugged")
+
+    done = await _wait_for(rt, notification_id, lambda s: s["state"] == "failed")
+    assert "slack is not connected" in done["last_error"]
+    assert deliver_spy.calls == []
 
 
 async def test_rerun_on_delivered_notification_skips_the_send(rt, deliver_spy):
@@ -398,9 +427,6 @@ async def test_create_seam_plus_direct_enqueue_delivers(rt, deliver_spy):
 
     assert (await _snapshot(rt, notification.id))["state"] == "delivered"
     assert len(deliver_spy.calls) == 1
-
-
-# --- gate-park notifications ---------------------------------------------------
 
 
 async def _set_gate_park_pointer(rt, destination_id):
@@ -507,6 +533,8 @@ async def test_external_park_with_declared_url_sets_deep_link(rt, deliver_spy):
     notification = await _wait_notification(rt, workflow_id, "delivered")
     assert notification.deep_link == "https://github.com/acme/app/pull/7"
     assert notification.actions is None
+    (call,) = deliver_spy.calls
+    assert call["deep_link"] == notification.deep_link
 
 
 async def test_no_designated_destination_notifies_nothing(rt, deliver_spy):
@@ -567,8 +595,7 @@ async def test_failed_delivery_leaves_run_parked_and_resumable(rt, deliver_spy, 
 
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9006))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
-    notification = await _wait_notification(rt, workflow_id, "failed")
-    assert _WEBHOOK_URL not in notification.last_error
+    await _wait_notification(rt, workflow_id, "failed")
 
     # The park never noticed the dead endpoint: still waiting, still resumable.
     parked = await _run_snapshot(rt, workflow_id)
@@ -661,9 +688,6 @@ async def test_each_park_round_gets_its_own_notification(rt, deliver_spy):
     assert [row.body for row in rows] == ["Round one", "Round two"]
     assert rows[0].run_parked_at != rows[1].run_parked_at
     assert len(deliver_spy.calls) == 2
-
-
-# --- respond: the inbound half against a live parked run ---------------------
 
 
 async def _respond_in_own_session(rt, token, choice):
