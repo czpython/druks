@@ -302,7 +302,7 @@ class VaultSecret(Base, Uuid7Pk):
         query = select(cls).where(
             cls.kind == SecretKind.OAUTH, cls.audience == audience, cls.revoked_at.is_(None)
         )
-        return list(await session.scalars(query.order_by(cls.created_at)))
+        return list(await session.scalars(query.order_by(cls.created_at, cls.id)))
 
     @classmethod
     async def list_account_connections(
@@ -318,7 +318,7 @@ class VaultSecret(Base, Uuid7Pk):
                     cls.account_id == account_id,
                     cls.revoked_at.is_(None),
                 )
-                .order_by(cls.created_at)
+                .order_by(cls.created_at, cls.id)
             )
         )
 
@@ -349,7 +349,7 @@ class VaultSecret(Base, Uuid7Pk):
             await session.scalars(
                 select(cls)
                 .where(cls.kind == SecretKind.OAUTH, cls.account_id == account_id)
-                .order_by(cls.created_at)
+                .order_by(cls.created_at, cls.id)
             )
         )
 

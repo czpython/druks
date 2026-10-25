@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
+import httpx
 from pydantic import Field, SecretStr
 from pydantic.fields import FieldInfo
 
@@ -170,10 +171,10 @@ class Authentication:
         }
 
     @classmethod
-    def is_grant_revoked(cls, status: int, tokens: dict[str, Any]) -> bool:
+    def is_grant_revoked(cls, response: httpx.Response) -> bool:
         """Whether the token endpoint's answer to a refresh says the provider revoked
         the grant. Override for a provider that reports it otherwise than RFC 6749."""
-        return oauth.is_grant_revoked(status, tokens)
+        return oauth.is_grant_revoked(response)
 
     @classmethod
     async def get_install_endpoint(cls) -> str:
@@ -197,8 +198,9 @@ class Authentication:
         field_name = name.removeprefix(f"{cls.service.slug}_")
         if field_name in row.secrets:
             return row.secrets[field_name], None
-        if cls.oauth and await cls.service.get_grant():
-            return await cls.service.get_access_token(), None
+        if cls.oauth and (grant := await cls.service.get_grant()):
+            client = await cls.service.get_oauth_client()
+            return await client.get_access_token(grant.session, connection=grant)
         if len(row.secrets) != 1:
             raise MissingSecretError(
                 f"{cls.service.slug} holds {len(row.secrets)} secrets. Name the field."

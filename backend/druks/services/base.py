@@ -522,9 +522,10 @@ class Service:
     ) -> tuple[str, datetime | None]:
         """The token a sandbox fetches under ``name``, and its expiry: a resource recipe's
         when ``resource`` names one, else what the service's ``Authentication`` gives."""
-        slug, _, key = resource.partition("/")
-        if slug in cls.resources:
-            return await cls.resources[slug](key).get_token()
+        if resource:
+            slug, _, key = resource.partition("/")
+            if slug in cls.resources:
+                return await cls.resources[slug](key).get_token()
         return await cls.Authentication.issue_token(resource, name=name)
 
     @classmethod
@@ -544,11 +545,20 @@ class Service:
                     return True
             elif all(
                 field_name in row.secrets
-                for field_name, (_, info) in way.fields.items()
-                if field_kind(info) == "secret"
+                for field_name in way.fields
+                if field_kind(cls.settings_model.model_fields[field_name]) == "secret"
             ):
                 return True
         return False
+
+    @classmethod
+    async def has_login(cls) -> bool:
+        """Whether the service holds a login of its own: a pasted key, or the installed app's
+        grant. An App's private key is no login."""
+        return (
+            bool(cls.Authentication.api_key or cls.Authentication.oauth)
+            and await cls.is_connected()
+        )
 
     @classmethod
     async def connect(cls, payload: dict[str, str]) -> VaultSecret:
