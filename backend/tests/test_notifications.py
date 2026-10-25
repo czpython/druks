@@ -13,15 +13,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 from uuid_utils import uuid7
 
-_WEBHOOK_URL = "https://hooks.slack.com/services/T000/B000/notifsecret"
 _SUBJECT = {"type": "work_item", "id": 1}
 
 
 async def _destination(name: str = "ops") -> Destination:
-    return await Destination.create(db_session(), name=name, kind="slack_webhook", url=_WEBHOOK_URL)
-
-
-# --- entity ------------------------------------------------------------------
+    return await Destination.create(db_session(), name=name, kind="slack_channel", channel_id="C1")
 
 
 async def test_unique_token_collision_raises(druks_db):
@@ -61,9 +57,6 @@ async def test_list_recent_newest_first_with_limit(druks_db):
     assert [notification.id for notification in listed] == [ids[2], ids[1]]
 
 
-# --- read endpoints ---------------------------------------------------------
-
-
 async def test_endpoints_list_and_get_omit_the_token(tmp_path, druks_db):
     destination = await _destination()
     tokens = []
@@ -94,14 +87,12 @@ async def test_endpoints_list_and_get_omit_the_token(tmp_path, druks_db):
             assert "correlationToken" not in item
         for token in tokens:
             assert token not in listed.text
-        assert _WEBHOOK_URL not in listed.text
 
         one = client.get(f"/api/notifications/{failed.id}")
         assert one.status_code == 200
         assert one.json()["id"] == failed.id
         assert one.json()["attempts"] == 0
         assert failed.correlation_token not in one.text
-        assert _WEBHOOK_URL not in one.text
 
         assert client.get("/api/notifications/no-such-id").status_code == 404
 
@@ -115,10 +106,7 @@ async def test_destinations_route_still_resolves_after_notifications_mount(tmp_p
         listed = client.get("/api/notifications/destinations")
         assert listed.status_code == 200
         assert [destination["name"] for destination in listed.json()] == ["alpha"]
-        assert listed.json()[0]["hasUrl"] is True
-
-
-# --- the gate-park destination setting ---------------------------------------
+        assert listed.json()[0]["channelId"] == "C1"
 
 
 async def test_settings_gate_park_destination_set_clear_and_reject(tmp_path, druks_db):
@@ -150,8 +138,6 @@ async def test_deleting_designated_destination_unsets_the_pointer(tmp_path, druk
         assert deleted.status_code == 204
         assert client.get("/api/settings").json()["gateParkDestinationId"] is None
 
-
-# --- respond: the inbound half ------------------------------------------------
 
 _IN_APP_ASK = {
     "presentation": "in_app",
@@ -254,7 +240,6 @@ async def test_respond_route_codes_and_secret_hygiene(tmp_path, druks_db, resume
     assert len(resume_spy) == 1
     for response in (unknown, bad_control, bad_question, blank_answer, empty_changes, again):
         assert token not in response.text
-        assert _WEBHOOK_URL not in response.text
 
 
 async def test_respond_external_notification_not_answerable(tmp_path, druks_db, resume_spy):

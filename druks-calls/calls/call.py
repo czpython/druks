@@ -74,7 +74,7 @@ def get_model(
         )
         # OpenAI's own voice detection reports the caller's turns.
         return (
-            OpenAIRealtimeLLMService(api_key=voice["key"], settings=settings),
+            OpenAIRealtimeLLMService(api_key=voice["api_key"], settings=settings),
             LLMUserAggregatorParams(user_idle_timeout=no_speech_seconds),
             OPENAI_INPUT_SAMPLE_RATE,
         )
@@ -84,7 +84,7 @@ def get_model(
         settings.voice = voice["voice_name"]
     # Gemini Live reports no turns of the caller, and the silence timer needs them.
     return (
-        GeminiLiveLLMService(api_key=voice["key"], settings=settings, tools=tools),
+        GeminiLiveLLMService(api_key=voice["api_key"], settings=settings, tools=tools),
         LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(), user_idle_timeout=no_speech_seconds
         ),

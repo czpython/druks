@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from urllib.parse import urlencode
 
 import pytest
-from conftest import bind_ambient_session, connect_service
+from conftest import bind_ambient_session, install_service
 from druks.accounts.models import Account
 from druks.core.webhooks.slack import SlackInteractivity, verify_slack_signature
 from druks.db import db_session as ambient_db_session
@@ -20,7 +20,6 @@ from fastapi.testclient import TestClient
 from uuid_utils import uuid7
 
 _SIGNING_SECRET = "slack-test-signing-secret"
-_WEBHOOK_URL = "https://hooks.slack.com/services/T000/B000/slackrail"
 
 _IN_APP_ASK = {
     "presentation": "in_app",
@@ -42,7 +41,7 @@ async def _parked_notification(druks_db):
     await druks_db.flush()
     await seed_dbos_status(druks_db, run.id, "parked")
     destination = await Destination.create(
-        druks_db, name=f"slack-{run.id[-8:]}", kind="slack_webhook", url=_WEBHOOK_URL
+        druks_db, name=f"slack-{run.id[-8:]}", kind="slack_channel", channel_id="C1"
     )
     notification = await Notification.create(
         druks_db,
@@ -79,10 +78,11 @@ def _client(tmp_path) -> TestClient:
 async def slack_card(druks_db):
     """The Slack card whose signing secret signs every delivery."""
     bind_ambient_session(druks_db)
-    await connect_service(
+    await install_service(
         "slack",
+        access_token="xoxb",
         identity={"client_id": "c1", "team": "Acme", "team_id": "T1", "bot_user_id": "U900"},
-        secrets={"client_secret": "cs", "signing_secret": _SIGNING_SECRET, "bot_token": "xoxb"},
+        secrets={"client_secret": "cs", "signing_secret": _SIGNING_SECRET},
     )
     await druks_db.commit()
 

@@ -1,11 +1,14 @@
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field
 
-from druks.services import Service, ServiceConnectError
+from druks.services import Service, ServiceConnectError, auth
 
 
 class Voice(Service):
     description = "The voice model that answers phone calls."
     required = False
+
+    class Authentication(auth.Authentication):
+        api_key = auth.ApiKey()
 
     class Settings(BaseModel):
         model: str = Field(
@@ -15,7 +18,6 @@ class Voice(Service):
                 "google/gemini-2.5-flash-native-audio."
             ),
         )
-        key: SecretStr = Field(title="Key")
         voice_name: str = Field(
             "",
             title="Voice name",

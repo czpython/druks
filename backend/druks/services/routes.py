@@ -37,9 +37,8 @@ async def list_services(session: SessionDep) -> list[ServiceResponse]:
         connections = [
             connection for connection in account_connections if connection.audience == audience
         ]
-        install_url = await service.get_install_endpoint() if row else ""
-        if install_url and service.is_managed():
-            # The manager binds the installation, so the install starts at the sign-in door.
+        install_url = ""
+        if row and await service.Authentication.get_install_endpoint():
             install_url = f"/api/oauth/{service.slug}/connect?install=1"
         entries.append(
             ServiceResponse.from_row(
@@ -94,7 +93,10 @@ async def connect_oauth_service(
 ) -> RedirectResponse:
     """Start a sign-in or an install at the provider."""
     service = services.get(slug)
-    if not service or not service.token_endpoint:
+    if not service or not service.Authentication.get_client():
+        raise OauthPageError(f"No OAuth service {slug!r}.", status_code=404)
+    authorization_endpoint = await service.Authentication.get_install_endpoint() if install else ""
+    if not (authorization_endpoint or service.Authentication.has_sign_in()):
         raise OauthPageError(f"No OAuth service {slug!r}.", status_code=404)
     account_id = current_account_id.get()
     if connection:
@@ -115,18 +117,14 @@ async def connect_oauth_service(
         client = await service.get_oauth_client()
     except ServiceNotConnectedError as error:
         raise OauthPageError(str(error), status_code=409) from error
-    authorization_endpoint = ""
     install_params: dict[str, str] = {}
-    if install:
-        authorization_endpoint = await service.get_install_endpoint()
-        if not authorization_endpoint:
-            raise OauthPageError(f"{slug} has no install page.", status_code=404)
-        install_params = service.get_install_params()
-    scopes = () if install and service.actor_token_name else service.scopes()
+    if install and (oauth := service.Authentication.oauth):
+        install_params = oauth.install_params
+    scopes = () if install else service.scopes()
     url = await client.begin_connect(
         redirect_uri=client.redirect_uri or f"{endpoint.rstrip('/')}/api/oauth/callback",
         scopes=scopes,
-        consent_query=service.get_consent_query(scopes),
+        consent_query=service.Authentication.get_consent_query(scopes),
         context={
             "account_id": account_id,
             "connection_id": connection,
@@ -171,11 +169,12 @@ async def oauth_callback(
         raise OauthPageError(f"No OAuth service {provider!r}.", status_code=400)
     try:
         if pending["install"]:
-            await service.complete_install(tokens)
-            if service.actor_token_name:
+            await service.install(session, tokens)
+            if service.Authentication.oauth:
+                # The app's own grant is the install; nobody signs in.
                 return await _finish_consent(session, pending)
-        grant = service.read_grant(tokens)
-        identity = await service.get_identity(grant["access_token"])
+        grant = service.Authentication.read_grant(tokens)
+        identity = await service.Authentication.get_identity(grant["access_token"])
     except OauthExchangeError as exchange_error:
         raise OauthPageError(str(exchange_error), status_code=400) from exchange_error
     granted = grant["scopes"] or pending["scopes"]
@@ -193,9 +192,9 @@ async def oauth_callback(
             raise OauthPageError(
                 "The connection was removed while consent was open.", status_code=400
             )
-    elif service.identity_key and (value := identity.get(service.identity_key)):
+    elif (key := service.Authentication.get_client().identity_key) and (value := identity.get(key)):
         row = await VaultSecret.get_for_identity(
-            session, Audience.service(provider), pending["account_id"], service.identity_key, value
+            session, Audience.service(provider), pending["account_id"], key, value
         )
     reconsent = bool(row)
     if row:

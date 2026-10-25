@@ -40,7 +40,7 @@ def test_the_models_vendor_picks_its_service(model, service):
     pickup = {
         "voice": {
             "model": model,
-            "key": "key",
+            "api_key": "key",
             "voice_name": "",
             "transcription_model": "gpt-4o-mini-transcribe",
         },
