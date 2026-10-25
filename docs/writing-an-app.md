@@ -539,8 +539,10 @@ An agent that calls a provider from its sandbox lists the secret it needs. The
 class Acme(Service):
     host = "api.acme.example"
 
+    class Authentication(auth.Authentication):
+        api_key = auth.ApiKey()
+
     class Settings(BaseModel):
-        api_key: SecretStr = Field(title="API key")
         webhook_secret: SecretStr = Field(title="Webhook secret")
 
 
@@ -1439,16 +1441,33 @@ the card heading from the slug:
 ```python
 from pydantic import BaseModel, Field, SecretStr
 
-from druks.services import Service, ServiceConnectError
+from druks.services import Service, ServiceConnectError, auth
 
 
 class Gmail(Service):
     description = "The appliance's own OAuth client — every mailbox authenticates against it."
 
-    class Settings(BaseModel):
-        client_id: str = Field(title="Client ID")
-        client_secret: SecretStr = Field(title="Client secret")
+    class Authentication(auth.Authentication):
+        sign_in = auth.SignIn(
+            authorization_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
+            token_endpoint="https://oauth2.googleapis.com/token",
+        )
 ```
+
+A service declares how it authenticates in a nested class named
+`Authentication`, found by name as `Settings` is. It names its ways as instances
+of the kinds in `druks.services.auth`, under fixed names. `api_key =
+auth.ApiKey()` is a pasted key. `jwt = auth.Jwt()` is an app's private key.
+`oauth = auth.Oauth(...)` is the service's own OAuth app: the operator installs
+it, and Druks acts with the grant. `sign_in = auth.SignIn(...)` is an OAuth
+client people only sign in through. A service declares `oauth` or `sign_in`,
+not both. Each kind owns its credential: `api_key`, `private_key`, or
+`client_id` and `client_secret`. These fields join the card after `Settings`,
+which holds the rest, such as a webhook secret or the identifier of an
+account. Druks acts as the service through `api_key`, `jwt`, or `oauth`, and
+holds one at a time: a pasted key ends the app's grant, and an install ends
+the key. `Authentication` also carries what the provider does differently, as
+classmethods. See [Connect provider accounts](#connect-provider-accounts-oauth).
 
 The slug names the service's vault row and the connect wire. A class
 rename changes the slug, rekeys the card, and orphans the connected identity.
@@ -1489,19 +1508,19 @@ set `mcp_host` to the host of that server. An OAuth MCP server at that host then
 uses the service's credential. If the service has OAuth endpoints, each account
 uses its own sign-in at the service, with no second consent. If not, the
 default account sends the service's pasted login, and every other account
-connects its own grant. Override `get_authorization` to turn the connected row
-into the `Authorization` value:
+connects its own grant. Override `Authentication.get_authorization` to turn the
+connected row into the `Authorization` value:
 
 ```python
 class Acme(Service):
     mcp_host = "mcp.acme.example"
 
-    class Settings(BaseModel):
-        api_key: SecretStr = Field(title="API key")
+    class Authentication(auth.Authentication):
+        api_key = auth.ApiKey()
 
-    @classmethod
-    def get_authorization(cls, login) -> str:
-        return f"Bearer {login.secrets['api_key']}"
+        @classmethod
+        def get_authorization(cls, login) -> str:
+            return f"Bearer {login.secrets['api_key']}"
 ```
 
 ### Resources at a provider
@@ -1526,8 +1545,8 @@ from druks.services import Resource, Service
 class Cloudflare(Service):
     host = "api.cloudflare.com"
 
-    class Settings(BaseModel):
-        api_token: SecretStr = Field(title="API token")
+    class Authentication(auth.Authentication):
+        api_key = auth.ApiKey()
 
     class Workers(Resource):
         def __init__(self, key: str) -> None:
@@ -1582,42 +1601,49 @@ variable is the service slug and `API_TOKEN`, in upper case. On requests to
 `host`, the secrets proxy replaces the placeholder with the token. A sandbox can
 hold only one resource of each service.
 
-Druks asks the service for each token that a sandbox fetches from the row of the
-service:
+Druks asks the service's `Authentication` for each token that a sandbox fetches
+from the row of the service:
 
 ```python
 @classmethod
 async def issue_token(cls, resource: str = "", *, name: str = "") -> tuple[str, datetime | None]:
 ```
 
-The base answers a resource recipe when `resource` names one, a pasted field
-when `name` is the service slug and the field name, and the one secret of the
-row under any other name. Override `issue_token` when the row holds a
-credential that no sandbox must get, and return the token and its expiry.
-Raise `MissingSecretError` when the row cannot give a token until a person
-acts.
+A resource recipe answers when `resource` names one. Otherwise the default
+answers a pasted field when `name` is the service slug and the field name, and
+under any other name the installed app's access token, else the one secret of
+the row. Override `issue_token` when the row holds a credential that no sandbox
+must get, and return the token and its expiry. Raise `MissingSecretError` when
+the row cannot give a token until a person acts.
 
 ## Connect provider accounts (OAuth)
 
-Declare the OAuth endpoints on the service that holds the client
-credentials. The `Settings` model must have `client_id` and `client_secret`
-fields:
+Declare the client people sign in through as `sign_in`, or the service's own
+OAuth app as `oauth`. Both bring `client_id` and `client_secret`, which the
+operator pastes:
 
 ```python
 class Acme(Service):
-    authorization_endpoint = "https://acme.example/oauth/authorize"
-    token_endpoint = "https://acme.example/oauth/token"
-    # True = HTTP Basic on the token endpoint. False = secret in the body.
-    basic_auth = True
-    identity_endpoint = "https://acme.example/oauth/userinfo"
-    identity_scopes = ("openid", "email")
-    # Query parameters the provider's consent URL must carry.
-    extra_authorize_params = {"access_type": "offline", "prompt": "consent"}
-
-    class Settings(BaseModel):
-        client_id: str = Field(title="Client ID")
-        client_secret: SecretStr = Field(title="Client secret")
+    class Authentication(auth.Authentication):
+        sign_in = auth.SignIn(
+            authorization_endpoint="https://acme.example/oauth/authorize",
+            token_endpoint="https://acme.example/oauth/token",
+            # True = HTTP Basic on the token endpoint. False = secret in the body.
+            basic_auth=True,
+            identity_endpoint="https://acme.example/oauth/userinfo",
+            identity_scopes=("openid", "email"),
+            identity_key="sub",
+            # Query parameters the provider's consent URL must carry.
+            extra_authorize_params={"access_type": "offline", "prompt": "consent"},
+        )
 ```
+
+An `oauth` way is the service's own app. The operator installs it from the
+card, and Druks acts with the grant the install returns: `get_grant()` and
+`get_access_token()` on the service read it. `install_params` join the install
+request. `Authentication.get_install_endpoint()` names where the install
+starts, and `Authentication.complete_install(tokens)` records what the install
+proves.
 
 `extra_authorize_params` declares special consent-query values for the provider. The
 platform adds them to every sign-in it starts for the service. The example
@@ -1629,42 +1655,52 @@ account's facts (email, username, name). Druks calls it once at consent and
 shows the facts as the connection label in Settings. `identity_scopes` are the
 scopes that this call requires. Druks adds them to the consent request.
 
-If one identity fact names the provider account, declare `identity_key`:
-`"sub"` for Google, `"id"` for GitHub. A fresh sign-in that matches an
-existing connection for the same owner updates that row instead of
-creating a second one. A revoked row that matches becomes live again and
-keeps its id. Without the declaration, each fresh sign-in creates a new
-connection.
+People sign in through the client when it declares `identity_key`, the
+identity fact that names the provider account: `"sub"` for Google, `"id"` for
+GitHub. A fresh sign-in that matches an existing connection for the same owner
+updates that row instead of creating a second one. A revoked row that matches
+becomes live again and keeps its id. Without `identity_key`, an `oauth` app
+only installs, and the card offers no sign-in. `identity_key` needs
+`identity_endpoint` or a `get_identity` override, and `identity_endpoint`
+needs `identity_key`; Druks refuses a service that declares one without the
+other.
 
 Some providers have no such endpoint, or return the facts in a different
-shape. Override `get_identity` for them:
+shape. Override `Authentication.get_identity` for them:
 
 ```python
-    @classmethod
-    async def get_identity(cls, access_token: str) -> dict:
-        payload = await fetch_profile(access_token)
-        return payload["data"]
+    class Authentication(auth.Authentication):
+        sign_in = auth.SignIn(...)
+
+        @classmethod
+        async def get_identity(cls, access_token: str) -> dict:
+            payload = await fetch_profile(access_token)
+            return payload["data"]
 ```
+
+`Authentication` also has `get_consent_query(scopes)`, `read_grant(tokens)`,
+and `is_grant_revoked(status, tokens)`, for a provider that shapes the consent
+query, the token answer, or a refused refresh differently.
 
 One provider can back several services — Google backs both Gmail and Google
 Calendar, and each keeps its own card and its own key. Share the provider's
 declarations through an abstract base. Set `abstract = True`. The base never
-registers. Each subclass inherits everything it declares, `Settings`
+registers. Each subclass inherits everything it declares, `Authentication`
 included, and needs nothing beyond its class name:
 
 ```python
 class GoogleOauth(Service):
     abstract = True
-    authorization_endpoint = "https://accounts.google.com/o/oauth2/v2/auth"
-    token_endpoint = "https://oauth2.googleapis.com/token"
-    extra_authorize_params = {"access_type": "offline", "prompt": "consent"}
-    identity_endpoint = "https://openidconnect.googleapis.com/v1/userinfo"
-    identity_scopes = ("openid", "email")
-    identity_key = "sub"
 
-    class Settings(BaseModel):
-        client_id: str = Field(title="Client ID")
-        client_secret: SecretStr = Field(title="Client secret")
+    class Authentication(auth.Authentication):
+        sign_in = auth.SignIn(
+            authorization_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
+            token_endpoint="https://oauth2.googleapis.com/token",
+            extra_authorize_params={"access_type": "offline", "prompt": "consent"},
+            identity_endpoint="https://openidconnect.googleapis.com/v1/userinfo",
+            identity_scopes=("openid", "email"),
+            identity_key="sub",
+        )
 
 
 class Gmail(GoogleOauth):
@@ -2227,7 +2263,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | --- | --- |
 | `druks.accounts` | `current_account_id` |
 | `druks.apps` | `App`, `AppSettings`, `Choices`, `Secret` |
-| `druks.services` | `Service`, `Connection`, `Resource`, `ResourceError`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
+| `druks.services` | `Service`, `Connection`, `auth`, `Resource`, `ResourceError`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
 | `druks.browser` | `BrowserClient`, `BrowserCommandError`, `BrowserSession`, `BrowserSessionSignedOutError`, `BrowserSessionStatus` |
 | `druks.agents` | `Agent`, `AgentOutput`, `Bot`, `BotUser` |
 | `druks.workflows` | `Workflow`, `Gate`, `GateTimeout`, `step`, run/agent response types, lifecycle enums and workflow errors |

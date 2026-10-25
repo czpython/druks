@@ -29,22 +29,18 @@ class McpServer(Base, Uuid7Pk):
     __tablename__ = "mcp_servers"
 
     # A row is the operator's overlay: a custom server they added, or a built-in
-    # they set state on. Either carries its own url — a built-in overlay copies
-    # the url from the built-in def when the operator's choice first creates it.
+    # they set state on. Either carries its own url.
     name: Mapped[str] = mapped_column(String, unique=True)
     url: Mapped[str] = mapped_column(String)
     # Whether delivery mints the Authorization bearer from a stored grant.
     # Otherwise the server authenticates through its header rows (a pasted
-    # bearer is the Authorization header spelled out). A catalog-managed name
-    # reads this from the registry definition instead.
+    # bearer is the Authorization header spelled out).
     is_oauth: Mapped[bool] = mapped_column(Boolean, default=False)
     # The plain declared header values from the server's spec. A secret one,
     # like the bearer itself, is a vault row at the server's audience.
     headers: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # Whose credential a run uses: each account's own (per_user) or one shared.
-    # A header server takes it when added; an OAuth server's first completed
-    # connect claims it. Setting the enable state carries no such decision.
     identity_mode: Mapped[str | None]
     # The scopes a connect requests at the provider. None requests the scopes
     # the server advertises.
@@ -53,7 +49,6 @@ class McpServer(Base, Uuid7Pk):
 
     @classmethod
     async def list_all(cls, session: AsyncSession) -> list["McpServer"]:
-        # The raw overlay rows — not the merged registry view (_merged).
         return list((await session.execute(select(cls).order_by(cls.name))).scalars())
 
     @classmethod
@@ -62,11 +57,7 @@ class McpServer(Base, Uuid7Pk):
 
     @classmethod
     async def _merged(cls, session: AsyncSession) -> dict[str, dict]:
-        # The full view the API and delivery build from, keyed by
-        # name: each built-in definition (url + auth from the registry)
-        # overlaid with its operator row's enable choice and secrets, then any
-        # fully custom rows. A secret is the vault row itself; its value is
-        # read where it enters a run.
+        # A secret is the vault row itself; its value is read where it enters a run.
         rows = {server.name: server for server in await cls.list_all(session)}
         secret_headers: dict[str, dict[str, VaultSecret]] = {}
         for secret in await VaultSecret.list_installation_tokens(session):
@@ -119,7 +110,7 @@ class McpServer(Base, Uuid7Pk):
                         session, Audience.mcp(server["name"]), account_id
                     )
                     secret_headers = {row.header: row for row in rows}
-            elif service and service.authorization_endpoint:
+            elif service and service.Authentication.has_sign_in():
                 credential = Credential.SERVICE_CONNECTION
                 connections = await VaultSecret.list_account_connections(
                     session, Audience.service(service.slug), account_id
@@ -170,7 +161,7 @@ class McpServer(Base, Uuid7Pk):
             session,
             SecretKind.STATIC,
             Audience.mcp(name),
-            secrets={"value": service.get_authorization(login)},
+            secrets={"value": service.Authentication.get_authorization(login)},
             account_id=account_id,
             header=BEARER_HEADER,
         )
@@ -189,7 +180,6 @@ class McpServer(Base, Uuid7Pk):
 
     @classmethod
     async def list_enabled(cls, session: AsyncSession) -> list[dict]:
-        # The enabled subset — what a run delivers and the settings UI shows active.
         return [server for server in (await cls._merged(session)).values() if server["is_enabled"]]
 
     @classmethod
@@ -253,13 +243,14 @@ class McpServer(Base, Uuid7Pk):
     ) -> None:
         """Replace the secret headers the account's key replaces; see ``get_key_holder``."""
         await self.remove_secret_headers(account_id)
+        holder = self.get_key_holder(account_id)
         for header, value in secret_headers.items():
             await VaultSecret.store(
                 self.session,
                 SecretKind.STATIC,
                 Audience.mcp(self.name),
                 secrets={"value": value},
-                account_id=self.get_key_holder(account_id),
+                account_id=holder,
                 header=header,
             )
 

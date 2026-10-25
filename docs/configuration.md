@@ -527,7 +527,7 @@ Select the tracker in **Software Factory → Settings**. The default is Linear.
 
 **Linear** and **Jira** are service identities. Connect them from
 **Settings → Connections → Services**. The Linear identity uses an API key
-and webhook secret. The Jira identity uses a base URL, email, API token, and
+and webhook secret. The Jira identity uses a base URL, email, API key, and
 webhook secret. For an Atlassian service account, the email is its address at
 `serviceaccount.atlassian.com`. Druks validates the credentials before it
 stores them. Linear, Jira, and GitHub share five status settings: trigger, in

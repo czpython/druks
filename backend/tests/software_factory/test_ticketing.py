@@ -60,7 +60,7 @@ async def _connect_jira():
     return await connect_service(
         "jira",
         identity={"base_url": "https://jira.test", "email": "a@b.com", "display_name": "druks"},
-        secrets={"api_token": "jira_secret", "webhook_secret": "jira-hook"},
+        secrets={"api_key": "jira_secret", "webhook_secret": "jira-hook"},
     )
 
 
@@ -186,7 +186,9 @@ async def test_linear_verify_stores_the_actor_and_workspace(monkeypatch):
 
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
-    facts = await services.Linear.verify(services.Linear.Settings(api_key="k", webhook_secret="s"))
+    facts = await services.Linear.verify(
+        services.Linear.settings_model(api_key="k", webhook_secret="s")
+    )
 
     assert facts == {"actor": "druks", "workspace": "Acme"}
 
@@ -202,7 +204,9 @@ async def test_linear_verify_rejects_a_bad_key_without_echoing(monkeypatch):
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
     with pytest.raises(ServiceConnectError) as raised:
-        await services.Linear.verify(services.Linear.Settings(api_key="bad", webhook_secret="s"))
+        await services.Linear.verify(
+            services.Linear.settings_model(api_key="bad", webhook_secret="s")
+        )
 
     assert "boom-marker" not in str(raised.value)
     assert "bad" not in str(raised.value)
@@ -223,8 +227,8 @@ async def test_jira_verify_stores_the_display_name(monkeypatch):
     monkeypatch.setattr(httpx.AsyncClient, "request", fake_request)
 
     facts = await services.Jira.verify(
-        services.Jira.Settings(
-            base_url="https://jira.test/", email="a@b.com", api_token="t", webhook_secret="s"
+        services.Jira.settings_model(
+            base_url="https://jira.test/", email="a@b.com", api_key="t", webhook_secret="s"
         )
     )
 
@@ -247,18 +251,19 @@ async def test_jira_verify_rejects_bad_credentials(monkeypatch):
 
     with pytest.raises(ServiceConnectError, match="did not accept"):
         await services.Jira.verify(
-            services.Jira.Settings(
-                base_url="https://jira.test", email="a@b.com", api_token="bad", webhook_secret="s"
+            services.Jira.settings_model(
+                base_url="https://jira.test", email="a@b.com", api_key="bad", webhook_secret="s"
             )
         )
 
 
 def test_jira_sends_a_service_account_login_as_a_bearer_token():
     login = VaultSecret(
-        identity={"email": "svc-x1@serviceaccount.atlassian.com"}, secrets={"api_token": "jira-key"}
+        identity={"email": "svc-x1@serviceaccount.atlassian.com"},
+        secrets={"api_key": "jira-key"},
     )
 
-    assert services.Jira.get_authorization(login) == "Bearer jira-key"
+    assert services.Jira.Authentication.get_authorization(login) == "Bearer jira-key"
 
 
 async def test_tracker_check_accepts_trackerless_by_choice(monkeypatch):
@@ -561,7 +566,7 @@ def _jira(fake: _FakeJiraClient) -> Jira:
     provider = Jira(
         base_url="https://jira.test",
         email="a@b.com",
-        api_token="tok",
+        api_key="tok",
         status_names={TicketStatus.DONE: "Done", TicketStatus.TRIGGER: "To Agent"},
         client=object(),
     )
@@ -606,7 +611,7 @@ def _jira_client(handler) -> JiraClient:
         return handler(request)
 
     wire = httpx.AsyncClient(transport=httpx.MockTransport(gateway))
-    return JiraClient(base_url="https://jira.test", email="a@b.com", api_token="tok", client=wire)
+    return JiraClient(base_url="https://jira.test", email="a@b.com", api_key="tok", client=wire)
 
 
 async def test_jira_client_executes_the_transition_to_the_status():

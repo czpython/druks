@@ -1,6 +1,6 @@
 import secrets
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,7 +10,7 @@ from druks.chat.bots.service import resume
 from druks.chat.models import Conversation
 from druks.secrets.enums import IdentityStatus, SecretKind
 from druks.secrets.models import VaultSecret
-from druks.services import Service
+from druks.services import Service, auth
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.settings import load_settings
 
@@ -28,21 +28,23 @@ class Waha(Service):
     )
     required = False
 
+    class Authentication(auth.Authentication):
+        api_key = auth.ApiKey()
+
     class Settings(BaseModel):
         url: str = Field(title="Address", description="Base URL of the WAHA server.")
-        key: SecretStr = Field(title="Key")
 
     @classmethod
     async def get_client(
         cls, session: AsyncSession, connection: VaultSecret | None = None
     ) -> WahaClient:
-        """A client under this card's key, or under a linked number's session key."""
-        if card := await VaultSecret.lookup(session, cls.secret_kind, WAHA_AUDIENCE):
+        """A client under the service's key, or under a linked number's session key."""
+        if row := await VaultSecret.lookup(session, cls.secret_kind, WAHA_AUDIENCE):
             if connection:
                 return WahaClient(
-                    card.identity["url"], connection.secrets["key"], connection.identity["session"]
+                    row.identity["url"], connection.secrets["key"], connection.identity["session"]
                 )
-            return WahaClient(card.identity["url"], card.secrets["key"])
+            return WahaClient(row.identity["url"], row.secrets["api_key"])
         raise ServiceNotConnectedError(cls.slug)
 
     @classmethod
@@ -54,9 +56,9 @@ class Waha(Service):
             raise WhatsAppLinkError(
                 "WAHA has no address to send events to. Set urls.webhook_host or urls.endpoint."
             )
-        card = await cls.get_client(session)
-        name = await card.create_session()
-        key = await card.create_key(name)
+        client = await cls.get_client(session)
+        name = await client.create_session()
+        key = await client.create_key(name)
         webhook_secret = secrets.token_urlsafe(32)
         # A new row for each link, so a removed number keeps its facts and its chats.
         connection = VaultSecret(
@@ -98,9 +100,9 @@ class Waha(Service):
     @classmethod
     async def unlink(cls, session: AsyncSession, connection: VaultSecret, reason: str) -> None:
         """Delete the number's session and its key. The row keeps its facts."""
-        card = await cls.get_client(session)
-        await card.delete_session(connection.identity["session"])
-        await card.delete_key(connection.secrets["key_id"])
+        client = await cls.get_client(session)
+        await client.delete_session(connection.identity["session"])
+        await client.delete_key(connection.secrets["key_id"])
         await connection.revoke(reason)
         # The number's chats never take a turn again, so their pauses end.
         for conversation in await Conversation.list_for_connection(session, connection.id):
@@ -108,7 +110,7 @@ class Waha(Service):
 
     @classmethod
     async def disconnect(cls, session: AsyncSession) -> None:
-        """Remove every linked number first, because only the card's key deletes a session."""
+        """Remove every linked number first, because only the service's key deletes a session."""
         for connection in await session.scalars(
             select(VaultSecret).where(
                 VaultSecret.kind == SecretKind.SESSION,

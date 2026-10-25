@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, ValidationError, create_model
+from pydantic.fields import FieldInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.apps.base import NAME_RE
@@ -19,14 +20,14 @@ from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
 
+from . import auth
 from .exceptions import (
-    OauthExchangeError,
     ServiceConnectError,
     ServiceDisabledError,
     ServiceManagedError,
     ServiceNotConnectedError,
 )
-from .oauth import OauthClient, fetch_identity, is_grant_revoked
+from .oauth import OauthClient
 from .resources import Resource
 
 logger = logging.getLogger(__name__)
@@ -152,8 +153,10 @@ class Service:
     description: ClassVar[str] = ""
     # Whether doctor fails when this service is not connected.
     required: ClassVar[bool] = True
-    # What the connected credential is in the vault: a pasted value, or an
-    # App key that issues tokens.
+    # How the service authenticates: its nested ``Authentication``, found by name like
+    # ``Settings``, names its ways and carries the provider's behavior. See ``auth``.
+    Authentication: ClassVar[type[auth.Authentication]] = auth.Authentication
+    # What the connected row is in the vault: an App key when the service has a ``jwt``.
     secret_kind: ClassVar[SecretKind] = SecretKind.STATIC
     # True marks a shared provider base. It never registers; its subclasses do.
     abstract: ClassVar[bool] = False
@@ -167,29 +170,9 @@ class Service:
     # The host of the MCP server that this identity also signs in to. That
     # server uses the service's credential instead of registering its own client.
     mcp_host: ClassVar[str] = ""
-    # If the registered app is an OAuth client, set both endpoints.
-    authorization_endpoint: ClassVar[str] = ""
-    token_endpoint: ClassVar[str] = ""
-    # HTTP Basic on the token endpoint; False sends the secret in the body.
-    basic_auth: ClassVar[bool] = False
-    # The provider's consent-query quirks — Google grants a refresh token
-    # only with access_type=offline and prompt=consent.
-    extra_authorize_params: ClassVar[dict[str, str]] = {}
-    # The endpoint that returns the signed-in account's facts;
-    # identity_scopes join the consent ask.
-    identity_endpoint: ClassVar[str] = ""
-    identity_scopes: ClassVar[tuple[str, ...]] = ()
-    # The identity fact that names the provider account — "sub" for Google,
-    # "subject" for GitHub. When set, a fresh sign-in that matches an existing
-    # connection for the same owner updates that row; a revoked row becomes
-    # live again. When empty, each fresh sign-in creates a new connection.
-    identity_key: ClassVar[str] = ""
     # The app that the create page registers at the provider. A service with one
     # offers that page on its card; without one, the person pastes credentials.
     manifest: ClassVar[dict[str, Any]] = {}
-    # The install stores the actor's token under this name. The service is connected only
-    # when its row holds it.
-    actor_token_name: ClassVar[str] = ""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -220,22 +203,69 @@ class Service:
                 "service_identities row and the connect wire."
             )
         declared = getattr(cls, "Settings", None)
+        if not declared:
+            declared = create_model(f"{cls.__name__}Settings")
         if not isinstance(declared, type) or not issubclass(declared, BaseModel):
             raise TypeError(f"{cls.__name__}.Settings must be a pydantic model")
-        if bool(cls.authorization_endpoint) != bool(cls.token_endpoint):
-            raise TypeError(f"{cls.__name__} must declare both OAuth endpoints or neither")
-        if cls.token_endpoint and not {"client_id", "client_secret"} <= set(declared.model_fields):
+        authentication = cls.__dict__.get("Authentication")
+        if not authentication:
+            # Each service gets a class of its own, so ``service`` points at it alone.
+            authentication = type("Authentication", (cls.Authentication,), {})
+        if not (
+            isinstance(authentication, type) and issubclass(authentication, auth.Authentication)
+        ):
+            raise TypeError(f"{cls.__name__}.Authentication must subclass auth.Authentication")
+        for name, kind in auth.WAYS.items():
+            way = getattr(authentication, name, None)
+            if way and not isinstance(way, kind):
+                raise TypeError(
+                    f"{cls.__name__}.Authentication.{name} must be an auth.{kind.__name__}"
+                )
+        for name, value in vars(authentication).items():
+            if isinstance(value, auth.Way) and name not in auth.WAYS:
+                raise TypeError(
+                    f"{cls.__name__}.Authentication names a way {name!r}; "
+                    f"the names are {', '.join(auth.WAYS)}"
+                )
+        if authentication.oauth and authentication.sign_in:
+            raise TypeError(f"{cls.__name__}.Authentication declares both oauth and sign_in")
+        client = authentication.get_client()
+        if client and client.identity_endpoint and not client.identity_key:
+            raise TypeError(f"{cls.__name__} declares identity_endpoint without identity_key")
+        reads_identity = client and (
+            client.identity_endpoint
+            or authentication.get_identity.__func__ is not auth.Authentication.get_identity.__func__
+        )
+        if client and client.identity_key and not reads_identity:
             raise TypeError(
-                f"{cls.__name__}.Settings must declare client_id and client_secret "
-                "fields — get_oauth_client() reads the OAuth client from them"
+                f"{cls.__name__} declares identity_key without identity_endpoint; "
+                "declare it or override get_identity"
             )
+        authentication.service = cls
+        cls.Authentication = authentication
+        cls.secret_kind = SecretKind.APP_KEY if authentication.jwt else SecretKind.STATIC
+        # The card: ``Settings``, then each way's fields. With two acting ways, each is
+        # pasted whole or left out.
+        exclusive = len(authentication.get_acting_ways()) > 1
+        pieces: dict[str, Any] = {}
+        for name, way in authentication.get_ways():
+            for field_name, (annotation, info) in way.fields.items():
+                if field_name in pieces or field_name in declared.model_fields:
+                    raise TypeError(f"{cls.__name__} declares the field {field_name!r} twice")
+                if exclusive and name != "sign_in":
+                    pieces[field_name] = (
+                        annotation | None,
+                        FieldInfo.merge_field_infos(info, default=None),
+                    )
+                else:
+                    pieces[field_name] = (annotation, info)
         # A registered service is concrete even under an abstract base.
         cls.abstract = False
         cls.slug = slug
         cls.title = slug.replace("_", " ").title()
-        cls.settings_model = declared
+        cls.settings_model = create_model(f"{cls.__name__}Settings", __base__=declared, **pieces)
         cls.fields = SimpleNamespace(
-            **{name: ServiceField(cls, name) for name in declared.model_fields}
+            **{name: ServiceField(cls, name) for name in cls.settings_model.model_fields}
         )
         cls.resources = {}
         for value in vars(cls).values():
@@ -303,6 +333,19 @@ class Service:
         return cls.slug in load_settings().manager.services
 
     @classmethod
+    async def get_grant(cls) -> VaultSecret | None:
+        """The installed app's grant: the OAuth connection the service itself holds."""
+        return await VaultSecret.get_service_grant(db_session(), Audience.service(cls.slug))
+
+    @classmethod
+    async def get_access_token(cls) -> str:
+        """The access token of the installed app's grant."""
+        grant = await cls.get_grant()
+        if not grant:
+            raise ServiceNotConnectedError(cls.slug)
+        return await Connection(cls, grant).get_access_token()
+
+    @classmethod
     async def sync_configuration(cls, session: AsyncSession) -> None:
         """Store each service that druks.toml configures as its card."""
         configuration = load_settings()
@@ -343,14 +386,11 @@ class Service:
                 ) from None
             row = await VaultSecret.lookup(session, service.secret_kind, Audience.service(slug))
             facts = row.identity if row else {}
-            kept_secrets = {}
-            if row and service.actor_token_name in row.secrets:
-                kept_secrets = {service.actor_token_name: row.secrets[service.actor_token_name]}
             await service._store(
                 session,
                 settings,
                 proven_facts={name: value for name, value in facts.items() if name not in entry},
-                kept_secrets=kept_secrets,
+                kept_secrets={},
             )
 
     @classmethod
@@ -360,10 +400,12 @@ class Service:
         secrets = {
             name: getattr(settings, name).get_secret_value()
             for name, field in type(settings).model_fields.items()
-            if field_kind(field) == "secret"
+            if field_kind(field) == "secret" and getattr(settings, name)
         }
         identity = {
-            name: value for name, value in settings.model_dump().items() if name not in secrets
+            name: value
+            for name, value in settings.model_dump().items()
+            if name not in secrets and value
         }
         return await VaultSecret.store(
             session,
@@ -377,9 +419,9 @@ class Service:
     def with_scopes(cls, *scopes: str) -> ScopedService:
         """Declare this app's use of the service and the scopes its
         calls need."""
-        if cls.token_endpoint:
+        if cls.Authentication.has_sign_in():
             return ScopedService(cls, scopes)
-        raise TypeError(f"{cls.__name__} declares no OAuth endpoints")
+        raise TypeError(f"{cls.__name__} offers no sign-in")
 
     @classmethod
     async def list_for_account(cls, account_id: str) -> list[Connection]:
@@ -404,159 +446,160 @@ class Service:
     def scopes(cls) -> tuple[str, ...]:
         """The union of every installed declaration's scopes — the consent ask."""
         scopes = {scope for declaration in cls.declarations() for scope in declaration.scopes}
-        scopes.update(cls.identity_scopes)
+        if client := cls.Authentication.get_client():
+            scopes.update(client.identity_scopes)
         return tuple(sorted(scopes))
 
     @classmethod
     def get_profile(cls, identity: dict[str, Any]) -> dict[str, Any]:
         """The facts that name the person at the provider: login, email, name. Not the
         authority or the identity key, which only match the sign-in to its account."""
-        hidden = ("authority", cls.identity_key)
+        client = cls.Authentication.get_client()
+        hidden = ("authority", client.identity_key if client else "")
         return {key: value for key, value in identity.items() if key not in hidden}
 
     @classmethod
-    async def get_identity(cls, access_token: str) -> dict[str, Any]:
-        """The signed-in account's facts, read from ``identity_endpoint``.
-        Override when the provider needs a different call."""
-        if cls.identity_endpoint:
-            return await fetch_identity(cls.identity_endpoint, access_token)
-        return {}
-
-    @classmethod
-    def get_consent_query(cls, scopes: tuple[str, ...]) -> dict[str, str]:
-        """The consent query that asks for ``scopes``. Override for a provider that
-        names or joins them differently."""
-        return {"scope": " ".join(scopes)}
-
-    @classmethod
-    def read_grant(cls, tokens: dict[str, Any]) -> dict[str, Any]:
-        """The grant in the token endpoint's answer: its access token, its refresh
-        token, and its scopes. Override for a provider that shapes the answer
-        differently. A grant whose refresh token is empty is one access token that
-        never expires."""
-        if tokens.get("refresh_token"):
-            return {
-                "access_token": tokens["access_token"],
-                "refresh_token": tokens["refresh_token"],
-                "scopes": tokens.get("scope", "").split(),
-            }
-        raise OauthExchangeError(
-            cls.slug,
-            "the authorization server granted no refresh token; druks needs offline access",
-            context={},
-        )
-
-    @classmethod
-    def is_grant_revoked(cls, status: int, tokens: dict[str, Any]) -> bool:
-        """Whether the token endpoint's answer to a refresh says the provider revoked
-        the grant. Override for a provider that reports it otherwise than RFC 6749."""
-        return is_grant_revoked(status, tokens)
-
-    @classmethod
     async def get_oauth_client(cls) -> OauthClient:
-        if not cls.token_endpoint:
-            raise TypeError(f"{cls.__name__} declares no OAuth endpoints")
+        client = cls.Authentication.get_client()
+        if not client:
+            raise TypeError(f"{cls.__name__} declares no OAuth client")
         connected = await cls.get()
         if cls.is_managed():
             manager = load_settings().manager
             return OauthClient(
                 provider=cls.slug,
-                authorization_endpoint=cls.authorization_endpoint,
+                authorization_endpoint=client.authorization_endpoint,
                 token_endpoint=f"{connected.identity['url'].rstrip('/')}/oauth/token",
                 client_id=connected.identity["client_id"],
-                extra_authorize_params=cls.extra_authorize_params,
+                extra_authorize_params=client.extra_authorize_params,
                 token_headers={"Authorization": f"Bearer {manager.token.get_secret_value()}"},
                 state_prefix=f"{manager.audience}.",
                 redirect_uri=f"{manager.issuer.rstrip('/')}/{cls.slug}/oauth/callback",
-                is_grant_revoked=cls.is_grant_revoked,
+                is_grant_revoked=cls.Authentication.is_grant_revoked,
             )
         return OauthClient(
             provider=cls.slug,
-            authorization_endpoint=cls.authorization_endpoint,
-            token_endpoint=cls.token_endpoint,
+            authorization_endpoint=client.authorization_endpoint,
+            token_endpoint=client.token_endpoint,
             client_id=connected.identity["client_id"],
             client_secret=connected.secrets["client_secret"],
-            basic_auth=cls.basic_auth,
-            extra_authorize_params=cls.extra_authorize_params,
-            is_grant_revoked=cls.is_grant_revoked,
+            basic_auth=client.basic_auth,
+            extra_authorize_params=client.extra_authorize_params,
+            is_grant_revoked=cls.Authentication.is_grant_revoked,
         )
 
     @classmethod
-    async def get_install_endpoint(cls) -> str:
-        return ""
-
-    @classmethod
-    def get_install_params(cls) -> dict[str, str]:
-        return {}
-
-    @classmethod
-    async def complete_install(cls, tokens: dict[str, Any]) -> None:
-        pass
+    async def install(cls, session: AsyncSession, tokens: dict[str, Any]) -> None:
+        """Record what the install proves. With an ``oauth`` way, keep its grant as the
+        service's own in place of the previous one, and drop a pasted key: a service holds
+        one way at a time."""
+        await cls.Authentication.complete_install(tokens)
+        if cls.Authentication.oauth:
+            audience = Audience.service(cls.slug)
+            if previous := await VaultSecret.get_service_grant(session, audience):
+                await OauthClient(provider=cls.slug).disconnect(previous, reason="reinstalled")
+            refresh_token = tokens.get("refresh_token", "")
+            await VaultSecret.connect(
+                session,
+                audience,
+                account_id=None,
+                refresh_token=refresh_token,
+                scopes=tokens.get("scope", "").replace(",", " ").split(),
+                secrets={} if refresh_token else {"access_token": tokens["access_token"]},
+            )
+            row = await cls.get()
+            keys = {
+                field_name
+                for name, way in cls.Authentication.get_acting_ways()
+                if name != "oauth"
+                for field_name in way.fields
+            }
+            row.secrets = {name: value for name, value in row.secrets.items() if name not in keys}
 
     @classmethod
     async def issue_token(
         cls, resource: str = "", *, name: str = ""
     ) -> tuple[str, datetime | None]:
-        """The token a sandbox fetches under ``name``, and its expiry. ``resource`` names
-        a resource of the service. ``name`` is ``<slug>_<field>`` for a pasted field;
-        under any other name the row gives the one secret it holds."""
-        if resource:
-            slug, _, key = resource.partition("/")
+        """The token a sandbox fetches under ``name``, and its expiry: a resource recipe's
+        when ``resource`` names one, else what the service's ``Authentication`` gives."""
+        slug, _, key = resource.partition("/")
+        if slug in cls.resources:
             return await cls.resources[slug](key).get_token()
-        row = await cls.get()
-        field = name.removeprefix(f"{cls.slug}_")
-        if field in row.secrets:
-            return row.secrets[field], None
-        [secret] = row.secrets.values()
-        return secret, None
-
-    @classmethod
-    def get_authorization(cls, login: VaultSecret) -> str:
-        """The ``Authorization`` value of the connected row, which the default account
-        sends to the server at ``mcp_host``. A service without a pasted login raises."""
-        raise NotImplementedError(f"{cls.slug} has no pasted login")
+        return await cls.Authentication.issue_token(resource, name=name)
 
     @classmethod
     async def is_connected(cls) -> bool:
+        """Whether the acting way that is present has what it needs: a pasted key's secrets
+        on the row, or the installed app's grant. A service that only signs people in is
+        connected by its row."""
         row = await VaultSecret.lookup(db_session(), cls.secret_kind, Audience.service(cls.slug))
-        if row and cls.actor_token_name:
-            return cls.actor_token_name in row.secrets
-        return bool(row)
+        if not row:
+            return False
+        acting = cls.Authentication.get_acting_ways()
+        if not acting:
+            return True
+        for name, way in acting:
+            if name == "oauth":
+                if await cls.get_grant():
+                    return True
+            elif all(
+                field_name in row.secrets
+                for field_name, (_, info) in way.fields.items()
+                if field_kind(info) == "secret"
+            ):
+                return True
+        return False
 
     @classmethod
     async def connect(cls, payload: dict[str, str]) -> VaultSecret:
         """Verify and store a paste of the service's fields: secrets encrypted, the rest as
-        identity facts. On a connected card a blank secret keeps the stored one. Another
-        client ID revokes the connections that belong to the old one."""
+        identity facts. On a connected card a blank secret keeps the stored one. A pasted key
+        ends the installed app's grant: a service holds one way at a time. Another client ID
+        revokes the connections that belong to the old one."""
         if cls.is_configured():
             raise ServiceManagedError(cls.slug)
         fields = cls.settings_model.model_fields
         session = db_session()
-        card = await VaultSecret.lookup(session, cls.secret_kind, Audience.service(cls.slug))
-        # A card from before its service had a sign-in names no client.
-        previous_client_id = card.identity.get("client_id") if card else None
-        pasted = dict(card.secrets) if card else {}
+        previous = await VaultSecret.lookup(session, cls.secret_kind, Audience.service(cls.slug))
+        previous_client_id = previous.identity.get("client_id") if previous else None
+        pasted = dict(previous.secrets) if previous else {}
         for name, value in payload.items():
             if name in fields:
                 if field_kind(fields[name]) != "secret":
                     value = value.strip()
                 if value:
                     pasted[name] = value
+        labels = {spec["name"]: spec["label"] for spec in cls.connect_fields()}
+        # A way is pasted whole or left out.
+        for _, way in cls.Authentication.get_ways():
+            names = list(way.fields)
+            missing = [name for name in names if name not in pasted]
+            if missing and len(missing) < len(names):
+                raise ServiceConnectError(f"Enter {', '.join(labels[name] for name in missing)}.")
         try:
             settings = cls.settings_model.model_validate(pasted)
         except ValidationError as error:
-            labels = {spec["name"]: spec["label"] for spec in cls.connect_fields()}
             missing = ", ".join(labels[item["loc"][0]] for item in error.errors())
             raise ServiceConnectError(f"Enter {missing}.") from error
         row = await cls._store(
             session, settings, proven_facts=await cls.verify(settings), kept_secrets={}
         )
-        if cls.token_endpoint and row.identity["client_id"] != previous_client_id:
-            client = OauthClient(provider=cls.slug)
+        client = OauthClient(provider=cls.slug)
+        if cls.Authentication.get_client() and row.identity.get("client_id") != previous_client_id:
             for connection in await VaultSecret.list_connections(
                 session, Audience.service(cls.slug)
             ):
                 await client.disconnect(connection, reason="client_replaced")
+        pasted_key = any(
+            payload.get(field_name)
+            for name, way in cls.Authentication.get_acting_ways()
+            if name != "oauth"
+            for field_name in way.fields
+        )
+        if pasted_key and (
+            grant := await VaultSecret.get_service_grant(session, Audience.service(cls.slug))
+        ):
+            await client.disconnect(grant, reason="key_pasted")
         return row
 
     @classmethod
@@ -567,6 +610,6 @@ class Service:
         client = OauthClient(provider=cls.slug)
         for connection in await VaultSecret.list_connections(session, audience):
             await client.disconnect(connection, reason="service_disconnected")
-        if card := await VaultSecret.lookup(session, cls.secret_kind, audience):
-            await card.revoke("user")
+        if row := await VaultSecret.lookup(session, cls.secret_kind, audience):
+            await row.revoke("user")
         await McpServer.remove_login(session, cls.mcp_host)
