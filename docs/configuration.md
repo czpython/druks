@@ -459,8 +459,10 @@ A sandbox never holds an installation token. It holds a placeholder in
 `GH_TOKEN`, and git and `gh` read it through Drukbox's setup. The Drukbox
 secrets proxy swaps the placeholder for a token that Druks mints for the
 sandbox's repo, with the expiry GitHub gives it, and fetches a new one before
-it expires. The `software_factory` build clones and pushes as the operator App.
-A review clones as the reviewer App when one is connected. Builds and reviews
+it expires. The token reaches that repo and the project's other repos that the
+same installation covers, and no other repo. The `software_factory` build
+clones and pushes as the operator App. A review clones as the reviewer App when
+one is connected. Builds and reviews
 also get the GitHub MCP server for `api.githubcopilot.com`. It acts as the
 review identity through a second entry.
 
