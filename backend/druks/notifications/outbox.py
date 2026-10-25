@@ -1,11 +1,13 @@
 from dbos import DBOS, StepOptions
 from dbos._error import DBOSMaxStepRetriesExceeded
 
+from druks.core.services import Slack
 from druks.durable.engine import step_session
 from druks.notifications.datastructures import NotificationState
 from druks.notifications.delivery import deliver
 from druks.notifications.exceptions import NotificationError
 from druks.notifications.models import Destination, Notification
+from druks.services.exceptions import ServiceNotConnectedError
 
 # Delivery retries on its own schedule, fully decoupled from run lifecycles: a
 # flaky provider endpoint must never retry (or wedge) a run's steps, so the
@@ -13,16 +15,6 @@ from druks.notifications.models import Destination, Notification
 # workflow must exist before DBOS.launch(); the queue is registered after.
 
 _SEND_RETRIES: StepOptions = {"retries_allowed": True, "max_attempts": 5}
-
-
-def _sanitized(error: Exception) -> str:
-    if isinstance(error, DBOSMaxStepRetriesExceeded):
-        error = error.errors[-1]
-    if isinstance(error, NotificationError):
-        return str(error)
-    # An unexpected error's text can embed the webhook URL (httpx puts the
-    # request URL in every message); the class name alone is always safe.
-    return type(error).__name__
 
 
 @DBOS.workflow(name="notifications.send")
@@ -41,17 +33,13 @@ async def send_notification(notification_id: str) -> None:
             # loaded destination readable as a detached row — an attribute
             # touched past the close can't lazy-load under the async session.
             session.expunge(destination)
+            client = await Slack.get_client()
             body = notification.body
             actions = notification.actions
             token = notification.correlation_token
+            deep_link = notification.deep_link
             notification.attempts += 1
-        await deliver(
-            destination,
-            body,
-            actions=actions,
-            token=token,
-            idempotency_key=notification_id,
-        )
+        await deliver(client, destination, body, actions=actions, token=token, deep_link=deep_link)
         async with step_session() as session:
             await (await session.get(Notification, notification_id)).mark_delivered()
 
@@ -60,7 +48,15 @@ async def send_notification(notification_id: str) -> None:
             StepOptions(name="notifications.send.deliver", **_SEND_RETRIES), _send
         )
     except Exception as error:
-        reason = _sanitized(error)
+        if isinstance(error, DBOSMaxStepRetriesExceeded):
+            error = error.errors[-1]
+        # An unexpected error's text can quote the request; the class name alone is
+        # always safe.
+        reason = (
+            str(error)
+            if isinstance(error, (NotificationError, ServiceNotConnectedError))
+            else type(error).__name__
+        )
 
         async def _mark_failed() -> None:
             async with step_session() as session:

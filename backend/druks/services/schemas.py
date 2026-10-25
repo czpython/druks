@@ -79,7 +79,7 @@ class ServiceResponse(Schema):
             fields=[ServiceFieldSpec(**spec) for spec in service.connect_fields()],
             create_url=service.get_create_url() if service.manifest else "",
             install_url=install_url,
-            is_oauth=bool(service.token_endpoint),
+            is_oauth=service.Authentication.has_sign_in(),
             scopes=list(service.scopes()),
             used_by=[declaration.label for declaration in service.declarations()],
             connections=connections or [],

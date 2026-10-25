@@ -92,6 +92,22 @@ async def connect_service(slug: str, *, identity: dict, secrets: dict) -> VaultS
     )
 
 
+async def install_service(
+    slug: str, *, access_token: str, identity: dict, secrets: dict | None = None
+) -> VaultSecret:
+    """Seed the rows a finished install would leave: the service's row and its own grant."""
+    row = await connect_service(slug, identity=identity, secrets=secrets or {})
+    await VaultSecret.connect(
+        db_session(),
+        Audience.service(slug),
+        account_id=None,
+        refresh_token="",
+        scopes=[],
+        secrets={"access_token": access_token},
+    )
+    return row
+
+
 async def installation_key() -> VaultSecret:
     account = await Account.get_or_create(db_session(), "op@example.com")
     return await VaultSecret.paste(

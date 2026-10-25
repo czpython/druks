@@ -1,3 +1,4 @@
+from . import auth
 from .base import Connection, Service
 from .exceptions import (
     OauthExchangeError,
@@ -11,6 +12,7 @@ from .resources import Resource
 
 __all__ = [
     "Connection",
+    "auth",
     "OauthClient",
     "OauthExchangeError",
     "OauthRefreshError",

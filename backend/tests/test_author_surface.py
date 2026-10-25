@@ -23,6 +23,7 @@ AUTHOR_SURFACE = {
         "Service",
         "ServiceConnectError",
         "ServiceNotConnectedError",
+        "auth",
     },
     "druks.sandbox": {"Sandbox", "SandboxMcpServer", "SandboxSecret"},
     "druks.agents": {"Agent", "AgentOutput", "Bot", "BotUser"},

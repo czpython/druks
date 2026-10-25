@@ -169,7 +169,7 @@ def github_identity(monkeypatch):
     async def identity(cls, access_token: str) -> dict:
         return {"authority": "https://github.com", "subject": "1", "login": "paulo"}
 
-    monkeypatch.setattr(Github, "get_identity", classmethod(identity))
+    monkeypatch.setattr(Github.Authentication, "get_identity", classmethod(identity))
 
 
 def _signature(body: bytes, delivery_id: str = "d-1", **claims) -> str:

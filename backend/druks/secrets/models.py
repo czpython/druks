@@ -36,6 +36,13 @@ class VaultSecret(Base, Uuid7Pk):
             postgresql_where=text("kind NOT IN ('oauth', 'session')"),
             postgresql_nulls_not_distinct=True,
         ),
+        # A service holds at most one grant of its own.
+        Index(
+            "ix_vault_one_service_grant",
+            "audience",
+            unique=True,
+            postgresql_where=text("kind = 'oauth' AND account_id IS NULL AND revoked_at IS NULL"),
+        ),
     )
 
     kind: Mapped[str]
@@ -278,12 +285,24 @@ class VaultSecret(Base, Uuid7Pk):
         await self.session.flush()
 
     @classmethod
+    async def get_service_grant(cls, session: AsyncSession, audience: str) -> "VaultSecret | None":
+        """The live grant the service itself holds at an audience: its installed app's."""
+        return await session.scalar(
+            select(cls).where(
+                cls.kind == SecretKind.OAUTH,
+                cls.audience == audience,
+                cls.account_id.is_(None),
+                cls.revoked_at.is_(None),
+            )
+        )
+
+    @classmethod
     async def list_connections(cls, session: AsyncSession, audience: str) -> list["VaultSecret"]:
         """Every account's live OAuth connections at an audience."""
         query = select(cls).where(
             cls.kind == SecretKind.OAUTH, cls.audience == audience, cls.revoked_at.is_(None)
         )
-        return list(await session.scalars(query.order_by(cls.created_at)))
+        return list(await session.scalars(query.order_by(cls.created_at, cls.id)))
 
     @classmethod
     async def list_account_connections(
@@ -299,7 +318,7 @@ class VaultSecret(Base, Uuid7Pk):
                     cls.account_id == account_id,
                     cls.revoked_at.is_(None),
                 )
-                .order_by(cls.created_at)
+                .order_by(cls.created_at, cls.id)
             )
         )
 
@@ -330,7 +349,7 @@ class VaultSecret(Base, Uuid7Pk):
             await session.scalars(
                 select(cls)
                 .where(cls.kind == SecretKind.OAUTH, cls.account_id == account_id)
-                .order_by(cls.created_at)
+                .order_by(cls.created_at, cls.id)
             )
         )
 
@@ -414,8 +433,7 @@ class VaultSecret(Base, Uuid7Pk):
         if not self.is_live:
             raise SecretRevokedError(self.audience)
         if self.audience == Audience.service(self.audience_name) and self.kind != SecretKind.OAUTH:
-            # The service's own row: pasted fields or an App key. An OAuth row under the
-            # same audience is a grant, which the OAUTH branch below refreshes.
+            # An OAuth row at this audience is the service's grant, not its own row.
             return await services.get(self.audience_name).issue_token(resource, name=name)
         if self.kind == SecretKind.STATIC:
             # A header row holds one secret.
