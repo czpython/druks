@@ -8,7 +8,7 @@ from urllib.parse import parse_qsl, urlparse
 import druks.chat.channels.slack.subscribers  # noqa: F401 — the webhook publishes to it
 import httpx
 import pytest
-from conftest import bind_ambient_session, connect_service
+from conftest import bind_ambient_session, install_service
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.dependencies import request_session
 from druks.chat import service
@@ -41,8 +41,9 @@ BOT = "U900"
 @pytest.fixture
 async def card(druks_db):
     bind_ambient_session(druks_db)
-    card = await connect_service(
+    row = await install_service(
         "slack",
+        access_token="xoxb-1",
         identity={
             "client_id": "c1",
             "team": "Acme",
@@ -50,10 +51,10 @@ async def card(druks_db):
             "bot_name": "druks",
             "bot_user_id": BOT,
         },
-        secrets={"client_secret": "cs", "signing_secret": "ss", "bot_token": "xoxb-1"},
+        secrets={"client_secret": "cs", "signing_secret": "ss"},
     )
     await druks_db.commit()
-    return card
+    return row
 
 
 @pytest.fixture

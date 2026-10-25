@@ -56,7 +56,6 @@ async def check_tracker_identity() -> CheckResult:
 
 
 async def list_tracker_status_choices() -> list[dict[str, str]]:
-    """The statuses of the selected tracker. Empty when no connected tracker lists them."""
     tracker = await SoftwareFactory.get_tracker()
     if tracker:
         async with tracker:
@@ -148,8 +147,6 @@ class SoftwareFactory(App):
 
     @classmethod
     async def get_tracker(cls, source: str | None = None) -> Tracker | None:
-        """The selected tracker, or None without one. A ``source`` returns the tracker
-        only when that source is the selected tracker."""
         settings = await cls.settings()
         if source and source != settings.tracker:
             return
@@ -171,7 +168,7 @@ class SoftwareFactory(App):
                 return Jira(
                     base_url=row.identity["base_url"],
                     email=row.identity["email"],
-                    api_token=row.secrets["api_token"],
+                    api_key=row.secrets["api_key"],
                     status_names=status_names,
                 )
             if settings.tracker == "github":

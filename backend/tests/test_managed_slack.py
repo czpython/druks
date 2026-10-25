@@ -8,7 +8,7 @@ import druks.chat.channels.slack.subscribers  # noqa: F401 — the webhook publi
 import httpx
 import jwt as pyjwt
 import pytest
-from conftest import MANAGER_KEY, bind_ambient_session, connect_service
+from conftest import MANAGER_KEY, bind_ambient_session, install_service
 from druks.accounts.models import Account
 from druks.chat.models import Conversation
 from druks.core.apis.slack import SLACK_BOT_SCOPES, SlackClient
@@ -99,7 +99,7 @@ async def managed_slack(tmp_path, monkeypatch, druks_db):
 
 @pytest.fixture
 async def slack_after_install(managed_slack):
-    await connect_service("slack", identity=FACTS_AFTER_INSTALL, secrets={"bot_token": BOT_TOKEN})
+    await install_service("slack", access_token=BOT_TOKEN, identity=FACTS_AFTER_INSTALL)
 
 
 @pytest.fixture
@@ -244,13 +244,16 @@ async def test_slack_waits_for_its_install_and_keeps_it_across_a_restart(
     [token_request] = manager.requests
     assert token_request.headers["Authorization"] == f"Bearer {MANAGER_TOKEN}"
     db_session().expunge_all()
-    assert not await VaultSecret.list_connections(db_session(), Audience.service("slack"))
+    [grant] = await VaultSecret.list_connections(db_session(), Audience.service("slack"))
+    assert grant.account_id is None
+    assert grant.secrets["access_token"] == BOT_TOKEN
 
     await Service.sync_configuration(db_session())
 
     row = await Slack.get()
-    assert (row.identity, row.secrets) == (FACTS_AFTER_INSTALL, {"bot_token": BOT_TOKEN})
+    assert (row.identity, row.secrets) == (FACTS_AFTER_INSTALL, {})
     assert await Slack.is_connected()
+    assert await Slack.get_bot_token() == BOT_TOKEN
     assert slack == [(BOT_TOKEN, "auth.test", {})]
 
 
@@ -294,11 +297,13 @@ async def test_a_personal_link_keeps_the_persons_token_apart_and_in_the_bots_wor
     assert [page.status_code for page in pages] == [400, 400, 200]
     assert "scope" not in manager.exchanges[2]
     db_session().expunge_all()
-    [connection] = await VaultSecret.list_connections(db_session(), Audience.service("slack"))
+    [grant, connection] = await VaultSecret.list_connections(
+        db_session(), Audience.service("slack")
+    )
     assert connection.account.username == "op@example.com"
     assert connection.secrets["access_token"] == "xoxp-ana"
     assert connection.identity["authority"] == "https://slack.com/T1"
-    assert (await Slack.get()).secrets == {"bot_token": BOT_TOKEN}
+    assert (grant.account_id, await Slack.get_bot_token()) == (None, BOT_TOKEN)
 
 
 async def test_forwarded_messages_reach_the_bot_once_and_only_from_its_workspace(
@@ -323,7 +328,7 @@ async def test_forwarded_messages_reach_the_bot_once_and_only_from_its_workspace
     )
     json_type = "application/json"
 
-    await connect_service("slack", identity=FACTS_AFTER_INSTALL, secrets={"bot_token": BOT_TOKEN})
+    await install_service("slack", access_token=BOT_TOKEN, identity=FACTS_AFTER_INSTALL)
     async with asgi_client(configure_app_for_test(settings=managed_slack)) as client:
         responses = []
         for event_id in ("Ev1", "Ev1"):

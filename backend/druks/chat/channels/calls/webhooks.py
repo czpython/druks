@@ -123,12 +123,12 @@ class CallsEvents(Webhook):
         self.conversation = await get_call(session, self.data["token"])
         if self.conversation and self.get_action() == "pickup":
             # The calls server forwards the signature of Twilio's stream handshake.
-            card = await Twilio.get()
+            row = await Twilio.get()
             verify_twilio_signature(
                 url=get_stream_url(self.data["token"]),
                 fields={},
                 signature=self.data["signature"],
-                auth_token=card.secrets["auth_token"],
+                api_key=row.secrets["api_key"],
             )
         return bool(self.conversation)
 

@@ -18,13 +18,11 @@ class Jira(Tracker):
         *,
         base_url: str,
         email: str,
-        api_token: str,
+        api_key: str,
         status_names: dict[TicketStatus, str],
         client: Any | None = None,
     ) -> None:
-        self._client = JiraClient(
-            base_url=base_url, email=email, api_token=api_token, client=client
-        )
+        self._client = JiraClient(base_url=base_url, email=email, api_key=api_key, client=client)
         # An empty name leaves that status unmapped.
         self._status_names = {status: name for status, name in status_names.items() if name}
 

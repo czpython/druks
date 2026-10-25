@@ -545,17 +545,21 @@ async def test_the_gateway_key_entry_sends_its_bearer_verbatim(druks_db):
 
 async def test_the_issuer_answers_422_for_a_disconnected_mcp_grant(druks_db, tmp_path):
     server = await McpServer.create(
-        druks_db, name="linear", url="https://mcp.linear.app/mcp", is_oauth=True
+        druks_db, name="notion", url="https://mcp.notion.com/mcp", is_oauth=True
     )
     server.identity_mode = IdentityMode.SHARED
     grant = await VaultSecret.connect(
-        druks_db, Audience.mcp("linear"), account_id=None, refresh_token="rt", scopes=[]
+        druks_db,
+        Audience.mcp("notion"),
+        account_id=None,
+        refresh_token="rt",
+        scopes=[],
     )
     identity, bearer, entry = await _mcp_identity()
     assert entry["issuer"]["refresh"] == "1h"
     await grant.revoke("user")
 
-    response = await _fetch(tmp_path, identity.id, bearer, "mcp_linear_token")
+    response = await _fetch(tmp_path, identity.id, bearer, "mcp_notion_token")
 
     assert response.status_code == 422
     assert "rt" not in response.text

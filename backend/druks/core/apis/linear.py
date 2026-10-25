@@ -6,6 +6,7 @@ import httpx
 from druks.core.apis.exceptions import LinearAPIError, UnknownTicketError
 
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
+LINEAR_AUTHORITY = "https://linear.app"
 
 
 def compute_delivery_key(
@@ -84,7 +85,13 @@ class LinearClient:
                 "changed": False,
             }
 
-        status_id = _status_id_by_name(issue["team"]["states"]["nodes"], status_name)
+        states = issue["team"]["states"]["nodes"]
+        status_id = next((state["id"] for state in states if state["name"] == status_name), "")
+        if not status_id:
+            available = ", ".join(state["name"] for state in states)
+            raise LinearAPIError(
+                f"Linear status {status_name!r} was not found. Available: {available}"
+            )
         result = await self._execute(
             """
             mutation DruksIssueUpdateStatus($issueId: String!, $statusId: String!) {
@@ -107,7 +114,6 @@ class LinearClient:
         }
 
     async def list_workflow_states(self) -> list[dict]:
-        """The workflow states of every team in the workspace, one page after another."""
         states: list[dict] = []
         cursor = None
         while True:
@@ -144,12 +150,3 @@ class LinearClient:
             raise LinearAPIError("Linear API response did not include data.")
 
         return data
-
-
-def _status_id_by_name(states: list[dict[str, Any]], status_name: str) -> str:
-    for state in states:
-        if state["name"] == status_name:
-            return state["id"]
-
-    available = ", ".join(state["name"] for state in states)
-    raise LinearAPIError(f"Linear status {status_name!r} was not found. Available: {available}")

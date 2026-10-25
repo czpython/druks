@@ -791,13 +791,17 @@ async def test_the_default_account_sends_the_service_login_and_others_their_gran
     )
     server.identity_mode = IdentityMode.PER_USER
     grant = await VaultSecret.connect(
-        druks_db, Audience.mcp("atlassian"), account_id=person.id, refresh_token="rt", scopes=[]
+        druks_db,
+        Audience.mcp("atlassian"),
+        account_id=person.id,
+        refresh_token="rt",
+        scopes=[],
     )
     await VaultSecret.store(
         druks_db,
         SecretKind.STATIC,
         Audience.service("jira"),
-        secrets={"api_token": "jira-token", "webhook_secret": "hook"},
+        secrets={"api_key": "jira-token", "webhook_secret": "hook"},
         identity={"email": "svc@example.com", "base_url": "https://acme.atlassian.net"},
     )
 
@@ -823,7 +827,7 @@ async def test_the_default_accounts_own_grant_precedes_the_service_login(druks_d
         druks_db,
         SecretKind.STATIC,
         Audience.service("jira"),
-        secrets={"api_token": "jira-token", "webhook_secret": "hook"},
+        secrets={"api_key": "jira-token", "webhook_secret": "hook"},
         identity={"email": "svc@example.com", "base_url": "https://acme.atlassian.net"},
     )
     grant = await VaultSecret.connect(
@@ -848,7 +852,11 @@ async def test_a_service_owned_server_sends_the_accounts_service_sign_in(druks_d
         druks_db, name="github", url="https://api.githubcopilot.com/mcp/", is_oauth=True
     )
     sign_in = await VaultSecret.connect(
-        druks_db, Audience.service("github"), account_id=person.id, refresh_token="rt", scopes=[]
+        druks_db,
+        Audience.service("github"),
+        account_id=person.id,
+        refresh_token="rt",
+        scopes=[],
     )
 
     [entry], [ref] = await Workspace.get_all_mcp_servers(druks_db, None, person.id)

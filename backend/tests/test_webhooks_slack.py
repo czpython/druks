@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from urllib.parse import urlencode
 
 import pytest
-from conftest import bind_ambient_session, connect_service
+from conftest import bind_ambient_session, install_service
 from druks.accounts.models import Account
 from druks.core.webhooks.slack import SlackInteractivity, verify_slack_signature
 from druks.db import db_session as ambient_db_session
@@ -79,10 +79,11 @@ def _client(tmp_path) -> TestClient:
 async def slack_card(druks_db):
     """The Slack card whose signing secret signs every delivery."""
     bind_ambient_session(druks_db)
-    await connect_service(
+    await install_service(
         "slack",
+        access_token="xoxb",
         identity={"client_id": "c1", "team": "Acme", "team_id": "T1", "bot_user_id": "U900"},
-        secrets={"client_secret": "cs", "signing_secret": _SIGNING_SECRET, "bot_token": "xoxb"},
+        secrets={"client_secret": "cs", "signing_secret": _SIGNING_SECRET},
     )
     await druks_db.commit()
 

@@ -81,7 +81,7 @@ async def voice(druks_db, helpdesk, monkeypatch):
             "voice_name": "",
             "transcription_model": "gpt-4o-mini-transcribe",
         },
-        secrets={"key": "sk-voice"},
+        secrets={"api_key": "sk-voice"},
     )
     monkeypatch.setattr(service, "render_prompt", AsyncMock(return_value="Help with tickets."))
 
@@ -93,7 +93,7 @@ def twilio_signature(url, fields):
 
 async def link(session):
     bind_ambient_session(session)
-    await connect_service("twilio", identity={"account_sid": "AC1"}, secrets={"auth_token": "t"})
+    await connect_service("twilio", identity={"account_sid": "AC1"}, secrets={"api_key": "t"})
     owner = await Account.create_for_bot(session, AccountKind.BOT)
     connection = await Twilio.link(session, owner, app="helpdesk", sid="PN1", calls_url=CALLS_URL)
     await session.refresh(connection, ["account"])
@@ -131,7 +131,7 @@ async def test_a_linked_number_sends_its_calls_to_druks_until_it_is_removed(
     druks_db, druks_client, helpdesk, twilio
 ):
     bind_ambient_session(druks_db)
-    await connect_service("twilio", identity={"account_sid": "AC1"}, secrets={"auth_token": "t"})
+    await connect_service("twilio", identity={"account_sid": "AC1"}, secrets={"api_key": "t"})
 
     added = await druks_client.post(
         "/api/chat/services/twilio/numbers", json={"app": "helpdesk", "sid": "PN1"}
@@ -247,7 +247,7 @@ async def test_a_pickup_hands_over_the_call_once(druks_db, druks_client, twilio,
         "model": "openai/gpt-realtime-mini",
         "voice_name": "",
         "transcription_model": "gpt-4o-mini-transcribe",
-        "key": "sk-voice",
+        "api_key": "sk-voice",
     }
     assert second_pickup.status_code == 409
 
