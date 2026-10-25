@@ -4,6 +4,7 @@ import pytest
 from conftest import bind_ambient_session
 from druks.apps import loader
 from druks.apps.exceptions import AppNotFound
+from druks.apps.registry import services
 from druks.services import Service
 from druks.services.exceptions import ServiceDisabledError
 from druks.settings import Settings
@@ -49,6 +50,19 @@ def test_an_app_that_no_package_provides_refuses_to_start(configuration):
 
     with pytest.raises(AppNotFound, match="apps.unknown"):
         loader.iter_apps()
+
+
+def test_a_service_registers_before_druks_toml_is_read(
+    declared_services, configuration, monkeypatch
+):
+    monkeypatch.setenv("DRUKS_CONFIG", "/nonexistent/druks.toml")
+
+    class Acme(Service):
+        class Settings(BaseModel):
+            url: str
+
+    monkeypatch.setenv("DRUKS_CONFIG", str(configuration))
+    assert "acme" in services
 
 
 async def test_a_disabled_service_is_not_installed(
