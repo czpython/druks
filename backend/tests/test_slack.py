@@ -8,7 +8,7 @@ from urllib.parse import parse_qsl, urlparse
 import druks.chat.channels.slack.subscribers  # noqa: F401 — the webhook publishes to it
 import httpx
 import pytest
-from conftest import bind_ambient_session, connect_service
+from conftest import bind_ambient_session, install_service
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.dependencies import request_session
 from druks.chat import service
@@ -21,13 +21,14 @@ from druks.chat.models import Conversation
 from druks.chat.routes import read_file, read_thread, require_tag
 from druks.core.apis.slack import SlackClient
 from druks.core.services import Slack
-from druks.core.webhooks.slack import SlackEvents
+from druks.core.webhooks.slack import SlackEvents, SlackInteractivity
 from druks.models import Base
 from druks.redis import close_client, get_client
 from druks.sandbox.layout import get_work_root
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.testing import asgi_client, configure_app_for_test, make_settings
+from druks.webhooks.router import match_webhook
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from slack_sdk.errors import SlackApiError
@@ -41,8 +42,9 @@ BOT = "U900"
 @pytest.fixture
 async def card(druks_db):
     bind_ambient_session(druks_db)
-    card = await connect_service(
+    row = await install_service(
         "slack",
+        access_token="xoxb-1",
         identity={
             "client_id": "c1",
             "team": "Acme",
@@ -50,10 +52,10 @@ async def card(druks_db):
             "bot_name": "druks",
             "bot_user_id": BOT,
         },
-        secrets={"client_secret": "cs", "signing_secret": "ss", "bot_token": "xoxb-1"},
+        secrets={"client_secret": "cs", "signing_secret": "ss"},
     )
     await druks_db.commit()
-    return card
+    return row
 
 
 @pytest.fixture
@@ -322,6 +324,14 @@ def test_create_slack_app_opens_slack_with_the_whole_manifest(tmp_path):
     query = dict(parse_qsl(location.query))
     assert (location.netloc, location.path, query["new_app"]) == ("api.slack.com", "/apps", "1")
     assert json.loads(query["manifest_json"]) == manifest
+
+
+def test_the_manifest_sends_button_clicks_to_the_interactivity_webhook():
+    interactivity = Slack.get_manifest()["settings"]["interactivity"]
+
+    path = urlparse(interactivity["request_url"]).path.removeprefix("/_external/")
+    assert interactivity["is_enabled"] is True
+    assert match_webhook(path)[0] is SlackInteractivity
 
 
 def room_event(user=ANA, text=f"<@{BOT}> read my runs", ts="10.0", **event):

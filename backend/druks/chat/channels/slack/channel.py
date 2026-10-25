@@ -50,40 +50,40 @@ class SlackChannel(Channel):
 
     @classmethod
     async def lookup_account(
-        cls, session: AsyncSession, card: VaultSecret, message: dict
+        cls, session: AsyncSession, row: VaultSecret, message: dict
     ) -> Account | None:
         """The account with a live Slack grant for the Slack user who wrote the message."""
-        authority = SLACK_AUTHORITY.format(team_id=card.identity["team_id"])
+        authority = SLACK_AUTHORITY.format(team_id=row.identity["team_id"])
         return await Account.lookup(session, authority, message["user"])
 
     @classmethod
-    async def route_message(cls, session: AsyncSession, card: VaultSecret, message: dict) -> None:
+    async def route_message(cls, session: AsyncSession, row: VaultSecret, message: dict) -> None:
         """Route a message for the bot. A direct message or a tag reaches the linked
         account's own conversation, or waits under a private link until the person
         connects their Slack account. An untagged reply reaches the thread conversation
         the person used in the last day, unless they asked for a tag. Everything else is
         not for the bot."""
         thread_id = get_thread_id(message)
-        is_addressed = not thread_id or f"<@{card.identity['bot_user_id']}>" in message["text"]
+        is_addressed = not thread_id or f"<@{row.identity['bot_user_id']}>" in message["text"]
         if not is_addressed and "thread_ts" not in message:
             # Most of a room's traffic: a top-level message that names nobody.
             return
-        linked_account = await cls.lookup_account(session, card, message)
+        linked_account = await cls.lookup_account(session, row, message)
         if is_addressed and linked_account:
-            await cls.save_message(session, card, linked_account, message)
+            await cls.save_message(session, row, linked_account, message)
         elif is_addressed:
-            await cls.send_link(card, message)
+            await cls.send_link(message)
         elif linked_account:
             joined = await Conversation.get_for_user(
-                session, card, user_id=message["user"], thread_id=thread_id
+                session, row, user_id=message["user"], thread_id=thread_id
             )
             since = Base.utc_now() - timedelta(seconds=JOINED_THREAD_SECONDS)
             if joined and not joined.is_tag_required and joined.last_message_at > since:
-                await cls.save_message(session, card, linked_account, message)
+                await cls.save_message(session, row, linked_account, message)
 
     @classmethod
     async def save_message(
-        cls, session: AsyncSession, card: VaultSecret, account: Account, message: dict
+        cls, session: AsyncSession, row: VaultSecret, account: Account, message: dict
     ) -> Conversation:
         """Save the message in the account's conversation for its place, and start its
         turn. Each file the message carries is a Druks file: the first on the message,
@@ -91,7 +91,7 @@ class SlackChannel(Channel):
         gives the agent nothing to read."""
         conversation = await Conversation.get_or_create_for_user(
             session,
-            card,
+            row,
             account.id,
             source=ConversationSource.SLACK,
             user_id=message["user"],
@@ -100,7 +100,7 @@ class SlackChannel(Channel):
             thread_id=get_thread_id(message),
             is_tag_required=account.is_tag_required,
         )
-        client = SlackClient(token=card.secrets["bot_token"])
+        client = SlackClient(token=await Slack.get_bot_token())
         shares = message.get("files", [])
         # Every download first: a failed one then leaves no file on disk.
         contents = [await client.download(shared["url_private_download"]) for shared in shares]
@@ -115,7 +115,7 @@ class SlackChannel(Channel):
             for shared, content in zip(shares, contents, strict=True)
         ]
         # The agent would take the bot's own mention for the person it answers.
-        text = message["text"].replace(f"<@{card.identity['bot_user_id']}>", "").strip()
+        text = message["text"].replace(f"<@{row.identity['bot_user_id']}>", "").strip()
         source_id = f"{message['channel']}:{message['ts']}"
         if files:
             await conversation.create_message(session, text, source_id=source_id, file=files[0])
@@ -132,7 +132,7 @@ class SlackChannel(Channel):
         return conversation
 
     @classmethod
-    async def send_link(cls, card: VaultSecret, message: dict) -> None:
+    async def send_link(cls, message: dict) -> None:
         """Hold the message under a private link, and send the person the link in their
         DM. In a room, also tell them in the thread where the link is."""
         token = secrets.token_urlsafe(32)
@@ -140,7 +140,7 @@ class SlackChannel(Channel):
             LINK_KEY.format(token=token), json.dumps(message), ex=LINK_TTL_SECONDS
         )
         endpoint = load_settings().urls.endpoint.rstrip("/")
-        client = SlackClient(token=card.secrets["bot_token"])
+        client = SlackClient(token=await Slack.get_bot_token())
         # Slack drops a message that only one person sees unless they are active in
         # that client, so the link goes to their DM, which keeps it.
         await client.post_markdown(
@@ -159,7 +159,7 @@ class SlackChannel(Channel):
     ) -> None:
         """Post the reply where the conversation lives, in pieces that fit a markdown
         block. The first piece's Slack id is the reply's source id."""
-        client = SlackClient(token=conversation.connection.secrets["bot_token"])
+        client = SlackClient(token=await Slack.get_bot_token())
         room, _, thread_ts = conversation.thread_id.partition(":")
         posted = [
             await client.post_markdown(
@@ -177,7 +177,7 @@ class SlackChannel(Channel):
         cls, session: AsyncSession, conversation: Conversation, message: Message
     ) -> None:
         """React to the person's message."""
-        client = SlackClient(token=conversation.connection.secrets["bot_token"])
+        client = SlackClient(token=await Slack.get_bot_token())
         room, ts = message.source_id.split(":")[:2]
         try:
             await client.reactions_add(channel=room, timestamp=ts, name=cls.reaction_ack)
@@ -196,7 +196,7 @@ class SlackChannel(Channel):
         room, _, thread_ts = conversation.thread_id.partition(":")
         if not room:
             raise ChannelHasNoThreadsError("A direct message has no thread to read.")
-        client = SlackClient(token=conversation.connection.secrets["bot_token"])
+        client = SlackClient(token=await Slack.get_bot_token())
         messages = await client.list_replies(room, thread_ts, limit=THREAD_MESSAGES)
         own_replies = await conversation.list_reply_source_ids(session)
         return [
@@ -229,7 +229,7 @@ class SlackChannel(Channel):
         room, _, _ = conversation.thread_id.partition(":")
         if not room:
             raise ChannelHasNoThreadsError("A direct message has no thread to read.")
-        client = SlackClient(token=conversation.connection.secrets["bot_token"])
+        client = SlackClient(token=await Slack.get_bot_token())
         shared = (await client.files_info(file=file_id))["file"]
         if room not in shared["channels"] + shared["groups"]:
             raise FileNotInThreadError(f"File {file_id} is not shared where this thread lives.")

@@ -1,10 +1,10 @@
 import httpx
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
-from druks.services import Service
+from druks.services import Service, auth
 from druks.services.exceptions import ServiceNotConnectedError
 
 from .constants import TRANSCRIPTION_TIMEOUT_SECONDS
@@ -20,11 +20,13 @@ class SpeechToText(Service):
     )
     required = False
 
+    class Authentication(auth.Authentication):
+        api_key = auth.ApiKey()
+
     class Settings(BaseModel):
         url: str = Field(
             title="Address", description="Base URL, for example https://api.openai.com/v1."
         )
-        key: SecretStr = Field(title="Key")
         model: str = Field(title="Model", description="For example whisper-1.")
 
     @classmethod
@@ -32,16 +34,16 @@ class SpeechToText(Service):
         cls, session: AsyncSession, *, name: str, content_type: str, content: bytes
     ) -> str:
         """The words in an audio file. An empty answer is a failure."""
-        card = await VaultSecret.lookup(session, cls.secret_kind, Audience.service(cls.slug))
-        if not card:
+        row = await VaultSecret.lookup(session, cls.secret_kind, Audience.service(cls.slug))
+        if not row:
             raise ServiceNotConnectedError(cls.slug)
         try:
             async with httpx.AsyncClient(timeout=TRANSCRIPTION_TIMEOUT_SECONDS) as client:
                 response = await client.post(
-                    f"{card.identity['url'].rstrip('/')}/audio/transcriptions",
+                    f"{row.identity['url'].rstrip('/')}/audio/transcriptions",
                     # A key pasted with a space would echo through the transport's error.
-                    headers={"Authorization": f"Bearer {card.secrets['key'].strip()}"},
-                    data={"model": card.identity["model"]},
+                    headers={"Authorization": f"Bearer {row.secrets['api_key'].strip()}"},
+                    data={"model": row.identity["model"]},
                     files={"file": (name, content, content_type)},
                 )
             response.raise_for_status()

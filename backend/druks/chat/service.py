@@ -137,7 +137,7 @@ async def list_sign_ins(session: AsyncSession, account_id: str) -> list[dict]:
                 "profile": {},
             }
     for service in services.all():
-        if service.host and service.token_endpoint:
+        if service.host and service.Authentication.has_sign_in():
             rows = await VaultSecret.list_account_connections(
                 session, Audience.service(service.slug), account_id
             )
@@ -348,7 +348,7 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                     session, None, conversation.account_id, skip_unauthenticated=True
                 )
                 for service in services.all():
-                    if service.host and service.token_endpoint:
+                    if service.host and service.Authentication.has_sign_in():
                         sign_in_rows = await VaultSecret.list_account_connections(
                             session, Audience.service(service.slug), conversation.account_id
                         )

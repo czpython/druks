@@ -76,7 +76,7 @@ async def test_tracker_webhook_starts_under_the_connected_account(
         await connect_service(
             "jira",
             identity={"base_url": "https://company.atlassian.net", "email": "druks@company.test"},
-            secrets={"api_token": "token", "webhook_secret": "hook"},
+            secrets={"api_key": "token", "webhook_secret": "hook"},
         )
         events = JiraEvents(
             request=SimpleNamespace(headers={"x-jira-initiator": "provider-actor-1"}),

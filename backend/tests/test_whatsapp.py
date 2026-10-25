@@ -119,7 +119,9 @@ async def link(
     number="+41000000000",
 ):
     bind_ambient_session(session)
-    await connect_service("waha", identity={"url": "http://waha.test"}, secrets={"key": "admin"})
+    await connect_service(
+        "waha", identity={"url": "http://waha.test"}, secrets={"api_key": "admin"}
+    )
     if access == BotAccess.PRIVATE:
         identity = {"app": app, "operators": {}}
     else:
@@ -243,7 +245,9 @@ async def test_adding_a_number_creates_its_accounts_and_session(
     druks_db, druks_client, helpdesk, waha, monkeypatch
 ):
     webhook_base(monkeypatch)
-    await connect_service("waha", identity={"url": "http://waha.test"}, secrets={"key": "admin"})
+    await connect_service(
+        "waha", identity={"url": "http://waha.test"}, secrets={"api_key": "admin"}
+    )
 
     response = await druks_client.post("/api/chat/services/waha/sessions", json={"app": "helpdesk"})
 
@@ -298,7 +302,9 @@ async def test_chat_links_a_number_without_an_admin_account(
     druks_db, druks_client, waha, monkeypatch
 ):
     webhook_base(monkeypatch)
-    await connect_service("waha", identity={"url": "http://waha.test"}, secrets={"key": "admin"})
+    await connect_service(
+        "waha", identity={"url": "http://waha.test"}, secrets={"api_key": "admin"}
+    )
 
     response = await druks_client.post("/api/chat/services/waha/sessions", json={"app": "chat"})
 

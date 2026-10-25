@@ -329,7 +329,11 @@ async def test_a_bot_key_calls_its_tool_for_the_person_in_its_conversation(
 ):
     owner = await Account.create_for_bot(druks_db, AccountKind.BOT)
     connection = await VaultSecret.store(
-        druks_db, SecretKind.SESSION, WAHA_AUDIENCE, secrets={"key": "one"}, account_id=owner.id
+        druks_db,
+        SecretKind.SESSION,
+        WAHA_AUDIENCE,
+        secrets={"key": "one"},
+        account_id=owner.id,
     )
     conversation = await Conversation.get_or_create_for_user(
         druks_db,

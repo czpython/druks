@@ -12,7 +12,7 @@ from druks.webhooks import Webhook
 
 
 def verify_twilio_signature(
-    *, url: str, fields: dict[str, str], signature: str | None, auth_token: str
+    *, url: str, fields: dict[str, str], signature: str | None, api_key: str
 ) -> None:
     """Refuse a request that Twilio did not sign. Twilio signs the URL and the sorted form
     fields with HMAC-SHA1. It signs a stream's handshake with or without a trailing slash
@@ -23,7 +23,7 @@ def verify_twilio_signature(
     url = url.rstrip("/")
     for signed_url in (url, f"{url}/"):
         digest = hmac.new(
-            key=auth_token.encode(),
+            key=api_key.encode(),
             msg=f"{signed_url}{signed_fields}".encode(),
             digestmod=hashlib.sha1,
         ).digest()
@@ -33,7 +33,7 @@ def verify_twilio_signature(
 
 
 class TwilioWebhook(Webhook):
-    """A request from Twilio, signed with the card's auth token."""
+    """A request from Twilio, signed with the account's API key."""
 
     abstract = True
     provider = "twilio"
@@ -44,13 +44,13 @@ class TwilioWebhook(Webhook):
 
     async def request_is_authentic(self) -> bool:
         try:
-            card = await Twilio.get()
+            row = await Twilio.get()
         except ServiceNotConnectedError as error:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(error)) from error
         verify_twilio_signature(
             url=f"{load_settings().urls.webhook_base}/_external/{self.path}",
             fields=self.data,
             signature=self.request.headers.get("X-Twilio-Signature"),
-            auth_token=card.secrets["auth_token"],
+            api_key=row.secrets["api_key"],
         )
         return True

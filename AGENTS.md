@@ -21,7 +21,7 @@ Start with `README.md`, then read only the material relevant to the task:
 - Migration head: `alembic heads`, not a scan of `backend/migrations/versions/`
 - Shared SPA work: `frontend/README.md`
 - Documentation navigation and audience ownership: `docs/index.md`
-- The checklist and craft gate every change is held to: `.druks/review/checklist.md`.
+- The checklist and craft gate every change is held to: `.druks/software_factory/review.md`.
 
 For app-surface changes, inspect the proof app at
 `backend/tests/druks-field_notes/` and its tests as well as the author guide.
@@ -72,6 +72,13 @@ For app-surface changes, inspect the proof app at
   a key, or a verifier. Any manager that serves the same routes and publishes a
   JWKS works. The docs describe Druks as an operator runs it: the
   `[services.<slug>]` table and the Services page. They name no manager.
+  A service declares how it authenticates in a nested `Authentication`, found
+  by name like `Settings`. It names its ways as instances from
+  `druks.services.auth` under fixed names: `api_key`, `jwt`, `oauth`,
+  `sign_in`. A kind owns its credential; `Settings` holds the rest. An install
+  stores the service's own grant, a vault row with no account; a service
+  acts one way at a time. A service never asks `is_managed()`; the manager seams do: the
+  OAuth client, the configuration sync, resources, and webhooks.
 - Do not type-switch over a typed stream in app code. When a projection needs
   ordering or anchoring, grow the SDK primitive instead of an `isinstance` chain.
 - Put only identity and facts in a read-side field. Keep UI wording in the app pages.

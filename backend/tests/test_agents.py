@@ -151,7 +151,10 @@ BROWSER_SERVER = McpServer(
 async def lent_browser(druks_db, monkeypatch):
     """The browsers the calls borrow, each lent with one stored key."""
     key = await VaultSecret.store(
-        druks_db, SecretKind.STATIC, "mcp:browser test", secrets={"value": "Bearer key"}
+        druks_db,
+        SecretKind.STATIC,
+        "mcp:browser test",
+        secrets={"value": "Bearer key"},
     )
     lent = []
 
