@@ -1,0 +1,214 @@
+exclude: [uv.lock, frontend/package-lock.json, backend/druks/migrations/versions/**]
+
+R21:
+  modules: [fastapi, sqlalchemy, sqlalchemy.orm, pydantic, dbos]
+
+R16:
+  root: backend
+  package: druks
+  author_surface: [druks.workflows, druks.workspaces, druks.agents, druks.events, druks.signals, druks.db, druks.schemas, druks.prompts, druks.durable, druks.apps, druks.ui, druks.webhooks]
+  public: [druks.workflows, druks.workspaces, druks.agents, druks.events, druks.signals, druks.db, druks.schemas, druks.prompts, druks.durable, druks.apps, druks.ui, druks.webhooks, druks.core, druks.chat]
+  apps: [druks.contrib]
+  # software_factory reads these platform internals today.
+  ignore_imports:
+    - druks.contrib.** -> druks.accounts.context
+    - druks.contrib.** -> druks.accounts.dependencies
+    - druks.contrib.** -> druks.accounts.models
+    - druks.contrib.** -> druks.api.exceptions
+    - druks.contrib.** -> druks.doctor
+    - druks.contrib.** -> druks.exceptions
+    - druks.contrib.** -> druks.mcp.inbound
+    - druks.contrib.** -> druks.models
+    - druks.contrib.** -> druks.sandbox
+    - druks.contrib.** -> druks.sandbox.datastructures
+    - druks.contrib.** -> druks.sandbox.host
+    - druks.contrib.** -> druks.sandbox.layout
+    - druks.contrib.** -> druks.services
+    - druks.contrib.** -> druks.services.exceptions
+    - druks.contrib.** -> druks.settings
+    - druks.contrib.** -> druks.skills.models
+
+# Every path with a finding at main on 2026-10-25, for review: fix the file or keep the exception.
+exceptions:
+  # Tests hold fake Linear ticket links for the ticketing providers.
+  R14: [backend/tests/**]
+  # isinstance dispatch outside webhooks/, apis/, and harnesses/ that predates the rule.
+  rule-3:
+    - backend/druks/accounts/jwt.py
+    - backend/druks/alembic_support.py
+    - backend/druks/apps/base.py
+    - backend/druks/apps/loader.py
+    - backend/druks/apps/settings.py
+    - backend/druks/contrib/software_factory/webhooks.py
+    - backend/druks/doctor.py
+    - backend/druks/mcp/catalog.py
+    - backend/druks/mcp/oauth.py
+    - backend/druks/mcp/server.py
+    - backend/druks/notifications/buttons.py
+    - backend/druks/notifications/outbox.py
+    - backend/druks/sandbox/client.py
+    - backend/druks/sandbox/host.py
+    - backend/druks/sandbox/runner.py
+    - backend/druks/services/base.py
+    - backend/druks/services/oauth.py
+    - backend/druks/settings.py
+    - backend/druks/setup_env.py
+    - backend/druks/signals.py
+    - backend/druks/ui/blocks.py
+    - backend/druks/ui/schemas.py
+    - backend/druks/workflows.py
+    - backend/tests/**
+    - druks-calls/tests/**
+  # `is None` tests that predate the rule; each is a fix or a `# ast-grep-ignore: rule-2` mark.
+  rule-2:
+    - backend/druks/accounts/dependencies.py
+    - backend/druks/alembic_support.py
+    - backend/druks/api/dashboard.py
+    - backend/druks/apps/base.py
+    - backend/druks/apps/loader.py
+    - backend/druks/chat/bridge.py
+    - backend/druks/chat/service.py
+    - backend/druks/contrib/software_factory/routes.py
+    - backend/druks/core/utils/time.py
+    - backend/druks/durable/live.py
+    - backend/druks/durable/models.py
+    - backend/druks/harnesses/artifacts.py
+    - backend/druks/harnesses/claude.py
+    - backend/druks/harnesses/datastructures.py
+    - backend/druks/harnesses/providers.py
+    - backend/druks/mcp/gateway/services.py
+    - backend/druks/mcp/oauth.py
+    - backend/druks/mcp/server.py
+    - backend/druks/migrations/env.py
+    - backend/druks/sandbox/host.py
+    - backend/druks/sandbox/models.py
+    - backend/druks/sandbox/runner.py
+    - backend/druks/services/resources.py
+    - backend/druks/ui/blocks.py
+    - backend/druks/usage/models.py
+    - backend/druks/usage/routes.py
+    - backend/druks/user_settings/models.py
+    - backend/druks/user_settings/reads.py
+    - backend/druks/webhooks/deliveries.py
+    - backend/druks/workflows.py
+    - backend/tests/**
+    - scripts/import_browser_session.py
+  # One test fake returns None explicitly.
+  rule-1: [backend/tests/**]
+  # Files that import four or more names from one module; the import style predates the rule.
+  R21:
+    - backend/druks/accounts/dependencies.py
+    - backend/druks/accounts/models.py
+    - backend/druks/accounts/routes.py
+    - backend/druks/api/dashboard.py
+    - backend/druks/api/runs.py
+    - backend/druks/api/server.py
+    - backend/druks/apps/base.py
+    - backend/druks/browser/login.py
+    - backend/druks/browser/routes.py
+    - backend/druks/browser/sessions.py
+    - backend/druks/chat/bots/routes.py
+    - backend/druks/chat/bots/service.py
+    - backend/druks/chat/channels/calls/routes.py
+    - backend/druks/chat/channels/calls/webhooks.py
+    - backend/druks/chat/channels/slack/channel.py
+    - backend/druks/chat/channels/whatsapp/routes.py
+    - backend/druks/chat/models.py
+    - backend/druks/chat/routes.py
+    - backend/druks/chat/service.py
+    - backend/druks/chat/sockets.py
+    - backend/druks/contrib/software_factory/app.py
+    - backend/druks/contrib/software_factory/journal.py
+    - backend/druks/contrib/software_factory/models.py
+    - backend/druks/contrib/software_factory/pages.py
+    - backend/druks/contrib/software_factory/routes.py
+    - backend/druks/contrib/software_factory/schemas.py
+    - backend/druks/contrib/software_factory/workflows.py
+    - backend/druks/core/routes.py
+    - backend/druks/core/webhooks/slack.py
+    - backend/druks/db/fields.py
+    - backend/druks/doctor.py
+    - backend/druks/durable/engine.py
+    - backend/druks/durable/models.py
+    - backend/druks/durable/reads.py
+    - backend/druks/durable/schemas.py
+    - backend/druks/events/models.py
+    - backend/druks/events/routes.py
+    - backend/druks/files/fields.py
+    - backend/druks/files/models.py
+    - backend/druks/files/routes.py
+    - backend/druks/harnesses/claude.py
+    - backend/druks/harnesses/codex.py
+    - backend/druks/harnesses/opencode.py
+    - backend/druks/harnesses/pi.py
+    - backend/druks/harnesses/providers.py
+    - backend/druks/harnesses/registry.py
+    - backend/druks/harnesses/routes.py
+    - backend/druks/harnesses/schemas.py
+    - backend/druks/mcp/gateway/schemas.py
+    - backend/druks/mcp/models.py
+    - backend/druks/mcp/oauth.py
+    - backend/druks/mcp/routes.py
+    - backend/druks/mcp/schemas.py
+    - backend/druks/mcp/server.py
+    - backend/druks/models.py
+    - backend/druks/notifications/models.py
+    - backend/druks/notifications/routes.py
+    - backend/druks/notifications/services.py
+    - backend/druks/prompts/resolver.py
+    - backend/druks/sandbox/client.py
+    - backend/druks/sandbox/host.py
+    - backend/druks/sandbox/models.py
+    - backend/druks/secrets/models.py
+    - backend/druks/services/base.py
+    - backend/druks/services/oauth.py
+    - backend/druks/services/routes.py
+    - backend/druks/settings.py
+    - backend/druks/skills/models.py
+    - backend/druks/testing.py
+    - backend/druks/ui/blocks.py
+    - backend/druks/ui/schemas.py
+    - backend/druks/usage/models.py
+    - backend/druks/usage/routes.py
+    - backend/druks/user_settings/models.py
+    - backend/druks/user_settings/reads.py
+    - backend/druks/user_settings/routes.py
+    - backend/druks/user_settings/schemas.py
+    - backend/druks/webhooks/router.py
+    - backend/druks/workflows.py
+    - backend/druks/workspaces.py
+    - backend/tests/**
+    - druks-calls/calls/call.py
+  # Function-level imports that predate the rule.
+  R23:
+    - backend/druks/apps/base.py
+    - backend/druks/apps/loader.py
+    - backend/druks/browser/sessions.py
+    - backend/druks/cli.py
+    - backend/druks/contrib/software_factory/models.py
+    - backend/druks/database.py
+    - backend/druks/durable/datastructures.py
+    - backend/druks/events/models.py
+    - backend/druks/harnesses/config.py
+    - backend/druks/models.py
+    - backend/druks/sandbox/host.py
+    - backend/druks/secrets/models.py
+    - backend/druks/signals.py
+    - backend/druks/testing.py
+    - backend/druks/usage/models.py
+    - backend/tests/**
+  # Catches of Exception that predate the rule.
+  R5:
+    - backend/druks/browser/routes.py
+    - backend/druks/chat/service.py
+    - backend/druks/notifications/outbox.py
+    - backend/druks/sandbox/host.py
+  # Sync helpers in workflows.py and tasks.py that predate the rule.
+  R13:
+    - backend/druks/contrib/software_factory/workflows.py
+    - backend/druks/core/tasks.py
+    - backend/druks/workflows.py
+  # One test step calls only plumbing, to drive the engine.
+  R11: [backend/tests/**]
+  # helpers.py predates the rule; the rename is its own change.
+  R25: [backend/druks/mcp/helpers.py]
