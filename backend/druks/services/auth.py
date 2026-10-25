@@ -188,7 +188,7 @@ class Authentication:
 
     @classmethod
     async def issue_token(
-        cls, resource: str = "", *, name: str = ""
+        cls, resources: tuple[str, ...] = (), *, name: str = ""
     ) -> tuple[str, datetime | None]:
         """The token a sandbox fetches under ``name``, and its expiry. ``name`` is
         ``<slug>_<field>`` for a pasted field; under any other name the installed app's

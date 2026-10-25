@@ -632,7 +632,7 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
     [refs] = [call.kwargs["secret_refs"] for call in service.get_sandbox.await_args_list]
     assert [ref.name for ref in refs] == ["mcp_linear_header_0", "github"] * len(expected)
     assert [ref.key for ref in refs if ref.name == "github"] == [
-        ("github", sign_in.id, "", "github.com")
+        ("github", sign_in.id, (), "github.com")
     ] * len(expected)
     assert starts[0]["mcpServers"] == expected
     sign_ins = [
