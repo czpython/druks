@@ -50,6 +50,22 @@ class Registry:
         return len(self._items)
 
 
+class ServiceRegistry(Registry):
+    """The services that druks.toml leaves in the installation. Druks reads the
+    file when a service is looked up, not when its class is defined, so importing
+    a service needs no configuration."""
+
+    def get(self, key: str) -> Any:
+        service = super().get(key)
+        return service if service and service.is_enabled() else None
+
+    def all(self) -> list[Any]:
+        return [service for service in super().all() if service.is_enabled()]
+
+    def __contains__(self, key: str) -> bool:
+        return bool(self.get(key))
+
+
 def autodiscover(package: str) -> list[ModuleType]:
     """Import every role-named leaf module under ``package`` so the capability
     each one defines self-registers. Returns the imported modules so the loader
@@ -66,7 +82,9 @@ def autodiscover(package: str) -> list[ModuleType]:
 
 webhooks = Registry("webhooks", key=lambda cls: f"{cls.__module__}.{cls.__qualname__}")
 pages = Registry("pages", key=lambda page_route: page_route.key)
-services = Registry("services", key=lambda cls: cls.slug)
+
+
+services = ServiceRegistry("services", key=lambda cls: cls.slug)
 workflows = Registry("workflows", key=lambda cls: cls.kind)
 agents = Registry("agents", key=lambda agent: agent.id)
 bots = Registry("bots", key=lambda bot: bot.id)
