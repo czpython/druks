@@ -21,7 +21,7 @@ Start with `README.md`, then read only the material relevant to the task:
 - Migration head: `alembic heads`, not a scan of `backend/migrations/versions/`
 - Shared SPA work: `frontend/README.md`
 - Documentation navigation and audience ownership: `docs/index.md`
-- The checklist and craft gate every change is held to: `.druks/review/checklist.md`.
+- The checklist and craft gate every change is held to: `.druks/software_factory/review.md`.
 
 For app-surface changes, inspect the proof app at
 `backend/tests/druks-field_notes/` and its tests as well as the author guide.

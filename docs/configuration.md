@@ -488,6 +488,12 @@ reviewer approves the pull request:
 When Druks receives a push to the default branch that changes `config.yml`, the
 next build uses the new file.
 
+The same folder holds `review.md`, the repository's rules for the implementer
+and the reviewer. The build and review prompts read it when the checkout has
+one, and it is the last word where it and a prompt disagree. A section heading
+that is a path glob, for example `## frontend/**`, marks the rules for that part
+of the repository.
+
 ### Review identity (optional)
 
 The bundled `software_factory` app declares an optional service, **Github

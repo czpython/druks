@@ -274,7 +274,7 @@ maintain and extend by someone who did not write it?
 
 ### What this repo asks of its reviewers
 
-`.druks/review/checklist.md`, when the checkout has one, is the repo's standing rules for this
+`.druks/software_factory/review.md`, when the checkout has one, is the repo's standing rules for this
 review and the last word: where it and anything else in this brief disagree, it wins. Its "do
 not" rules bind hardest of all — when the repo says never to flag something, do not mention it.
 
