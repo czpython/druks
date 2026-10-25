@@ -1,4 +1,5 @@
 import json
+import logging
 import traceback
 
 import httpx
@@ -169,13 +170,22 @@ async def test_a_configured_service_keeps_its_own_verifier_and_oauth_client(
     assert accepted.json() == {"accepted": True, "handled": False}
 
 
+async def test_an_undeclared_service_table_is_skipped_without_its_values(
+    acme, configuration, secrets, druks_db, caplog
+):
+    configuration.write_text('[services.unknown]\nurl = "sensitive-value"')
+    with caplog.at_level(logging.INFO, logger="druks.services.base"):
+        await Service.sync_configuration(druks_db)
+    assert "Druks ignores [services.unknown]." in caplog.text
+    assert "sensitive-value" not in caplog.text
+
+
 @pytest.mark.parametrize(
     "body, secret, message",
     [
         ('[services.acme]\nurl = "invalid-secret"', "safe-key", "services.acme.url"),
         ('[services.acme]\nurl = ["sensitive-value"]', "safe-key", "services.acme.url"),
         ("[services.acme]", "safe-key", "services.acme.url"),
-        ('[services.unknown]\nurl = "sensitive-value"', "safe-key", "no installed app"),
     ],
 )
 async def test_invalid_service_entry_stops_the_sync_without_its_values(

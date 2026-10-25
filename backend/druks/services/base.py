@@ -348,18 +348,18 @@ class Service:
     async def sync_configuration(cls, session: AsyncSession) -> None:
         """Store each service that druks.toml configures as its card."""
         configuration = load_settings()
-        undeclared = [slug for slug in configuration.manager.services if not services.get(slug)]
-        for slug in undeclared:
-            logger.info("No installed app declares the managed service %r. Druks ignores it.", slug)
         for slug, entry in configuration.services.items():
-            if slug in undeclared or not entry.get("enabled", True):
+            if not entry.get("enabled", True):
                 continue
             service = services.get(slug)
             if not service:
-                raise ServiceConnectError(
-                    f"druks.toml configures the service {slug!r}, and no installed app "
-                    f"declares it. Remove [services.{slug}]."
+                # A manager can write the table before the app release that reads it.
+                logger.info(
+                    "No installed app declares the service %r. Druks ignores [services.%s].",
+                    slug,
+                    slug,
                 )
+                continue
             model = service.settings_model
             if service.is_managed():
                 # A key that ``Settings`` does not declare becomes a fact.
