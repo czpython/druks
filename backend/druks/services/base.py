@@ -272,8 +272,7 @@ class Service:
             if isinstance(value, type) and issubclass(value, Resource):
                 value.service = cls
                 cls.resources[value.slug] = value
-        if cls.is_enabled():
-            services.register(cls)
+        services.register(cls)
 
     @classmethod
     async def verify(cls, settings: Any) -> dict[str, Any]:
@@ -318,8 +317,8 @@ class Service:
 
     @classmethod
     def is_enabled(cls) -> bool:
-        """Whether druks.toml leaves this service in the installation. A disabled
-        service never registers."""
+        """Whether druks.toml leaves this service in the installation. The registry
+        hides a disabled service."""
         return load_settings().services.get(cls.slug, {}).get("enabled", True)
 
     @classmethod
