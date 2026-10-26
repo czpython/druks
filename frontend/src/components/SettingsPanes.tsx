@@ -25,6 +25,7 @@ import {
   type Billing,
   type McpServer,
   type Pat,
+  type PersonalSettings,
   type Provider,
   type ProviderCatalog,
   type ProviderDirectoryEntry,
@@ -428,12 +429,16 @@ function InheritCell({
 export function PreferencesPane({
   timezone,
   setTimezone,
+  theme,
+  setTheme,
   timezones,
   clock,
   busy,
 }: {
   timezone: string
   setTimezone: (timezone: string) => void
+  theme: PersonalSettings['theme']
+  setTheme: (theme: PersonalSettings['theme']) => void
   timezones: string[]
   clock: string
   busy: boolean
@@ -467,6 +472,24 @@ export function PreferencesPane({
           <span className="set-clock">
             now · <b>{clock}</b>
           </span>
+        </div>
+      </div>
+      <div className="set-group">
+        <label className="set-group-label" htmlFor="personal-theme">
+          Theme
+        </label>
+        <div className="set-field" style={{ maxWidth: 320 }}>
+          <select
+            id="personal-theme"
+            className="set-select"
+            value={theme}
+            onChange={(event) => setTheme(event.target.value as PersonalSettings['theme'])}
+            disabled={busy}
+          >
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
         </div>
       </div>
     </div>

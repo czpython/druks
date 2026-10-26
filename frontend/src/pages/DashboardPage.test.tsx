@@ -38,7 +38,7 @@ function mount(apps: string[] = ['notes'], timezone = 'UTC') {
   client.setQueryData(['personalSettings'], { timezone })
   render(
     <QueryClientProvider client={client}>
-      <UserPreferencesProvider>
+      <UserPreferencesProvider accountId="operator">
         <Router><DashboardPage apps={apps} /></Router>
       </UserPreferencesProvider>
     </QueryClientProvider>,

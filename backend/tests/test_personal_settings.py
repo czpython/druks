@@ -41,6 +41,7 @@ async def test_account_creation_copies_defaults_once(tmp_path, druks_db, monkeyp
     )
     alice = await Account.get_or_create(druks_db, "alice@example.com")
     assert (alice.timezone, alice.gate_park_destination_id) == ("Europe/Madrid", destination.id)
+    assert alice.theme == "system"
     await alice.update_preferences(timezone="America/New_York", gate_park_destination_id=None)
     await installation.update(default_effort="low")
     existing = await Account.get_or_create(druks_db, "alice@example.com")
@@ -51,6 +52,7 @@ async def test_account_creation_copies_defaults_once(tmp_path, druks_db, monkeyp
             "/api/settings/personal", headers={IDENTITY_HEADER: alice.username}
         ).json() == {
             "timezone": "America/New_York",
+            "theme": "system",
             "gateParkDestinationId": None,
             "isTagRequired": False,
         }
@@ -89,6 +91,7 @@ async def test_migrations_preserve_preferences_and_installation_execution(druks_
     for statement in (
         "DELETE FROM settings",
         "ALTER TABLE accounts DROP COLUMN timezone",
+        "ALTER TABLE accounts DROP COLUMN theme",
         "ALTER TABLE accounts DROP COLUMN gate_park_destination_id",
         "ALTER TABLE settings DROP CONSTRAINT settings_singleton",
         "ALTER TABLE settings ADD COLUMN timezone varchar NOT NULL DEFAULT 'UTC'",
@@ -128,6 +131,7 @@ async def test_migrations_preserve_preferences_and_installation_execution(druks_
             "74b53981122c_add_account_preferences.py",
             "7dc609a2d51a_move_preferences_to_accounts.py",
             "b43924bf37db_enforce_installation_settings_singleton.py",
+            "d8f6a2c91b47_add_account_theme_preference.py",
         ):
             path = (
                 Path(__file__).resolve().parent.parent
@@ -145,17 +149,17 @@ async def test_migrations_preserve_preferences_and_installation_execution(druks_
     await (await druks_db.connection()).run_sync(upgrade)
     preferences = (
         await druks_db.execute(
-            text("SELECT id, timezone, gate_park_destination_id FROM accounts ORDER BY id")
+            text("SELECT id, timezone, theme, gate_park_destination_id FROM accounts ORDER BY id")
         )
     ).all()
     expected = (
         [
-            (alice.id, "America/New_York", destination.id),
-            (bob.id, "Asia/Tokyo", None),
-            (charlie.id, "Europe/Madrid", destination.id),
+            (alice.id, "America/New_York", "system", destination.id),
+            (bob.id, "Asia/Tokyo", "system", None),
+            (charlie.id, "Europe/Madrid", "system", destination.id),
         ]
         if has_settings
-        else [(account_id, "UTC", None) for account_id in account_ids]
+        else [(account_id, "UTC", "system", None) for account_id in account_ids]
     )
     assert preferences == sorted(expected)
     execution = (
@@ -268,7 +272,13 @@ async def test_personal_api_is_scoped_and_does_not_retime_schedules(
         alice = {IDENTITY_HEADER: "alice@example.com"}
         bob = {IDENTITY_HEADER: "bob@example.com"}
         inherited = client.get("/api/settings/personal", headers=alice).json()
-        assert set(inherited) == {"timezone", "gateParkDestinationId", "isTagRequired"}
+        assert set(inherited) == {"timezone", "theme", "gateParkDestinationId", "isTagRequired"}
+        assert inherited["theme"] == "system"
+        saved_theme = client.patch("/api/settings/personal", headers=alice, json={"theme": "dark"})
+        assert saved_theme.status_code == 200
+        assert saved_theme.json()["theme"] == "dark"
+        assert client.get("/api/settings/personal", headers=bob).json()["theme"] == "system"
+        assert (await Account.get_for_username(druks_db, "alice@example.com")).theme == "dark"
         saved = client.patch(
             "/api/settings/personal", headers=alice, json={"timezone": "America/New_York"}
         )
@@ -296,6 +306,7 @@ async def test_personal_api_is_scoped_and_does_not_retime_schedules(
         ("fastMode", True),
         ("defaultTimeout", 600),
         ("timezone", "not-a-timezone"),
+        ("theme", "sepia"),
     ],
 )
 async def test_invalid_edit_keeps_account_preferences(tmp_path, druks_db, field, value):
@@ -304,6 +315,7 @@ async def test_invalid_edit_keeps_account_preferences(tmp_path, druks_db, field,
         assert response.status_code == 422
         assert client.patch("/api/settings/personal", json={}).status_code == 200
     assert (await Account.get_default(druks_db)).timezone == "UTC"
+    assert (await Account.get_default(druks_db)).theme == "system"
 
 
 async def test_shared_agent_overrides_use_installation_settings_after_a_personal_edit(

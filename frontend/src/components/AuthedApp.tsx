@@ -27,7 +27,7 @@ function QueryCacheMount({ account }: { account: Account }) {
   )
   return (
     <QueryClientProvider client={queryClient}>
-      <UserPreferencesProvider>
+      <UserPreferencesProvider accountId={account.id}>
         <App account={account} />
       </UserPreferencesProvider>
     </QueryClientProvider>

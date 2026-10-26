@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import { App } from '../App'
 import { api } from '../api/client'
+import { UserPreferencesProvider } from '../lib/preferences'
 import { SETTINGS_FIELDS } from './settings'
 import type {
   AgentSetting,
@@ -145,6 +146,7 @@ const providerDirectory = [
 
 const patched: Record<string, unknown>[] = []
 const personalPatched: Record<string, unknown>[] = []
+let rejectPersonalPatch = false
 
 const appSettings: AppsSettingsResponse = {
   allowedEfforts: ['low', 'medium', 'high'],
@@ -342,12 +344,14 @@ function stubFetch(
       if (path === '/api/settings/personal') {
         const preferences = savedPersonal ?? {
           timezone: 'UTC',
+          theme: 'system',
           gateParkDestinationId: savedSettings.gateParkDestinationId,
           isTagRequired: false,
         }
         if (init?.method === 'PATCH') {
           const changes = JSON.parse(String(init.body))
           personalPatched.push(changes)
+          if (rejectPersonalPatch) return new Response('{}', { status: 503 })
           savedPersonal = { ...preferences, ...changes }
         }
         return new Response(JSON.stringify(savedPersonal ?? preferences), { status: 200 })
@@ -439,14 +443,17 @@ function stubFetch(
 
 function renderSettings(workPath?: string) {
   window.history.replaceState(null, '', workPath ?? '/settings/personal')
-  vi.stubGlobal(
-    'matchMedia',
-    vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
-  )
+  vi.stubGlobal('matchMedia', vi.fn(() => ({
+    matches: true,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  })))
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={queryClient}>
-      <App account={{ id: 'operator', username: 'operator@example.invalid', isDefault: true }} />
+      <UserPreferencesProvider accountId="operator">
+        <App account={{ id: 'operator', username: 'operator@example.invalid', isDefault: true }} />
+      </UserPreferencesProvider>
     </QueryClientProvider>,
   )
 }
@@ -457,6 +464,8 @@ afterEach(() => {
   vi.restoreAllMocks()
   patched.length = 0
   personalPatched.length = 0
+  rejectPersonalPatch = false
+  window.localStorage.removeItem('druks:theme:operator')
 })
 
 describe('SettingsPages app fields', () => {
@@ -837,6 +846,42 @@ describe('SettingsPages agents', () => {
 })
 
 describe('settings drafts and navigation', () => {
+  it('previews theme choices and persists them with Personal Settings', async () => {
+    stubFetch(false)
+    renderSettings('/settings/personal')
+
+    const theme = await screen.findByRole('combobox', { name: 'Theme' })
+    expect((theme as HTMLSelectElement).value).toBe('system')
+    expect(document.documentElement.dataset.theme).toBeUndefined()
+
+    fireEvent.change(theme, { target: { value: 'light' } })
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('light'))
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect((theme as HTMLSelectElement).value).toBe('light')
+    expect(personalPatched).toEqual([])
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(personalPatched).toEqual([{ theme: 'light' }]))
+
+    fireEvent.change(theme, { target: { value: 'dark' } })
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe('dark'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(personalPatched).toEqual([{ theme: 'light' }, { theme: 'dark' }]))
+  })
+
+  it('keeps a failed theme save as a draft', async () => {
+    stubFetch(false)
+    rejectPersonalPatch = true
+    renderSettings('/settings/personal')
+
+    const theme = await screen.findByRole('combobox', { name: 'Theme' })
+    fireEvent.change(theme, { target: { value: 'dark' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await screen.findByRole('alert')
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    expect((theme as HTMLSelectElement).value).toBe('dark')
+  })
+
   it('keeps shared drafts across pages and saves only the current page', async () => {
     stubFetch(false)
     renderSettings()
@@ -989,7 +1034,7 @@ describe('settings resource and keyboard behavior', () => {
     expect(update).toHaveBeenCalledTimes(1)
     expect(update).toHaveBeenCalledWith({ timezone: 'Europe/Madrid' })
     await act(async () => {
-      finish({ timezone: 'Europe/Madrid', gateParkDestinationId: null, isTagRequired: false } as PersonalSettings)
+      finish({ timezone: 'Europe/Madrid', theme: 'system', gateParkDestinationId: null, isTagRequired: false } as PersonalSettings)
     })
     expect(
       (screen.getByRole('button', { name: 'Save changes' }) as HTMLButtonElement).disabled,
@@ -1035,7 +1080,9 @@ it('restores the work return URL when a settings fragment route reloads', async 
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
-      <App account={{ id: 'operator', username: 'operator@example.invalid', isDefault: true }} />
+      <UserPreferencesProvider accountId="operator">
+        <App account={{ id: 'operator', username: 'operator@example.invalid', isDefault: true }} />
+      </UserPreferencesProvider>
     </QueryClientProvider>,
   )
   await screen.findByRole('combobox', { name: 'Timezone' })
@@ -1699,7 +1746,7 @@ it('focuses a personal field after preferences finish loading', async () => {
   renderSettings('/settings/personal?field=timezone')
   await screen.findByRole('heading', { name: 'Preferences' })
   expect(screen.queryByRole('combobox', { name: 'Timezone' })).toBeNull()
-  await act(async () => { finish({ timezone: 'UTC', gateParkDestinationId: null, isTagRequired: false }) })
+  await act(async () => { finish({ timezone: 'UTC', theme: 'system', gateParkDestinationId: null, isTagRequired: false }) })
   await waitFor(() => expect(document.activeElement?.id).toBe('personal-timezone'))
 })
 

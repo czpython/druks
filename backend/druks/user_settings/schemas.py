@@ -4,6 +4,7 @@ from typing import Annotated, Any, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PositiveInt
 from pydantic.fields import FieldInfo
 
+from druks.accounts.enums import Theme
 from druks.apps.settings import (
     field_choices,
     field_kind,
@@ -33,6 +34,7 @@ class PersonalSettingsResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     timezone: str
+    theme: Theme
     gate_park_destination_id: str | None
     is_tag_required: bool
 
@@ -55,6 +57,7 @@ class UpdatePersonalSettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     timezone: Annotated[str, AfterValidator(validate_timezone)] | None = None
+    theme: Theme | None = None
     # Absent leaves the destination unchanged. Null turns notifications off.
     gate_park_destination_id: str | None = Field(
         default=None, validation_alias="gateParkDestinationId"

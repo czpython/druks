@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 
 import { AuthedApp } from './components/AuthedApp'
 import { IdentityBootstrap } from './components/IdentityBootstrap'
+import './tokens.css'
 import './styles.css'
 import './command-center.css'
 import './settings.css'
