@@ -1,0 +1,16 @@
+name: On Pull Request House Rules
+
+on:
+  pull_request:
+    branches: [main, "codex/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  # Branch protection requires the "druks-house-rules / check" check; this job name is its first half.
+  druks-house-rules:
+    uses: getdruks/druks-workflows/.github/workflows/house-rules.yml@v1
+    with:
+      # The release that reads .druks/house_rules/config.yml.
+      ref: v0.0.2
