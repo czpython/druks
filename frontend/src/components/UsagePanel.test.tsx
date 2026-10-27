@@ -57,7 +57,10 @@ const today: UsageTodayResponse = {
   providers: [],
 }
 
-function stubFetch(summary: UsageResponse = usage, usageHistory: UsageHistoryResponse = history) {
+function stubFetch(
+  summary: UsageResponse = usage,
+  usageHistory: UsageHistoryResponse = history,
+) {
   vi.stubGlobal(
     'fetch',
     vi.fn<(url: string) => Promise<Response>>(async (url) => {

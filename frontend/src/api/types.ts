@@ -750,6 +750,7 @@ export type Billing = 'subscription' | 'api_key'
 
 export interface PersonalSettings {
   timezone: string
+  theme: 'system' | 'light' | 'dark'
   gateParkDestinationId: string | null
   isTagRequired: boolean
 }
@@ -768,6 +769,7 @@ export interface InstallationSettings {
 
 export interface UpdatePersonalSettingsRequest {
   timezone?: string
+  theme?: PersonalSettings['theme']
   gateParkDestinationId?: string | null
   isTagRequired?: boolean
 }

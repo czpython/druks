@@ -7,21 +7,49 @@
   {# The dashboard's tokens, inlined: these pages are served by the API with no
      SPA assets in reach, and a hashed stylesheet URL would rot. #}
   <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f7;
+      --surface: #fcfcfc;
+      --input: #ffffff;
+      --text: #293638;
+      --text-secondary: #424e50;
+      --text-tertiary: #5b6668;
+      --border: #dee2de;
+      --border-strong: #71898b;
+      --accent: #00677b;
+      --on-accent: #fffcf6;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --bg: #0c0c0c;
+        --surface: #111111;
+        --input: #181818;
+        --text: #f0f2f7;
+        --text-secondary: #b4bccd;
+        --text-tertiary: #99a3b9;
+        --border: #2b2b2b;
+        --border-strong: #878787;
+        --accent: #4dd4f4;
+        --on-accent: #0c0c0c;
+      }
+    }
     body { margin: 0; min-height: 100vh; display: grid; place-items: center;
-           background: #0a0c12; color: #f0f2f7;
+           background: var(--bg); color: var(--text);
            font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    main { background: #0e1119; border: 1px solid #1c2030; border-radius: 8px;
+    main { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
            padding: 28px 32px; max-width: 30rem; }
-    .wordmark { color: #7e889d; font-size: 12px; letter-spacing: .14em;
+    .wordmark { color: var(--text-tertiary); font-size: 12px; letter-spacing: .14em;
                 text-transform: uppercase; margin-bottom: 14px; }
-    p { margin: 0 0 12px; color: #b4bccd; }
-    a { color: #a78bfa; }
-    b { color: #f0f2f7; }
-    label { display: block; color: #99a3b9; font-size: 13px; }
+    p { margin: 0 0 12px; color: var(--text-secondary); }
+    a { color: var(--accent); }
+    b { color: var(--text); }
+    label { display: block; color: var(--text-tertiary); font-size: 13px; }
     input { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 8px 10px;
-            background: #131825; color: #f0f2f7; border: 1px solid #1c2030;
+            background: var(--input); color: var(--text); border: 1px solid var(--border-strong);
             border-radius: 5px; font: inherit; }
-    button { padding: 9px 16px; background: #a78bfa; color: #0a0c12; border: 0;
+    button { padding: 9px 16px; background: var(--accent); color: var(--on-accent); border: 0;
              border-radius: 5px; font: inherit; font-weight: 600; cursor: pointer; }
   </style>
 </head>

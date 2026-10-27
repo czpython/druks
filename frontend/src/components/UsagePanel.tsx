@@ -54,7 +54,7 @@ export function UsagePanel() {
   }))
   const ages = providers.map((h) => h.ageSeconds).filter((v): v is number => v !== null)
   const updatedLabel = ages.length > 0 ? `updated ${formatAge(Math.min(...ages))} ago` : ''
-  const harnessColor = harnessColors(providers.map((h) => h.id))
+  const harnessColor = harnessColors(providers.map((provider) => provider.id))
 
   return (
     <section className="us-col">
@@ -519,10 +519,10 @@ function Spark({ data, tone, id }: { data: number[]; tone: UsageTone; id: string
   const area = `${line} L${x(n - 1).toFixed(1)} ${h} L${x(0).toFixed(1)} ${h} Z`
   const color =
     tone === 'crit'
-      ? 'var(--bucket-dead)'
+      ? 'var(--danger)'
       : tone === 'warn'
-        ? 'var(--decision-request-revision)'
-        : 'var(--outcome-merged)'
+        ? 'var(--warning)'
+        : 'var(--success)'
   const gid = `us-sg-${id}`
   return (
     <svg className="us-spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
@@ -543,7 +543,7 @@ function Spark({ data, tone, id }: { data: number[]; tone: UsageTone; id: string
 function TodaySection({ today }: { today: UsageTodayResponse }) {
   const totalSpend = today.providers.reduce((sum, h) => sum + h.spendUsd, 0)
   const totalTokens = today.providers.reduce((sum, h) => sum + h.tokens, 0)
-  const harnessColor = harnessColors(today.providers.map((h) => h.id))
+  const harnessColor = harnessColors(today.providers.map((provider) => provider.id))
 
   return (
     <>

@@ -25,6 +25,7 @@ import { appLabel } from '../apps/registry'
 import { useTicker } from '../lib/useTicker'
 import { absTime } from '../lib/format'
 import { harnessColors } from '../lib/harnessColors'
+import { useThemePreference } from '../lib/preferences'
 import { Page } from './Page'
 import { Sidebar } from './Sidebar'
 import { BrowserProfilesPane } from './BrowserProfilesPane'
@@ -174,6 +175,8 @@ export function SettingsPages({
   const errorNotice = useRef<HTMLParagraphElement>(null)
   const effectiveDefaults = defaults ?? savedDefaults
   const personalTimezone = personalEdits.timezone ?? personalQuery.data?.timezone ?? 'UTC'
+  const { theme, previewTheme } = useThemePreference()
+  const personalTheme = personalEdits.theme ?? theme
   const personalChanges = Object.fromEntries(
     Object.entries(personalEdits).filter(([field, value]) =>
       value !== personalQuery.data?.[field as keyof UpdatePersonalSettingsRequest],
@@ -284,7 +287,10 @@ export function SettingsPages({
   }, [dirtyPages.length])
 
   function discard(page: string) {
-    if (page === 'personal') setPersonalEdits({})
+    if (page === 'personal') {
+      setPersonalEdits({})
+      previewTheme(null)
+    }
     else if (page === 'agents') setDefaults(null)
     else
       setAppEdits((current) => {
@@ -691,6 +697,11 @@ export function SettingsPages({
                 <PreferencesPane
                   timezone={personalTimezone}
                   setTimezone={(value) => setPersonalEdits((current) => ({ ...current, timezone: value }))}
+                  theme={personalTheme}
+                  setTheme={(value) => {
+                    setPersonalEdits((current) => ({ ...current, theme: value }))
+                    previewTheme(value)
+                  }}
                   timezones={timezones}
                   clock={clock}
                   busy={saving}

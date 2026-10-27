@@ -236,7 +236,7 @@ function InfoPanel({
             <span className="ins-field-k">pr</span>
             <span className="ins-field-v">
               {workItem.prNumber == null ? (
-                <span style={{ color: 'var(--text-faint)' }}>not opened</span>
+                <span style={{ color: 'var(--text-tertiary)' }}>not opened</span>
               ) : workItem.links.pr ? (
                 <a className="ins-link" href={workItem.links.pr} target="_blank" rel="noreferrer">
                   #{workItem.prNumber}
@@ -762,12 +762,12 @@ function TranscriptBody({
       )
     }
     return (
-      <div className="ins-stream" style={{ color: 'var(--text-faint)' }}>
+      <div className="ins-stream" style={{ color: 'var(--text-tertiary)' }}>
         <div className="ins-stream-line">
-          <span className="ins-stream-from" style={{ color: 'var(--text-faint)' }}>
+          <span className="ins-stream-from" style={{ color: 'var(--text-tertiary)' }}>
             —
           </span>
-          <span className="ins-stream-body" style={{ color: 'var(--text-faint)' }}>
+          <span className="ins-stream-body" style={{ color: 'var(--text-tertiary)' }}>
             no agent calls in this run
           </span>
         </div>

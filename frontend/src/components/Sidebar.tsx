@@ -32,9 +32,9 @@ export function Sidebar({
 
   const content = (
     <>
-      <Link href={home} className="sidebar-brand" aria-label="Druks home">
-        <span className="brand-glyph" aria-hidden="true" />
-        <span>druks</span>
+      <Link href={home} className="sidebar-brand brand-lockup" aria-label="Druks home">
+        <span className="brand-lockup-mark" aria-hidden="true" />
+        <span>Druks</span>
       </Link>
       {children}
       <div className="sidebar-account" title={account.username}>

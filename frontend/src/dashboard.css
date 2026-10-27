@@ -1,38 +1,38 @@
 .dashboard .page-shell-body { width: min(100%, 1040px); margin-inline: auto; padding-block: 12px 40px; }
 .dashboard-head { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
 .dashboard h1 { margin: 0 0 10px; font-size: 32px; font-weight: 500; letter-spacing: -.02em; }
-.dashboard-head p { margin: 0; color: var(--text-mid); font-size: 17px; }
-.dashboard-filter { min-height: 44px; max-width: 240px; padding: 0 12px; border: 1px solid var(--border-loud); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
-.dashboard-alert { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 24px 0 0; color: var(--outcome-failed); }
+.dashboard-head p { margin: 0; color: var(--text-secondary); font-size: 17px; }
+.dashboard-filter { min-height: 44px; max-width: 240px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--input); color: var(--text); font: inherit; }
+.dashboard-alert { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 24px 0 0; color: var(--danger); }
 .dashboard-alert button { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--text); text-decoration: underline; }
 .dashboard-alert button:disabled { cursor: wait; opacity: .6; }
 .dashboard-primary { display: flex; flex-direction: column; gap: 12px; margin-top: 36px; }
-.dashboard-card { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 24px; align-items: center; min-height: 124px; padding: 24px; border: 1px solid var(--border-loud); border-radius: 14px; background: var(--surface); }
-.dashboard-app-mark { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 12px; background: var(--surface-2); color: var(--text-mid); font-size: 16px; font-weight: 500; }
-.dashboard-card-failed .dashboard-app-mark { background: color-mix(in oklch, var(--outcome-failed) 10%, var(--surface)); color: color-mix(in oklch, var(--outcome-failed) 65%, var(--text-mid)); }
+.dashboard-card { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 24px; align-items: center; min-height: 124px; padding: 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.dashboard-app-mark { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 12px; background: var(--surface-2); color: var(--text-secondary); font-size: 16px; font-weight: 500; }
+.dashboard-card-failed .dashboard-app-mark { background: color-mix(in oklch, var(--danger) 10%, var(--surface)); color: color-mix(in oklch, var(--danger) 65%, var(--text-secondary)); }
 .dashboard-identity { min-width: 0; overflow-wrap: anywhere; }
 .dashboard h2 { margin: 0; font-size: 17px; font-weight: 500; }
-.dashboard-identity p { margin: 6px 0 0; color: var(--text-mid); }
-.dashboard-identity .dashboard-meta { margin-top: 10px; color: var(--text-dim); font-size: 14px; }
+.dashboard-identity p { margin: 6px 0 0; color: var(--text-secondary); }
+.dashboard-identity .dashboard-meta { margin-top: 10px; color: var(--text-tertiary); font-size: 14px; }
 .dashboard-failure { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; white-space: pre-wrap; }
-.dashboard-action { display: inline-flex; align-items: center; justify-content: center; min-width: 106px; min-height: 44px; padding: 0 20px; color: var(--text); text-decoration: none; border: 1px solid var(--border-loud); border-radius: 999px; background: var(--surface-2); }
+.dashboard-action { display: inline-flex; align-items: center; justify-content: center; min-width: 106px; min-height: 44px; padding: 0 20px; color: var(--text); text-decoration: none; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface-2); }
 .dashboard-action:hover { background: var(--surface-3); }
-.dashboard-action.primary { color: color-mix(in oklch, var(--accent-amber) 60%, var(--text)); background: color-mix(in oklch, var(--accent-amber) 12%, var(--surface)); border-color: color-mix(in oklch, var(--accent-amber) 40%, var(--border)); }
-.dashboard-action.primary:hover { background: color-mix(in oklch, var(--accent-amber) 20%, var(--surface)); }
-.dashboard :is(a, button, select):focus-visible { outline: 2px solid var(--text); outline-offset: 4px; }
-.dashboard-unavailable { max-width: 130px; color: var(--text-dim); font-size: 13px; }
-.dashboard-more { margin: 12px 0 0; color: var(--text-mid); }
-.dashboard-quiet { margin: 36px 0 0; color: var(--text-mid); }
-.dashboard-status { margin-top: 24px; padding: 8px 24px; border: 1px solid var(--border-loud); border-radius: 14px; background: var(--surface); }
+.dashboard-action.primary { color: var(--accent); background: color-mix(in oklch, var(--accent) 12%, var(--surface)); border-color: color-mix(in oklch, var(--accent) 40%, var(--border)); }
+.dashboard-action.primary:hover { background: color-mix(in oklch, var(--accent) 20%, var(--surface)); }
+.dashboard :is(a, button, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.dashboard-unavailable { max-width: 130px; color: var(--text-tertiary); font-size: 13px; }
+.dashboard-more { margin: 12px 0 0; color: var(--text-secondary); }
+.dashboard-quiet { margin: 36px 0 0; color: var(--text-secondary); }
+.dashboard-status { margin-top: 24px; padding: 8px 24px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
 .dashboard-status ul { list-style: none; padding: 0; margin: 0; }
 .dashboard-status-row { display: flex; gap: 14px; align-items: baseline; padding: 18px 0; }
 .dashboard-status-row + .dashboard-status-row { border-top: 1px solid var(--border); }
 .dashboard-status-row > div { min-width: 0; overflow-wrap: anywhere; }
 .dashboard-status-row strong { font-weight: 500; }
-.dashboard-status-row p { margin: 6px 0 0; color: var(--text-mid); font-size: 14px; }
-.dashboard-status-dot { flex: 0 0 6px; height: 6px; border-radius: 50%; background: var(--text-faint); }
-.dashboard-status-failed .dashboard-status-dot { background: var(--bucket-dead); }
-.dashboard-status-running .dashboard-status-dot { background: var(--bucket-run); }
+.dashboard-status-row p { margin: 6px 0 0; color: var(--text-secondary); font-size: 14px; }
+.dashboard-status-dot { flex: 0 0 6px; height: 6px; border-radius: 50%; background: var(--text-tertiary); }
+.dashboard-status-failed .dashboard-status-dot { background: var(--danger); }
+.dashboard-status-running .dashboard-status-dot { background: var(--info); }
 @media (max-width: 649px) {
   .dashboard .page-shell-body { padding-top: 4px; }
   .dashboard-head { flex-wrap: wrap; gap: 20px; }

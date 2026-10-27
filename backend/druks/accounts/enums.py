@@ -8,3 +8,9 @@ class AccountKind(StrEnum):
     OPERATOR = "operator"
     BOT = "bot"
     BOT_ADMIN = "bot_admin"
+
+
+class Theme(StrEnum):
+    SYSTEM = "system"
+    LIGHT = "light"
+    DARK = "dark"
