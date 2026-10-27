@@ -1274,6 +1274,46 @@ The public path is `/_external/night_watch/events/`. Druks deduplicates a
 delivery when the class supplies a delivery key. A failing handler releases the
 claim so the provider can retry.
 
+### GitHub facts
+
+The operator App's webhook publishes `pr.opened`, `pr.synchronized`,
+`pr.edited`, and `pr.ready_for_review`, the App's own pull requests included.
+Each carries `repo`, `pr_number`, and a `payload` with `branch`, `base_branch`,
+`head_sha`, `title`, `body`, `draft`, `author`, and `author_can_write`.
+
+`post_check_run` creates the named check run on the head commit, or updates the
+one the App already posted there. An annotation is GitHub's shape. The App needs
+**Checks: Read and write**; see [Configuration](configuration.md#github).
+
+```python
+from druks.core.services import Github
+from druks.signals import subscribe
+
+
+@subscribe("pr.synchronized")
+async def check_the_head(*, repo: str, payload: dict, **_: object) -> None:
+    findings = await lint(repo, payload["head_sha"])
+    await (await Github.get_client()).post_check_run(
+        repo,
+        head_sha=payload["head_sha"],
+        name="night-watch",
+        status="completed",
+        conclusion="failure" if findings else "success",
+        title=f"{len(findings)} findings",
+        summary="One annotation per finding.",
+        annotations=[
+            {
+                "path": finding.path,
+                "start_line": finding.line,
+                "end_line": finding.line,
+                "annotation_level": "failure",
+                "message": finding.message,
+            }
+            for finding in findings
+        ],
+    )
+```
+
 ## Models and migrations
 
 Models subclass `druks.db.Model`. Druks names the table for the app and the
