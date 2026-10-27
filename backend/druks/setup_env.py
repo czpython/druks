@@ -361,6 +361,8 @@ def _canonical_config(raw: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(table, dict):
             _require_scalar("", table_name, table)
             continue
+        if table_name in _RUNTIME_TABLES:
+            continue
         for key, value in table.items():
             if table_name in _KNOWN_TOML_KEYS and key in _KNOWN_TOML_KEYS[table_name]:
                 continue
@@ -368,6 +370,12 @@ def _canonical_config(raw: dict[str, Any]) -> dict[str, Any]:
                 continue
             _require_scalar(f"{table_name}.", key, value)
     return config
+
+
+# Tables the runtime reads from druks.toml itself: ``[apps.<name>]`` and
+# ``[services.<slug>]`` switch an app or a service off, or make a service managed.
+# Setup renders nothing from them and writes them back as they are.
+_RUNTIME_TABLES = ("apps", "services")
 
 
 def _provider_tables(sandbox: dict[str, Any]) -> dict[str, Any]:
