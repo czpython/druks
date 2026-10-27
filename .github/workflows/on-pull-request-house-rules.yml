@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   # Branch protection requires the "druks-house-rules / check" check; this job name is its first half.
