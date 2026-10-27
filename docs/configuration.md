@@ -142,8 +142,9 @@ Services page again.
 
 One Druks image serves installations with different purposes. A platform that
 writes `druks.toml` itself switches an app or a service off for one
-installation. The installer refuses these tables, as it refuses
-`[services.<slug>]`.
+installation. The installer renders nothing from these tables and writes them
+back as they are, as it does with `[services.<slug>]`, so `druks setup` still
+renders `.env` from a file that holds them.
 
 ```toml
 [apps.software_factory]
