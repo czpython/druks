@@ -564,7 +564,9 @@ class CodexHarness(Harness):
         # shows nothing for them.
         args = (*args, "-c", "model_reasoning_summary=auto")
         if self.effort:
-            args = (*args, "-c", f"model_reasoning_effort={self.effort}")
+            # Codex's scale ends at xhigh; max is Druks's top level, so it maps there.
+            effort = "xhigh" if self.effort == "max" else self.effort
+            args = (*args, "-c", f"model_reasoning_effort={effort}")
         # Stream one JSONL event per line on stdout (reasoning chunks, tool
         # calls, messages) so the transcript tails live. The structured result
         # still lands in the --output-last-message file, untouched.
