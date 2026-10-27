@@ -179,6 +179,10 @@ billing, effort, fast mode, and timeout defaults. Every account uses these
 defaults. Shared agent overrides take priority. A declared agent timeout also
 takes priority over the installation default.
 
+Effort is one of `low`, `medium`, `high`, `xhigh`, and `max`. Claude and Pi
+take the level as it is. Codex's scale ends at `xhigh`, so it runs `max` as
+`xhigh`. OpenCode ignores the level: see [Chat](chat.md).
+
 **Include apps** is off by default. When it is on, a run loads the apps of the
 subscription it runs on in its sandbox: claude.ai connectors or ChatGPT apps.
 See [Harnesses](#harnesses) for what the switch changes in a sandbox.

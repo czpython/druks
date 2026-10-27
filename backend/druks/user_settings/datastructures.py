@@ -1,6 +1,8 @@
 from typing import Literal, NamedTuple, get_args
 
-Effort = Literal["low", "medium", "high"]
+# The levels Claude and Pi take as they are. Codex stops at xhigh and runs max as
+# that; OpenCode ignores the level, its efforts being model variants.
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
 ALLOWED_EFFORTS: tuple[str, ...] = get_args(Effort)
 
 

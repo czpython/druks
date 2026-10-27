@@ -196,6 +196,20 @@ def test_codex_emits_summary_effort_and_json_stream():
     assert "--json" in flags  # streams the rollout to stdout for the live tail
 
 
+def test_codex_runs_max_effort_as_xhigh():
+    # Codex's reasoning scale ends at xhigh; Druks's max lands there.
+    flags = CodexHarness(model=_CODEX_MODEL, fast_mode=False, effort="max")._prompt_flags(
+        include_apps=False
+    )
+    assert "model_reasoning_effort=xhigh" in flags
+    assert "model_reasoning_effort=max" not in flags
+
+
+def test_claude_forwards_max_effort_as_is():
+    args = ClaudeHarness(model="anthropic/claude-x", fast_mode=False, effort="max")._command_args()
+    assert args[args.index("--effort") + 1] == "max"
+
+
 def test_codex_mcp_flags_register_server_with_env_var_token():
     server = McpServer(name="github", url="https://api.example/mcp/", bearer_token_env_var="GH_TOK")
     flags = CodexHarness(model=_CODEX_MODEL, fast_mode=False, effort=None)._mcp_flags((server,))

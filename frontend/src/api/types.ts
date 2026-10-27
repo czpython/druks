@@ -557,7 +557,7 @@ export interface GateAnswer {
 }
 
 
-export type AgentEffort = 'low' | 'medium' | 'high'
+export type AgentEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /** One picker entry — the provider's model id and its display label. */
 export interface CatalogModel {
@@ -1031,7 +1031,7 @@ export interface UsageTodayResponse {
   providers: UsageProviderToday[]
 }
 
-export const ALLOWED_EFFORTS: readonly AgentEffort[] = ['low', 'medium', 'high']
+export const ALLOWED_EFFORTS: readonly AgentEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
 export interface Skill {
   name: string
