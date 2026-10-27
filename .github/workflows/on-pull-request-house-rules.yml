@@ -2,6 +2,7 @@ name: On Pull Request House Rules
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
     branches: [main, "codex/**"]
 
 permissions:
