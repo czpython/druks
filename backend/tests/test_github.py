@@ -701,3 +701,74 @@ async def test_create_repo_from_template_reads_a_taken_name_as_already_created(
     )
 
     assert full_name == "clawhaven/acme-coffee"
+
+
+class _Checks:
+    def __init__(self, posted_ids: tuple[int, ...] = ()) -> None:
+        self.posted_ids = posted_ids
+        self.calls: list[tuple[str, Any]] = []
+
+    async def async_list_for_ref(self, owner: str, repo: str, ref: str, **kwargs: Any) -> Any:
+        runs = [SimpleNamespace(id=run_id) for run_id in self.posted_ids]
+        return SimpleNamespace(parsed_data=SimpleNamespace(check_runs=runs))
+
+    async def async_create(self, owner: str, repo: str, *, data: dict[str, Any]) -> Any:
+        self.calls.append(("create", data))
+        return SimpleNamespace(parsed_data=SimpleNamespace(id=900))
+
+    async def async_update(
+        self, owner: str, repo: str, check_run_id: int, *, data: dict[str, Any]
+    ) -> Any:
+        self.calls.append(("update", {"check_run_id": check_run_id, **data}))
+
+
+def _checks_client(checks: _Checks) -> _TestGitHubClient:
+    client = _TestGitHubClient(SimpleNamespace(rest=SimpleNamespace(checks=checks)))
+    client._app_id = "41"
+    return client
+
+
+async def test_post_check_run_creates_the_run_and_sends_annotations_in_batches() -> None:
+    checks = _Checks()
+
+    await _checks_client(checks).post_check_run(
+        "acme/widget",
+        head_sha="0f3a2c1d",
+        name="druks-house-rules",
+        status="completed",
+        conclusion="failure",
+        title="120 findings",
+        summary="One annotation per finding.",
+        annotations=[{"path": "app.py", "start_line": line} for line in range(120)],
+    )
+
+    assert [name for name, _ in checks.calls] == ["create", "update", "update"]
+    assert checks.calls[0][1]["head_sha"] == "0f3a2c1d"
+    assert checks.calls[0][1]["conclusion"] == "failure"
+    assert [len(data["output"]["annotations"]) for _, data in checks.calls] == [50, 50, 20]
+    assert {data["check_run_id"] for _, data in checks.calls[1:]} == {900}
+
+
+async def test_post_check_run_updates_the_run_this_app_already_posted() -> None:
+    checks = _Checks(posted_ids=(77,))
+
+    await _checks_client(checks).post_check_run(
+        "acme/widget",
+        head_sha="0f3a2c1d",
+        name="druks-house-rules",
+        status="in_progress",
+        title="Checking",
+        summary="",
+    )
+
+    assert checks.calls == [
+        (
+            "update",
+            {
+                "check_run_id": 77,
+                "name": "druks-house-rules",
+                "status": "in_progress",
+                "output": {"title": "Checking", "summary": "", "annotations": []},
+            },
+        )
+    ]

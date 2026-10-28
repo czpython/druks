@@ -453,12 +453,16 @@ comes with it, and refuses a sign-in that has none.
 | Contents | Read and write |
 | Pull requests | Read and write |
 | Issues | Read and write |
-| Checks | Read |
+| Checks | Read and write |
 | Commit statuses | Read |
 
 Install the GitHub App on the repositories that Druks will use. This
 installation set defines where `software_factory` can act. Personal access
 tokens are not a supported substitute.
+
+To change a permission on an existing App, open it on GitHub under
+**Developer settings → GitHub Apps → Permissions & events**, set it, and save.
+Each account that installed the App then accepts the change.
 
 A sandbox never holds an installation token. It holds a placeholder in
 `GH_TOKEN`, and git and `gh` read it through Drukbox's setup. The Drukbox

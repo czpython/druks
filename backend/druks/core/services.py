@@ -177,7 +177,7 @@ class Github(GithubApp):
             "administration": "write",
             "pull_requests": "write",
             "issues": "write",
-            "checks": "read",
+            "checks": "write",
             "statuses": "read",
         },
     }

@@ -133,6 +133,37 @@ class GitHubEvents(Webhook):
             )
         return _accepted()
 
+    async def on_pull_request_opened(self) -> Response:
+        return await self._publish_pull_request("pr.opened")
+
+    async def on_pull_request_synchronize(self) -> Response:
+        return await self._publish_pull_request("pr.synchronized")
+
+    async def on_pull_request_edited(self) -> Response:
+        return await self._publish_pull_request("pr.edited")
+
+    async def on_pull_request_ready_for_review(self) -> Response:
+        return await self._publish_pull_request("pr.ready_for_review")
+
+    async def _publish_pull_request(self, fact: str) -> Response:
+        pull_request = self.data["pull_request"]
+        await publish(
+            fact,
+            repo=_repo_name(self.data),
+            pr_number=pull_request["number"],
+            payload={
+                "branch": pull_request["head"]["ref"],
+                "base_branch": pull_request["base"]["ref"],
+                "head_sha": pull_request["head"]["sha"],
+                "title": pull_request["title"],
+                "body": pull_request["body"] or "",
+                "draft": pull_request["draft"],
+                "author": pull_request["user"]["login"],
+                "author_can_write": pull_request["author_association"] in _WRITERS,
+            },
+        )
+        return _accepted()
+
     async def on_pull_request_closed(self) -> Response:
         pull_request = self.data["pull_request"]
         merged = pull_request["merged"]

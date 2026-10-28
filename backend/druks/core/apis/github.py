@@ -32,6 +32,9 @@ class ReviewComment:
     start_line: int | None = None
 
 
+_ANNOTATIONS_PER_REQUEST = 50
+
+
 # Where-druks-may-act is derived from the App's installations. Module-level
 # so it survives the per-call-site client construction; keyed by app id;
 # serves the last-known set when GitHub hiccups.
@@ -625,6 +628,48 @@ class GitHubClient:
                 body=fallback_body,  # type: ignore[arg-type]
             )
             return response.parsed_data.model_dump()
+
+    @_retry_on_401
+    async def post_check_run(
+        self,
+        repo: str,
+        *,
+        head_sha: str,
+        name: str,
+        status: str,
+        conclusion: str = "",
+        title: str,
+        summary: str,
+        annotations: Sequence[dict[str, Any]] = (),
+    ) -> None:
+        """Create the check run ``name`` on ``head_sha``, or update the one this App
+        already posted there. An annotation is GitHub's shape: ``path``, ``start_line``,
+        ``end_line``, ``annotation_level``, ``message``."""
+        owner, repo_name = repo.split("/", 1)
+        github = await self._for_repo(repo)
+        posted = await github.rest.checks.async_list_for_ref(
+            owner, repo_name, head_sha, check_name=name, app_id=int(self._app_id)
+        )
+        check_run_id = next((run.id for run in posted.parsed_data.check_runs), None)
+        limit = _ANNOTATIONS_PER_REQUEST
+        output = {"title": title, "summary": summary}
+        body: dict[str, Any] = {
+            "name": name,
+            "status": status,
+            "output": {**output, "annotations": list(annotations[:limit])},
+        }
+        if conclusion:
+            body["conclusion"] = conclusion
+        if check_run_id:
+            await github.rest.checks.async_update(owner, repo_name, check_run_id, data=body)
+        else:
+            response = await github.rest.checks.async_create(
+                owner, repo_name, data={**body, "head_sha": head_sha}
+            )
+            check_run_id = response.parsed_data.id
+        for start in range(limit, len(annotations), limit):
+            body["output"] = {**output, "annotations": list(annotations[start : start + limit])}
+            await github.rest.checks.async_update(owner, repo_name, check_run_id, data=body)
 
     @_retry_on_401
     async def get_file_content(
