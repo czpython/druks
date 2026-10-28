@@ -241,6 +241,9 @@ evidence.
   still unsettled after you finish everything else and wait a few minutes, mark its command
   `not_run`; never substitute a local run for a missing conclusion. Unsettled checks that cover
   no configured command are `not_run` and do not block.
+- A named check whose workflow's `paths` or `paths-ignore` filter skips every file the diff
+  changes never registers for this PR. Do not wait for it: mark its command `not_run` with the
+  filter as the reason. It does not block the verdict.
 - If a command you must run locally cannot run because repo dependencies, private indexes, or
   credentials are unavailable, report that check as `not_run`. A different green GitHub check
   cannot stand in for it.
