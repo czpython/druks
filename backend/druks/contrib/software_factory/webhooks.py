@@ -62,7 +62,7 @@ class LinearEvents(Webhook):
                 "title": issue["title"],
                 "url": issue["url"],
                 "project_name": project.get("name"),
-                "labels": [],
+                "labels": [label["name"] for label in issue["labels"]],
                 "actor_id": actor.get("id"),
                 "assignee_id": assignee.get("id"),
                 "assignee_email": assignee.get("email"),

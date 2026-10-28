@@ -13,10 +13,10 @@ async def _lookup(**signals):
     return await ProjectRepo.lookup(**{**defaults, **signals})
 
 
-async def test_project_name_wins_over_labels(druks_db):
+async def test_label_wins_over_project_name(druks_db):
     await _register(druks_db, "acme/widget", "octo/gadget")
     row = await _lookup(project_name="widget", labels=["gadget"])
-    assert row.full_name == "acme/widget"
+    assert row.full_name == "octo/gadget"
 
 
 async def test_label_routes_when_project_name_is_not_a_repo(druks_db):

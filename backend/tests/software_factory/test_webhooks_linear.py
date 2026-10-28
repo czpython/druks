@@ -34,6 +34,7 @@ def _transition():
             "url": "https://linear.app/acme/issue/ACME-7",
             "state": {"name": "Done"},
             "project": {"name": "acme-app"},
+            "labels": [{"id": "label-1", "name": "gadget", "color": "#5e6ad2"}],
             "assignee": {"id": "user-7", "email": "dev@acme.co", "name": "Dev"},
         },
     }
@@ -102,7 +103,7 @@ async def test_emits_normalized_ticket_transition(tmp_path, monkeypatch):
                 "title": "Add an endpoint",
                 "url": "https://linear.app/acme/issue/ACME-7",
                 "project_name": "acme-app",
-                "labels": [],
+                "labels": ["gadget"],
                 "actor_id": "actor-1",
                 "assignee_id": "user-7",
                 "assignee_email": "dev@acme.co",

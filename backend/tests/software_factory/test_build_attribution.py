@@ -114,6 +114,7 @@ async def test_tracker_webhook_starts_under_the_connected_account(
                 "url": f"https://linear.app/company/issue/{item.ticket_key}",
                 "state": {"name": settings.trigger_status, "type": "unstarted"},
                 "project": {"name": "company/app"},
+                "labels": [],
                 "assignee": {
                     "id": "provider-user-1",
                     "email": "boss@company.test",
