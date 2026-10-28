@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import re
 from collections.abc import Callable, Coroutine
 from datetime import datetime
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from druks.db import db_session
 from druks.exceptions import ObjectNotFound
 from druks.models import StoredSubject
+from druks.redis import get_client
 from druks.ui.exceptions import PageContractError, PageReadError, PageRouteError
 from druks.user_settings.models import SettingsOverride
 
@@ -197,6 +199,27 @@ class App:
             value,
             is_secret=field_kind(model.model_fields[field]) == "secret",
         )
+
+    @classmethod
+    async def get_cached(cls, key: str):
+        """What this app cached under ``key``, or ``None`` when it was never set, its TTL
+        ran out, or the app cleared it."""
+        if stored := await get_client().get(cls._cache_key(key)):
+            return json.loads(stored)
+
+    @classmethod
+    async def set_cached(cls, key: str, value, *, ttl: int) -> None:
+        """Cache a JSON value under ``key`` for ``ttl`` seconds."""
+        await get_client().set(cls._cache_key(key), json.dumps(value), ex=ttl)
+
+    @classmethod
+    async def clear_cached(cls, key: str) -> None:
+        """Clear the value under ``key``."""
+        await get_client().delete(cls._cache_key(key))
+
+    @classmethod
+    def _cache_key(cls, key: str) -> str:
+        return f"druks:app:{cls.name}:{key}"
 
     @classmethod
     def agents(cls) -> "list[Agent]":
