@@ -147,6 +147,31 @@ async def test_installations_builds_the_client_from_the_row(
     assert built == ["12345"]
 
 
+@pytest.mark.parametrize(
+    ("granted", "ok", "named"),
+    [
+        ({**doctor.Github.manifest["default_permissions"], "administration": "write"}, True, ""),
+        ({"metadata": "read", "contents": "write"}, False, "checks: write"),
+    ],
+)
+async def test_app_permissions_names_what_the_app_lacks(
+    tmp_path: Path, doctor_db, monkeypatch, granted: dict[str, str], ok: bool, named: str
+) -> None:
+    class _FakeClient:
+        async def get_app_permissions(self):
+            return granted
+
+    async def _fake_client():
+        return _FakeClient()
+
+    monkeypatch.setattr("druks.core.services.Github.get_client", _fake_client)
+
+    result = await doctor.check_app_permissions(make_settings(tmp_path))
+
+    assert result.ok is ok
+    assert named in result.detail
+
+
 def test_data_dir_fails_when_missing(tmp_path: Path) -> None:
     missing = tmp_path / "absent"
     settings = make_settings(tmp_path, data_dir=missing)
@@ -287,6 +312,7 @@ async def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
         "webhook_ingress",
         "github_identity",
         "installations",
+        "app_permissions",
         "software_factory:settings",
         "software_factory:review_identity",
         "anthropic_credentials",

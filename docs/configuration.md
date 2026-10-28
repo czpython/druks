@@ -442,10 +442,11 @@ Webhook URL:
 Callback URL:
 `<endpoint>/api/oauth/callback`
 
-Subscribe to issues, issue comment, pull request, pull request review, pull
-request review comment, and push events. Keep **Expire user authorization
-tokens** on: Druks refreshes a person's sign-in with the refresh token that
-comes with it, and refuses a sign-in that has none.
+Subscribe to check run, check suite, issue comment, issues, pull request, pull
+request review, pull request review comment, push, repository, status, and
+workflow run events. Keep **Expire user authorization tokens** on: Druks
+refreshes a person's sign-in with the refresh token that comes with it, and
+refuses a sign-in that has none.
 
 | Repository permission | Access |
 | --- | --- |
@@ -454,7 +455,22 @@ comes with it, and refuses a sign-in that has none.
 | Pull requests | Read and write |
 | Issues | Read and write |
 | Checks | Read and write |
-| Commit statuses | Read |
+| Commit statuses | Read and write |
+| Workflows | Read and write |
+| Actions | Read and write |
+| Repository creation | Write |
+| Administration | Read |
+| Discussions | Read |
+| Dependabot alerts | Read |
+| Code scanning alerts | Read |
+
+| Organization permission | Access |
+| --- | --- |
+| Members | Read |
+
+| Account permission | Access |
+| --- | --- |
+| Email addresses | Read |
 
 Install the GitHub App on the repositories that Druks will use. This
 installation set defines where `software_factory` can act. Personal access
@@ -462,7 +478,8 @@ tokens are not a supported substitute.
 
 To change a permission on an existing App, open it on GitHub under
 **Developer settings → GitHub Apps → Permissions & events**, set it, and save.
-Each account that installed the App then accepts the change.
+Each account that installed the App then accepts the change. `druks doctor`
+names each permission in these tables that the App lacks.
 
 A sandbox never holds an installation token. It holds a placeholder in
 `GH_TOKEN`, and git and `gh` read it through Drukbox's setup. The Drukbox

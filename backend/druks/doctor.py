@@ -131,6 +131,47 @@ async def check_installations(settings: Settings) -> CheckResult:
     )
 
 
+async def check_app_permissions(settings: Settings) -> CheckResult:
+    """The permissions the manifest asks for that the operator App lacks. GitHub
+    reads a manifest once, at creation, so an App outlives the set it was made with."""
+    if Github.is_managed():
+        return CheckResult(name="app_permissions", ok=True, detail="managed")
+    try:
+        async with _check_engine(settings) as engine:
+            async with session_scope(engine):
+                client = await Github.get_client()
+            granted = await client.get_app_permissions()
+    except ServiceNotConnectedError:
+        return CheckResult(
+            name="app_permissions",
+            ok=False,
+            pending=True,
+            detail="github is not connected — connect it in Settings → Connections → Services.",
+        )
+    except Exception as error:  # noqa: BLE001 — doctor reports, never raises
+        return CheckResult(
+            name="app_permissions",
+            ok=False,
+            detail=f"could not read the operator App's permissions: {error}",
+        )
+    access = ("", "read", "write", "admin")
+    missing = [
+        f"{name}: {asked}"
+        for name, asked in Github.manifest["default_permissions"].items()
+        if access.index(granted.get(name, "")) < access.index(asked)
+    ]
+    if missing:
+        return CheckResult(
+            name="app_permissions",
+            ok=False,
+            pending=True,
+            detail=f"operator App lacks {', '.join(missing)} — raise them on GitHub under "
+            "Developer settings → GitHub Apps → Permissions & events, then accept the "
+            "change on each installed account.",
+        )
+    return CheckResult(name="app_permissions", ok=True, detail="operator App has every permission")
+
+
 def _credentials_check(
     provider_id: str,
     *,
@@ -548,6 +589,7 @@ CHECKS = (
     check_webhook_ingress,
     check_service_identities,
     check_installations,
+    check_app_permissions,
     check_provider_credentials,
     check_data_dir,
     check_database,
