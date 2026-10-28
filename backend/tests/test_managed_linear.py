@@ -12,6 +12,7 @@ from druks.accounts.models import Account
 from druks.contrib.software_factory import webhooks as webhook_module
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
+from druks.core import services
 from druks.core.apis.linear import LINEAR_GRAPHQL_URL
 from druks.core.services import Linear
 from druks.db import db_session
@@ -341,3 +342,7 @@ async def test_a_forwarded_event_reaches_the_factory(
 
     assert response.json() == {"accepted": True}
     assert published == [("ticket.transitioned", "ACME-1")]
+
+
+def test_a_persons_sign_in_asks_linear_for_read_and_write():
+    assert services.Linear.scopes() == ("read", "write")
