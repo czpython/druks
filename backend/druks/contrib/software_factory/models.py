@@ -192,9 +192,10 @@ class ProjectRepo(StoredSubject):
         project_name: str | None,
         labels: list[str],
     ) -> "ProjectRepo | None":
-        """The PR target repo for the routing signals of a ticket: the project name
-        first, then each label. A label routes a ticket when one project spans many repos."""
-        for name in (project_name, *labels):
+        """The PR target repo for the routing signals of a ticket: each label first, then
+        the project name. A GitHub issue's repo arrives as its project, and a Jira project
+        can name a repo; a Linear project is an achievement and names none."""
+        for name in (*labels, project_name):
             if name:
                 row = await cls.get_for_name(name)
                 if row:

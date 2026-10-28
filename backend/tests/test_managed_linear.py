@@ -190,6 +190,7 @@ def _ready_for_agent() -> bytes:
             "title": "Ship it",
             "url": "https://linear.app/acme/issue/ACME-1",
             "state": {"name": "Ready for Agent"},
+            "labels": [],
         },
     }
     return json.dumps(body).encode()
