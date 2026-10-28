@@ -525,7 +525,9 @@ class CodexHarness(Harness):
         value from the named env var at runtime; only non-secret header values
         ride inline. A header name is a quoted TOML key segment — a valid HTTP
         header name carries no quote, so plain quoting holds."""
-        flags: tuple[str, ...] = ()
+        # A run has one turn, and Codex starts it with only the servers that are ready
+        # after a one-second grace. 0 waits for each server's startup timeout instead.
+        flags: tuple[str, ...] = ("-c", "mcp_optional_startup_grace_ms=0") if servers else ()
         for server in servers:
             flags = (*flags, "-c", f'mcp_servers.{server.name}.url="{server.url}"')
             if server.bearer_token_env_var:
