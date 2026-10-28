@@ -215,6 +215,7 @@ def test_codex_mcp_flags_register_server_with_env_var_token():
     flags = CodexHarness(model=_CODEX_MODEL, fast_mode=False, effort=None)._mcp_flags((server,))
     assert 'mcp_servers.github.url="https://api.example/mcp/"' in flags
     assert 'mcp_servers.github.bearer_token_env_var="GH_TOK"' in flags
+    assert "mcp_optional_startup_grace_ms=0" in flags
     # The token value is never named here — only the env-var name.
     assert all("GH_TOK" not in f or "bearer_token_env_var" in f for f in flags)
 
