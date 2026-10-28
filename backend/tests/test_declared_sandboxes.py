@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import druks.agents as agent_module
 import druks.workflows as workflow_module
 import pytest
 from druks.db import db_session
@@ -345,23 +344,24 @@ async def test_ephemeral_lease_uses_workflow_template(monkeypatch):
         calls.append(kwargs)
         yield box
 
-    workflow = SimpleNamespace(
-        sandbox=sandbox,
-        get_workspace=AsyncMock(return_value="workspace"),
-    )
+    workflow = Workflow.__new__(Workflow)
+    workflow.sandbox = sandbox
+    workflow._workflow_id = "run-1"
+    workflow.account_id = None
+    workflow.get_workspace = AsyncMock(return_value="workspace")
     resolve = AsyncMock(return_value="template-1")
     monkeypatch.setattr(
-        agent_module,
+        workflow_module,
         "sandbox_client",
         SimpleNamespace(ephemeral=ephemeral),
     )
-    monkeypatch.setattr(agent_module, "get_template_id", resolve)
+    monkeypatch.setattr(workflow_module, "get_template_id", resolve)
+    monkeypatch.setattr(workflow_module, "set_run_phase", AsyncMock())
 
-    config = SimpleNamespace(secrets={}, secret_refs=[], secrets_hash="")
-    async with agent_module._runner(
-        db_session(), workflow, None, "run-1", "summarize", config, []
-    ) as runner:
-        assert runner == "workspace"
+    async with workflow._workspace(
+        db_session(), None, "summarize", [], secrets={}, secrets_hash=""
+    ) as workspace:
+        assert workspace == "workspace"
 
     resolve.assert_awaited_once_with(sandbox)
     assert calls == [

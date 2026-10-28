@@ -361,14 +361,14 @@ async def _sandbox_e2e() -> list[CheckResult]:
                     ["sh", "-c", f"command -v {harness.command}"],
                     timeout=30.0,
                 )
-                if result.ok:
+                if result.returncode == 0:
                     binary_detail = result.stdout.strip() or f"{harness.command} found"
                 else:
                     binary_detail = result.stderr.strip() or f"{harness.command} not found"
                 binary_results.append(
                     CheckResult(
                         name=f"sandbox_binary:{harness.name}",
-                        ok=result.ok,
+                        ok=result.returncode == 0,
                         detail=binary_detail,
                     )
                 )
@@ -393,7 +393,7 @@ async def _sandbox_e2e() -> list[CheckResult]:
 
 async def _doctor_exec(sandbox) -> None:
     result = await sandbox.exec(["echo", "doctor"], timeout=30.0)
-    if not result.ok:
+    if result.returncode:
         raise RuntimeError(result.stderr)
 
 

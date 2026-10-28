@@ -66,17 +66,6 @@ class Sandbox:
 
 
 @dataclass(frozen=True)
-class ExecResult:
-    exit_code: int
-    stdout: str
-    stderr: str
-
-    @property
-    def ok(self) -> bool:
-        return self.exit_code == 0
-
-
-@dataclass(frozen=True)
 class AgentResult:
     """Result of one agent execution, what ``Host.run_agent`` returns.
     the agent call records it as an ``AgentCall`` and parses ``output``."""

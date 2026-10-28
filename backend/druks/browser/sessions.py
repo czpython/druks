@@ -271,7 +271,7 @@ async def launch(browser, name: str, *, headless: bool, env: dict[str, str]) -> 
         ],
         timeout=SESSION_LAUNCH_TIMEOUT_SECONDS,
     )
-    if not ready.ok:
+    if ready.returncode:
         raise BrowserLaunchError(name, ready.stderr.strip())
 
 
@@ -280,7 +280,7 @@ async def export_state(browser, name: str) -> bytes:
     exported = await browser.exec(
         [f"{SESSION_ROOT}/session-export"], timeout=SESSION_EXPORT_TIMEOUT_SECONDS
     )
-    if not exported.ok:
+    if exported.returncode:
         raise BrowserExportError(name, exported.stderr.strip())
     with tempfile.TemporaryDirectory(prefix="druks-browser-") as staging:
         exported_path = Path(staging) / "state.tar.gz"

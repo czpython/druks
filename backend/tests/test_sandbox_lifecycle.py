@@ -1,3 +1,4 @@
+import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,7 +27,6 @@ from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.datastructures import Credentials, HomeCopy, HomeFile
 from druks.sandbox.exceptions import ExecFailed, HostGone, SandboxUnreachable
-from druks.sandbox.host import ExecResult
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.testing import seed_run
 from druks_field_notes.workflows import Summarize
@@ -47,10 +47,12 @@ class _FakeSandbox:
         self.secrets: list[tuple[str, str]] = []  # (secret, remote)
         self.aclose_calls = 0
         # Per-test injection points.
-        self.exec_results: dict[int, ExecResult] = {}
-        self.default_exec_result = ExecResult(0, "", "")
+        self.exec_results: dict[int, subprocess.CompletedProcess[str]] = {}
+        self.default_exec_result = subprocess.CompletedProcess([], 0, "", "")
 
-    async def exec(self, cmd: list[str], *, timeout: float = 30.0) -> ExecResult:
+    async def exec(
+        self, cmd: list[str], *, timeout: float = 30.0
+    ) -> subprocess.CompletedProcess[str]:
         idx = len(self.exec_log)
         self.exec_log.append((cmd, timeout))
         return self.exec_results.get(idx, self.default_exec_result)
@@ -309,7 +311,7 @@ async def test_clone_uses_custom_target_path():
 
 async def test_clone_raises_exec_failed_on_clone_failure():
     sandbox = _FakeSandbox()
-    sandbox.exec_results = {0: ExecResult(128, "", "fatal: not found")}
+    sandbox.exec_results = {0: subprocess.CompletedProcess([], 128, "", "fatal: not found")}
 
     with pytest.raises(ExecFailed) as excinfo:
         await repo.clone(
@@ -323,7 +325,7 @@ async def test_clone_raises_exec_failed_on_clone_failure():
 
 async def test_clone_failure_message_omits_ref_when_none():
     sandbox = _FakeSandbox()
-    sandbox.exec_results = {0: ExecResult(128, "", "fatal: not found")}
+    sandbox.exec_results = {0: subprocess.CompletedProcess([], 128, "", "fatal: not found")}
 
     with pytest.raises(ExecFailed) as excinfo:
         await repo.clone(
@@ -339,7 +341,8 @@ async def test_clone_failure_message_omits_ref_when_none():
 async def test_clone_redacts_token_from_error_output():
     sandbox = _FakeSandbox()
     sandbox.exec_results = {
-        0: ExecResult(
+        0: subprocess.CompletedProcess(
+            [],
             128,
             "",
             "fatal: could not read from https://x-access-token:gho_secret@github.com/x.git",
@@ -371,7 +374,7 @@ async def test_clone_rejects_non_github_urls():
 async def test_ensure_clones_when_repo_absent():
     sandbox = _FakeSandbox()
     # exec 0 = the `test -d` probe → make it fail (absent).
-    sandbox.exec_results = {0: ExecResult(1, "", "")}
+    sandbox.exec_results = {0: subprocess.CompletedProcess([], 1, "", "")}
 
     await repo.ensure(
         sandbox,  # type: ignore[arg-type]
@@ -387,7 +390,7 @@ async def test_ensure_clones_when_repo_absent():
 
 
 async def test_ensure_fetches_and_checks_out_when_repo_present():
-    sandbox = _FakeSandbox()  # default ExecResult(0) → probe says present
+    sandbox = _FakeSandbox()  # default returncode 0 → probe says present
 
     await repo.ensure(
         sandbox,  # type: ignore[arg-type]
@@ -424,7 +427,7 @@ async def test_ensure_present_with_ref_none_is_a_noop():
 async def test_ensure_raises_exec_failed_on_fetch_failure():
     sandbox = _FakeSandbox()
     # Probe ok (present), fetch/checkout fails.
-    sandbox.exec_results = {1: ExecResult(128, "", "fatal: bad ref")}
+    sandbox.exec_results = {1: subprocess.CompletedProcess([], 128, "", "fatal: bad ref")}
 
     with pytest.raises(ExecFailed, match="git fetch/checkout"):
         await repo.ensure(

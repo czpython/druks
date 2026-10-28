@@ -61,7 +61,7 @@ class Bridge:
             ],
             timeout=10,
         )
-        if not result.ok:
+        if result.returncode:
             raise ChatBridgeError("The Chat bridge did not start.")
         async with asyncio.timeout(10):
             while not await self.is_running():
