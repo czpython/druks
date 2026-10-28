@@ -1,6 +1,7 @@
 .env
 druks.toml
-.claude/
+.claude/*
+!.claude/settings.json
 .DS_Store
 .venv/
 .pytest_cache/
