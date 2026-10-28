@@ -1,7 +1,6 @@
 import asyncio
 import contextlib
 import random
-from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -30,9 +29,7 @@ from druks.harnesses.exceptions import (
 )
 from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
-from druks.sandbox.client import provisioning_key, sandbox_client
-from druks.sandbox.models import SandboxIdentity, SecretRef
-from druks.sandbox.templates import get_template_id
+from druks.sandbox.models import SecretRef
 from druks.secrets.enums import SecretKind
 from druks.settings import load_settings
 from druks.usage.models import UsageScrape
@@ -41,69 +38,12 @@ from druks.workflows import _in_step, current_workflow
 if TYPE_CHECKING:
     from druks.browser.sessions import BrowserSession
     from druks.services.base import ServiceField
-    from druks.workflows import Workflow
-    from druks.workspaces import Workspace
 
 __all__ = ["Agent", "AgentOutput", "Bot", "BotUser"]
 
 _QUOTA_FALLBACK_WAIT_SECONDS = 30 * 60
 _QUOTA_MAX_WAIT_SECONDS = 6 * 60 * 60
 _REAP_BEFORE_WAIT_SECONDS = 120
-
-
-@contextlib.asynccontextmanager
-async def _runner(
-    session: AsyncSession,
-    workflow: "Workflow",
-    host_id: str | None,
-    workflow_id: str,
-    step: str,
-    config: AgentConfig,
-    refs: list[SecretRef],
-) -> AsyncIterator["Workspace"]:
-    # The agent always runs in a Workspace. A warm run attaches the run's held VM; the
-    # rest get a fresh ephemeral VM. Either way workflow.get_workspace() turns the VM into
-    # the runner — fresh per call, so nothing (connection or credential) is held across steps.
-    identity = None
-    if refs and not host_id:
-        identity = await SandboxIdentity.lookup(
-            session,
-            account_id=workflow.account_id,
-            run_id=workflow_id,
-            scoped_to=step,
-            secret_refs=refs,
-        )
-    if host_id:
-        vm = sandbox_client.attach(host_id=host_id)
-    elif identity:
-        # A crashed attempt left its box behind. Its identity finds it again.
-        vm = sandbox_client.resume(host_id=identity.host_id)
-    else:
-        template = None
-        if workflow.sandbox:
-            template = await get_template_id(workflow.sandbox)
-            await set_run_phase("provisioning_vm")
-        # A box that fetches gets its own identity, and the key names it. A
-        # replay finds the box through the identity, above.
-        identity, entries, key = None, {}, config.secrets_hash
-        if refs:
-            identity, entries = await SandboxIdentity.create(
-                session,
-                account_id=workflow.account_id,
-                run_id=workflow_id,
-                scoped_to=step,
-                secret_refs=refs,
-                secrets_hash=config.secrets_hash,
-            )
-            key = identity.id
-        vm = sandbox_client.ephemeral(
-            idempotency_key=provisioning_key(workflow_id, step, key),
-            secrets={**config.secrets, **entries},
-            template=template,
-            identity=identity,
-        )
-    async with vm as box:
-        yield await workflow.get_workspace(box)
 
 
 class AgentOutput(BaseModel):
@@ -401,15 +341,7 @@ class Agent:
             refs = [
                 *config.secret_refs,
                 *service_refs,
-                *(
-                    SecretRef(
-                        name=secret.name,
-                        secret_id=secret.secret_id,
-                        resources=list(secret.resources),
-                        host=secret.host,
-                    )
-                    for secret in await workspace_class.get_secrets(subject)
-                ),
+                *(await workspace_class.get_secret_refs(subject)),
                 *mcp_secret_refs,
             ]
             # An agent browser's box holds the call's key, so the box belongs to
@@ -426,8 +358,13 @@ class Agent:
             # works, then finish it — or fail it if the run raised after
             # starting. A provisioning failure happens before this and records
             # no call.
-            async with _runner(
-                session, workflow, host_id, workflow_id, scope, config, refs
+            async with workflow._workspace(
+                session,
+                host_id,
+                scope,
+                refs,
+                secrets=config.secrets,
+                secrets_hash=config.secrets_hash,
             ) as runner:
                 context = await runner.prepare_context(session, context, agent_call_id=call_id)
                 # Templates read the live workflow + the workspace the agent runs in,

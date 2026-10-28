@@ -3,6 +3,7 @@ import contextlib
 import json
 import logging
 import shlex
+import subprocess
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,7 +30,6 @@ from .datastructures import (
     AgentInvocation,
     AgentResult,
     Credentials,
-    ExecResult,
     HarnessRunResult,
     McpServer,
 )
@@ -127,10 +127,10 @@ class Host:
         result = await self.exec(["sh", "-c", " && ".join(parts)], timeout=10.0)
         # A silent write failure would start the agent unauthenticated. The
         # secret never rides the error message, only its destination path.
-        if not result.ok:
+        if result.returncode:
             raise SandboxError(
                 f"failed to write secret to {remote}: "
-                f"exit={result.exit_code} {result.stderr.strip()}"
+                f"exit={result.returncode} {result.stderr.strip()}"
             )
 
     async def download(
@@ -512,20 +512,24 @@ class Host:
         self,
         cmd: list[str],
         *,
+        cwd: str = "",
         timeout: float = 30.0,
-    ) -> ExecResult:
+    ) -> subprocess.CompletedProcess[str]:
         conn = await self._ensure_conn()
         joined = " ".join(shlex.quote(part) for part in cmd)
+        if cwd:
+            joined = f"cd {shlex.quote(cwd)} && {joined}"
         completed = await conn.run(joined, check=False, timeout=timeout)
         # asyncssh's returncode is the exit status, or the negative signal number when
         # the command was killed (an OOM'd clone dies on SIGKILL → -9), or None if the
         # channel closed with neither. A signal death must read as failure — coercing it
         # to 0 let callers proceed against a half-cloned workspace.
         returncode = completed.returncode
-        return ExecResult(
-            exit_code=returncode if returncode is not None else -1,
-            stdout=_as_str(completed.stdout),
-            stderr=_as_str(completed.stderr),
+        return subprocess.CompletedProcess(
+            cmd,
+            returncode if returncode is not None else -1,
+            _as_str(completed.stdout),
+            _as_str(completed.stderr),
         )
 
     async def _start_instruction(

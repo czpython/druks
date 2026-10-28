@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 from dataclasses import dataclass, field
 from typing import Self
 from unittest.mock import patch
@@ -7,7 +8,6 @@ import asyncssh
 import pytest
 from druks.sandbox import runner
 from druks.sandbox.exceptions import ExecFailed, SandboxUnreachable
-from druks.sandbox.host import ExecResult
 from druks.sandbox.runner import Exec, attach, start_exec
 
 
@@ -103,12 +103,12 @@ class _FakeSandbox:
     def __init__(
         self,
         vm: _FakeVM | None = None,
-        exec_results: list[ExecResult] | None = None,
+        exec_results: list[subprocess.CompletedProcess[str]] | None = None,
         ssh_username: str = "root",
     ) -> None:
         self.vm = vm or _FakeVM()
         self.exec_log: list[list[str]] = []
-        self.exec_results = exec_results or [ExecResult(0, "", "")]
+        self.exec_results = exec_results or [subprocess.CompletedProcess([], 0, "", "")]
         self.conn = _FakeConnection(self.vm)
         self.aclose_calls = 0
         # Matches the real ``Host`` interface — the runner reads this
@@ -116,7 +116,9 @@ class _FakeSandbox:
         # ``root`` by default so existing path assertions stay simple.
         self.ssh_username = ssh_username
 
-    async def exec(self, cmd: list[str], *, timeout: float = 30.0) -> ExecResult:
+    async def exec(
+        self, cmd: list[str], *, timeout: float = 30.0
+    ) -> subprocess.CompletedProcess[str]:
         self.exec_log.append(cmd)
         if self.exec_results:
             # FIFO consumption with a sticky-last fallback so callers
@@ -124,7 +126,7 @@ class _FakeSandbox:
             if len(self.exec_results) > 1:
                 return self.exec_results.pop(0)
             return self.exec_results[0]
-        return ExecResult(0, "", "")
+        return subprocess.CompletedProcess([], 0, "", "")
 
     async def ssh_connection(self) -> _FakeConnection:
         return self.conn
@@ -154,9 +156,9 @@ async def test_start_exec_writes_env_file_and_invokes_druks_sandbox_verb(
 ):
     sandbox = _FakeSandbox(
         exec_results=[
-            ExecResult(0, "", ""),  # env file write
-            ExecResult(0, "", ""),  # spawn (nohup setsid druks-sandbox exec-start ...)
-            ExecResult(0, "12345", ""),  # pid check
+            subprocess.CompletedProcess([], 0, "", ""),  # env file write
+            subprocess.CompletedProcess([], 0, "", ""),  # spawn
+            subprocess.CompletedProcess([], 0, "12345", ""),  # pid check
         ],
     )
 
@@ -201,8 +203,8 @@ async def test_start_exec_no_env_skips_env_file_write_and_arg(
 
     sandbox = _FakeSandbox(
         exec_results=[
-            ExecResult(0, "", ""),  # spawn
-            ExecResult(0, "12345", ""),  # pid
+            subprocess.CompletedProcess([], 0, "", ""),  # spawn
+            subprocess.CompletedProcess([], 0, "12345", ""),  # pid
         ],
     )
 
@@ -226,7 +228,7 @@ async def test_start_exec_raises_when_env_file_write_fails(
 
     sandbox = _FakeSandbox(
         exec_results=[
-            ExecResult(1, "", "permission denied"),  # env write fails
+            subprocess.CompletedProcess([], 1, "", "permission denied"),  # env write fails
         ],
     )
 
@@ -246,11 +248,11 @@ async def test_start_exec_raises_when_pid_file_never_appears(
 
     sandbox = _FakeSandbox(
         exec_results=[
-            ExecResult(0, "", ""),  # mkdir
-            ExecResult(0, "", ""),  # spawn
+            subprocess.CompletedProcess([], 0, "", ""),  # mkdir
+            subprocess.CompletedProcess([], 0, "", ""),  # spawn
             # pid check always returns empty — the sticky-last fallback
             # in _FakeSandbox keeps returning this.
-            ExecResult(0, "", ""),
+            subprocess.CompletedProcess([], 0, "", ""),
         ],
     )
 

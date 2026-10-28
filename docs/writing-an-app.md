@@ -825,6 +825,26 @@ returns the harness shapes and the secret refs for every MCP server of a
 sandbox: the workspace's servers and the enabled registry servers. An agent
 declared with `include_mcp=False` gets none of them.
 
+A workflow runs one command in a VM of its workspace with `exec`. The VM comes
+from the workflow's sandbox template and holds the workspace's secrets. The
+command runs in the workspace's working directory, the clone for a
+`RepoWorkspace`, and the VM is released after it. Call it from `run()` or inside
+a `@step`:
+
+```python
+class Lint(Workflow):
+    subject = Repository
+    sandbox = Sandbox(setup="sandboxes/lint.sh")
+    workspace_class = RepoWorkspace
+
+    async def run(self) -> None:
+        result = await self.exec(["ruff", "check", "."], timeout=300)
+        if result.returncode:
+            raise FatalError(result.stdout)
+```
+
+The result is a `subprocess.CompletedProcess`: `returncode`, `stdout`, and `stderr`.
+
 Keep durable state outside the VM. A workflow can set
 `steps_reuse_sandbox = True` to retain one host across a segment. Druks releases
 the host at a gate and at workflow exit. It rotates the host near lease expiry,

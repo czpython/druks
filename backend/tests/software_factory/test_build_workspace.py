@@ -191,7 +191,7 @@ class _IdentitySandbox:
             get_repo_root(self.ssh_username), shlex.quote(str(self.repo_path))
         )
         result = subprocess.run(["sh", "-c", script], check=False, capture_output=True, text=True)
-        return SimpleNamespace(ok=result.returncode == 0, exit_code=result.returncode, stderr="")
+        return SimpleNamespace(returncode=result.returncode, stderr="")
 
 
 def _dispatched_by(monkeypatch: pytest.MonkeyPatch, username: str | None) -> SimpleNamespace:

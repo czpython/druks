@@ -261,10 +261,10 @@ async def start_exec(
             f"printf %s {shlex.quote(body)} > {shlex.quote(env_file)}"
         )
         wrote = await host.exec(["sh", "-c", write_cmd], timeout=10.0)
-        if not wrote.ok:
+        if wrote.returncode:
             raise ExecFailed(
                 f"could not write env file: {wrote.stderr.strip()}",
-                exit_code=wrote.exit_code,
+                exit_code=wrote.returncode,
             )
 
     # Build the helper invocation. Detached via ``nohup setsid ... &``
@@ -283,10 +283,10 @@ async def start_exec(
         "exit 0"
     )
     spawn = await host.exec(["sh", "-c", detach], timeout=15.0)
-    if not spawn.ok:
+    if spawn.returncode:
         raise ExecFailed(
             f"helper spawn failed: {spawn.stderr.strip()}",
-            exit_code=spawn.exit_code,
+            exit_code=spawn.returncode,
         )
 
     # Confirm the helper started by waiting for its pid file to land.
@@ -297,7 +297,7 @@ async def start_exec(
             ["sh", "-c", f"test -s {shlex.quote(run.pid_path)} && cat {shlex.quote(run.pid_path)}"],
             timeout=5.0,
         )
-        if check.ok and check.stdout.strip():
+        if check.returncode == 0 and check.stdout.strip():
             return run
         await asyncio.sleep(SPAWN_POLL_INTERVAL_SECONDS)
 

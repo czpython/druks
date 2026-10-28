@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 from drukbox_sdk import SandboxHost as SandboxHostRecord
 from druks.sandbox.exceptions import SandboxError
-from druks.sandbox.host import ExecResult, Host, _stream_local_tar_into
+from druks.sandbox.host import Host, _stream_local_tar_into
 
 
 @dataclass
@@ -291,10 +292,9 @@ async def test_exec_oneshot_returns_typed_result_with_ok_helper(
 
     result = await sandbox.exec(["git", "rev-parse", "HEAD"])
 
-    assert isinstance(result, ExecResult)
-    assert result.exit_code == 0
+    assert isinstance(result, subprocess.CompletedProcess)
+    assert result.returncode == 0
     assert result.stdout == "abc123\n"
-    assert result.ok is True
 
 
 async def test_exec_oneshot_nonzero_exit_returns_not_raises(
@@ -311,8 +311,7 @@ async def test_exec_oneshot_nonzero_exit_returns_not_raises(
 
     result = await sandbox.exec(["rg", "needle", "backend/missing"])
 
-    assert result.exit_code == 2
-    assert result.ok is False
+    assert result.returncode == 2
     assert "No such file" in result.stderr
 
 
@@ -333,8 +332,7 @@ async def test_exec_signal_killed_command_is_not_ok(
 
     result = await sandbox.exec(["sh", "-c", "git clone https://example/big"])
 
-    assert result.exit_code != 0
-    assert result.ok is False
+    assert result.returncode != 0
 
 
 async def test_exec_closed_channel_without_status_is_not_ok(
@@ -349,8 +347,7 @@ async def test_exec_closed_channel_without_status_is_not_ok(
 
     result = await sandbox.exec(["true"])
 
-    assert result.exit_code == -1
-    assert result.ok is False
+    assert result.returncode == -1
 
 
 # The local tar half of upload_dir against a real ``tar -xf -``; the SSH half
@@ -459,7 +456,7 @@ async def test_write_secret_raises_when_the_remote_write_fails(fake_record):
     sandbox = Host(record=fake_record)
 
     async def failing_exec(cmd, *, timeout=30.0):
-        return ExecResult(1, "", "permission denied")
+        return subprocess.CompletedProcess(cmd, 1, "", "permission denied")
 
     sandbox.exec = failing_exec  # type: ignore[method-assign]
 

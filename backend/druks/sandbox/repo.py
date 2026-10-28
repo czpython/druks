@@ -48,7 +48,7 @@ async def clone(
             f" && git config push.default current"
         )
     result = await host.exec(["sh", "-c", cmd], timeout=CLONE_TIMEOUT_SECONDS)
-    if not result.ok:
+    if result.returncode:
         # Strip any token that somehow surfaced in error output before
         # surfacing — belt-and-braces. With the credential-helper the
         # token never lives in the URL, but git could still echo a
@@ -57,7 +57,7 @@ async def clone(
         target = f"{repo_url}@{ref}" if ref else repo_url
         raise ExecFailed(
             f"git clone {target} failed: {sanitized}",
-            exit_code=result.exit_code,
+            exit_code=result.returncode,
         )
 
 
@@ -79,7 +79,7 @@ async def ensure(
         ["test", "-d", f"{target_path}/.git"],
         timeout=10.0,
     )
-    if not present.ok:
+    if present.returncode:
         # Fresh VM (or first run on this PR) — full clone.
         await clone(host, repo_url=repo_url, ref=ref, target_path=target_path)
         return
@@ -98,11 +98,11 @@ async def ensure(
         f" && git config push.default current"
     )
     result = await host.exec(["sh", "-c", cmd], timeout=CLONE_TIMEOUT_SECONDS)
-    if not result.ok:
+    if result.returncode:
         sanitized = _strip_token(result.stderr.strip() or result.stdout.strip())
         raise ExecFailed(
             f"git fetch/checkout {repo_url}@{ref} failed: {sanitized}",
-            exit_code=result.exit_code,
+            exit_code=result.returncode,
         )
 
 

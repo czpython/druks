@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 import shlex
+import subprocess
 import sys
 import types
 from contextlib import asynccontextmanager
@@ -25,7 +26,6 @@ from druks.browser.sessions import BrowserSession
 from druks.browser.subscribers import signed_out_session_goes_stale
 from druks.db import db_session
 from druks.redis import get_client
-from druks.sandbox.datastructures import ExecResult
 from druks.testing import make_settings
 
 
@@ -63,8 +63,8 @@ class FakeBrowser:
         self.commands.append(command)
         if command[0] == "/work/session/session-export":
             self.files["/work/session/out/state.tar.gz"] = b"exported-profile"
-            return ExecResult(exit_code=self.export_exit, stdout="", stderr="export stderr")
-        return ExecResult(exit_code=self.launch_exit, stdout="", stderr="launch stderr")
+            return subprocess.CompletedProcess(command, self.export_exit, "", "export stderr")
+        return subprocess.CompletedProcess(command, self.launch_exit, "", "launch stderr")
 
     async def upload_file(self, *, local, remote, mode=0o600):
         self.files[remote] = local.read_bytes()

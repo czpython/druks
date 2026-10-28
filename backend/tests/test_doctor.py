@@ -475,7 +475,7 @@ def _fake_sandbox_client(
                 f"command -v {missing_command}",
             ]
             return SimpleNamespace(
-                ok=not command_missing,
+                returncode=1 if command_missing else 0,
                 stdout="" if command_missing else "/usr/bin/tool\n",
                 stderr="missing\n" if command_missing else "",
             )

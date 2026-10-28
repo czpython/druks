@@ -1362,7 +1362,7 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
         "druks.sandbox.client.Client.ephemeral",
         _fake_ephemeral_returning({"gist": "The pump ran hot."}, calls, []),
     )
-    monkeypatch.setattr("druks.agents.get_template_id", AsyncMock(return_value="template-test"))
+    monkeypatch.setattr("druks.workflows.get_template_id", AsyncMock(return_value="template-test"))
     monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
     completed = []
     body = Summarize.run_multistep

@@ -94,7 +94,7 @@ async def sandbox(druks_db, conversation, monkeypatch):
         aclose=AsyncMock(),
         upload_file=AsyncMock(),
         download=AsyncMock(),
-        exec=AsyncMock(return_value=SimpleNamespace(ok=True, stdout="Gate check\n")),
+        exec=AsyncMock(return_value=SimpleNamespace(returncode=0, stdout="Gate check\n")),
     )
     monkeypatch.setattr(service, "get_sandbox", AsyncMock(return_value=(host, identity)))
     monkeypatch.setattr(service, "get_running_sandbox", AsyncMock(return_value=host))
@@ -488,7 +488,7 @@ async def test_bridge_start_uploads_the_bridge_only_when_none_answers():
         ssh_username="druks",
         open_tcp_connection=AsyncMock(side_effect=[channel(b""), channel(pong), channel(pong)]),
         upload_file=AsyncMock(),
-        exec=AsyncMock(return_value=SimpleNamespace(ok=True)),
+        exec=AsyncMock(return_value=SimpleNamespace(returncode=0)),
     )
 
     await Bridge(host).start()
@@ -514,7 +514,7 @@ async def test_bridge_start_retires_the_bridge_of_an_older_druks():
         ssh_username="druks",
         open_tcp_connection=AsyncMock(side_effect=channels),
         upload_file=AsyncMock(),
-        exec=AsyncMock(return_value=SimpleNamespace(ok=True)),
+        exec=AsyncMock(return_value=SimpleNamespace(returncode=0)),
     )
 
     # A busy bridge serves this turn; an idle one exits, and the launch carries the version.

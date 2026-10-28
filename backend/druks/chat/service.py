@@ -716,7 +716,7 @@ async def name_conversation(
     )
     with suppress(asyncssh.Error, OSError):
         result = await host.exec([*harness.reply_command, prompt], timeout=30)
-        if result.ok and result.stdout.strip():
+        if result.returncode == 0 and result.stdout.strip():
             conversation.title = result.stdout.strip()[:80]
             await session.commit()
             await publish(conversation.id, {"type": "messages"})

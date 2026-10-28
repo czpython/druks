@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import mimetypes
 import shlex
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -26,7 +27,12 @@ from druks.mcp.exceptions import MissingGrantError, MissingTokenError
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.inbound import get_druks_account_token
 from druks.sandbox import repo as checkout
-from druks.sandbox.datastructures import AgentResult, McpServer, SandboxMcpServer, SandboxSecret
+from druks.sandbox.datastructures import (
+    AgentResult,
+    McpServer,
+    SandboxMcpServer,
+    SandboxSecret,
+)
 from druks.sandbox.exceptions import ExecFailed
 from druks.sandbox.layout import get_repo_root, get_work_root
 from druks.sandbox.models import SecretRef
@@ -65,6 +71,24 @@ class Workspace:
         # The secrets a box of this workspace fetches, beyond its profile's.
         # Read before the box exists, so from the subject alone. Base: none.
         return []
+
+    @classmethod
+    async def get_secret_refs(cls, subject: Any) -> list[SecretRef]:
+        return [
+            SecretRef(
+                name=secret.name,
+                secret_id=secret.secret_id,
+                resources=list(secret.resources),
+                host=secret.host,
+            )
+            for secret in await cls.get_secrets(subject)
+        ]
+
+    async def exec(self, command: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+        """Run the command in the workspace's working directory."""
+        return await self.host.exec(
+            command, cwd=get_work_root(self.host.ssh_username), timeout=timeout
+        )
 
     async def prepare_context(
         self, session: AsyncSession, context: dict[str, Any], *, agent_call_id: str
@@ -305,15 +329,22 @@ class RepoWorkspace(Workspace):
     def repo_path(self) -> str:
         return get_repo_root(self.host.ssh_username)
 
-    async def run_agent(self, *, account_id: str | None, **kwargs: Any) -> AgentResult:
+    async def clone(self) -> None:
         await checkout.ensure(
             self.host,
             repo_url=f"https://github.com/{self.get_repo(self.subject)}",
             ref=self.branch,
             target_path=self.repo_path,
         )
+
+    async def run_agent(self, *, account_id: str | None, **kwargs: Any) -> AgentResult:
+        await self.clone()
         await self.set_git_identity(db_session(), account_id)
         return await super().run_agent(account_id=account_id, **kwargs)
+
+    async def exec(self, command: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+        await self.clone()
+        return await self.host.exec(command, cwd=self.repo_path, timeout=timeout)
 
     async def set_git_identity(self, session: AsyncSession, account_id: str | None) -> None:
         """Commits in the repo are authored as the operator's bot user, with a
@@ -340,11 +371,11 @@ class RepoWorkspace(Workspace):
                 "chmod 755 .git/hooks/prepare-commit-msg",
             ]
         result = await self.host.exec(["sh", "-c", " && ".join(steps)], timeout=10.0)
-        if not result.ok:
+        if result.returncode:
             raise ExecFailed(
                 f"failed to set the workspace git identity: "
-                f"exit={result.exit_code} stderr={result.stderr.strip()}",
-                exit_code=result.exit_code,
+                f"exit={result.returncode} stderr={result.stderr.strip()}",
+                exit_code=result.returncode,
             )
 
 

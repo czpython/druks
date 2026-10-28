@@ -1,5 +1,6 @@
 import json
 import shlex
+import subprocess
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -12,7 +13,6 @@ from druks.browser.exceptions import BrowserExportError, BrowserLoginWindowGoneE
 from druks.browser.login import LoginWindow, is_same_origin
 from druks.browser.models import StoredBrowserSession
 from druks.db import db_session
-from druks.sandbox.datastructures import ExecResult
 from druks.testing import make_settings
 from fastapi import HTTPException, WebSocket
 
@@ -30,16 +30,18 @@ class FakeSandbox:
         self.export_exit_code = 0
         self.export_payload = b"fresh-profile"
 
-    async def exec(self, command: list[str], *, timeout: float = 30.0) -> ExecResult:
+    async def exec(
+        self, command: list[str], *, timeout: float = 30.0
+    ) -> subprocess.CompletedProcess[str]:
         del timeout
         if command[:2] == ["sh", "-c"] and "session-launch --headed" in command[2]:
             self.launch_command = command[2]
             self.files["/work/session/.runtime/ready.json"] = b"{}\n"
         if command == ["/work/session/session-export"]:
             if self.export_exit_code:
-                return ExecResult(exit_code=self.export_exit_code, stdout="", stderr="failed")
+                return subprocess.CompletedProcess(command, self.export_exit_code, "", "failed")
             self.files[OUTPUT_STATE_PATH] = self.export_payload
-        return ExecResult(exit_code=0, stdout="", stderr="")
+        return subprocess.CompletedProcess(command, 0, "", "")
 
     async def upload_file(self, *, local, remote: str, mode: int = 0o600) -> None:
         del mode
