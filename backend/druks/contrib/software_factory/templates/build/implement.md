@@ -67,7 +67,7 @@ git commit -m "<concise subject describing this diff>"
 git push
 ```
 
-Stage only the paths your implementation changed; explicit staging is what keeps stray artifacts (caches, downloaded toolchains, editor files) out of the PR. The commit subject must describe what THIS commit's diff actually contains — not work that landed in earlier commits — and must not include the ticket or issue prefix.
+Stage only the paths your implementation changed; explicit staging is what keeps stray artifacts (caches, downloaded toolchains, editor files) out of the PR. The commit subject must describe what THIS commit's diff actually contains — not work that landed in earlier commits. When the repo's AGENTS.md or contributing guide gives a commit message format, the subject follows it; otherwise it carries no ticket or issue prefix.
 
 The PR body carries the plan block — the plan document reviewers review the diff against. The block is exactly these lines, in order:
 
@@ -84,6 +84,7 @@ Then, on every implementation revision, republish the plan block so a later plan
 After a successful push, open the draft PR against the default branch (`gh` is authenticated). When the repo has a GitHub pull request template, the body is that template filled in from the plan and your diff, with the plan block where the template asks for a description, or at the end when it has no such section. Tick a template checkbox only when your work proves it; leave unticked any box a person must confirm, such as a contributor agreement. Without a template, the body is the plan block alone.
 
 - Title: `<ticket ref> - <ticket title>` for a Linear, Jira, or Druks board ticket (just the ref when the title is empty); the GitHub issue title verbatim when the source is GitHub.
+- When the repo gives a commit message format, the title follows it instead, with the ticket title as its message, because a squash merge makes the title the commit subject.
 {% endif %}
 
 Authentication is already configured (a git credential helper supplies the token), so the push needs no further setup. After a successful push, report the resulting commit SHA in `head_sha` and `commit_sha`, and set `base_sha` to the commit you started from (the `git rev-parse HEAD` before your first commit). Report the branch you delivered on in `branch` and its PR number in `pr_number`. If the push is rejected because the remote branch moved, fetch and retry once (`git fetch origin <branch> && git rebase origin/<branch>`, resolve trivially, push again); if it still fails, return `status="needs_clarification"` explaining the conflict. `workspace_path` should be the repo root you worked in.
