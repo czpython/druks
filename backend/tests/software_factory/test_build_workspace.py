@@ -221,7 +221,8 @@ async def test_set_git_identity_stamps_the_workspace_repo(
 
     session = _dispatched_by(monkeypatch, "dev@example.com")
     await workspace.set_git_identity(session, "account-1")
-    message.write_text("Change\n")
+    # A co-author line already in the message does not take the dispatcher's place.
+    message.write_text("Change\n\nCo-Authored-By: Dana <dana@example.com>\n")
     subprocess.run([str(hook), str(message), "squash"], check=True)
     subprocess.run([str(hook), str(message)], check=True)
     email = subprocess.run(

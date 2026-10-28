@@ -361,9 +361,10 @@ class RepoWorkspace(Workspace):
         ]
         if account_id and (account := await session.get(Account, account_id)):
             trailer = f"Co-Authored-By: {account.username} <{account.username}>"
+            # The dispatcher's line goes beside any other co-author line, and only once.
             hook = (
                 "#!/bin/sh\n"
-                f"git interpret-trailers --in-place --if-exists doNothing"
+                f"git interpret-trailers --in-place --if-exists addIfDifferent"
                 f' --trailer {shlex.quote(trailer)} "$1"\n'
             )
             steps += [
