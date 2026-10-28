@@ -244,6 +244,11 @@ class GitHubClient:
             _BOT_USER_ID_CACHE[self._app_id] = user_id
         return bot_name, f"{user_id}+{bot_name}@users.noreply.github.com"
 
+    async def get_app_permissions(self) -> dict[str, str]:
+        """What GitHub grants the App today, by permission name."""
+        response = await self._app.rest.apps.async_get_authenticated()
+        return response.json()["permissions"]
+
     async def get_authenticated_app_slug(self) -> str:
         """The slug GitHub reports for these credentials — a live App-JWT call,
         so it proves the App ID matches the PEM. The connect flow's validation;

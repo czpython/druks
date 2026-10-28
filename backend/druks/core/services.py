@@ -160,25 +160,39 @@ class Github(GithubApp):
     # docs/configuration.md — keep the two in step.
     manifest = {
         "name": "druks",
-        "description": "Druks operator — receives webhooks, writes branches, PRs, and comments.",
+        "description": (
+            "Druks receives repository events and writes branches, pull requests, and comments."
+        ),
         "public": False,
         "default_events": [
+            "check_run",
+            "check_suite",
             "issue_comment",
             "issues",
             "pull_request",
             "pull_request_review",
             "pull_request_review_comment",
             "push",
+            "repository",
+            "status",
+            "workflow_run",
         ],
         "default_permissions": {
             "metadata": "read",
             "contents": "write",
-            # Generating a repo from a template is Administration, not Contents.
-            "administration": "write",
             "pull_requests": "write",
             "issues": "write",
             "checks": "write",
-            "statuses": "read",
+            "statuses": "write",
+            "workflows": "write",
+            "actions": "write",
+            "repository_creation": "write",
+            "administration": "read",
+            "discussions": "read",
+            "vulnerability_alerts": "read",
+            "security_events": "read",
+            "members": "read",
+            "emails": "read",
         },
     }
 
