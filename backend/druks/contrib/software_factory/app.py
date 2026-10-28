@@ -88,6 +88,8 @@ class SoftwareFactory(App):
         "Turns a ticket into a pull request — it plans the change, builds it, and "
         "gates on you before shipping. Reviews a pull request when asked."
     )
+    # The factory comments on a ticket and moves it as the person who signed in to Linear.
+    linear = services.Linear.with_scopes("read", "write")
 
     class Settings(AppSettings):
         tracker: Literal["none", "linear", "jira", "druks", "github"] = Field(
