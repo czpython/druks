@@ -461,7 +461,9 @@ function AppShell({
           </Route>
           <Route path="/schedules">
             <SchedulesPage
-              apps={rosterQuery.data?.map((entry) => entry.name) ?? []}
+              apps={
+                rosterQuery.data?.filter((entry) => !entry.builtin).map((entry) => entry.name) ?? []
+              }
               unsavedFormRef={unsavedFormRef}
             />
           </Route>
