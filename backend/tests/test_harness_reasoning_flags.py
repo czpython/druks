@@ -210,6 +210,12 @@ def test_claude_forwards_max_effort_as_is():
     assert args[args.index("--effort") + 1] == "max"
 
 
+def test_claude_adds_no_attribution_to_commits_or_pull_requests():
+    args = ClaudeHarness(model="anthropic/claude-x", fast_mode=False, effort=None)._command_args()
+    settings = json.loads(args[args.index("--settings") + 1])
+    assert settings["attribution"] == {"commit": "", "pr": ""}
+
+
 def test_codex_mcp_flags_register_server_with_env_var_token():
     server = McpServer(name="github", url="https://api.example/mcp/", bearer_token_env_var="GH_TOK")
     flags = CodexHarness(model=_CODEX_MODEL, fast_mode=False, effort=None)._mcp_flags((server,))

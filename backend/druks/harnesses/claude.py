@@ -258,8 +258,12 @@ class ClaudeHarness(Harness):
         args = (self.command,)
         if self.model:
             args = (*args, "--model", self.model_id)
+        # Druks credits a commit itself: the workspace hook adds the dispatcher, and it adds
+        # nothing to a commit that already carries a Co-Authored-By trailer.
+        settings: dict[str, object] = {"attribution": {"commit": "", "pr": ""}}
         if self.fast_mode:
-            args = (*args, "--settings", json.dumps({"fastMode": True}))
+            settings["fastMode"] = True
+        args = (*args, "--settings", json.dumps(settings))
         if self.effort:
             args = (*args, "--effort", self.effort)
         return args
