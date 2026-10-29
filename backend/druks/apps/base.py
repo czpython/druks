@@ -654,6 +654,8 @@ class App:
             engine: EngineDep,
             offset: int = 0,
         ) -> StreamingResponse:
+            if offset < 0:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "offset must be >= 0.")
             return StreamingResponse(
                 reads.stream_transcript(engine, call_id, stream, offset=offset),
                 media_type="text/event-stream",
