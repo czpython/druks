@@ -53,3 +53,11 @@ def test_the_signing_key_declares_the_multiline_secret_presentation():
     pem = "-----BEGIN KEY-----\nline-one\nline-two\n-----END KEY-----"
     settings = FieldNotes.Settings(sync_signing_key=pem)
     assert settings.sync_signing_key.get_secret_value() == pem
+
+
+async def test_the_app_caches_a_value_until_it_clears_it(druks_redis):
+    await FieldNotes.set_cached("gist:note-1", {"gist": "Short."}, ttl=60)
+
+    assert await FieldNotes.get_cached("gist:note-1") == {"gist": "Short."}
+    await FieldNotes.clear_cached("gist:note-1")
+    assert await FieldNotes.get_cached("gist:note-1") is None

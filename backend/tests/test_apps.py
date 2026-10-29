@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from types import ModuleType, SimpleNamespace
 
+import druks.redis
 import pytest
 from druks.apps import App, loader
 from druks.apps.exceptions import AppSubjectContractError
@@ -365,3 +366,41 @@ def test_an_app_without_a_landing_page_gets_the_platform_home(monkeypatch):
     assert (owner["text"], size["number"]) == ("ann", 3.0)
     assert opened["when"].startswith("2026-09-01")
     assert not status["status"]["state"]
+
+
+class _Shop(App):
+    name = "shop"
+    package = ""
+
+
+class _Bakery(App):
+    name = "bakery"
+    package = ""
+
+
+async def test_a_cached_value_reads_back_until_its_ttl_runs_out(druks_redis):
+    assert await _Shop.get_cached("commits:acme/site") is None
+
+    await _Shop.set_cached("commits:acme/site", [{"sha": "abc"}], ttl=60)
+
+    assert await _Shop.get_cached("commits:acme/site") == [{"sha": "abc"}]
+    ttl = await druks.redis.get_client().ttl("druks:app:shop:commits:acme/site")
+    assert 0 < ttl <= 60
+
+
+async def test_clearing_a_value_keeps_the_others(druks_redis):
+    await _Shop.set_cached("commits:acme/site", "one", ttl=60)
+    await _Shop.set_cached("commits:acme/other", "kept", ttl=60)
+
+    await _Shop.clear_cached("commits:acme/site")
+
+    assert await _Shop.get_cached("commits:acme/site") is None
+    assert await _Shop.get_cached("commits:acme/other") == "kept"
+
+
+async def test_one_app_cannot_read_another_apps_cache(druks_redis):
+    await _Shop.set_cached("commits:acme/site", "shop's", ttl=60)
+
+    assert await _Bakery.get_cached("commits:acme/site") is None
+    await _Bakery.clear_cached("commits:acme/site")
+    assert await _Shop.get_cached("commits:acme/site") == "shop's"

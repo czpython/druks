@@ -1991,6 +1991,30 @@ settings validation. Return `druks.doctor.CheckResult`. Druks namespaces the
 result. It converts an exception or malformed result into an error without
 hiding later checks.
 
+## Cache a provider read
+
+A page reads again on every load and every followed event. When it shows what
+a provider holds, such as a repository's commits, cache the answer instead of
+asking the provider each time:
+
+```python
+history = await NightWatch.get_cached(f"commits:{repo}")
+if history is None:
+    history = await list_commits(repo)
+    await NightWatch.set_cached(f"commits:{repo}", history, ttl=3600)
+```
+
+The cache belongs to the app. Another app cannot read or clear its values. A
+value is JSON, and `None` means a miss: it was never set, its TTL ran out, or the
+app cleared it. Every value expires, so pass `ttl` in seconds.
+
+Call `await NightWatch.clear_cached(f"commits:{repo}")` when the app changes what
+the provider holds, such as after a push. Let the TTL cover changes made
+elsewhere.
+
+Cache only what the provider can give back. The cache is Redis, so a value can
+disappear before its TTL. Keep a record the app owns in the database.
+
 ## Test an app
 
 The Druks installation registers its pytest plugin. An app can request the
