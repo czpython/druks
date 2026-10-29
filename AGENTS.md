@@ -131,9 +131,10 @@ uv run pytest backend/
 The suite collects the proof app, so `pytest backend/` fails at collection
 until that editable install has run.
 
-Before you push, run `druks-house-rules check --base origin/main`; CI runs the
-same check on every pull request. Install it with
-`uv tool install git+https://github.com/getdruks/druks-house-rules@v0.0.2`.
+Before you push, run `druks-house-rules check --base origin/main`. Druks runs
+the same check on every pull request and posts it as the `druks-house-rules`
+check. Install the command with
+`uv tool install git+https://github.com/getdruks/druks-house-rules@v0.0.4`.
 
 If the public app surface changed, also install and exercise the proof
 app as described in `docs/development.md`.

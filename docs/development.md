@@ -148,6 +148,15 @@ The pull-request backend
 workflow does the same. Pyright is available for local and editor use. It is not
 a CI gate.
 
+House rules:
+
+```bash
+druks-house-rules check --base origin/main
+```
+
+Druks runs the same check on every pull request through its `house_rules` app
+and posts the result as the `druks-house-rules` check, which `main` requires.
+
 Frontend checks:
 
 ```bash
