@@ -223,8 +223,8 @@ class Build(Workflow):
         kwargs = await super().get_workspace_kwargs(host)
         kwargs = {
             **kwargs,
-            # None until the first implement provisions the PR branch.
-            "branch": self.branch,
+            # None until the implement phase creates the PR branch.
+            "branch": kwargs["subject"].branch,
             "skills": tuple(self._profile.get("recommended_skills", [])),
         }
         return kwargs
@@ -237,7 +237,7 @@ class Build(Workflow):
         prompt_context = BuildPromptContext(
             repo=work_item.repo,
             work_item_url=work_item_url,
-            branch=self.branch,
+            branch=work_item.branch,
             pr_number=self.pr_number,
             ticket_ref=work_item.ticket_key,
             source=work_item.source,
@@ -314,6 +314,7 @@ class Build(Workflow):
             operator_note = operator_reply.note
 
     async def _implement_phase(self) -> None:
+        await self._create_branch()
         while True:
             await self.implement()
             evaluation = await SoftwareFactory.evaluate_implementation()
@@ -378,14 +379,13 @@ class Build(Workflow):
         # The run fails with that reason, so the dashboard shows it.
         if delivery.status == "needs_clarification":
             raise FatalError(f"implementation needs clarification: {delivery.summary}")
-        if self.journal.implementation_revision == 1:
-            await self.announce(
-                "pr.opened",
-                repo=(await self.subject).repo,
-                pr_number=delivery.pr_number,
-                branch=delivery.branch,
-            )
         return delivery
+
+    @step
+    async def _create_branch(self) -> None:
+        # Replay keeps the branch: GitHub holds it, and a second pass would create the
+        # next number.
+        await (await self.subject).create_branch()
 
     @step
     async def declare_merge_intent(self) -> bool:
@@ -393,14 +393,8 @@ class Build(Workflow):
         github = await Github.get_client()
         return await github.merge_when_ready((await self.subject).repo, self.pr_number)
 
-    # The branch and the PR come from the first delivery. Before it, both are None.
-    # Rework deliveries reuse the pair. The item row and webhook routing use it as a
-    # key, so a later delivery with other values must not change these reads.
-    @property
-    def branch(self) -> str | None:
-        implementations = self.journal.implementations
-        return implementations[0].branch if implementations else None
-
+    # The PR comes from the first delivery. Before it, this is None. Rework deliveries
+    # reuse the PR, so a later delivery with another value must not change this read.
     @property
     def pr_number(self) -> int | None:
         implementations = self.journal.implementations
@@ -413,7 +407,7 @@ class Build(Workflow):
     async def request_assignee_review(self) -> None:
         login = self.journal.assignee_github_login
         repo = (await self.subject).repo
-        if login and self.pr_number:
+        if login:
             try:
                 await (await Github.get_client()).request_pull_request_reviewers(
                     repo, self.pr_number, [login]
@@ -428,13 +422,12 @@ class Build(Workflow):
 
     async def set_pr_draft(self, *, draft: bool) -> None:
         repo = (await self.subject).repo
-        if self.pr_number:
-            try:
-                await (await Github.get_client()).set_pull_request_draft_state(
-                    repo, self.pr_number, draft=draft
-                )
-            except Exception:  # noqa: BLE001 — a draft merge fails loudly anyway
-                logger.warning("Could not set draft=%s on %s#%s.", draft, repo, self.pr_number)
+        try:
+            await (await Github.get_client()).set_pull_request_draft_state(
+                repo, self.pr_number, draft=draft
+            )
+        except Exception:  # noqa: BLE001 — a draft merge fails loudly anyway
+            logger.warning("Could not set draft=%s on %s#%s.", draft, repo, self.pr_number)
 
 
 class ProfileWorkspace(RepoWorkspace):

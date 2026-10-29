@@ -9,7 +9,7 @@ describe('Factory Activity', () => {
     ['workflow.scheduled', 'software_factory.build', 'Build queued'],
     ['plan.prepared', 'software_factory.build', 'Plan prepared'],
     ['plan.revised', 'software_factory.build', 'Plan revised'],
-    ['pr.opened', 'software_factory.build', 'Pull request opened'],
+    ['build.pr_opened', null, 'Pull request opened'],
     ['review.completed', 'software_factory.pull_request_review', 'Review completed'],
     ['merged', null, 'Pull request merged'],
     ['closed', null, 'Pull request closed'],
@@ -34,7 +34,7 @@ describe('Factory Activity', () => {
 })
 
 it.each([
-  ['pr.opened', GitPullRequest], ['merged', GitMerge], ['closed', GitPullRequestClosed],
+  ['build.pr_opened', GitPullRequest], ['merged', GitMerge], ['closed', GitPullRequestClosed],
 ])('shows the recorded PR for %s', (topic, icon) => {
   const line = eventLine({ id: 'event:1', seq: 1, at: '2026-09-09T12:00:00Z', topic,
     app: 'software_factory', subjectKey: 'DRU-42 Recorded work', payload: { repo: 'acme/widgets', pr_number: 42 } })
@@ -65,9 +65,9 @@ it.each([
 
 it('does not invent old PR references or reply actions', () => {
   const event = { id: 'event:1', seq: 1, at: '2026-09-09T12:00:00Z', app: 'software_factory', payload: {} }
-  expect(eventLine({ ...event, topic: 'pr.opened' }).context).toBeUndefined()
+  expect(eventLine({ ...event, topic: 'build.pr_opened' }).context).toBeUndefined()
   expect(eventLine({ ...event, topic: 'workflow.running' }).context).toBeUndefined()
   expect(eventLine({ ...event, topic: 'workflow.running', payload: { gate: 'review_work' } }).context)
     .toBe('Implementation review')
-  expect(activity({ topic: 'pr.opened' }).label).toBe('Pull request opened')
+  expect(activity({ topic: 'build.pr_opened' }).label).toBe('Pull request opened')
 })

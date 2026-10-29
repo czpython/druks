@@ -5,7 +5,7 @@ import type { ActivityEvent, ActivityPresentation } from '../registry'
 const TOPICS: Record<string, string> = {
   'plan.prepared': 'Plan prepared',
   'plan.revised': 'Plan revised',
-  'pr.opened': 'Pull request opened',
+  'build.pr_opened': 'Pull request opened',
   'review.completed': 'Review completed',
   merged: 'Pull request merged',
   closed: 'Pull request closed',
@@ -35,7 +35,7 @@ function label(event: ActivityEvent): string | undefined {
 const TOPIC_ICONS: Record<string, LucideIcon> = {
   'plan.prepared': FileText,
   'plan.revised': FilePenLine,
-  'pr.opened': GitPullRequest,
+  'build.pr_opened': GitPullRequest,
   'review.completed': FileCheck2,
   merged: GitMerge,
   closed: GitPullRequestClosed,
@@ -54,7 +54,7 @@ type FactoryFacts = FeedItem['payload'] & { repo?: string; pr_number?: number; r
 export function activity(event: ActivityEvent): ActivityPresentation {
   const facts: FactoryFacts = event.payload ?? {}
   let context: string | undefined
-  if (['pr.opened', 'merged', 'closed'].includes(event.topic)) {
+  if (['build.pr_opened', 'merged', 'closed'].includes(event.topic)) {
     context = [facts.repo, facts.pr_number && `#${facts.pr_number}`].filter(Boolean).join(' · ') || undefined
   } else if (event.topic === 'workflow.running' && facts.gate) {
     const gateName = facts.gate === 'review_work' ? 'Implementation review' : facts.gate === 'review' ? 'Plan review' : undefined

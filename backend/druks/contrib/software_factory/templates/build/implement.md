@@ -23,7 +23,7 @@ acceptance criterion — nothing more, nothing less.
   silently deviate: return `status="needs_clarification"` quoting the ruled-out line and
   the concrete behavior it breaks, the same way the contradiction escape works.{% endif %}
 - **You deliver by pushing.** You are working in a clone with push access already configured.
-  When the implementation is complete, commit every change and push it to the work branch
+  When the implementation is complete, commit every change and push it to the PR branch
   (see "Delivering your work" below). The pushed commit IS the deliverable — the evaluator
   reads it from the PR branch.
 
@@ -45,20 +45,11 @@ acceptance criterion — nothing more, nothing less.
 
 {% endif %}When the checkout has `.druks/software_factory/review.md`, read it before you write: it is the repo's standing rules for code and prose, and the reviewer holds your diff to it.
 
-Implement the approved plan (rendered above as **Current plan**) on the work branch (see "Delivering your work" below). When a **Revision request** section is rendered above, implement it on top of the plan — it is the reviewer's feedback, already triaged into instructions. Before pushing, you may run the repo's configured test, lint, or typecheck command narrowed to the files your diff touches — self-checking your own work, nothing more. Never run the full verification profile, and never adjudicate it: the evaluator owns that verdict, and a failure you cannot attribute to your own diff is environment noise to report, not a gate to chase. Do not run ad hoc install, build, or smoke commands beyond that unless the plan explicitly requires changing those commands or generated outputs. Never leave dependency lockfile, generated, or cache changes unless they are part of the requested implementation. Return structured evidence for every acceptance criterion, every check you ran or intentionally did not run, changed files, and known risks. If a check was not run, include status not_run and a reason.
+Implement the approved plan (rendered above as **Current plan**) on the PR branch (see "Delivering your work" below). When a **Revision request** section is rendered above, implement it on top of the plan — it is the reviewer's feedback, already triaged into instructions. Before pushing, you may run the repo's configured test, lint, or typecheck command narrowed to the files your diff touches — self-checking your own work, nothing more. Never run the full verification profile, and never adjudicate it: the evaluator owns that verdict, and a failure you cannot attribute to your own diff is environment noise to report, not a gate to chase. Do not run ad hoc install, build, or smoke commands beyond that unless the plan explicitly requires changing those commands or generated outputs. Never leave dependency lockfile, generated, or cache changes unless they are part of the requested implementation. Return structured evidence for every acceptance criterion, every check you ran or intentionally did not run, changed files, and known risks. If a check was not run, include status not_run and a reason.
 
 ## Delivering your work
 
-{% if build.pr_number %}
-When the implementation is complete you MUST commit and push it to the PR branch — the pushed commit is the deliverable. The repo is checked out on the PR branch already. Run, from the repo root:
-{% else %}
-No PR exists yet — your delivery provisions it. The repo is checked out on the default branch, so create the work branch first and implement on it (`git checkout -b <branch>`), named:
-
-- Linear, Jira, or Druks board ticket: `agent/<ticket ref>` (e.g. `agent/ACME-270`).
-- GitHub issue: `agent/issue-<issue number>-<slug>` — slug is the issue title lowercased, non-alphanumeric runs replaced with `-`, trimmed to 40 characters.
-
-When the implementation is complete, run from the repo root (pushing with `git push -u origin <branch>`; if the remote rejects the name as taken, rename with a `-2`/`-3`/… suffix and push again — never adopt an existing branch or PR):
-{% endif %}
+When the implementation is complete you MUST commit and push it to the PR branch — the pushed commit is the deliverable. The repo is checked out on the PR branch `{{ build.branch }}` already. Stay on it: Druks finds the PR by this name. Run, from the repo root:
 
 ```
 git status --short                      # review what changed
@@ -87,7 +78,7 @@ After a successful push, open the draft PR against the default branch (`gh` is a
 - When the repo gives a commit message format, the title follows it instead, with the ticket title as its message, because a squash merge makes the title the commit subject.
 {% endif %}
 
-Authentication is already configured (a git credential helper supplies the token), so the push needs no further setup. After a successful push, report the resulting commit SHA in `head_sha` and `commit_sha`, and set `base_sha` to the commit you started from (the `git rev-parse HEAD` before your first commit). Report the branch you delivered on in `branch` and its PR number in `pr_number`. If the push is rejected because the remote branch moved, fetch and retry once (`git fetch origin <branch> && git rebase origin/<branch>`, resolve trivially, push again); if it still fails, return `status="needs_clarification"` explaining the conflict. `workspace_path` should be the repo root you worked in.
+Authentication is already configured (a git credential helper supplies the token), so the push needs no further setup. After a successful push, report the resulting commit SHA in `head_sha` and `commit_sha`, and set `base_sha` to the commit you started from (the `git rev-parse HEAD` before your first commit). Report the PR number in `pr_number`. If the push is rejected because the remote branch moved, fetch and retry once (`git fetch origin <branch> && git rebase origin/<branch>`, resolve trivially, push again); if it still fails, return `status="needs_clarification"` explaining the conflict. `workspace_path` should be the repo root you worked in.
 
 CONTRADICTION ESCAPE — when the **Prior implementation review** section above shows a prior evaluation failed on a specific binding requirement, first check whether that requirement is internally consistent with the rest of the contract before attempting another fix. A requirement is contradictory when satisfying it would necessarily break another binding requirement, an acceptance criterion, the data model graph, a third-party library's documented behavior, or itself (mutually exclusive sub-clauses). Examples: 'cascading delete must propagate to all related rows' when a related row is explicitly PROTECTed; 'function must be both pure and perform I/O'; 'use exactly version X' when X is yanked.
 If you detect a contradiction, set status=needs_clarification and put a single concise paragraph in summary covering: which requirement is contradictory, what concretely contradicts it, what you tried in the previous revision (so the operator does not retry the same workaround), and what a coherent revised requirement could look like. Do not invent a half-working interpretation just to get a green eval; Druks fails the run with your summary as its reason, so the operator reads it directly and re-dispatches once the contract is fixed. Use this escape only when you have actually identified a contradiction — if the requirement is hard but achievable, keep implementing.

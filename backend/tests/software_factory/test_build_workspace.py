@@ -96,14 +96,14 @@ async def test_get_workspace_kwargs_carries_the_build_fields():
 
     workflow = Build()
     workflow.input = Build._run_input_model()
-    workflow.subject = SimpleNamespace(repo="o/app")
+    workflow.subject = SimpleNamespace(repo="o/app", branch="agent/ACME-1")
     workflow._profile = {"recommended_skills": ["python-house-rules"]}
     kwargs = await workflow.get_workspace_kwargs(host)
 
     assert kwargs == {
         "host": host,
         "subject": workflow.__dict__["subject"],
-        "branch": None,
+        "branch": "agent/ACME-1",
         "skills": ("python-house-rules",),
     }
 
