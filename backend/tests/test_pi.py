@@ -3,9 +3,11 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import druks.harnesses.base
 import pytest
 from drukbox_sdk import Secret
 from druks.db import db_session
+from druks.harnesses.base import Harness
 from druks.harnesses.exceptions import (
     HarnessAuthError,
     HarnessError,
@@ -165,6 +167,25 @@ async def test_build_invocation_without_servers_or_effort_is_bare(
     assert "--mcp-config" not in wrapper
     assert "pi-mcp-adapter" not in wrapper
     assert ".mcp.json" not in wrapper
+
+
+async def test_a_hooked_call_hands_the_result_tool_the_hook() -> None:
+    invocation = await _harness().build_invocation(
+        db_session(),
+        prompt="Prompt",
+        schema={"type": "object"},
+        run_id="run-1",
+        ssh_username="exedev",
+        hooks=("after_agent",),
+    )
+
+    parts = shlex.split(invocation.args[2])
+    written = {parts[i + 1]: parts[i - 1] for i, part in enumerate(parts) if part == ">"}
+    hook = Harness.after_agent_hook_path(_RUN_DIR)
+    body = (Path(druks.harnesses.base.__file__).parent / "druks-after-agent.mjs").read_text()
+    assert written[hook] == body
+    assert invocation.env is not None
+    assert invocation.env["DRUKS_AFTER_AGENT"] == hook
 
 
 def test_parse_returns_the_contract_and_sums_spend(tmp_path: Path) -> None:

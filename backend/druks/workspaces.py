@@ -346,6 +346,24 @@ class RepoWorkspace(Workspace):
         await self.clone()
         return await self.host.exec(command, cwd=self.repo_path, timeout=timeout)
 
+    async def get_diff(self) -> str:
+        """The checkout's change since it left the default branch, untracked files included."""
+        # A scratch index, so the agent's own index stays as it is.
+        script = (
+            'index=$(mktemp) && cp "$(git rev-parse --git-path index)" "$index" && '
+            'GIT_INDEX_FILE="$index" git add --intent-to-add --all && '
+            'GIT_INDEX_FILE="$index" git diff "$(git merge-base HEAD origin/HEAD)"; '
+            'status=$?; rm -f "$index"; exit $status'
+        )
+        result = await self.host.exec(["sh", "-c", script], cwd=self.repo_path, timeout=60.0)
+        if result.returncode:
+            raise ExecFailed(
+                f"failed to read the workspace diff: "
+                f"exit={result.returncode} stderr={result.stderr.strip()}",
+                exit_code=result.returncode,
+            )
+        return result.stdout
+
     async def set_git_identity(self, session: AsyncSession, account_id: str | None) -> None:
         """Commits in the repo are authored as the operator's bot user, with a
         prepare-commit-msg hook crediting the account that dispatched the run.

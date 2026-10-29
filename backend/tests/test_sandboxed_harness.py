@@ -49,6 +49,7 @@ class _FakeRun:
     exit_code: int = 0
     wait_delay: float = 0.0
     kill_calls: int = 0
+    hooks: Any = None
 
     async def tail(self, stream: str, *, from_offset: int = 0) -> AsyncIterator[bytes]:
         del from_offset
@@ -57,7 +58,8 @@ class _FakeRun:
             yield chunk
             await asyncio.sleep(0)
 
-    async def wait(self) -> int:
+    async def wait(self, *, hooks: Any = None) -> int:
+        self.hooks = hooks
         if self.wait_delay:
             await asyncio.sleep(self.wait_delay)
         return self.exit_code
@@ -329,6 +331,9 @@ async def test_run_prompt_builds_executes_and_parses(
             seen["parse"] = {"result": result, "artifact_dir": artifact_dir, "run_id": run_id}
             return {"answer": 42}
 
+    async def after_agent() -> str:
+        return "Run the tests."
+
     payload = await Host.run_prompt(
         sandbox,
         db_session(),
@@ -340,6 +345,7 @@ async def test_run_prompt_builds_executes_and_parses(
         call_id="call-7",
         identity={"email": "op@example.com"},
         extra_env={"GITHUB_MCP_TOKEN": "ghs_x"},
+        hooks={"after_agent": after_agent},
     )
 
     assert payload == {"answer": 42}
@@ -348,6 +354,8 @@ async def test_run_prompt_builds_executes_and_parses(
     assert seen["build"]["extra_env"] == {"GITHUB_MCP_TOKEN": "ghs_x"}
     assert seen["build"]["timeout"] == 60
     assert seen["exec"]["first_byte_kill_seconds"] == 17
+    assert "after_agent" in seen["build"]["hooks"]
+    assert run.hooks == {"after_agent": after_agent}
     # The prompt was persisted to the artifact dir before exec.
     assert (ctx.artifact_dir / "call-7" / "prompt.md").read_text() == "do the thing"
     # The capability manifest was written alongside it, keyed to the same call.

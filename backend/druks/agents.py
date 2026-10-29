@@ -1,6 +1,9 @@
 import asyncio
 import contextlib
+import functools
 import random
+from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -10,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.apps.exceptions import AppBotError
+from druks.apps.loader import resolve_app
 from druks.apps.registry import agents, bots
 from druks.browser.agent_browsers import AgentBrowser
 from druks.browser.enums import BrowserClient
@@ -20,6 +24,7 @@ from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, step_session
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import AgentCall, Artifact
+from druks.exceptions import ObjectNotFound
 from druks.files.datastructures import File
 from druks.harnesses.config import AgentConfig, get_config
 from druks.harnesses.exceptions import (
@@ -38,12 +43,15 @@ from druks.workflows import _in_step, current_workflow
 if TYPE_CHECKING:
     from druks.browser.sessions import BrowserSession
     from druks.services.base import ServiceField
+    from druks.workspaces import Workspace
 
 __all__ = ["Agent", "AgentOutput", "Bot", "BotUser"]
 
 _QUOTA_FALLBACK_WAIT_SECONDS = 30 * 60
 _QUOTA_MAX_WAIT_SECONDS = 6 * 60 * 60
 _REAP_BEFORE_WAIT_SECONDS = 120
+
+_in_after_agent: ContextVar[bool] = ContextVar("_in_after_agent", default=False)
 
 
 class AgentOutput(BaseModel):
@@ -112,6 +120,9 @@ class Agent:
     # standalone agent (no owner).
     id: str = field(default="", compare=False)
     app: str = field(init=False, compare=False, default="")
+    _after_agent: list[Callable[..., Awaitable[str | None]]] = field(
+        default_factory=list, init=False, compare=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         if self.browser and self.browser_client != BrowserClient.PINCHTAB:
@@ -143,6 +154,24 @@ class Agent:
         object.__setattr__(self, "id", f"{owner.name}.{attr}")
         object.__setattr__(self, "app", owner.name)
         agents.register(self)
+
+    @classmethod
+    def get(cls, id: str) -> "Agent":
+        """The agent registered as ``id``, ``<app>.<attribute>``, loading its app first."""
+        if id not in agents:
+            resolve_app(id.partition(".")[0])
+        agent = agents.get(id)
+        if not agent:
+            raise ObjectNotFound("agent", {"id": id})
+        return agent
+
+    def after_agent(
+        self, hook: Callable[..., Awaitable[str | None]]
+    ) -> Callable[..., Awaitable[str | None]]:
+        """Call ``hook(prompt=..., workspace=...)`` when this agent ends its turn. Text
+        that it returns goes back to the agent as one more turn."""
+        self._after_agent.append(hook)
+        return hook
 
     async def get_config(self) -> AgentConfig:
         """How this agent runs for the current run's actor, read from settings now."""
@@ -346,9 +375,10 @@ class Agent:
             ]
             # An agent browser's box holds the call's key, so the box belongs to
             # the call: it is never the warm box, and no other attempt resumes it.
+            # The same goes for a call from an after-agent hook: the hooked agent holds it.
             scope = self.id
             host_id = None
-            if self.browser:
+            if self.browser or _in_after_agent.get():
                 scope = call_id
             else:
                 host_id = await workflow._lease_host(session, config, refs)
@@ -373,6 +403,11 @@ class Agent:
                 prompt_context.setdefault("workflow", workflow)
                 prompt_context.setdefault("workspace", runner)
                 prompt = await render_prompt(self.prompt, **prompt_context)
+                hooks = {}
+                if self._after_agent:
+                    hooks["after_agent"] = functools.partial(
+                        self._run_after_agent, prompt=prompt, workspace=runner
+                    )
                 await set_run_phase("agent_running")
                 await AgentCall.start(
                     engine,
@@ -395,6 +430,7 @@ class Agent:
                         call_id=call_id,
                         include_plugins=self.include_plugins,
                         mcp_servers=mcp_servers,
+                        hooks=hooks,
                     )
                 except BaseException as error:
                     await AgentCall.fail(engine, call_id=call_id, error=error)
@@ -438,6 +474,18 @@ class Agent:
                 session, call_dir=artifact_dir / call_id, call_id=call_id, event=event, **artifact
             )
         return output.to_result()
+
+    async def _run_after_agent(self, *, prompt: str, workspace: "Workspace") -> str:
+        # The hooks run inside the hooked call's step, so an agent call in a hook
+        # replays with that step instead of taking a checkpoint of its own.
+        in_step = _in_step.set(True)
+        in_after_agent = _in_after_agent.set(True)
+        try:
+            texts = [await hook(prompt=prompt, workspace=workspace) for hook in self._after_agent]
+        finally:
+            _in_step.reset(in_step)
+            _in_after_agent.reset(in_after_agent)
+        return "\n\n".join(text for text in texts if text)
 
 
 @dataclass(frozen=True)

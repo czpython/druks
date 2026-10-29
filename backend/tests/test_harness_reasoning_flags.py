@@ -1,13 +1,23 @@
 import json
 import shlex
+from pathlib import Path
 
+import druks.harnesses.base
 from drukbox_sdk import Secret
 from druks.db import db_session
+from druks.harnesses.base import Harness
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.sandbox.datastructures import McpServer
 
 _CODEX_MODEL = CodexHarness.default_model
+_HOOK = Harness.after_agent_hook_path("/home/exedev/work/runs/run-1")
+_HOOK_BODY = (Path(druks.harnesses.base.__file__).parent / "druks-after-agent.mjs").read_text()
+
+
+def _written(wrapper: str) -> dict[str, str]:
+    parts = shlex.split(wrapper)
+    return {parts[i + 1]: parts[i - 1] for i, part in enumerate(parts) if part == ">"}
 
 
 async def test_claude_build_invocation_carries_every_flag():
@@ -62,9 +72,40 @@ async def test_claude_build_invocation_carries_every_flag():
         assert token in wrapper, f"missing from claude argv: {token}"
     # The MCP token rides only in env — never in argv.
     assert "secret" not in wrapper
+    assert "druks-after-agent" not in wrapper
     assert inv.env == {"TOK": "secret"}
     assert inv.stdin == b"hello"
     assert inv.extra_artifact_filenames == ("debug.log", "session.jsonl")
+
+
+async def test_claude_refuses_the_first_result_of_a_hooked_call():
+    inv = await ClaudeHarness(
+        model="anthropic/claude-x", fast_mode=True, effort=None
+    ).build_invocation(
+        db_session(),
+        prompt="hello",
+        schema={"type": "object"},
+        run_id="run-1",
+        ssh_username="exedev",
+        timeout=900,
+        hooks=("after_agent",),
+    )
+
+    parts = shlex.split(inv.args[2])
+    assert json.loads(parts[parts.index("--settings") + 1]) == {
+        "fastMode": True,
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "StructuredOutput",
+                    "hooks": [
+                        {"type": "command", "command": f"node {_HOOK} claude", "timeout": 900}
+                    ],
+                }
+            ]
+        },
+    }
+    assert _written(inv.args[2])[_HOOK] == _HOOK_BODY
 
 
 async def test_codex_build_invocation_carries_every_flag():
@@ -118,8 +159,29 @@ async def test_codex_build_invocation_carries_every_flag():
     assert stdin.startswith("hello")
     assert "Do not send interim assistant messages" in stdin
     assert "CODEX_HOME" not in wrapper
+    assert "druks-after-agent" not in wrapper
     assert inv.env == {"TOK": "secret"}
     assert inv.extra_artifact_filenames == ("output.json", "session.jsonl")
+
+
+async def test_codex_blocks_the_first_stop_of_a_hooked_call():
+    inv = await CodexHarness(model=_CODEX_MODEL, fast_mode=False, effort=None).build_invocation(
+        db_session(),
+        prompt="hello",
+        schema={"type": "object"},
+        run_id="run-1",
+        ssh_username="exedev",
+        timeout=900,
+        hooks=("after_agent",),
+    )
+
+    parts = shlex.split(inv.args[2])
+    hook = parts.index("--dangerously-bypass-hook-trust")
+    assert parts[hook - 2 : hook] == [
+        "-c",
+        f'hooks.Stop=[{{hooks=[{{type="command",command="node {_HOOK} codex",timeout=900}}]}}]',
+    ]
+    assert _written(inv.args[2])[_HOOK] == _HOOK_BODY
 
 
 async def test_claude_reads_its_key_from_a_placeholder_in_the_vm():
@@ -176,12 +238,12 @@ async def test_codex_reads_its_key_from_a_placeholder_in_the_vm():
 def test_claude_forwards_effort_value_only():
     with_effort = ClaudeHarness(
         model="anthropic/claude-x", fast_mode=False, effort="high"
-    )._command_args()
+    )._command_args({})
     assert with_effort[with_effort.index("--effort") + 1] == "high"
 
     no_effort = ClaudeHarness(
         model="anthropic/claude-x", fast_mode=False, effort=None
-    )._command_args()
+    )._command_args({})
     assert "--effort" not in no_effort
 
 
@@ -206,7 +268,9 @@ def test_codex_runs_max_effort_as_xhigh():
 
 
 def test_claude_forwards_max_effort_as_is():
-    args = ClaudeHarness(model="anthropic/claude-x", fast_mode=False, effort="max")._command_args()
+    args = ClaudeHarness(model="anthropic/claude-x", fast_mode=False, effort="max")._command_args(
+        {}
+    )
     assert args[args.index("--effort") + 1] == "max"
 
 

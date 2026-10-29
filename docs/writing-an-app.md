@@ -126,13 +126,14 @@ package modules:
 | `routes.py` | FastAPI routers |
 | `pages.py` | `@page` declarations that return `Page` objects |
 | `subscribers.py` | signal reactions |
+| `hooks.py` | Optional hooks on agents, this app's or another app's |
 | `webhooks.py` | Optional authenticated provider deliveries |
 | `services.py` | Optional `Service` declarations for appliance credentials at external providers |
 | `migrations/versions/` | this distribution's Alembic history |
 | `dist/` | optional built frontend module, mounted inside the shell (served under `/app/<name>`) |
 
 Druks recursively discovers leaf modules named `workflows`, `tasks`, `routes`,
-`pages`, `subscribers`, `webhooks`, `services`, and `channel`. A capability
+`pages`, `subscribers`, `hooks`, `webhooks`, `services`, and `channel`. A capability
 hidden in `workflow.py` is not discovered. Ordinary names such as `policy.py` and `workspace.py` have no import
 side effect unless a discovered module imports them.
 
@@ -579,6 +580,69 @@ gets no variable.
 
 Do not ask the framework to infer domain side effects from agent prose.
 The prompt or a subsequent explicit step owns those actions.
+
+### Give an agent one more turn
+
+An app can hook an agent in `hooks.py`. Decorate a function with the agent's
+`after_agent`:
+
+```python
+# hooks.py
+from druks.workspaces import RepoWorkspace
+
+from .app import NightWatch
+
+
+@NightWatch.report.after_agent
+async def review(*, prompt: str, workspace: RepoWorkspace) -> str | None:
+    finding = await NightWatch.critic(diff=await workspace.get_diff(), task=prompt)
+    return finding.instruction
+```
+
+To hook another app's agent, name it with `Agent.get`, so that neither app
+imports the other:
+
+```python
+from druks.agents import Agent
+
+implementer = Agent.get("software_factory.implement")
+
+
+@implementer.after_agent
+async def review(*, prompt: str, workspace: RepoWorkspace) -> str | None:
+    ...
+```
+
+Druks calls the hook when the agent ends its turn, before Druks takes the
+agent's output. The hook gets the rendered prompt and the workspace that the
+agent runs in. If the hook returns text, the agent gets the text as one more
+turn in the same session, and its next result is the result of the call. If
+the hook returns `None` or an empty string, the turn ends. A call gets one
+round: Druks asks once, and the next end of turn is final. The hooks of one
+agent run in registration order, and Druks joins their texts.
+
+`Agent.get` loads the class of the owning app first, so `hooks.py` can name an
+agent of an app that Druks has not loaded yet. An unknown id raises
+`ObjectNotFound`.
+
+A hook runs inside the step of the hooked call. An agent that a hook calls records
+its own call and artifact. It gets its own sandbox, because the hooked
+agent still holds its sandbox. Recovery reuses a completed hooked call, and an
+interrupted one runs again with its hooks. A hook that raises fails the hooked
+call. The time that a hook takes counts against the timeout of the hooked call.
+
+`RepoWorkspace.get_diff()` returns the change of the checkout since it left the
+default branch: commits, uncommitted edits, and untracked files. It reads the
+checkout as it is, without a clone.
+
+Each harness gives the agent the text in its own way:
+
+| Harness | The agent ends its turn when | The agent gets the text as |
+| --- | --- | --- |
+| Claude Code | it records its result | the reason that Druks refuses that result |
+| Codex | it stops | a message from a Stop hook |
+| pi | it calls `submit_result` | the answer of `submit_result` |
+| OpenCode | its message completes | the next message in the session |
 
 ## Answer WhatsApp with a Bot
 

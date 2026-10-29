@@ -10,7 +10,9 @@ from druks.accounts.models import Account
 from druks.browser import BrowserClient, BrowserSession
 from druks.db import db_session
 from druks.durable import AgentCall, WorkflowError
+from druks.exceptions import ObjectNotFound
 from druks.files import File
+from druks.sandbox.client import sandbox_client
 from druks.sandbox.datastructures import McpServer
 from druks.sandbox.exceptions import SandboxDownloadError
 from druks.sandbox.models import SandboxIdentity, SecretRef
@@ -271,6 +273,7 @@ async def test_declaration_drives_run_agent_call(druks_db, tmp_path, monkeypatch
     assert kwargs["prompt"] == "PROMPT:dummy/agent.md:repo=acme/widget"
     assert kwargs["artifact_dir"] == tmp_path / "run-wf-9"
     assert kwargs["include_plugins"] is True
+    assert kwargs["hooks"] == {}
     assert "model" not in kwargs
 
 
@@ -408,6 +411,75 @@ async def test_runner_comes_from_workflow_workspace_factory(
     assert result == DummyOutput(ok=True)
     workspace.run_agent.assert_awaited_once()
     assert workspace.run_agent.await_args.kwargs["agent"] == "dummy"
+
+
+def test_get_loads_the_owning_app_before_it_reads_the_registry(monkeypatch):
+    monkeypatch.setattr(agents.agents, "_items", dict(agents.agents._items))
+    writer = agents.Agent(id="later.writer", prompt="dummy/agent.md", contract=DummyOutput)
+    del agents.agents._items[writer.id]
+    loaded = []
+
+    def resolve_app(name):
+        loaded.append(name)
+        agents.agents.register(writer)
+
+    monkeypatch.setattr(agents, "resolve_app", resolve_app)
+
+    assert agents.Agent.get("later.writer") is writer
+    assert agents.Agent.get("dummy") is DUMMY_AGENT
+    assert loaded == ["later"]
+    with pytest.raises(ObjectNotFound):
+        agents.Agent.get("later.reader")
+
+
+async def test_after_agent_hooks_answer_the_turn_from_a_box_of_their_own(
+    druks_db, tmp_path, monkeypatch, current_run
+):
+    hooked = agents.Agent(id="hooked_probe", prompt="dummy/agent.md", contract=DummyOutput)
+    seen = []
+
+    @hooked.after_agent
+    async def check(*, prompt, workspace):
+        seen.append((prompt, workspace.host_id))
+        nested = await DUMMY_AGENT()
+        return f"The check says {nested.ok}."
+
+    @hooked.after_agent
+    async def stay_quiet(*, prompt, workspace):
+        return None
+
+    @hooked.after_agent
+    async def nudge(*, prompt, workspace):
+        return "Run the tests."
+
+    warm = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    warm.id = "warm-host"
+    answers = []
+
+    async def run_hooked(_session, **kwargs):
+        answers.append(await kwargs["hooks"]["after_agent"]())
+        return make_agent_result({"ok": True}, agent="hooked_probe")
+
+    warm.run_agent = AsyncMock(side_effect=run_hooked)
+
+    @asynccontextmanager
+    async def attach(*, host_id):
+        yield warm
+
+    monkeypatch.setattr(sandbox_client, "attach", attach)
+    lease = AsyncMock(return_value="warm-host")
+    monkeypatch.setattr(current_run, "_lease_host", lease)
+    nested_box = MagicMock()
+    nested_box.id = "nested-host"
+    nested_box.run_agent = AsyncMock(return_value=make_agent_result({"ok": True}, agent="dummy"))
+    _patch_ephemeral(monkeypatch, nested_box)
+
+    await hooked._run(db_session(), workflow_id="wf-9")
+
+    assert answers == ["The check says True.\n\nRun the tests."]
+    assert seen == [("PROMPT:dummy/agent.md:repo=None", "warm-host")]
+    lease.assert_awaited_once()
+    nested_box.run_agent.assert_awaited_once()
 
 
 async def test_ephemeral_acquisition_keys_idempotency_to_workflow_step(

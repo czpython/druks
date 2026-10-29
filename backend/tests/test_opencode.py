@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from druks.db import db_session
+from druks.harnesses.base import Harness
 from druks.harnesses.exceptions import (
     HarnessError,
     HarnessInvalidOutputError,
@@ -100,7 +101,7 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
         "/session?directory=",
         "/message",
         "json_schema",
-        '"$DRUKS_DEADLINE_SECONDS"',
+        '--max-time "$remaining"',
         "/abort",
     ):
         assert text in wrapper
@@ -156,6 +157,47 @@ async def test_third_party_invocation_keeps_provider_key_and_model_namespace() -
     assert "OPENCODE_AUTH_CONTENT" not in invocation.env
     assert invocation.env["DRUKS_PROVIDER"] == "openrouter"
     assert invocation.env["DRUKS_MODEL"] == "anthropic/claude-sonnet-4"
+
+
+async def test_a_hooked_call_writes_the_hook_and_names_it() -> None:
+    invocation = await _harness().build_invocation(
+        db_session(),
+        prompt="Run it.",
+        schema={"type": "object"},
+        run_id="run-1",
+        ssh_username="exedev",
+        hooks=("after_agent",),
+    )
+
+    wrapper = invocation.args[2]
+    hook = Harness.after_agent_hook_path("/home/exedev/work/runs/run-1")
+    assert wrapper.startswith("mkdir -p /home/exedev/work/runs/run-1 && printf %s ")
+    assert f"> {hook} || exit $?" in wrapper
+    assert invocation.env is not None
+    assert invocation.env["DRUKS_AFTER_AGENT"] == hook
+    syntax = subprocess.run(
+        ["sh", "-n", "-c", wrapper], check=False, capture_output=True, text=True
+    )
+    assert syntax.returncode == 0, syntax.stderr
+
+
+def test_parse_takes_the_last_turn_and_sums_spend(tmp_path: Path) -> None:
+    turns = [
+        _response(structured={"answer": "first", "count": 1}, cost=0.5),
+        _response(structured={"answer": "done", "count": 3}, cost=0.25),
+    ]
+
+    output = _harness().parse(
+        HarnessRunResult(returncode=0, stdout=b"\n".join(turns) + b"\n", stderr=b""),
+        artifact_dir=tmp_path,
+        run_id="run-1",
+    )
+
+    assert output == {"answer": "done", "count": 3}
+    cost = json.loads((tmp_path / "run-1" / "cost.json").read_text())
+    assert cost["cost_usd"] == 0.75
+    assert cost["metadata"]["input_tokens"] == 240
+    assert cost["metadata"]["cache_creation_tokens"] == 20
 
 
 def test_parse_returns_contract_and_writes_cost_sidecars(tmp_path: Path) -> None:
