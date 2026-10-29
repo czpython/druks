@@ -6,6 +6,6 @@
     "@earendil-works/pi-coding-agent": "1.4.0",
     "@openai/codex": "0.164.0",
     "opencode-ai": "1.19.4",
-    "pi-mcp-adapter": "6.0.0"
+    "pi-mcp-adapter": "7.0.0"
   }
 }
