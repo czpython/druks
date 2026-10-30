@@ -9,12 +9,12 @@ import jwt as pyjwt
 import pytest
 from conftest import MANAGER_KEY, bind_ambient_session
 from druks.accounts.models import Account
-from druks.contrib.software_factory import webhooks as webhook_module
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.core import services
 from druks.core.apis.linear import LINEAR_GRAPHQL_URL
 from druks.core.services import Linear
+from druks.core.webhooks import linear as webhook_module
 from druks.db import db_session
 from druks.mcp.exceptions import MissingGrantError
 from druks.mcp.models import McpServer
