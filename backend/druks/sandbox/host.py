@@ -31,6 +31,7 @@ from .datastructures import (
     AgentResult,
     Credentials,
     HarnessRunResult,
+    Hook,
     McpServer,
 )
 from .exceptions import SandboxDownloadError, SandboxError
@@ -214,6 +215,7 @@ class Host:
         skills: tuple[str, ...] = (),
         extra_env: dict[str, Any] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
+        hooks: dict[str, Hook] | None = None,
     ) -> AgentResult:
         """Run ``agent`` with ``config`` and return a pure ``AgentResult`` —
         no database write. A failure is carried on the result's ``error``, not
@@ -224,6 +226,7 @@ class Host:
         it into the VM first (see Software Factory's workspace).
         ``include_plugins=False`` (Claude only) skips uploading the operator's plugin
         state — for prompts that hit no MCP server; a no-op for codex.
+        ``hooks`` answers the run's hooks, by name.
         """
         model, timeout = config.model, config.timeout
         harness = config.harness_class(
@@ -255,6 +258,7 @@ class Host:
                 call_id=run_id,
                 identity=config.identity,
                 include_apps=config.include_apps,
+                hooks=hooks,
             )
         except HarnessError as exc:
             error = exc
@@ -295,6 +299,7 @@ class Host:
         call_id: str | None = None,
         identity: dict | None = None,
         include_apps: bool = False,
+        hooks: dict[str, Hook] | None = None,
     ) -> Any:
         """Drive one prompt through ``harness`` on this VM: the harness
         builds the invocation and parses the result; this sandbox executes it."""
@@ -321,6 +326,7 @@ class Host:
             identity=identity,
             include_apps=include_apps,
             timeout=timeout,
+            hooks=hooks or (),
         )
         result = await self._exec(
             invocation,
@@ -328,6 +334,7 @@ class Host:
             artifact_dir=artifact_dir,
             timeout=timeout,
             first_byte_kill_seconds=harness.first_byte_seconds,
+            hooks=hooks,
         )
         return harness.parse(result, artifact_dir=artifact_dir, run_id=run_id)
 
@@ -339,6 +346,7 @@ class Host:
         artifact_dir: Path,
         timeout: int,
         first_byte_kill_seconds: int | None = None,
+        hooks: dict[str, Hook] | None = None,
     ) -> HarnessRunResult:
         """Execute a built invocation on this VM: tee stdout/stderr to the
         artifact dir, enforce the first-byte and overall timeouts, record
@@ -409,7 +417,7 @@ class Host:
                     # --output-last-message file, so its stdout stays empty for a
                     # healthy run; watching stdout alone would kill every codex.
                     first_byte_task: asyncio.Task[bool] | None = None
-                    if first_byte_kill_seconds is not None:
+                    if first_byte_kill_seconds:
                         first_byte_task = asyncio.create_task(
                             _first_byte_killer(
                                 run=run,
@@ -421,7 +429,9 @@ class Host:
 
                     try:
                         try:
-                            returncode = await asyncio.wait_for(run.wait(), timeout=timeout)
+                            returncode = await asyncio.wait_for(
+                                run.wait(hooks=hooks), timeout=timeout
+                            )
                         except TimeoutError:
                             timed_out = True
                             with contextlib.suppress(Exception):
@@ -725,7 +735,7 @@ async def _stream_local_tar_into(
 def _as_str(value: object) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
-    return str(value) if value is not None else ""
+    return str(value) if value else ""
 
 
 async def _tee_stream(

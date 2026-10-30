@@ -46,6 +46,22 @@ class _FakeFileHandle:
 
 
 @dataclass
+class _FakeWriteHandle:
+    vm: "_FakeVM"
+    path: str
+
+    async def write(self, data: str) -> None:
+        self.vm.append(self.path, data.encode())
+
+    async def __aenter__(self) -> Self:
+        self.vm.write(self.path, b"")
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+
+@dataclass
 class _FakeVM:
     files: dict[str, bytes] = field(default_factory=dict)
 
@@ -68,14 +84,22 @@ class _FakeSFTP:
             raise _FakeSFTPNoSuchFile()
         return _FakeAttrs(size=len(self.vm.files[path]))
 
-    def open(self, path: str, app: str = "rb") -> _FakeFileHandle:
+    def open(self, path: str, app: str = "rb") -> _FakeFileHandle | _FakeWriteHandle:
         # asyncssh returns an awaitable that resolves to a file handle
         # supporting async context manager + async read. We collapse
         # that to a directly-returned object because the runner uses
         # ``async with sftp.open(...) as fh``.
+        if app == "w":
+            return _FakeWriteHandle(vm=self.vm, path=path)
         if not self.vm.exists(path):
             raise _FakeSFTPNoSuchFile()
         return _FakeFileHandle(data=self.vm.files[path])
+
+    async def exists(self, path: str) -> bool:
+        return self.vm.exists(path)
+
+    async def rename(self, old: str, new: str) -> None:
+        self.vm.files[new] = self.vm.files.pop(old)
 
     async def __aenter__(self) -> Self:
         return self
@@ -443,6 +467,48 @@ async def test_wait_polls_until_exit_code_appears(fast_sleep: list[float]):
 
     assert exit_code == 42
     assert poll_count >= 3
+
+
+async def test_wait_answers_the_after_agent_request_once(fast_sleep: list[float]):
+    vm = _FakeVM()
+    vm.write("/work/runs/r-1/after_agent.request", b"")
+    sandbox = _FakeSandbox(vm=vm)
+    run = Exec(host=sandbox, run_id="r-1", run_dir="/work/runs/r-1")  # type: ignore[arg-type]
+    asked = 0
+    polls = 0
+
+    async def after_agent() -> str:
+        nonlocal asked
+        asked += 1
+        return "Run the tests."
+
+    async def fake_sleep(seconds: float) -> None:
+        nonlocal polls
+        polls += 1
+        if polls == 3:
+            vm.write("/work/runs/r-1/exit_code", b"0")
+
+    with patch("druks.sandbox.runner.asyncio.sleep", fake_sleep):
+        assert await run.wait(hooks={"after_agent": after_agent}) == 0
+
+    assert asked == 1
+    assert vm.files["/work/runs/r-1/after_agent.answer"] == b"Run the tests."
+
+
+async def test_wait_kills_the_run_when_the_hook_raises(fast_sleep: list[float]):
+    vm = _FakeVM()
+    vm.write("/work/runs/r-1/after_agent.request", b"")
+    sandbox = _FakeSandbox(vm=vm)
+    run = Exec(host=sandbox, run_id="r-1", run_dir="/work/runs/r-1")  # type: ignore[arg-type]
+
+    async def after_agent() -> str:
+        raise ValueError("the hook failed")
+
+    with pytest.raises(ValueError, match="the hook failed"):
+        await run.wait(hooks={"after_agent": after_agent})
+
+    assert sandbox.exec_log == [["/root/druks-sandbox", "exec-kill", "--run-id", "r-1"]]
+    assert "/work/runs/r-1/after_agent.answer" not in vm.files
 
 
 async def test_kill_invokes_druks_sandbox_exec_kill_verb(fast_sleep: list[float]):

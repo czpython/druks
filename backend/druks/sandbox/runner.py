@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import shlex
 import tempfile
 import time
@@ -8,6 +9,7 @@ from typing import Literal, NamedTuple
 
 import asyncssh
 
+from .datastructures import Hook
 from .exceptions import ExecFailed, SandboxUnreachable
 from .host import Host
 from .layout import get_helper_script_path, get_runs_root
@@ -92,8 +94,8 @@ class Exec:
         attempt = 0
         while True:
             try:
-                conn = await self.host.ssh_connection()
-                async with conn.start_sftp_client() as sftp:
+                connection = await self.host.ssh_connection()
+                async with connection.start_sftp_client() as sftp:
                     chunk, offset = await self._read_new_bytes(sftp, path, offset)
                     if chunk:
                         yield chunk
@@ -109,16 +111,15 @@ class Exec:
                         yield final
                     return
                 await asyncio.sleep(POLL_INTERVAL_SECONDS)
-            except (asyncssh.Error, OSError, ConnectionError) as exc:
+            except (asyncssh.Error, OSError, ConnectionError) as error:
                 await self.host.aclose()
                 now = time.monotonic()
-                if reconnect_start is None:
-                    reconnect_start = now
+                reconnect_start = reconnect_start or now
                 if now - reconnect_start > RECONNECT_MAX_DURATION_SECONDS:
                     raise SandboxUnreachable(
                         f"tail({stream}) on run {self.run_id} unable to "
                         f"reconnect after {RECONNECT_MAX_DURATION_SECONDS}s",
-                    ) from exc
+                    ) from error
                 attempt += 1
                 await asyncio.sleep(_backoff(attempt))
 
@@ -131,15 +132,15 @@ class Exec:
         size = await self._sftp_size(sftp, path)
         if size <= offset:
             return b"", offset
-        async with sftp.open(path, "rb") as fh:
-            await fh.seek(offset)
-            data = await fh.read(size - offset)
+        async with sftp.open(path, "rb") as file:
+            await file.seek(offset)
+            data = await file.read(size - offset)
         chunk = data if isinstance(data, bytes) else data.encode("utf-8")
         return chunk, offset + len(chunk)
 
     async def _final_drain(self, path: str, offset: int) -> bytes:
-        conn = await self.host.ssh_connection()
-        async with conn.start_sftp_client() as sftp:
+        connection = await self.host.ssh_connection()
+        async with connection.start_sftp_client() as sftp:
             chunk, _ = await self._read_new_bytes(sftp, path, offset)
         return chunk
 
@@ -159,49 +160,75 @@ class Exec:
 
     # Completion
 
-    async def wait(self) -> int:
+    async def wait(self, *, hooks: dict[str, Hook] | None = None) -> int:
+        """Wait for the run's exit code, answering each of ``hooks`` once."""
+        unanswered = dict(hooks or {})
         reconnect_start: float | None = None
         attempt = 0
         while True:
             try:
-                conn = await self.host.ssh_connection()
-                async with conn.start_sftp_client() as sftp:
+                connection = await self.host.ssh_connection()
+                async with connection.start_sftp_client() as sftp:
                     if await self._is_done(sftp):
                         return await self._read_exit_code(sftp)
+                    asked = [
+                        name
+                        for name in unanswered
+                        if await sftp.exists(f"{self.run_dir}/{name}.request")
+                    ]
                 reconnect_start = None
                 attempt = 0
-                await asyncio.sleep(POLL_INTERVAL_SECONDS)
-            except (asyncssh.Error, OSError, ConnectionError) as exc:
+            except (asyncssh.Error, OSError, ConnectionError) as error:
                 await self.host.aclose()
                 now = time.monotonic()
-                if reconnect_start is None:
-                    reconnect_start = now
+                reconnect_start = reconnect_start or now
                 if now - reconnect_start > RECONNECT_MAX_DURATION_SECONDS:
                     raise SandboxUnreachable(
                         f"wait() on run {self.run_id} unable to reconnect "
                         f"after {RECONNECT_MAX_DURATION_SECONDS}s",
-                    ) from exc
+                    ) from error
                 attempt += 1
                 await asyncio.sleep(_backoff(attempt))
+                continue
+            for name in asked:
+                await self._answer_hook(name, unanswered.pop(name))
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+
+    async def _answer_hook(self, name: str, hook: Hook) -> None:
+        try:
+            text = await hook()
+        except Exception:
+            # Otherwise the agent waits on the answer until its timeout.
+            with contextlib.suppress(Exception):
+                await self.kill()
+            raise
+        answer = f"{self.run_dir}/{name}.answer"
+        partial = f"{answer}.partial"
+        connection = await self.host.ssh_connection()
+        async with connection.start_sftp_client() as sftp:
+            async with sftp.open(partial, "w") as file:
+                await file.write(text)
+            # The answer must appear whole: the hook reads it as soon as it exists.
+            await sftp.rename(partial, answer)
 
     async def _read_exit_code(self, sftp: asyncssh.SFTPClient) -> int:
-        async with sftp.open(self.exit_code_path, "rb") as fh:
-            raw = await fh.read()
+        async with sftp.open(self.exit_code_path, "rb") as file:
+            raw = await file.read()
         text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
         return int(text.strip())
 
     async def completion(self) -> Completion:
         try:
-            conn = await self.host.ssh_connection()
-            async with conn.start_sftp_client() as sftp:
+            connection = await self.host.ssh_connection()
+            async with connection.start_sftp_client() as sftp:
                 stdout_bytes = await self._sftp_size(sftp, self.stdout_path)
                 done = await self._is_done(sftp)
                 exit_code = await self._read_exit_code(sftp) if done else None
-        except (asyncssh.Error, OSError, ConnectionError) as exc:
+        except (asyncssh.Error, OSError, ConnectionError) as error:
             await self.host.aclose()
             raise SandboxUnreachable(
                 f"completion() on run {self.run_id} failed to read sandbox state",
-            ) from exc
+            ) from error
 
         return Completion(done=done, exit_code=exit_code, stdout_bytes=stdout_bytes)
 
@@ -241,13 +268,13 @@ async def start_exec(
     if stdin_data is not None:
         stdin_file = f"{run_dir}/stdin"
         await host.exec(["mkdir", "-p", run_dir], timeout=10.0)
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            tmp.write(stdin_data)
-            tmp_path = Path(tmp.name)
+        with tempfile.NamedTemporaryFile(delete=False) as upload:
+            upload.write(stdin_data)
+            upload_path = Path(upload.name)
         try:
-            await host.upload_file(local=tmp_path, remote=stdin_file)
+            await host.upload_file(local=upload_path, remote=stdin_file)
         finally:
-            tmp_path.unlink(missing_ok=True)
+            upload_path.unlink(missing_ok=True)
 
     # If env was supplied, write it to a file the helper will source.
     # We avoid stuffing env into the SSH command line because quoting
@@ -255,7 +282,7 @@ async def start_exec(
     # one round-trip and POSIX-source semantics are obvious.
     if env:
         env_file = f"{run_dir}/env"
-        body = "\n".join(_render_env_line(k, v) for k, v in env.items()) + "\n"
+        body = "\n".join(_render_env_line(key, value) for key, value in env.items()) + "\n"
         write_cmd = (
             f"mkdir -p {shlex.quote(run_dir)} && "
             f"printf %s {shlex.quote(body)} > {shlex.quote(env_file)}"
@@ -275,7 +302,7 @@ async def start_exec(
     if stdin_file:
         args += ["--stdin-from", stdin_file]
     args += ["--", *cmd]
-    quoted = " ".join(shlex.quote(a) for a in args)
+    quoted = " ".join(shlex.quote(argument) for argument in args)
     detach = (
         f"nohup setsid {quoted} </dev/null >/dev/null 2>&1 & "
         # ``exit 0`` so exec doesn't see a non-zero from the

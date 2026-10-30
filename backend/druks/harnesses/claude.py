@@ -2,6 +2,7 @@ import contextlib
 import json
 import logging
 import shlex
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -132,14 +133,29 @@ class ClaudeHarness(Harness):
         identity: dict | None = None,
         include_apps: bool = False,
         timeout: int = Harness.default_timeout,
+        hooks: Collection[str] = (),
     ) -> AgentInvocation:
         in_vm_run_dir = f"{get_runs_root(ssh_username)}/{run_id}"
         in_vm_debug = f"{in_vm_run_dir}/debug.log"
         in_vm_session = f"{in_vm_run_dir}/session.jsonl"
+        settings_hooks: dict[str, object] = {}
+        write_hook = ""
+        if "after_agent" in hooks:
+            # Claude Code ignores a Stop hook in a structured run.
+            command = f"node {self.after_agent_hook_path(in_vm_run_dir)} claude"
+            settings_hooks = {
+                "PreToolUse": [
+                    {
+                        "matcher": "StructuredOutput",
+                        "hooks": [{"type": "command", "command": command, "timeout": timeout}],
+                    }
+                ]
+            }
+            write_hook = f"{self.write_after_agent_hook(in_vm_run_dir)} && "
         # Prompt rides as stdin (SFTP-uploaded) to avoid the SSH exec
         # channel's per-request size limit.
         claude_argv = [
-            *self._command_args(),
+            *self._command_args(settings_hooks),
             "--print",
             "--output-format",
             "stream-json",
@@ -180,6 +196,7 @@ class ClaudeHarness(Harness):
             )
         wrapper = (
             f"mkdir -p {run_dir_q} && "
+            f"{write_hook}"
             f"touch {run_dir_q}/.start && "
             f"{login}"
             f"{claude_cmdline}; "
@@ -254,12 +271,17 @@ class ClaudeHarness(Harness):
         # the CLI sends as a bearer. It never refreshes a token from there.
         return [SecretRef(name=AnthropicProvider.id, secret_id=subscription.id)]
 
-    def _command_args(self) -> tuple[str, ...]:
+    def _command_args(self, hooks: dict[str, object]) -> tuple[str, ...]:
         args = (self.command,)
         if self.model:
             args = (*args, "--model", self.model_id)
+        settings: dict[str, object] = {}
         if self.fast_mode:
-            args = (*args, "--settings", json.dumps({"fastMode": True}))
+            settings["fastMode"] = True
+        if hooks:
+            settings["hooks"] = hooks
+        if settings:
+            args = (*args, "--settings", json.dumps(settings))
         if self.effort:
             args = (*args, "--effort", self.effort)
         return args

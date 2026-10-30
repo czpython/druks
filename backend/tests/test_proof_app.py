@@ -24,6 +24,13 @@ def test_discovery_registers_the_tables_and_capabilities():
     assert prefixes >= {"/notes", "/transcripts/{call_id}", "/note"}
 
 
+def test_discovery_registers_the_agent_hooks():
+    load_app("field_notes")
+    from druks_field_notes.hooks import keep_the_checkout
+
+    assert agents.get("field_notes.survey")._after_agent == [keep_the_checkout]
+
+
 def test_boot_registers_the_read_only_browser_session():
     app = load_app("field_notes")
 

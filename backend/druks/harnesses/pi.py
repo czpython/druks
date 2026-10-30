@@ -1,6 +1,7 @@
 import json
 import re
 import shlex
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,7 @@ class PiHarness(Harness):
         identity: dict | None = None,
         include_apps: bool = False,
         timeout: int = Harness.default_timeout,
+        hooks: Collection[str] = (),
     ) -> AgentInvocation:
         model = self.model_id
         provider = self.model.partition("/")[0]
@@ -105,6 +107,14 @@ class PiHarness(Harness):
         if mcp:
             mcp_body = json.dumps({"mcpServers": mcp}, indent=2, sort_keys=True)
             writes.append(f"printf %s {shlex.quote(mcp_body)} > {shlex.quote(in_vm_mcp_config)}")
+        env = {
+            **(extra_env or {}),
+            "DRUKS_SCHEMA_PATH": in_vm_schema,
+            "DRUKS_RESULT_PATH": in_vm_output,
+        }
+        if "after_agent" in hooks:
+            writes.append(self.write_after_agent_hook(in_vm_run_dir))
+            env["DRUKS_AFTER_AGENT"] = self.after_agent_hook_path(in_vm_run_dir)
         command_line = " ".join(shlex.quote(argument) for argument in command)
         wrapper = " && ".join((*writes, command_line))
 
@@ -113,11 +123,7 @@ class PiHarness(Harness):
             args=("sh", "-c", wrapper),
             stdin=prompt.encode("utf-8"),
             credentials=Credentials(),
-            env={
-                **(extra_env or {}),
-                "DRUKS_SCHEMA_PATH": in_vm_schema,
-                "DRUKS_RESULT_PATH": in_vm_output,
-            },
+            env=env,
             extra_artifact_filenames=("output.json",),
         )
 

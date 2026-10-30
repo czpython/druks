@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import shlex
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -382,6 +382,8 @@ class CodexHarness(Harness):
         codex_flags: tuple[str, ...],
         cwd: str,
         identity: dict | None,
+        hooks: Collection[str],
+        timeout: int,
     ) -> list[str]:
         # In-VM paths under <get_runs_root>/<run_id>/. Schema is inlined via
         # printf (~few KB); the prompt rides as stdin via the helper.
@@ -390,6 +392,17 @@ class CodexHarness(Harness):
         in_vm_output = f"{in_vm_run_dir}/output.json"
         in_vm_marker = f"{in_vm_run_dir}/session.marker"
         in_vm_session = f"{in_vm_run_dir}/session.jsonl"
+        write_hook = ""
+        if "after_agent" in hooks:
+            command = f"node {self.after_agent_hook_path(in_vm_run_dir)} codex"
+            codex_flags = (
+                *codex_flags,
+                "-c",
+                f'hooks.Stop=[{{hooks=[{{type="command",command="{command}",timeout={timeout}}}]}}]',
+                # codex exec silently skips an untrusted hook.
+                "--dangerously-bypass-hook-trust",
+            )
+            write_hook = f"{self.write_after_agent_hook(in_vm_run_dir)} && "
 
         # Callers own schema validity: the API behind --output-schema
         # enforces OpenAI's strict rules (additionalProperties: false +
@@ -438,6 +451,7 @@ class CodexHarness(Harness):
         wrapper = (
             f"mkdir -p {shlex.quote(in_vm_run_dir)} && "
             f"printf %s {shlex.quote(schema_body)} > {shlex.quote(in_vm_schema)} && "
+            f"{write_hook}"
             f"{login}"
             f"touch {marker_q} && "
             f"{codex_cmdline}; "
@@ -473,6 +487,7 @@ class CodexHarness(Harness):
         identity: dict | None = None,
         include_apps: bool = False,
         timeout: int = Harness.default_timeout,
+        hooks: Collection[str] = (),
     ) -> AgentInvocation:
         cmd = self._build_codex_wrapper(
             ssh_username=ssh_username,
@@ -484,6 +499,8 @@ class CodexHarness(Harness):
             ),
             cwd=get_work_root(ssh_username),
             identity=identity,
+            hooks=hooks,
+            timeout=timeout,
         )
         # --output-schema constrains EVERY agent_message mechanically (the
         # "final response shape" in its docs is inaccurate — verified by

@@ -1,4 +1,6 @@
+import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -66,6 +68,42 @@ async def test_repo_workspace_clones_before_every_agent_call_and_writes_no_token
         ("git_identity", "acct"),
         ("run_agent", "acct", {"prompt": "p"}),
     ]
+
+
+async def test_repo_workspace_diff_holds_commits_edits_and_untracked_files(tmp_path: Path):
+    def git(*args: str, cwd: Path = tmp_path) -> str:
+        identity = ("-c", "user.name=dev", "-c", "user.email=dev@example.com")
+        return subprocess.run(
+            ["git", *identity, *args], cwd=cwd, check=True, capture_output=True, text=True
+        ).stdout
+
+    git("init", "-q", "-b", "main", "origin")
+    (tmp_path / "origin" / "kept.txt").write_text("kept\n")
+    git("add", "kept.txt", cwd=tmp_path / "origin")
+    git("commit", "-q", "-m", "start", cwd=tmp_path / "origin")
+    git("clone", "-q", "origin", "checkout")
+    checkout = tmp_path / "checkout"
+    git("checkout", "-q", "-b", "feature", cwd=checkout)
+    (checkout / "committed.txt").write_text("committed\n")
+    git("add", "committed.txt", cwd=checkout)
+    git("commit", "-q", "-m", "change", cwd=checkout)
+    (checkout / "kept.txt").write_text("edited\n")
+    (checkout / "untracked.txt").write_text("untracked\n")
+
+    class _CheckoutHost:
+        ssh_username = "exedev"
+
+        async def exec(
+            self, command: list[str], *, cwd: str = "", timeout: float = 30.0
+        ) -> subprocess.CompletedProcess[str]:
+            assert cwd == get_repo_root(self.ssh_username)
+            return subprocess.run(command, cwd=checkout, capture_output=True, text=True)
+
+    diff = await RepoWorkspace(host=_CheckoutHost()).get_diff()  # type: ignore[arg-type]
+
+    for path in ("committed.txt", "kept.txt", "untracked.txt"):
+        assert f"+++ b/{path}" in diff
+    assert "?? untracked.txt" in git("status", "--short", cwd=checkout)
 
 
 async def _connect(slug: str = "github") -> VaultSecret:

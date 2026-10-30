@@ -21,7 +21,7 @@ webhooks, and the dashboard.
   loudly on a mismatched key, a duplicate name, an import error, or an unprefixed
   table.
 - Druks discovers leaf modules named `workflows`, `routes`, `pages`,
-  `subscribers`, and `webhooks`. A capability placed in `workflow.py` is never
+  `subscribers`, `hooks`, and `webhooks`. A capability placed in `workflow.py` is never
   discovered. Any other module name is inert until a discovered module imports it.
 - Screens are Python. `pages.py` declares them and the dashboard renders them;
   this app writes no JavaScript. An app that needs full control of its interface

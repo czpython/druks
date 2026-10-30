@@ -1,6 +1,7 @@
 import json
 import logging
 import urllib.parse
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +100,7 @@ class OpenCodeHarness(Harness):
         identity: dict | None = None,
         include_apps: bool = False,
         timeout: int = Harness.default_timeout,
+        hooks: Collection[str] = (),
     ) -> AgentInvocation:
         mcp = {}
         for server in mcp_servers:
@@ -120,24 +122,30 @@ class OpenCodeHarness(Harness):
             mcp[server.name] = entry
 
         provider, _, model = self.model.partition("/")
+        run_dir = f"{get_runs_root(ssh_username)}/{run_id}"
+        wrapper = _WRAPPER
+        env = {
+            **(extra_env or {}),
+            "DRUKS_RUN_DIR": run_dir,
+            "OPENCODE_CONFIG_CONTENT": json.dumps(
+                {"$schema": "https://opencode.ai/config.json", "mcp": mcp},
+                sort_keys=True,
+            ),
+            "DRUKS_SCHEMA": json.dumps(schema, sort_keys=True),
+            "DRUKS_PROVIDER": provider,
+            "DRUKS_MODEL": model,
+            "DRUKS_WORKSPACE_QUERY": urllib.parse.quote(get_work_root(ssh_username), safe=""),
+            "DRUKS_DEADLINE_SECONDS": str(max(1, timeout - _ABORT_MARGIN_SECONDS)),
+        }
+        if "after_agent" in hooks:
+            wrapper = f"{self.write_after_agent_hook(run_dir)} || exit $?\n{_WRAPPER}"
+            env["DRUKS_AFTER_AGENT"] = self.after_agent_hook_path(run_dir)
         return AgentInvocation(
             name=self.name,
-            args=("sh", "-c", _WRAPPER),
+            args=("sh", "-c", wrapper),
             stdin=prompt.encode("utf-8"),
             credentials=Credentials(),
-            env={
-                **(extra_env or {}),
-                "DRUKS_RUN_DIR": f"{get_runs_root(ssh_username)}/{run_id}",
-                "OPENCODE_CONFIG_CONTENT": json.dumps(
-                    {"$schema": "https://opencode.ai/config.json", "mcp": mcp},
-                    sort_keys=True,
-                ),
-                "DRUKS_SCHEMA": json.dumps(schema, sort_keys=True),
-                "DRUKS_PROVIDER": provider,
-                "DRUKS_MODEL": model,
-                "DRUKS_WORKSPACE_QUERY": urllib.parse.quote(get_work_root(ssh_username), safe=""),
-                "DRUKS_DEADLINE_SECONDS": str(max(1, timeout - _ABORT_MARGIN_SECONDS)),
-            },
+            env=env,
             extra_artifact_filenames=("opencode.log",),
         )
 
@@ -147,7 +155,8 @@ class OpenCodeHarness(Harness):
                 "opencode hit the agent deadline; the session was aborted."
             )
         try:
-            info = json.loads(result.stdout)["info"]
+            responses = [json.loads(line)["info"] for line in result.stdout.splitlines()]
+            info = responses[-1]
             if failure := info.get("error"):
                 data = failure.get("data") or {}
                 message = data.get("message")
@@ -156,18 +165,18 @@ class OpenCodeHarness(Harness):
                     raise exceptions.HarnessOverloadedError(detail)
                 raise _ERROR_TYPES.get(failure["name"], exceptions.HarnessError)(detail)
             structured = info["structured"]
-            tokens = info["tokens"]
+            tokens = [response["tokens"] for response in responses]
             metadata = {
                 "provider": self.name,
                 "model": self.model,
-                "input_tokens": tokens["input"],
-                "output_tokens": tokens["output"],
-                "reasoning_tokens": tokens["reasoning"],
-                "cached_input_tokens": tokens["cache"]["read"],
-                "cache_creation_tokens": tokens["cache"]["write"],
+                "input_tokens": sum(entry["input"] for entry in tokens),
+                "output_tokens": sum(entry["output"] for entry in tokens),
+                "reasoning_tokens": sum(entry["reasoning"] for entry in tokens),
+                "cached_input_tokens": sum(entry["cache"]["read"] for entry in tokens),
+                "cache_creation_tokens": sum(entry["cache"]["write"] for entry in tokens),
             }
-            cost_usd = float(info["cost"])
-        except (ValueError, KeyError, TypeError, AttributeError) as error:
+            cost_usd = sum(float(response["cost"]) for response in responses)
+        except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
             try:
                 self.check_returncode(result)
             except exceptions.HarnessError as process_error:

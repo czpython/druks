@@ -112,7 +112,7 @@ def load_app(name: str) -> type[App]:
     ``AppImportError``; a declared subject that fails the read-side contract
     raises ``AppSubjectContractError``; a page table a request could not
     resolve raises ``PageRouteError``."""
-    app = _resolve(name)
+    app = resolve_app(name)
     try:
         import_app_models(app)
         app.discover()
@@ -125,7 +125,7 @@ def load_app(name: str) -> type[App]:
     return app
 
 
-def _resolve(name: str) -> type[App]:
+def resolve_app(name: str) -> type[App]:
     """The single installed app named ``name``, loaded to its ``App``
     class. Entry points are listed, not imported, so an unknown name fails before
     any app code runs."""

@@ -2,10 +2,13 @@
 // contract rides as this tool's parameters and the agent ends its turn by
 // calling it. pi loads this file by absolute path from the run directory,
 // which is outside every node_modules — so it imports nothing from pi.
+import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import { promisify } from "node:util";
 
 const schemaPath = process.env.DRUKS_SCHEMA_PATH;
 const resultPath = process.env.DRUKS_RESULT_PATH;
+const afterAgent = process.env.DRUKS_AFTER_AGENT;
 
 export default function (pi) {
   pi.registerTool({
@@ -14,12 +17,17 @@ export default function (pi) {
     description: "Return the final result object for this task. Calling this ends the turn.",
     promptSnippet: "Return the final result object with submit_result",
     promptGuidelines: [
-      "Finish by calling submit_result exactly once with the final result object.",
+      "Finish by calling submit_result with the final result object.",
+      "If submit_result answers with more work, do that work and call submit_result again.",
       "Do not send an assistant message after submit_result.",
     ],
     parameters: JSON.parse(readFileSync(schemaPath, "utf8")),
     async execute(_toolCallId, params) {
       writeFileSync(resultPath, JSON.stringify(params));
+      if (afterAgent) {
+        const { stdout } = await promisify(execFile)("node", [afterAgent]);
+        if (stdout) return { content: [{ type: "text", text: stdout }], terminate: false };
+      }
       return { content: [{ type: "text", text: "result recorded" }], terminate: true };
     },
   });

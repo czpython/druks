@@ -1,6 +1,7 @@
 import hashlib
 import inspect
 import sys
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
     from druks.harnesses.exceptions import HarnessError
 
     from .host import Host
+
+Hook = Callable[[], Awaitable[str]]
 
 
 class Profile(BaseModel):

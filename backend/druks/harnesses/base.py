@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import shlex
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Collection
@@ -33,6 +34,8 @@ logger = logging.getLogger(__name__)
 # the recorded shape changes so a reader can tell manifests apart across
 # versions; the value is part of the hash, so a bump reshuffles the buckets.
 MANIFEST_SCHEMA_VERSION = 2
+
+_AFTER_AGENT_HOOK = Path(__file__).parent / "druks-after-agent.mjs"
 
 
 class Harness(ABC):
@@ -221,6 +224,18 @@ class Harness(ABC):
         for one-shot callers without parent state.
         """
         return call_id or str(uuid.uuid4())
+
+    @staticmethod
+    def after_agent_hook_path(run_dir: str) -> str:
+        return f"{run_dir}/{_AFTER_AGENT_HOOK.name}"
+
+    @classmethod
+    def write_after_agent_hook(cls, run_dir: str) -> str:
+        """The shell command that writes the hook into ``run_dir``."""
+        body = _AFTER_AGENT_HOOK.read_text()
+        path = cls.after_agent_hook_path(run_dir)
+        write = f"printf %s {shlex.quote(body)} > {shlex.quote(path)}"
+        return f"mkdir -p {shlex.quote(run_dir)} && {write}"
 
 
 def _terminal_detail(result: HarnessRunResult) -> str:
