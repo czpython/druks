@@ -5,9 +5,10 @@ from typing import Any, cast
 
 import pytest
 from conftest import connect_service
-from druks.contrib.software_factory import webhooks as webhook_module
-from druks.contrib.software_factory.webhooks import LinearEvents
+from druks.core.webhooks import linear as webhook_module
+from druks.core.webhooks.linear import LinearEvents
 from druks.testing import make_settings
+from druks.webhooks.router import match_webhook
 from druks.webhooks.router import router as webhooks_router
 from fastapi import HTTPException
 
@@ -52,6 +53,11 @@ def _capture(monkeypatch):
 
 def test_route_is_unchanged():
     assert f"{webhooks_router.prefix}/{LinearEvents.path}" == "/_external/linear/events/"
+
+
+def test_the_platform_owns_the_route():
+    # Any app consumes Linear facts, so the handler cannot live in one of them.
+    assert match_webhook("linear/events/")[0].__module__ == "druks.core.webhooks.linear"
 
 
 async def test_authentication_reads_the_service_row(tmp_path, druks_db):
