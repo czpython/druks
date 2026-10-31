@@ -204,6 +204,21 @@ async def test_transcript_stream_emits_chunk_then_finishes(
     assert "event: agent_call.finished" in body
 
 
+async def test_transcript_stream_rejects_a_negative_offset(
+    client: TestClient,
+    druks_db,
+):
+    call_id = await _seed_call_id(druks_db)
+
+    response = client.get(
+        f"/api/field_notes/transcripts/{call_id}/stream",
+        params={"stream": "stdout", "offset": -1},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "offset must be >= 0."
+
+
 def test_transcript_stream_unknown_call_closes(
     client: TestClient,
     druks_db,
