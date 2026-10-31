@@ -24,10 +24,9 @@ from druks.durable.models import Run
 from druks.files.constants import MAX_UPLOAD_BYTES
 from druks.files.datastructures import File
 from druks.files.storage import get_file_storage
-from druks.harnesses.base import Harness
 from druks.harnesses.config import AgentConfig, get_config
 from druks.harnesses.exceptions import AgentConfigError, HarnessNotConnectedError
-from druks.harnesses.registry import get_harness, get_harnesses
+from druks.harnesses.registry import get_harnesses
 from druks.locks import lock
 from druks.mcp import models as mcp_models
 from druks.mcp.enums import AllowedTools, Credential, Toolkit
@@ -60,6 +59,7 @@ from .constants import (
     DELIVERY_FAILED_MESSAGE,
     FAILURE_MESSAGE,
     INTERNAL_MESSAGES_PROMPT,
+    NAMING_PROMPT,
     NO_ANSWER_MESSAGE,
     NO_RESULT_MESSAGE,
     NO_RESULT_ON_SUBJECT_MESSAGE,
@@ -378,6 +378,7 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                 allowed_tools=tools,
                 secret_refs=secret_refs,
             )
+            naming = None
             try:
                 bridge = Bridge(host)
                 turn = await send_turn(
@@ -391,8 +392,17 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                     mcp_servers=mcp_servers,
                 )
                 if turn:
-                    await follow_turn(session, conversation, turn, bridge)
+                    if not conversation.connection and not conversation.title:
+                        naming_prompt = NAMING_PROMPT.format(message=message.body[:2000])
+                        naming = asyncio.create_task(
+                            host.exec(
+                                [*config.harness_class.reply_command, naming_prompt], timeout=30
+                            )
+                        )
+                    await follow_turn(session, conversation, turn, bridge, naming=naming)
             finally:
+                if naming:
+                    naming.cancel()
                 await host.aclose()
             continue
         try:
@@ -589,8 +599,14 @@ async def get_turn_content(
 
 
 async def follow_turn(
-    session: AsyncSession, conversation: Conversation, message: Message, bridge: Bridge
+    session: AsyncSession,
+    conversation: Conversation,
+    message: Message,
+    bridge: Bridge,
+    naming: asyncio.Task | None = None,
 ) -> None:
+    """Stream the turn's events until the agent settles, then save the reply. A new web
+    conversation gets its name as soon as the harness's naming call answers."""
     redis = get_client()
     position_key = f"chat:{conversation.id}:position"
     while True:
@@ -622,8 +638,13 @@ async def follow_turn(
                 transaction.set(position_key, json.dumps(position), ex=SANDBOX_HOST_LEASE_SECONDS)
                 await transaction.execute()
             after = position["sequence"]
+        if naming and naming.done():
+            await name_conversation(session, conversation, naming)
+            naming = None
         if status["status"] in ("replied", "cancelled") and after >= status["sequence"]:
             await finish_turn(session, conversation, message, bridge, status)
+            if naming:
+                await name_conversation(session, conversation, naming)
             return
         if not events:
             await asyncio.sleep(0.25)
@@ -636,8 +657,8 @@ async def finish_turn(
     bridge: Bridge,
     status: dict,
 ) -> None:
-    """Save the reply and the agent's session files, send a channel's reply to its
-    person, and name a new web conversation."""
+    """Save the reply and the agent's session files, and send a channel's reply to its
+    person."""
     body, tool_calls = await bridge.reply(conversation.id, message.id)
     state = MessageState(status["status"])
     await conversation.end_turn(session, state)
@@ -650,23 +671,23 @@ async def finish_turn(
         await conversation.set_session_file(session, session_file)
     await session.commit()
     await reset_live_stream(conversation.id)
-    if conversation.connection:
-        # A person who took the chat over during the turn answers it instead.
-        if state == MessageState.REPLIED and not await conversation.is_held(session):
-            if reply.answer:
-                await conversation.channel.send_reply(session, conversation, reply)
-            elif message.body == NO_ANSWER_MESSAGE:
-                failure = await conversation.create_message(
-                    session, DELIVERY_FAILED_MESSAGE, role=MessageRole.ASSISTANT, reply_to=message
-                )
-                await session.commit()
-                await conversation.channel.send_reply(session, conversation, failure)
-            else:
-                await conversation.create_message(session, NO_ANSWER_MESSAGE, is_internal=True)
-                await session.commit()
-    elif not conversation.title:
-        harness = get_harness(status["harness"])
-        await name_conversation(session, conversation, bridge.host, message, body, harness)
+    # A person who took the chat over during the turn answers it instead.
+    if (
+        conversation.connection
+        and state == MessageState.REPLIED
+        and not await conversation.is_held(session)
+    ):
+        if reply.answer:
+            await conversation.channel.send_reply(session, conversation, reply)
+        elif message.body == NO_ANSWER_MESSAGE:
+            failure = await conversation.create_message(
+                session, DELIVERY_FAILED_MESSAGE, role=MessageRole.ASSISTANT, reply_to=message
+            )
+            await session.commit()
+            await conversation.channel.send_reply(session, conversation, failure)
+        else:
+            await conversation.create_message(session, NO_ANSWER_MESSAGE, is_internal=True)
+            await session.commit()
 
 
 async def report_result(session: AsyncSession, run: Run, *, result) -> str | None:
@@ -701,21 +722,12 @@ async def report_outcome(session: AsyncSession, run: Run, body: str) -> str | No
 
 
 async def name_conversation(
-    session: AsyncSession,
-    conversation: Conversation,
-    host: Host,
-    message: Message,
-    reply: str,
-    harness: type[Harness],
+    session: AsyncSession, conversation: Conversation, naming: asyncio.Task
 ) -> None:
-    """Ask the harness for a short name. A failed call leaves the conversation unnamed,
-    and the next reply asks again: a name is never worth failing a delivery."""
-    prompt = (
-        "Name this conversation in at most six words. Reply with the name only.\n\n"
-        f"Message: {message.body[:2000]}\n\nReply: {reply[:2000]}"
-    )
+    """Save the name the harness gave. A failed call leaves the conversation unnamed, and
+    the next turn asks again: a name is never worth failing a delivery."""
     with suppress(asyncssh.Error, OSError):
-        result = await host.exec([*harness.reply_command, prompt], timeout=30)
+        result = await naming
         if result.returncode == 0 and result.stdout.strip():
             conversation.title = result.stdout.strip()[:80]
             await session.commit()

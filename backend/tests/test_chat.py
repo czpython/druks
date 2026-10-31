@@ -19,6 +19,7 @@ from druks.chat.constants import (
     CHAT_KEY_NAME,
     CONVERSATION_HEADER,
     DELIVERY_FAILED_MESSAGE,
+    NAMING_PROMPT,
     NO_ANSWER_MESSAGE,
 )
 from druks.chat.enums import ConversationSource, MessageRole, MessageState
@@ -401,8 +402,7 @@ async def test_recovery_reads_live_events_then_saves_reply_and_replaces_archive(
             "textOffset": 9,
         }
     ]
-    assert conversation.title == "Gate check"
-    assert await get_client().xlen(service.events_key(conversation.id)) == 2
+    assert await get_client().xlen(service.events_key(conversation.id)) == 1
     assert previous.deleted_at
     archive = await druks_db.get(FileRecord, conversation.session_file.id)
     assert not archive.agent_call_id
@@ -582,6 +582,72 @@ async def test_new_sandbox_restores_archive_and_drains_pending_messages(
     assert starts[0]["headers"] == [{"name": CONVERSATION_HEADER, "value": conversation.id}]
     assert host.upload_file.await_count == 1
     assert previous.deleted_at
+    assert conversation.title == "Gate check"
+    [naming] = host.exec.await_args_list
+    assert naming.args[0] == ["claude", "-p", NAMING_PROMPT.format(message="Find the issue")]
+
+
+async def test_name_arrives_while_the_first_reply_runs(
+    druks_db, conversation, sandbox, monkeypatch
+):
+    message = await conversation.get_unanswered_message(druks_db)
+    state = {
+        "status": "idle",
+        "sessionId": "one",
+        "messageId": "",
+        "harness": "claude",
+        "epoch": "sandbox-one",
+        "sequence": 0,
+        "archivePath": "",
+    }
+
+    async def request(self, method, **values):
+        if method == "prompt":
+            state.update(status="running", messageId=values["messageId"])
+        elif method == "events":
+            return {"events": []}
+        # The reply ends only after the name is saved.
+        elif method == "status" and conversation.title:
+            state["status"] = "replied"
+        return state
+
+    monkeypatch.setattr(Bridge, "request", request)
+
+    await asyncio.wait_for(service.deliver_pending(druks_db, conversation), timeout=5)
+
+    assert conversation.title == "Gate check"
+    assert message.state == "replied"
+
+
+async def test_failed_naming_leaves_the_reply_saved_and_the_conversation_unnamed(
+    druks_db, conversation, sandbox, monkeypatch
+):
+    message = await conversation.get_unanswered_message(druks_db)
+    state = {
+        "status": "idle",
+        "sessionId": "one",
+        "messageId": "",
+        "harness": "claude",
+        "epoch": "sandbox-one",
+        "sequence": 0,
+        "archivePath": "",
+    }
+
+    async def request(self, method, **values):
+        if method == "prompt":
+            state.update(status="replied", messageId=values["messageId"])
+        elif method == "events":
+            return {"events": []}
+        return state
+
+    host, _identity = sandbox
+    host.exec.side_effect = OSError("The sandbox closed the connection.")
+    monkeypatch.setattr(Bridge, "request", request)
+
+    await service.deliver_pending(druks_db, conversation)
+
+    assert message.state == "replied"
+    assert not conversation.title
 
 
 LINEAR = {
@@ -620,7 +686,7 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
             starts.append(values)
         return {"status": "idle", "sessionId": "one"}
 
-    async def follow_turn(session, conversation, message, bridge):
+    async def follow_turn(session, conversation, message, bridge, naming):
         message.state = MessageState.REPLIED
         await session.commit()
 
@@ -1121,7 +1187,7 @@ async def test_stop_during_startup_keeps_the_sandbox_and_sends_only_the_next_mes
             prompts.append(values["messageId"])
         return {"status": "idle", "sessionId": "one"}
 
-    async def follow_turn(session, conversation, message, bridge):
+    async def follow_turn(session, conversation, message, bridge, naming):
         message.state = MessageState.REPLIED
         await session.commit()
 
