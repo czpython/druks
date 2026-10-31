@@ -674,19 +674,19 @@ valid one. See [Chat](chat.md#whatsapp) for linking numbers.
 ## Slack
 
 **Slack** is the service identity that Druks answers Slack messages as: one Slack
-app in one workspace. Create the app from Druks's manifest, install it, and paste
-its keys.
+app in one workspace. Create the app from Druks's manifest, paste its keys, and
+install it from Druks.
 
 1. Set `urls.endpoint`. Set `urls.webhook_host` when Slack must reach Druks at
    another host.
 2. Open **Settings → Connections → Services → Slack** and select **Create Slack
    App**. Slack opens its app creation page with Druks's manifest filled in.
 3. Select the workspace, review the app, and create it.
-4. Install the app in the workspace. Slack shows the bot token on **OAuth &
-   Permissions**, and the client ID, client secret, and signing secret on
-   **Basic Information**.
-5. Paste the four values on the Slack card. Druks checks the bot token with
-   `auth.test` and keeps the workspace and the bot user.
+4. On the Slack card, select **Connect Slack** and paste the fields that it
+   shows: the signing secret, the client ID, and the client secret. Slack shows
+   them on **Basic Information**.
+5. Select **Install** on the Slack card. Slack asks you to allow the app in the
+   workspace. Druks keeps the bot token, the workspace, and the bot user.
 6. In the Slack app's **Event Subscriptions**, verify the Request URL again.
    Slack's first check ran before the card held the signing secret, so Druks
    refused it.
@@ -707,9 +707,9 @@ Redirect URL:
 `<endpoint>/api/oauth/callback`
 
 Druks checks each event's signature with the signing secret, and refuses an
-event older than five minutes. With rotation off, the pasted bot token and each
-person's Slack token live until someone revokes them. A person connects their
-own Slack account through the same app: see [Chat](chat.md#slack).
+event older than five minutes. With rotation off, the bot token from the install
+and each person's Slack token live until someone revokes them. A person connects
+their own Slack account through the same app: see [Chat](chat.md#slack).
 
 An app created from an earlier manifest needs `reactions:write` and the
 Interactivity URL. Add the scope under **OAuth & Permissions** and reinstall the
