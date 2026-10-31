@@ -182,7 +182,7 @@ async def test_a_hooked_call_hands_the_result_tool_the_hook() -> None:
     parts = shlex.split(invocation.args[2])
     written = {parts[i + 1]: parts[i - 1] for i, part in enumerate(parts) if part == ">"}
     hook = Harness.after_agent_hook_path(_RUN_DIR)
-    body = (Path(druks.harnesses.base.__file__).parent / "druks-after-agent.mjs").read_text()
+    body = (Path(druks.harnesses.base.__file__).parent / "druks-after-agent.sh").read_text()
     assert written[hook] == body
     assert invocation.env is not None
     assert invocation.env["DRUKS_AFTER_AGENT"] == hook

@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -179,6 +180,60 @@ async def test_a_hooked_call_writes_the_hook_and_names_it() -> None:
         ["sh", "-n", "-c", wrapper], check=False, capture_output=True, text=True
     )
     assert syntax.returncode == 0, syntax.stderr
+
+
+_FAKE_CURL = r"""#!/bin/sh
+for argument; do case "$argument" in
+  *"/session?"*) echo '{"id": "ses-1"}'; exit 0 ;;
+  @*) cat "${argument#@}" >> "$DRUKS_RUN_DIR/sent.jsonl" ;;
+esac; done
+echo '{"info": {}}'
+"""
+
+
+async def test_the_wrapper_sends_each_turn_without_node(tmp_path: Path) -> None:
+    invocation = await _harness().build_invocation(
+        db_session(),
+        prompt="Run it.",
+        schema={"type": "object"},
+        run_id="run-1",
+        ssh_username="exedev",
+        hooks=("after_agent",),
+    )
+    assert invocation.env is not None
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "curl").write_text(_FAKE_CURL)
+    (tools / "opencode").write_text("#!/bin/sh\necho listening on http://127.0.0.1:4096\n")
+    (tools / "node").write_text("#!/bin/sh\nexit 127\n")
+    for tool in tools.iterdir():
+        tool.chmod(0o755)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    hook = run_dir / "hook.sh"
+    hook.write_text('cat "$(dirname "$0")/after_agent.answer"')
+    (run_dir / "after_agent.answer").write_text("Run the tests.")
+    env = {
+        **invocation.env,
+        "DRUKS_RUN_DIR": str(run_dir),
+        "DRUKS_AFTER_AGENT": str(hook),
+        "PATH": f"{tools}:{os.environ['PATH']}",
+    }
+    # The harness writes its hook first; this run brings its own.
+    wrapper = invocation.args[2].split(" || exit $?\n", 1)[1]
+
+    run = subprocess.run(
+        ["sh", "-c", wrapper], input=b"Do it.", env=env, capture_output=True, check=False
+    )
+
+    assert run.returncode == 0, run.stderr
+    turns = [json.loads(line) for line in (run_dir / "sent.jsonl").read_text().splitlines()]
+    assert [turn["parts"] for turn in turns] == [
+        [{"type": "text", "text": "Do it."}],
+        [{"type": "text", "text": "Run the tests."}],
+    ]
+    assert turns[0]["model"]["modelID"] == env["DRUKS_MODEL"]
+    assert turns[0]["format"] == {"type": "json_schema", "schema": {"type": "object"}}
 
 
 def test_parse_takes_the_last_turn_and_sums_spend(tmp_path: Path) -> None:

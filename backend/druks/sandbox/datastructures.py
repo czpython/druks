@@ -101,6 +101,7 @@ class HarnessRunResult:
     returncode: int
     stdout: bytes
     stderr: bytes
+    unasked_hooks: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

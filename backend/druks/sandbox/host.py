@@ -21,6 +21,7 @@ from druks.harnesses.artifacts import persist_manifest, persist_prompt, read_cos
 from druks.harnesses.exceptions import (
     HarnessError,
     HarnessFirstByteTimeoutError,
+    HarnessHookError,
     HarnessSandboxError,
     HarnessTimeoutError,
 )
@@ -336,7 +337,13 @@ class Host:
             first_byte_kill_seconds=harness.first_byte_seconds,
             hooks=hooks,
         )
-        return harness.parse(result, artifact_dir=artifact_dir, run_id=run_id)
+        output = harness.parse(result, artifact_dir=artifact_dir, run_id=run_id)
+        # After the parse, so a failed run keeps its own error and the call its cost.
+        if result.unasked_hooks:
+            raise HarnessHookError(
+                f"{harness.name} finished and never ran {', '.join(result.unasked_hooks)}."
+            )
+        return output
 
     async def _exec(
         self,
@@ -516,6 +523,7 @@ class Host:
             returncode=int(returncode),
             stdout=bytes(stdout_buf),
             stderr=bytes(stderr_buf),
+            unasked_hooks=run.unasked_hooks,
         )
 
     async def exec(

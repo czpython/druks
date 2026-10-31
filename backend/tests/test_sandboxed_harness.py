@@ -19,6 +19,7 @@ from druks.harnesses.config import AgentConfig, get_config
 from druks.harnesses.exceptions import (
     HarnessAuthError,
     HarnessError,
+    HarnessHookError,
     HarnessOverloadedError,
     HarnessRateLimitError,
     HarnessSandboxError,
@@ -50,6 +51,7 @@ class _FakeRun:
     wait_delay: float = 0.0
     kill_calls: int = 0
     hooks: Any = None
+    unasked_hooks: tuple[str, ...] = ()
 
     async def tail(self, stream: str, *, from_offset: int = 0) -> AsyncIterator[bytes]:
         del from_offset
@@ -365,6 +367,49 @@ async def test_run_prompt_builds_executes_and_parses(
     # parse received the executed result for the same run.
     assert seen["parse"]["run_id"] == "call-7"
     assert seen["parse"]["result"].stdout == b"streamed\n"
+
+
+async def test_run_prompt_fails_a_finished_run_whose_hook_never_ran(ctx: SimpleNamespace):
+    sandbox = _fake_sandbox(_FakeRun(unasked_hooks=("after_agent",)))
+    sandbox._exec = functools.partial(Host._exec, sandbox)
+    parsed = []
+
+    class _FakeHarness:
+        name = "claude"
+        first_byte_seconds = None
+
+        async def get_manifest(self, _session: Any, **_kwargs: Any) -> dict:
+            return {}
+
+        @staticmethod
+        def mint_run_id(call_id: str) -> str:
+            return call_id
+
+        async def build_invocation(self, _session: Any, **_kwargs: Any) -> AgentInvocation:
+            return _inv(("claude", "--print"))
+
+        def parse(self, result: Any, *, artifact_dir: Path, run_id: str) -> Any:
+            parsed.append(run_id)
+            return {"answer": 42}
+
+    async def after_agent() -> str:
+        return ""
+
+    with pytest.raises(HarnessHookError, match="claude finished and never ran after_agent"):
+        await Host.run_prompt(
+            sandbox,
+            db_session(),
+            _FakeHarness(),
+            prompt="do the thing",
+            schema={"type": "object"},
+            artifact_dir=ctx.artifact_dir,
+            timeout=60,
+            call_id="call-7",
+            hooks={"after_agent": after_agent},
+        )
+
+    # The parse writes the cost, so the failed call still records it.
+    assert parsed == ["call-7"]
 
 
 def test_check_returncode_surfaces_the_streams_terminal_error():
