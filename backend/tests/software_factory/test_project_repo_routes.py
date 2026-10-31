@@ -72,6 +72,37 @@ async def test_adding_a_repo_survives_when_github_is_not_connected(client: TestC
     assert response.json()["fullName"] == "acme/widget"
 
 
+@pytest.mark.parametrize("full_name", ["acme/widget", "Acme/Widget"])
+async def test_adding_a_repo_another_project_holds_answers_a_409(
+    client: TestClient, monkeypatch, full_name: str
+):
+    """A repo belongs to one project in any letter case. The 409 names that project
+    and leaves the repo rows, the work items, and profiling alone."""
+    from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
+
+    profile_calls = _stub_profile_dispatch(monkeypatch)
+    owner = await Project.create(name="Owner")
+    other = await Project.create(name="Other")
+    repo = await ProjectRepo.create(project_id=owner.id, full_name="acme/widget")
+    work_item = await _make_work_item(owner.id, "ENG-1")
+    owner_id, repo_id, work_item_id = owner.id, repo.id, work_item.id
+
+    response = await client.post(
+        f"/api/software_factory/projects/{other.id}/repos", json={"fullName": full_name}
+    )
+
+    assert response.status_code == 409
+    assert "Owner" in response.json()["detail"]
+    # The route ran on its own session. Drop the cached instances so the reads
+    # below come from the database.
+    db_session().expunge_all()
+    assert [(row.id, row.project_id, row.full_name) for row in await ProjectRepo.all()] == [
+        (repo_id, owner_id, "acme/widget")
+    ]
+    assert (await WorkItem.get_or_none(id=work_item_id)).project_id == owner_id
+    assert profile_calls == []
+
+
 async def test_profile_endpoint_dispatches(client: TestClient, monkeypatch):
     # Concurrency is the Profile workflow's subject-unique lock, not the route's
     # job — the route always dispatches and start() dedups against a live run.

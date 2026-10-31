@@ -13,6 +13,7 @@ from druks.contrib.software_factory.exceptions import (
     AssigneeNotFound,
     PrefixTakenError,
     RepoNotFound,
+    RepoTakenError,
     TicketNotFound,
     TicketNotMovable,
     TrackerNotConfigured,
@@ -178,6 +179,9 @@ async def add_project_repo(
             status.HTTP_400_BAD_REQUEST,
             "fullName must be 'owner/name'",
         )
+    if registered_repo := await ProjectRepo.get_for_repo(full_name):
+        error = RepoTakenError(registered_repo.full_name, registered_repo.project.name)
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error))
     repo = await ProjectRepo.create(
         project_id=project.id,
         full_name=full_name,
