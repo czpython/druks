@@ -3,6 +3,9 @@ REPLY_PIECE_CHARACTERS = 12_000
 # An unlinked person's link, and the message it holds, live this long.
 LINK_TTL_SECONDS = 600
 LINK_KEY = "chat:slack:link:{token}"
+# A person who stays unlinked hears the welcome again after this long.
+WELCOME_TTL_SECONDS = 30 * 24 * 60 * 60
+WELCOME_KEY = "chat:slack:welcome:{user}"
 # A person's untagged replies in a thread reach their agent while the last message
 # of their conversation there is younger than this.
 JOINED_THREAD_SECONDS = 24 * 60 * 60
@@ -13,3 +16,4 @@ UNLINKED_REPLY = (
     "<@{user}>, your Slack account is not connected to Druks yet. "
     "I sent you a direct message with the link to connect it."
 )
+WELCOME_TEMPLATE = "chat/channels/slack/welcome.md"

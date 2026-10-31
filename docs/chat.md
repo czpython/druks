@@ -455,6 +455,12 @@ message you wrote. The link works for 10 minutes. A forwarded link is harmless:
 Slack's sign-in links whoever opens it, and the held message waits for the
 person who wrote it.
 
+The first time the bot sends you that link, it sends a welcome before it. The
+welcome says what the bot can do in this installation, what it reads, what you
+connect first, and what it keeps. If you do not connect, you get the welcome
+again after 30 days. The bot also posts the welcome in a room when it joins that
+room.
+
 ### Direct messages
 
 You have one conversation with the bot in your direct message. Druks drops a
