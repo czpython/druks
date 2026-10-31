@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
+import pytest
 from conftest import connect_service
 from druks.contrib.software_factory import subscribers  # noqa: F401 (the import registers them)
 from druks.contrib.software_factory.app import SoftwareFactory
@@ -189,3 +191,33 @@ async def test_update_clears_nullable_with_none_and_skips_omitted(druks_db) -> N
 
     assert not item.pr_number
     assert item.branch == "agent/keep"
+
+
+@pytest.mark.parametrize(
+    ("source", "ticket_key", "held", "branch"),
+    [
+        ("linear", "ACME-5", {"agent/ACME-5", "agent/ACME-5-2"}, "agent/ACME-5-3"),
+        ("github", "o/r#42", set(), "agent/issue-42"),
+    ],
+)
+async def test_create_branch_takes_a_name_github_does_not_hold(
+    druks_db, monkeypatch, source, ticket_key, held, branch
+) -> None:
+    item = await make_test_work_item(repo="o/r", title="t", source=source, ticket_key=ticket_key)
+    created = []
+
+    async def has_branch(repo, name):
+        return name in held
+
+    async def create_branch(repo, name):
+        created.append((repo, name))
+
+    async def get_client():
+        return SimpleNamespace(has_branch=has_branch, create_branch=create_branch)
+
+    monkeypatch.setattr("druks.contrib.software_factory.models.Github.get_client", get_client)
+
+    await item.create_branch()
+
+    assert item.branch == branch
+    assert created == [("o/r", branch)]

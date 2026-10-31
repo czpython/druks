@@ -85,14 +85,14 @@ class GitHubClient:
         self._slug = slug
         self._app = GitHub(AppAuthStrategy(app_id, private_key), base_url=app_url)
         self._installation_cache: dict[str, int] = {}
-        self._repo_gh_cache: dict[int, GitHub] = {}
+        self._installation_clients: dict[int, GitHub] = {}
 
     async def aclose(self) -> None:
         # With direct method calls githubkit creates and closes a fresh httpx
         # client per request, so there is no persistent pool to release. Dropping
         # the per-installation cache is the only cleanup. Pooled connections
         # would require entering the client context and closing it here.
-        self._repo_gh_cache.clear()
+        self._installation_clients.clear()
 
     async def _owner_installation_id(self, owner: str) -> int:
         try:
@@ -121,7 +121,7 @@ class GitHubClient:
         except GitHubAppNotInstalledError:
             return []
 
-        github = await self._get_for_installation(installation_id)
+        github = await self._create_installation_client(installation_id)
         async with github:
             repos: list[dict[str, Any]] = []
             page = 1
@@ -152,7 +152,7 @@ class GitHubClient:
         installation_id = await self._owner_installation_id(owner)
         template_owner, template_name = template_repo.split("/", 1)
         full_name = f"{owner}/{name}"
-        github = await self._get_for_installation(installation_id)
+        github = await self._create_installation_client(installation_id)
         async with github:
             try:
                 await github.rest.repos.async_create_using_template(
@@ -237,7 +237,7 @@ class GitHubClient:
                     installations.append(installation)
             if not installations:
                 raise GitHubAppNotInstalledError(bot_name, app=self._slug)
-            github = await self._get_for_installation(installations[0].id)
+            github = await self._create_installation_client(installations[0].id)
             async with github:
                 response = await github.rest.users.async_get_by_username(bot_name)
             user_id = response.parsed_data.id
@@ -289,19 +289,21 @@ class GitHubClient:
             await redis.set(key, str(minted.token), ex=ttl)
         return str(minted.token), expires_at
 
-    async def _get_for_installation(self, installation_id: int) -> GitHub:
+    async def _create_installation_client(self, installation_id: int) -> GitHub:
         token, _ = await self._get_installation_token(installation_id)
         return GitHub(TokenAuthStrategy(token), base_url=GITHUB_API_URL)
 
-    async def _for_repo(self, repo: str) -> GitHub:
+    async def _get_installation_client(self, repo: str) -> GitHub:
         installation_id = await self._installation_id(repo)
-        if installation_id not in self._repo_gh_cache:
-            self._repo_gh_cache[installation_id] = await self._get_for_installation(installation_id)
-        return self._repo_gh_cache[installation_id]
+        if installation_id not in self._installation_clients:
+            self._installation_clients[installation_id] = await self._create_installation_client(
+                installation_id
+            )
+        return self._installation_clients[installation_id]
 
     async def _invalidate_for_repo(self, repo: str) -> None:
         installation_id = self._installation_cache.pop(repo, None)
-        github = self._repo_gh_cache.pop(installation_id, None) if installation_id else None
+        github = self._installation_clients.pop(installation_id, None) if installation_id else None
         if installation_id:
             await get_client().delete(f"github:installation_token:{installation_id}")
         if github:
@@ -332,14 +334,14 @@ class GitHubClient:
     @_retry_on_401
     async def get_repository(self, repo: str) -> dict[str, Any]:
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         response = await github.rest.repos.async_get(owner, name)
         return response.parsed_data.model_dump()
 
     @_retry_on_401
     async def get_issue(self, repo: str, issue_number: int) -> dict[str, Any]:
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         response = await github.rest.issues.async_get(owner, name, issue_number)
         return response.parsed_data.model_dump()
 
@@ -347,7 +349,7 @@ class GitHubClient:
     async def list_comments(self, repo: str, issue_number: int) -> list[dict[str, Any]]:
         """Every top-level comment on the issue or pull request, oldest first."""
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         comments = github.rest.paginate(
             github.rest.issues.async_list_comments,
             owner=owner,
@@ -361,7 +363,7 @@ class GitHubClient:
     async def list_review_comments(self, repo: str, pr_number: int) -> list[dict[str, Any]]:
         """Every inline comment on the pull request, oldest first."""
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         comments = github.rest.paginate(
             github.rest.pulls.async_list_review_comments,
             owner=owner,
@@ -374,7 +376,7 @@ class GitHubClient:
     @_retry_on_401
     async def create_comment(self, repo: str, issue_number: int, body: str) -> dict[str, Any]:
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         response = await github.rest.issues.async_create_comment(
             owner, name, issue_number, body=body
         )
@@ -385,7 +387,7 @@ class GitHubClient:
         """React to a top-level comment. GitHub keeps one reaction per App and content,
         so reacting again changes nothing."""
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         await github.rest.reactions.async_create_for_issue_comment(
             owner, name, comment_id, content=content
         )
@@ -396,7 +398,7 @@ class GitHubClient:
     ) -> None:
         """React to a comment in a pull request review."""
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         await github.rest.reactions.async_create_for_pull_request_review_comment(
             owner, name, comment_id, content=content
         )
@@ -408,7 +410,7 @@ class GitHubClient:
         """A reply in the inline thread that ``comment_id`` starts. GitHub takes the
         thread's first comment only, never a reply in it."""
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         response = await github.rest.pulls.async_create_reply_for_review_comment(
             owner, name, pr_number, comment_id, body=body
         )
@@ -421,7 +423,7 @@ class GitHubClient:
         """Put ``add`` on the issue and take ``remove`` off. GitHub answers 404 for a
         label the issue does not carry, and that label is already off."""
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         await github.rest.issues.async_add_labels(owner, name, issue_number, data=[add])
         for label in remove:
             try:
@@ -433,7 +435,7 @@ class GitHubClient:
     @_retry_on_401
     async def close_issue(self, repo: str, issue_number: int) -> None:
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         await github.rest.issues.async_update(
             owner, name, issue_number, state="closed", state_reason="completed"
         )
@@ -441,7 +443,7 @@ class GitHubClient:
     @_retry_on_401
     async def get_pull_request(self, repo: str, pr_number: int) -> dict[str, Any]:
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         response = await github.rest.pulls.async_get(owner, name, pr_number)
         return response.parsed_data.model_dump()
 
@@ -449,7 +451,7 @@ class GitHubClient:
     async def squash_merge_pull_request(self, repo: str, pr_number: int) -> bool:
         # No commit_title: GitHub then titles the squash commit from the PR title.
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         try:
             response = await github.rest.pulls.async_merge(
                 owner,
@@ -465,7 +467,7 @@ class GitHubClient:
 
     @_retry_on_401
     async def enable_auto_merge(self, repo: str, node_id: str) -> bool:
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         try:
             await github.async_graphql(
                 """
@@ -486,7 +488,7 @@ class GitHubClient:
     @_retry_on_401
     async def update_pull_request_branch(self, repo: str, pr_number: int) -> None:
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         try:
             await github.rest.pulls.async_update_branch(owner, name, pr_number)
         except RequestFailed as error:
@@ -518,7 +520,7 @@ class GitHubClient:
         body: str,
     ) -> dict[str, Any]:
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         response = await github.rest.pulls.async_update(owner, name, pr_number, body=body)
         return response.parsed_data.model_dump()
 
@@ -535,7 +537,7 @@ class GitHubClient:
             return
 
         node_id = str(pull_request["node_id"])
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         if draft:
             await github.async_graphql(
                 """
@@ -561,9 +563,35 @@ class GitHubClient:
         )
 
     @_retry_on_401
+    async def has_branch(self, repo: str, branch: str) -> bool:
+        owner, name = repo.split("/", 1)
+        github = await self._get_installation_client(repo)
+        try:
+            await github.rest.git.async_get_ref(owner, name, f"heads/{branch}")
+        except RequestFailed as error:
+            if error.response.status_code == 404:
+                return False
+            raise
+
+        return True
+
+    @_retry_on_401
+    async def create_branch(self, repo: str, branch: str) -> None:
+        """Create ``branch`` at the head of the default branch."""
+        owner, name = repo.split("/", 1)
+        github = await self._get_installation_client(repo)
+        repository = await github.rest.repos.async_get(owner, name)
+        head = await github.rest.git.async_get_ref(
+            owner, name, f"heads/{repository.parsed_data.default_branch}"
+        )
+        await github.rest.git.async_create_ref(
+            owner, name, ref=f"refs/heads/{branch}", sha=head.parsed_data.object_.sha
+        )
+
+    @_retry_on_401
     async def delete_branch(self, repo: str, branch: str) -> bool:
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         try:
             await github.rest.git.async_delete_ref(owner, name, f"heads/{branch}")
         except RequestFailed as error:
@@ -581,7 +609,7 @@ class GitHubClient:
         reviewers: list[str],
     ) -> None:
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         await github.rest.pulls.async_request_reviewers(
             owner,
             name,
@@ -600,7 +628,7 @@ class GitHubClient:
         comments: list[ReviewComment] | None = None,
     ) -> dict[str, Any]:
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         raw_comments = _build_review_comments(comments) if comments else None
         try:
             kwargs: dict[str, Any] = {
@@ -651,7 +679,7 @@ class GitHubClient:
         already posted there. An annotation is GitHub's shape: ``path``, ``start_line``,
         ``end_line``, ``annotation_level``, ``message``."""
         owner, repo_name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         posted = await github.rest.checks.async_list_for_ref(
             owner, repo_name, head_sha, check_name=name, app_id=int(self._app_id)
         )
@@ -686,9 +714,9 @@ class GitHubClient:
     ) -> str | None:
         owner, name = repo.split("/", 1)
         try:
-            # _for_repo inside the try: an unreachable repo fails at the installation
-            # lookup, which for an optional-file read is also "no such file".
-            github = await self._for_repo(repo)
+            # The client lookup stays inside the try: an unreachable repo fails there, which
+            # for an optional-file read is also "no such file".
+            github = await self._get_installation_client(repo)
             response = await github.rest.repos.async_get_content(
                 owner,
                 name,
@@ -709,7 +737,7 @@ class GitHubClient:
     async def download_tarball(self, repo: str) -> bytes:
         """Gzipped tarball of ``repo``'s default branch."""
         owner, name = repo.split("/", 1)
-        github = await self._for_repo(repo)
+        github = await self._get_installation_client(repo)
         response = await github.rest.repos.async_download_tarball_archive(owner, name, "")
         return response.content
 

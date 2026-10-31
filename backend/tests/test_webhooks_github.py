@@ -28,7 +28,11 @@ def _pull_request(*, action):
             "draft": False,
             "user": {"login": "octocat"},
             "author_association": "MEMBER",
-            "head": {"ref": "agent/eng-1", "sha": "0f3a2c1d"},
+            "head": {
+                "ref": "agent/eng-1",
+                "sha": "0f3a2c1d",
+                "repo": {"full_name": "acme/widget"},
+            },
             "base": {"ref": "main"},
         },
     }
@@ -68,6 +72,7 @@ async def test_a_pull_request_action_publishes_its_fact(
                 "pr_number": 12,
                 "payload": {
                     "branch": "agent/eng-1",
+                    "is_fork": False,
                     "base_branch": "main",
                     "head_sha": "0f3a2c1d",
                     "title": "Import contacts",
@@ -79,3 +84,14 @@ async def test_a_pull_request_action_publishes_its_fact(
             },
         )
     ]
+
+
+@pytest.mark.parametrize("head_repo", [{"full_name": "stranger/widget"}, None])
+async def test_a_pull_request_from_a_fork_says_so(tmp_path, monkeypatch, head_repo):
+    published = _capture(monkeypatch)
+    delivery = _pull_request(action="opened")
+    delivery["pull_request"]["head"]["repo"] = head_repo
+
+    await _events(tmp_path, payload=delivery).on_pull_request_opened()
+
+    assert published[0][1]["payload"]["is_fork"] is True

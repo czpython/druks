@@ -21,13 +21,15 @@ async def cancelled_build_settles_the_item(*, subject: WorkItem, **_: object) ->
         await subject.resolve(Resolution.CANCELLED, at=Base.utc_now())
 
 
-@subscribe("pr.opened", workflow=Build)
-async def pr_open_mirrors_onto_item(
-    *, subject: WorkItem, pr_number: int, branch: str, **_: object
-) -> None:
-    # The implementer's provisioned PR + branch, mirrored onto the work item —
-    # the read side (board links, webhook routing by repo+PR) keys off them.
-    await subject.update(pr_number=pr_number, branch=branch)
+@subscribe("pr.opened", payload__is_fork=False)
+async def pr_open_fills_the_item(*, repo: str, pr_number: int, payload: dict) -> None:
+    """GitHub announcing the PR the implementer opened on the branch Build created. A fork
+    can use any branch name, so a fork's PR never fills the item. Webhook routing by repo
+    and PR keys off the stored number, so a redelivery finds it and stops."""
+    item = await WorkItem.get_for_branch(repo=repo, branch=payload["branch"])
+    if item and not item.pr_number:
+        await item.update(pr_number=pr_number)
+        await item.announce("build.pr_opened", repo=item.repo, pr_number=pr_number)
 
 
 @subscribe(WorkflowEvent.RUNNING, workflow=Build)

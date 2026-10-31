@@ -2,11 +2,9 @@ from datetime import UTC, datetime
 
 import pytest
 from conftest import installation_key
-from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import (
     ContractRevisionOutput,
     FindingOutput,
-    ImplementationOutput,
     PlanOutput,
     ReviewReport,
 )
@@ -22,64 +20,6 @@ from druks.testing import seed_run
 from sqlalchemy import select
 
 from software_factory.factories import make_test_work_item
-
-
-async def test_first_delivery_records_its_pr_and_work_title(druks_db, druks_client, monkeypatch):
-    item = await make_test_work_item(
-        repo="acme/widget", title="Repair the queue", ticket_key="ACME-42"
-    )
-    run = await seed_run(druks_db, kind=Build.kind, subject=item)
-    workflow = Build()
-    workflow._workflow_id = run.id
-    workflow._subject = item.identity
-    delivery = ImplementationOutput(
-        type="result",
-        status="success",
-        base_sha="base",
-        head_sha="head",
-        commit_sha="commit",
-        branch="agent/queue",
-        pr_number=42,
-        files_changed=["queue.py"],
-        acceptance_results=[],
-        checks=[],
-        known_risks=[],
-        summary="Repaired the queue.",
-        workspace_path="/work/queue",
-        workspace_retention=None,
-    )
-
-    async def implement():
-        workflow.journal.add(delivery)
-        return delivery
-
-    async def run_step(options, operation):
-        return await operation()
-
-    monkeypatch.setattr(SoftwareFactory, "implement", implement)
-    monkeypatch.setattr("druks.workflows.DBOS.run_step_async", run_step)
-    await item.update(title="A renamed queue")
-    await workflow.implement()
-    await workflow.implement()
-    db_session().expunge_all()
-    item = await WorkItem.get_or_none(id=item.id)
-    assert item.pr_number == 42
-    await item.start_attempt()
-    await item.update(pr_number=43, branch="agent/next")
-
-    response = await druks_client.get("/api/events?app=software_factory&topic=pr.opened")
-
-    assert response.status_code == 200
-    events = response.json()["items"]
-    assert len(events) == 1
-    assert events[0]["subjectKey"] == "ACME-42 Repair the queue"
-    assert events[0]["payload"] == {
-        "repo": "acme/widget",
-        "pr_number": 42,
-        "branch": "agent/queue",
-        "run": run.id,
-        "kind": Build.kind,
-    }
 
 
 def test_plan_outputs_declare_their_saved_results():

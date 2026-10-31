@@ -305,12 +305,7 @@ Two rules:
 Announce a domain fact from the workflow body:
 
 ```python
-await self.announce(
-    "pr.opened",
-    repo=item.repo,
-    pr_number=delivery.pr_number,
-    branch=delivery.branch,
-)
+await self.announce("sweep.finished", findings=len(self.journal.findings))
 ```
 
 Druks records the event in one checkpoint. It notifies subscribers in a second
@@ -1362,8 +1357,10 @@ claim so the provider can retry.
 
 The operator App's webhook publishes `pr.opened`, `pr.synchronized`,
 `pr.edited`, and `pr.ready_for_review`, the App's own pull requests included.
-Each carries `repo`, `pr_number`, and a `payload` with `branch`, `base_branch`,
-`head_sha`, `title`, `body`, `draft`, `author`, and `author_can_write`.
+Each carries `repo`, `pr_number`, and a `payload` with `branch`, `is_fork`,
+`base_branch`, `head_sha`, `title`, `body`, `draft`, `author`, and
+`author_can_write`. A fork can use any branch name, so a subscriber that matches
+on `branch` filters with `payload__is_fork=False`.
 
 `post_check_run` creates the named check run on the head commit, or updates the
 one the App already posted there. An annotation is GitHub's shape. The App needs

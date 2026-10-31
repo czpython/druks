@@ -132,12 +132,11 @@ class PlanData(BaseModel):
         pairs = []
         for question in self.questions:
             chosen = picks.get(question.id)
-            if not chosen:
-                continue
-            label = next(
-                (option.label for option in question.options if option.id == chosen), chosen
-            )
-            pairs.append({"question": question.prompt, "answer": label})
+            if chosen:
+                label = next(
+                    (option.label for option in question.options if option.id == chosen), chosen
+                )
+                pairs.append({"question": question.prompt, "answer": label})
         return pairs
 
 
@@ -231,14 +230,13 @@ class ImplementationOutput(AgentOutput):
     status: Literal["success", "needs_clarification"]
     # Nullable only for needs_clarification (bailed before delivering) — the strict
     # schema bans defaults, so optional is spelled required-but-nullable. On success
-    # the validator below demands all five: a "success" without a pushed commit on a
+    # the validator below demands all four: a "success" without a pushed commit on a
     # PR is the fabrication this contract exists to reject.
     base_sha: str | None
     head_sha: str | None
     commit_sha: str | None
-    # The branch pushed to and the PR delivered on — the one from the workflow context, or
-    # the pair the implementer provisioned on the first pass.
-    branch: str | None
+    # The PR delivered on: the one from the workflow context, or the one the implementer
+    # opened on the first pass.
     pr_number: int | None
     files_changed: list[str]
     acceptance_results: list[AcceptanceEvidenceOutput]
@@ -250,18 +248,17 @@ class ImplementationOutput(AgentOutput):
 
     @model_validator(mode="after")
     def _success_means_delivered(self) -> "ImplementationOutput":
-        if self.status != "success":
-            return self
-        undelivered = [
-            name
-            for name in ("base_sha", "head_sha", "commit_sha", "branch", "pr_number")
-            if not getattr(self, name)
-        ]
-        if undelivered:
-            raise ValueError(
-                f"status=success without {', '.join(undelivered)} — a delivery has a "
-                "pushed commit on a PR; return needs_clarification if you could not deliver"
-            )
+        if self.status == "success":
+            undelivered = [
+                name
+                for name in ("base_sha", "head_sha", "commit_sha", "pr_number")
+                if not getattr(self, name)
+            ]
+            if undelivered:
+                raise ValueError(
+                    f"status=success without {', '.join(undelivered)} — a delivery has a "
+                    "pushed commit on a PR; return needs_clarification if you could not deliver"
+                )
         return self
 
 

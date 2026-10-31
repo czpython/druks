@@ -10,8 +10,10 @@ from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Build
 from druks.durable import Run
 from druks.durable.enums import WorkflowEvent
+from druks.events.models import Event
 from druks.signals import publish
 from druks.testing import seed_dbos_status
+from sqlalchemy import select
 from uuid_utils import uuid7
 
 from software_factory.factories import make_test_work_item
@@ -163,18 +165,39 @@ async def test_pr_review_answers_through_the_review_gate(
     assert answers == ([(item, reply)] if author_can_write else [])
 
 
-async def test_pr_open_reaches_the_work_item(druks_db):
+async def test_github_pr_open_records_the_pr_of_the_items_branch(druks_db):
     item = await make_test_work_item(
         repo="acme/widget", title="t", source="linear", ticket_key="ACME-8"
     )
+    await item.update(branch="agent/ACME-8")
+
+    # GitHub redelivers.
+    for _ in range(2):
+        await publish(
+            "pr.opened",
+            repo="acme/widget",
+            pr_number=12,
+            payload={"branch": "agent/ACME-8", "is_fork": False},
+        )
+
+    opened = await druks_db.scalars(
+        select(Event).where(Event.type == "build.pr_opened", Event.subject_id == str(item.id))
+    )
+    assert item.pr_number == 12
+    assert [event.payload for event in opened] == [{"repo": "acme/widget", "pr_number": 12}]
+
+
+async def test_a_fork_pr_on_the_items_branch_leaves_the_item_alone(druks_db):
+    item = await make_test_work_item(
+        repo="acme/widget", title="t", source="linear", ticket_key="ACME-9"
+    )
+    await item.update(branch="agent/ACME-9")
 
     await publish(
         "pr.opened",
-        subject=item.identity,
-        kind=Build.kind,
-        pr_number=12,
-        branch="agent/eng-8",
+        repo="acme/widget",
+        pr_number=13,
+        payload={"branch": "agent/ACME-9", "is_fork": True},
     )
 
-    refreshed = await WorkItem.get_or_none(id=item.id)
-    assert refreshed.pr_number == 12 and refreshed.branch == "agent/eng-8"
+    assert not item.pr_number

@@ -27,7 +27,6 @@ def _implementation(
             "base_sha": base_sha if delivered else None,
             "head_sha": head_sha if delivered else None,
             "commit_sha": head_sha if delivered else None,
-            "branch": "agent/eng-1" if delivered else None,
             "pr_number": 7 if delivered else None,
             "files_changed": [],
             "acceptance_results": [],

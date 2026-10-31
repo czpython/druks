@@ -73,13 +73,13 @@ class Project(Base):
     @classmethod
     async def get_for_repo(cls, full_name: str) -> "Project | None":
         """The project that owns ``full_name``, for example ``clawhaven/acme-app``."""
-        stmt = (
+        statement = (
             select(cls)
             .join(ProjectRepo, ProjectRepo.project_id == cls.id)
             .where(func.lower(ProjectRepo.full_name) == full_name.lower())
             .limit(1)
         )
-        return (await db_session().scalars(stmt)).first()
+        return (await db_session().scalars(statement)).first()
 
     @classmethod
     async def list_all(cls) -> list["Project"]:
@@ -123,8 +123,8 @@ class ProjectRepo(StoredSubject):
     async def get_in_project(cls, *, project_id: int, repo_id: int) -> "ProjectRepo | None":
         # For the nested /projects/{project_id}/repos/{repo_id} routes. A repo under the
         # wrong project is a miss, not a hit to reject.
-        stmt = select(cls).where(cls.id == repo_id, cls.project_id == project_id).limit(1)
-        return (await db_session().scalars(stmt)).first()
+        statement = select(cls).where(cls.id == repo_id, cls.project_id == project_id).limit(1)
+        return (await db_session().scalars(statement)).first()
 
     def __str__(self) -> str:
         return self.full_name
@@ -135,17 +135,19 @@ class ProjectRepo(StoredSubject):
     @classmethod
     async def list_summaries(cls, account_id: str | None) -> list["ProjectRepoSummary"]:
         # A repo is registered, not transient, so the board shows all of them by name.
-        stmt = select(cls).order_by(cls.full_name)
-        return [project_repo.get_summary() for project_repo in await db_session().scalars(stmt)]
+        statement = select(cls).order_by(cls.full_name)
+        return [
+            project_repo.get_summary() for project_repo in await db_session().scalars(statement)
+        ]
 
     async def get_siblings(self) -> list["ProjectRepo"]:
         # A fresh query, not ``self.project.repos``: the loaded collection goes
         # stale when a repo is registered through its FK in the same session.
-        stmt = select(ProjectRepo).where(
+        statement = select(ProjectRepo).where(
             ProjectRepo.project_id == self.project_id,
             ProjectRepo.full_name != self.full_name,
         )
-        return list(await db_session().scalars(stmt))
+        return list(await db_session().scalars(statement))
 
     @property
     def effective_profile(self) -> dict[str, Any]:
@@ -167,15 +169,17 @@ class ProjectRepo(StoredSubject):
             return await cls.get_for_repo(target)
         # ``iendswith`` escapes ``%`` and ``_`` so a wildcard-shaped name matches the
         # literal slug, not a different registered repo.
-        stmt = select(cls).where(cls.full_name.iendswith(f"/{target}", autoescape=True)).limit(1)
-        return (await db_session().scalars(stmt)).first()
+        statement = (
+            select(cls).where(cls.full_name.iendswith(f"/{target}", autoescape=True)).limit(1)
+        )
+        return (await db_session().scalars(statement)).first()
 
     @classmethod
     async def get_for_repo(
         cls, full_name: str, *, raise_on_missing: bool = False
     ) -> "ProjectRepo | None":
-        stmt = select(cls).where(func.lower(cls.full_name) == full_name.lower()).limit(1)
-        project_repo = (await db_session().scalars(stmt)).first()
+        statement = select(cls).where(func.lower(cls.full_name) == full_name.lower()).limit(1)
+        project_repo = (await db_session().scalars(statement)).first()
         if raise_on_missing and not project_repo:
             # A rename or a GitHub transfer can leave a run with an old repo name.
             # Fail with that reason, not with an unclear NoneType error.
@@ -221,7 +225,7 @@ class WorkItem(StoredSubject):
     # The tracker of the ticket: ``linear``, ``github``, ``jira``, or ``druks``.
     source: Mapped[str] = mapped_column(default="github")
     title: Mapped[str] = mapped_column(default="")
-    # The issue key in the source, for example ``ACME-270``, ``#42``, or ``JIRA-123``.
+    # The issue key in the source, for example ``ACME-270``, ``owner/repo#42``, or ``JIRA-123``.
     # The Linear GraphQL API accepts this key wherever it accepts the UUID.
     ticket_key: Mapped[str]
     ticket_url: Mapped[str | None]
@@ -245,20 +249,45 @@ class WorkItem(StoredSubject):
     async def list_summaries(cls, account_id: str | None) -> list[WorkItemSummary]:
         # The run state colors a row but never decides whether the row shows. The 500
         # most recent rows cover the board.
-        stmt = (
+        statement = (
             select(cls).where(cls.resolution.is_(None)).order_by(cls.updated_at.desc()).limit(500)
         )
-        return [item.get_summary() for item in await db_session().scalars(stmt)]
+        return [item.get_summary() for item in await db_session().scalars(statement)]
 
     @classmethod
     async def get_for_pr(cls, *, repo: str, pr_number: int) -> "WorkItem | None":
-        stmt = (
+        statement = (
             select(cls)
             .where(func.lower(cls.repo) == repo.lower(), cls.pr_number == pr_number)
             .order_by(cls.updated_at.desc())
             .limit(1)
         )
-        return (await db_session().scalars(stmt)).first()
+        return (await db_session().scalars(statement)).first()
+
+    @classmethod
+    async def get_for_branch(cls, *, repo: str, branch: str) -> "WorkItem | None":
+        statement = (
+            select(cls)
+            .where(func.lower(cls.repo) == repo.lower(), cls.branch == branch)
+            .order_by(cls.updated_at.desc())
+            .limit(1)
+        )
+        return (await db_session().scalars(statement)).first()
+
+    async def create_branch(self) -> None:
+        """Create the attempt's branch, so the implementer starts on it and the
+        ``pr.opened`` webhook finds this item. A name GitHub holds gets a number."""
+        stem = f"agent/{self.ticket_key}"
+        if self.source == "github":
+            # A GitHub ticket key is ``owner/repo#42``.
+            stem = f"agent/issue-{self.ticket_key.rsplit('#', 1)[1]}"
+        github = await Github.get_client()
+        branch, number = stem, 1
+        while await github.has_branch(self.repo, branch):
+            number += 1
+            branch = f"{stem}-{number}"
+        await github.create_branch(self.repo, branch)
+        await self.update(branch=branch)
 
     async def start_attempt(self) -> None:
         self.branch = None
@@ -302,23 +331,23 @@ class WorkItem(StoredSubject):
         source: str,
         ticket_key: str,
     ) -> "WorkItem | None":
-        stmt = select(cls).where(cls.source == source, cls.ticket_key == ticket_key).limit(1)
-        return (await db_session().scalars(stmt)).first()
+        statement = select(cls).where(cls.source == source, cls.ticket_key == ticket_key).limit(1)
+        return (await db_session().scalars(statement)).first()
 
     @classmethod
     async def list_recent(cls, *, limit: int = 50, offset: int = 0) -> list["WorkItem"]:
-        stmt = select(cls).order_by(cls.updated_at.desc()).limit(limit).offset(offset)
-        return list(await db_session().scalars(stmt))
+        statement = select(cls).order_by(cls.updated_at.desc()).limit(limit).offset(offset)
+        return list(await db_session().scalars(statement))
 
     @classmethod
     async def list_handoff(cls, *, limit: int = 10) -> list["WorkItem"]:
-        stmt = (
+        statement = (
             select(cls)
             .where(cls.resolved_at.is_not(None))
             .order_by(cls.resolved_at.desc())
             .limit(limit)
         )
-        return list(await db_session().scalars(stmt))
+        return list(await db_session().scalars(statement))
 
     async def set_ticket_status(self, status: TicketStatus) -> None:
         # Import cycle: the app imports this module through ticketing/druks.py.

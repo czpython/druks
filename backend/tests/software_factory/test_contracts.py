@@ -81,7 +81,6 @@ def _implementation(**overrides):
         "base_sha": "a",
         "head_sha": "b",
         "commit_sha": "b",
-        "branch": "agent/eng-1",
         "pr_number": 7,
         "files_changed": [],
         "acceptance_results": [],
@@ -99,7 +98,7 @@ def test_implementation_success_requires_a_delivery():
     # success = a pushed commit on a PR; a success without them is the fabrication
     # path (the original setup bug) and must fail at the contract, loudly.
     with pytest.raises(ValueError, match="pr_number"):
-        _implementation(branch=None, pr_number=None)
+        _implementation(pr_number=None)
 
 
 def test_needs_clarification_may_omit_the_delivery_fields():
@@ -112,7 +111,6 @@ def test_needs_clarification_may_omit_the_delivery_fields():
         base_sha=None,
         head_sha=None,
         commit_sha=None,
-        branch=None,
         pr_number=None,
     )
     assert bailed.status == "needs_clarification"

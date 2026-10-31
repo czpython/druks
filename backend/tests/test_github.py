@@ -51,16 +51,16 @@ class _GitHub:
 
 
 class _TestGitHubClient(GitHubClient):
-    def __init__(self, gh: _GitHub) -> None:
-        self.gh = gh
+    def __init__(self, github: _GitHub) -> None:
+        self.github = github
 
-    async def _for_repo(self, repo: str) -> Any:
-        return self.gh
+    async def _get_installation_client(self, repo: str) -> Any:
+        return self.github
 
 
 async def test_create_review_omits_empty_comments() -> None:
-    gh = _GitHub()
-    client = _TestGitHubClient(gh)
+    github = _GitHub()
+    client = _TestGitHubClient(github)
 
     await client.create_review(
         "ClawHaven/example",
@@ -69,7 +69,7 @@ async def test_create_review_omits_empty_comments() -> None:
         body="Approved.",
     )
 
-    assert gh.rest.pulls.create_review_kwargs == {
+    assert github.rest.pulls.create_review_kwargs == {
         "owner": "ClawHaven",
         "repo": "example",
         "pr_number": 7,
@@ -79,12 +79,12 @@ async def test_create_review_omits_empty_comments() -> None:
 
 
 async def test_enable_auto_merge_uses_squash_mutation() -> None:
-    gh = SimpleNamespace(async_graphql=AsyncMock())
-    client = _TestGitHubClient(gh)
+    github = SimpleNamespace(async_graphql=AsyncMock())
+    client = _TestGitHubClient(github)
 
     assert await client.enable_auto_merge("ClawHaven/example", "PR_node")
 
-    query, variables = gh.async_graphql.await_args.args
+    query, variables = github.async_graphql.await_args.args
     assert "enablePullRequestAutoMerge" in query
     assert "mergeMethod: SQUASH" in query
     assert variables == {"id": "PR_node"}
@@ -159,6 +159,21 @@ async def test_update_pull_request_branch_raises_other_failures() -> None:
         await client.update_pull_request_branch("ClawHaven/example", 7)
 
     assert raised.value is error
+
+
+async def test_create_branch_starts_at_the_head_of_the_default_branch() -> None:
+    repository = SimpleNamespace(parsed_data=SimpleNamespace(default_branch="trunk"))
+    head = SimpleNamespace(parsed_data=SimpleNamespace(object_=SimpleNamespace(sha="abc123")))
+    git = SimpleNamespace(async_get_ref=AsyncMock(return_value=head), async_create_ref=AsyncMock())
+    repos = SimpleNamespace(async_get=AsyncMock(return_value=repository))
+    client = _TestGitHubClient(SimpleNamespace(rest=SimpleNamespace(repos=repos, git=git)))
+
+    await client.create_branch("ClawHaven/example", "agent/ACME-5")
+
+    git.async_get_ref.assert_awaited_once_with("ClawHaven", "example", "heads/trunk")
+    git.async_create_ref.assert_awaited_once_with(
+        "ClawHaven", "example", ref="refs/heads/agent/ACME-5", sha="abc123"
+    )
 
 
 def _merge_when_ready_client(
@@ -379,15 +394,15 @@ class _StuckOn401Pulls:
         raise _make_request_failed(401)
 
 
-class _CountingForRepoClient(GitHubClient):
-    def __init__(self, gh_factory) -> None:
-        self.gh_factory = gh_factory
+class _CountingClient(GitHubClient):
+    def __init__(self, github_factory) -> None:
+        self.github_factory = github_factory
         self.for_repo_calls = 0
         self.invalidate_calls = 0
 
-    async def _for_repo(self, repo: str) -> Any:
+    async def _get_installation_client(self, repo: str) -> Any:
         self.for_repo_calls += 1
-        return self.gh_factory()
+        return self.github_factory()
 
     async def _invalidate_for_repo(self, repo: str) -> None:
         self.invalidate_calls += 1
@@ -396,12 +411,12 @@ class _CountingForRepoClient(GitHubClient):
 async def test_401_invalidates_cache_and_retries_once_then_succeeds() -> None:
     pulls = _Flaky401Pulls()
 
-    class _Gh:
+    class _GitHubStub:
         def __init__(self) -> None:
             self.rest = type("R", (), {"pulls": pulls})()
 
-    gh = _Gh()
-    client = _CountingForRepoClient(lambda: gh)
+    github = _GitHubStub()
+    client = _CountingClient(lambda: github)
 
     # No exception — the second attempt succeeds.
     await client.update_pull_request_body("ClawHaven/example", 7, "new body")
@@ -414,11 +429,11 @@ async def test_401_invalidates_cache_and_retries_once_then_succeeds() -> None:
 async def test_403_does_not_retry() -> None:
     pulls = _ForbiddenPulls()
 
-    class _Gh:
+    class _GitHubStub:
         def __init__(self) -> None:
             self.rest = type("R", (), {"pulls": pulls})()
 
-    client = _CountingForRepoClient(lambda: _Gh())
+    client = _CountingClient(lambda: _GitHubStub())
 
     try:
         await client.update_pull_request_body("ClawHaven/example", 7, "new body")
@@ -434,11 +449,11 @@ async def test_403_does_not_retry() -> None:
 async def test_401_on_retry_surfaces_to_caller() -> None:
     pulls = _StuckOn401Pulls()
 
-    class _Gh:
+    class _GitHubStub:
         def __init__(self) -> None:
             self.rest = type("R", (), {"pulls": pulls})()
 
-    client = _CountingForRepoClient(lambda: _Gh())
+    client = _CountingClient(lambda: _GitHubStub())
 
     try:
         await client.update_pull_request_body("ClawHaven/example", 7, "new body")
@@ -474,7 +489,7 @@ async def test_a_repo_token_retries_on_401_and_succeeds() -> None:
         def __init__(self) -> None:
             self._app = _AppGitHub()
             self._installation_cache: dict[str, int] = {"ClawHaven/example": 12345}
-            self._repo_gh_cache: dict[int, Any] = {}
+            self._installation_clients: dict[int, Any] = {}
             self.invalidated: list[str] = []
 
         async def _installation_id(self, repo: str) -> int:
@@ -534,10 +549,10 @@ async def test_github_client_aclose_drops_cache_without_raising() -> None:
     per-installation cache."""
     client = GitHubClient.__new__(GitHubClient)
     client._app = GitHub("fake-token")
-    client._repo_gh_cache = {1: GitHub("fake-token")}
+    client._installation_clients = {1: GitHub("fake-token")}
 
     await client.aclose()  # must not raise
-    assert client._repo_gh_cache == {}
+    assert client._installation_clients == {}
 
 
 async def test_get_file_content_returns_none_when_repo_missing() -> None:
@@ -551,7 +566,7 @@ async def test_get_file_content_returns_none_when_repo_missing() -> None:
         def __init__(self) -> None:  # skip real auth
             pass
 
-        async def _for_repo(self, repo: str) -> Any:
+        async def _get_installation_client(self, repo: str) -> Any:
             raise _make_request_failed(404)
 
     client = _RepoMissingClient()
@@ -591,7 +606,7 @@ async def test_get_file_content_returns_none_when_app_not_installed() -> None:
         def __init__(self) -> None:  # skip real auth
             pass
 
-        async def _for_repo(self, repo: str) -> Any:
+        async def _get_installation_client(self, repo: str) -> Any:
             raise GitHubAppNotInstalledError(repo, app="example-app")
 
     client = _UninstalledClient()
@@ -638,7 +653,7 @@ async def test_get_bot_git_author_looks_up_the_bot_with_a_live_installation(
             self._slug = "example-app"
             self._app = SimpleNamespace(rest=SimpleNamespace(apps=_Apps()))
 
-        async def _get_for_installation(self, installation_id: int) -> _InstallationGitHub:
+        async def _create_installation_client(self, installation_id: int) -> _InstallationGitHub:
             return _InstallationGitHub(installation_id)
 
     client = _SluggedClient()

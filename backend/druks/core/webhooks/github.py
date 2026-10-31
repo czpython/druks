@@ -147,12 +147,17 @@ class GitHubEvents(Webhook):
 
     async def _publish_pull_request(self, fact: str) -> Response:
         pull_request = self.data["pull_request"]
+        repo = _repo_name(self.data)
+        head_repo = pull_request["head"]["repo"]
+        # GitHub nulls the head repo after the fork is deleted.
+        is_fork = not head_repo or head_repo["full_name"] != repo
         await publish(
             fact,
-            repo=_repo_name(self.data),
+            repo=repo,
             pr_number=pull_request["number"],
             payload={
                 "branch": pull_request["head"]["ref"],
+                "is_fork": is_fork,
                 "base_branch": pull_request["base"]["ref"],
                 "head_sha": pull_request["head"]["sha"],
                 "title": pull_request["title"],
