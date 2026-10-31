@@ -125,6 +125,13 @@ When the source ticket asks for a manual smoke or visual check, do ONE of these 
 
 Smoke / manual-verify requests in the source are operator concerns, not implementer concerns. Honor the intent (the operator wants to test the UX) without making the agent loop block on something it can't satisfy.
 
+STATUS — the `status` schema field. Return `blocked` only when your tracker tools cannot read
+the source ticket or you cannot read the repo. Then state in `plan_markdown` what is missing
+and the error you got. Leave `questions` and `acceptance_criteria` empty. Druks fails the run
+with your `plan_markdown` as the reason, before any review. Return `planned` for every other
+plan. A genuine intent question is not missing access: return it in `questions` with `status`
+set to `planned`.
+
 CONFIDENCE — the `confidence` schema field. Report how confident you are that this plan is
 the change the operator wants: `high` only when the ticket is unambiguous, the repo told you
 the shape, and the blast radius is small enough that an operator skimming the diff would

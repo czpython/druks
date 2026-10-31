@@ -29,6 +29,7 @@ def test_plan_outputs_declare_their_saved_results():
         questions=[],
         rejected_approaches=[],
         confidence="high",
+        status="planned",
         assignee_github_login=None,
     )
     revision = ContractRevisionOutput(

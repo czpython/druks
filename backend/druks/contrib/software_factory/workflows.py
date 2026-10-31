@@ -287,6 +287,10 @@ class Build(Workflow):
                 operator_note=operator_note,
                 reviewer_notes=critique,
             )
+            # The planner could not read the ticket or the repo. No review can fix missing
+            # access, so the run fails here with the planner's reason.
+            if plan.status == "blocked":
+                raise FatalError(plan.plan_markdown)
             critique = ""
             if not plan.questions:
                 if plan_gate != "human" and not reviewed:
