@@ -111,6 +111,9 @@ class PlanData(BaseModel):
     # The planner's self-reported calibration; "medium" for producers that
     # don't assert one (a contract revision), which never skips a park.
     confidence: Literal["high", "medium", "low"] = "medium"
+    # Whether the planner could plan at all; "planned" for producers that don't
+    # assert one (a contract revision).
+    status: Literal["planned", "blocked"] = "planned"
     # Resolved by the planner; a revision carries None.
     assignee_github_login: str | None = None
 
@@ -146,6 +149,10 @@ class PlanOutput(AgentOutput):
     questions: list[QuestionOutput] = Field(max_length=8)
     rejected_approaches: list[str]
     confidence: Literal["high", "medium", "low"]
+    # ``blocked`` = the planner could not read the ticket or the repo, and
+    # ``plan_markdown`` names what is missing. The workflow turns that into a
+    # run-stopping failure.
+    status: Literal["planned", "blocked"]
     # Required but nullable: the planner always reports the field, null when it
     # resolved no assignee login convincingly.
     assignee_github_login: str | None
@@ -163,6 +170,7 @@ class PlanOutput(AgentOutput):
             questions=self.questions,
             rejected_approaches=self.rejected_approaches,
             confidence=self.confidence,
+            status=self.status,
             assignee_github_login=self.assignee_github_login,
         )
 

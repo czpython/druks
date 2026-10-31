@@ -200,6 +200,9 @@ def test_ask_contracts_cap_identity_and_cardinality():
             plan_markdown="m",
             acceptance_criteria=[],
             questions=[O.QuestionOutput(id=f"q{i}", prompt="p", options=[]) for i in range(9)],
+            rejected_approaches=[],
+            confidence="medium",
+            status="planned",
             assignee_github_login=None,
         )
 

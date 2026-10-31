@@ -5,6 +5,7 @@ from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import (
     AcceptanceCriterionOutput,
     PlanData,
+    PlanOutput,
     QuestionOptionOutput,
     QuestionOutput,
     ReviewOutput,
@@ -60,6 +61,19 @@ def _acceptance_criteria() -> list[AcceptanceCriterionOutput]:
             verification="Read the changed code.",
         )
     ]
+
+
+def _blocked_plan(reason: str) -> PlanData:
+    # The agent call returns to_result(), so the status must survive the conversion.
+    return PlanOutput(
+        plan_markdown=reason,
+        acceptance_criteria=[],
+        questions=[],
+        rejected_approaches=[],
+        confidence="low",
+        status="blocked",
+        assignee_github_login=None,
+    ).to_result()
 
 
 async def test_gate_mode_parks_every_plan_and_never_calls_the_reviewer(monkeypatch):
@@ -567,6 +581,43 @@ async def test_operator_rounds_after_the_critique_never_rerun_the_reviewer(monke
     assert parks == 2
     assert [passing["reviewer_notes"] for passing in passes] == ["", "wrong layer", ""]
     assert [passing["operator_note"] for passing in passes] == ["", "", "steer left"]
+
+
+@pytest.mark.parametrize("plan_gate", ["human", "machine", "machine_then_human", "adaptive"])
+async def test_blocked_plan_fails_the_run_before_any_review(monkeypatch, plan_gate):
+    """A planner that cannot read the ticket or the repo fails the run with its
+    own reason. Neither the machine reviewer nor the operator sees the plan."""
+    flow = _flow(plan_gate=plan_gate)
+    _fake_plans(monkeypatch, _blocked_plan("Blocked: the tracker tools cannot read ACME-1."))
+    _no_review_agent(monkeypatch)
+
+    async def fail_park(*, questions=None, context=""):
+        raise AssertionError("a blocked plan must not park")
+
+    flow.review = fail_park
+
+    with pytest.raises(FatalError) as failure:
+        await flow._plan_phase()
+    assert str(failure.value) == "Blocked: the tracker tools cannot read ACME-1."
+
+
+async def test_blocked_redraft_fails_the_run_instead_of_implementing(monkeypatch):
+    """The machine gate sends a redraft to implementation without a second
+    review, so a blocked redraft fails the run on its own pass."""
+    flow = _flow(plan_gate="machine")
+    passes = _fake_plans(
+        monkeypatch,
+        PlanData(plan_markdown="v1"),
+        _blocked_plan("Blocked: the repo checkout is empty."),
+    )
+    _fake_grades(
+        monkeypatch,
+        ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body="name the wire schema"),
+    )
+
+    with pytest.raises(FatalError, match="the repo checkout is empty"):
+        await flow._plan_phase()
+    assert [passing["reviewer_notes"] for passing in passes] == ["", "name the wire schema"]
 
 
 async def test_review_work_ask_renders_a_notification_body(monkeypatch):
