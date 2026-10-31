@@ -33,6 +33,8 @@ and in scope for review even on lines the diff leaves alone.
 13. positive conditions: `if value: do`, never `if not value:` bare-return followed
     by the happy path one positive branch could hold — flip it and let the miss
     fall through (negative guards stay for raises and real multi-exit chains)
+14. each new test fails when you revert the source change; delete a test that
+    passes without it
 
 Process: never pipe a test run that gates a commit — run tests as their own step.
 After any scripted edit, grep that it landed. As the last step before commit,
