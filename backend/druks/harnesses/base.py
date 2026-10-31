@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # versions; the value is part of the hash, so a bump reshuffles the buckets.
 MANIFEST_SCHEMA_VERSION = 2
 
-_AFTER_AGENT_HOOK = Path(__file__).parent / "druks-after-agent.mjs"
+_AFTER_AGENT_HOOK = Path(__file__).parent / "druks-after-agent.sh"
 
 
 class Harness(ABC):
@@ -224,6 +224,11 @@ class Harness(ABC):
         for one-shot callers without parent state.
         """
         return call_id or str(uuid.uuid4())
+
+    @classmethod
+    def get_after_agent_reply(cls, text: str) -> str:
+        """What the hook prints for ``text``: this CLI's way to take one more turn."""
+        return text
 
     @staticmethod
     def after_agent_hook_path(run_dir: str) -> str:

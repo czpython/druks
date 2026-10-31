@@ -495,6 +495,20 @@ async def test_wait_answers_the_after_agent_request_once(fast_sleep: list[float]
     assert vm.files["/work/runs/r-1/after_agent.answer"] == b"Run the tests."
 
 
+async def test_wait_names_a_hook_the_run_never_asked(fast_sleep: list[float]):
+    vm = _FakeVM()
+    vm.write("/work/runs/r-1/exit_code", b"0")
+    sandbox = _FakeSandbox(vm=vm)
+    run = Exec(host=sandbox, run_id="r-1", run_dir="/work/runs/r-1")  # type: ignore[arg-type]
+
+    async def after_agent() -> str:
+        raise AssertionError("no request to answer")
+
+    assert await run.wait(hooks={"after_agent": after_agent}) == 0
+
+    assert run.unasked_hooks == ("after_agent",)
+
+
 async def test_wait_kills_the_run_when_the_hook_raises(fast_sleep: list[float]):
     vm = _FakeVM()
     vm.write("/work/runs/r-1/after_agent.request", b"")

@@ -12,6 +12,7 @@ from druks.db import db_session
 from druks.durable import AgentCall, WorkflowError
 from druks.exceptions import ObjectNotFound
 from druks.files import File
+from druks.harnesses.claude import ClaudeHarness
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.datastructures import McpServer
 from druks.sandbox.exceptions import SandboxDownloadError
@@ -476,7 +477,9 @@ async def test_after_agent_hooks_answer_the_turn_from_a_box_of_their_own(
 
     await hooked._run(db_session(), workflow_id="wf-9")
 
-    assert answers == ["The check says True.\n\nRun the tests."]
+    assert answers == [
+        ClaudeHarness.get_after_agent_reply("The check says True.\n\nRun the tests.")
+    ]
     assert seen == [("PROMPT:dummy/agent.md:repo=None", "warm-host")]
     lease.assert_awaited_once()
     nested_box.run_agent.assert_awaited_once()

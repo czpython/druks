@@ -1,5 +1,7 @@
 import json
 import shlex
+import subprocess
+import time
 from pathlib import Path
 
 import druks.harnesses.base
@@ -12,7 +14,7 @@ from druks.sandbox.datastructures import McpServer
 
 _CODEX_MODEL = CodexHarness.default_model
 _HOOK = Harness.after_agent_hook_path("/home/exedev/work/runs/run-1")
-_HOOK_BODY = (Path(druks.harnesses.base.__file__).parent / "druks-after-agent.mjs").read_text()
+_HOOK_BODY = (Path(druks.harnesses.base.__file__).parent / "druks-after-agent.sh").read_text()
 
 
 def _written(wrapper: str) -> dict[str, str]:
@@ -98,9 +100,7 @@ async def test_claude_refuses_the_first_result_of_a_hooked_call():
             "PreToolUse": [
                 {
                     "matcher": "StructuredOutput",
-                    "hooks": [
-                        {"type": "command", "command": f"node {_HOOK} claude", "timeout": 900}
-                    ],
+                    "hooks": [{"type": "command", "command": f"sh {_HOOK}", "timeout": 900}],
                 }
             ]
         },
@@ -179,9 +179,39 @@ async def test_codex_blocks_the_first_stop_of_a_hooked_call():
     hook = parts.index("--dangerously-bypass-hook-trust")
     assert parts[hook - 2 : hook] == [
         "-c",
-        f'hooks.Stop=[{{hooks=[{{type="command",command="node {_HOOK} codex",timeout=900}}]}}]',
+        f'hooks.Stop=[{{hooks=[{{type="command",command="sh {_HOOK}",timeout=900}}]}}]',
     ]
     assert _written(inv.args[2])[_HOOK] == _HOOK_BODY
+
+
+def test_the_hook_prints_the_answer_once(tmp_path: Path):
+    hook = tmp_path / "druks-after-agent.sh"
+    hook.write_text(_HOOK_BODY)
+
+    waiting = subprocess.Popen(["sh", hook], stdout=subprocess.PIPE, text=True)
+    while not (tmp_path / "after_agent.request").exists():
+        time.sleep(0.01)
+    (tmp_path / "after_agent.answer").write_text("Run the tests.")
+    assert waiting.communicate(timeout=5)[0] == "Run the tests."
+
+    second = subprocess.run(["sh", hook], capture_output=True, text=True, check=True, timeout=5)
+    assert second.stdout == ""
+
+
+def test_claude_turns_a_nudge_into_a_denied_result():
+    assert ClaudeHarness.get_after_agent_reply("") == ""
+    reply = json.loads(ClaudeHarness.get_after_agent_reply("Run the tests."))
+    assert reply["hookSpecificOutput"] == {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "Run the tests.",
+    }
+
+
+def test_codex_turns_a_nudge_into_a_blocked_stop():
+    assert CodexHarness.get_after_agent_reply("") == ""
+    reply = json.loads(CodexHarness.get_after_agent_reply("Run the tests."))
+    assert reply == {"decision": "block", "reason": "Run the tests."}
 
 
 async def test_claude_reads_its_key_from_a_placeholder_in_the_vm():
