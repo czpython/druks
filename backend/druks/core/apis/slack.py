@@ -14,7 +14,9 @@ SLACK_AUTHORITY = "https://slack.com/{team_id}"
 SLACK_BOT_SCOPES = (
     "chat:write",
     "channels:history",
+    "channels:read",
     "groups:history",
+    "groups:read",
     "im:history",
     "mpim:history",
     "users:read",

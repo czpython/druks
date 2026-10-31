@@ -116,6 +116,20 @@ def message_event(
     }
 
 
+def join_event(user):
+    return {
+        "type": "event_callback",
+        "team_id": "T1",
+        "event": {
+            "type": "member_joined_channel",
+            "user": user,
+            "channel": "C1",
+            "channel_type": "C",
+            "team": "T1",
+        },
+    }
+
+
 async def receive(data):
     webhook = SlackEvents(None, {}, None)
     webhook.raw_body = json.dumps(data).encode()
@@ -163,7 +177,7 @@ async def test_an_unlinked_person_gets_a_link_that_answers_their_message_once_th
 ):
     await receive(message_event())
 
-    [(method, sent)] = slack
+    [_, (method, sent)] = slack
     assert (method, sent["channel"]) == ("chat.postMessage", ANA)
     link = sent["text"].partition("https://druks.example")[2]
     assert not await Conversation.list_for_connection(druks_db, card.id)
@@ -187,7 +201,7 @@ async def test_a_forwarded_link_links_only_the_person_who_opens_it(
     card, druks_db, druks_client, slack, delivery, endpoint
 ):
     await receive(message_event())
-    [(_, sent)] = slack
+    [_, (_, sent)] = slack
     link = sent["text"].partition("https://druks.example")[2]
     operator = await Account.get_or_create(druks_db, "op@example.com")
     await link_person(druks_db, operator, user_id="U200")
@@ -437,12 +451,45 @@ async def test_an_unlinked_person_who_tags_the_bot_gets_the_link_by_direct_messa
     await receive(room_event(ts="10.0"))
     await receive(room_event(text="hello?", ts="11.0", thread_ts="10.0"))
 
-    [(_, direct_message), (_, reply)] = slack
-    assert direct_message["channel"] == ANA
+    [(_, welcome), (_, direct_message), (_, reply)] = slack
+    assert welcome["channel"] == direct_message["channel"] == ANA
     assert "/api/chat/services/slack/link/" in direct_message["text"]
     assert (reply["channel"], reply["thread_ts"]) == ("C1", "10.0")
     assert f"<@{ANA}>" in reply["text"] and "/link/" not in reply["text"]
     delivery.assert_not_awaited()
+
+
+async def test_a_person_hears_the_welcome_once_before_their_first_link(
+    card, slack, endpoint, monkeypatch
+):
+    monkeypatch.setattr(
+        "druks.chat.channels.slack.channel.iter_apps",
+        lambda: [
+            SimpleNamespace(description="Builds features.", builtin=False),
+            SimpleNamespace(description="The platform.", builtin=True),
+        ],
+    )
+
+    await receive(message_event())
+    await receive(message_event(text="hello?", ts="2.0"))
+
+    [(_, welcome), (_, first_link), (_, second_link)] = slack
+    assert welcome["channel"] == ANA
+    assert "- Builds features." in welcome["text"]
+    assert "The platform." not in welcome["text"]
+    assert "https://druks.example/settings/providers" in welcome["text"]
+    assert "/link/" in first_link["text"] and "/link/" in second_link["text"]
+
+
+async def test_the_bot_welcomes_a_room_when_it_joins_and_ignores_other_joins(card, slack, endpoint):
+    await receive(join_event(ANA))
+    assert not slack
+
+    await receive(join_event(BOT))
+
+    [(method, sent)] = slack
+    assert (method, sent["channel"]) == ("chat.postMessage", "C1")
+    assert "https://druks.example/chat" in sent["text"]
 
 
 async def test_the_agent_reads_its_thread_and_knows_who_wrote_what(card, druks_db, monkeypatch):

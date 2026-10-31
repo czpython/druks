@@ -368,6 +368,7 @@ async def test_forwarded_messages_reach_the_bot_once_and_only_from_its_workspace
     delivery.assert_awaited_once()
     assert [(token, method, sent["channel"]) for token, method, sent in slack] == [
         (BOT_TOKEN, "chat.postMessage", "U200"),
+        (BOT_TOKEN, "chat.postMessage", "U200"),
         (BOT_TOKEN, "chat.postMessage", "C1"),
     ]
 

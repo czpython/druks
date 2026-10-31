@@ -8,6 +8,7 @@ from slack_sdk.errors import SlackApiError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.models import Account
+from druks.apps.loader import iter_apps
 from druks.chat.channels.base import Channel
 from druks.chat.enums import ConversationSource
 from druks.chat.exceptions import ChannelHasNoThreadsError, FileNotInThreadError
@@ -17,6 +18,7 @@ from druks.core.apis.slack import SLACK_AUTHORITY, SlackClient
 from druks.core.services import Slack
 from druks.files.datastructures import File
 from druks.models import Base
+from druks.prompts import render_prompt
 from druks.redis import get_client
 from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
@@ -29,6 +31,9 @@ from .constants import (
     REPLY_PIECE_CHARACTERS,
     THREAD_MESSAGES,
     UNLINKED_REPLY,
+    WELCOME_KEY,
+    WELCOME_TEMPLATE,
+    WELCOME_TTL_SECONDS,
 )
 
 logger = logging.getLogger(__name__)
@@ -132,15 +137,31 @@ class SlackChannel(Channel):
         return conversation
 
     @classmethod
+    async def get_welcome(cls) -> str:
+        """What the bot says when it meets a room or a person, for this installation's
+        apps and address."""
+        return await render_prompt(
+            WELCOME_TEMPLATE,
+            apps=[app for app in iter_apps() if app.description and not app.builtin],
+            endpoint=load_settings().urls.endpoint.rstrip("/"),
+        )
+
+    @classmethod
     async def send_link(cls, message: dict) -> None:
         """Hold the message under a private link, and send the person the link in their
-        DM. In a room, also tell them in the thread where the link is."""
+        DM, after the welcome if they have not had it. In a room, also tell them in the
+        thread where the link is."""
         token = secrets.token_urlsafe(32)
         await get_client().set(
             LINK_KEY.format(token=token), json.dumps(message), ex=LINK_TTL_SECONDS
         )
         endpoint = load_settings().urls.endpoint.rstrip("/")
         client = SlackClient(token=await Slack.get_bot_token())
+        is_first_contact = await get_client().set(
+            WELCOME_KEY.format(user=message["user"]), "1", nx=True, ex=WELCOME_TTL_SECONDS
+        )
+        if is_first_contact:
+            await client.post_markdown(message["user"], await cls.get_welcome())
         # Slack drops a message that only one person sees unless they are active in
         # that client, so the link goes to their DM, which keeps it.
         await client.post_markdown(

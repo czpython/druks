@@ -129,8 +129,8 @@ class SlackInteractivity(SlackWebhook):
 
 
 class SlackEvents(SlackWebhook):
-    """Publishes each person's message as a fact. It knows nothing about
-    conversations."""
+    """Publishes each person's message, and the bot's join to a room, as facts. It
+    knows nothing about conversations."""
 
     category = "events"
 
@@ -146,12 +146,14 @@ class SlackEvents(SlackWebhook):
         return JSONResponse({"challenge": self.data["challenge"]})
 
     async def on_event_callback(self) -> Response:
-        """Publish a person's message. Edits, deletes, joins, hidden events, the bot's
-        own messages, and people from other workspaces are not facts for anyone."""
+        """Publish a person's message, and the bot's own join to a room. Edits, deletes,
+        other joins, hidden events, the bot's own messages, and people from other
+        workspaces are not facts for anyone."""
         event = self.data["event"]
         bot_user_id = (await Slack.get()).identity["bot_user_id"]
         is_from_person = (
-            (not event.get("subtype") or event["subtype"] in ("file_share", "thread_broadcast"))
+            event["type"] == "message"
+            and (not event.get("subtype") or event["subtype"] in ("file_share", "thread_broadcast"))
             and not event.get("hidden")
             and not event.get("bot_id")
             and event.get("user") != bot_user_id
@@ -159,4 +161,6 @@ class SlackEvents(SlackWebhook):
         )
         if is_from_person:
             await publish("slack.message", message=event)
+        elif event["type"] == "member_joined_channel" and event["user"] == bot_user_id:
+            await publish("slack.bot_joined", room=event["channel"])
         return JSONResponse({"accepted": True})

@@ -447,6 +447,7 @@ class Slack(Service):
                 "event_subscriptions": {
                     "request_url": f"{urls.webhook_base}/_external/slack/events/",
                     "bot_events": [
+                        "member_joined_channel",
                         "message.channels",
                         "message.groups",
                         "message.im",
