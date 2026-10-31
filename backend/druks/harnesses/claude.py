@@ -142,7 +142,7 @@ class ClaudeHarness(Harness):
         write_hook = ""
         if "after_agent" in hooks:
             # Claude Code ignores a Stop hook in a structured run.
-            command = f"node {self.after_agent_hook_path(in_vm_run_dir)} claude"
+            command = f"sh {self.after_agent_hook_path(in_vm_run_dir)}"
             settings_hooks = {
                 "PreToolUse": [
                     {
@@ -270,6 +270,17 @@ class ClaudeHarness(Harness):
         # The catalog entry puts the placeholder in ANTHROPIC_AUTH_TOKEN, which
         # the CLI sends as a bearer. It never refreshes a token from there.
         return [SecretRef(name=AnthropicProvider.id, secret_id=subscription.id)]
+
+    @classmethod
+    def get_after_agent_reply(cls, text: str) -> str:
+        if text:
+            output = {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": text,
+            }
+            return json.dumps({"hookSpecificOutput": output})
+        return ""
 
     def _command_args(self, hooks: dict[str, object]) -> tuple[str, ...]:
         args = (self.command,)

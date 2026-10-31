@@ -373,6 +373,10 @@ class CodexHarness(Harness):
         "internal server error": HarnessOverloadedError,
     }
 
+    @classmethod
+    def get_after_agent_reply(cls, text: str) -> str:
+        return json.dumps({"decision": "block", "reason": text}) if text else ""
+
     def _build_codex_wrapper(
         self,
         *,
@@ -394,7 +398,7 @@ class CodexHarness(Harness):
         in_vm_session = f"{in_vm_run_dir}/session.jsonl"
         write_hook = ""
         if "after_agent" in hooks:
-            command = f"node {self.after_agent_hook_path(in_vm_run_dir)} codex"
+            command = f"sh {self.after_agent_hook_path(in_vm_run_dir)}"
             codex_flags = (
                 *codex_flags,
                 "-c",

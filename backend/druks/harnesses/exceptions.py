@@ -119,6 +119,13 @@ class HarnessNotConnectedError(HarnessError):
     code = "not_connected"
 
 
+class HarnessHookError(HarnessError):
+    """The agent finished and a hook of the call never ran. Never auto-retried:
+    a rerun on the same box fails the same way and spends again."""
+
+    code = "hook_not_run"
+
+
 class HarnessFirstByteTimeoutError(HarnessError):
     """A harness subprocess produced zero stdout bytes within the
     first-byte deadline and was killed.

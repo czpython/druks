@@ -58,6 +58,7 @@ class Exec:
         self.host = host
         self.run_id = run_id
         self.run_dir = run_dir
+        self.unasked_hooks: tuple[str, ...] = ()
 
     # File paths
 
@@ -169,13 +170,14 @@ class Exec:
             try:
                 connection = await self.host.ssh_connection()
                 async with connection.start_sftp_client() as sftp:
-                    if await self._is_done(sftp):
-                        return await self._read_exit_code(sftp)
                     asked = [
                         name
                         for name in unanswered
                         if await sftp.exists(f"{self.run_dir}/{name}.request")
                     ]
+                    if await self._is_done(sftp):
+                        self.unasked_hooks = tuple(name for name in unanswered if name not in asked)
+                        return await self._read_exit_code(sftp)
                 reconnect_start = None
                 attempt = 0
             except (asyncssh.Error, OSError, ConnectionError) as error:

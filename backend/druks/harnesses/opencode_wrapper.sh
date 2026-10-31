@@ -9,16 +9,11 @@
 run_dir="$DRUKS_RUN_DIR"
 
 write_request() {
-  node -e '
-    const fs = require("fs");
-    const [textPath, requestPath] = process.argv.slice(1);
-    const request = {
-      model: {providerID: process.env.DRUKS_PROVIDER, modelID: process.env.DRUKS_MODEL},
-      parts: [{type: "text", text: fs.readFileSync(textPath, "utf8")}],
-      format: {type: "json_schema", schema: JSON.parse(process.env.DRUKS_SCHEMA)},
-    };
-    fs.writeFileSync(requestPath, JSON.stringify(request));
-  ' "$1" "$run_dir/request.json"
+  jq -cn --rawfile text "$1" '{
+    model: {providerID: env.DRUKS_PROVIDER, modelID: env.DRUKS_MODEL},
+    parts: [{type: "text", text: $text}],
+    format: {type: "json_schema", schema: env.DRUKS_SCHEMA | fromjson},
+  }' > "$run_dir/request.json"
 }
 
 mkdir -p "$run_dir" &&
@@ -49,9 +44,7 @@ fi
 curl --fail --silent --show-error -X POST \
   "$base_url/session?directory=$DRUKS_WORKSPACE_QUERY" \
   -H 'content-type: application/json' --data '{}' > "$run_dir/session.json" || exit $?
-session_id=$(node -e '
-  process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).id)
-' "$run_dir/session.json") || exit $?
+session_id=$(jq -r .id "$run_dir/session.json") || exit $?
 deadline=$(($(date +%s) + DRUKS_DEADLINE_SECONDS))
 
 send() {
@@ -73,15 +66,12 @@ send() {
   cat "$run_dir/response.json"
   echo
   if [ "$message_status" -ne 0 ]; then exit "$message_status"; fi
-  node -e '
-    const payload = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-    process.exit(payload.info && payload.info.error ? 1 : 0);
-  ' "$run_dir/response.json" || exit $?
+  jq -e '.info.error | not' "$run_dir/response.json" > /dev/null || exit $?
 }
 
 send
 if [ -n "$DRUKS_AFTER_AGENT" ]; then
-  node "$DRUKS_AFTER_AGENT" > "$run_dir/after_agent.txt" || exit $?
+  sh "$DRUKS_AFTER_AGENT" > "$run_dir/after_agent.txt" || exit $?
   if [ -s "$run_dir/after_agent.txt" ]; then
     write_request "$run_dir/after_agent.txt" || exit $?
     send
