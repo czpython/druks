@@ -380,6 +380,16 @@ describe('ServicesPane', () => {
     expect(screen.queryByText('Create Slack App')).toBeNull()
   })
 
+  it('offers Install on a self-hosted Slack card with a client but no grant', async () => {
+    const installUrl = '/api/oauth/slack/connect?install=1'
+    stubFetch([[{ ...pasteOnly, slug: 'slack', title: 'Slack', installUrl }]])
+    renderPane()
+
+    expect(await screen.findByText('Not installed')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Slack' }))
+    expect(screen.getByText('Install').getAttribute('href')).toBe(installUrl)
+  })
+
   it.each(['Manager', ''])('locks a managed service with manager %j', async (managedBy) => {
     stubFetch([[{ ...pasteOnly, connected: true, managed: true, managedBy }]])
     renderPane()
