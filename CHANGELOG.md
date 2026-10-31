@@ -3,6 +3,112 @@
 All notable changes to Druks. Versions follow [semantic versioning](https://semver.org);
 while Druks is pre-1.0, a minor bump may break compatibility.
 
+## [0.12.0] — 2026-10-31
+
+### Breaking changes
+
+- **A service declares how it authenticates in `Authentication`.** This nested
+  class names its ways with the kinds in `druks.services.auth`: `ApiKey`, `Jwt`,
+  `Oauth`, and `SignIn`. The OAuth endpoints and options move there from the
+  `Service` class. `api_key`, `private_key`, `client_id`, and `client_secret`
+  leave `Settings`. `get_authorization`, `get_identity`, `get_consent_query`,
+  `read_grant`, `is_grant_revoked`, `get_install_endpoint`, and `issue_token`
+  move to `Authentication`.
+- **A sandbox secret names a tuple of resources.** `SandboxSecret.resources` and
+  `SandboxMcpServer.resources` replace `resource`.
+  `GitHubClient.get_token_for_repos(*repos)` replaces `token_for_repo(repo)`. A
+  sandbox's GitHub token reaches only the repositories that its workspace names.
+- **A notification destination is a Slack channel.** The kind `slack_channel` and
+  `channelId` replace `slack_webhook`, `url`, and `hasUrl`. Druks posts as the bot
+  of the Slack card. A migration deletes each `slack_webhook` destination and its
+  notifications, and clears the defaults that name one. Apprise is gone.
+- **`.druks/software_factory/review.md` replaces `.druks/review/checklist.md`.**
+- **`pr.opened` is a platform fact from GitHub's webhook**, with `repo`,
+  `pr_number`, and `payload`. Software Factory records `build.pr_opened`.
+
+### Added
+
+- **An app can give an agent one more turn.** An `after_agent` hook runs when the
+  agent ends its turn. If it returns text, the agent gets the text as one more
+  turn. A hook can sit on the app's own agent, or on another app's agent through
+  `Agent.get(id)`, so neither app imports the other. Druks discovers `hooks.py`,
+  and `RepoWorkspace.get_diff()` gives a hook the agent's change.
+- **A workflow can run a command in a VM.** `Workflow.exec(command, timeout=...)`
+  runs it in a VM of the workspace and returns a `subprocess.CompletedProcess`.
+- **An app can act on pull requests.** The GitHub webhook publishes `pr.opened`,
+  `pr.synchronized`, `pr.edited`, and `pr.ready_for_review`.
+  `GitHubClient.post_check_run()` posts a check run with annotations.
+- **An app can cache a provider read.** `App.get_cached()`, `set_cached()`, and
+  `clear_cached()` keep JSON values in Redis, and each value expires.
+- **`druks.toml` can switch off an app or a service.** Set `enabled = false` in
+  `[apps.<name>]` or `[services.<slug>]`. `druks setup` keeps both tables.
+- **Druks can act as an installed Linear app.** The Linear card takes an install
+  or a pasted API key. Druks then uses that credential for tickets and for
+  Linear's MCP server.
+- **A manager can own the Slack and Linear apps.** The card then shows **Install**,
+  and Druks uses the manager's app for messages, button clicks, and account links.
+- **Choose the Claude sign-in method.** `sign_in` in `[providers.anthropic]` is
+  `oauth`, the default, or `setup_token`, a pasted `claude setup-token`.
+- **A sandbox can load the apps of a subscription.** The **Include apps** setting
+  is off by default. When it is on, a run loads the subscription's claude.ai
+  connectors or ChatGPT apps.
+- **The Slack bot introduces itself.** It posts a welcome when it joins a room,
+  and before the first link that it sends to a person.
+- **The agent can read files on a thread.** `chat_read_thread` lists the files on
+  each Slack message, and `chat_read_file` puts one in the sandbox.
+- **Chat reacts with 👀** to each message from Slack, GitHub, or WhatsApp when its
+  delivery starts.
+- **An MCP server can pin the scopes that a connect requests.** The **Scopes**
+  button on the server's row shows what the server advertises.
+- **The effort levels `xhigh` and `max`.** Codex runs `max` as `xhigh`.
+- **A theme preference.** Each account chooses System, Light, or Dark under
+  Settings → Preferences.
+- **`ResourceError` keeps `status_code` and `reason`**, so an app can tell a
+  refusal from an outage.
+
+### Changed
+
+- **A sandbox secret that needs a person fails the run at once.** The failure
+  gives the reason, such as a GitHub App that is not on the repository. Druks
+  needs a current Drukbox for this.
+- **Every MCP tool failure is one JSON object:** `{"code", "message", "retryable"}`.
+  A wrong call is `INVALID_TOOL_ARGUMENTS`.
+- **Claude loads every Druks tool upfront.** The Chat agent searches for a
+  connected service's tools before it says that it cannot reach that service.
+- **Chat asks the agent once for a missing channel reply.** The person gets the
+  failure line only when the second turn also ends with no text.
+- **A new web conversation gets its title during the first reply.**
+- **Activity shows every finish.** A routine start records no row.
+- **A `[services.<slug>]` table that no installed app declares is logged and
+  skipped.** Druks does not refuse to start.
+- **The GitHub and Slack manifests ask for more.** GitHub adds Checks write and
+  Repository creation write, and Administration drops to read. `druks doctor`
+  names each permission that the App lacks. Slack adds `reactions:write`,
+  `channels:read`, `groups:read`, and the Interactivity URL.
+- **The Linear webhook is in core**, so a standalone app can read Linear facts
+  without Software Factory. The endpoint does not change.
+- **A Software Factory build creates its branch on GitHub first.** A branch name
+  that exists gets the next number. A pull request from a fork never fills a work
+  item.
+- **A Linear ticket routes to its repository by its labels**, then by its project
+  name.
+- **Agent commits and pull request titles follow the repository's format**, when
+  its `AGENTS.md` or contributing guide gives one.
+- **A person's Linear sign-in asks for `read` and `write`.**
+- **The Schedules filter leaves out builtin apps**, as the Dashboard does.
+
+### Fixed
+
+- **The image no longer trusts the `emSign ECC Root CA - G3` root.** Both certifi
+  and `ca-certificates` drop it.
+- **A Codex run waits for its MCP servers before its first turn.** A slow server
+  was missing from the run.
+- **A CI check that a path filter skips does not block an evaluation.**
+- **The dispatcher's co-author line stays** when a commit has other co-authors.
+- **The web manifest loads behind an access check that needs a cookie.**
+- **The Atlassian directory entry uses `/v2/mcp`.** A connect to the old endpoint
+  requested no scope.
+
 ## [0.11.0] — 2026-10-18
 
 ### Added
