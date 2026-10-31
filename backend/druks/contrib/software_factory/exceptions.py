@@ -10,6 +10,14 @@ class PrefixTakenError(DruksError):
         )
 
 
+class RepoTakenError(DruksError):
+    def __init__(self, full_name: str, project_name: str) -> None:
+        super().__init__(
+            f"Project {project_name!r} already holds {full_name}. "
+            "Remove the repo from that project first."
+        )
+
+
 class TicketNotFound(AgentApiError):
     status_code = 404
     code = "TICKET_NOT_FOUND"
