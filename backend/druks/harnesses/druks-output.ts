@@ -25,7 +25,7 @@ export default function (pi) {
     async execute(_toolCallId, params) {
       writeFileSync(resultPath, JSON.stringify(params));
       if (afterAgent) {
-        const { stdout } = await promisify(execFile)("node", [afterAgent]);
+        const { stdout } = await promisify(execFile)("sh", [afterAgent]);
         if (stdout) return { content: [{ type: "text", text: stdout }], terminate: false };
       }
       return { content: [{ type: "text", text: "result recorded" }], terminate: true };

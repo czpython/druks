@@ -42,6 +42,7 @@ from druks.workflows import _in_step, current_workflow
 
 if TYPE_CHECKING:
     from druks.browser.sessions import BrowserSession
+    from druks.harnesses.base import Harness
     from druks.services.base import ServiceField
     from druks.workspaces import Workspace
 
@@ -406,7 +407,10 @@ class Agent:
                 hooks = {}
                 if self._after_agent:
                     hooks["after_agent"] = functools.partial(
-                        self._run_after_agent, prompt=prompt, workspace=runner
+                        self._run_after_agent,
+                        harness=config.harness_class,
+                        prompt=prompt,
+                        workspace=runner,
                     )
                 await set_run_phase("agent_running")
                 await AgentCall.start(
@@ -475,7 +479,9 @@ class Agent:
             )
         return output.to_result()
 
-    async def _run_after_agent(self, *, prompt: str, workspace: "Workspace") -> str:
+    async def _run_after_agent(
+        self, *, harness: type["Harness"], prompt: str, workspace: "Workspace"
+    ) -> str:
         # The hooks run inside the hooked call's step, so an agent call in a hook
         # replays with that step instead of taking a checkpoint of its own.
         in_step = _in_step.set(True)
@@ -485,7 +491,7 @@ class Agent:
         finally:
             _in_step.reset(in_step)
             _in_after_agent.reset(in_after_agent)
-        return "\n\n".join(text for text in texts if text)
+        return harness.get_after_agent_reply("\n\n".join(text for text in texts if text))
 
 
 @dataclass(frozen=True)
