@@ -1362,6 +1362,11 @@ Each carries `repo`, `pr_number`, and a `payload` with `branch`, `is_fork`,
 `author_can_write`. A fork can use any branch name, so a subscriber that matches
 on `branch` filters with `payload__is_fork=False`.
 
+It also publishes `issue.opened`, `issue.edited`, and `issue.reopened` for
+issues, not pull requests. Each carries `repo`, `number`, and a `payload` with
+`title`, `body`, `url`, `author`, and `author_can_write`. An edit carries the
+issue as it is after the edit, not what changed.
+
 `post_check_run` creates the named check run on the head commit, or updates the
 one the App already posted there. An annotation is GitHub's shape. The App needs
 **Checks: Read and write**; see [Configuration](configuration.md#github).
