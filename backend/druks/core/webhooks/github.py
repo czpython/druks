@@ -133,6 +133,33 @@ class GitHubEvents(Webhook):
             )
         return _accepted()
 
+    async def on_issues_opened(self) -> Response:
+        return await self._publish_issue("issue.opened")
+
+    async def on_issues_edited(self) -> Response:
+        return await self._publish_issue("issue.edited")
+
+    async def on_issues_reopened(self) -> Response:
+        return await self._publish_issue("issue.reopened")
+
+    async def _publish_issue(self, fact: str) -> Response:
+        # GitHub sends a pull request's own changes as ``pull_request`` events, so these
+        # are issues only.
+        issue = self.data["issue"]
+        await publish(
+            fact,
+            repo=_repo_name(self.data),
+            number=issue["number"],
+            payload={
+                "title": issue["title"],
+                "body": issue["body"] or "",
+                "url": issue["html_url"],
+                "author": issue["user"]["login"],
+                "author_can_write": issue["author_association"] in _WRITERS,
+            },
+        )
+        return _accepted()
+
     async def on_pull_request_opened(self) -> Response:
         return await self._publish_pull_request("pr.opened")
 

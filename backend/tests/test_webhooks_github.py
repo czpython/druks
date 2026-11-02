@@ -48,6 +48,60 @@ def _capture(monkeypatch):
     return published
 
 
+def _issue(*, action, body="It drops the labels."):
+    return {
+        "action": action,
+        "repository": {"full_name": "acme/widget"},
+        "issue": {
+            "number": 7,
+            "title": "The webhook drops labels",
+            "body": body,
+            "html_url": "https://github.com/acme/widget/issues/7",
+            "user": {"login": "passerby"},
+            "author_association": "NONE",
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("action", "handler", "fact"),
+    [
+        ("opened", "on_issues_opened", "issue.opened"),
+        ("edited", "on_issues_edited", "issue.edited"),
+        ("reopened", "on_issues_reopened", "issue.reopened"),
+    ],
+)
+async def test_an_issue_action_publishes_its_fact(tmp_path, monkeypatch, action, handler, fact):
+    published = _capture(monkeypatch)
+
+    await getattr(_events(tmp_path, payload=_issue(action=action)), handler)()
+
+    assert published == [
+        (
+            fact,
+            {
+                "repo": "acme/widget",
+                "number": 7,
+                "payload": {
+                    "title": "The webhook drops labels",
+                    "body": "It drops the labels.",
+                    "url": "https://github.com/acme/widget/issues/7",
+                    "author": "passerby",
+                    "author_can_write": False,
+                },
+            },
+        )
+    ]
+
+
+async def test_an_issue_without_a_body_publishes_an_empty_one(tmp_path, monkeypatch):
+    published = _capture(monkeypatch)
+
+    await _events(tmp_path, payload=_issue(action="opened", body=None)).on_issues_opened()
+
+    assert published[0][1]["payload"]["body"] == ""
+
+
 @pytest.mark.parametrize(
     ("action", "handler", "fact"),
     [
