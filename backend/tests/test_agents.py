@@ -10,9 +10,11 @@ from druks.accounts.models import Account
 from druks.browser import BrowserClient, BrowserSession
 from druks.db import db_session
 from druks.durable import AgentCall, WorkflowError
+from druks.durable.engine import _step_engine
 from druks.exceptions import ObjectNotFound
 from druks.files import File
 from druks.harnesses.claude import ClaudeHarness
+from druks.harnesses.config import get_config
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.datastructures import McpServer
 from druks.sandbox.exceptions import SandboxDownloadError
@@ -536,6 +538,41 @@ async def test_running_call_visible_then_finished(
     assert call.status == "succeeded"
     assert call.sandbox_host_id == "host-test"
     assert call.finished_at is not None
+
+
+@pytest.mark.parametrize(("left_on", "resumed"), [("host-test", True), ("host-gone", False)])
+async def test_a_recovered_call_resumes_the_agent_its_box_still_runs(
+    druks_db, tmp_path, monkeypatch, current_run, left_on, resumed
+):
+    """A RUNNING row from a stopped process names the call. On its box the attempt
+    watches that agent under the same id; on another box it starts over and the
+    row is abandoned."""
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    sandbox.resume_agent = AsyncMock(return_value=make_agent_result({"ok": True}, agent="dummy"))
+    _patch_ephemeral(monkeypatch, sandbox)
+    config = await get_config(db_session(), DUMMY_AGENT.id, current_run.account_id)
+    await AgentCall.start(
+        _step_engine(),
+        call_id="call-left",
+        run_id="wf-9",
+        model=config.model,
+        agent="dummy",
+        host_id=left_on,
+        subscription_id=config.subscription.id,
+        api_key_id=None,
+    )
+
+    assert await DUMMY_AGENT._run(db_session(), workflow_id="wf-9") == DummyOutput(ok=True)
+
+    calls = {call.id: call.status for call in await AgentCall.list_for_run(db_session(), "wf-9")}
+    if resumed:
+        assert calls == {"call-left": "succeeded"}
+        assert sandbox.resume_agent.await_args.kwargs["call_id"] == "call-left"
+        sandbox.run_agent.assert_not_awaited()
+    else:
+        assert calls.pop("call-left") == "abandoned"
+        assert list(calls.values()) == ["succeeded"]
+        sandbox.resume_agent.assert_not_awaited()
 
 
 async def test_provisioning_failure_records_no_call(druks_db, tmp_path, monkeypatch, current_run):
