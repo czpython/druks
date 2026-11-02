@@ -6,14 +6,11 @@ R21:
 R16:
   root: backend
   package: druks
-  author_surface: [druks.workflows, druks.workspaces, druks.agents, druks.events, druks.signals, druks.db, druks.schemas, druks.prompts, druks.durable, druks.apps, druks.ui, druks.webhooks]
-  public: [druks.workflows, druks.workspaces, druks.agents, druks.events, druks.signals, druks.db, druks.schemas, druks.prompts, druks.durable, druks.apps, druks.ui, druks.webhooks, druks.core, druks.chat]
+  author_surface: [druks.accounts, druks.workflows, druks.workspaces, druks.agents, druks.events, druks.signals, druks.db, druks.schemas, druks.prompts, druks.durable, druks.apps, druks.ui, druks.webhooks]
+  public: [druks.accounts, druks.workflows, druks.workspaces, druks.agents, druks.events, druks.signals, druks.db, druks.schemas, druks.prompts, druks.durable, druks.apps, druks.ui, druks.webhooks, druks.core, druks.chat]
   apps: [druks.contrib]
   # software_factory reads these platform internals today.
   ignore_imports:
-    - druks.contrib.** -> druks.accounts.context
-    - druks.contrib.** -> druks.accounts.dependencies
-    - druks.contrib.** -> druks.accounts.models
     - druks.contrib.** -> druks.api.exceptions
     - druks.contrib.** -> druks.doctor
     - druks.contrib.** -> druks.exceptions

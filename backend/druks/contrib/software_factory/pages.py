@@ -2,11 +2,9 @@ from datetime import timedelta
 from typing import Literal
 
 from druks import ui
-from druks.accounts.context import current_account_id
-from druks.accounts.models import Account
+from druks.accounts import Account, AccountKind, current_account_id
 from druks.contrib.software_factory.enums import Priority, Status
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket, WorkItem
-from druks.db import db_session
 from druks.models import Base
 
 PRIORITY_LABELS: dict[Priority, str] = {
@@ -141,7 +139,7 @@ async def board(
         updated_since = Base.utc_now() - timedelta(days=30)
     projects = await Project.list_all()
     repos = await ProjectRepo.list_all()
-    accounts = await Account.list_operators(db_session())
+    accounts = await Account.filter(kind=AccountKind.OPERATOR)
     account_names = {account.id: account.username for account in accounts}
     tickets = await Ticket.list_matching(
         status=status,
@@ -242,7 +240,7 @@ async def ticket(identifier: str):
         )
 
     repos = await ProjectRepo.list_all()
-    accounts = await Account.list_operators(db_session())
+    accounts = await Account.filter(kind=AccountKind.OPERATOR)
     account_names = {account.id: account.username for account in accounts}
     thread = [
         ui.Card(

@@ -7,7 +7,7 @@ from sqlalchemy import ForeignKey, Index, String, func, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
-from druks.accounts.models import Account
+from druks.accounts import Account
 from druks.contrib.software_factory.enums import Priority, Resolution, Status
 from druks.contrib.software_factory.exceptions import PrefixTakenError
 from druks.contrib.software_factory.policy import RepoPolicy
@@ -510,7 +510,7 @@ class Ticket(Base):
             await self._emit_transitioned(status)
 
     async def _emit_transitioned(self, status: Status) -> None:
-        assignee = await db_session().get(Account, self.assignee_id) if self.assignee_id else None
+        assignee = await Account.get_or_none(id=self.assignee_id) if self.assignee_id else None
         await publish(
             "ticket.transitioned",
             payload={

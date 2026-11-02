@@ -59,7 +59,8 @@ class SlackChannel(Channel):
     ) -> Account | None:
         """The account with a live Slack grant for the Slack user who wrote the message."""
         authority = SLACK_AUTHORITY.format(team_id=row.identity["team_id"])
-        return await Account.lookup(session, authority, message["user"])
+        owner_id = await VaultSecret.get_owner_id(session, authority, message["user"])
+        return await session.get(Account, owner_id) if owner_id else None
 
     @classmethod
     async def route_message(cls, session: AsyncSession, row: VaultSecret, message: dict) -> None:

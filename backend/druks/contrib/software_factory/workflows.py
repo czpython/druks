@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from druks.accounts.models import Account
+from druks.accounts import Account
 from druks.contrib.software_factory.contracts import ImplementationOutput, ReviewWork
 from druks.contrib.software_factory.enums import (
     EvaluationVerdict,
@@ -558,9 +558,8 @@ class PullRequestReview(Workflow):
             (await self.subject).repo, raise_on_missing=True
         )
         # The reviewer writes on GitHub, so the requester goes by their GitHub login.
-        account = await Account.get_for_run(db_session(), self.account_id)
-        sign_ins = await Github.list_for_account(account.id)
-        requested_by = sign_ins[0].identity["login"] if sign_ins else account.username
+        sign_ins = await Github.list_for_account(self.account.id)
+        requested_by = sign_ins[0].identity["login"] if sign_ins else self.account.username
         return {
             "siblings": await project_repo.get_siblings(),
             "review_mode": (await get_review_actor()).mode,
