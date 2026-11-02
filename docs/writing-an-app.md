@@ -249,6 +249,10 @@ resolved account, and `start()` inherits it. A route does not require more
 attribution code. If the dispatcher has a better account, pass `account_id`.
 For example, a webhook can resolve the ticket assignee.
 
+The run carries its account. A body reads `self.account`, the `Account` row,
+and `self.account_id`. A route takes the caller's row with
+`account: Account = Depends(current_account)` from `druks.accounts`.
+
 `Run.account_id` is required. A browser start records the authenticated account.
 An unattended start records the default account. Druks refuses to start a run
 before an account is available. A parked run keeps its account after resume.
@@ -1511,6 +1515,12 @@ def list_reviews() -> list[ReviewResponse]:
     return Review.list_for_account(current_account_id.get())
 ```
 
+`Account` is a `Model`. Your rows relate to it with `relationship(Account)`, and
+`Account.get_or_none(id=...)` and `Account.filter(kind=AccountKind.OPERATOR)`
+read other accounts, such as an assignee a form submitted.
+`Account.lookup(authority, subject)` is the account that signed in as a provider
+user, for a webhook that names its actor.
+
 Druks prefixes every operation id of an app with the app name, so write the
 bare verb. For example, `operation_id="write_note"` in `field_notes` becomes
 `field_notes_write_note` in the OpenAPI document. Startup refuses an id that
@@ -2419,7 +2429,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 
 | Namespace | Public names |
 | --- | --- |
-| `druks.accounts` | `current_account_id` |
+| `druks.accounts` | `Account`, `AccountKind`, `current_account`, `current_account_id` |
 | `druks.apps` | `App`, `AppSettings`, `Choices`, `Secret` |
 | `druks.services` | `Service`, `Connection`, `auth`, `Resource`, `ResourceError`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
 | `druks.browser` | `BrowserClient`, `BrowserCommandError`, `BrowserSession`, `BrowserSessionSignedOutError`, `BrowserSessionStatus` |

@@ -38,7 +38,10 @@ class GitHubChannel(Channel):
     @classmethod
     async def lookup_account(cls, session: AsyncSession, payload: dict) -> Account | None:
         """The account with a live GitHub sign-in for the person who wrote the comment."""
-        return await Account.lookup(session, GITHUB_AUTHORITY, str(payload["author_id"]))
+        owner_id = await VaultSecret.get_owner_id(
+            session, GITHUB_AUTHORITY, str(payload["author_id"])
+        )
+        return await session.get(Account, owner_id) if owner_id else None
 
     @classmethod
     async def route_message(

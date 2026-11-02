@@ -4,8 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Response, status
 from sqlalchemy import delete, func, select, update
 
-from druks.accounts.dependencies import current_account
-from druks.accounts.models import Account
+from druks.accounts import Account, current_account
 from druks.api.exceptions import ToolNotAvailable, agent_error_responses
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.enums import Priority, Status
@@ -403,7 +402,7 @@ async def require_repo(repo_id: int) -> ProjectRepo:
 async def require_assignee(account_id: str | None) -> str | None:
     """The id as given, once it names a real account. The column is RESTRICT, so an
     unknown id would surface as a write failure rather than an answer."""
-    if account_id and not await db_session().get(Account, account_id):
+    if account_id and not await Account.get_or_none(id=account_id):
         raise AssigneeNotFound(account_id)
     return account_id
 

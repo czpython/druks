@@ -90,7 +90,7 @@ async def test_a_queued_run_replays_through_its_subject():
         PullRequestReview,
         PullRequest(id="acme/app#7").identity,
         {"repo": "acme/app", "pr_number": 7, "requested_by": "dev@example.com"},
-        account_id="review-account",
+        account=Account(id="review-account", username="review@example.com"),
     )
 
     assert run_kwargs == {"note": ""}
@@ -167,7 +167,7 @@ async def test_the_requester_goes_by_their_github_login_once_linked(druks_db, mo
     monkeypatch.setattr(ProjectRepo, "get_siblings", AsyncMock(return_value=[]))
     dev = await Account.get_or_create(druks_db, "dev@example.com")
     review, _ = _bind_instance(
-        PullRequestReview, PullRequest(id="acme/app#7").identity, {}, account_id=dev.id
+        PullRequestReview, PullRequest(id="acme/app#7").identity, {}, account=dev
     )
 
     assert (await review.get_prompt_context())["requested_by"] == "dev@example.com"

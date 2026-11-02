@@ -318,7 +318,7 @@ async def test_connect_slack_asks_for_user_scopes_and_keeps_the_token_from_authe
         assert page.status_code == 200
 
     operator = await Account.get_or_create(druks_db, "op@example.com")
-    assert await Account.lookup(druks_db, AUTHORITY, ANA) == operator
+    assert await VaultSecret.get_owner_id(druks_db, AUTHORITY, ANA) == operator.id
     [grant] = await VaultSecret.list_account_connections(druks_db, SLACK_AUDIENCE, operator.id)
     assert (grant.identity, grant.scopes) == (
         {"authority": AUTHORITY, "subject": ANA, "name": "ana"},

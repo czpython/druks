@@ -1,7 +1,6 @@
 import base64
 import hashlib
 import hmac
-import logging
 import secrets
 from datetime import datetime
 
@@ -22,15 +21,14 @@ from druks.accounts.constants import (
 from druks.accounts.enums import AccountKind, Theme
 from druks.accounts.exceptions import AuthConfigurationError, InvalidPatError
 from druks.core.models import Uuid7Pk, uuid7_str
-from druks.models import Base
+from druks.db import db_session
+from druks.models import Base, Model
 from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
 from druks.user_settings.models import InstallationSettings
 
-logger = logging.getLogger(__name__)
 
-
-class Account(Base, Uuid7Pk):
+class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
     __tablename__ = "accounts"
     __table_args__ = (
         CheckConstraint("theme IN ('system', 'light', 'dark')", name="accounts_theme_allowed"),
@@ -89,20 +87,10 @@ class Account(Base, Uuid7Pk):
         return await session.scalar(select(cls).where(cls.username == username))
 
     @classmethod
-    async def lookup(cls, session: AsyncSession, authority: str, subject: str) -> "Account | None":
-        """The one account with a live grant for this provider user. A shared
-        grant has no account, and two owning accounts match none."""
-        owners = select(VaultSecret.account_id).where(
-            VaultSecret.revoked_at.is_(None),
-            VaultSecret.identity["authority"].astext == authority,
-            VaultSecret.identity["subject"].astext == subject,
-        )
-        accounts = list(await session.scalars(select(cls).where(cls.id.in_(owners))))
-        if len(accounts) == 1:
-            return accounts[0]
-        if accounts:
-            logger.warning("A provider user at %s has grants under multiple accounts.", authority)
-        return
+    async def lookup(cls, authority: str, subject: str) -> "Account | None":
+        """The account that signed in as this provider user, for app code."""
+        owner_id = await VaultSecret.get_owner_id(db_session(), authority, subject)
+        return await db_session().get(cls, owner_id) if owner_id else None
 
     @classmethod
     async def get_or_create(cls, session: AsyncSession, username: str) -> "Account":

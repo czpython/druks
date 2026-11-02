@@ -459,7 +459,7 @@ async def test_connect_github_links_the_signed_in_login_to_the_account(
         assert page.status_code == 200
 
     operator = await Account.get_or_create(druks_db, "op@example.com")
-    assert await Account.lookup(druks_db, GITHUB_AUTHORITY, str(ANA)) == operator
+    assert await VaultSecret.get_owner_id(druks_db, GITHUB_AUTHORITY, str(ANA)) == operator.id
     [grant] = await VaultSecret.list_account_connections(druks_db, GITHUB_AUDIENCE, operator.id)
     assert grant.identity == {"authority": GITHUB_AUTHORITY, "subject": str(ANA), "login": "ana"}
     client = await Github.get_oauth_client()

@@ -356,7 +356,7 @@ async def run_workflow(
         if account_id
         else await Account.get_or_create(db_session(), "op@example.com")
     )
-    instance, run_kwargs = _bind_instance(workflow_class, identity, input, account_id=account.id)
+    instance, run_kwargs = _bind_instance(workflow_class, identity, input, account=account)
     body = getattr(workflow_class, workflow_class._body_method)
     token = current_workflow.set(instance)
     try:

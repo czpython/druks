@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -17,6 +18,8 @@ from druks.secrets.exceptions import SecretRevokedError
 
 if TYPE_CHECKING:
     from druks.accounts.models import Account
+
+logger = logging.getLogger(__name__)
 
 
 class VaultSecret(Base, Uuid7Pk):
@@ -295,6 +298,26 @@ class VaultSecret(Base, Uuid7Pk):
                 cls.revoked_at.is_(None),
             )
         )
+
+    @classmethod
+    async def get_owner_id(cls, session: AsyncSession, authority: str, subject: str) -> str | None:
+        """The account holding a live grant for this provider user. A shared grant
+        has no account, and two owning accounts match none."""
+        owners = set(
+            await session.scalars(
+                select(cls.account_id).where(
+                    cls.account_id.is_not(None),
+                    cls.revoked_at.is_(None),
+                    cls.identity["authority"].astext == authority,
+                    cls.identity["subject"].astext == subject,
+                )
+            )
+        )
+        if len(owners) == 1:
+            return owners.pop()
+        if owners:
+            logger.warning("A provider user at %s has grants under multiple accounts.", authority)
+        return
 
     @classmethod
     async def list_connections(cls, session: AsyncSession, audience: str) -> list["VaultSecret"]:

@@ -849,6 +849,7 @@ class Workflow:
         # set before run() — for templates and derived properties. None = no input.
         self.input: BaseModel | None = None
         # The dispatcher binds the authenticated or default account before execution.
+        self.account: Account
         self.account_id: str
         # The chat conversation whose tool call started the run, if one did.
         self.conversation_id: str | None = None
@@ -1269,7 +1270,7 @@ def _bind_instance(
     subject: dict[str, Any] | None = None,
     input: dict[str, Any] | None = None,
     *,
-    account_id: str,
+    account: Account,
 ) -> tuple[Workflow, dict[str, Any]]:
     """A workflow instance carrying its subject and validated input, with the
     keyword arguments its body takes."""
@@ -1277,7 +1278,8 @@ def _bind_instance(
     instance._subject = subject
     input = dict(input or {})
     input.pop(_ACCOUNT_INPUT_KEY, None)
-    instance.account_id = account_id
+    instance.account = account
+    instance.account_id = account.id
     instance.conversation_id = input.pop(_CONVERSATION_INPUT_KEY, None)
     # The body's input re-validates from its wire dict; a cron fires with no
     # input, so a scheduled workflow must default every parameter. The validated
@@ -1296,8 +1298,8 @@ async def _run_instance(
     input: dict[str, Any] | None = None,
 ) -> Any:
     async with step_session() as session:
-        account_id = (await Account.get_for_run(session, (input or {}).get(_ACCOUNT_INPUT_KEY))).id
-    instance, run_kwargs = _bind_instance(cls, subject, input, account_id=account_id)
+        account = await Account.get_for_run(session, (input or {}).get(_ACCOUNT_INPUT_KEY))
+    instance, run_kwargs = _bind_instance(cls, subject, input, account=account)
     instance._workflow_id = DBOS.workflow_id  # type: ignore[assignment]
     token = current_workflow.set(instance)
     try:
