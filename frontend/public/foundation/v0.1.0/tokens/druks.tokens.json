@@ -1,0 +1,665 @@
+{
+  "$schema": "https://www.designtokens.org/schemas/2025.10/format.json",
+  "$description": "Approved Druks Foundation tokens: semantic Light and Dark colors plus the Druks Logo Lockup size.",
+  "color": {
+    "$type": "color",
+    "light": {
+      "background": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9686274509803922,
+            0.9686274509803922,
+            0.9686274509803922
+          ],
+          "alpha": 1,
+          "hex": "#f7f7f7"
+        },
+        "$description": "Page ground."
+      },
+      "surface": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9882352941176471,
+            0.9882352941176471,
+            0.9882352941176471
+          ],
+          "alpha": 1,
+          "hex": "#fcfcfc"
+        },
+        "$description": "Cards, panels, menus, dialogs, and empty states."
+      },
+      "surface-subtle": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9333333333333333,
+            0.9333333333333333,
+            0.9333333333333333
+          ],
+          "alpha": 1,
+          "hex": "#eeeeee"
+        },
+        "$description": "Neutral panels, code, and quiet blocks."
+      },
+      "surface-raised": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9058823529411765,
+            0.9058823529411765,
+            0.9058823529411765
+          ],
+          "alpha": 1,
+          "hex": "#e7e7e7"
+        },
+        "$description": "Raised surfaces and approved control surfaces."
+      },
+      "field-background": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "alpha": 1,
+          "hex": "#ffffff"
+        },
+        "$description": "Form field background."
+      },
+      "text-primary": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.1607843137254902,
+            0.21176470588235294,
+            0.2196078431372549
+          ],
+          "alpha": 1,
+          "hex": "#293638"
+        },
+        "$description": "Primary text."
+      },
+      "text-secondary": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.25882352941176473,
+            0.3058823529411765,
+            0.3137254901960784
+          ],
+          "alpha": 1,
+          "hex": "#424e50"
+        },
+        "$description": "Descriptions and supporting text."
+      },
+      "text-tertiary": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.3568627450980392,
+            0.4,
+            0.40784313725490196
+          ],
+          "alpha": 1,
+          "hex": "#5b6668"
+        },
+        "$description": "Metadata and supporting information."
+      },
+      "border-subtle": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9019607843137255,
+            0.9137254901960784,
+            0.8980392156862745
+          ],
+          "alpha": 1,
+          "hex": "#e6e9e5"
+        },
+        "$description": "Decorative dividers inside panels."
+      },
+      "border-default": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.8705882352941177,
+            0.8862745098039215,
+            0.8705882352941177
+          ],
+          "alpha": 1,
+          "hex": "#dee2de"
+        },
+        "$description": "Panel and card boundaries."
+      },
+      "border-control": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.44313725490196076,
+            0.5372549019607843,
+            0.5450980392156862
+          ],
+          "alpha": 1,
+          "hex": "#71898b"
+        },
+        "$description": "Meaningful control boundaries."
+      },
+      "accent": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.0,
+            0.403921568627451,
+            0.4823529411764706
+          ],
+          "alpha": 1,
+          "hex": "#00677b"
+        },
+        "$description": "Approved interactive accent used by links, focus, and primary action fill."
+      },
+      "on-accent": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            1.0,
+            0.9882352941176471,
+            0.9647058823529412
+          ],
+          "alpha": 1,
+          "hex": "#fffcf6"
+        },
+        "$description": "Foreground on Light accent."
+      },
+      "selection-surface": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.8941176470588236,
+            0.9019607843137255,
+            0.9058823529411765
+          ],
+          "alpha": 1,
+          "hex": "#e4e6e7"
+        },
+        "$description": "Selected rows and current navigation surface."
+      },
+      "brand-mark": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.0,
+            0.403921568627451,
+            0.4823529411764706
+          ],
+          "alpha": 1,
+          "hex": "#00677b"
+        },
+        "$description": "Druks mark. Light uses approved Light accent to meet the 3:1 mark gate."
+      },
+      "status-info": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.16470588235294117,
+            0.37254901960784315,
+            0.6627450980392157
+          ],
+          "alpha": 1,
+          "hex": "#2a5fa9"
+        },
+        "$description": "Information and running status foreground."
+      },
+      "status-info-surface": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9137254901960784,
+            0.9372549019607843,
+            0.9803921568627451
+          ],
+          "alpha": 1,
+          "hex": "#e9effa"
+        },
+        "$description": "Information status surface."
+      },
+      "status-success": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.1568627450980392,
+            0.3764705882352941,
+            0.26666666666666666
+          ],
+          "alpha": 1,
+          "hex": "#286044"
+        },
+        "$description": "Success status foreground."
+      },
+      "status-success-surface": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9176470588235294,
+            0.9607843137254902,
+            0.9294117647058824
+          ],
+          "alpha": 1,
+          "hex": "#eaf5ed"
+        },
+        "$description": "Success status surface."
+      },
+      "status-warning": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.5058823529411764,
+            0.3137254901960784,
+            0.11372549019607843
+          ],
+          "alpha": 1,
+          "hex": "#81501d"
+        },
+        "$description": "Warning status foreground."
+      },
+      "status-warning-surface": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            1.0,
+            0.9450980392156862,
+            0.8470588235294118
+          ],
+          "alpha": 1,
+          "hex": "#fff1d8"
+        },
+        "$description": "Warning status surface."
+      },
+      "status-danger": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.6392156862745098,
+            0.19215686274509805,
+            0.20392156862745098
+          ],
+          "alpha": 1,
+          "hex": "#a33134"
+        },
+        "$description": "Danger status foreground."
+      },
+      "status-danger-surface": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9882352941176471,
+            0.9372549019607843,
+            0.9294117647058824
+          ],
+          "alpha": 1,
+          "hex": "#fcefed"
+        },
+        "$description": "Danger status surface."
+      }
+    },
+    "dark": {
+      "background": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.047058823529411764,
+            0.047058823529411764,
+            0.047058823529411764
+          ],
+          "alpha": 1,
+          "hex": "#0c0c0c"
+        },
+        "$description": "Page ground."
+      },
+      "surface": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.06666666666666667,
+            0.06666666666666667,
+            0.06666666666666667
+          ],
+          "alpha": 1,
+          "hex": "#111111"
+        },
+        "$description": "Cards, panels, menus, dialogs, and empty states."
+      },
+      "surface-subtle": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.09019607843137255,
+            0.09019607843137255,
+            0.09019607843137255
+          ],
+          "alpha": 1,
+          "hex": "#171717"
+        },
+        "$description": "Neutral panels, code, and quiet blocks."
+      },
+      "surface-raised": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.10980392156862745,
+            0.10980392156862745,
+            0.10980392156862745
+          ],
+          "alpha": 1,
+          "hex": "#1c1c1c"
+        },
+        "$description": "Raised surfaces and approved control surfaces."
+      },
+      "field-background": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.09411764705882353,
+            0.09411764705882353,
+            0.09411764705882353
+          ],
+          "alpha": 1,
+          "hex": "#181818"
+        },
+        "$description": "Form field background."
+      },
+      "text-primary": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9411764705882353,
+            0.9490196078431372,
+            0.9686274509803922
+          ],
+          "alpha": 1,
+          "hex": "#f0f2f7"
+        },
+        "$description": "Primary text."
+      },
+      "text-secondary": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.7058823529411765,
+            0.7372549019607844,
+            0.803921568627451
+          ],
+          "alpha": 1,
+          "hex": "#b4bccd"
+        },
+        "$description": "Descriptions and supporting text."
+      },
+      "text-tertiary": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.6,
+            0.6392156862745098,
+            0.7254901960784313
+          ],
+          "alpha": 1,
+          "hex": "#99a3b9"
+        },
+        "$description": "Metadata and supporting information."
+      },
+      "border-subtle": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.13725490196078433,
+            0.13725490196078433,
+            0.13725490196078433
+          ],
+          "alpha": 1,
+          "hex": "#232323"
+        },
+        "$description": "Decorative dividers inside panels."
+      },
+      "border-default": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.16862745098039217,
+            0.16862745098039217,
+            0.16862745098039217
+          ],
+          "alpha": 1,
+          "hex": "#2b2b2b"
+        },
+        "$description": "Panel and card boundaries."
+      },
+      "border-control": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.5294117647058824,
+            0.5294117647058824,
+            0.5294117647058824
+          ],
+          "alpha": 1,
+          "hex": "#878787"
+        },
+        "$description": "Meaningful control boundaries."
+      },
+      "accent": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.30196078431372547,
+            0.8313725490196079,
+            0.9568627450980393
+          ],
+          "alpha": 1,
+          "hex": "#4dd4f4"
+        },
+        "$description": "Approved interactive accent used by links, focus, and primary action fill."
+      },
+      "on-accent": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.047058823529411764,
+            0.047058823529411764,
+            0.047058823529411764
+          ],
+          "alpha": 1,
+          "hex": "#0c0c0c"
+        },
+        "$description": "Foreground on Dark accent."
+      },
+      "selection-surface": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.11372549019607843,
+            0.11372549019607843,
+            0.11372549019607843
+          ],
+          "alpha": 1,
+          "hex": "#1d1d1d"
+        },
+        "$description": "Selected rows and current navigation surface."
+      },
+      "brand-mark": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.30196078431372547,
+            0.8313725490196079,
+            0.9568627450980393
+          ],
+          "alpha": 1,
+          "hex": "#4dd4f4"
+        },
+        "$description": "Druks mark. Dark retains approved cyan."
+      },
+      "status-info": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.36470588235294116,
+            0.592156862745098,
+            0.9647058823529412
+          ],
+          "alpha": 1,
+          "hex": "#5d97f6"
+        },
+        "$description": "Information and running status foreground."
+      },
+      "status-info-surface": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.06274509803921569,
+            0.10588235294117647,
+            0.18823529411764706
+          ],
+          "alpha": 1,
+          "hex": "#101b30"
+        },
+        "$description": "Information status surface."
+      },
+      "status-success": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.2901960784313726,
+            0.8705882352941177,
+            0.5019607843137255
+          ],
+          "alpha": 1,
+          "hex": "#4ade80"
+        },
+        "$description": "Success status foreground."
+      },
+      "status-success-surface": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.06666666666666667,
+            0.12156862745098039,
+            0.0784313725490196
+          ],
+          "alpha": 1,
+          "hex": "#111f14"
+        },
+        "$description": "Success status surface."
+      },
+      "status-warning": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9568627450980393,
+            0.6784313725490196,
+            0.38823529411764707
+          ],
+          "alpha": 1,
+          "hex": "#f4ad63"
+        },
+        "$description": "Warning status foreground."
+      },
+      "status-warning-surface": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.13725490196078433,
+            0.09803921568627451,
+            0.058823529411764705
+          ],
+          "alpha": 1,
+          "hex": "#23190f"
+        },
+        "$description": "Warning status surface."
+      },
+      "status-danger": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.9372549019607843,
+            0.30980392156862746,
+            0.3568627450980392
+          ],
+          "alpha": 1,
+          "hex": "#ef4f5b"
+        },
+        "$description": "Danger status foreground."
+      },
+      "status-danger-surface": {
+        "$type": "color",
+        "$value": {
+          "colorSpace": "srgb",
+          "components": [
+            0.1450980392156863,
+            0.07450980392156863,
+            0.07450980392156863
+          ],
+          "alpha": 1,
+          "hex": "#251313"
+        },
+        "$description": "Danger status surface."
+      }
+    }
+  },
+  "identity": {
+    "$type": "dimension",
+    "logo-height": {
+      "$value": {
+        "value": 40,
+        "unit": "px"
+      },
+      "$description": "Approved height of the full Druks logo lockup; its width follows the supplied SVG aspect ratio."
+    }
+  }
+}

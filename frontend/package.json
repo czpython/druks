@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run foundation:check && tsc -b && vite build",
     "lint": "eslint .",
+    "foundation:check": "node scripts/check-foundation.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

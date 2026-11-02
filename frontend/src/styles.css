@@ -52,25 +52,6 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   box-shadow: 0 0 6px color-mix(in oklch, var(--success) 60%, transparent);
 }
 
-.brand-lockup {
-  display: inline-flex;
-  align-items: center;
-  gap: 0;
-  color: var(--text);
-  font: 700 28px / 1 var(--font-sans);
-  white-space: nowrap;
-}
-
-.brand-lockup-mark {
-  display: block;
-  flex: none;
-  width: 48px;
-  height: 48px;
-  background: var(--brand);
-  mask: url(/brand-mark.svg) center / contain no-repeat;
-  -webkit-mask: url(/brand-mark.svg) center / contain no-repeat;
-}
-
 .installed-app {
   flex: 1;
   min-height: 0;

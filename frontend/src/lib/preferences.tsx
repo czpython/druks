@@ -29,8 +29,26 @@ function applyTheme(theme: PersonalSettings['theme']) {
   const root = document.documentElement
   if (theme === 'system') delete root.dataset.theme
   else root.dataset.theme = theme
-  const background = getComputedStyle(root).getPropertyValue('--bg').trim()
-  document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute('content', background)
+  const styles = getComputedStyle(root)
+  const background = styles.getPropertyValue('--druks-color-background').trim()
+  const variant = styles.getPropertyValue('color-scheme').trim() === 'dark' ? 'dark' : 'light'
+  for (const themeColor of ['light', 'dark']) {
+    const meta = document.querySelector<HTMLMetaElement>(`meta[name="theme-color"][data-theme-color="${themeColor}"]`)
+    if (!meta) continue
+    meta.media = theme === 'system'
+      ? `(prefers-color-scheme: ${themeColor})`
+      : themeColor === theme ? 'all' : 'not all'
+    if (themeColor === variant) meta.content = background
+  }
+  for (const format of ['ico', 'svg']) {
+    for (const theme of ['light', 'dark']) {
+      const link = document.querySelector<HTMLLinkElement>(`#druks-favicon-${format}-${theme}`)
+      if (!link) continue
+      link.media = theme === 'system'
+        ? `(prefers-color-scheme: ${theme})`
+        : theme === variant ? 'all' : 'not all'
+    }
+  }
 }
 
 export function UserPreferencesProvider({
@@ -53,6 +71,13 @@ export function UserPreferencesProvider({
 
   useLayoutEffect(() => {
     applyTheme(theme)
+    if (theme !== 'system') return
+
+    if (!window.matchMedia) return
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
+    const updateSystemMetadata = () => applyTheme('system')
+    systemTheme.addEventListener('change', updateSystemMetadata)
+    return () => systemTheme.removeEventListener('change', updateSystemMetadata)
   }, [theme])
 
   useEffect(() => {
