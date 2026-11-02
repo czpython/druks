@@ -329,6 +329,7 @@ class Agent:
 
         engine = _step_engine()
         call_id = config.harness_class.mint_run_id(None)
+        running = await AgentCall.lookup_running(session, workflow_id, self.id)
 
         # Registered for provisioning through execution — the subscription's
         # rotation defers around it. A key never rotates.
@@ -397,6 +398,13 @@ class Agent:
                 secrets=config.secrets,
                 secrets_hash=config.secrets_hash,
             ) as runner:
+                # The running call's box is this box when its identity found it again:
+                # this attempt takes that call over, under its id, instead of starting
+                # a second agent beside it. A box that is gone leaves the call to
+                # start over on a new one.
+                resume = running and running.sandbox_host_id == runner.host_id
+                if resume:
+                    call_id = running.id
                 context = await runner.prepare_context(session, context, agent_call_id=call_id)
                 # Templates read the live workflow + the workspace the agent runs in,
                 # alongside whatever the workflow's get_prompt_context composes.
@@ -413,18 +421,27 @@ class Agent:
                         workspace=runner,
                     )
                 await set_run_phase("agent_running")
-                await AgentCall.start(
-                    engine,
-                    call_id=call_id,
-                    run_id=workflow_id,
-                    model=model,
-                    agent=self.id,
-                    host_id=runner.host_id,
-                    subscription_id=subscription_id,
-                    api_key_id=api_key_id,
-                )
-                try:
-                    result = await runner.run_agent(
+                if resume:
+                    attempt = runner.host.resume_agent(
+                        agent=self.id,
+                        config=config,
+                        artifact_dir=artifact_dir,
+                        call_id=call_id,
+                        started_at=running.started_at,
+                        hooks=hooks,
+                    )
+                else:
+                    await AgentCall.start(
+                        engine,
+                        call_id=call_id,
+                        run_id=workflow_id,
+                        model=model,
+                        agent=self.id,
+                        host_id=runner.host_id,
+                        subscription_id=subscription_id,
+                        api_key_id=api_key_id,
+                    )
+                    attempt = runner.run_agent(
                         account_id=workflow.account_id,
                         config=config,
                         agent=self.id,
@@ -436,6 +453,8 @@ class Agent:
                         mcp_servers=mcp_servers,
                         hooks=hooks,
                     )
+                try:
+                    result = await attempt
                 except BaseException as error:
                     await AgentCall.fail(engine, call_id=call_id, error=error)
                     raise

@@ -95,7 +95,7 @@ class AgentResult:
 
 @dataclass
 class HarnessRunResult:
-    """Raw outcome of one CLI execution in the VM — what ``Host._exec``
+    """Raw outcome of one CLI execution in the VM — what ``Host._start_run``
     returns and a harness's ``parse`` consumes."""
 
     returncode: int
@@ -106,7 +106,7 @@ class HarnessRunResult:
 
 @dataclass(frozen=True)
 class AgentInvocation:
-    """A fully-built CLI invocation, ready for ``Host._exec``.
+    """A fully-built CLI invocation, ready for ``Host._start_run``.
 
     Produced by a harness's ``build_invocation`` — the harness is a pure
     planner (argv in, parsed payload out) and never touches the live

@@ -78,7 +78,7 @@ class _LifecycleCall:
 def _fake_sandbox(run: _FakeRun) -> SimpleNamespace:
     """Build a Host-stub for the flat exec path.
 
-    ``Host._exec`` / ``Host.run_prompt`` are invoked unbound with this
+    ``Host._start_run`` / ``Host.run_prompt`` are invoked unbound with this
     stub as ``self`` — they only touch ``_start_instruction`` /
     ``_download_artifacts`` / ``ssh_username``. The ``calls`` list captures
     every start's kwargs; ``downloads`` the artifact pulls.
@@ -101,6 +101,9 @@ def _fake_sandbox(run: _FakeRun) -> SimpleNamespace:
     fake = SimpleNamespace(id="host-abc", ssh_username="root")
     fake._start_instruction = _start_instruction
     fake._download_artifacts = _download_artifacts
+    fake._watch_run = functools.partial(Host._watch_run, fake)
+    fake._parse_run = functools.partial(Host._parse_run, fake)
+    fake._capture_result = functools.partial(Host._capture_result, fake)
     fake.calls = calls
     fake.downloads = downloads
     return fake
@@ -137,7 +140,7 @@ async def test_returns_harness_run_result_with_stdout_stderr(
     )
     sandbox = _fake_sandbox(run)
 
-    result = await Host._exec(
+    result = await Host._start_run(
         sandbox,
         _inv(("claude", "--print", "hi")),
         run_id=_DEFAULT_RUN_ID,
@@ -156,7 +159,7 @@ async def test_writes_log_files_in_dashboard_convention(
     run = _FakeRun(stdout_chunks=[b"hello\n"], stderr_chunks=[b"oops\n"])
     sandbox = _fake_sandbox(run)
 
-    await Host._exec(
+    await Host._start_run(
         sandbox,
         _inv(("claude",)),
         run_id=_DEFAULT_RUN_ID,
@@ -186,7 +189,7 @@ async def test_forwards_invocation_to_lifecycle(
     run = _FakeRun(stdout_chunks=[b""])
     sandbox = _fake_sandbox(run)
 
-    await Host._exec(
+    await Host._start_run(
         sandbox,
         _inv(
             ("codex", "exec", "--print"),
@@ -236,7 +239,7 @@ async def test_overall_timeout_raises_harness_timeout_error(
     monkeypatch.setattr("druks.sandbox.host.asyncio.wait_for", fast_wait_for)
 
     with pytest.raises(HarnessTimeoutError, match="timed out"):
-        await Host._exec(
+        await Host._start_run(
             sandbox,
             _inv(("claude",)),
             run_id=_DEFAULT_RUN_ID,
@@ -278,7 +281,7 @@ async def test_sandbox_unreachable_translates_to_harness_error(
     sandbox._download_artifacts = _download_artifacts
 
     with pytest.raises(HarnessSandboxError, match="sandbox failure") as excinfo:
-        await Host._exec(
+        await Host._start_run(
             sandbox,
             _inv(("claude",)),
             run_id=_DEFAULT_RUN_ID,
@@ -302,9 +305,9 @@ async def test_run_prompt_builds_executes_and_parses(
 
     async def execute(*args: Any, **kwargs: Any) -> HarnessRunResult:
         seen["exec"] = kwargs
-        return await Host._exec(sandbox, *args, **kwargs)
+        return await Host._start_run(sandbox, *args, **kwargs)
 
-    sandbox._exec = execute
+    sandbox._start_run = execute
 
     class _FakeHarness:
         name = "claude"
@@ -369,9 +372,61 @@ async def test_run_prompt_builds_executes_and_parses(
     assert seen["parse"]["result"].stdout == b"streamed\n"
 
 
+async def test_resume_prompt_watches_a_running_call_from_its_recorded_start(
+    ctx: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+):
+    """A recovered call attaches to the run its predecessor started: nothing starts,
+    the harness's artifacts come from the start record, and the timeout counts from it."""
+    run = _FakeRun(stdout_chunks=[b"streamed\n"])
+    sandbox = _fake_sandbox(run)
+    local_dir = ctx.artifact_dir / "call-7"
+    local_dir.mkdir()
+    (local_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "name": "claude",
+                "started_at": (datetime.now(UTC) - timedelta(seconds=50)).isoformat(),
+                "args": ["claude", "--print"],
+                "artifact_filenames": ["output.json"],
+            }
+        )
+    )
+    attached = []
+
+    async def attach(*, host: Any, run_id: str) -> _FakeRun:
+        attached.append((host, run_id))
+        return run
+
+    monkeypatch.setattr("druks.sandbox.runner.attach", attach)
+    budgets = []
+    real_wait_for = asyncio.wait_for
+
+    async def wait_for(coro: Any, timeout: float) -> Any:
+        budgets.append(timeout)
+        return await real_wait_for(coro, timeout=timeout)
+
+    monkeypatch.setattr("druks.sandbox.host.asyncio.wait_for", wait_for)
+    harness = SimpleNamespace(
+        name="claude", parse=lambda result, *, artifact_dir, run_id: result.stdout
+    )
+
+    payload = await Host.resume_prompt(
+        sandbox, harness, artifact_dir=ctx.artifact_dir, run_id="call-7", timeout=60
+    )
+
+    assert payload == b"streamed\n"
+    assert attached == [(sandbox, "call-7")]
+    assert sandbox.calls == []
+    assert sandbox.downloads == [{"local_dir": local_dir, "extra_filenames": ("output.json",)}]
+    assert 0 < budgets[0] <= 10
+    metadata = json.loads((local_dir / "metadata.json").read_text())
+    assert metadata["args"] == ["claude", "--print"]
+    assert metadata["exit_code"] == 0
+
+
 async def test_run_prompt_fails_a_finished_run_whose_hook_never_ran(ctx: SimpleNamespace):
     sandbox = _fake_sandbox(_FakeRun(unasked_hooks=("after_agent",)))
-    sandbox._exec = functools.partial(Host._exec, sandbox)
+    sandbox._start_run = functools.partial(Host._start_run, sandbox)
     parsed = []
 
     class _FakeHarness:
@@ -580,6 +635,7 @@ async def test_run_agent_carries_foreign_failures_as_harness_errors(
     import pickle
 
     sandbox = SimpleNamespace(id="host-abc", ssh_username="root")
+    sandbox._capture_result = functools.partial(Host._capture_result, sandbox)
     original = RuntimeError("kaboom")
 
     async def run_prompt(_session: Any, harness: Any, **_kwargs: Any) -> Any:
@@ -607,6 +663,7 @@ async def test_run_agent_carries_foreign_failures_as_harness_errors(
 
 async def test_run_agent_carries_a_taxonomy_failure_as_itself(ctx: SimpleNamespace, agent_config):
     sandbox = SimpleNamespace(id="host-abc", ssh_username="root")
+    sandbox._capture_result = functools.partial(Host._capture_result, sandbox)
     timeout = HarnessTimeoutError("claude timed out after 60s.")
 
     async def run_prompt(_session: Any, harness: Any, **_kwargs: Any) -> Any:
@@ -643,7 +700,7 @@ async def test_claude_api_key_stays_on_the_server(
     run = _FakeRun(stdout_chunks=[json.dumps(result_event).encode() + b"\n"])
     sandbox = _fake_sandbox(run)
     sandbox.run_prompt = functools.partial(Host.run_prompt, sandbox)
-    sandbox._exec = functools.partial(Host._exec, sandbox)
+    sandbox._start_run = functools.partial(Host._start_run, sandbox)
     settings = SimpleNamespace(
         harness_config_root=tmp_path / "harnesses",
         skills_dir=tmp_path / "skills",
@@ -701,7 +758,7 @@ async def test_claude_subscription_token_stays_on_the_server(
     run = _FakeRun(stdout_chunks=[json.dumps(result_event).encode() + b"\n"])
     sandbox = _fake_sandbox(run)
     sandbox.run_prompt = functools.partial(Host.run_prompt, sandbox)
-    sandbox._exec = functools.partial(Host._exec, sandbox)
+    sandbox._start_run = functools.partial(Host._start_run, sandbox)
     settings = SimpleNamespace(
         harness_config_root=tmp_path / "harnesses",
         skills_dir=tmp_path / "skills",
@@ -757,7 +814,7 @@ async def test_codex_subscription_token_stays_on_the_server(
     run = _FakeRun(stdout_chunks=[b'{"type":"thread.started"}\n'])
     sandbox = _fake_sandbox(run)
     sandbox.run_prompt = functools.partial(Host.run_prompt, sandbox)
-    sandbox._exec = functools.partial(Host._exec, sandbox)
+    sandbox._start_run = functools.partial(Host._start_run, sandbox)
     settings = SimpleNamespace(
         harness_config_root=tmp_path / "harnesses",
         skills_dir=tmp_path / "skills",

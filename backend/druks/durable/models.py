@@ -625,9 +625,9 @@ class AgentCall(Base, Uuid7Pk):
         # until it ends. Provisioning isn't part of the call, so the row only
         # exists once there's a host to run on.
         async with get_session(engine) as session:
-            # A crash-recovered step re-runs with a fresh call id; abandon the
-            # prior attempt's RUNNING row (a run's calls are sequential) so it
-            # doesn't linger as a phantom live step.
+            # A recovered step whose box is gone re-runs with a fresh call id;
+            # abandon the prior attempt's RUNNING row (a run's calls are
+            # sequential) so it doesn't linger as a phantom live step.
             await session.execute(
                 update(cls)
                 .where(cls.run_id == run_id, cls.status == AgentCallStatus.RUNNING.value)
@@ -676,6 +676,20 @@ class AgentCall(Base, Uuid7Pk):
         if not call:
             raise AgentCallNotFound(agent_call_id)
         return call
+
+    @classmethod
+    async def lookup_running(
+        cls, session: AsyncSession, run_id: str, agent: str
+    ) -> "AgentCall | None":
+        # A run's calls are sequential, so at most one row is RUNNING: the call a
+        # stopped process left on its box.
+        return await session.scalar(
+            select(cls).where(
+                cls.run_id == run_id,
+                cls.agent == agent,
+                cls.status == AgentCallStatus.RUNNING.value,
+            )
+        )
 
     @classmethod
     async def list_for_run(cls, session: AsyncSession, run_id: str) -> list["AgentCall"]:

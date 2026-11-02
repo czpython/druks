@@ -79,9 +79,10 @@ boundaries. This has several consequences:
 - A workflow structure change can affect active runs. Treat the change as a
   deployment compatibility decision.
 
-Workflow recovery does not preserve a live external agent process through a
-worker crash. Agent execution in a workflow is a durable operation around a
-process in a sandbox. Recovery follows the operation boundary in this section.
+An agent process in a sandbox survives a worker crash. The recovered agent
+call finds the sandbox of the call that was running through the run's identity,
+attaches to the process, and waits for its result. If the sandbox is gone, the
+call starts again on a new one.
 [Chat](chat.md#execution-and-recovery) has a separate live-session lifecycle.
 
 ## When Druks fits

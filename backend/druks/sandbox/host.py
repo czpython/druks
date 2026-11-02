@@ -4,7 +4,7 @@ import json
 import logging
 import shlex
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
@@ -229,9 +229,8 @@ class Host:
         state — for prompts that hit no MCP server; a no-op for codex.
         ``hooks`` answers the run's hooks, by name.
         """
-        model, timeout = config.model, config.timeout
         harness = config.harness_class(
-            model=model,
+            model=config.model,
             fast_mode=config.fast_mode,
             effort=config.effort,
         )
@@ -240,17 +239,14 @@ class Host:
         # orchestrator so the row already exists (RUNNING) before we run; falls
         # back to a fresh uuid for callers that record the call after the fact.
         run_id = harness.mint_run_id(call_id)
-        started_at = datetime.now(UTC)
-        error: HarnessError | None = None
-        output: Any = None
-        try:
-            output = await self.run_prompt(
+        return await self._capture_result(
+            self.run_prompt(
                 session,
                 harness,
                 prompt=prompt,
                 schema=schema,
                 artifact_dir=artifact_dir,
-                timeout=timeout,
+                timeout=config.timeout,
                 include_plugins=include_plugins,
                 add_dirs=add_dirs,
                 skills=skills,
@@ -260,7 +256,60 @@ class Host:
                 identity=config.identity,
                 include_apps=config.include_apps,
                 hooks=hooks,
-            )
+            ),
+            agent=agent,
+            model=config.model,
+            run_id=run_id,
+            artifact_dir=artifact_dir,
+            started_at=datetime.now(UTC),
+        )
+
+    async def resume_agent(
+        self,
+        *,
+        agent: str,
+        config: "AgentConfig",
+        artifact_dir: Path,
+        call_id: str,
+        started_at: datetime,
+        hooks: dict[str, Hook] | None = None,
+    ) -> AgentResult:
+        """``run_agent`` for a call another process started on this VM and left
+        running: watch it to its end and parse it into the same result."""
+        harness = config.harness_class(
+            model=config.model,
+            fast_mode=config.fast_mode,
+            effort=config.effort,
+        )
+        return await self._capture_result(
+            self.resume_prompt(
+                harness,
+                artifact_dir=artifact_dir,
+                run_id=call_id,
+                timeout=config.timeout,
+                hooks=hooks,
+            ),
+            agent=agent,
+            model=config.model,
+            run_id=call_id,
+            artifact_dir=artifact_dir,
+            started_at=started_at,
+        )
+
+    async def _capture_result(
+        self,
+        attempt: Awaitable[Any],
+        *,
+        agent: str,
+        model: str,
+        run_id: str,
+        artifact_dir: Path,
+        started_at: datetime,
+    ) -> AgentResult:
+        error: HarnessError | None = None
+        output: Any = None
+        try:
+            output = await attempt
         except HarnessError as exc:
             error = exc
         except Exception as exc:  # noqa: BLE001 — carried on the result, not raised
@@ -329,7 +378,7 @@ class Host:
             timeout=timeout,
             hooks=hooks or (),
         )
-        result = await self._exec(
+        result = await self._start_run(
             invocation,
             run_id=run_id,
             artifact_dir=artifact_dir,
@@ -337,6 +386,35 @@ class Host:
             first_byte_kill_seconds=harness.first_byte_seconds,
             hooks=hooks,
         )
+        return self._parse_run(harness, result, artifact_dir=artifact_dir, run_id=run_id)
+
+    async def resume_prompt(
+        self,
+        harness: "Harness",
+        *,
+        artifact_dir: Path,
+        run_id: str,
+        timeout: int,
+        hooks: dict[str, Hook] | None = None,
+    ) -> Any:
+        """``run_prompt`` for a run that is already going on this VM: its prompt,
+        manifest and start record are on disk, so this attaches and watches."""
+        from . import runner as _runner  # cycle: each sibling imports Host from this module
+
+        local_dir = artifact_dir / run_id
+        run = await _runner.attach(host=self, run_id=run_id)
+        result = await self._watch_run(
+            run,
+            local_dir=local_dir,
+            metadata=json.loads((local_dir / "metadata.json").read_text()),
+            timeout=timeout,
+            hooks=hooks,
+        )
+        return self._parse_run(harness, result, artifact_dir=artifact_dir, run_id=run_id)
+
+    def _parse_run(
+        self, harness: "Harness", result: HarnessRunResult, *, artifact_dir: Path, run_id: str
+    ) -> Any:
         output = harness.parse(result, artifact_dir=artifact_dir, run_id=run_id)
         # After the parse, so a failed run keeps its own error and the call its cost.
         if result.unasked_hooks:
@@ -345,7 +423,7 @@ class Host:
             )
         return output
 
-    async def _exec(
+    async def _start_run(
         self,
         invocation: AgentInvocation,
         *,
@@ -355,21 +433,11 @@ class Host:
         first_byte_kill_seconds: int | None = None,
         hooks: dict[str, Hook] | None = None,
     ) -> HarnessRunResult:
-        """Execute a built invocation on this VM: tee stdout/stderr to the
-        artifact dir, enforce the first-byte and overall timeouts, record
-        ``metadata.json``, download artifacts."""
+        """Execute a built invocation on this VM: start it, record ``metadata.json``,
+        then watch it."""
         local_dir = artifact_dir / run_id
         local_dir.mkdir(parents=True, exist_ok=True)
-        stdout_log = local_dir / "stdout.jsonl"
-        stderr_log = local_dir / "stderr.log"
-        metadata_path = local_dir / "metadata.json"
-
-        stdout_buf = bytearray()
-        stderr_buf = bytearray()
         started_at = datetime.now(UTC)
-        timed_out = False
-        first_byte_killed = False
-
         try:
             run = await self._start_instruction(
                 credentials_bundle=invocation.credentials,
@@ -379,145 +447,131 @@ class Host:
                 cwd=invocation.cwd,
                 stdin_data=invocation.stdin,
             )
-            try:
-                _write_metadata(
-                    metadata_path,
-                    {
-                        "name": invocation.name,
-                        "sandbox_host_id": run.host.id,
-                        "sandbox_run_id": run.run_id,
-                        "started_at": started_at.isoformat(),
-                        "timeout_seconds": timeout,
-                        # The exact CLI args the sandbox executed. Credentials
-                        # don't flow through args (they go via the separate
-                        # ``credentials`` env-injection path), so this is safe
-                        # to persist verbatim. Lets an operator ssh into the
-                        # sandbox and reproduce a failed call by hand without
-                        # spelunking source to reconstruct flags.
-                        "args": list(invocation.args),
-                        "cwd": invocation.cwd,
-                    },
-                )
-
-                with open(stdout_log, "wb") as out_f, open(stderr_log, "wb") as err_f:
-                    tee_out = asyncio.create_task(
-                        _tee_stream(
-                            run.tail("stdout"),
-                            out_f,
-                            stdout_buf,
-                            STDOUT_BUFFER_LIMIT,
-                        ),
-                    )
-                    tee_err = asyncio.create_task(
-                        _tee_stream(
-                            run.tail("stderr"),
-                            err_f,
-                            stderr_buf,
-                            STDERR_BUFFER_LIMIT,
-                        ),
-                    )
-
-                    # First-byte kill: cancel the run if it emits nothing at all
-                    # within the window — the symptom of a wedge before the agent
-                    # gets going. "Nothing" means neither stdout nor stderr: codex
-                    # streams its progress on stderr and returns its result via the
-                    # --output-last-message file, so its stdout stays empty for a
-                    # healthy run; watching stdout alone would kill every codex.
-                    first_byte_task: asyncio.Task[bool] | None = None
-                    if first_byte_kill_seconds:
-                        first_byte_task = asyncio.create_task(
-                            _first_byte_killer(
-                                run=run,
-                                stdout_buf=stdout_buf,
-                                stderr_buf=stderr_buf,
-                                delay_seconds=first_byte_kill_seconds,
-                            ),
-                        )
-
-                    try:
-                        try:
-                            returncode = await asyncio.wait_for(
-                                run.wait(hooks=hooks), timeout=timeout
-                            )
-                        except TimeoutError:
-                            timed_out = True
-                            with contextlib.suppress(Exception):
-                                await run.kill()
-                            # Wait briefly for the helper to write its exit code
-                            # post-kill; otherwise returncode stays -1.
-                            try:
-                                returncode = await asyncio.wait_for(run.wait(), timeout=10.0)
-                            except Exception:
-                                returncode = -1
-                    except BaseException:
-                        # The wait failed some other way (SSH dropped, cancelled):
-                        # the tails may never see an exit code, so cancel instead
-                        # of draining — the finally's gather reaps them before the
-                        # log files close.
-                        tee_out.cancel()
-                        tee_err.cancel()
-                        raise
-                    finally:
-                        if first_byte_task:
-                            if first_byte_task.done() and not first_byte_task.cancelled():
-                                with contextlib.suppress(Exception):
-                                    first_byte_killed = first_byte_task.result()
-                            else:
-                                first_byte_task.cancel()
-                                with contextlib.suppress(asyncio.CancelledError, Exception):
-                                    await first_byte_task
-
-                        # Tail tasks finish when the run.wait() completes
-                        # (tail terminates on exit_code), but we still wait
-                        # to drain remaining bytes.
-                        await asyncio.gather(tee_out, tee_err, return_exceptions=True)
-            finally:
-                # Best-effort artifact download however the run ended —
-                # never mask a downstream error with a download failure.
-                try:
-                    await self._download_artifacts(
-                        run,
-                        local_dir,
-                        extra_filenames=invocation.extra_artifact_filenames,
-                    )
-                except Exception:  # noqa: BLE001 — best-effort cleanup in finally; never mask the caller's error
-                    logger.exception("artifact download failed for run %s", run.run_id)
         except SandboxError as exc:
             # SSH unreachable, host gone, sandbox-service down. Translate
             # into the existing HarnessError taxonomy so callers don't
             # have to learn a new exception family.
             raise HarnessSandboxError(f"{invocation.name} sandbox failure: {exc}") from exc
+        metadata = {
+            "name": invocation.name,
+            "sandbox_host_id": run.host.id,
+            "sandbox_run_id": run.run_id,
+            "started_at": started_at.isoformat(),
+            "timeout_seconds": timeout,
+            # The exact CLI args the sandbox executed. Credentials
+            # don't flow through args (they go via the separate
+            # ``credentials`` env-injection path), so this is safe
+            # to persist verbatim. Lets an operator ssh into the
+            # sandbox and reproduce a failed call by hand without
+            # spelunking source to reconstruct flags.
+            "args": list(invocation.args),
+            "cwd": invocation.cwd,
+            # The harness's files beside the streams, so a watch that resumes
+            # this run downloads them without the invocation.
+            "artifact_filenames": list(invocation.extra_artifact_filenames),
+        }
+        _write_metadata(local_dir / "metadata.json", metadata)
+        return await self._watch_run(
+            run,
+            local_dir=local_dir,
+            metadata=metadata,
+            timeout=timeout,
+            first_byte_kill_seconds=first_byte_kill_seconds,
+            hooks=hooks,
+        )
+
+    async def _watch_run(
+        self,
+        run: "Exec",
+        *,
+        local_dir: Path,
+        metadata: dict[str, Any],
+        timeout: int,
+        first_byte_kill_seconds: int | None = None,
+        hooks: dict[str, Hook] | None = None,
+    ) -> HarnessRunResult:
+        """Tee the run's streams to ``local_dir``, enforce the first-byte and overall
+        timeouts, complete ``metadata.json``, download artifacts. ``metadata`` is the
+        run's start record; the timeout counts from the start it names."""
+        name = metadata["name"]
+        started_at = datetime.fromisoformat(metadata["started_at"])
+        stdout_buf = bytearray()
+        stderr_buf = bytearray()
+        first_byte_killed = False
+        try:
+            tee_out = asyncio.create_task(
+                _tee_stream(
+                    run.tail("stdout"), local_dir / "stdout.jsonl", stdout_buf, STDOUT_BUFFER_LIMIT
+                )
+            )
+            tee_err = asyncio.create_task(
+                _tee_stream(
+                    run.tail("stderr"), local_dir / "stderr.log", stderr_buf, STDERR_BUFFER_LIMIT
+                )
+            )
+            # First-byte kill: cancel the run if it emits nothing at all
+            # within the window — the symptom of a wedge before the agent
+            # gets going. "Nothing" means neither stdout nor stderr: codex
+            # streams its progress on stderr and returns its result via the
+            # --output-last-message file, so its stdout stays empty for a
+            # healthy run; watching stdout alone would kill every codex.
+            first_byte_task: asyncio.Task[bool] | None = None
+            if first_byte_kill_seconds:
+                first_byte_task = asyncio.create_task(
+                    _first_byte_killer(
+                        run=run,
+                        stdout_buf=stdout_buf,
+                        stderr_buf=stderr_buf,
+                        delay_seconds=first_byte_kill_seconds,
+                    ),
+                )
+            try:
+                # A resumed run has used part of its timeout already.
+                remaining = timeout - (datetime.now(UTC) - started_at).total_seconds()
+                returncode, timed_out = await _wait_for_exit(run, timeout=remaining, hooks=hooks)
+            except BaseException:
+                # The wait failed some other way (SSH dropped, cancelled): the
+                # tails may never see an exit code, so cancel instead of draining.
+                tee_out.cancel()
+                tee_err.cancel()
+                raise
+            finally:
+                if first_byte_task:
+                    # Done: its answer. Still sleeping: cancelled, so no kill.
+                    first_byte_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        first_byte_killed = await first_byte_task
+                # The tails end with the exit code; this drains their last bytes.
+                await asyncio.gather(tee_out, tee_err, return_exceptions=True)
+        except SandboxError as exc:
+            raise HarnessSandboxError(f"{name} sandbox failure: {exc}") from exc
+        finally:
+            await self._download_artifacts(
+                run, local_dir, extra_filenames=tuple(metadata["artifact_filenames"])
+            )
 
         ended_at = datetime.now(UTC)
         elapsed = (ended_at - started_at).total_seconds()
         _write_metadata(
-            metadata_path,
+            local_dir / "metadata.json",
             {
-                "name": invocation.name,
-                "sandbox_host_id": run.host.id,
-                "sandbox_run_id": run.run_id,
-                "started_at": started_at.isoformat(),
+                **metadata,
                 "ended_at": ended_at.isoformat(),
                 "elapsed_seconds": round(elapsed, 1),
                 "exit_code": returncode,
-                "timeout_seconds": timeout,
                 "timed_out": timed_out,
                 "first_byte_killed": first_byte_killed,
                 "first_byte_kill_seconds": first_byte_kill_seconds,
-                # See the initial metadata write for the rationale on persisting
-                # the literal CLI args.
-                "args": list(invocation.args),
-                "cwd": invocation.cwd,
             },
         )
 
         if first_byte_killed:
             raise HarnessFirstByteTimeoutError(
-                f"{invocation.name} produced no output within {first_byte_kill_seconds}s; killed.",
+                f"{name} produced no output within {first_byte_kill_seconds}s; killed.",
             )
 
         if timed_out:
-            raise HarnessTimeoutError(f"{invocation.name} timed out after {timeout}s.")
+            raise HarnessTimeoutError(f"{name} timed out after {timeout}s.")
 
         return HarnessRunResult(
             returncode=int(returncode),
@@ -587,16 +641,19 @@ class Host:
         *,
         extra_filenames: tuple[str, ...] = (),
     ) -> None:
+        # Best-effort however the run ended — never mask the caller's error.
         local_dir.mkdir(parents=True, exist_ok=True)
-        for filename in (*_ARTIFACT_FILENAMES, *extra_filenames):
-            remote_path = f"{run.run_dir}/{filename}"
-            local_path = local_dir / filename
-            try:
-                await self.download(remote=remote_path, local=local_path)
-            except (asyncssh.SFTPError, OSError):
-                # Absence is common (exit_code on a killed run, pid on a
-                # never-started wrapper).
-                logger.debug("artifact missing or unreadable: %s", remote_path)
+        try:
+            for filename in (*_ARTIFACT_FILENAMES, *extra_filenames):
+                remote_path = f"{run.run_dir}/{filename}"
+                try:
+                    await self.download(remote=remote_path, local=local_dir / filename)
+                except (asyncssh.SFTPError, OSError):
+                    # Absence is common (exit_code on a killed run, pid on a
+                    # never-started wrapper).
+                    logger.debug("artifact missing or unreadable: %s", remote_path)
+        except Exception:  # noqa: BLE001 — a cleanup failure is a log line
+            logger.exception("artifact download failed for run %s", run.run_id)
 
     async def ssh_connection(self) -> asyncssh.SSHClientConnection:
         return await self._ensure_conn()
@@ -748,17 +805,34 @@ def _as_str(value: object) -> str:
 
 async def _tee_stream(
     chunks: Any,
-    log_file: Any,
+    log_path: Path,
     buffer: bytearray,
     buffer_limit: int,
 ) -> None:
-    async for chunk in chunks:
-        log_file.write(chunk)
-        log_file.flush()
-        buffer.extend(chunk)
-        if len(buffer) > buffer_limit:
-            excess = len(buffer) - buffer_limit
-            del buffer[:excess]
+    with open(log_path, "wb") as log_file:
+        async for chunk in chunks:
+            log_file.write(chunk)
+            log_file.flush()
+            buffer.extend(chunk)
+            if len(buffer) > buffer_limit:
+                excess = len(buffer) - buffer_limit
+                del buffer[:excess]
+
+
+async def _wait_for_exit(
+    run: Any, *, timeout: float, hooks: dict[str, Hook] | None
+) -> tuple[int, bool]:
+    """The run's exit code, and whether it was killed for outliving ``timeout``."""
+    try:
+        return await asyncio.wait_for(run.wait(hooks=hooks), timeout=timeout), False
+    except TimeoutError:
+        with contextlib.suppress(Exception):
+            await run.kill()
+        # Wait briefly for the helper to write its exit code post-kill; otherwise -1.
+        try:
+            return await asyncio.wait_for(run.wait(), timeout=10.0), True
+        except Exception:
+            return -1, True
 
 
 async def _first_byte_killer(
