@@ -246,7 +246,9 @@ async def read_file(
 @router.put("/thread/tag", operation_id="require_tag", status_code=204, tags=["agent"])
 async def require_tag(
     session: SessionDep,
-    is_required: Annotated[bool, Body(embed=True)],
+    is_required: Annotated[
+        bool, Body(embed=True, description="True to require a tag, false to stop requiring one.")
+    ],
     account: Account = Depends(current_account),
 ) -> None:
     """Require a tag in the thread of the conversation this call comes from, or stop
