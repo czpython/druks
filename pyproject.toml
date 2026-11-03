@@ -3,13 +3,12 @@ name = "druks"
 version = "0.12.0"
 description = "Autonomous software delivery; the self-hosted home for durable agent apps."
 readme = "README.md"
-license = "MIT"
+license = "FSL-1.1-ALv2"
 license-files = ["LICENSE"]
 authors = [{ name = "Paulo Alvarado Garcia" }]
 keywords = ["agents", "dbos", "durable-execution", "orchestration", "workflows"]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",

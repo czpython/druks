@@ -123,6 +123,14 @@ orchestration belongs to `software_factory`, not to Druks.
 - **Reporting a vulnerability:** [Security policy](https://github.com/czpython/druks/blob/main/SECURITY.md)
 - **All documentation:** [docs.druks.ai](https://docs.druks.ai).
 
+## License
+
+Druks uses the [Functional Source License](LICENSE) (FSL-1.1-ALv2). You can
+self-host Druks, change it, and build apps on it. You cannot sell it as a
+competing hosted service. Each release becomes Apache 2.0 two years after it
+ships. The [licensing page](https://docs.druks.ai/licensing) explains the
+details.
+
 ## Contributors
 
 Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
