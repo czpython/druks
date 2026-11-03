@@ -126,7 +126,6 @@ class PiHarness(Harness):
         )
 
     def parse(self, result: HarnessRunResult, *, artifact_dir: Path, run_id: str) -> Any:
-        self.check_returncode(result)
         try:
             events = [json.loads(line) for line in result.stdout.splitlines()]
             # pi repeats an assistant message on turn_end and agent_end;
@@ -136,6 +135,21 @@ class PiHarness(Harness):
                 for event in events
                 if event["type"] == "message_end" and event["message"]["role"] == "assistant"
             ]
+            usage = [message["usage"] for message in messages]
+            cost_usd = sum(entry["cost"]["total"] for entry in usage)
+            tokens = {
+                "input_tokens": sum(entry["input"] for entry in usage),
+                "output_tokens": sum(entry["output"] for entry in usage),
+                "cached_input_tokens": sum(entry["cacheRead"] for entry in usage),
+                "cache_creation_tokens": sum(entry["cacheWrite"] for entry in usage),
+            }
+            call_dir = artifact_dir / run_id
+            write_cost(
+                call_dir,
+                cost_usd=cost_usd,
+                metadata={"provider": self.name, "model": self.model, **tokens},
+            )
+            self.check_returncode(result)
             for message in messages:
                 # A runtime provider failure exits zero, so the HTTP status in
                 # ``errorMessage`` is what classifies it.
@@ -146,24 +160,11 @@ class PiHarness(Harness):
                     if code >= 500:
                         raise exceptions.HarnessOverloadedError(detail)
                     raise _STATUS_ERRORS.get(code, exceptions.HarnessError)(detail)
-            usage = [message["usage"] for message in messages]
-            cost_usd = sum(entry["cost"]["total"] for entry in usage)
-            tokens = {
-                "input_tokens": sum(entry["input"] for entry in usage),
-                "output_tokens": sum(entry["output"] for entry in usage),
-                "cached_input_tokens": sum(entry["cacheRead"] for entry in usage),
-                "cache_creation_tokens": sum(entry["cacheWrite"] for entry in usage),
-            }
         except (ValueError, KeyError, TypeError) as error:
+            self.check_returncode(result)
             raise exceptions.HarnessInvalidOutputError("pi wrote no usable stream.") from error
 
-        call_dir = artifact_dir / run_id
         output_path = call_dir / "output.json"
         payload = read_result_json(output_path, name=self.name)
         output_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
-        write_cost(
-            call_dir,
-            cost_usd=cost_usd,
-            metadata={"provider": self.name, "model": self.model, **tokens},
-        )
         return payload

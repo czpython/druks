@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from druks.harnesses.artifacts import read_cost
 from druks.harnesses.base import Harness
 from druks.harnesses.datastructures import Manifest
 from druks.harnesses.exceptions import (
@@ -55,6 +56,7 @@ def _response(
     structured: object = None,
     error: dict[str, object] | None = None,
     cost: float = 0.0,
+    has_structured: bool = True,
 ) -> bytes:
     info: dict[str, object] = {
         "role": "assistant",
@@ -70,7 +72,7 @@ def _response(
     }
     if error:
         info["error"] = error
-    else:
+    elif has_structured:
         info["structured"] = structured
     return json.dumps({"info": info, "parts": []}).encode()
 
@@ -284,14 +286,30 @@ def test_parse_returns_contract_and_writes_cost_sidecars(tmp_path: Path) -> None
     }
 
 
-@pytest.mark.parametrize("stdout", [b"", b"not-json"])
-def test_parse_rejects_empty_or_non_json_stdout(tmp_path: Path, stdout: bytes) -> None:
+@pytest.mark.parametrize(
+    ("stdout", "expected_cost"),
+    [
+        (b"", None),
+        (b"not-json", None),
+        (
+            _response(error={"data": {"message": "missing name"}}, cost=0.25),
+            0.25,
+        ),
+        (_response(cost=0.25, has_structured=False), 0.25),
+    ],
+)
+def test_parse_rejects_unusable_stdout(
+    tmp_path: Path, stdout: bytes, expected_cost: float | None
+) -> None:
     with pytest.raises(HarnessInvalidOutputError):
         _harness().parse(
             HarnessRunResult(returncode=0, stdout=stdout, stderr=b""),
             artifact_dir=tmp_path,
             run_id="run-1",
         )
+
+    cost_usd, _ = read_cost(tmp_path / "run-1")
+    assert cost_usd == expected_cost
 
 
 def test_parse_maps_the_deadline_exit_to_timeout(tmp_path: Path) -> None:

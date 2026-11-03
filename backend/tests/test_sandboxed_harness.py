@@ -23,6 +23,7 @@ from druks.harnesses.exceptions import (
     HarnessOverloadedError,
     HarnessRateLimitError,
     HarnessSandboxError,
+    HarnessSpendLimitError,
     HarnessTimeoutError,
     HarnessUsageLimitError,
     Retry,
@@ -528,6 +529,14 @@ def _claude_result_event(text: str) -> bytes:
             _claude_result_event("You've hit your session limit · resets 5:10pm (UTC)"),
             HarnessUsageLimitError,
             "usage_limit",
+        ),
+        (
+            ClaudeHarness,
+            _claude_result_event(
+                "You've hit your monthly spend limit · your session limit resets 4:20pm"
+            ),
+            HarnessSpendLimitError,
+            "spend_limit",
         ),
         (
             ClaudeHarness,

@@ -101,6 +101,7 @@ class ClaudeHarness(Harness):
     # {…overloaded_error…}"), so "api error: 5" covers 529 and every 5xx; 429
     # and 401 are their own families.
     failure_markers = {
+        "monthly spend limit": exceptions.HarnessSpendLimitError,
         "session limit": exceptions.HarnessUsageLimitError,
         "usage limit": exceptions.HarnessUsageLimitError,
         "api error: 429": exceptions.HarnessRateLimitError,
@@ -213,11 +214,12 @@ class ClaudeHarness(Harness):
         )
 
     def parse(self, result: HarnessRunResult, *, artifact_dir: Path, run_id: str) -> Any:
-        self.check_returncode(result)
-
         try:
             envelope = collapse_claude_stream(result.stdout)
         except exceptions.StreamJsonError as error:
+            # Keep a provider failure when its stream is incomplete. Only a
+            # successful malformed response is an output failure.
+            self.check_returncode(result)
             transcript = artifact_dir / run_id / "stdout.jsonl"
             raise exceptions.HarnessInvalidOutputError(
                 f"claude wrote invalid stream-json. See {transcript}",
@@ -225,6 +227,7 @@ class ClaudeHarness(Harness):
 
         cost_usd, cost_metadata = extract_claude_cost_from_envelope(envelope)
         write_cost(artifact_dir / run_id, cost_usd=cost_usd, metadata=cost_metadata)
+        self.check_returncode(result)
 
         structured: Any = envelope.get("structured_output")
         if structured is None:

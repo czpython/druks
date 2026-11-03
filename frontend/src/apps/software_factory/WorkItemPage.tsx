@@ -28,6 +28,7 @@ import { agentCallPath, workItemPath } from './slug'
 import { useRawLocation } from '../../lib/useRawLocation'
 import { useCanonicalPath } from '../../lib/useCanonicalPath'
 import { useTicker } from '../../lib/useTicker'
+import { useTimezone } from '../../lib/preferences'
 
 interface Props {
   workItemId: number
@@ -195,6 +196,7 @@ function WorkItemView({ data }: { data: WorkItemDetail }) {
             <TimelinePanel
               runs={runs}
               phase={data.phase}
+              phaseEndsAt={data.phaseEndsAt}
               selection={selection}
               onSelect={(id) => setSelected(id)}
             />
@@ -313,11 +315,13 @@ function InfoPanel({
 function TimelinePanel({
   runs,
   phase,
+  phaseEndsAt,
   selection,
   onSelect,
 }: {
   runs: RunSummary[]
   phase?: string | null
+  phaseEndsAt?: string | null
   selection: Selection | null
   onSelect: (id: string) => void
 }) {
@@ -335,6 +339,7 @@ function TimelinePanel({
               key={chain[0].id}
               chain={chain}
               phase={phase}
+              phaseEndsAt={phaseEndsAt}
               selection={selection}
               onSelect={onSelect}
             />
@@ -357,11 +362,13 @@ function selectOnKey(onSelect: () => void) {
 function ChainRow({
   chain,
   phase,
+  phaseEndsAt,
   selection,
   onSelect,
 }: {
   chain: RetryChain
   phase?: string | null
+  phaseEndsAt?: string | null
   selection: Selection | null
   onSelect: (id: string) => void
 }) {
@@ -397,7 +404,14 @@ function ChainRow({
               {first.accountUsername}
             </span>
           </div>
-          {collapseCalls && <RunStatus run={first} phase={phase} collapsed />}
+          {collapseCalls && (
+            <RunStatus
+              run={first}
+              phase={phase}
+              phaseEndsAt={phaseEndsAt}
+              collapsed
+            />
+          )}
         </div>
         <div className="wic-op-ledger">
           <span className="wic-op-dur">{elapsed > 0 ? dur(elapsed) : '–'}</span>
@@ -411,6 +425,7 @@ function ChainRow({
             run={run}
             retry={index}
             phase={phase}
+            phaseEndsAt={phaseEndsAt}
             selection={selection}
             onSelect={onSelect}
           />
@@ -426,12 +441,14 @@ function RunSegment({
   run,
   retry,
   phase,
+  phaseEndsAt,
   selection,
   onSelect,
 }: {
   run: RunSummary
   retry: number
   phase?: string | null
+  phaseEndsAt?: string | null
   selection: Selection | null
   onSelect: (id: string) => void
 }) {
@@ -478,7 +495,12 @@ function RunSegment({
           onClick={selectRun}
           onKeyDown={selectOnKey(selectRun)}
         >
-          <RunStatus run={run} phase={phase} collapsed={false} />
+          <RunStatus
+            run={run}
+            phase={phase}
+            phaseEndsAt={phaseEndsAt}
+            collapsed={false}
+          />
         </div>
       )}
     </>
@@ -489,16 +511,19 @@ function RunSegment({
 function RunStatus({
   run,
   phase,
+  phaseEndsAt,
   collapsed,
 }: {
   run: RunSummary
   phase?: string | null
+  phaseEndsAt?: string | null
   collapsed: boolean
 }) {
+  const timezone = useTimezone()
   return (
     <span className={`wic-op-sub wic-sub-${run.state}`}>
       <span className="wic-op-sub-dot" />
-      {runSubLine(run, phase, collapsed)}
+      {runSubLine(run, phase, collapsed, phaseEndsAt, timezone)}
       {!isRunning(run) && <span> · {relTime(secondsSince(run.updatedAt))}</span>}
     </span>
   )
@@ -742,6 +767,7 @@ function TranscriptBody({
   run: RunSummary
   call: AgentCallSummary | null
 }) {
+  const timezone = useTimezone()
   const isLive = call?.status === 'running'
 
   // Running but no agent call yet → the sandbox spin-up window. The run's sandbox
@@ -753,7 +779,9 @@ function TranscriptBody({
         <div className="ins-infra">
           <span className="ins-infra-glyph">◍</span>
           <div className="ins-infra-text">
-            <div className="ins-infra-phrase">{phaseLine(data.phase) ?? 'Starting up…'}</div>
+            <div className="ins-infra-phrase">
+              {phaseLine(data.phase, data.phaseEndsAt, timezone) ?? 'Starting up…'}
+            </div>
             <div className="ins-infra-sub">
               no agent call yet — the transcript begins once the agent starts
             </div>

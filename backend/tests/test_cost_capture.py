@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from druks.durable import AgentCall
 from druks.harnesses.artifacts import (
     normalize_token_usage,
@@ -8,10 +9,15 @@ from druks.harnesses.artifacts import (
     write_cost,
 )
 from druks.harnesses.claude import (
+    ClaudeHarness,
     collapse_claude_stream,
     extract_claude_cost_from_envelope,
 )
-from druks.harnesses.exceptions import StreamJsonError
+from druks.harnesses.codex import CodexHarness
+from druks.harnesses.exceptions import HarnessError, HarnessSpendLimitError, StreamJsonError
+from druks.harnesses.opencode import OpenCodeHarness
+from druks.harnesses.pi import PiHarness
+from druks.sandbox.datastructures import HarnessRunResult
 from druks.testing import seed_call, seed_run
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
@@ -50,6 +56,166 @@ def test_extract_claude_cost_returns_none_when_envelope_lacks_cost():
 
     assert cost_usd is None
     assert metadata is None
+
+
+def test_failed_claude_call_writes_cost_before_raising(tmp_path: Path):
+    message = (
+        "You've hit your org's monthly spend limit · ask your admin to raise it · "
+        "your session limit resets 2:20pm"
+    )
+    stdout = (
+        json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": True,
+                "result": message,
+                "total_cost_usd": 190.25,
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "cache_creation_input_tokens": 30,
+                    "cache_read_input_tokens": 400,
+                },
+            }
+        ).encode()
+        + b"\n"
+    )
+    harness = ClaudeHarness(model="anthropic/claude-opus-4-7", fast_mode=False, effort=None)
+
+    with pytest.raises(HarnessSpendLimitError):
+        harness.parse(
+            HarnessRunResult(returncode=1, stdout=stdout, stderr=b""),
+            artifact_dir=tmp_path,
+            run_id="failed-call",
+        )
+
+    cost_usd, metadata = read_cost(tmp_path / "failed-call")
+    assert cost_usd == 190.25
+    assert metadata == {
+        "provider": "anthropic",
+        "input_tokens": 100,
+        "output_tokens": 20,
+        "cache_creation_input_tokens": 30,
+        "cache_read_input_tokens": 400,
+    }
+
+
+def test_failed_codex_call_writes_cost_before_raising(tmp_path: Path):
+    call_dir = tmp_path / "failed-call"
+    call_dir.mkdir()
+    event = {
+        "timestamp": "2026-06-07T14:41:03.746Z",
+        "type": "event_msg",
+        "payload": {
+            "type": "token_count",
+            "info": {
+                "model": "gpt-5.5",
+                "total_token_usage": {
+                    "input_tokens": 1_000,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 1_000,
+                    "reasoning_output_tokens": 0,
+                    "total_tokens": 2_000,
+                },
+            },
+        },
+    }
+    (call_dir / "session.jsonl").write_text(json.dumps(event) + "\n")
+    harness = CodexHarness(model="openai/gpt-5.5", fast_mode=False, effort=None)
+
+    with pytest.raises(HarnessError):
+        harness.parse(
+            HarnessRunResult(returncode=1, stdout=b"", stderr=b"request failed\n"),
+            artifact_dir=tmp_path,
+            run_id="failed-call",
+        )
+
+    cost_usd, metadata = read_cost(call_dir)
+    assert cost_usd and cost_usd > 0
+    assert metadata
+    assert metadata["input_tokens"] == 1_000
+    assert metadata["output_tokens"] == 1_000
+
+
+def test_failed_pi_call_writes_cost_before_raising(tmp_path: Path):
+    message = {
+        "type": "message_end",
+        "message": {
+            "role": "assistant",
+            "stopReason": "error",
+            "errorMessage": "OpenAI API error (429): slow down",
+            "usage": {
+                "input": 100,
+                "output": 20,
+                "cacheRead": 5,
+                "cacheWrite": 2,
+                "cost": {"total": 0.75},
+            },
+        },
+    }
+    harness = PiHarness(model="openai/gpt-5.5", fast_mode=False, effort=None)
+
+    with pytest.raises(HarnessError):
+        harness.parse(
+            HarnessRunResult(
+                returncode=0,
+                stdout=(json.dumps(message) + "\n").encode(),
+                stderr=b"",
+            ),
+            artifact_dir=tmp_path,
+            run_id="failed-call",
+        )
+
+    cost_usd, metadata = read_cost(tmp_path / "failed-call")
+    assert cost_usd == 0.75
+    assert metadata
+    assert metadata["input_tokens"] == 100
+    assert metadata["output_tokens"] == 20
+
+
+def test_failed_opencode_call_writes_cost_before_raising(tmp_path: Path):
+    response = {
+        "info": {
+            "role": "assistant",
+            "providerID": "anthropic",
+            "modelID": "claude-sonnet-4-5",
+            "cost": 0.75,
+            "tokens": {
+                "input": 100,
+                "output": 20,
+                "reasoning": 3,
+                "cache": {"read": 5, "write": 2},
+            },
+            "error": {
+                "name": "APIError",
+                "data": {"message": "busy", "isRetryable": True},
+            },
+        },
+        "parts": [],
+    }
+    harness = OpenCodeHarness(
+        model="anthropic/claude-sonnet-4-5",
+        fast_mode=False,
+        effort=None,
+    )
+
+    with pytest.raises(HarnessError):
+        harness.parse(
+            HarnessRunResult(
+                returncode=1,
+                stdout=(json.dumps(response) + "\n").encode(),
+                stderr=b"request failed\n",
+            ),
+            artifact_dir=tmp_path,
+            run_id="failed-call",
+        )
+
+    cost_usd, metadata = read_cost(tmp_path / "failed-call")
+    assert cost_usd == 0.75
+    assert metadata
+    assert metadata["input_tokens"] == 100
+    assert metadata["output_tokens"] == 20
 
 
 def test_write_cost_and_read_cost_round_trip(tmp_path: Path):

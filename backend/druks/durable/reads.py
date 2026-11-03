@@ -10,7 +10,7 @@ from sqlalchemy import Engine
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.database import session_scope
-from druks.durable.activity import get_run_phase
+from druks.durable.activity import get_run_phase, get_run_phase_ends_at
 from druks.durable.exceptions import AgentCallNotFound
 from druks.durable.live import keepalive_comment, serialize_model_event
 
@@ -126,11 +126,14 @@ async def get_subject_response(
     # eager-loaded here.
     runs = await Run.list_for_subject(session, subject_type, subject_id, include_calls=True)
     latest = runs[0] if runs else None
+    phase = await get_run_phase(latest.id) if latest and latest.is_running else None
+    ends_at = await get_run_phase_ends_at(latest.id) if phase else None
     return SubjectResponse(
         summary=summary,
         status=await _status(latest),
         timeline=await _timeline(runs),
-        phase=await get_run_phase(latest.id) if latest and latest.is_running else None,
+        phase=phase,
+        phase_ends_at=ends_at if ends_at and ends_at > datetime.now(UTC) else None,
     )
 
 

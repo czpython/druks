@@ -6,6 +6,7 @@ from pathlib import Path
 import druks.harnesses.base
 import pytest
 from drukbox_sdk import Secret
+from druks.harnesses.artifacts import read_cost
 from druks.harnesses.base import Harness
 from druks.harnesses.datastructures import Manifest
 from druks.harnesses.exceptions import (
@@ -256,7 +257,18 @@ def test_parse_returns_the_contract_and_sums_spend(tmp_path: Path) -> None:
 def test_parse_classifies_a_provider_error_by_status(
     tmp_path: Path, detail: str, expected: type[HarnessError]
 ) -> None:
-    stdout = _message_end("assistant", stopReason="error", errorMessage=detail)
+    stdout = _message_end(
+        "assistant",
+        stopReason="error",
+        errorMessage=detail,
+        usage={
+            "input": 1,
+            "output": 1,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "cost": {"total": 0.25},
+        },
+    )
 
     with pytest.raises(expected) as error:
         _parse(stdout, tmp_path)
@@ -266,7 +278,18 @@ def test_parse_classifies_a_provider_error_by_status(
 
 
 def test_parse_reports_a_nonzero_exit_before_reading_the_stream(tmp_path: Path) -> None:
-    stdout = _message_end("assistant", stopReason="error", errorMessage="OpenAI API error (401): x")
+    stdout = _message_end(
+        "assistant",
+        stopReason="error",
+        errorMessage="OpenAI API error (401): x",
+        usage={
+            "input": 1,
+            "output": 1,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "cost": {"total": 0.25},
+        },
+    )
 
     with pytest.raises(HarnessError, match="pi exited with 1.*extension failed") as error:
         _parse(stdout, tmp_path, returncode=1, stderr=b"extension failed\n")
@@ -279,9 +302,33 @@ def test_parse_treats_a_missing_result_file_as_invalid_output(tmp_path: Path) ->
         _parse(b'{"type":"agent_settled"}', tmp_path)
 
 
-def test_parse_treats_a_broken_stream_as_invalid_output(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("stdout", "expected_cost"),
+    [
+        (b"not json", None),
+        (
+            _message_end(
+                "assistant",
+                usage={
+                    "input": 1,
+                    "output": 1,
+                    "cacheRead": 0,
+                    "cacheWrite": 0,
+                    "cost": {"total": 0.25},
+                },
+            ),
+            0.25,
+        ),
+    ],
+)
+def test_parse_treats_a_broken_stream_as_invalid_output(
+    tmp_path: Path, stdout: bytes, expected_cost: float | None
+) -> None:
     with pytest.raises(HarnessInvalidOutputError, match="no usable stream"):
-        _parse(b"not json", tmp_path)
+        _parse(stdout, tmp_path)
+
+    cost_usd, _ = read_cost(tmp_path / "run-1")
+    assert cost_usd == expected_cost
 
 
 async def test_a_pasted_key_becomes_the_catalog_entry(client, druks_db) -> None:

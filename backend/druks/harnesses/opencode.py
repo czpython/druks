@@ -148,21 +148,9 @@ class OpenCodeHarness(Harness):
         )
 
     def parse(self, result: HarnessRunResult, *, artifact_dir: Path, run_id: str) -> Any:
-        if result.returncode == 124:
-            raise exceptions.HarnessTimeoutError(
-                "opencode hit the agent deadline; the session was aborted."
-            )
         try:
             responses = [json.loads(line)["info"] for line in result.stdout.splitlines()]
             info = responses[-1]
-            if failure := info.get("error"):
-                data = failure.get("data") or {}
-                message = data.get("message")
-                detail = f"{failure['name']}: {message}" if message else failure["name"]
-                if failure["name"] == "APIError" and data.get("isRetryable"):
-                    raise exceptions.HarnessOverloadedError(detail)
-                raise _ERROR_TYPES.get(failure["name"], exceptions.HarnessError)(detail)
-            structured = info["structured"]
             tokens = [response["tokens"] for response in responses]
             metadata = {
                 "provider": self.name,
@@ -174,7 +162,26 @@ class OpenCodeHarness(Harness):
                 "cache_creation_tokens": sum(entry["cache"]["write"] for entry in tokens),
             }
             cost_usd = sum(float(response["cost"]) for response in responses)
+            output_dir = call_dir(artifact_dir, run_id)
+            write_cost(output_dir, cost_usd=cost_usd, metadata=metadata)
+            if result.returncode == 124:
+                raise exceptions.HarnessTimeoutError(
+                    "opencode hit the agent deadline; the session was aborted."
+                )
+            if failure := info.get("error"):
+                data = failure.get("data") or {}
+                message = data.get("message")
+                detail = f"{failure['name']}: {message}" if message else failure["name"]
+                if failure["name"] == "APIError" and data.get("isRetryable"):
+                    raise exceptions.HarnessOverloadedError(detail)
+                raise _ERROR_TYPES.get(failure["name"], exceptions.HarnessError)(detail)
+            structured = info["structured"]
+            self.check_returncode(result)
         except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
+            if result.returncode == 124:
+                raise exceptions.HarnessTimeoutError(
+                    "opencode hit the agent deadline; the session was aborted."
+                ) from error
             try:
                 self.check_returncode(result)
             except exceptions.HarnessError as process_error:
@@ -183,8 +190,5 @@ class OpenCodeHarness(Harness):
                 "opencode wrote no usable response.",
             ) from error
 
-        self.check_returncode(result)
-        output_dir = call_dir(artifact_dir, run_id)
         (output_dir / "output.json").write_text(json.dumps(structured, indent=2, sort_keys=True))
-        write_cost(output_dir, cost_usd=cost_usd, metadata=metadata)
         return structured

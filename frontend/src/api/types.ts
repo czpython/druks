@@ -178,14 +178,15 @@ export interface SubjectRow<S extends SubjectSummary = SubjectSummary> {
 
 // A subject's full read view: domain summary, status, the platform timeline
 // (the subject's runs, oldest first, each with its agent calls), and the
-// driving run's sandbox phase while it starts.
+// driving run's live phase while it starts or waits.
 export interface SubjectResponse<S extends SubjectSummary = SubjectSummary> {
   summary: S
   status: SubjectStatus
   timeline: RunSummary[]
-  // The driving run's sandbox phase while it starts ("provisioning_vm"). The shell
-  // supplies the words.
+  // The driving run's live phase while it starts or waits. The shell supplies
+  // the words. A timed phase carries the time when it ends separately.
   phase?: string | null
+  phaseEndsAt?: string | null
 }
 
 export interface ArtifactFile {
