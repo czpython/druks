@@ -307,7 +307,7 @@ async def test_external_close_honors_delete_branch_policy(druks_db, tmp_path, mo
 
 
 def _async_value(value):
-    async def get():
+    async def get(repo):
         return value
 
     return get
@@ -355,7 +355,7 @@ async def test_external_close_survives_policy_resolution_failure(druks_db, tmp_p
         deleted.append((repo, branch))
 
     monkeypatch.setattr(
-        build_models.Github, "get_client", lambda: SimpleNamespace(delete_branch=_delete)
+        build_models.Github, "get_client", lambda repo: SimpleNamespace(delete_branch=_delete)
     )
 
     pushed = []

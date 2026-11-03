@@ -1,6 +1,6 @@
-import asyncio
 import hashlib
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlparse
 
 import httpx
@@ -9,6 +9,7 @@ from druks.core.services import Github
 from druks.db import db_session
 from druks.redis import get_client
 from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.services import OauthClient, OauthRefreshError
 from druks.services.oauth import complete_connect
@@ -67,39 +68,54 @@ async def _connection(
     )
 
 
-def _token_key(connection: VaultSecret) -> str:
-    return f"{_PROVIDER}:access_token:{connection.id}"
+def _scope_hash(scopes: tuple[str, ...]) -> str:
+    return hashlib.sha256(" ".join(sorted(scopes)).encode()).hexdigest()[:16]
 
 
-def _scoped_suffix(scopes: tuple[str, ...]) -> str:
-    return ":" + hashlib.sha256(" ".join(sorted(scopes)).encode()).hexdigest()[:16]
+def _audience(connection: VaultSecret, scopes: tuple[str, ...] = ()) -> str:
+    if scopes:
+        return Audience.oauth(_PROVIDER, connection.id, _scope_hash(scopes))
+    return Audience.oauth(_PROVIDER, connection.id)
+
+
+async def _keep(connection: VaultSecret, value: str, scopes: tuple[str, ...] = ()) -> None:
+    await VaultSecret.store(
+        db_session(),
+        SecretKind.STATIC,
+        _audience(connection, scopes),
+        secrets={"value": value},
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+
+
+async def _kept(connection: VaultSecret, scopes: tuple[str, ...] = ()) -> tuple | None:
+    return await VaultSecret.get_token(db_session(), _audience(connection, scopes))
 
 
 def _lock_key(connection: VaultSecret) -> str:
     return f"{_PROVIDER}:refresh_lock:{connection.id}"
 
 
-async def test_get_serves_the_cache_without_a_refresh(token_endpoint):
+async def test_get_serves_the_kept_token_without_a_refresh(token_endpoint):
     connection = await _connection()
-    await get_client().set(_token_key(connection), "at-cached")
+    await _keep(connection, "at-kept")
 
     token, expires_at = await _client().get_access_token(db_session(), connection=connection)
 
-    assert token == "at-cached"
-    # A cached token without a lifetime carries no expiry.
-    assert expires_at is None
+    assert token == "at-kept"
+    assert expires_at - datetime.now(UTC) > timedelta(minutes=59)
     assert not token_endpoint.requests
 
 
-async def test_get_refreshes_persists_rotation_and_fills_with_skewed_ttl(token_endpoint):
+async def test_get_refreshes_persists_rotation_and_keeps_the_token_in_the_vault(token_endpoint):
     token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-new", "expires_in": 300}
     connection = await _connection()
 
     token, expires_at = await _client().get_access_token(db_session(), connection=connection)
 
     assert token == "at-2"
-    # The expiry is the cache lifetime: the provider's 300s less the skew.
-    assert timedelta(seconds=230) < expires_at - datetime.now(UTC) <= timedelta(seconds=240)
+    # The expiry is the provider's 300s from now.
+    assert timedelta(seconds=290) < expires_at - datetime.now(UTC) <= timedelta(seconds=300)
     db_session().expunge_all()
     assert (await db_session().get(VaultSecret, connection.id)).secrets["refresh_token"] == "rt-new"
     refresh = token_endpoint.requests[0]
@@ -108,13 +124,12 @@ async def test_get_refreshes_persists_rotation_and_fills_with_skewed_ttl(token_e
     # Body-style client auth: the credentials travel in the form.
     assert refresh["client_id"] == "client-123"
     assert refresh["client_secret"] == "secret-123"
-    redis = get_client()
-    assert await redis.get(_token_key(connection)) == b"at-2"
-    assert 0 < await redis.ttl(_token_key(connection)) <= 240
-    assert not await redis.get(_lock_key(connection))
+    assert (await _kept(connection))[0] == "at-2"
+    # Redis holds no token, and the refresh lock is gone.
+    assert not await get_client().keys()
 
 
-async def test_get_fills_the_cache_only_after_the_rotation_is_saved(token_endpoint, monkeypatch):
+async def test_get_keeps_the_token_only_after_the_rotation_is_saved(token_endpoint, monkeypatch):
     token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-new", "expires_in": 300}
     connection = await _connection()
 
@@ -125,21 +140,22 @@ async def test_get_fills_the_cache_only_after_the_rotation_is_saved(token_endpoi
     with pytest.raises(RuntimeError, match="rotation write failed"):
         await _client().get_access_token(db_session(), connection=connection)
 
-    redis = get_client()
-    assert not await redis.get(_token_key(connection))
-    assert not await redis.get(_lock_key(connection))
+    assert not await _kept(connection)
+    assert not await get_client().get(_lock_key(connection))
 
 
-async def test_get_losing_the_lock_polls_for_the_winners_token(token_endpoint):
+async def test_get_losing_the_lock_polls_for_the_winners_token(token_endpoint, monkeypatch):
     connection = await _connection()
-    redis = get_client()
-    await redis.set(_lock_key(connection), "1")
+    await get_client().set(_lock_key(connection), "1")
 
-    # The winner holds its lock: a lock freed between the loser's cache miss
-    # and its lock attempt would elect the loser instead.
-    winner = asyncio.create_task(redis.set(_token_key(connection), "at-winner"))
+    async def winner_keeps_its_token(seconds: float) -> None:
+        await _keep(connection, "at-winner")
+
+    # The winner holds its lock and keeps its token while the loser waits.
+    monkeypatch.setattr(
+        "druks.services.oauth.asyncio", SimpleNamespace(sleep=winner_keeps_its_token)
+    )
     token, _ = await _client().get_access_token(db_session(), connection=connection)
-    await winner
 
     assert token == "at-winner"
     assert not token_endpoint.requests
@@ -153,7 +169,7 @@ async def test_get_times_out_loudly_when_the_lock_never_frees(token_endpoint):
         await _client(mint_wait_attempts=3).get_access_token(db_session(), connection=connection)
 
 
-async def test_get_refresh_rejection_evicts_and_raises(token_endpoint):
+async def test_get_refresh_rejection_keeps_nothing_and_raises(token_endpoint):
     token_endpoint.status = 400
     connection = await _connection()
 
@@ -161,9 +177,8 @@ async def test_get_refresh_rejection_evicts_and_raises(token_endpoint):
         await _client().get_access_token(db_session(), connection=connection)
 
     assert (await db_session().get(VaultSecret, connection.id)).secrets["refresh_token"] == "rt-old"
-    redis = get_client()
-    assert not await redis.get(_token_key(connection))
-    assert not await redis.get(_lock_key(connection))
+    assert not await _kept(connection)
+    assert not await get_client().get(_lock_key(connection))
 
 
 @pytest.mark.parametrize(("status", "response"), [(500, {}), (400, {"error": "invalid_client"})])
@@ -216,9 +231,9 @@ async def test_get_refresh_uses_basic_auth(token_endpoint):
     assert "client_secret" not in token_endpoint.requests[0]
 
 
-async def test_disconnect_revokes_the_connection_and_drops_the_cached_token(token_endpoint):
+async def test_disconnect_revokes_the_connection_and_its_kept_token(token_endpoint):
     connection = await _connection()
-    await get_client().set(_token_key(connection), "at-cached")
+    await _keep(connection, "at-kept")
 
     await _client().disconnect(connection, reason="user")
 
@@ -228,7 +243,7 @@ async def test_disconnect_revokes_the_connection_and_drops_the_cached_token(toke
     # Nothing secret outlives the consent at rest.
     assert "refresh_token" not in revoked.secrets
     assert revoked.account_id is None
-    assert not await get_client().get(_token_key(connection))
+    assert not await _kept(connection)
 
     # A second revoke keeps the first stamp.
     first_stamp = revoked.revoked_at
@@ -250,9 +265,9 @@ async def test_a_revoke_landing_mid_refresh_is_not_overwritten(token_endpoint):
     with pytest.raises(OauthRefreshError, match="revoked mid-refresh"):
         await _client().get_access_token(db_session(), connection=connection)
 
-    # The rotated token is not stored and no access token is cached.
+    # The rotated token is not stored and no access token is kept.
     assert "refresh_token" not in (await db_session().get(VaultSecret, connection.id)).secrets
-    assert not await get_client().get(_token_key(connection))
+    assert not await _kept(connection)
 
 
 async def test_get_refuses_a_revoked_connection(token_endpoint):
@@ -308,7 +323,7 @@ async def test_begin_connect_call_params_override_the_declared_ones():
     assert params["prompt"] == "select_account"
 
 
-async def test_downscoped_get_asks_and_caches_apart_from_the_full_grant(token_endpoint):
+async def test_downscoped_get_asks_and_keeps_apart_from_the_full_grant(token_endpoint):
     connection = await _connection(scopes=["posts.write", "profile.read"])
     token_endpoint.response = {
         "access_token": "at-narrow",
@@ -323,10 +338,8 @@ async def test_downscoped_get_asks_and_caches_apart_from_the_full_grant(token_en
 
     assert narrow == "at-narrow"
     assert token_endpoint.requests[0]["scope"] == "profile.read"
-    redis = get_client()
-    scoped_key = _token_key(connection) + _scoped_suffix(("profile.read",))
-    assert await redis.get(scoped_key) == b"at-narrow"
-    assert not await redis.get(_token_key(connection))
+    assert (await _kept(connection, ("profile.read",)))[0] == "at-narrow"
+    assert not await _kept(connection)
 
     token_endpoint.response = {
         "access_token": "at-full",
@@ -337,10 +350,10 @@ async def test_downscoped_get_asks_and_caches_apart_from_the_full_grant(token_en
 
     assert full == "at-full"
     assert "scope" not in token_endpoint.requests[1]
-    assert await redis.get(_token_key(connection)) == b"at-full"
-    assert await redis.get(scoped_key) == b"at-narrow"
+    assert (await _kept(connection))[0] == "at-full"
+    assert (await _kept(connection, ("profile.read",)))[0] == "at-narrow"
 
-    # The scoped cache serves the scoped ask without another refresh.
+    # The scoped token serves the scoped ask without another refresh.
     assert (
         await _client().get_access_token(
             db_session(), connection=connection, scopes=("profile.read",)
@@ -374,41 +387,37 @@ async def test_downscoped_get_rejects_a_provider_that_ignores_the_ask(token_endp
             db_session(), connection=connection, scopes=("profile.read",)
         )
 
-    scoped_key = _token_key(connection) + _scoped_suffix(("profile.read",))
-    assert not await get_client().get(scoped_key)
+    assert not await _kept(connection, ("profile.read",))
 
 
-async def test_uncached_get_refreshes_past_a_live_cache_and_refills_it(token_endpoint):
+async def test_uncached_get_refreshes_past_a_kept_token_and_keeps_the_new_one(token_endpoint):
     connection = await _connection()
-    redis = get_client()
-    await redis.set(_token_key(connection), "at-tail")
+    await _keep(connection, "at-tail")
 
     token, _ = await _client().get_access_token(db_session(), connection=connection, cached=False)
 
     assert token == "at-1"
     assert len(token_endpoint.requests) == 1
-    assert await redis.get(_token_key(connection)) == b"at-1"
-    assert not await redis.get(_lock_key(connection))
+    assert (await _kept(connection))[0] == "at-1"
+    assert not await get_client().get(_lock_key(connection))
 
 
 async def test_refresher_election_is_per_scope_set(token_endpoint):
     connection = await _connection(scopes=["profile.read"])
     redis = get_client()
-    await redis.set(_lock_key(connection) + _scoped_suffix(("profile.read",)), "1")
+    await redis.set(f"{_lock_key(connection)}:{_scope_hash(('profile.read',))}", "1")
 
     # The scoped variant's lock never blocks the full-grant mint.
     assert (await _client().get_access_token(db_session(), connection=connection))[0] == "at-1"
     assert len(token_endpoint.requests) == 1
 
 
-async def test_disconnect_evicts_the_scope_variant_keys(token_endpoint):
+async def test_disconnect_revokes_the_scope_variants(token_endpoint):
     connection = await _connection(scopes=["profile.read"])
-    redis = get_client()
-    scoped_key = _token_key(connection) + _scoped_suffix(("profile.read",))
-    await redis.set(_token_key(connection), "at-full")
-    await redis.set(scoped_key, "at-narrow")
+    await _keep(connection, "at-full")
+    await _keep(connection, "at-narrow", ("profile.read",))
 
     await _client().disconnect(connection, reason="user")
 
-    assert not await redis.get(_token_key(connection))
-    assert not await redis.get(scoped_key)
+    assert not await _kept(connection)
+    assert not await _kept(connection, ("profile.read",))

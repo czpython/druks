@@ -25,7 +25,7 @@ async def fetch_collection(
     the flat skills dir and its VM projection share one global name namespace."""
     repo = _parse_github_repo(url)
     try:
-        github = await Github.get_client()
+        github = await Github.get_client(repo)
         archive = await github.download_tarball(repo)
     except (ServiceNotConnectedError, GitHubAppNotInstalledError):
         try:

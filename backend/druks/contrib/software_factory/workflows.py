@@ -394,8 +394,9 @@ class Build(Workflow):
     @step
     async def declare_merge_intent(self) -> bool:
         """Whether GitHub accepted ownership of the merge."""
-        github = await Github.get_client()
-        return await github.merge_when_ready((await self.subject).repo, self.pr_number)
+        repo = (await self.subject).repo
+        github = await Github.get_client(repo)
+        return await github.merge_when_ready(repo, self.pr_number)
 
     # The PR comes from the first delivery. Before it, this is None. Rework deliveries
     # reuse the PR, so a later delivery with another value must not change this read.
@@ -413,9 +414,8 @@ class Build(Workflow):
         repo = (await self.subject).repo
         if login:
             try:
-                await (await Github.get_client()).request_pull_request_reviewers(
-                    repo, self.pr_number, [login]
-                )
+                github = await Github.get_client(repo)
+                await github.request_pull_request_reviewers(repo, self.pr_number, [login])
             except Exception:  # noqa: BLE001 — a missed ping must not fail the park
                 logger.warning(
                     "could not request review from %s on %s#%s",
@@ -427,9 +427,8 @@ class Build(Workflow):
     async def set_pr_draft(self, *, draft: bool) -> None:
         repo = (await self.subject).repo
         try:
-            await (await Github.get_client()).set_pull_request_draft_state(
-                repo, self.pr_number, draft=draft
-            )
+            github = await Github.get_client(repo)
+            await github.set_pull_request_draft_state(repo, self.pr_number, draft=draft)
         except Exception:  # noqa: BLE001 — a draft merge fails loudly anyway
             logger.warning("Could not set draft=%s on %s#%s.", draft, repo, self.pr_number)
 

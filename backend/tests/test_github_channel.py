@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qsl, urlparse
@@ -11,7 +11,7 @@ from druks.accounts.models import Account
 from druks.chat.channels.github.channel import GitHubChannel
 from druks.chat.enums import ConversationSource, MessageRole
 from druks.chat.models import Conversation
-from druks.core.apis.github import GITHUB_AUTHORITY, GitHubClient
+from druks.core.apis.github import GITHUB_AUTHORITY, GitHubAppClient, GitHubClient
 from druks.core.services import Github
 from druks.core.webhooks import github as github_webhooks
 from druks.core.webhooks.github import GitHubEvents
@@ -31,7 +31,15 @@ THREAD = "acme/app#7"
 
 
 @pytest.fixture
-async def card(druks_db):
+async def card(druks_db, monkeypatch):
+    async def get_installation_id(self, owner_or_repo):
+        return 1
+
+    async def create_installation_token(self, installation_id, repositories=()):
+        return "ghs_test", datetime.now(UTC) + timedelta(hours=1)
+
+    monkeypatch.setattr(GitHubAppClient, "get_installation_id", get_installation_id)
+    monkeypatch.setattr(GitHubAppClient, "create_installation_token", create_installation_token)
     bind_ambient_session(druks_db)
     card = await connect_service(
         "github",

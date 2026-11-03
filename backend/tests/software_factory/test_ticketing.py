@@ -731,9 +731,12 @@ class _FakeGitHubClient:
         self.calls.append(("close_issue", repo, issue_number))
 
 
-def _github(fake) -> GitHub:
+def _github(monkeypatch, fake) -> GitHub:
+    async def get_client(repo):
+        return fake
+
+    monkeypatch.setattr(services.Github, "get_client", get_client)
     return GitHub(
-        client=fake,
         status_names={
             TicketStatus.TRIGGER: "ready-for-agent",
             TicketStatus.IN_PROGRESS: "agent:in-progress",
@@ -754,10 +757,10 @@ async def test_tracker_builds_github_from_the_operator_app(monkeypatch):
     assert tracker._status_names[TicketStatus.TRIGGER] == "ready-for-agent"
 
 
-async def test_github_set_status_swaps_the_label_within_an_exclusive_group():
+async def test_github_set_status_swaps_the_label_within_an_exclusive_group(monkeypatch):
     fake = _FakeGitHubClient()
 
-    await _github(fake).set_status("acme/widget#7", TicketStatus.IN_PROGRESS)
+    await _github(monkeypatch, fake).set_status("acme/widget#7", TicketStatus.IN_PROGRESS)
 
     assert fake.calls == [
         (
@@ -770,16 +773,16 @@ async def test_github_set_status_swaps_the_label_within_an_exclusive_group():
     ]
 
 
-async def test_github_done_closes_the_issue():
+async def test_github_done_closes_the_issue(monkeypatch):
     fake = _FakeGitHubClient()
 
-    await _github(fake).set_status("acme/widget#7", TicketStatus.DONE)
+    await _github(monkeypatch, fake).set_status("acme/widget#7", TicketStatus.DONE)
 
     assert fake.calls[-1] == ("close_issue", "acme/widget", 7)
 
 
-async def test_github_rejects_a_key_without_its_repo():
-    tracker = _github(_FakeGitHubClient())
+async def test_github_rejects_a_key_without_its_repo(monkeypatch):
+    tracker = _github(monkeypatch, _FakeGitHubClient())
 
     with pytest.raises(UnknownTicketError, match="doesn't exist in GitHub"):
         await tracker.set_status("widget#7", TicketStatus.DONE)

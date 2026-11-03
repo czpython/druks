@@ -135,10 +135,7 @@ async def test_default_branch_push_drops_the_cached_file(tmp_path, monkeypatch, 
             remote["reads"] += 1
             return remote["body"]
 
-        async def aclose(self):
-            pass
-
-    async def _client():
+    async def _client(repo):
         return _GitHub()
 
     monkeypatch.setattr("druks.core.services.Github.get_client", _client)

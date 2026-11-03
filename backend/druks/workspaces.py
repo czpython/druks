@@ -370,7 +370,8 @@ class RepoWorkspace(Workspace):
         Rewritten before every agent call so a reused warm host follows the
         current run's dispatcher — a system dispatch carries no hook and
         credits nobody."""
-        author_name, author_email = await (await Github.get_client()).get_bot_git_author()
+        github = await Github.get_client(self.get_repo(self.subject))
+        author_name, author_email = await github.get_bot_git_author()
         steps = [
             f"cd {shlex.quote(self.repo_path)}",
             f"git config user.name {shlex.quote(author_name)}",

@@ -2,6 +2,7 @@ import contextlib
 import shutil
 import time
 
+from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.services import Github
 from druks.settings import load_settings
 
@@ -18,12 +19,13 @@ async def fetch_file(*, repo: str, path: str) -> str | None:
         if time.time() - cache.stat().st_mtime < _TTL_SECONDS:
             return cache.read_text() or None
 
-    github = await Github.get_client()
-
     try:
+        github = await Github.get_client(repo)
+    except GitHubAppNotInstalledError:
+        # A repository the App cannot reach has no file to read.
+        body = None
+    else:
         body = await github.get_file_content(repo, path)
-    finally:
-        await github.aclose()
 
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(body or "")

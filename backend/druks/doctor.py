@@ -102,7 +102,7 @@ async def check_installations(settings: Settings) -> CheckResult:
     try:
         async with _check_engine(settings) as engine:
             async with session_scope(engine):
-                client = await Github.get_client()
+                client = await Github.get_app_client()
             accounts = await client.list_installation_accounts()
     except ServiceNotConnectedError:
         return CheckResult(
@@ -139,7 +139,7 @@ async def check_app_permissions(settings: Settings) -> CheckResult:
     try:
         async with _check_engine(settings) as engine:
             async with session_scope(engine):
-                client = await Github.get_client()
+                client = await Github.get_app_client()
             granted = await client.get_app_permissions()
     except ServiceNotConnectedError:
         return CheckResult(

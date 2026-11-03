@@ -281,7 +281,7 @@ class WorkItem(StoredSubject):
         if self.source == "github":
             # A GitHub ticket key is ``owner/repo#42``.
             stem = f"agent/issue-{self.ticket_key.rsplit('#', 1)[1]}"
-        github = await Github.get_client()
+        github = await Github.get_client(self.repo)
         branch, number = stem, 1
         while await github.has_branch(self.repo, branch):
             number += 1
@@ -319,7 +319,8 @@ class WorkItem(StoredSubject):
             await db_session().flush()
             try:
                 if (await RepoPolicy.resolve(self.repo)).delete_branch:
-                    await (await Github.get_client()).delete_branch(self.repo, self.branch)
+                    github = await Github.get_client(self.repo)
+                    await github.delete_branch(self.repo, self.branch)
             except Exception:  # noqa: BLE001 — cleanup only
                 logger.warning("Skipped branch cleanup for %s.", self.repo, exc_info=True)
             await self.set_ticket_status(TicketStatus.BACKLOG)

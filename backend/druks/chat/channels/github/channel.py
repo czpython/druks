@@ -90,8 +90,8 @@ class GitHubChannel(Channel):
     async def post(cls, thread_id: str, body: str, *, source_id: str) -> str:
         """Post ``body`` where the comment ``source_id`` sits: in its inline thread, or
         at the top of the issue. Returns the posted comment's source id."""
-        client = await Github.get_client()
         repo, _, number = thread_id.partition("#")
+        client = await Github.get_client(repo)
         kind, *place = source_id.split(":")
         if kind == "review_comment":
             thread = int(place[0])
@@ -116,8 +116,8 @@ class GitHubChannel(Channel):
         cls, session: AsyncSession, conversation: Conversation, message: Message
     ) -> None:
         """React to the person's comment."""
-        client = await Github.get_client()
         repo = conversation.thread_id.partition("#")[0]
+        client = await Github.get_client(repo)
         kind, *place = message.source_id.split(":")
         comment_id = int(place[-1])
         if kind == "review_comment":
@@ -130,15 +130,16 @@ class GitHubChannel(Channel):
         """Whether the repository is private, so the agent knows who can read its reply,
         and the login of the person it answers."""
         repo = conversation.thread_id.partition("#")[0]
-        repository = await (await Github.get_client()).get_repository(repo)
+        github = await Github.get_client(repo)
+        repository = await github.get_repository(repo)
         return {"is_private": repository["private"], "user_name": conversation.user_name}
 
     @classmethod
     async def read_thread(cls, session: AsyncSession, conversation: Conversation) -> list[dict]:
         """The issue or pull request, then its newest comments, oldest first. A reply is
         this conversation's by its recorded GitHub id."""
-        client = await Github.get_client()
         repo, _, number = conversation.thread_id.partition("#")
+        client = await Github.get_client(repo)
         number = int(number)
         own_replies = await conversation.list_reply_source_ids(session)
 

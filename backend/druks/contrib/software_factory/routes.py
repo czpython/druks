@@ -1,4 +1,5 @@
 import logging
+from contextlib import suppress
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Response, status
@@ -36,7 +37,11 @@ from druks.contrib.software_factory.schemas import (
 )
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Profile, PullRequestReview
-from druks.core.apis.exceptions import TicketNotMovableError, UnknownTicketError
+from druks.core.apis.exceptions import (
+    GitHubAppNotInstalledError,
+    TicketNotMovableError,
+    UnknownTicketError,
+)
 from druks.core.services import Github
 from druks.db import db_session
 from druks.services.exceptions import ServiceNotConnectedError
@@ -87,22 +92,21 @@ async def list_github_repos(
         ),
     ),
 ) -> GitHubReposResponse:
-    github = await Github.get_client()
     resolved = (owner or "").strip()
     if resolved:
         owners: tuple[str, ...] = (resolved,)
     else:
-        owners = await github.list_installation_accounts()
+        owners = await (await Github.get_app_client()).list_installation_accounts()
         if not owners:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
                 "the operator GitHub App has no installations — install it on your org",
             )
-    repos = [
-        repo
-        for account in sorted(owners, key=str.casefold)
-        for repo in await github.list_repos_for_owner(account)
-    ]
+    repos = []
+    for account in sorted(owners, key=str.casefold):
+        # An owner the App is not installed on has no repos to list.
+        with suppress(GitHubAppNotInstalledError):
+            repos.extend(await (await Github.get_client(account)).list_repos())
     return GitHubReposResponse(
         repos=[
             GitHubRepoSummary(full_name=r["full_name"], description=r.get("description"))

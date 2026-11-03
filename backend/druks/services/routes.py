@@ -201,8 +201,8 @@ async def oauth_callback(
         await row.reconnect(
             refresh_token=refresh_token, scopes=granted, identity=identity, secrets=kept
         )
-        # A token cached before this consent must not serve the new one.
-        await OauthClient(provider=provider).evict_access_token(row.id)
+        # A token kept before this consent must not serve the new one.
+        await OauthClient(provider=provider).evict_access_token(session, row.id)
     else:
         row = await VaultSecret.connect(
             session,

@@ -198,7 +198,7 @@ def _dispatched_by(monkeypatch: pytest.MonkeyPatch, username: str | None) -> Sim
     async def _bot_git_author() -> tuple[str, str]:
         return "app[bot]", "1+app[bot]@users.noreply.github.com"
 
-    async def _client():
+    async def _client(repo):
         return SimpleNamespace(get_bot_git_author=_bot_git_author)
 
     monkeypatch.setattr("druks.core.services.Github.get_client", _client)
@@ -215,7 +215,10 @@ async def test_set_git_identity_stamps_the_workspace_repo(
 ) -> None:
     repo_path = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", str(repo_path)], check=True)
-    workspace = RepoWorkspace(host=_IdentitySandbox(repo_path))  # type: ignore[arg-type]
+    workspace = RepoWorkspace(
+        host=_IdentitySandbox(repo_path),  # type: ignore[arg-type]
+        subject=SimpleNamespace(repo="o/app"),
+    )
     hook = repo_path / ".git" / "hooks" / "prepare-commit-msg"
     message = repo_path / "COMMIT_EDITMSG"
 

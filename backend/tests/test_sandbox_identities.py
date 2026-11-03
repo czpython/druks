@@ -7,7 +7,7 @@ import pytest
 from conftest import connect_provider, connect_service
 from druks.accounts.models import Account
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
-from druks.core.apis.github import GitHubClient
+from druks.core.apis.github import GitHubAppClient
 from druks.core.services import Github
 from druks.db import db_session
 from druks.durable.engine import _step_engine
@@ -438,10 +438,10 @@ async def test_the_issuer_answers_503_when_github_refuses(druks_db, tmp_path, mo
 async def test_the_issuer_answers_422_with_the_reason_when_the_app_is_not_on_the_repo(
     druks_db, tmp_path, monkeypatch
 ):
-    async def get_token_for_repos(self, *repos: str) -> tuple[str, datetime]:
-        raise GitHubAppNotInstalledError(repos[0], app="druks-reviewer")
+    async def get_installation_id(self, owner_or_repo: str) -> int:
+        raise GitHubAppNotInstalledError(owner_or_repo, app="druks-reviewer")
 
-    monkeypatch.setattr(GitHubClient, "get_token_for_repos", get_token_for_repos)
+    monkeypatch.setattr(GitHubAppClient, "get_installation_id", get_installation_id)
     await _connect_github()
     identity, bearer = await _github_identity()
 

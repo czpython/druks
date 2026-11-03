@@ -212,7 +212,7 @@ async def test_create_branch_takes_a_name_github_does_not_hold(
     async def create_branch(repo, name):
         created.append((repo, name))
 
-    async def get_client():
+    async def get_client(repo):
         return SimpleNamespace(has_branch=has_branch, create_branch=create_branch)
 
     monkeypatch.setattr("druks.contrib.software_factory.models.Github.get_client", get_client)
