@@ -65,17 +65,17 @@ async def test_manifest_records_the_delivered_capability_set(druks_db):
     # server (get_mcp_servers), so it reads delivered but not declared.
     manifest = await _build(mcp_servers=(linear, github), skills=("alpha",))
 
-    assert manifest["schema_version"] == 2
-    assert manifest["model"] == "anthropic/claude-opus-4-8"
-    assert manifest["harness"] == "claude"
-    assert manifest["skills_delivered"] == ["alpha"]
+    assert manifest.as_dict()["schema_version"] == 2
+    assert manifest.model == "anthropic/claude-opus-4-8"
+    assert manifest.harness == "claude"
+    assert manifest.skills == ("alpha",)
 
-    linear_entry = next(s for s in manifest["mcp_servers"] if s["name"] == "linear")
+    linear_entry = next(s for s in manifest.mcp_servers if s["name"] == "linear")
     assert linear_entry["declared"] is True
     assert linear_entry["delivered"] is True
     assert linear_entry["token_present"] is True
 
-    github_entry = next(s for s in manifest["mcp_servers"] if s["name"] == "github")
+    github_entry = next(s for s in manifest.mcp_servers if s["name"] == "github")
     assert github_entry["declared"] is False
     assert github_entry["delivered"] is True
     assert github_entry["token_present"] is True
@@ -90,7 +90,7 @@ async def test_missing_mcp_token_records_absence(druks_db):
 
     manifest = await _build(mcp_servers=(McpServer(name="linear", url=_LINEAR_URL),))
 
-    linear_entry = next(s for s in manifest["mcp_servers"] if s["name"] == "linear")
+    linear_entry = next(s for s in manifest.mcp_servers if s["name"] == "linear")
     assert linear_entry["declared"] is True
     assert linear_entry["token_present"] is False
 
@@ -105,7 +105,7 @@ async def test_declared_but_undelivered_server_still_reads_declared(druks_db):
 
     manifest = await _build()
 
-    linear_entry = next(s for s in manifest["mcp_servers"] if s["name"] == "linear")
+    linear_entry = next(s for s in manifest.mcp_servers if s["name"] == "linear")
     assert linear_entry["declared"] is True
     assert linear_entry["delivered"] is False
     assert linear_entry["token_present"] is False
@@ -126,7 +126,7 @@ async def test_records_the_delivered_server_not_the_registry_duplicate(druks_db)
 
     manifest = await _build(mcp_servers=(required,))
 
-    linear_entry = next(s for s in manifest["mcp_servers"] if s["name"] == "linear")
+    linear_entry = next(s for s in manifest.mcp_servers if s["name"] == "linear")
     assert linear_entry["url"] == "https://required.internal/linear"
     assert linear_entry["bearer_token_env_var"] == "REQUIRED_LINEAR_TOKEN"
     assert linear_entry["declared"] is True
@@ -144,16 +144,16 @@ async def test_hash_is_stable_for_identical_capabilities(druks_db):
     with_token = {"mcp_servers": (linear,)}
 
     baseline = await _build(**with_token)
-    assert (await _build(**with_token))["manifest_hash"] == baseline["manifest_hash"]
+    assert (await _build(**with_token)).hash == baseline.hash
 
     different_model = await _build(
         harness=ClaudeHarness(model="anthropic/claude-sonnet-5", fast_mode=False, effort=None),
         **with_token,
     )
-    assert different_model["manifest_hash"] != baseline["manifest_hash"]
+    assert different_model.hash != baseline.hash
 
     without_token = await _build(mcp_servers=(McpServer(name="linear", url=_LINEAR_URL),))
-    assert without_token["manifest_hash"] != baseline["manifest_hash"]
+    assert without_token.hash != baseline.hash
 
 
 async def test_curated_skills_change_the_recorded_set_and_the_hash(druks_db):
@@ -162,9 +162,9 @@ async def test_curated_skills_change_the_recorded_set_and_the_hash(druks_db):
     with_enabled = await _build(skills=("alpha", "beta"))
     disabled_only = await _build(skills=("beta",))
 
-    assert with_enabled["skills_delivered"] == ["alpha"]
-    assert disabled_only["skills_delivered"] == []
-    assert with_enabled["manifest_hash"] != disabled_only["manifest_hash"]
+    assert with_enabled.skills == ("alpha",)
+    assert disabled_only.skills == ()
+    assert with_enabled.hash != disabled_only.hash
 
 
 async def test_manifest_records_token_presence_never_the_value(druks_db):
@@ -177,7 +177,7 @@ async def test_manifest_records_token_presence_never_the_value(druks_db):
 
     manifest = await _build(mcp_servers=(linear,))
 
-    serialized = json.dumps(manifest)
+    serialized = json.dumps(manifest.as_dict())
     assert _TOKEN not in serialized
     assert _LINEAR_ENV in serialized  # the var name is safe to record
 
@@ -203,10 +203,10 @@ async def test_manifest_stays_presence_only_for_a_declared_header_server(druks_d
 
     manifest = await _build(mcp_servers=(delivered,))
 
-    serialized = json.dumps(manifest)
+    serialized = json.dumps(manifest.as_dict())
     assert "grafana-api-secret" not in serialized
     assert "acme.grafana.net" not in serialized
-    grafana_entry = next(s for s in manifest["mcp_servers"] if s["name"] == "grafana")
+    grafana_entry = next(s for s in manifest.mcp_servers if s["name"] == "grafana")
     assert grafana_entry["declared"] is True
     assert grafana_entry["delivered"] is True
     assert grafana_entry["token_present"] is True
@@ -218,7 +218,7 @@ async def test_persist_writes_manifest_into_the_call_dir(tmp_path, druks_db):
     path = persist_manifest(tmp_path, call_id="call-1", manifest=manifest)
 
     assert path == tmp_path / "call-1" / "manifest.json"
-    assert json.loads(path.read_text())["manifest_hash"] == manifest["manifest_hash"]
+    assert json.loads(path.read_text())["manifest_hash"] == manifest.hash
 
 
 async def test_manifest_surfaces_in_agent_call_files(tmp_path, druks_db):

@@ -72,10 +72,10 @@ class _FakeSandbox:
         *,
         local: Path,
         remote: str,
-        excludes: tuple[str, ...] = (),
+        members: tuple[str, ...] | None = None,
     ) -> None:
         # Record dir uploads the same way; tests assert on .remote.
-        del excludes
+        del members
         self.uploads.append(_FakeUpload(local=local, remote=remote))
 
     async def write_secret(

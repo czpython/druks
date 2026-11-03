@@ -12,6 +12,7 @@ from druks.accounts.models import Account
 from druks.db import db_session
 from druks.harnesses.claude import ClaudeHarness, _get_credentials
 from druks.harnesses.codex import CodexHarness
+from druks.harnesses.datastructures import Manifest
 from druks.harnesses.exceptions import AgentConfigError, HarnessNotConnectedError
 from druks.harnesses.opencode import OpenCodeHarness
 from druks.harnesses.pi import PiHarness
@@ -21,6 +22,9 @@ from druks.sandbox.models import SandboxIdentity
 from druks.secrets.models import VaultSecret
 from druks.testing import seed_run
 from druks_field_notes.workflows import Summarize
+
+# A manifest for a call with no skills.
+_MANIFEST = Manifest(model="", harness="", mcp_servers=(), skills=())
 
 
 @pytest.fixture
@@ -53,7 +57,7 @@ async def _seed_claude(
 async def test_claude_bundle_carries_no_credential_file(druks_db, config_root):
     """The sandbox holds a placeholder for the token. No file carries it."""
     await _seed_claude(access="live", refresh="R0")
-    bundle = await _get_credentials(db_session())
+    bundle = _get_credentials(_MANIFEST)
     assert not any(type(entry) is HomeFile for entry in bundle.home)
     assert bundle.home[0] == HomeCopy(".claude/settings.json", config_root / "claude/settings.json")
 
@@ -73,7 +77,7 @@ async def test_the_operators_claude_config_reaches_the_box_without_its_mcp_serve
         )
     )
 
-    bundle = await _get_credentials(db_session())
+    bundle = _get_credentials(_MANIFEST)
 
     [config] = [entry for entry in bundle.home if entry.path == ".claude.json"]
     assert json.loads(config.content) == {"theme": "dark"}
@@ -107,12 +111,12 @@ async def _seed_codex() -> VaultSecret:
 async def test_credentials_builders_read_their_harness_config_directories(
     druks_db, config_root, tmp_path
 ):
-    claude_bundle = await _get_credentials(db_session())
-    codex_bundle = await CodexHarness(
+    claude_bundle = _get_credentials(_MANIFEST)
+    codex_bundle = CodexHarness(
         model=CodexHarness.default_model,
         fast_mode=False,
         effort=None,
-    )._get_credentials(db_session())
+    )._get_credentials(_MANIFEST)
 
     # No credential file: each CLI reads a placeholder the box holds.
     assert not any(type(entry) is HomeFile for entry in (*claude_bundle.home, *codex_bundle.home))
@@ -172,7 +176,7 @@ async def test_config_delivery_does_not_copy_host_provider_credentials(
     invocation = await harness(
         model=harness.default_model, fast_mode=False, effort=None
     ).build_invocation(
-        db_session(),
+        _MANIFEST,
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",
@@ -227,7 +231,7 @@ async def test_the_codex_wrapper_writes_its_login_around_the_placeholder(druks_d
     invocation = await CodexHarness(
         model=CodexHarness.default_model, fast_mode=False, effort=None
     ).build_invocation(
-        db_session(),
+        _MANIFEST,
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",
@@ -318,7 +322,7 @@ async def _build_claude(druks_db, **kwargs):
     return await ClaudeHarness(
         model=ClaudeHarness.default_model, fast_mode=False, effort=None
     ).build_invocation(
-        db_session(),
+        _MANIFEST,
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",
@@ -371,9 +375,9 @@ async def test_codex_exec_turns_apps_off_without_include_apps(druks_db):
     harness = CodexHarness(model=CodexHarness.default_model, fast_mode=False, effort=None)
     kwargs = {"prompt": "hello", "schema": {"type": "object"}, "run_id": "run-1"}
 
-    off = await harness.build_invocation(db_session(), ssh_username="druks", **kwargs)
+    off = await harness.build_invocation(_MANIFEST, ssh_username="druks", **kwargs)
     on = await harness.build_invocation(
-        db_session(), ssh_username="druks", include_apps=True, **kwargs
+        _MANIFEST, ssh_username="druks", include_apps=True, **kwargs
     )
 
     assert "-c features.apps=false" in off.args[2]

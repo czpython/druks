@@ -1103,8 +1103,8 @@ repository needs the GitHub App installed on it.
 If it requests none, it receives each enabled skill. A Software Factory build
 requests the recommended set from the repository profile.
 
-Druks excludes other
-installed skills from the upload. The capability manifest records the delivered
+Druks uploads no other
+installed skill. The capability manifest records the delivered
 set for each agent.
 
 ## Credential custody and secrets at rest

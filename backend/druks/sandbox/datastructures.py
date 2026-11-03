@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 
 from druks.settings import load_settings
 
-from .constants import DEFAULT_DIR_EXCLUDES
 from .exceptions import SetupScriptError
 
 if TYPE_CHECKING:
@@ -197,7 +196,9 @@ class HomeCopy:
 
     path: str
     source: Path
-    excludes: tuple[str, ...] = ()
+    # None ships the whole tree. A tuple ships only those entries of it, and an
+    # empty tuple only the directory.
+    members: tuple[str, ...] | None = None
 
     async def push(self, host: "Host", home: str) -> None:
         remote = f"{home}/{self.path}"
@@ -206,9 +207,7 @@ class HomeCopy:
         if self.source.is_file():
             await host.upload_file(local=self.source, remote=remote)
         elif self.source.is_dir():
-            await host.upload_dir(
-                local=self.source, remote=remote, excludes=DEFAULT_DIR_EXCLUDES + self.excludes
-            )
+            await host.upload_dir(local=self.source, remote=remote, members=self.members)
 
 
 @dataclass(frozen=True)

@@ -10,12 +10,12 @@ from typing import Any
 
 import pytest
 from conftest import CONFIG_PROBE, connect_provider, installation_key, make_jwt
-from druks.db import db_session
 from druks.durable.enums import AgentCallStatus
 from druks.harnesses.base import Harness
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.config import AgentConfig, get_config
+from druks.harnesses.datastructures import Manifest
 from druks.harnesses.exceptions import (
     HarnessAuthError,
     HarnessError,
@@ -38,6 +38,9 @@ from druks.sandbox.datastructures import (
 from druks.sandbox.exceptions import SandboxUnreachable
 from druks.sandbox.host import Host, _first_byte_killer
 from druks.user_settings.models import SettingsOverride
+
+# A manifest for a call with no skills.
+_MANIFEST = Manifest(model="", harness="", mcp_servers=(), skills=())
 
 
 @dataclass
@@ -314,21 +317,11 @@ async def test_run_prompt_builds_executes_and_parses(
         model = "claude-opus-4-8"
         first_byte_seconds = 17
 
-        async def get_manifest(self, _session: Any, **_kwargs: Any) -> dict[str, Any]:
-            return {
-                "manifest_hash": "hash",
-                "schema_version": 2,
-                "model": self.model,
-                "harness": self.name,
-                "mcp_servers": [],
-                "skills_delivered": [],
-            }
-
         @staticmethod
         def mint_run_id(call_id: str | None) -> str:
             return call_id or "minted-id"
 
-        async def build_invocation(self, _session: Any, **kwargs: Any) -> AgentInvocation:
+        async def build_invocation(self, _manifest: Any, **kwargs: Any) -> AgentInvocation:
             seen["build"] = kwargs
             return _inv(("claude", "--print"))
 
@@ -339,10 +332,11 @@ async def test_run_prompt_builds_executes_and_parses(
     async def after_agent() -> str:
         return "Run the tests."
 
+    manifest = Manifest(model="claude-opus-4-8", harness="claude", mcp_servers=(), skills=())
     payload = await Host.run_prompt(
         sandbox,
-        db_session(),
         _FakeHarness(),
+        manifest,
         prompt="do the thing",
         schema={"type": "object"},
         artifact_dir=ctx.artifact_dir,
@@ -364,9 +358,8 @@ async def test_run_prompt_builds_executes_and_parses(
     # The prompt was persisted to the artifact dir before exec.
     assert (ctx.artifact_dir / "call-7" / "prompt.md").read_text() == "do the thing"
     # The capability manifest was written alongside it, keyed to the same call.
-    manifest = json.loads((ctx.artifact_dir / "call-7" / "manifest.json").read_text())
-    assert manifest["model"] == "claude-opus-4-8"
-    assert manifest["harness"] == "claude"
+    written = json.loads((ctx.artifact_dir / "call-7" / "manifest.json").read_text())
+    assert written == manifest.as_dict()
     # parse received the executed result for the same run.
     assert seen["parse"]["run_id"] == "call-7"
     assert seen["parse"]["result"].stdout == b"streamed\n"
@@ -433,14 +426,11 @@ async def test_run_prompt_fails_a_finished_run_whose_hook_never_ran(ctx: SimpleN
         name = "claude"
         first_byte_seconds = None
 
-        async def get_manifest(self, _session: Any, **_kwargs: Any) -> dict:
-            return {}
-
         @staticmethod
         def mint_run_id(call_id: str) -> str:
             return call_id
 
-        async def build_invocation(self, _session: Any, **_kwargs: Any) -> AgentInvocation:
+        async def build_invocation(self, _manifest: Any, **_kwargs: Any) -> AgentInvocation:
             return _inv(("claude", "--print"))
 
         def parse(self, result: Any, *, artifact_dir: Path, run_id: str) -> Any:
@@ -453,8 +443,8 @@ async def test_run_prompt_fails_a_finished_run_whose_hook_never_ran(ctx: SimpleN
     with pytest.raises(HarnessHookError, match="claude finished and never ran after_agent"):
         await Host.run_prompt(
             sandbox,
-            db_session(),
             _FakeHarness(),
+            _MANIFEST,
             prompt="do the thing",
             schema={"type": "object"},
             artifact_dir=ctx.artifact_dir,
@@ -608,6 +598,22 @@ def test_agent_result_names_the_agent_in_its_failure():
     assert result.error.code == "overloaded"
 
 
+def _run_agent(sandbox: Any, config: AgentConfig, **kwargs: Any) -> Any:
+    # What Workspace.run_agent hands the host for ``config``.
+    harness = config.harness_class(
+        model=config.model, fast_mode=config.fast_mode, effort=config.effort
+    )
+    return Host.run_agent(
+        sandbox,
+        harness,
+        _MANIFEST,
+        timeout=config.timeout,
+        identity=config.identity,
+        include_apps=config.include_apps,
+        **kwargs,
+    )
+
+
 @pytest.fixture
 def agent_config():
     return AgentConfig(
@@ -638,15 +644,14 @@ async def test_run_agent_carries_foreign_failures_as_harness_errors(
     sandbox._capture_result = functools.partial(Host._capture_result, sandbox)
     original = RuntimeError("kaboom")
 
-    async def run_prompt(_session: Any, harness: Any, **_kwargs: Any) -> Any:
+    async def run_prompt(harness: Any, _manifest: Any, **_kwargs: Any) -> Any:
         raise original
 
     sandbox.run_prompt = run_prompt
-    result = await Host.run_agent(
+    result = await _run_agent(
         sandbox,
-        db_session(),
+        agent_config,
         agent="evaluate",
-        config=agent_config,
         prompt="p",
         schema={"type": "object"},
         artifact_dir=ctx.artifact_dir,
@@ -666,15 +671,14 @@ async def test_run_agent_carries_a_taxonomy_failure_as_itself(ctx: SimpleNamespa
     sandbox._capture_result = functools.partial(Host._capture_result, sandbox)
     timeout = HarnessTimeoutError("claude timed out after 60s.")
 
-    async def run_prompt(_session: Any, harness: Any, **_kwargs: Any) -> Any:
+    async def run_prompt(harness: Any, _manifest: Any, **_kwargs: Any) -> Any:
         raise timeout
 
     sandbox.run_prompt = run_prompt
-    result = await Host.run_agent(
+    result = await _run_agent(
         sandbox,
-        db_session(),
+        agent_config,
         agent="evaluate",
-        config=agent_config,
         prompt="p",
         schema={"type": "object"},
         artifact_dir=ctx.artifact_dir,
@@ -707,11 +711,10 @@ async def test_claude_api_key_stays_on_the_server(
     )
     monkeypatch.setattr("druks.harnesses.claude.load_settings", lambda: settings)
 
-    result = await Host.run_agent(
+    result = await _run_agent(
         sandbox,
-        db_session(),
+        config,
         agent="evaluate",
-        config=config,
         prompt="p",
         schema={"type": "object"},
         artifact_dir=ctx.artifact_dir,
@@ -765,11 +768,10 @@ async def test_claude_subscription_token_stays_on_the_server(
     )
     monkeypatch.setattr("druks.harnesses.claude.load_settings", lambda: settings)
 
-    result = await Host.run_agent(
+    result = await _run_agent(
         sandbox,
-        db_session(),
+        config,
         agent="evaluate",
-        config=config,
         prompt="p",
         schema={"type": "object"},
         artifact_dir=ctx.artifact_dir,
@@ -821,11 +823,10 @@ async def test_codex_subscription_token_stays_on_the_server(
     )
     monkeypatch.setattr("druks.harnesses.codex.load_settings", lambda: settings)
 
-    result = await Host.run_agent(
+    result = await _run_agent(
         sandbox,
-        db_session(),
+        config,
         agent="evaluate",
-        config=config,
         prompt="p",
         schema={"type": "object"},
         artifact_dir=ctx.artifact_dir,

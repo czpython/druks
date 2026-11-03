@@ -6,11 +6,15 @@ from pathlib import Path
 
 import druks.harnesses.base
 from drukbox_sdk import Secret
-from druks.db import db_session
 from druks.harnesses.base import Harness
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
+from druks.harnesses.datastructures import Manifest
 from druks.sandbox.datastructures import McpServer
+
+# A manifest for a call with no skills.
+_MANIFEST = Manifest(model="", harness="", mcp_servers=(), skills=())
+
 
 _CODEX_MODEL = CodexHarness.default_model
 _HOOK = Harness.after_agent_hook_path("/home/exedev/work/runs/run-1")
@@ -33,7 +37,7 @@ async def test_claude_build_invocation_carries_every_flag():
         fast_mode=True,
         effort="high",
     ).build_invocation(
-        db_session(),
+        _MANIFEST,
         identity={"email": "op@example.com", "scopes": ["user:inference"]},
         prompt="hello",
         schema=schema,
@@ -86,7 +90,7 @@ async def test_claude_refuses_the_first_result_of_a_hooked_call():
     inv = await ClaudeHarness(
         model="anthropic/claude-x", fast_mode=True, effort=None
     ).build_invocation(
-        db_session(),
+        _MANIFEST,
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",
@@ -118,7 +122,7 @@ async def test_codex_build_invocation_carries_every_flag():
         fast_mode=True,
         effort="high",
     ).build_invocation(
-        db_session(),
+        _MANIFEST,
         identity={"email": "op@example.com", "account_id": "acc-1"},
         prompt="hello",
         schema={"type": "object"},
@@ -168,7 +172,7 @@ async def test_codex_build_invocation_carries_every_flag():
 
 async def test_codex_blocks_the_first_stop_of_a_hooked_call():
     inv = await CodexHarness(model=_CODEX_MODEL, fast_mode=False, effort=None).build_invocation(
-        db_session(),
+        _MANIFEST,
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",
@@ -231,7 +235,7 @@ async def test_claude_reads_its_key_from_a_placeholder_in_the_vm():
     inv = await ClaudeHarness(
         model="anthropic/claude-x", fast_mode=False, effort=None
     ).build_invocation(
-        db_session(),
+        _MANIFEST,
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",
@@ -256,7 +260,7 @@ async def test_codex_reads_its_key_from_a_placeholder_in_the_vm():
         )
     }
     inv = await CodexHarness(model=_CODEX_MODEL, fast_mode=False, effort=None).build_invocation(
-        db_session(),
+        _MANIFEST,
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",

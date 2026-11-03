@@ -5,8 +5,6 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from druks.accounts.enums import AccountKind
 from druks.sandbox.datastructures import (
     AgentInvocation,
@@ -19,6 +17,7 @@ from druks.sandbox.layout import get_runs_root, get_work_root
 from . import exceptions
 from .artifacts import call_dir, write_cost
 from .base import Harness
+from .datastructures import Manifest
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +85,7 @@ class OpenCodeHarness(Harness):
 
     async def build_invocation(
         self,
-        session: AsyncSession,
+        manifest: Manifest,
         *,
         prompt: str,
         schema: dict[str, object],
@@ -94,7 +93,6 @@ class OpenCodeHarness(Harness):
         ssh_username: str,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
-        skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         identity: dict | None = None,

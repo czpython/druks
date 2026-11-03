@@ -1,4 +1,3 @@
-import hashlib
 import json
 import logging
 import shlex
@@ -22,6 +21,7 @@ from . import exceptions
 from .datastructures import (
     AgentInvocation,
     HarnessRunResult,
+    Manifest,
 )
 from .providers import Provider, get_provider, is_registered
 
@@ -29,11 +29,6 @@ if TYPE_CHECKING:
     from druks.sandbox.datastructures import McpServer
 
 logger = logging.getLogger(__name__)
-
-# The capability manifest is a plain JSON dict written per AgentCall. Bump when
-# the recorded shape changes so a reader can tell manifests apart across
-# versions; the value is part of the hash, so a bump reshuffles the buckets.
-MANIFEST_SCHEMA_VERSION = 2
 
 _AFTER_AGENT_HOOK = Path(__file__).parent / "hooks" / "druks-after-agent.sh"
 
@@ -75,7 +70,7 @@ class Harness(ABC):
         self.effort = effort
 
     @abstractmethod
-    async def build_invocation(self, session: AsyncSession, **kwargs: object) -> AgentInvocation:
+    async def build_invocation(self, manifest: Manifest, **kwargs: object) -> AgentInvocation:
         """Assemble this CLI's full invocation (argv, stdin, credentials,
         env) for one prompt. Pure — never touches the live sandbox; the
         sandbox executes the returned invocation."""
@@ -155,18 +150,13 @@ class Harness(ABC):
         *,
         mcp_servers: tuple["McpServer", ...],
         skills: Collection[str],
-    ) -> dict:
+    ) -> Manifest:
         """The capability manifest for one AgentCall: what this harness was
         handed. Presence only — a token records as a boolean, never its value,
         so nothing here needs scrubbing. Identity stays off it — the manifest
         sits in the call dir whose name is the AgentCall id, and that row
         already records which agent ran; the execution record (args, timings,
-        exit code) is metadata.json beside it.
-
-        Everything recorded is capability-shaped and hashed: ``manifest_hash``
-        is a stable digest of the canonicalised record, so an identical
-        capability set always hashes the same and an eval report can bucket
-        calls by it."""
+        exit code) is metadata.json beside it."""
         # Declared = the enabled registry view; delivered = what actually
         # reached this call (a workspace's server owns its name — see
         # Workspace.get_all_mcp_servers). The delivered server is what
@@ -194,22 +184,15 @@ class Harness(ABC):
                     ),
                 }
             )
-        # Only the delivered skill set is reachable in either CLI home, so the
-        # manifest records that per-call capability.
-        capability = {
-            "schema_version": MANIFEST_SCHEMA_VERSION,
-            "model": self.model or "",
-            "harness": self.name,
-            "mcp_servers": mcp,
-            "skills_delivered": sorted(
-                skill.name for skill in await Skill.list_delivered(session, skills)
-            ),
-        }
-        canonical = json.dumps(capability, sort_keys=True, separators=(",", ":"))
-        return {
-            "manifest_hash": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
-            **capability,
-        }
+        # Only the delivered skills reach the CLI home, and the harness ships
+        # exactly this list.
+        delivered = await Skill.list_delivered(session, skills)
+        return Manifest(
+            model=self.model or "",
+            harness=self.name,
+            mcp_servers=tuple(mcp),
+            skills=tuple(skill.name for skill in delivered),
+        )
 
     @staticmethod
     def mint_run_id(call_id: str | None) -> str:

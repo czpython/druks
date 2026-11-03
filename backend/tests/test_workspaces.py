@@ -10,10 +10,21 @@ from druks import workspaces as workspace_mod
 from druks.contrib.software_factory.services import GithubReviewer
 from druks.core.apis.github import GitHubClient
 from druks.core.services import Github
+from druks.harnesses.claude import ClaudeHarness
 from druks.sandbox import SandboxSecret
 from druks.sandbox.layout import get_repo_root
 from druks.secrets.models import VaultSecret
 from druks.workspaces import RepoWorkspace, Workspace
+
+_CONFIG = SimpleNamespace(
+    harness_class=ClaudeHarness,
+    model="anthropic/claude-opus-4-8",
+    fast_mode=False,
+    effort=None,
+    timeout=60,
+    identity={},
+    include_apps=False,
+)
 
 
 class _RecordingHost:
@@ -32,13 +43,22 @@ async def test_every_agent_call_gets_the_workspace_env(druks_db):
     calls: list[dict[str, Any]] = []
 
     class _Host:
-        async def run_agent(self, session, **kwargs: Any) -> str:
+        async def run_agent(self, harness, manifest, **kwargs: Any) -> str:
             calls.append(kwargs)
             return "result"
 
-    await DeployWorkspace(host=_Host()).run_agent(account_id=None, prompt="p")  # type: ignore[arg-type]
+    workspace = DeployWorkspace(host=_Host())  # type: ignore[arg-type]
+    await workspace.run_agent(account_id=None, config=_CONFIG, prompt="p")
 
-    assert calls == [{"extra_env": {"DEPLOY_TOKEN": "token"}, "prompt": "p"}]
+    assert calls == [
+        {
+            "extra_env": {"DEPLOY_TOKEN": "token"},
+            "prompt": "p",
+            "timeout": 60,
+            "identity": {},
+            "include_apps": False,
+        }
+    ]
 
 
 async def test_repo_workspace_clones_before_every_agent_call_and_writes_no_token(

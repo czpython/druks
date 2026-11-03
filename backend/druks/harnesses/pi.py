@@ -5,8 +5,6 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
@@ -18,6 +16,7 @@ from druks.sandbox.layout import get_runs_root
 from . import exceptions
 from .artifacts import write_cost
 from .base import Harness
+from .datastructures import Manifest
 from .subprocess import read_result_json
 
 _DRUKS_OUTPUT_TEMPLATE = Path(__file__).parent / "druks-output.ts"
@@ -40,7 +39,7 @@ class PiHarness(Harness):
 
     async def build_invocation(
         self,
-        session: AsyncSession,
+        manifest: Manifest,
         *,
         prompt: str,
         schema: dict[str, object],
@@ -51,7 +50,6 @@ class PiHarness(Harness):
         # run hermetic.
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
-        skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         identity: dict | None = None,
