@@ -26,6 +26,8 @@ jobs:
             python-version: "3.11"
           - name: backend (3.14)
             python-version: "3.14"
+          - name: backend (3.15)
+            python-version: "3.15"
           # Druks supports Postgres 16 and newer; the other jobs run 16.
           - name: backend (postgres 18)
             python-version: "3.11"
