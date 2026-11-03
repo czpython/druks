@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any, Self
 import asyncssh
 from drukbox_sdk import SandboxHost as SandboxHostRecord
 from drukbox_sdk.exceptions import SandboxAPIError, SandboxUnavailableError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.core.utils.time import ensure_utc
 from druks.durable.enums import AgentCallStatus
@@ -27,6 +26,7 @@ from druks.harnesses.exceptions import (
 )
 from druks.settings import load_settings
 
+from .constants import DEFAULT_DIR_EXCLUDES
 from .datastructures import (
     AgentInvocation,
     AgentResult,
@@ -40,7 +40,7 @@ from .layout import get_helper_script_path, get_work_root
 
 if TYPE_CHECKING:
     from druks.harnesses.base import Harness
-    from druks.harnesses.config import AgentConfig
+    from druks.harnesses.datastructures import Manifest
 
     from .runner import Exec
 
@@ -179,10 +179,12 @@ class Host:
         *,
         local: Path,
         remote: str,
-        excludes: Sequence[str] = (),
+        members: Sequence[str] | None = None,
     ) -> None:
         conn = await self._ensure_conn()
         await self.exec(["mkdir", "-p", remote], timeout=30.0)
+        if members is not None and not members:
+            return
 
         # Remote: untar from stdin into ``remote``. ``-m`` skips mtime
         # restore to avoid clock-skew warnings.
@@ -191,7 +193,8 @@ class Host:
         try:
             await _stream_local_tar_into(
                 local=local,
-                excludes=excludes,
+                excludes=DEFAULT_DIR_EXCLUDES,
+                members=members,
                 writer=process.stdin,
             )
         finally:
@@ -203,22 +206,24 @@ class Host:
 
     async def run_agent(
         self,
-        session: AsyncSession,
+        harness: "Harness",
+        manifest: "Manifest",
         *,
         agent: str,
-        config: "AgentConfig",
         prompt: str,
         schema: dict[str, Any],
         artifact_dir: Path,
+        timeout: int,
+        identity: dict | None = None,
+        include_apps: bool = False,
         call_id: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
-        skills: tuple[str, ...] = (),
         extra_env: dict[str, Any] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         hooks: dict[str, Hook] | None = None,
     ) -> AgentResult:
-        """Run ``agent`` with ``config`` and return a pure ``AgentResult`` —
+        """Run ``agent`` with ``harness`` and return a pure ``AgentResult`` —
         no database write. A failure is carried on the result's ``error``, not
         raised, so the call still records what it cost before the agent call
         re-raises it.
@@ -229,36 +234,29 @@ class Host:
         state — for prompts that hit no MCP server; a no-op for codex.
         ``hooks`` answers the run's hooks, by name.
         """
-        harness = config.harness_class(
-            model=config.model,
-            fast_mode=config.fast_mode,
-            effort=config.effort,
-        )
-
         # Names the artifact subdir and is the AgentCall.id — supplied by the
         # orchestrator so the row already exists (RUNNING) before we run; falls
         # back to a fresh uuid for callers that record the call after the fact.
         run_id = harness.mint_run_id(call_id)
         return await self._capture_result(
             self.run_prompt(
-                session,
                 harness,
+                manifest,
                 prompt=prompt,
                 schema=schema,
                 artifact_dir=artifact_dir,
-                timeout=config.timeout,
+                timeout=timeout,
                 include_plugins=include_plugins,
                 add_dirs=add_dirs,
-                skills=skills,
                 extra_env=extra_env,
                 mcp_servers=mcp_servers,
                 call_id=run_id,
-                identity=config.identity,
-                include_apps=config.include_apps,
+                identity=identity,
+                include_apps=include_apps,
                 hooks=hooks,
             ),
             agent=agent,
-            model=config.model,
+            model=harness.model,
             run_id=run_id,
             artifact_dir=artifact_dir,
             started_at=datetime.now(UTC),
@@ -266,31 +264,27 @@ class Host:
 
     async def resume_agent(
         self,
+        harness: "Harness",
         *,
         agent: str,
-        config: "AgentConfig",
         artifact_dir: Path,
         call_id: str,
         started_at: datetime,
+        timeout: int,
         hooks: dict[str, Hook] | None = None,
     ) -> AgentResult:
         """``run_agent`` for a call another process started on this VM and left
         running: watch it to its end and parse it into the same result."""
-        harness = config.harness_class(
-            model=config.model,
-            fast_mode=config.fast_mode,
-            effort=config.effort,
-        )
         return await self._capture_result(
             self.resume_prompt(
                 harness,
                 artifact_dir=artifact_dir,
                 run_id=call_id,
-                timeout=config.timeout,
+                timeout=timeout,
                 hooks=hooks,
             ),
             agent=agent,
-            model=config.model,
+            model=harness.model,
             run_id=call_id,
             artifact_dir=artifact_dir,
             started_at=started_at,
@@ -334,8 +328,8 @@ class Host:
 
     async def run_prompt(
         self,
-        session: AsyncSession,
         harness: "Harness",
+        manifest: "Manifest",
         *,
         prompt: str,
         schema: dict[str, Any],
@@ -343,7 +337,6 @@ class Host:
         timeout: int,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
-        skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         call_id: str | None = None,
@@ -359,18 +352,17 @@ class Host:
         persist_manifest(
             artifact_dir,
             call_id=run_id,
-            manifest=await harness.get_manifest(session, mcp_servers=mcp_servers, skills=skills),
+            manifest=manifest,
         )
 
         invocation = await harness.build_invocation(
-            session,
+            manifest,
             prompt=prompt,
             schema=schema,
             run_id=run_id,
             ssh_username=self.ssh_username,
             include_plugins=include_plugins,
             add_dirs=add_dirs,
-            skills=skills,
             extra_env=extra_env,
             mcp_servers=mcp_servers,
             identity=identity,
@@ -739,10 +731,14 @@ async def _stream_local_tar_into(
     local: Path,
     excludes: Sequence[str],
     writer: "asyncssh.SSHWriter[Any]",
+    members: Sequence[str] | None = None,
 ) -> None:
     exclude_args: list[str] = []
     for pattern in excludes:
         exclude_args.extend(["--exclude", pattern])
+    # Members are named as ``-C local .`` names them, so excludes anchored to
+    # ``./`` keep matching.
+    paths = ["."] if members is None else [f"./{member}" for member in members]
 
     proc = await asyncio.create_subprocess_exec(
         "tar",
@@ -751,7 +747,7 @@ async def _stream_local_tar_into(
         *exclude_args,
         "-C",
         str(local),
-        ".",
+        *paths,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )

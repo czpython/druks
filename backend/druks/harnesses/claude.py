@@ -6,8 +6,6 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from druks.accounts.enums import AccountKind
 from druks.sandbox.datastructures import (
     AgentInvocation,
@@ -21,12 +19,12 @@ from druks.sandbox.layout import get_runs_root
 from druks.sandbox.models import SecretRef
 from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
-from druks.skills.models import Skill
 
 from . import exceptions
 from .artifacts import call_dir, write_cost
 from .base import Harness
 from .constants import CLAUDE_DISALLOWED_TOOLS
+from .datastructures import Manifest
 from .providers import AnthropicProvider
 
 logger = logging.getLogger(__name__)
@@ -119,7 +117,7 @@ class ClaudeHarness(Harness):
 
     async def build_invocation(
         self,
-        session: AsyncSession,
+        manifest: Manifest,
         *,
         prompt: str,
         schema: dict[str, object],
@@ -127,7 +125,6 @@ class ClaudeHarness(Harness):
         ssh_username: str,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
-        skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         identity: dict | None = None,
@@ -210,11 +207,7 @@ class ClaudeHarness(Harness):
             name="claude",
             args=("sh", "-c", wrapper),
             stdin=prompt.encode("utf-8"),
-            credentials=await _get_credentials(
-                session,
-                include_plugins=include_plugins,
-                skills=skills,
-            ),
+            credentials=_get_credentials(manifest, include_plugins=include_plugins),
             env=extra_env,
             extra_artifact_filenames=("debug.log", "session.jsonl"),
         )
@@ -298,12 +291,7 @@ class ClaudeHarness(Harness):
         return args
 
 
-async def _get_credentials(
-    session: AsyncSession,
-    *,
-    include_plugins: bool = True,
-    skills: tuple[str, ...] = (),
-) -> Credentials:
+def _get_credentials(manifest: Manifest, *, include_plugins: bool = True) -> Credentials:
     """The Credentials bundle the runner pushes into the sandbox: the local
     config, plugins, and skills. No credential file: the sandbox holds a
     placeholder for its token or key. ``include_plugins=False`` skips the
@@ -337,7 +325,7 @@ async def _get_credentials(
         HomeCopy(
             ".claude/skills",
             settings.skills_dir,
-            excludes=await Skill.delivery_excludes(session, skills),
+            members=manifest.skills,
         )
     )
     return Credentials(home=tuple(home))

@@ -669,7 +669,7 @@ async def test_subjectless_review_fails_loudly(runtime):
 def _fake_ephemeral_returning(output: dict, seen: list[dict], held: list[bool]):
     @contextlib.asynccontextmanager
     async def _fake_ephemeral(self, **_kw):
-        async def _run_agent(_session, **kwargs):
+        async def _run_agent(_harness, _manifest, **kwargs):
             seen.append(kwargs)
 
             held.append(db_session().in_transaction())

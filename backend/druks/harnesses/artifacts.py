@@ -3,6 +3,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from .datastructures import Manifest
+
 logger = logging.getLogger(__name__)
 
 _COST_FILENAME = "cost.json"
@@ -120,7 +122,7 @@ def persist_prompt(artifact_dir: Path, *, call_id: str, prompt: str) -> Path:
     return path
 
 
-def persist_manifest(artifact_dir: Path, *, call_id: str, manifest: dict) -> Path:
+def persist_manifest(artifact_dir: Path, *, call_id: str, manifest: Manifest) -> Path:
     path = call_dir(artifact_dir, call_id) / "manifest.json"
-    path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    path.write_text(json.dumps(manifest.as_dict(), indent=2, sort_keys=True))
     return path

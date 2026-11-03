@@ -4,8 +4,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from druks.db import db_session
 from druks.harnesses.base import Harness
+from druks.harnesses.datastructures import Manifest
 from druks.harnesses.exceptions import (
     HarnessError,
     HarnessInvalidOutputError,
@@ -17,6 +17,10 @@ from druks.harnesses.opencode import OpenCodeHarness
 from druks.harnesses.registry import get_harness
 from druks.sandbox.datastructures import HarnessRunResult, McpServer
 from pydantic import BaseModel
+
+# A manifest for a call with no skills.
+_MANIFEST = Manifest(model="", harness="", mcp_servers=(), skills=())
+
 
 _MODEL = OpenCodeHarness.default_model
 _API_KEY = "sk-opencode-secret"  # nosec B105
@@ -81,7 +85,7 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
         env_headers={"X-Trace-Key": "MCP_TRACE_KEY"},
     )
     invocation = await _harness().build_invocation(
-        db_session(),
+        _MANIFEST,
         prompt="A large prompt stays on stdin.",
         schema={"type": "object", "properties": {"answer": {"type": "string"}}},
         run_id="run-1",
@@ -147,7 +151,7 @@ async def test_third_party_invocation_keeps_provider_key_and_model_namespace() -
     )
 
     invocation = await harness.build_invocation(
-        db_session(),
+        _MANIFEST,
         prompt="Run it.",
         schema={"type": "object"},
         run_id="run-openrouter",
@@ -162,7 +166,7 @@ async def test_third_party_invocation_keeps_provider_key_and_model_namespace() -
 
 async def test_a_hooked_call_writes_the_hook_and_names_it() -> None:
     invocation = await _harness().build_invocation(
-        db_session(),
+        _MANIFEST,
         prompt="Run it.",
         schema={"type": "object"},
         run_id="run-1",
@@ -193,7 +197,7 @@ echo '{"info": {}}'
 
 async def test_the_wrapper_sends_each_turn_without_node(tmp_path: Path) -> None:
     invocation = await _harness().build_invocation(
-        db_session(),
+        _MANIFEST,
         prompt="Run it.",
         schema={"type": "object"},
         run_id="run-1",

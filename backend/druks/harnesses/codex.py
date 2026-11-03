@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from drukbox_sdk import Secret
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
 from druks.sandbox.datastructures import (
@@ -25,10 +24,10 @@ from druks.sandbox.layout import get_runs_root, get_work_root
 from druks.sandbox.models import SecretRef
 from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
-from druks.skills.models import Skill
 
 from .artifacts import write_cost
 from .base import Harness
+from .datastructures import Manifest
 from .exceptions import (
     HarnessAuthError,
     HarnessOverloadedError,
@@ -474,7 +473,7 @@ class CodexHarness(Harness):
 
     async def build_invocation(
         self,
-        session: AsyncSession,
+        manifest: Manifest,
         *,
         prompt: str,
         schema: dict[str, object],
@@ -485,7 +484,6 @@ class CodexHarness(Harness):
         # access so it needs no per-dir grants.
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
-        skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         identity: dict | None = None,
@@ -516,7 +514,7 @@ class CodexHarness(Harness):
             name=self.name,
             args=tuple(cmd),
             stdin=_with_final_message_note(prompt).encode("utf-8"),
-            credentials=await self._get_credentials(session, skills=skills),
+            credentials=self._get_credentials(manifest),
             env=extra_env,
             extra_artifact_filenames=("output.json", "session.jsonl"),
         )
@@ -596,9 +594,7 @@ class CodexHarness(Harness):
         args = (*args, "--json")
         return args
 
-    async def _get_credentials(
-        self, session: AsyncSession, *, skills: tuple[str, ...] = ()
-    ) -> Credentials:
+    def _get_credentials(self, manifest: Manifest) -> Credentials:
         settings = load_settings()
         config_dir = settings.harness_config_root / self.name
         return Credentials(
@@ -608,7 +604,7 @@ class CodexHarness(Harness):
                 HomeCopy(
                     ".codex/skills",
                     settings.skills_dir,
-                    excludes=await Skill.delivery_excludes(session, skills),
+                    members=manifest.skills,
                 ),
             )
         )

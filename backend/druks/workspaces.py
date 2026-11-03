@@ -38,6 +38,7 @@ from druks.sandbox.layout import get_repo_root, get_work_root
 from druks.sandbox.models import SecretRef
 
 if TYPE_CHECKING:
+    from druks.harnesses.config import AgentConfig
     from druks.sandbox.host import Host
 
 
@@ -181,12 +182,29 @@ class Workspace:
         await self.host.upload_file(local=source, remote=remote)
         return remote
 
-    async def run_agent(self, *, account_id: str | None, **kwargs: Any) -> AgentResult:
+    async def run_agent(
+        self, *, account_id: str | None, config: "AgentConfig", **kwargs: Any
+    ) -> AgentResult:
         run_kwargs = self.get_agent_run_kwargs(extra_env=self.get_env(), **kwargs)
-        # Commit so the step's connection isn't held idle through the minutes
-        # the agent runs.
+        harness = config.harness_class(
+            model=config.model, fast_mode=config.fast_mode, effort=config.effort
+        )
+        manifest = await harness.get_manifest(
+            db_session(),
+            mcp_servers=run_kwargs.get("mcp_servers", ()),
+            skills=run_kwargs.pop("skills", ()),
+        )
+        # The host reads nothing, so the step's connection isn't held in a
+        # transaction through the minutes the agent runs.
         await db_session().commit()
-        return await self.host.run_agent(db_session(), **run_kwargs)
+        return await self.host.run_agent(
+            harness,
+            manifest,
+            timeout=config.timeout,
+            identity=config.identity,
+            include_apps=config.include_apps,
+            **run_kwargs,
+        )
 
     @classmethod
     async def get_all_mcp_servers(

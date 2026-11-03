@@ -6,8 +6,8 @@ from pathlib import Path
 import druks.harnesses.base
 import pytest
 from drukbox_sdk import Secret
-from druks.db import db_session
 from druks.harnesses.base import Harness
+from druks.harnesses.datastructures import Manifest
 from druks.harnesses.exceptions import (
     HarnessAuthError,
     HarnessError,
@@ -24,6 +24,10 @@ from druks.secrets.models import VaultSecret
 from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
+
+# A manifest for a call with no skills.
+_MANIFEST = Manifest(model="", harness="", mcp_servers=(), skills=())
+
 
 _API_KEY = "sk-pi-secret"  # nosec B105
 _RUN_DIR = "/home/exedev/work/runs/run-1"
@@ -82,7 +86,7 @@ async def test_build_invocation_writes_the_run_files_and_pi_argv(
     public = McpServer(name="public", url="https://public.example.test/mcp")
 
     invocation = await _harness().build_invocation(
-        db_session(),
+        _MANIFEST,
         prompt="A large prompt stays on stdin.",
         schema={"type": "object"},
         run_id="run-1",
@@ -155,7 +159,7 @@ async def test_build_invocation_without_servers_or_effort_is_bare(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     invocation = await _harness(effort=None).build_invocation(
-        db_session(),
+        _MANIFEST,
         prompt="Prompt",
         schema={"type": "object"},
         run_id="run-1",
@@ -171,7 +175,7 @@ async def test_build_invocation_without_servers_or_effort_is_bare(
 
 async def test_a_hooked_call_hands_the_result_tool_the_hook() -> None:
     invocation = await _harness().build_invocation(
-        db_session(),
+        _MANIFEST,
         prompt="Prompt",
         schema={"type": "object"},
         run_id="run-1",

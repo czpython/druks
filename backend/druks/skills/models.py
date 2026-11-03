@@ -94,16 +94,6 @@ class Skill(Base, Uuid7Pk):
         return enabled
 
     @classmethod
-    async def delivery_excludes(
-        cls, session: AsyncSession, requested: Collection[str]
-    ) -> tuple[str, ...]:
-        # Patterns are anchored to the skills_dir tar root (``-C skills_dir .``);
-        # excluded skills remain installed on disk.
-        delivered = {skill.name for skill in await cls.list_delivered(session, requested)}
-        installed = await cls.installed_names(session)
-        return tuple(f"./{name}" for name in sorted(installed - delivered))
-
-    @classmethod
     async def get(cls, session: AsyncSession, name: str) -> "Skill | None":
         result = await session.execute(select(cls).where(cls.name == name))
         return result.scalar_one_or_none()

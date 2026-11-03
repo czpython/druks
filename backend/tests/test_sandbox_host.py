@@ -374,6 +374,7 @@ async def _roundtrip_via_tar(
     src: Path,
     dst: Path,
     excludes: tuple[str, ...] = (),
+    members: tuple[str, ...] | None = None,
 ) -> None:
     dst.mkdir(parents=True, exist_ok=True)
     untar = await asyncio.create_subprocess_exec(
@@ -388,7 +389,7 @@ async def _roundtrip_via_tar(
     )
     sink = _SubprocessTarSink(untar)
     try:
-        await _stream_local_tar_into(local=src, excludes=excludes, writer=sink)
+        await _stream_local_tar_into(local=src, excludes=excludes, members=members, writer=sink)
     finally:
         rc = await untar.wait()
     if rc != 0:
@@ -409,6 +410,20 @@ async def test_upload_dir_tar_roundtrip_mirrors_tree(tmp_path: Path):
     assert (dst / "a.txt").read_text() == "alpha"
     assert (dst / "deep" / "b.txt").read_text() == "beta"
     assert (dst / "deep" / "nest" / "c.bin").read_bytes() == b"\x00\x01\x02"
+
+
+async def test_upload_dir_tar_ships_only_the_members(tmp_path: Path):
+    src = tmp_path / "src"
+    (src / "alpha").mkdir(parents=True)
+    (src / "alpha" / "SKILL.md").write_text("alpha")
+    (src / "beta").mkdir()
+    (src / "beta" / "SKILL.md").write_text("beta")
+
+    dst = tmp_path / "dst"
+    await _roundtrip_via_tar(src, dst, members=("beta",))
+
+    assert sorted(path.name for path in dst.iterdir()) == ["beta"]
+    assert (dst / "beta" / "SKILL.md").read_text() == "beta"
 
 
 async def test_upload_dir_tar_honours_excludes(tmp_path: Path):

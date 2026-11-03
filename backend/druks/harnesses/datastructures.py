@@ -1,7 +1,9 @@
+import hashlib
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal, Self
+from typing import ClassVar, Literal, Self
 
 # Execution-side types live with the executor; re-exported here
 # because the harness API speaks them.
@@ -11,6 +13,45 @@ from druks.sandbox.datastructures import (  # noqa: F401
 )
 
 Billing = Literal["subscription", "api_key"]
+
+
+@dataclass(frozen=True)
+class Manifest:
+    """What one call was handed. The harness builds the invocation from it, and
+    the call dir keeps it as manifest.json. Presence only: a token records as a
+    boolean, never its value, so nothing here needs scrubbing."""
+
+    # Bump when the recorded shape changes so a reader can tell manifests apart
+    # across versions; the value is part of the hash, so a bump reshuffles the
+    # buckets.
+    schema_version: ClassVar[int] = 2
+
+    model: str
+    harness: str
+    # One entry per enabled registry server and per delivered server: name, url,
+    # bearer_token_env_var, declared, delivered, and token_present.
+    mcp_servers: tuple[dict, ...]
+    # The delivered skills, by name: what the box receives.
+    skills: tuple[str, ...]
+
+    @property
+    def hash(self) -> str:
+        # A stable digest of the canonicalised record, so an identical capability
+        # set always hashes the same and an eval report can bucket calls by it.
+        canonical = json.dumps(self._capability(), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def as_dict(self) -> dict:
+        return {"manifest_hash": self.hash, **self._capability()}
+
+    def _capability(self) -> dict:
+        return {
+            "schema_version": self.schema_version,
+            "model": self.model,
+            "harness": self.harness,
+            "mcp_servers": list(self.mcp_servers),
+            "skills_delivered": list(self.skills),
+        }
 
 
 @dataclass(frozen=True)

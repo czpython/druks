@@ -423,11 +423,14 @@ class Agent:
                 await set_run_phase("agent_running")
                 if resume:
                     attempt = runner.host.resume_agent(
+                        config.harness_class(
+                            model=config.model, fast_mode=config.fast_mode, effort=config.effort
+                        ),
                         agent=self.id,
-                        config=config,
                         artifact_dir=artifact_dir,
                         call_id=call_id,
                         started_at=running.started_at,
+                        timeout=config.timeout,
                         hooks=hooks,
                     )
                 else:

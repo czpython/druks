@@ -180,19 +180,15 @@ async def test_collection_create_get_cascade_delete(druks_db):
         "alpha",
         "beta",
     ]
-    assert await Skill.delivery_excludes(db_session(), ()) == ()
     assert [skill.name for skill in await Skill.list_delivered(db_session(), ("alpha",))] == [
         "alpha"
     ]
-    assert await Skill.delivery_excludes(db_session(), ("alpha",)) == ("./beta",)
 
     (await Skill.get(db_session(), "alpha")).enabled = False
     await druks_db.flush()
 
     assert [skill.name for skill in await Skill.list_delivered(db_session(), ())] == ["beta"]
-    assert await Skill.delivery_excludes(db_session(), ()) == ("./alpha",)
     assert await Skill.list_delivered(db_session(), ("alpha",)) == []
-    assert await Skill.delivery_excludes(db_session(), ("alpha",)) == ("./alpha", "./beta")
 
     await collection.delete()
     assert await SkillCollection.list_all(db_session()) == []

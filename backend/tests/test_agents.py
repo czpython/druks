@@ -269,9 +269,13 @@ async def test_declaration_drives_run_agent_call(druks_db, tmp_path, monkeypatch
     result = await DUMMY_AGENT._run(db_session(), workflow_id="wf-9", repo="acme/widget")
 
     assert result == DummyOutput(ok=True)
+    harness, manifest = sandbox.run_agent.await_args.args
+    assert isinstance(harness, ClaudeHarness)
+    assert harness.model == "anthropic/claude-opus-4-7"
+    assert manifest.harness == "claude"
     kwargs = sandbox.run_agent.await_args.kwargs
     assert kwargs["agent"] == "dummy"
-    assert kwargs["config"].subscription.account_id == current_run.account_id
+    assert kwargs["timeout"] == 1800
     assert kwargs["schema"] == DummyOutput.model_json_schema()
     assert kwargs["prompt"] == "PROMPT:dummy/agent.md:repo=acme/widget"
     assert kwargs["artifact_dir"] == tmp_path / "run-wf-9"
@@ -459,7 +463,7 @@ async def test_after_agent_hooks_answer_the_turn_from_a_box_of_their_own(
     warm.id = "warm-host"
     answers = []
 
-    async def run_hooked(_session, **kwargs):
+    async def run_hooked(_harness, _manifest, **kwargs):
         answers.append(await kwargs["hooks"]["after_agent"]())
         return make_agent_result({"ok": True}, agent="hooked_probe")
 
@@ -520,7 +524,8 @@ async def test_running_call_visible_then_finished(
     await SettingsOverride.set_agent_billing(druks_db, DUMMY_AGENT.id, billing)
     during: dict[str, object] = {}
 
-    async def _run_agent(_session, *, call_id, config, **_kwargs):
+    async def _run_agent(_harness, _manifest, *, call_id, **_kwargs):
+        config = await get_config(db_session(), DUMMY_AGENT.id, current_run.account_id)
         row = await AgentCall.get(db_session(), call_id)
         assert row.subscription_id == (config.subscription.id if config.subscription else None)
         assert row.api_key_id == (config.api_key.id if config.api_key else None)
@@ -598,7 +603,7 @@ async def test_crash_after_start_fails_the_call(druks_db, tmp_path, monkeypatch,
     row instead of leaving it dangling RUNNING."""
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
 
-    async def _boom(_session, **_kwargs):
+    async def _boom(_harness, _manifest, **_kwargs):
         raise RuntimeError("kaboom")
 
     sandbox.run_agent = _boom
@@ -707,7 +712,7 @@ async def test_a_carried_failure_is_raised_with_its_code(
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     overloaded = HarnessOverloadedError("claude exited with 1. API Error: 529 Overloaded.")
 
-    async def _run_agent(_session, **_kwargs):
+    async def _run_agent(_harness, _manifest, **_kwargs):
         return make_agent_result(None, agent="dummy", error=overloaded)
 
     sandbox.run_agent = _run_agent
@@ -1198,7 +1203,7 @@ async def test_api_key_billing_hands_claude_a_placeholder(
             )
         }
     ]
-    config = sandbox.run_agent.await_args.kwargs["config"]
+    config = await get_config(db_session(), DUMMY_AGENT.id, current_run.account_id)
     # The VM's key names the pasted key, never its value.
     assert keys == [f"wf-9:dummy:{config.secrets_hash}"]
     assert (config.billing, config.subscription) == ("api_key", None)
