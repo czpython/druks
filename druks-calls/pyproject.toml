@@ -2,7 +2,7 @@
 name = "druks-calls"
 version = "0.0.1"
 description = "The server that carries phone calls for Druks."
-license = "MIT"
+license = "FSL-1.1-ALv2"
 requires-python = ">=3.11"
 dependencies = [
     # Pinned: the realtime services and the MCP client change between releases.

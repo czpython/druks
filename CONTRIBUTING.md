@@ -25,6 +25,6 @@ list each command that you ran. Explain each command that you did not run.
   security boundaries, and deployment changes.
 - Do not commit credentials, local configuration, exports, research, generated
   build output, or files under `tmp/`.
-- Your contribution uses the repository's [MIT License](LICENSE).
+- Your contribution uses the repository's [Functional Source License](LICENSE).
 
 Security reports do not belong in public issues. Follow [SECURITY.md](SECURITY.md).
