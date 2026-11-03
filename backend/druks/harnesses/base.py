@@ -78,7 +78,8 @@ class Harness(ABC):
     @abstractmethod
     def parse(self, result: HarnessRunResult, *, artifact_dir: Path, run_id: str) -> object:
         """Turn a finished run into the structured payload (and write the
-        cost/output sidecars under ``artifact_dir / run_id``)."""
+        cost/output sidecars under ``artifact_dir / run_id``). Write any
+        available cost sidecar before a run failure raises."""
 
     @classmethod
     def check_returncode(cls, result: HarnessRunResult) -> None:

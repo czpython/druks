@@ -5,7 +5,7 @@ import random
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from dbos import DBOS, StepOptions
@@ -284,6 +284,10 @@ class Agent:
                     if wait_seconds > _QUOTA_MAX_WAIT_SECONDS:
                         raise
                     wait_seconds += random.uniform(60, 120)
+                    await set_run_phase(
+                        "waiting_for_quota",
+                        ends_at=datetime.now(UTC) + timedelta(seconds=wait_seconds),
+                    )
                 else:
                     # Permanent or unclassified — never retried.
                     raise

@@ -248,11 +248,33 @@ async def test_detail_carries_the_running_phase(client: TestClient, druks_db, mo
     await seed_build_run(druks_db, work_item_id=item.id, state="running")
 
     async def phase(_run_id):
-        return "provisioning_vm"
+        return "waiting_for_quota"
+
+    async def phase_ends_at(_run_id):
+        return datetime(2099, 8, 1, 14, 19, tzinfo=UTC)
 
     monkeypatch.setattr("druks.durable.reads.get_run_phase", phase)
+    monkeypatch.setattr("druks.durable.reads.get_run_phase_ends_at", phase_ends_at)
     detail = (await client.get(f"/api/software_factory/work_item/{item.id}")).json()
-    assert detail["phase"] == "provisioning_vm"
+    assert detail["phase"] == "waiting_for_quota"
+    assert detail["phaseEndsAt"] == "2099-08-01T14:19:00Z"
+
+
+async def test_detail_omits_a_phase_end_that_has_passed(client: TestClient, druks_db, monkeypatch):
+    item = await make_test_work_item(repo="ClawHaven/acme-app", title="x")
+    await seed_build_run(druks_db, work_item_id=item.id, state="running")
+
+    async def phase(_run_id):
+        return "waiting_for_quota"
+
+    async def phase_ends_at(_run_id):
+        return datetime(2000, 1, 1, tzinfo=UTC)
+
+    monkeypatch.setattr("druks.durable.reads.get_run_phase", phase)
+    monkeypatch.setattr("druks.durable.reads.get_run_phase_ends_at", phase_ends_at)
+    detail = (await client.get(f"/api/software_factory/work_item/{item.id}")).json()
+
+    assert not detail["phaseEndsAt"]
 
 
 async def test_detail_has_no_phase_when_not_running(client: TestClient, druks_db):
@@ -261,3 +283,4 @@ async def test_detail_has_no_phase_when_not_running(client: TestClient, druks_db
 
     detail = (await client.get(f"/api/software_factory/work_item/{item.id}")).json()
     assert not detail["phase"]
+    assert not detail["phaseEndsAt"]

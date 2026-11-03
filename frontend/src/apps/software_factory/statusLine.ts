@@ -57,6 +57,8 @@ export function runSubLine(
   run: RunSummary,
   phase: string | null | undefined,
   collapsed: boolean,
+  phaseEndsAt?: string | null,
+  timezone: string = 'UTC',
 ): string {
   if (run.state === 'failed' && run.failure) {
     return (run.failure.split('—')[0] ?? run.failure).trim()
@@ -67,7 +69,7 @@ export function runSubLine(
   if (run.state === 'running') {
     const step = collapsed && run.agentCalls.find((call) => call.status === 'running')
     if (step) return step.label
-    const line = phaseLine(phase)
+    const line = phaseLine(phase, phaseEndsAt, timezone)
     if (line) return line
   }
   return STATE_LABEL[run.state] ?? run.state

@@ -119,6 +119,12 @@ describe('runSubLine', () => {
     expect(runSubLine(run(), 'agent_running', true)).toBe('running')
   })
 
+  it('names a quota wait and its end in the account timezone', () => {
+    expect(runSubLine(run(), 'waiting_for_quota', true, '2026-08-01T14:19:00Z', 'UTC')).toBe(
+      'Waiting for the usage window, tries again at 14:19',
+    )
+  })
+
   it('falls back to the state when nothing is running yet', () => {
     expect(runSubLine(run({ state: 'scheduled' }), null, true)).toBe('scheduled')
   })

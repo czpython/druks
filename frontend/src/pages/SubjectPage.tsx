@@ -16,6 +16,7 @@ import { RunTranscript } from '../components/RunTranscript'
 import { StatusGlyph } from '../components/StatusGlyph'
 import { httpUrl, relTimeFromIso } from '../lib/format'
 import { phaseLine } from '../lib/phase'
+import { useTimezone } from '../lib/preferences'
 import { summaryEntries } from '../lib/summary'
 
 const isActiveRun = (run: RunSummary) =>
@@ -58,6 +59,7 @@ function SubjectDetail({
   subjectId: string
   search: string
 }) {
+  const timezone = useTimezone()
   const target = new URLSearchParams(search)
   const selectedRun = target.get('run')
   const parkedAt = target.get('parkedAt') ?? undefined
@@ -99,7 +101,7 @@ function SubjectDetail({
 
   const data = query.data!
   const runs = [...data.timeline].reverse()
-  const now = phaseLine(data.phase)
+  const now = phaseLine(data.phase, data.phaseEndsAt, timezone)
   const crumb = (
     <div className="ins-crumb">
       <Link href={`/${app}`} className="ins-crumb-back">

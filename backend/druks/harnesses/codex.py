@@ -520,9 +520,14 @@ class CodexHarness(Harness):
         )
 
     def parse(self, result: HarnessRunResult, *, artifact_dir: Path, run_id: str) -> Any:
+        call_dir = artifact_dir / run_id
+        cost_usd, cost_metadata = read_codex_cost_from_jsonl(
+            call_dir / "session.jsonl",
+            model=self.model_id,
+        )
+        write_cost(call_dir, cost_usd=cost_usd, metadata=cost_metadata)
         self.check_returncode(result)
 
-        call_dir = artifact_dir / run_id
         payload = read_result_json(
             call_dir / "output.json",
             name=self.name,
@@ -530,11 +535,6 @@ class CodexHarness(Harness):
         (call_dir / "output.json").write_text(
             json.dumps(payload, indent=2, sort_keys=True),
         )
-        cost_usd, cost_metadata = read_codex_cost_from_jsonl(
-            call_dir / "session.jsonl",
-            model=self.model_id,
-        )
-        write_cost(call_dir, cost_usd=cost_usd, metadata=cost_metadata)
         return payload
 
     def _mcp_flags(self, servers: tuple[McpServer, ...]) -> tuple[str, ...]:

@@ -867,6 +867,8 @@ async def test_body_level_quota_waits_for_the_reset_once(
     )
     jitter = MagicMock(return_value=90.0)
     monkeypatch.setattr(agents.random, "uniform", jitter)
+    set_run_phase = AsyncMock()
+    monkeypatch.setattr(agents, "set_run_phase", set_run_phase)
     current_run._reap_run = AsyncMock()
     checkpoints, sleep = _inline_agent_steps
 
@@ -876,6 +878,10 @@ async def test_body_level_quota_waits_for_the_reset_once(
     assert excinfo.value is failures[-1]
     sleep.assert_awaited_once_with(60 * 60 + 90.0)
     jitter.assert_called_once_with(60.0, 120.0)
+    set_run_phase.assert_any_await(
+        "waiting_for_quota",
+        ends_at=now + timedelta(hours=1, seconds=90),
+    )
     current_run._reap_run.assert_awaited_once()
     assert [options["name"] for options in checkpoints] == [
         "test.agent.dummy",

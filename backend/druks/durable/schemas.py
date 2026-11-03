@@ -207,9 +207,10 @@ class SubjectResponse(Schema):
     status: SubjectStatus
     # The subject's runs, oldest first, each with its agent calls — the timeline.
     timeline: list[RunResponse] = Field(default_factory=list)
-    # The driving run's sandbox phase while it starts ("provisioning_vm"). The
-    # shell supplies the words.
+    # The driving run's live phase while it starts or waits. The shell supplies
+    # the words. A timed phase carries the time when it ends separately.
     phase: str | None = None
+    phase_ends_at: datetime | None = None
 
 
 class TranscriptChunk(Schema):
