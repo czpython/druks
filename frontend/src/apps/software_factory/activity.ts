@@ -17,6 +17,7 @@ function label(event: ActivityEvent): string | undefined {
   if (event.payload?.kind === 'software_factory.build') {
     switch (event.topic) {
       case 'workflow.scheduled': return 'Build queued'
+      case 'workflow.finished': return 'Build finished'
       case 'workflow.failed': return 'Build failed'
       case 'workflow.cancelled': return 'Build cancelled'
       case 'workflow.parked':
@@ -43,6 +44,7 @@ const TOPIC_ICONS: Record<string, LucideIcon> = {
 }
 
 const REPLY_ACTIONS: Record<string, string> = {
+  merged: 'Merged on GitHub',
   approve: 'Approve',
   request_changes: 'Request changes',
   revise_contract: 'Revise contract',

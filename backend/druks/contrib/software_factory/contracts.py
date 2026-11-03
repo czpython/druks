@@ -15,11 +15,11 @@ if TYPE_CHECKING:
 
 
 class ReviewWork(Gate):
-    """The verdict on the built work: approve/request_changes (PR webhook) or
-    revise_contract (UI)."""
+    """The verdict on the built work: approve/request_changes (PR review webhook),
+    revise_contract (UI), or merged (pr.closed webhook)."""
 
     name = "review_work"
-    action: Literal["approve", "request_changes", "revise_contract"]
+    action: Literal["approve", "request_changes", "revise_contract", "merged"]
     reviewer: str | None = None
     body: str | None = None
 

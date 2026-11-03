@@ -33,15 +33,21 @@ async def pr_open_fills_the_item(*, repo: str, pr_number: int, payload: dict) ->
 
 
 @subscribe(WorkflowEvent.RUNNING, workflow=Build)
-async def build_start_marks_ticket_in_progress(*, subject: WorkItem, **_: object) -> None:
-    # Every (re)start and gate-resume of a build means the ticket is in progress —
-    # including the return from a rework loop that had parked it In Review.
-    await subject.set_ticket_status(TicketStatus.IN_PROGRESS)
+async def build_start_marks_ticket_in_progress(
+    *, subject: WorkItem, result: dict | None = None, **_: object
+) -> None:
+    # A merged reply ends the build, and the merge already moved the ticket to Done.
+    if not result or result["action"] != "merged":
+        await subject.set_ticket_status(TicketStatus.IN_PROGRESS)
 
 
 @subscribe(WorkflowEvent.PARKED, workflow=Build, gate=ReviewWork)
 async def review_park_marks_ticket_in_review(*, subject: WorkItem, **_: object) -> None:
-    await subject.set_ticket_status(TicketStatus.IN_REVIEW)
+    # A merge can arrive before the gate parks, when there is no ask to answer yet.
+    if subject.resolution == Resolution.MERGED:
+        await ReviewWork.answer(subject, action="merged")
+    else:
+        await subject.set_ticket_status(TicketStatus.IN_REVIEW)
 
 
 @subscribe("repo.pushed", to_default_branch=True)

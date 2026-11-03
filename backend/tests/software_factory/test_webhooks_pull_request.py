@@ -1,8 +1,10 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import druks.contrib.software_factory.subscribers  # noqa: F401 — registers the pr.closed subscriber
 import pytest
+from druks.contrib.software_factory.contracts import ReviewWork
 from druks.contrib.software_factory.models import WorkItem
 from druks.core.webhooks.github import GitHubEvents
 from druks.durable import Run
@@ -85,9 +87,11 @@ async def _fresh_run(run_id):
 
 
 @pytest.mark.asyncio
-async def test_external_merge_stores_githubs_verdict_and_ends_involvement(druks_db, tmp_path):
+async def test_external_merge_answers_review_without_cancelling(druks_db, tmp_path, monkeypatch):
+    answer = AsyncMock()
+    monkeypatch.setattr(ReviewWork, "answer", answer)
     repo, pr_number, branch = "ClawHaven/acme-app", 42, "agent/eng-1"
-    work_item_id, run_id = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
+    work_item_id, _ = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
@@ -97,8 +101,7 @@ async def test_external_merge_stores_githubs_verdict_and_ends_involvement(druks_
     assert item.resolved_at == datetime(2026, 7, 25, 21, 59, 9, tzinfo=UTC)
     # ...announced as the milestone...
     assert await _milestone_count(work_item_id, "merged") == 1
-    # ...and involvement ended: the parked build run is cancelled.
-    assert not (await _fresh_run(run_id)).is_active
+    answer.assert_awaited_once_with(item, action="merged")
 
 
 @pytest.mark.asyncio
@@ -122,10 +125,12 @@ async def test_merge_ships_but_leaves_a_running_build_to_converge(druks_db, tmp_
 
 
 @pytest.mark.asyncio
-async def test_a_redelivered_webhook_does_not_rewrite_the_verdict(druks_db, tmp_path):
+async def test_a_redelivered_webhook_does_not_rewrite_the_verdict(druks_db, tmp_path, monkeypatch):
     """GitHub redelivers webhooks, and druks's own merge echoes back through the
     same path. The stored verdict is the first one; a contradicting redelivery
     neither overwrites it nor records a second milestone."""
+    answer = AsyncMock()
+    monkeypatch.setattr(ReviewWork, "answer", answer)
     repo, pr_number, branch = "ClawHaven/acme-app", 44, "agent/eng-3"
     work_item_id, _ = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
@@ -144,6 +149,7 @@ async def test_a_redelivered_webhook_does_not_rewrite_the_verdict(druks_db, tmp_
     assert item.resolved_at == datetime(2026, 7, 25, 21, 59, 9, tzinfo=UTC)
     assert await _milestone_count(work_item_id, "merged") == 1
     assert await _milestone_count(work_item_id, "closed") == 0
+    answer.assert_awaited_once_with(item, action="merged")
 
 
 @pytest.mark.asyncio
@@ -215,7 +221,9 @@ async def test_a_remerge_after_redispatch_records_a_fresh_verdict(druks_db, tmp_
     from druks.db import db_session as ds
 
     repo, pr_number, branch = "ClawHaven/acme-app", 77, "agent/eng-9"
-    work_item_id, _ = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
+    work_item_id, _ = await _park_work_item(
+        repo=repo, pr_number=pr_number, branch=branch, state="running"
+    )
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
     # Redispatched: a newer build run owns the item, and its PR is a fresh one.
     await seed_build_run(ds(), work_item_id=work_item_id, state="running")
@@ -267,7 +275,9 @@ async def test_external_merge_pushes_done(druks_db, tmp_path, monkeypatch):
     monkeypatch.setattr(WorkItem, "set_ticket_status", _record)
 
     repo, pr_number, branch = "ClawHaven/acme-app", 92, "agent/eng-21"
-    work_item_id, _ = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
+    work_item_id, _ = await _park_work_item(
+        repo=repo, pr_number=pr_number, branch=branch, state="running"
+    )
 
     await _fire_closed(
         repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path, merged=True
