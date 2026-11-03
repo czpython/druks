@@ -1,5 +1,5 @@
 import subprocess
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -8,7 +8,7 @@ import pytest
 from conftest import connect_service
 from druks import workspaces as workspace_mod
 from druks.contrib.software_factory.services import GithubReviewer
-from druks.core.apis.github import GitHubClient
+from druks.core.apis.github import GitHubAppClient
 from druks.core.services import Github
 from druks.harnesses.claude import ClaudeHarness
 from druks.sandbox import SandboxSecret
@@ -158,14 +158,18 @@ async def test_a_workspace_selects_its_github_identity_by_service(druks_db):
 async def test_the_github_service_issues_its_installation_token(
     druks_db, monkeypatch: pytest.MonkeyPatch
 ):
-    expiry = datetime(2026, 9, 7, 18, 0, tzinfo=UTC)
-    asked: list[tuple[str, str]] = []
+    expiry = datetime.now(UTC) + timedelta(hours=1)
+    asked: list[tuple] = []
 
-    async def get_token_for_repos(self, *repos: str) -> tuple[str, datetime]:
-        asked.append((self._app_id, *repos))
+    async def get_installation_id(self, owner_or_repo: str) -> int:
+        return 7
+
+    async def create_installation_token(self, installation_id, repositories=()):
+        asked.append((self._app_id, installation_id, *repositories))
         return "ghs_operator", expiry
 
-    monkeypatch.setattr(GitHubClient, "get_token_for_repos", get_token_for_repos)
+    monkeypatch.setattr(GitHubAppClient, "get_installation_id", get_installation_id)
+    monkeypatch.setattr(GitHubAppClient, "create_installation_token", create_installation_token)
     await connect_service(
         "github",
         identity={"app_id": "1", "slug": "druks-operator"},
@@ -173,4 +177,4 @@ async def test_the_github_service_issues_its_installation_token(
     )
 
     assert await Github.issue_token(("acme/widgets",)) == ("ghs_operator", expiry)
-    assert asked == [("1", "acme/widgets")]
+    assert asked == [("1", 7, "widgets")]

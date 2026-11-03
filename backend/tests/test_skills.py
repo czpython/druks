@@ -37,7 +37,7 @@ def _patch_download(monkeypatch, archive: bytes) -> None:
 
 
 def _patch_github_client(monkeypatch, download_tarball) -> None:
-    async def fake_client():
+    async def fake_client(repo):
         return SimpleNamespace(download_tarball=download_tarball)
 
     monkeypatch.setattr(install_mod.Github, "get_client", fake_client)

@@ -448,7 +448,7 @@ async def complete_connect(session: AsyncSession, *, state: str, code: str) -> s
             identity_error=identity_error,
             secrets=client,
         )
-        # A reconsent's stale cached token must not serve until its TTL runs out.
+        # A reconsent's stale token must not serve until it expires.
         await evict_access_token(session, name, account_id)
     else:
         await VaultSecret.connect(
@@ -468,7 +468,7 @@ async def complete_connect(session: AsyncSession, *, state: str, code: str) -> s
 async def evict_access_token(session: AsyncSession, name: str, account_id: str | None) -> None:
     connection = await get_connection(session, name, account_id)
     if connection:
-        await OauthClient(provider=Audience.mcp(name)).evict_access_token(connection.id)
+        await OauthClient(provider=Audience.mcp(name)).evict_access_token(session, connection.id)
 
 
 async def disconnect(

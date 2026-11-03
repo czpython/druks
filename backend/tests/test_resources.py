@@ -5,7 +5,11 @@ from hashlib import sha256
 import httpx
 import pytest
 from conftest import bind_ambient_session, connect_service
+from druks.db import db_session
+from druks.redis import get_client
 from druks.sandbox import SandboxSecret
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.services import Resource, ResourceError, Service
 from druks.services.resources import ManagedResource
 from pydantic import BaseModel, SecretStr
@@ -189,6 +193,9 @@ async def test_a_pasted_cards_token_is_reused_too(acme):
     tokens = [await acme.Workers("site").get_token() for _ in range(2)]
 
     assert [value for value, _ in tokens] == ["site-1", "site-1"]
+    kept = await VaultSecret.get_token(db_session(), Audience.resource("acme", "workers/site"))
+    assert kept[0] == "site-1"
+    assert not await get_client().keys()
 
 
 async def test_a_box_rebuilds_the_resource_from_its_key(acme, managed, manager):

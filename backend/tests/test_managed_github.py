@@ -18,6 +18,7 @@ from druks.core.services import Github
 from druks.db import db_session
 from druks.redis import get_client
 from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.services import Connection, Service
 from druks.testing import asgi_client, configure_app_for_test, make_settings
@@ -70,14 +71,12 @@ def _refused(status_code: int) -> RequestFailed:
 
 class _GitHubKit:
     """githubkit as the tests see it: the credential and base URL of every client it made, and
-    the calls they were asked for. The App's directory answers for this Druks's installations;
-    repository calls answer with ``statuses``, 204 once those run out."""
+    the calls they were asked for. The App's directory answers for this Druks's installations."""
 
     def __init__(self) -> None:
         self.clients: list[tuple[object, str]] = []
         self.calls: list[str] = []
         self.minted = 0
-        self.statuses: list[int] = []
 
     def __call__(self, auth: object = None, *, base_url: str = GITHUB_API_URL) -> SimpleNamespace:
         self.clients.append((auth, base_url))
@@ -87,7 +86,7 @@ class _GitHubKit:
             async_list_installations=self._installations,
         )
         git = SimpleNamespace(async_delete_ref=self._delete_ref)
-        return SimpleNamespace(rest=SimpleNamespace(apps=apps, git=git), __aexit__=self._close)
+        return SimpleNamespace(rest=SimpleNamespace(apps=apps, git=git))
 
     async def _installation_of(self, owner: str, name: str) -> SimpleNamespace:
         self.calls.append(f"GET repos/{owner}/{name}/installation")
@@ -110,12 +109,6 @@ class _GitHubKit:
 
     async def _delete_ref(self, owner: str, name: str, ref: str) -> None:
         self.calls.append(f"DELETE repos/{owner}/{name}/git/{ref}")
-        status = self.statuses.pop(0) if self.statuses else 204
-        if status >= 400:
-            raise _refused(status)
-
-    async def _close(self, *args: object) -> None:
-        pass
 
 
 class _Manager:
@@ -217,13 +210,11 @@ async def test_the_managed_card_holds_the_apps_public_identity_and_the_instance_
 async def test_app_calls_go_to_the_manager_with_the_instance_key_and_repo_calls_to_github(
     managed_github, githubkit
 ):
-    client = await Github.get_client()
-
-    assert await client.delete_branch("acme/app", "feature")
+    assert await (await Github.get_client("acme/app")).delete_branch("acme/app", "feature")
     token, expires_at = await Github.issue_token(("acme/app",))
-    assert await client.delete_branch("paulo/site", "feature")
+    assert await (await Github.get_client("paulo/site")).delete_branch("paulo/site", "feature")
     with pytest.raises(GitHubAppNotInstalledError, match="other/repo"):
-        await client.delete_branch("other/repo", "feature")
+        await Github.get_client("other/repo")
 
     # The box's token names its repo, so it is not the instance's token for the installation.
     assert token == "ghs_11_2"
@@ -232,7 +223,9 @@ async def test_app_calls_go_to_the_manager_with_the_instance_key_and_repo_calls_
         (INSTANCE_KEY, CARD_URL),
         (TokenAuthStrategy("ghs_11_1"), GITHUB_API_URL),
         (INSTANCE_KEY, CARD_URL),
+        (INSTANCE_KEY, CARD_URL),
         (TokenAuthStrategy("ghs_22_3"), GITHUB_API_URL),
+        (INSTANCE_KEY, CARD_URL),
     ]
     assert githubkit.calls == [
         "GET repos/acme/app/installation",
@@ -247,16 +240,22 @@ async def test_app_calls_go_to_the_manager_with_the_instance_key_and_repo_calls_
     ]
 
 
-async def test_a_token_is_kept_in_redis_until_it_expires(managed_github, githubkit):
-    await (await Github.get_client()).delete_branch("acme/app", "first")
-    redis = get_client()
-    # GitHub's hour, less the skew every cached token keeps.
-    assert 3530 <= await redis.ttl("github:installation_token:11") <= 3540
-    await (await Github.get_client()).delete_branch("acme/app", "second")
+async def test_a_token_is_kept_in_the_vault_until_shortly_before_it_expires(
+    managed_github, githubkit
+):
+    await (await Github.get_client("acme/app")).delete_branch("acme/app", "first")
+    kept = await VaultSecret.lookup(
+        db_session(), SecretKind.STATIC, Audience.resource("github", "installation", 11)
+    )
+    assert kept.secrets == {"value": "ghs_11_1"}
+    assert timedelta(minutes=59) < kept.expires_at - datetime.now(UTC) <= timedelta(hours=1)
+    assert not await get_client().keys()
+    await (await Github.get_client("acme/app")).delete_branch("acme/app", "second")
     assert githubkit.minted == 1
 
-    await redis.delete("github:installation_token:11")
-    await (await Github.get_client()).delete_branch("acme/app", "third")
+    kept.expires_at = datetime.now(UTC) + timedelta(seconds=30)
+    await db_session().flush()
+    await (await Github.get_client("acme/app")).delete_branch("acme/app", "third")
 
     assert githubkit.minted == 2
     assert [auth for auth, base_url in githubkit.clients if base_url == GITHUB_API_URL] == [
@@ -266,18 +265,29 @@ async def test_a_token_is_kept_in_redis_until_it_expires(managed_github, githubk
     ]
 
 
-async def test_a_rejected_token_is_minted_once_more(managed_github, githubkit):
-    client = await Github.get_client()
+async def test_after_a_reinstall_the_next_client_acts_in_the_new_installation(
+    managed_github, githubkit, monkeypatch
+):
+    await Github.get_client("acme/app")
+    monkeypatch.setitem(INSTALLATIONS, "acme", 33)
 
-    githubkit.statuses = [401, 204]
-    assert await client.delete_branch("acme/app", "first")
-    assert githubkit.minted == 2
+    assert await (await Github.get_client("acme/app")).delete_branch("acme/app", "feature")
 
-    githubkit.statuses = [401, 401]
-    with pytest.raises(RequestFailed) as rejected:
-        await client.delete_branch("acme/app", "second")
-    assert rejected.value.response.status_code == 401
-    assert githubkit.minted == 3
+    assert githubkit.clients[-1] == (TokenAuthStrategy("ghs_33_2"), GITHUB_API_URL)
+
+
+async def test_a_box_token_names_the_repos_its_first_repos_installation_covers(
+    managed_github, githubkit
+):
+    token, _ = await Github.issue_token(("acme/web", "acme/api", "paulo/site", "other/gone"))
+    alone, _ = await Github.issue_token(("acme/api",))
+
+    assert (token, alone) == ("ghs_11_1", "ghs_11_2")
+    assert (await Github.issue_token(("acme/api", "acme/web")))[0] == "ghs_11_1"
+    assert [call for call in githubkit.calls if call.startswith("POST")] == [
+        "POST app/installations/11/access_tokens ['api', 'web']",
+        "POST app/installations/11/access_tokens ['api']",
+    ]
 
 
 async def test_install_binds_at_the_manager_and_links_the_installer(

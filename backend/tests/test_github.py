@@ -1,4 +1,3 @@
-from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock, call
@@ -6,8 +5,7 @@ from unittest.mock import AsyncMock, Mock, call
 import druks.core.apis.github as github_api
 import pytest
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
-from druks.core.apis.github import GitHubClient
-from githubkit import GitHub
+from druks.core.apis.github import GitHubAppClient, GitHubClient
 from githubkit.exception import GraphQLFailed, RequestFailed
 
 
@@ -52,10 +50,7 @@ class _GitHub:
 
 class _TestGitHubClient(GitHubClient):
     def __init__(self, github: _GitHub) -> None:
-        self.github = github
-
-    async def _get_installation_client(self, repo: str) -> Any:
-        return self.github
+        self._github = github
 
 
 async def test_create_review_omits_empty_comments() -> None:
@@ -242,38 +237,54 @@ async def test_merge_when_ready_reports_unsettled_merge() -> None:
     ]
 
 
-class _OwnerReposClient(GitHubClient):
+class _TestGitHubAppClient(GitHubAppClient):
     def __init__(self, apps: Any) -> None:
-        self._app_id = "123"
         self._slug = "example-app"
-        apps.async_create_installation_access_token = AsyncMock(
-            return_value=SimpleNamespace(
-                parsed_data=SimpleNamespace(token="ghs_minted", expires_at="2026-09-07T18:00:00Z")
-            )
-        )
         self._app = SimpleNamespace(rest=SimpleNamespace(apps=apps))
 
 
-class _InstallationGitHub:
-    def __init__(self, **rest: Any) -> None:
-        self.rest = SimpleNamespace(**rest)
-
-    async def __aenter__(self) -> "_InstallationGitHub":
-        return self
-
-    async def __aexit__(self, *args: Any) -> None:
-        pass
-
-
-async def test_list_repos_for_user_installation_falls_back_and_paginates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    app_apis = SimpleNamespace(
+async def test_an_account_installation_falls_back_to_the_user_endpoint() -> None:
+    apps = SimpleNamespace(
         async_get_org_installation=AsyncMock(side_effect=_make_request_failed(404)),
         async_get_user_installation=AsyncMock(
             return_value=SimpleNamespace(parsed_data=SimpleNamespace(id=42))
         ),
     )
+
+    assert await _TestGitHubAppClient(apps).get_installation_id("czpython") == 42
+    apps.async_get_org_installation.assert_awaited_once_with("czpython")
+    apps.async_get_user_installation.assert_awaited_once_with("czpython")
+
+
+async def test_an_org_installation_does_not_consult_the_user_endpoint() -> None:
+    apps = SimpleNamespace(
+        async_get_org_installation=AsyncMock(
+            return_value=SimpleNamespace(parsed_data=SimpleNamespace(id=41))
+        ),
+        async_get_user_installation=AsyncMock(),
+    )
+
+    assert await _TestGitHubAppClient(apps).get_installation_id("clawhaven") == 41
+    apps.async_get_user_installation.assert_not_awaited()
+
+
+async def test_installation_lookup_404_names_the_repo() -> None:
+    """An App without access to the repo fails at the installation lookup. The raw
+    githubkit repr (``Response(404 Not Found, …)``) is what a run's failure column
+    would show the operator — translate it into an error that names the repo and
+    the fix."""
+    apps = SimpleNamespace(
+        async_get_repo_installation=AsyncMock(side_effect=_make_request_failed(404))
+    )
+
+    with pytest.raises(GitHubAppNotInstalledError) as raised:
+        await _TestGitHubAppClient(apps).get_installation_id("ClawHaven/acme-app")
+
+    assert "The GitHub App example-app has no access to ClawHaven/acme-app" in str(raised.value)
+    assert "install the app" in str(raised.value)
+
+
+async def test_list_repos_paginates() -> None:
     first_page = [
         SimpleNamespace(full_name=f"czpython/repo-{number}", description=None)
         for number in range(100)
@@ -282,7 +293,7 @@ async def test_list_repos_for_user_installation_falls_back_and_paginates(
         SimpleNamespace(full_name="czpython/repo-100", description="first"),
         SimpleNamespace(full_name="czpython/repo-101", description="second"),
     ]
-    repo_apis = SimpleNamespace(
+    apps = SimpleNamespace(
         async_list_repos_accessible_to_installation=AsyncMock(
             side_effect=[
                 SimpleNamespace(parsed_data=SimpleNamespace(repositories=first_page)),
@@ -290,373 +301,30 @@ async def test_list_repos_for_user_installation_falls_back_and_paginates(
             ]
         )
     )
-    installation_github = _InstallationGitHub(apps=repo_apis)
-    monkeypatch.setattr(github_api, "GitHub", lambda *_args, **_kwargs: installation_github)
-    client = _OwnerReposClient(app_apis)
+    client = _TestGitHubClient(SimpleNamespace(rest=SimpleNamespace(apps=apps)))
 
-    repos = await client.list_repos_for_owner("czpython")
+    repos = await client.list_repos()
 
     assert len(repos) == 102
     assert repos[0] == {"full_name": "czpython/repo-0", "description": None}
     assert repos[-1] == {"full_name": "czpython/repo-101", "description": "second"}
-    app_apis.async_get_org_installation.assert_awaited_once_with("czpython")
-    app_apis.async_get_user_installation.assert_awaited_once_with("czpython")
-    repo_apis.async_list_repos_accessible_to_installation.assert_has_awaits(
-        [
-            call(per_page=100, page=1),
-            call(per_page=100, page=2),
-        ]
+    apps.async_list_repos_accessible_to_installation.assert_has_awaits(
+        [call(per_page=100, page=1), call(per_page=100, page=2)]
     )
 
 
-async def test_list_repos_for_org_installation_does_not_consult_user_endpoint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    app_apis = SimpleNamespace(
-        async_get_org_installation=AsyncMock(
-            return_value=SimpleNamespace(parsed_data=SimpleNamespace(id=41))
-        ),
-        async_get_user_installation=AsyncMock(),
-    )
-    repo_apis = SimpleNamespace(
-        async_list_repos_accessible_to_installation=AsyncMock(
-            return_value=SimpleNamespace(
-                parsed_data=SimpleNamespace(
-                    repositories=[
-                        SimpleNamespace(
-                            full_name="clawhaven/druks",
-                            description="Durable agent applications",
-                        )
-                    ]
-                )
-            )
-        )
-    )
-    installation_github = _InstallationGitHub(apps=repo_apis)
-    monkeypatch.setattr(github_api, "GitHub", lambda *_args, **_kwargs: installation_github)
-    client = _OwnerReposClient(app_apis)
-
-    repos = await client.list_repos_for_owner("clawhaven")
-
-    assert repos == [
-        {
-            "full_name": "clawhaven/druks",
-            "description": "Durable agent applications",
-        }
-    ]
-    app_apis.async_get_org_installation.assert_awaited_once_with("clawhaven")
-    app_apis.async_get_user_installation.assert_not_awaited()
-
-
-async def test_list_repos_for_owner_returns_empty_when_app_is_not_installed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    app_apis = SimpleNamespace(
-        async_get_org_installation=AsyncMock(side_effect=_make_request_failed(404)),
-        async_get_user_installation=AsyncMock(side_effect=_make_request_failed(404)),
-    )
-    github_constructor = AsyncMock()
-    monkeypatch.setattr(github_api, "GitHub", github_constructor)
-    client = _OwnerReposClient(app_apis)
-
-    assert await client.list_repos_for_owner("uninstalled") == []
-    app_apis.async_get_org_installation.assert_awaited_once_with("uninstalled")
-    app_apis.async_get_user_installation.assert_awaited_once_with("uninstalled")
-    github_constructor.assert_not_called()
-
-
-class _Flaky401Pulls:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def async_update(self, owner: str, repo: str, pr_number: int, **kwargs: Any):
-        self.calls += 1
-        if self.calls == 1:
-            raise _make_request_failed(401)
-        return _Response()
-
-
-class _ForbiddenPulls:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def async_update(self, owner: str, repo: str, pr_number: int, **kwargs: Any):
-        self.calls += 1
-        raise _make_request_failed(403)
-
-
-class _StuckOn401Pulls:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def async_update(self, owner: str, repo: str, pr_number: int, **kwargs: Any):
-        self.calls += 1
-        raise _make_request_failed(401)
-
-
-class _CountingClient(GitHubClient):
-    def __init__(self, github_factory) -> None:
-        self.github_factory = github_factory
-        self.for_repo_calls = 0
-        self.invalidate_calls = 0
-
-    async def _get_installation_client(self, repo: str) -> Any:
-        self.for_repo_calls += 1
-        return self.github_factory()
-
-    async def _invalidate_for_repo(self, repo: str) -> None:
-        self.invalidate_calls += 1
-
-
-async def test_401_invalidates_cache_and_retries_once_then_succeeds() -> None:
-    pulls = _Flaky401Pulls()
-
-    class _GitHubStub:
-        def __init__(self) -> None:
-            self.rest = type("R", (), {"pulls": pulls})()
-
-    github = _GitHubStub()
-    client = _CountingClient(lambda: github)
-
-    # No exception — the second attempt succeeds.
-    await client.update_pull_request_body("ClawHaven/example", 7, "new body")
-
-    assert pulls.calls == 2
-    assert client.invalidate_calls == 1
-    assert client.for_repo_calls == 2  # initial + post-invalidate
-
-
-async def test_403_does_not_retry() -> None:
-    pulls = _ForbiddenPulls()
-
-    class _GitHubStub:
-        def __init__(self) -> None:
-            self.rest = type("R", (), {"pulls": pulls})()
-
-    client = _CountingClient(lambda: _GitHubStub())
-
-    try:
-        await client.update_pull_request_body("ClawHaven/example", 7, "new body")
-    except RequestFailed:
-        pass
-    else:
-        raise AssertionError("expected RequestFailed to propagate")
-
-    assert pulls.calls == 1
-    assert client.invalidate_calls == 0
-
-
-async def test_401_on_retry_surfaces_to_caller() -> None:
-    pulls = _StuckOn401Pulls()
-
-    class _GitHubStub:
-        def __init__(self) -> None:
-            self.rest = type("R", (), {"pulls": pulls})()
-
-    client = _CountingClient(lambda: _GitHubStub())
-
-    try:
-        await client.update_pull_request_body("ClawHaven/example", 7, "new body")
-    except RequestFailed as exc:
-        assert exc.response.status_code == 401
-    else:
-        raise AssertionError("expected RequestFailed to propagate")
-
-    assert pulls.calls == 2
-    assert client.invalidate_calls == 1
-
-
-async def test_a_repo_token_retries_on_401_and_succeeds() -> None:
-    calls = {"n": 0}
-
-    class _AppApps:
-        async def async_create_installation_access_token(self, _id: int, **_: Any) -> Any:
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise _make_request_failed(401)
-
-            class _Tok:
-                class parsed_data:
-                    token = "ghs_fresh_token"
-                    expires_at = "2026-09-07T18:00:00Z"
-
-            return _Tok()
-
-    class _AppGitHub:
-        rest = type("R", (), {"apps": _AppApps()})()
-
-    class _Client(GitHubClient):
-        def __init__(self) -> None:
-            self._app = _AppGitHub()
-            self._installation_cache: dict[str, int] = {"ClawHaven/example": 12345}
-            self._installation_clients: dict[int, Any] = {}
-            self.invalidated: list[str] = []
-
-        async def _installation_id(self, repo: str) -> int:
-            return self._installation_cache.get(repo, 99999)
-
-        async def _invalidate_for_repo(self, repo: str) -> None:
-            self.invalidated.append(repo)
-            self._installation_cache.pop(repo, None)
-
-    client = _Client()
-    token = await client.get_token_for_repos("ClawHaven/example")
-
-    # GitHub's expiry rides with the token, so a mint can answer it.
-    assert token == ("ghs_fresh_token", datetime(2026, 9, 7, 18, 0, tzinfo=UTC))
-    assert calls["n"] == 2
-    assert client.invalidated == ["ClawHaven/example"]
-
-
-async def test_a_repo_token_names_the_repos_the_first_ones_installation_covers() -> None:
-    minted: list[list[str]] = []
-
-    async def mint(installation_id: int, *, repositories: list[str]) -> Any:
-        minted.append(repositories)
-        return SimpleNamespace(
-            parsed_data=SimpleNamespace(
-                token=f"ghs_{len(minted)}", expires_at="2099-09-07T18:00:00Z"
-            )
-        )
-
-    installations = {"acme/api": 7, "acme/web": 7, "other/worker": 8}
-
-    async def installation_id(repo: str) -> int:
-        if repo in installations:
-            return installations[repo]
-        raise GitHubAppNotInstalledError(repo, app="druks-operator")
-
-    client = GitHubClient.__new__(GitHubClient)
-    client._app = SimpleNamespace(
-        rest=SimpleNamespace(apps=SimpleNamespace(async_create_installation_access_token=mint))
-    )
-    client._installation_id = installation_id  # type: ignore[method-assign]
-
-    token, _ = await client.get_token_for_repos("acme/api", "acme/web", "other/worker", "acme/gone")
-    alone, _ = await client.get_token_for_repos("acme/api")
-
-    assert minted == [["api", "web"], ["api"]]
-    assert (token, alone) == ("ghs_1", "ghs_2")
-    assert (await client.get_token_for_repos("acme/web", "acme/api"))[0] == "ghs_1"
-
-
-async def test_github_client_aclose_drops_cache_without_raising() -> None:
-    """``aclose()`` must not call githubkit's ``__aexit__`` — these clients are
-    used via direct calls (per-request self-closing httpx clients), so the
-    contextvar holding a long-lived client is always None and ``__aexit__``
-    would raise ``'NoneType' object has no attribute 'aclose'`` (the prod
-    "Application shutdown failed" on every restart). aclose just drops the
-    per-installation cache."""
-    client = GitHubClient.__new__(GitHubClient)
-    client._app = GitHub("fake-token")
-    client._installation_clients = {1: GitHub("fake-token")}
-
-    await client.aclose()  # must not raise
-    assert client._installation_clients == {}
-
-
-async def test_get_file_content_returns_none_when_repo_missing() -> None:
-    """A 404 at the installation lookup (the repo doesn't exist / the App
-    isn't installed) means the file doesn't exist either — so get_file_content
-    returns None rather than raising. This is the prompt-override hierarchy
-    probing a missing ``<owner>/.druks`` repo: it must fall through to the
-    bundled prompt, not blow up the operation (prod scope 404 regression)."""
-
-    class _RepoMissingClient(GitHubClient):
-        def __init__(self) -> None:  # skip real auth
-            pass
-
-        async def _get_installation_client(self, repo: str) -> Any:
-            raise _make_request_failed(404)
-
-    client = _RepoMissingClient()
-    assert await client.get_file_content("clawhaven/.druks", "prompts/x.md") is None
-
-
-async def test_installation_lookup_404_names_the_repo() -> None:
-    """An App without access to the repo fails every call at the installation
-    lookup. The raw githubkit repr (``Response(404 Not Found, …)``) is what a
-    run's failure column would show the operator — translate it into an error
-    that names the repo and the fix."""
-
-    class _Apps:
-        async def async_get_repo_installation(self, owner: str, name: str) -> Any:
-            raise _make_request_failed(404)
-
-    class _UninstalledClient(GitHubClient):
-        def __init__(self) -> None:  # skip real auth
-            self._installation_cache = {}
-            self._slug = "example-app"
-            self._app = type("_App", (), {"rest": type("_Rest", (), {"apps": _Apps()})()})()
-
-    client = _UninstalledClient()
-    try:
-        await client._installation_id("ClawHaven/acme-app")
-    except GitHubAppNotInstalledError as error:
-        assert "The GitHub App example-app has no access to ClawHaven/acme-app" in str(error)
-        assert "install the app" in str(error)
-    else:
-        raise AssertionError("expected GitHubAppNotInstalledError")
-
-
-async def test_get_file_content_returns_none_when_app_not_installed() -> None:
-    # Same optional-read contract as the raw-404 case above: an unreachable
-    # repo has no file to read.
-    class _UninstalledClient(GitHubClient):
-        def __init__(self) -> None:  # skip real auth
-            pass
-
-        async def _get_installation_client(self, repo: str) -> Any:
-            raise GitHubAppNotInstalledError(repo, app="example-app")
-
-    client = _UninstalledClient()
-    assert await client.get_file_content("clawhaven/.druks", "prompts/x.md") is None
-
-
-async def test_get_bot_git_author_looks_up_the_bot_with_a_live_installation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_get_bot_git_author_looks_up_the_bot_once(monkeypatch: pytest.MonkeyPatch) -> None:
     # The author is the App's bot user with GitHub's <id>+<login> noreply
-    # address; the id comes from one lookup with a live installation's token,
-    # cached for the life of the process.
-    requested: list[tuple[str, int]] = []
-
-    class _Users:
-        def __init__(self, installation_id: int) -> None:
-            self.installation_id = installation_id
-
-        async def async_get_by_username(self, username: str) -> SimpleNamespace:
-            requested.append((username, self.installation_id))
-            return SimpleNamespace(parsed_data=SimpleNamespace(id=123456789))
-
-    class _InstallationGitHub:
-        def __init__(self, installation_id: int) -> None:
-            self.rest = SimpleNamespace(users=_Users(installation_id))
-
-        async def __aenter__(self) -> "_InstallationGitHub":
-            return self
-
-        async def __aexit__(self, *_args: Any) -> None:
-            pass
-
-    class _Apps:
-        async def async_list_installations(self, per_page: int) -> SimpleNamespace:
-            suspended = SimpleNamespace(id=11, suspended_at=datetime(2026, 10, 1, tzinfo=UTC))
-            live = SimpleNamespace(id=22, suspended_at=None)
-            return SimpleNamespace(parsed_data=[suspended, live])
-
+    # address; the id comes from one lookup, cached for the life of the process.
     monkeypatch.setattr(github_api, "_BOT_USER_ID_CACHE", {})
+    users = SimpleNamespace(
+        async_get_by_username=AsyncMock(
+            return_value=SimpleNamespace(parsed_data=SimpleNamespace(id=123456789))
+        )
+    )
+    client = _TestGitHubClient(SimpleNamespace(rest=SimpleNamespace(users=users)))
+    client._app_id, client._slug = "12345", "example-app"
 
-    class _SluggedClient(GitHubClient):
-        def __init__(self) -> None:  # skip real auth
-            self._app_id = "12345"
-            self._slug = "example-app"
-            self._app = SimpleNamespace(rest=SimpleNamespace(apps=_Apps()))
-
-        async def _create_installation_client(self, installation_id: int) -> _InstallationGitHub:
-            return _InstallationGitHub(installation_id)
-
-    client = _SluggedClient()
     author = await client.get_bot_git_author()
 
     assert author == (
@@ -664,30 +332,16 @@ async def test_get_bot_git_author_looks_up_the_bot_with_a_live_installation(
         "123456789+example-app[bot]@users.noreply.github.com",
     )
     assert await client.get_bot_git_author() == author
-    assert requested == [("example-app[bot]", 22)]
+    users.async_get_by_username.assert_awaited_once_with("example-app[bot]")
 
 
-def _template_generating_client(
-    repo_apis: Any,
-    monkeypatch: pytest.MonkeyPatch,
-) -> _OwnerReposClient:
-    monkeypatch.setattr(
-        github_api, "GitHub", lambda *_args, **_kwargs: _InstallationGitHub(repos=repo_apis)
-    )
-    return _OwnerReposClient(
-        SimpleNamespace(
-            async_get_org_installation=AsyncMock(
-                return_value=SimpleNamespace(parsed_data=SimpleNamespace(id=7))
-            )
-        )
-    )
+def _template_generating_client(repo_apis: Any) -> _TestGitHubClient:
+    return _TestGitHubClient(SimpleNamespace(rest=SimpleNamespace(repos=repo_apis)))
 
 
-async def test_create_repo_from_template_generates_a_private_repo(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_create_repo_from_template_generates_a_private_repo() -> None:
     repo_apis = SimpleNamespace(async_create_using_template=AsyncMock())
-    client = _template_generating_client(repo_apis, monkeypatch)
+    client = _template_generating_client(repo_apis)
 
     full_name = await client.create_repo_from_template(
         "clawhaven", "clawhaven/shop-template", "acme-coffee"
@@ -703,13 +357,11 @@ async def test_create_repo_from_template_generates_a_private_repo(
     )
 
 
-async def test_create_repo_from_template_reads_a_taken_name_as_already_created(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_create_repo_from_template_reads_a_taken_name_as_already_created() -> None:
     repo_apis = SimpleNamespace(
         async_create_using_template=AsyncMock(side_effect=_make_request_failed(422))
     )
-    client = _template_generating_client(repo_apis, monkeypatch)
+    client = _template_generating_client(repo_apis)
 
     full_name = await client.create_repo_from_template(
         "clawhaven", "clawhaven/shop-template", "acme-coffee"

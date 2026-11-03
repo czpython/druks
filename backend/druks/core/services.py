@@ -1,4 +1,5 @@
 import base64
+import functools
 import logging
 import secrets
 from contextlib import suppress
@@ -15,8 +16,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.models import Account
+from druks.core.apis import github
 from druks.core.apis.exceptions import GitHubAppNotInstalledError, TwilioError, TwilioNotFoundError
-from druks.core.apis.github import GITHUB_API_URL, GITHUB_AUTHORITY, GitHubClient
 from druks.core.apis.jira import SERVICE_ACCOUNT_DOMAIN, JiraClient
 from druks.core.apis.linear import LINEAR_AUTHORITY, LINEAR_GRAPHQL_URL, LinearClient
 from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
@@ -35,8 +36,8 @@ _VERIFY_TIMEOUT = 10.0
 
 
 class GithubApp(Service):
-    """A GitHub App that Druks acts as. Its private key mints an installation token per
-    repo, and GitHub's page for the App installs it on an account."""
+    """A GitHub App that Druks acts as. Its private key mints a token per installation,
+    kept in the vault, and GitHub's page for the App installs it on an account."""
 
     abstract = True
     # Drukbox knows this host: a token for it reaches git and gh.
@@ -63,7 +64,7 @@ class GithubApp(Service):
 
         @classmethod
         async def complete_install(cls, tokens: dict[str, Any]) -> None:
-            client = await cls.service.get_client()
+            client = await cls.service.get_app_client()
             accounts = await client.list_installation_accounts(cached=False)
             row = await cls.service.get()
             row.identity = {**row.identity, "installations": list(accounts)}
@@ -81,11 +82,25 @@ class GithubApp(Service):
                 raise MissingSecretError(
                     "GitHub issues a token for repositories. This entry names none."
                 )
-            client = await cls.service.get_client()
+            row = await cls.service.get()
+            app = cls.service._app_client(row)
+            first, *others = resources
             try:
-                return await client.get_token_for_repos(*resources)
+                installation_id = await app.get_installation_id(first)
             except GitHubAppNotInstalledError as error:
                 raise MissingSecretError(str(error)) from error
+            names = [first.split("/", 1)[1]]
+            for repo in others:
+                # GitHub refuses the whole token when one named repository is out of reach.
+                with suppress(GitHubAppNotInstalledError):
+                    if await app.get_installation_id(repo) == installation_id:
+                        names.append(repo.split("/", 1)[1])
+            names.sort()
+            return await VaultSecret.get_or_mint_token(
+                row.session,
+                Audience.resource(cls.service.slug, "installation", installation_id, *names),
+                on_miss=functools.partial(app.create_installation_token, installation_id, names),
+            )
 
     @classmethod
     def get_manifest(cls, *, endpoint: str, webhook_base: str) -> dict[str, Any]:
@@ -102,7 +117,7 @@ class GithubApp(Service):
 
     @classmethod
     async def verify(cls, settings: BaseModel) -> dict[str, Any]:
-        client = GitHubClient(
+        client = github.GitHubAppClient(
             app_id=settings.app_id,
             private_key=settings.private_key.get_secret_value(),
         )
@@ -116,14 +131,32 @@ class GithubApp(Service):
         return {"slug": slug}
 
     @classmethod
-    async def get_client(cls) -> GitHubClient:
-        """The client of the connected App's vault row. PEM plaintext exists only
-        here, feeding the auth strategy."""
+    async def get_app_client(cls) -> github.GitHubAppClient:
+        """The App client of the connected App's vault row."""
+        return cls._app_client(await cls.get())
+
+    @classmethod
+    async def get_client(cls, owner_or_repo: str) -> github.GitHubClient:
+        """The client of the installation that covers a repository or an account, with
+        the token the vault keeps for it. The installation is looked up on each call, so
+        an App reinstall mints for the new one."""
         row = await cls.get()
-        return GitHubClient(
+        app = cls._app_client(row)
+        installation_id = await app.get_installation_id(owner_or_repo)
+        token, _ = await VaultSecret.get_or_mint_token(
+            row.session,
+            Audience.resource(cls.slug, "installation", installation_id),
+            on_miss=functools.partial(app.create_installation_token, installation_id),
+        )
+        return github.GitHubClient(token, app_id=row.identity["app_id"], slug=row.identity["slug"])
+
+    @staticmethod
+    def _app_client(row: VaultSecret) -> github.GitHubAppClient:
+        # PEM plaintext exists only here, feeding the auth strategy.
+        return github.GitHubAppClient(
             app_id=row.identity["app_id"],
             private_key=row.secrets["private_key"],
-            app_url=row.identity.get("url", GITHUB_API_URL),
+            app_url=row.identity.get("url", github.GITHUB_API_URL),
             slug=row.identity["slug"],
         )
 
@@ -148,10 +181,10 @@ class Github(GithubApp):
         @classmethod
         async def get_identity(cls, access_token: str) -> dict[str, Any]:
             """The person behind a user token, keyed the way ``Account.lookup`` finds them."""
-            async with GitHub(access_token, base_url=GITHUB_API_URL) as github:
-                person = (await github.rest.users.async_get_authenticated()).parsed_data
+            async with GitHub(access_token, base_url=github.GITHUB_API_URL) as client:
+                person = (await client.rest.users.async_get_authenticated()).parsed_data
             return {
-                "authority": GITHUB_AUTHORITY,
+                "authority": github.GITHUB_AUTHORITY,
                 "subject": str(person.id),
                 "login": person.login,
             }

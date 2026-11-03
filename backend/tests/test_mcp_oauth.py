@@ -1,11 +1,10 @@
-import asyncio
 import base64
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlparse
 
-import druks.redis
 import httpx
 import pytest
 from druks.accounts.models import Account
@@ -154,9 +153,23 @@ def _state_key(state: str) -> str:
     return f"oauth:connect:{state}"
 
 
-async def _token_key(account_id: str) -> str:
+async def _audience(account_id: str | None) -> str:
     connection = await oauth.get_connection(db_session(), _NAME, account_id)
-    return f"mcp:{_NAME}:access_token:{connection.id}"
+    return Audience.oauth(Audience.mcp(_NAME), connection.id)
+
+
+async def _keep(audience: str, value: str) -> None:
+    await VaultSecret.store(
+        db_session(),
+        SecretKind.STATIC,
+        audience,
+        secrets={"value": value},
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+
+
+async def _kept(audience: str) -> tuple | None:
+    return await VaultSecret.get_token(db_session(), audience)
 
 
 async def _lock_key(account_id: str) -> str:
@@ -336,9 +349,9 @@ async def test_complete_connect_exchanges_code_and_stores_the_grant(auth_server,
     assert exchange["code_verifier"]
     assert exchange["resource"] == _SERVER_URL
 
-    # Nothing is cached at connect (the grant is real only once this commits);
+    # Nothing is kept at connect (the grant is real only once this commits);
     # the first delivery mints from it, carrying the grant's resource binding.
-    assert not await get_client().get(await _token_key(None))
+    assert not await _kept(await _audience(None))
     assert (await oauth.get_access_token(druks_db, _NAME, None))[0] == "at-1"
     refresh = auth_server.token_requests[1]
     assert refresh["grant_type"] == "refresh_token"
@@ -479,7 +492,8 @@ async def test_complete_connect_without_refresh_token_stores_nothing(auth_server
 
 async def test_reconsent_replaces_the_grant_and_evicts_the_stale_token(auth_server, druks_db):
     await _store_grant(refresh_token="rt-stale")
-    await get_client().set(await _token_key(None), "at-stale")
+    stale = await _audience(None)
+    await _keep(stale, "at-stale")
 
     url = await oauth.begin_connect(
         _NAME,
@@ -493,8 +507,8 @@ async def test_reconsent_replaces_the_grant_and_evicts_the_stale_token(auth_serv
 
     grant = await oauth.get_connection(druks_db, _NAME, None)
     assert grant.secrets["refresh_token"] == "rt-1"
-    # The stale narrow token must not keep serving until its TTL runs out.
-    assert not await get_client().get(await _token_key(None))
+    # The stale token must not keep serving until it expires.
+    assert not await _kept(stale)
 
 
 async def test_reconnect_after_disconnect_creates_a_new_grant(auth_server, druks_db):
@@ -593,7 +607,7 @@ async def test_a_later_connect_stores_under_the_claimed_mode(auth_server, druks_
 # --- get_access_token: cache, refresh, rotation, eviction -------------------
 
 
-async def test_get_refreshes_on_cache_miss_and_persists_rotation(auth_server, druks_db):
+async def test_get_refreshes_without_a_kept_token_and_persists_rotation(auth_server, druks_db):
     await _store_grant(refresh_token="rt-old")
     auth_server.token_response = {
         "access_token": "at-2",
@@ -604,8 +618,8 @@ async def test_get_refreshes_on_cache_miss_and_persists_rotation(auth_server, dr
     token, expires_at = await oauth.get_access_token(druks_db, _NAME, None)
 
     assert token == "at-2"
-    # The expiry is the cache lifetime: the provider's 300s less the skew.
-    assert timedelta(seconds=230) < expires_at - datetime.now(UTC) <= timedelta(seconds=240)
+    # The expiry is the provider's 300s from now.
+    assert timedelta(seconds=290) < expires_at - datetime.now(UTC) <= timedelta(seconds=300)
     refresh = auth_server.token_requests[0]
     assert refresh["grant_type"] == "refresh_token"
     # The wire request carries the plaintext; the row carried only ciphertext.
@@ -615,7 +629,7 @@ async def test_get_refreshes_on_cache_miss_and_persists_rotation(auth_server, dr
     stored = await oauth.get_connection(druks_db, _NAME, None)
     assert stored.secrets["refresh_token"] == "rt-new"
 
-    # A second call within the TTL reuses the cache — no second refresh.
+    # A second call reuses the kept token — no second refresh.
     assert (await oauth.get_access_token(druks_db, _NAME, None))[0] == "at-2"
     assert len(auth_server.token_requests) == 1
 
@@ -625,13 +639,13 @@ async def test_get_without_grant_fails_loudly(druks_db):
         await oauth.get_access_token(druks_db, _NAME, None)
 
 
-async def test_get_refresh_rejection_fails_loudly_and_evicts_the_cache(auth_server, druks_db):
+async def test_get_refresh_rejection_fails_loudly_and_keeps_nothing(auth_server, druks_db):
     await _store_grant()
     auth_server.token_status = 400
 
     with pytest.raises(GrantRefreshError, match=_NAME):
         await oauth.get_access_token(druks_db, _NAME, None)
-    assert not await get_client().get(await _token_key(None))
+    assert not await _kept(await _audience(None))
 
 
 async def test_get_rejects_a_malformed_token_response(auth_server, druks_db):
@@ -654,20 +668,19 @@ async def test_get_losing_the_refresh_lock_polls_for_the_winners_token(
     auth_server, druks_db, monkeypatch
 ):
     # A second caller never refreshes (one rotation spender per server) and
-    # never blocks the event loop: it polls until the winner's token appears
-    # in the cache. The winner here is a concurrent task holding the lock.
+    # never blocks the event loop: it polls until the winner's token is kept.
+    # The winner holds the lock and keeps its token while the loser waits.
     await _store_grant()
-    redis = get_client()
-    monkeypatch.setattr(oauth, "OAUTH_MINT_WAIT_INTERVAL_SECONDS", 0)
-    await redis.set(await _lock_key(None), "1")
+    winners = await _audience(None)
+    await get_client().set(await _lock_key(None), "1")
 
-    async def _winner_finishes():
-        await redis.set(await _token_key(None), "at-winner")
-        await redis.delete(await _lock_key(None))
+    async def winner_keeps_its_token(seconds: float) -> None:
+        await _keep(winners, "at-winner")
 
-    winner = asyncio.create_task(_winner_finishes())
-    assert await oauth.get_access_token(druks_db, _NAME, None) == ("at-winner", None)
-    await winner
+    monkeypatch.setattr(
+        "druks.services.oauth.asyncio", SimpleNamespace(sleep=winner_keeps_its_token)
+    )
+    assert (await oauth.get_access_token(druks_db, _NAME, None))[0] == "at-winner"
     assert not auth_server.token_requests
 
 
@@ -681,17 +694,16 @@ async def test_get_times_out_loudly_when_the_refresh_lock_never_frees(druks_db, 
         await oauth.get_access_token(druks_db, _NAME, None)
 
 
-async def test_get_cache_and_refresh_lock_are_per_account(auth_server, druks_db):
+async def test_get_kept_token_and_refresh_lock_are_per_account(auth_server, druks_db):
     first = await Account.get_or_create(druks_db, "first@example.com")
     second = await Account.get_or_create(druks_db, "second@example.com")
     await _store_grant(account_id=first.id, identity_mode=IdentityMode.PER_USER)
     await _store_grant(account_id=second.id, identity_mode=IdentityMode.PER_USER)
-    redis = get_client()
-    await redis.set(await _lock_key(first.id), "1")
+    await get_client().set(await _lock_key(first.id), "1")
 
     assert (await oauth.get_access_token(druks_db, _NAME, second.id))[0] == "at-1"
-    assert not await redis.get(await _token_key(first.id))
-    assert await redis.get(await _token_key(second.id)) == b"at-1"
+    assert not await _kept(await _audience(first.id))
+    assert (await _kept(await _audience(second.id)))[0] == "at-1"
 
 
 # --- delivery: the oauth ref and the row that issues -------------------------
@@ -972,15 +984,16 @@ async def test_callback_route_completes_the_connect(
         )
 
 
-async def test_disconnect_route_drops_grant_and_cache(
+async def test_disconnect_route_drops_grant_and_kept_token(
     tmp_path, registry_state, auth_server, druks_db
 ):
     _register_oauth_server()
     await _store_grant()
     await oauth.get_access_token(druks_db, _NAME, None)
-    token_key = await _token_key(None)
-    # The oauth engine's Redis client is bound to this test's loop; close it so the
-    # route dials its own — the cached token lives in Redis either way.
+    kept = await _audience(None)
+    assert await _kept(kept)
+    # The refresh lock's Redis client is bound to this test's loop; close it so the
+    # route dials its own.
     await close_client()
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
@@ -991,12 +1004,7 @@ async def test_disconnect_route_drops_grant_and_cache(
         assert (await McpServer.get_for_name(druks_db, _NAME)).is_enabled is False
         assert client.delete(f"/api/mcp-servers/{_NAME}/grant").status_code == 404
 
-    # Read the eviction on this test's own loop. Abandon whatever client the
-    # portal left (the conftest fixture's move) rather than trusting lifespan
-    # shutdown to have nulled it — a portal-bound client awaited from here
-    # parks forever, it doesn't raise.
-    druks.redis._client = None
-    assert not await get_client().get(token_key)
+    assert not await _kept(kept)
 
 
 async def test_shared_disconnect_allows_per_user_reconnect(
@@ -1098,17 +1106,15 @@ async def test_api_has_token_is_scoped_to_the_requesting_account(tmp_path, druks
     assert unconnected_server["hasToken"] is False
 
 
-async def test_per_user_disconnect_preserves_other_accounts_grant_and_cache(tmp_path, druks_db):
+async def test_per_user_disconnect_preserves_other_accounts_grant_and_token(tmp_path, druks_db):
     disconnected = await Account.get_or_create(druks_db, "disconnect@example.com")
     connected = await Account.get_or_create(druks_db, "connected@example.com")
     await _store_grant(account_id=disconnected.id, identity_mode=IdentityMode.PER_USER)
     await _store_grant(account_id=connected.id, identity_mode=IdentityMode.PER_USER)
-    redis = get_client()
-    disconnected_key = await _token_key(disconnected.id)
-    connected_key = await _token_key(connected.id)
-    await redis.set(disconnected_key, "disconnect-token")
-    await redis.set(connected_key, "connected-token")
-    await close_client()
+    disconnected_token = await _audience(disconnected.id)
+    connected_token = await _audience(connected.id)
+    await _keep(disconnected_token, "disconnect-token")
+    await _keep(connected_token, "connected-token")
     settings = make_settings(
         tmp_path,
         identity={"mode": "header", "header": "X-Test-User"},
@@ -1124,22 +1130,19 @@ async def test_per_user_disconnect_preserves_other_accounts_grant_and_cache(tmp_
     assert not await oauth.get_connection(druks_db, _NAME, disconnected.id)
     assert await oauth.get_connection(druks_db, _NAME, connected.id)
     assert (await McpServer.get_for_name(druks_db, _NAME)).is_enabled is True
-    druks.redis._client = None
-    assert not await get_client().get(disconnected_key)
-    assert await get_client().get(connected_key) == b"connected-token"
+    assert not await _kept(disconnected_token)
+    assert (await _kept(connected_token))[0] == "connected-token"
 
 
-async def test_removal_drops_every_grant_and_cached_token(tmp_path, druks_db):
+async def test_removal_drops_every_grant_and_kept_token(tmp_path, druks_db):
     first = await Account.get_or_create(druks_db, "first@example.com")
     second = await Account.get_or_create(druks_db, "second@example.com")
     await _store_grant(account_id=first.id, identity_mode=IdentityMode.PER_USER)
     await _store_grant(account_id=second.id, identity_mode=IdentityMode.PER_USER)
-    redis = get_client()
-    first_key = await _token_key(first.id)
-    second_key = await _token_key(second.id)
-    await redis.set(first_key, "first-token")
-    await redis.set(second_key, "second-token")
-    await close_client()
+    first_token = await _audience(first.id)
+    second_token = await _audience(second.id)
+    await _keep(first_token, "first-token")
+    await _keep(second_token, "second-token")
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         connections = client.get(f"/api/mcp-servers/{_NAME}/connections").json()
@@ -1151,6 +1154,5 @@ async def test_removal_drops_every_grant_and_cached_token(tmp_path, druks_db):
 
     assert not await McpServer.get_for_name(druks_db, _NAME)
     assert not await oauth.list_connections(druks_db, _NAME)
-    druks.redis._client = None
-    assert not await get_client().get(first_key)
-    assert not await get_client().get(second_key)
+    assert not await _kept(first_token)
+    assert not await _kept(second_token)

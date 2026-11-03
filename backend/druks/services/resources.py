@@ -1,17 +1,18 @@
 import contextlib
 import functools
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from druks.db import db_session
 from druks.models import snake_name
-from druks.redis import get_client
 from druks.sandbox.datastructures import SandboxSecret
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
 
-from .constants import OAUTH_TOKEN_TTL_SKEW_SECONDS
 from .exceptions import ResourceError
 
 if TYPE_CHECKING:
@@ -23,16 +24,11 @@ STEPS = ("create", "update", "delete", "get_token")
 def _reuse_token(get_token: Callable) -> Callable:
     @functools.wraps(get_token)
     async def get_kept_token(resource: "Resource") -> tuple[str, datetime | None]:
-        redis = get_client()
-        key = f"{resource.service.slug}:resource_token:{resource.path}"
-        if value := await redis.get(key):
-            return value.decode(), datetime.now(UTC) + timedelta(seconds=await redis.ttl(key))
-        value, expires_at = await get_token(resource)
-        if expires_at:
-            lifetime = (expires_at - datetime.now(UTC)).total_seconds()
-            if (ttl := int(lifetime) - OAUTH_TOKEN_TTL_SKEW_SECONDS) > 0:
-                await redis.set(key, value, ex=ttl)
-        return value, expires_at
+        return await VaultSecret.get_or_mint_token(
+            db_session(),
+            Audience.resource(resource.service.slug, resource.path),
+            on_miss=functools.partial(get_token, resource),
+        )
 
     return get_kept_token
 

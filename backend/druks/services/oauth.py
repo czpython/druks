@@ -1,12 +1,13 @@
 import asyncio
 import base64
+import functools
 import hashlib
 import json
 import secrets
 from collections.abc import Callable
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlencode
 
 import httpx
@@ -16,6 +17,7 @@ from druks.database import get_session
 from druks.exceptions import LockHeldError
 from druks.locks import lock
 from druks.redis import get_client
+from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.signals import publish
 
@@ -23,7 +25,6 @@ from .constants import (
     OAUTH_CONNECT_STATE_TTL_SECONDS,
     OAUTH_MINT_WAIT_ATTEMPTS,
     OAUTH_MINT_WAIT_INTERVAL_SECONDS,
-    OAUTH_TOKEN_TTL_SKEW_SECONDS,
 )
 from .exceptions import OauthExchangeError, OauthRefreshError
 
@@ -82,7 +83,7 @@ class OauthClient:
     ``get_oauth_client()``. Construct a client directly only when no service
     holds the client credentials.
 
-    The token cache and the refresh lock key on the connection id. All clients
+    The kept token and the refresh lock key on the connection id. All clients
     for one provider share them, also across a rolling deploy. The consent stash
     pins the endpoints and the client at begin time, so a configuration change
     during a consent cannot break its exchange.
@@ -196,17 +197,18 @@ class OauthClient:
         scopes: tuple[str, ...] = (),
         cached: bool = True,
     ) -> tuple[str, datetime | None]:
-        """The access token for one grant, and its expiry. A cached token serves
-        while it lives. Else Redis elects one refresher per connection and scope
-        set, because two concurrent refreshes can trip the provider's reuse
-        detection and revoke the grant. Other callers wait for its result, then
-        raise. The expiry is the provider's ``expires_in`` less the skew, one hour
-        when it gives none, or None for a cached token without a lifetime.
+        """The access token for one grant, and its expiry. The vault keeps the token
+        and serves it while more than the skew remains. Else Redis elects one
+        refresher per connection and scope set, because two concurrent refreshes
+        can trip the provider's reuse detection and revoke the grant. Other callers
+        wait for the token it keeps, then raise. The expiry is the provider's
+        ``expires_in`` from now, one hour when it gives none, or None for a token
+        without a lifetime.
 
         ``scopes`` asks for a token narrower than the grant (RFC 6749 section 6),
         for a token that goes to untrusted compute. They must be a subset of the
-        granted scopes. ``cached=False`` skips the cache read, but still elects
-        one refresher and fills the cache."""
+        granted scopes. ``cached=False`` skips the kept token, but still elects
+        one refresher and keeps the fresh one."""
         if connection.revoked_at:
             raise OauthRefreshError(
                 self.provider, "the connection is revoked; sign in again to restore it"
@@ -218,20 +220,18 @@ class OauthClient:
             raise OauthRefreshError(
                 self.provider, f"the connection does not grant scope(s) {missing}"
             )
-        redis = get_client()
-        # A down-scoped token must never serve a full-scope caller, or the reverse.
-        suffix = ""
+        parts = [self.provider, connection.id]
+        lock_key = f"{self.provider}:refresh_lock:{connection.id}"
         if requested:
-            suffix = ":" + hashlib.sha256(" ".join(requested).encode()).hexdigest()[:16]
-        token_key = f"{self.provider}:access_token:{connection.id}{suffix}"
-        lock_key = f"{self.provider}:refresh_lock:{connection.id}{suffix}"
+            # A down-scoped token must never serve a full-scope caller, or the reverse.
+            scope_hash = hashlib.sha256(" ".join(requested).encode()).hexdigest()[:16]
+            parts.append(scope_hash)
+            lock_key += f":{scope_hash}"
+        audience = Audience.oauth(*parts)
         refresh_lock = AsyncExitStack()
         for _ in range(self.mint_wait_attempts):
-            if cached:
-                cached_token = await redis.get(token_key)
-                if cached_token:
-                    ttl = await redis.ttl(token_key)
-                    return cast(bytes, cached_token).decode(), _expiry(ttl)
+            if cached and (kept := await VaultSecret.get_token(session, audience)):
+                return kept
             try:
                 await refresh_lock.enter_async_context(lock(lock_key, blocking=False))
             except LockHeldError:
@@ -243,101 +243,98 @@ class OauthClient:
                 self.provider, "timed out waiting for a concurrent refresh to finish"
             )
         async with refresh_lock:
-            grant = await connection.get_grant()
-            if not grant["refresh_token"]:
-                # The grant is one access token that never expires.
-                return grant["access_token"], None
-            data = {
-                "grant_type": "refresh_token",
-                "refresh_token": grant["refresh_token"],
-                **self.extra_token_params,
-            }
-            if requested:
-                data["scope"] = " ".join(requested)
-            async with _http() as http:
-                try:
-                    response = await _post_token(
-                        http,
-                        self.token_endpoint,
-                        data,
-                        client_id=self.client_id,
-                        client_secret=self.client_secret,
-                        basic_auth=self.basic_auth,
-                        headers=self.token_headers,
-                    )
-                except httpx.HTTPError as error:
-                    raise OauthRefreshError(self.provider, str(error)) from error
-            try:
-                tokens = response.json()
-            except ValueError:
-                tokens = None
-            if not isinstance(tokens, dict):
-                if response.status_code == 200:
-                    raise OauthRefreshError(
-                        self.provider, "the token endpoint returned malformed JSON"
-                    )
-                tokens = {}
-            elif self.is_grant_revoked(response):
-                # Presenting the grant again can never succeed. The revoke commits on
-                # its own: the caller's step session rolls back when this error propagates.
-                async with get_session(session.bind) as own:
-                    revoked = await own.get(VaultSecret, connection.id)
-                    await self.disconnect(revoked, reason="invalid_grant")
-                    await own.commit()
-                raise OauthRefreshError(
-                    self.provider,
-                    "the provider revoked the grant; sign in again to restore the connection",
-                )
-            if response.status_code != 200:
-                await redis.delete(token_key)
-                raise OauthRefreshError(
-                    self.provider, f"HTTP {response.status_code} from the token endpoint"
-                )
-            if not tokens.get("access_token"):
-                raise OauthRefreshError(
-                    self.provider, "the token endpoint returned no access token"
-                )
-            if tokens.get("refresh_token"):
-                await connection.update_refresh_token(tokens["refresh_token"])
-            if requested and tokens.get("scope") and set(tokens["scope"].split()) != set(requested):
-                # The provider ignored the narrowing. The sandbox must never hold this token.
-                raise OauthRefreshError(
-                    self.provider,
-                    f"asked for scope(s) {' '.join(requested)}; "
-                    f"the token came back with {tokens['scope']!r}",
-                )
-            try:
-                ttl = int(tokens.get("expires_in", 3600)) - OAUTH_TOKEN_TTL_SKEW_SECONDS
-            except (TypeError, ValueError) as error:
-                raise OauthRefreshError(
-                    self.provider, "the token endpoint returned a malformed expires_in"
-                ) from error
-            if ttl > 0:
-                await redis.set(token_key, tokens["access_token"], ex=ttl)
-            return tokens["access_token"], _expiry(ttl)
+            return await VaultSecret.get_or_mint_token(
+                session,
+                audience,
+                on_miss=functools.partial(self._refresh, session, connection, requested),
+                reuse=cached,
+            )
 
-    async def evict_access_token(self, connection_id: str) -> None:
-        # Down-scoped tokens share the prefix, so one scan removes them all.
-        redis = get_client()
-        async for key in redis.scan_iter(match=f"{self.provider}:access_token:{connection_id}*"):
-            await redis.delete(key)
+    async def _refresh(
+        self, session: AsyncSession, connection: VaultSecret, requested: tuple[str, ...]
+    ) -> tuple[str, datetime | None]:
+        """A fresh access token from the grant, and its expiry. A grant without a
+        refresh token is one access token that never expires."""
+        grant = await connection.get_grant()
+        if not grant["refresh_token"]:
+            return grant["access_token"], None
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": grant["refresh_token"],
+            **self.extra_token_params,
+        }
+        if requested:
+            data["scope"] = " ".join(requested)
+        async with _http() as http:
+            try:
+                response = await _post_token(
+                    http,
+                    self.token_endpoint,
+                    data,
+                    client_id=self.client_id,
+                    client_secret=self.client_secret,
+                    basic_auth=self.basic_auth,
+                    headers=self.token_headers,
+                )
+            except httpx.HTTPError as error:
+                raise OauthRefreshError(self.provider, str(error)) from error
+        try:
+            tokens = response.json()
+        except ValueError:
+            tokens = None
+        if not isinstance(tokens, dict):
+            if response.status_code == 200:
+                raise OauthRefreshError(self.provider, "the token endpoint returned malformed JSON")
+            tokens = {}
+        elif self.is_grant_revoked(response):
+            # Presenting the grant again can never succeed. The revoke commits on
+            # its own: the caller's step session rolls back when this error propagates.
+            async with get_session(session.bind) as own:
+                revoked = await own.get(VaultSecret, connection.id)
+                await self.disconnect(revoked, reason="invalid_grant")
+                await own.commit()
+            raise OauthRefreshError(
+                self.provider,
+                "the provider revoked the grant; sign in again to restore the connection",
+            )
+        if response.status_code != 200:
+            raise OauthRefreshError(
+                self.provider, f"HTTP {response.status_code} from the token endpoint"
+            )
+        if not tokens.get("access_token"):
+            raise OauthRefreshError(self.provider, "the token endpoint returned no access token")
+        if tokens.get("refresh_token"):
+            await connection.update_refresh_token(tokens["refresh_token"])
+        if requested and tokens.get("scope") and set(tokens["scope"].split()) != set(requested):
+            # The provider ignored the narrowing. The sandbox must never hold this token.
+            raise OauthRefreshError(
+                self.provider,
+                f"asked for scope(s) {' '.join(requested)}; "
+                f"the token came back with {tokens['scope']!r}",
+            )
+        try:
+            lifetime = int(tokens.get("expires_in", 3600))
+        except (TypeError, ValueError) as error:
+            raise OauthRefreshError(
+                self.provider, "the token endpoint returned a malformed expires_in"
+            ) from error
+        return tokens["access_token"], datetime.now(UTC) + timedelta(seconds=lifetime)
+
+    async def evict_access_token(self, session: AsyncSession, connection_id: str) -> None:
+        """Revoke the access tokens kept for a connection, its scope variants included."""
+        await VaultSecret.revoke_tokens(session, Audience.oauth(self.provider, connection_id))
 
     async def disconnect(self, connection: VaultSecret, *, reason: str) -> None:
-        """Revoke the grant, evict its cached access token, and publish
+        """Revoke the grant and the access tokens kept for it, and publish
         ``oauth.disconnected``."""
         await connection.revoke(reason)
-        await self.evict_access_token(connection.id)
+        await self.evict_access_token(connection.session, connection.id)
         await publish(
             "oauth.disconnected",
             provider=self.provider,
             connection_id=connection.id,
             account_id=connection.account_id,
         )
-
-
-def _expiry(seconds: int) -> datetime | None:
-    # Redis returns -1 for a key without a lifetime and -2 for a missing key.
-    return datetime.now(UTC) + timedelta(seconds=seconds) if seconds > 0 else None
 
 
 async def complete_connect(

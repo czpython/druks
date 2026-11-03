@@ -173,9 +173,8 @@ class SoftwareFactory(App):
                     api_key=row.secrets["api_key"],
                     status_names=status_names,
                 )
-            if settings.tracker == "github":
-                client = await services.Github.get_client()
-                return GitHub(client=client, status_names=status_names)
+            if settings.tracker == "github" and await services.Github.is_connected():
+                return GitHub(status_names=status_names)
         except ServiceNotConnectedError:
             return
         except OauthRefreshError:

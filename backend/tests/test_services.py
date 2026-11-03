@@ -2,10 +2,10 @@ import hashlib
 import hmac
 import html
 import json
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlparse
 
-import druks.redis
 import httpx
 import pytest
 from conftest import connect_service
@@ -13,12 +13,13 @@ from druks.accounts.models import Account
 from druks.agents import Agent, AgentOutput
 from druks.api.server import app
 from druks.apps.registry import services
-from druks.core.apis.github import GitHubClient
+from druks.core.apis.github import GitHubAppClient
 from druks.core.services import Github
 from druks.core.webhooks.github import GitHubEvents
 from druks.db import db_session
-from druks.redis import close_client, get_client
+from druks.redis import close_client
 from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
 from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
 from druks.services import Service, auth
@@ -90,23 +91,16 @@ async def test_get_raises_when_the_service_is_not_connected(druks_db):
 async def test_client_factory_resolves_only_the_row(druks_db):
     await _connect()
 
-    client = await Github.get_client()
+    client = await Github.get_app_client()
 
     assert client._app_id == "12345"
     assert client._app.auth.private_key == _PEM
     assert client._slug == "druks-operator"
 
 
-async def test_mention_handle_is_the_stored_slug(druks_db):
-    # No transport stub: a refetch would ask GitHub and fail loudly here.
-    await _connect()
-
-    assert await (await Github.get_client()).get_mention_handle() == "druks-operator"
-
-
 async def test_client_factory_raises_the_typed_error_when_absent(druks_db):
     with pytest.raises(ServiceNotConnectedError):
-        await Github.get_client()
+        await Github.get_client("acme/app")
 
 
 def _events(body: bytes, signature: str, tmp_path) -> GitHubEvents:
@@ -148,7 +142,7 @@ def _mock_authenticated_app(monkeypatch, slug: str = "druks-operator") -> None:
     async def _slug(self) -> str:
         return slug
 
-    monkeypatch.setattr(GitHubClient, "get_authenticated_app_slug", _slug)
+    monkeypatch.setattr(GitHubAppClient, "get_authenticated_app_slug", _slug)
 
 
 async def test_list_reports_each_declared_service(druks_client: httpx.AsyncClient):
@@ -245,7 +239,7 @@ async def test_invalid_credentials_preserve_the_previous_row(
     async def _rejected(self) -> str:
         raise RuntimeError("boom-marker bad credentials")
 
-    monkeypatch.setattr(GitHubClient, "get_authenticated_app_slug", _rejected)
+    monkeypatch.setattr(GitHubAppClient, "get_authenticated_app_slug", _rejected)
 
     response = await druks_client.post(
         "/api/services/github",
@@ -301,7 +295,7 @@ async def test_blank_fields_are_rejected_without_touching_github(
     async def _never(self) -> str:
         raise AssertionError("blank fields must not reach GitHub")
 
-    monkeypatch.setattr(GitHubClient, "get_authenticated_app_slug", _never)
+    monkeypatch.setattr(GitHubAppClient, "get_authenticated_app_slug", _never)
 
     response = await druks_client.post(
         "/api/services/github",
@@ -837,8 +831,15 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
         assert connection.scopes == ["profile.read", "posts.write"]
 
         # Reconsent through the same connection replaces its tokens and
-        # evicts the stale cached access token.
-        stale_key = f"acme:access_token:{connection.id}"
+        # revokes the stale kept access token.
+        kept = Audience.oauth("acme", connection.id)
+        await VaultSecret.store(
+            db_session(),
+            SecretKind.STATIC,
+            kept,
+            secrets={"value": "at-stale"},
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+        )
         reconnect = client.get(
             f"/api/oauth/acme/connect?connection={connection.id}", follow_redirects=False
         )
@@ -857,8 +858,7 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
     }
     assert reconsent["reconsent"] is True
     assert reconsent["connection_id"] == connection.id
-    druks.redis._client = None
-    assert not await get_client().get(stale_key)
+    assert not await VaultSecret.get_token(db_session(), kept)
 
 
 async def test_oauth_connect_rejects_an_unknown_or_another_accounts_reconnect_target(
@@ -950,7 +950,7 @@ async def test_matching_fresh_sign_in_lands_on_live_connection_and_evicts_cached
     connection_id = connection.id
     evicted_connection_ids = []
 
-    async def record_eviction(oauth_client, evicted_connection_id):
+    async def record_eviction(oauth_client, session, evicted_connection_id):
         assert oauth_client.provider == keyed_acme.slug
         evicted_connection_ids.append(evicted_connection_id)
 

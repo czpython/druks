@@ -1,13 +1,10 @@
 # OAuth connect + mint plumbing shared by every OauthClient consumer. Pending
 # connect state (the PKCE verifier plus the begun flow's client identity)
-# lives in Redis for its short TTL, single-use. Access tokens cache for their
-# lifetime minus the skew, so a token handed out never expires moments after
-# delivery.
+# lives in Redis for its short TTL, single-use.
 OAUTH_CONNECT_STATE_TTL_SECONDS = 600
-OAUTH_TOKEN_TTL_SKEW_SECONDS = 60
 
 # Mint's mutual exclusion: a rotating grant tolerates exactly one refresher.
-# Losers poll the cache on the interval for about one token-endpoint round
+# Losers poll the vault on the interval for about one token-endpoint round
 # trip, then fail loudly.
 OAUTH_MINT_WAIT_INTERVAL_SECONDS = 0.2
 OAUTH_MINT_WAIT_ATTEMPTS = 150

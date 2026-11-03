@@ -1383,7 +1383,8 @@ from druks.signals import subscribe
 @subscribe("pr.synchronized")
 async def check_the_head(*, repo: str, payload: dict, **_: object) -> None:
     findings = await lint(repo, payload["head_sha"])
-    await (await Github.get_client()).post_check_run(
+    github = await Github.get_client(repo)
+    await github.post_check_run(
         repo,
         head_sha=payload["head_sha"],
         name="night-watch",
@@ -1957,16 +1958,17 @@ hold, across services, revoked ones shown as history. Replacing a service's
 client credentials revokes its connections: a new client can never refresh
 the old client's tokens, but the consents stay on record.
 
-`get_access_token` serves a Redis-cached access token and lets only one
-refresher run per connection and scope set. This is necessary: two
+`get_access_token` serves the access token that the vault keeps until shortly
+before it expires, and lets only one refresher run per connection and scope
+set. This is necessary: two
 refreshes at the same time can make the provider revoke the whole
 connection. It raises `OauthRefreshError` when the refresh fails. Then ask
 the user to reconnect.
 
 `get_access_token(scopes=("profile.read",))` asks the provider for a token with
 fewer scopes than the grant. If the token goes to untrusted compute, use it.
-Pass a subset of the connection scopes. `cached=False` bypasses the cache to get
-a full-lifetime token.
+Pass a subset of the connection scopes. `cached=False` skips the kept token to
+get a full-lifetime one.
 
 ## App settings and checks
 

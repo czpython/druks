@@ -1,5 +1,6 @@
 import logging
-from datetime import datetime
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import ColumnElement, ForeignKey, Index, select, text, update
@@ -11,7 +12,9 @@ from sqlalchemy_encrypted_field import EncryptedJsonField
 from druks.apps.registry import services
 from druks.core.models import Uuid7Pk
 from druks.database import get_session
+from druks.locks import lock
 from druks.models import Base
+from druks.secrets.constants import TOKEN_EXPIRY_SKEW_SECONDS
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import IdentityStatus, SecretKind
 from druks.secrets.exceptions import SecretRevokedError
@@ -209,6 +212,70 @@ class VaultSecret(Base, Uuid7Pk):
         row.updated_at = Base.utc_now()
         await session.flush()
         return row
+
+    @classmethod
+    async def get_token(cls, session: AsyncSession, audience: str) -> tuple[str, datetime] | None:
+        """The token kept at ``audience`` and its expiry, while more than the skew
+        remains before it expires. Read past the identity map, so a token that a peer
+        minted since serves."""
+        row = await session.scalar(
+            select(cls)
+            .where(
+                cls.kind == SecretKind.STATIC, cls.audience == audience, cls.revoked_at.is_(None)
+            )
+            .execution_options(populate_existing=True)
+        )
+        skew = timedelta(seconds=TOKEN_EXPIRY_SKEW_SECONDS)
+        if row and row.expires_at > Base.utc_now() + skew:
+            return row.secrets["value"], row.expires_at
+        return
+
+    @classmethod
+    async def get_or_mint_token(
+        cls,
+        session: AsyncSession,
+        audience: str,
+        *,
+        on_miss: Callable[[], Awaitable[tuple[str, datetime | None]]],
+        reuse: bool = True,
+    ) -> tuple[str, datetime | None]:
+        """The token kept at ``audience`` while more than the skew remains before it
+        expires, else a fresh one from ``on_miss``, kept with its expiry. A token without
+        an expiry is not kept. ``reuse=False`` mints without reading the kept one."""
+        if reuse and (kept := await cls.get_token(session, audience)):
+            return kept
+        # Callers that miss together mint once: a waiter reads the row the holder kept.
+        async with lock(audience):
+            if reuse and (kept := await cls.get_token(session, audience)):
+                return kept
+            token, expires_at = await on_miss()
+            if expires_at:
+                # Callers in other sessions read the row, and a later rollback of the
+                # enclosing transaction must not lose it, so this commits on its own.
+                async with get_session(session.bind) as own:
+                    await cls.store(
+                        own,
+                        SecretKind.STATIC,
+                        audience,
+                        secrets={"value": token},
+                        expires_at=expires_at,
+                    )
+                    await own.commit()
+        return token, expires_at
+
+    @classmethod
+    async def revoke_tokens(cls, session: AsyncSession, audience: str) -> None:
+        """Revoke the tokens kept at ``audience`` and under it: a connection's token
+        and its scope variants."""
+        await session.execute(
+            update(cls)
+            .where(
+                cls.kind == SecretKind.STATIC,
+                cls.audience.startswith(audience),
+                cls.revoked_at.is_(None),
+            )
+            .values(revoked_at=Base.utc_now(), secrets={})
+        )
 
     @classmethod
     async def paste(

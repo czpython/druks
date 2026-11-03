@@ -1,12 +1,11 @@
 import base64
-import functools
 import logging
 import time
-from collections.abc import Awaitable, Callable, Sequence
-from contextlib import suppress
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from typing import Any, Literal, TypeVar
+from datetime import datetime
+from functools import partial
+from typing import Any, Literal
 
 from githubkit import AppAuthStrategy, GitHub, TokenAuthStrategy
 from githubkit.exception import GraphQLFailed, RequestFailed
@@ -14,8 +13,6 @@ from githubkit.utils import UNSET
 
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.utils.time import ensure_utc
-from druks.redis import get_client
-from druks.services.constants import OAUTH_TOKEN_TTL_SKEW_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -41,37 +38,13 @@ _ANNOTATIONS_PER_REQUEST = 50
 _INSTALLATION_ACCOUNTS_TTL_SECONDS = 600.0
 _INSTALLATION_ACCOUNTS_CACHE: dict[str, tuple[float, tuple[str, ...]]] = {}
 
-# An App's slug and bot user id are fixed for its life, so these need no expiry.
-_MENTION_HANDLE_CACHE: dict[str, str] = {}
+# An App's bot user id is fixed for its life, so this needs no expiry.
 _BOT_USER_ID_CACHE: dict[str, int] = {}
 
 
-F = TypeVar("F", bound=Callable[..., Awaitable[Any]])
-
-
-def _retry_on_401(func: F) -> F:
-    @functools.wraps(func)
-    async def wrapper(self: "GitHubClient", repo: str, *args: Any, **kwargs: Any) -> Any:
-        try:
-            return await func(self, repo, *args, **kwargs)
-        except RequestFailed as error:
-            if error.response.status_code != 401:
-                raise
-            logger.warning(
-                "GitHub 401 on %s/%s for %s; dropping cached installation client and retrying once",
-                repo,
-                func.__name__,
-                repo,
-            )
-            await self._invalidate_for_repo(repo)
-            return await func(self, repo, *args, **kwargs)
-
-    return wrapper  # type: ignore[return-value]
-
-
-class GitHubClient:
-    """The App's key signs its calls at ``app_url``. Repository calls go to GitHub with
-    the installation tokens minted there."""
+class GitHubAppClient:
+    """The App's key signs its calls at ``app_url``: the App itself, its installations,
+    and a token for one of them."""
 
     def __init__(
         self,
@@ -84,90 +57,37 @@ class GitHubClient:
         self._app_id = app_id
         self._slug = slug
         self._app = GitHub(AppAuthStrategy(app_id, private_key), base_url=app_url)
-        self._installation_cache: dict[str, int] = {}
-        self._installation_clients: dict[int, GitHub] = {}
 
-    async def aclose(self) -> None:
-        # With direct method calls githubkit creates and closes a fresh httpx
-        # client per request, so there is no persistent pool to release. Dropping
-        # the per-installation cache is the only cleanup. Pooled connections
-        # would require entering the client context and closing it here.
-        self._installation_clients.clear()
-
-    async def _owner_installation_id(self, owner: str) -> int:
-        try:
-            response = await self._app.rest.apps.async_get_org_installation(owner)
-        except RequestFailed as error:
-            if error.response.status_code != 404:
-                raise
+    async def get_installation_id(self, owner_or_repo: str) -> int:
+        """The installation that covers a repository ``owner/name``, or an account."""
+        owner, _, name = owner_or_repo.partition("/")
+        apps = self._app.rest.apps
+        if name:
+            lookups = [partial(apps.async_get_repo_installation, owner, name)]
+        else:
+            # An organization and a user each have their own endpoint.
+            lookups = [
+                partial(apps.async_get_org_installation, owner),
+                partial(apps.async_get_user_installation, owner),
+            ]
+        for lookup in lookups:
             try:
-                response = await self._app.rest.apps.async_get_user_installation(owner)
+                return (await lookup()).parsed_data.id
             except RequestFailed as error:
-                if error.response.status_code == 404:
-                    raise GitHubAppNotInstalledError(owner, app=self._slug) from error
-                raise
-        return response.parsed_data.id
+                if error.response.status_code != 404:
+                    raise
+        raise GitHubAppNotInstalledError(owner_or_repo, app=self._slug)
 
-    async def list_repos_for_owner(self, owner: str) -> list[dict[str, Any]]:
-        """Repos the GitHub App can see under ``owner``.
-
-        Returns ``[{"full_name": "<owner>/<name>", "description": ...}, ...]``.
-        Empty when the app isn't installed on this owner or has no repo
-        access. Used by the projects UI as the typeahead source for the
-        "add repo" affordance.
-        """
-        try:
-            installation_id = await self._owner_installation_id(owner)
-        except GitHubAppNotInstalledError:
-            return []
-
-        github = await self._create_installation_client(installation_id)
-        async with github:
-            repos: list[dict[str, Any]] = []
-            page = 1
-            while True:
-                response = await github.rest.apps.async_list_repos_accessible_to_installation(
-                    per_page=100,
-                    page=page,
-                )
-                items = response.parsed_data.repositories
-                if not items:
-                    break
-                for repository in items:
-                    repos.append(
-                        {
-                            "full_name": repository.full_name,
-                            "description": repository.description,
-                        }
-                    )
-                if len(items) < 100:
-                    break
-                page += 1
-            return repos
-
-    async def create_repo_from_template(self, owner: str, template_repo: str, name: str) -> str:
-        """A new private repo ``name`` under ``owner``, generated from the
-        ``owner/name`` template ``template_repo``; returns its ``full_name``.
-        Safe to retry: a name already taken reads as already created."""
-        installation_id = await self._owner_installation_id(owner)
-        template_owner, template_name = template_repo.split("/", 1)
-        full_name = f"{owner}/{name}"
-        github = await self._create_installation_client(installation_id)
-        async with github:
-            try:
-                await github.rest.repos.async_create_using_template(
-                    template_owner,
-                    template_name,
-                    name=name,
-                    owner=owner,
-                    private=True,
-                )
-            except RequestFailed as error:
-                # On a valid name GitHub's 422 is "already taken" — a retried create.
-                if error.response.status_code == 422:
-                    return full_name
-                raise
-        return full_name
+    async def create_installation_token(
+        self, installation_id: int, repositories: Sequence[str] = ()
+    ) -> tuple[str, datetime]:
+        """A token for the installation, and the expiry GitHub gave it. Named
+        ``repositories`` limit it to them; without them it covers the whole installation."""
+        response = await self._app.rest.apps.async_create_installation_access_token(
+            installation_id, repositories=list(repositories) or UNSET
+        )
+        minted = response.parsed_data
+        return str(minted.token), ensure_utc(datetime.fromisoformat(str(minted.expires_at)))
 
     async def list_installation_accounts(self, cached: bool = True) -> tuple[str, ...]:
         """Account logins (orgs/users) this App is installed on — the
@@ -207,43 +127,6 @@ class GitHubClient:
         _INSTALLATION_ACCOUNTS_CACHE[self._app_id] = (now, result)
         return result
 
-    async def get_mention_handle(self) -> str:
-        """What a comment writes after ``@`` to address this App — its slug, which
-        GitHub resolves to the App's bot user. The operator client carries the
-        slug stored at connect time and never refetches it; a client constructed
-        without one (the review identity) asks GitHub once and caches it."""
-        if self._slug:
-            return self._slug
-        cached = _MENTION_HANDLE_CACHE.get(self._app_id)
-        if cached:
-            return cached
-        response = await self._app.rest.apps.async_get_authenticated()
-        handle = getattr(response.parsed_data, "slug", None) or ""
-        _MENTION_HANDLE_CACHE[self._app_id] = handle
-        return handle
-
-    async def get_bot_git_author(self) -> tuple[str, str]:
-        """Name and email for commits made as the App's bot user — the
-        ``<id>+<slug>[bot]@users.noreply.github.com`` convention, the same
-        identity a squash-merge advertises. The id comes from the users endpoint
-        with an installation token: GitHub limits anonymous requests to 60 an hour per IP."""
-        bot_name = f"{await self.get_mention_handle()}[bot]"
-        user_id = _BOT_USER_ID_CACHE.get(self._app_id)
-        if not user_id:
-            response = await self._app.rest.apps.async_list_installations(per_page=100)
-            installations = []
-            for installation in response.parsed_data:
-                if not installation.suspended_at:
-                    installations.append(installation)
-            if not installations:
-                raise GitHubAppNotInstalledError(bot_name, app=self._slug)
-            github = await self._create_installation_client(installations[0].id)
-            async with github:
-                response = await github.rest.users.async_get_by_username(bot_name)
-            user_id = response.parsed_data.id
-            _BOT_USER_ID_CACHE[self._app_id] = user_id
-        return bot_name, f"{user_id}+{bot_name}@users.noreply.github.com"
-
     async def get_app_permissions(self) -> dict[str, str]:
         """What GitHub grants the App today, by permission name."""
         response = await self._app.rest.apps.async_get_authenticated()
@@ -256,102 +139,85 @@ class GitHubClient:
         response = await self._app.rest.apps.async_get_authenticated()
         return str(getattr(response.parsed_data, "slug", None) or "")
 
-    async def _installation_id(self, repo: str) -> int:
-        if repo in self._installation_cache:
-            return self._installation_cache[repo]
-        owner, name = repo.split("/", 1)
-        try:
-            response = await self._app.rest.apps.async_get_repo_installation(owner, name)
-        except RequestFailed as error:
-            if error.response.status_code == 404:
-                raise GitHubAppNotInstalledError(repo, app=self._slug) from error
-            raise
-        installation_id: int = response.parsed_data.id
-        self._installation_cache[repo] = installation_id
-        return installation_id
 
-    async def _get_installation_token(
-        self, installation_id: int, repositories: Sequence[str] = ()
-    ) -> tuple[str, datetime]:
-        """The token and its expiry, kept in Redis until the skew before it expires. Named
-        ``repositories`` limit it to them; without them it covers the whole installation."""
-        redis = get_client()
-        key = ":".join(("github:installation_token", str(installation_id), *sorted(repositories)))
-        if token := await redis.get(key):
-            return token.decode(), datetime.now(UTC) + timedelta(seconds=await redis.ttl(key))
-        response = await self._app.rest.apps.async_create_installation_access_token(
-            installation_id, repositories=list(repositories) or UNSET
-        )
-        minted = response.parsed_data
-        expires_at = ensure_utc(datetime.fromisoformat(str(minted.expires_at)))
-        ttl = int((expires_at - datetime.now(UTC)).total_seconds()) - OAUTH_TOKEN_TTL_SKEW_SECONDS
-        if ttl > 0:
-            await redis.set(key, str(minted.token), ex=ttl)
-        return str(minted.token), expires_at
+class GitHubClient:
+    """The App acting in one installation, with the token minted for it."""
 
-    async def _create_installation_client(self, installation_id: int) -> GitHub:
-        token, _ = await self._get_installation_token(installation_id)
-        return GitHub(TokenAuthStrategy(token), base_url=GITHUB_API_URL)
+    def __init__(self, token: str, *, app_id: str, slug: str) -> None:
+        self._app_id = app_id
+        self._slug = slug
+        self._github = GitHub(TokenAuthStrategy(token), base_url=GITHUB_API_URL)
 
-    async def _get_installation_client(self, repo: str) -> GitHub:
-        installation_id = await self._installation_id(repo)
-        if installation_id not in self._installation_clients:
-            self._installation_clients[installation_id] = await self._create_installation_client(
-                installation_id
+    async def list_repos(self) -> list[dict[str, Any]]:
+        """The repositories the installation can see, as
+        ``[{"full_name": "<owner>/<name>", "description": ...}, ...]``."""
+        repos: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            response = await self._github.rest.apps.async_list_repos_accessible_to_installation(
+                per_page=100,
+                page=page,
             )
-        return self._installation_clients[installation_id]
+            items = response.parsed_data.repositories
+            repos.extend(
+                {"full_name": repository.full_name, "description": repository.description}
+                for repository in items
+            )
+            if len(items) < 100:
+                break
+            page += 1
+        return repos
 
-    async def _invalidate_for_repo(self, repo: str) -> None:
-        installation_id = self._installation_cache.pop(repo, None)
-        github = self._installation_clients.pop(installation_id, None) if installation_id else None
-        if installation_id:
-            await get_client().delete(f"github:installation_token:{installation_id}")
-        if github:
-            try:
-                await github.__aexit__(None, None, None)
-            except Exception:  # noqa: BLE001 — best-effort cleanup, log and move on
-                logger.warning(
-                    "Failed to close stale GitHub client for %s; leaking httpx pool",
-                    repo,
-                    exc_info=True,
-                )
+    async def create_repo_from_template(self, owner: str, template_repo: str, name: str) -> str:
+        """A new private repo ``name`` under ``owner``, generated from the
+        ``owner/name`` template ``template_repo``; returns its ``full_name``.
+        Safe to retry: a name already taken reads as already created."""
+        template_owner, template_name = template_repo.split("/", 1)
+        full_name = f"{owner}/{name}"
+        try:
+            await self._github.rest.repos.async_create_using_template(
+                template_owner,
+                template_name,
+                name=name,
+                owner=owner,
+                private=True,
+            )
+        except RequestFailed as error:
+            # On a valid name GitHub's 422 is "already taken" — a retried create.
+            if error.response.status_code == 422:
+                return full_name
+            raise
+        return full_name
 
-    @_retry_on_401
-    async def get_token_for_repos(self, *repos: str) -> tuple[str, datetime]:
-        """A token limited to ``repos``, and the expiry GitHub gave it. The first repo's
-        installation mints it, and leaves out each other repo that it does not cover."""
-        # git holds the token after this call, so a 401 here is the one chance to drop
-        # a stale installation id (the App was reinstalled) and mint again.
-        installation_id = await self._installation_id(repos[0])
-        names = []
-        for repo in repos:
-            # GitHub refuses the whole token when one named repository is out of reach.
-            with suppress(GitHubAppNotInstalledError):
-                if await self._installation_id(repo) == installation_id:
-                    names.append(repo.split("/", 1)[1])
-        return await self._get_installation_token(installation_id, names)
+    async def get_bot_git_author(self) -> tuple[str, str]:
+        """Name and email for commits made as the App's bot user — the
+        ``<id>+<slug>[bot]@users.noreply.github.com`` convention, the same
+        identity a squash-merge advertises. The id comes from the users endpoint
+        with the installation's token: GitHub limits anonymous requests to 60 an
+        hour per IP."""
+        bot_name = f"{self._slug}[bot]"
+        user_id = _BOT_USER_ID_CACHE.get(self._app_id)
+        if not user_id:
+            response = await self._github.rest.users.async_get_by_username(bot_name)
+            user_id = response.parsed_data.id
+            _BOT_USER_ID_CACHE[self._app_id] = user_id
+        return bot_name, f"{user_id}+{bot_name}@users.noreply.github.com"
 
-    @_retry_on_401
     async def get_repository(self, repo: str) -> dict[str, Any]:
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        response = await github.rest.repos.async_get(owner, name)
+        response = await self._github.rest.repos.async_get(owner, name)
         return response.parsed_data.model_dump()
 
-    @_retry_on_401
     async def get_issue(self, repo: str, issue_number: int) -> dict[str, Any]:
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        response = await github.rest.issues.async_get(owner, name, issue_number)
+        response = await self._github.rest.issues.async_get(owner, name, issue_number)
         return response.parsed_data.model_dump()
 
-    @_retry_on_401
     async def list_comments(self, repo: str, issue_number: int) -> list[dict[str, Any]]:
         """Every top-level comment on the issue or pull request, oldest first."""
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        comments = github.rest.paginate(
-            github.rest.issues.async_list_comments,
+        comments = self._github.rest.paginate(
+            self._github.rest.issues.async_list_comments,
             owner=owner,
             repo=name,
             issue_number=issue_number,
@@ -359,13 +225,11 @@ class GitHubClient:
         )
         return [comment.model_dump() async for comment in comments]
 
-    @_retry_on_401
     async def list_review_comments(self, repo: str, pr_number: int) -> list[dict[str, Any]]:
         """Every inline comment on the pull request, oldest first."""
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        comments = github.rest.paginate(
-            github.rest.pulls.async_list_review_comments,
+        comments = self._github.rest.paginate(
+            self._github.rest.pulls.async_list_review_comments,
             owner=owner,
             repo=name,
             pull_number=pr_number,
@@ -373,87 +237,71 @@ class GitHubClient:
         )
         return [comment.model_dump() async for comment in comments]
 
-    @_retry_on_401
     async def create_comment(self, repo: str, issue_number: int, body: str) -> dict[str, Any]:
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        response = await github.rest.issues.async_create_comment(
+        response = await self._github.rest.issues.async_create_comment(
             owner, name, issue_number, body=body
         )
         return response.parsed_data.model_dump()
 
-    @_retry_on_401
     async def create_reaction(self, repo: str, comment_id: int, content: str) -> None:
         """React to a top-level comment. GitHub keeps one reaction per App and content,
         so reacting again changes nothing."""
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        await github.rest.reactions.async_create_for_issue_comment(
+        await self._github.rest.reactions.async_create_for_issue_comment(
             owner, name, comment_id, content=content
         )
 
-    @_retry_on_401
     async def create_review_comment_reaction(
         self, repo: str, comment_id: int, content: str
     ) -> None:
         """React to a comment in a pull request review."""
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        await github.rest.reactions.async_create_for_pull_request_review_comment(
+        await self._github.rest.reactions.async_create_for_pull_request_review_comment(
             owner, name, comment_id, content=content
         )
 
-    @_retry_on_401
     async def reply_to_review_comment(
         self, repo: str, pr_number: int, comment_id: int, body: str
     ) -> dict[str, Any]:
         """A reply in the inline thread that ``comment_id`` starts. GitHub takes the
         thread's first comment only, never a reply in it."""
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        response = await github.rest.pulls.async_create_reply_for_review_comment(
+        response = await self._github.rest.pulls.async_create_reply_for_review_comment(
             owner, name, pr_number, comment_id, body=body
         )
         return response.parsed_data.model_dump()
 
-    @_retry_on_401
     async def replace_issue_labels(
         self, repo: str, issue_number: int, *, add: str, remove: set[str]
     ) -> None:
         """Put ``add`` on the issue and take ``remove`` off. GitHub answers 404 for a
         label the issue does not carry, and that label is already off."""
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        await github.rest.issues.async_add_labels(owner, name, issue_number, data=[add])
+        await self._github.rest.issues.async_add_labels(owner, name, issue_number, data=[add])
         for label in remove:
             try:
-                await github.rest.issues.async_remove_label(owner, name, issue_number, label)
+                await self._github.rest.issues.async_remove_label(owner, name, issue_number, label)
             except RequestFailed as error:
                 if error.response.status_code != 404:
                     raise
 
-    @_retry_on_401
     async def close_issue(self, repo: str, issue_number: int) -> None:
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        await github.rest.issues.async_update(
+        await self._github.rest.issues.async_update(
             owner, name, issue_number, state="closed", state_reason="completed"
         )
 
-    @_retry_on_401
     async def get_pull_request(self, repo: str, pr_number: int) -> dict[str, Any]:
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        response = await github.rest.pulls.async_get(owner, name, pr_number)
+        response = await self._github.rest.pulls.async_get(owner, name, pr_number)
         return response.parsed_data.model_dump()
 
-    @_retry_on_401
     async def squash_merge_pull_request(self, repo: str, pr_number: int) -> bool:
         # No commit_title: GitHub then titles the squash commit from the PR title.
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
         try:
-            response = await github.rest.pulls.async_merge(
+            response = await self._github.rest.pulls.async_merge(
                 owner,
                 name,
                 pr_number,
@@ -465,11 +313,9 @@ class GitHubClient:
             raise
         return response.parsed_data.merged
 
-    @_retry_on_401
     async def enable_auto_merge(self, repo: str, node_id: str) -> bool:
-        github = await self._get_installation_client(repo)
         try:
-            await github.async_graphql(
+            await self._github.async_graphql(
                 """
                 mutation EnablePullRequestAutoMerge($id: ID!) {
                   enablePullRequestAutoMerge(
@@ -485,12 +331,10 @@ class GitHubClient:
             return False
         return True
 
-    @_retry_on_401
     async def update_pull_request_branch(self, repo: str, pr_number: int) -> None:
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
         try:
-            await github.rest.pulls.async_update_branch(owner, name, pr_number)
+            await self._github.rest.pulls.async_update_branch(owner, name, pr_number)
         except RequestFailed as error:
             if error.response.status_code == 422:
                 return
@@ -512,7 +356,6 @@ class GitHubClient:
             return True
         return False
 
-    @_retry_on_401
     async def update_pull_request_body(
         self,
         repo: str,
@@ -520,11 +363,9 @@ class GitHubClient:
         body: str,
     ) -> dict[str, Any]:
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        response = await github.rest.pulls.async_update(owner, name, pr_number, body=body)
+        response = await self._github.rest.pulls.async_update(owner, name, pr_number, body=body)
         return response.parsed_data.model_dump()
 
-    @_retry_on_401
     async def set_pull_request_draft_state(
         self,
         repo: str,
@@ -537,9 +378,8 @@ class GitHubClient:
             return
 
         node_id = str(pull_request["node_id"])
-        github = await self._get_installation_client(repo)
         if draft:
-            await github.async_graphql(
+            await self._github.async_graphql(
                 """
                 mutation ConvertPullRequestToDraft($id: ID!) {
                   convertPullRequestToDraft(input: {pullRequestId: $id}) {
@@ -551,7 +391,7 @@ class GitHubClient:
             )
             return
 
-        await github.async_graphql(
+        await self._github.async_graphql(
             """
             mutation MarkPullRequestReadyForReview($id: ID!) {
               markPullRequestReadyForReview(input: {pullRequestId: $id}) {
@@ -562,12 +402,10 @@ class GitHubClient:
             {"id": node_id},
         )
 
-    @_retry_on_401
     async def has_branch(self, repo: str, branch: str) -> bool:
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
         try:
-            await github.rest.git.async_get_ref(owner, name, f"heads/{branch}")
+            await self._github.rest.git.async_get_ref(owner, name, f"heads/{branch}")
         except RequestFailed as error:
             if error.response.status_code == 404:
                 return False
@@ -575,25 +413,21 @@ class GitHubClient:
 
         return True
 
-    @_retry_on_401
     async def create_branch(self, repo: str, branch: str) -> None:
         """Create ``branch`` at the head of the default branch."""
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        repository = await github.rest.repos.async_get(owner, name)
-        head = await github.rest.git.async_get_ref(
+        repository = await self._github.rest.repos.async_get(owner, name)
+        head = await self._github.rest.git.async_get_ref(
             owner, name, f"heads/{repository.parsed_data.default_branch}"
         )
-        await github.rest.git.async_create_ref(
+        await self._github.rest.git.async_create_ref(
             owner, name, ref=f"refs/heads/{branch}", sha=head.parsed_data.object_.sha
         )
 
-    @_retry_on_401
     async def delete_branch(self, repo: str, branch: str) -> bool:
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
         try:
-            await github.rest.git.async_delete_ref(owner, name, f"heads/{branch}")
+            await self._github.rest.git.async_delete_ref(owner, name, f"heads/{branch}")
         except RequestFailed as error:
             if error.response.status_code == 404:
                 return False
@@ -601,7 +435,6 @@ class GitHubClient:
 
         return True
 
-    @_retry_on_401
     async def request_pull_request_reviewers(
         self,
         repo: str,
@@ -609,15 +442,13 @@ class GitHubClient:
         reviewers: list[str],
     ) -> None:
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        await github.rest.pulls.async_request_reviewers(
+        await self._github.rest.pulls.async_request_reviewers(
             owner,
             name,
             pr_number,
             reviewers=reviewers,
         )
 
-    @_retry_on_401
     async def create_review(
         self,
         repo: str,
@@ -628,7 +459,6 @@ class GitHubClient:
         comments: list[ReviewComment] | None = None,
     ) -> dict[str, Any]:
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
         raw_comments = _build_review_comments(comments) if comments else None
         try:
             kwargs: dict[str, Any] = {
@@ -637,7 +467,7 @@ class GitHubClient:
             }
             if raw_comments:
                 kwargs["comments"] = raw_comments
-            response = await github.rest.pulls.async_create_review(
+            response = await self._github.rest.pulls.async_create_review(
                 owner,
                 name,
                 pr_number,
@@ -653,7 +483,7 @@ class GitHubClient:
                 pr_number,
             )
             fallback_body = _fold_comments_into_body(body, comments or [])
-            response = await github.rest.pulls.async_create_review(
+            response = await self._github.rest.pulls.async_create_review(
                 owner,
                 name,
                 pr_number,
@@ -662,7 +492,6 @@ class GitHubClient:
             )
             return response.parsed_data.model_dump()
 
-    @_retry_on_401
     async def post_check_run(
         self,
         repo: str,
@@ -679,8 +508,8 @@ class GitHubClient:
         already posted there. An annotation is GitHub's shape: ``path``, ``start_line``,
         ``end_line``, ``annotation_level``, ``message``."""
         owner, repo_name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        posted = await github.rest.checks.async_list_for_ref(
+        checks = self._github.rest.checks
+        posted = await checks.async_list_for_ref(
             owner, repo_name, head_sha, check_name=name, app_id=int(self._app_id)
         )
         check_run_id = next((run.id for run in posted.parsed_data.check_runs), None)
@@ -694,17 +523,16 @@ class GitHubClient:
         if conclusion:
             body["conclusion"] = conclusion
         if check_run_id:
-            await github.rest.checks.async_update(owner, repo_name, check_run_id, data=body)
+            await checks.async_update(owner, repo_name, check_run_id, data=body)
         else:
-            response = await github.rest.checks.async_create(
+            response = await checks.async_create(
                 owner, repo_name, data={**body, "head_sha": head_sha}
             )
             check_run_id = response.parsed_data.id
         for start in range(limit, len(annotations), limit):
             body["output"] = {**output, "annotations": list(annotations[start : start + limit])}
-            await github.rest.checks.async_update(owner, repo_name, check_run_id, data=body)
+            await checks.async_update(owner, repo_name, check_run_id, data=body)
 
-    @_retry_on_401
     async def get_file_content(
         self,
         repo: str,
@@ -714,17 +542,12 @@ class GitHubClient:
     ) -> str | None:
         owner, name = repo.split("/", 1)
         try:
-            # The client lookup stays inside the try: an unreachable repo fails there, which
-            # for an optional-file read is also "no such file".
-            github = await self._get_installation_client(repo)
-            response = await github.rest.repos.async_get_content(
+            response = await self._github.rest.repos.async_get_content(
                 owner,
                 name,
                 path,
                 ref=ref or "",
             )
-        except GitHubAppNotInstalledError:
-            return
         except RequestFailed as error:
             if error.response.status_code == 404:
                 return
@@ -733,19 +556,17 @@ class GitHubClient:
         content = getattr(data, "content", None) or ""
         return base64.b64decode(content).decode()
 
-    @_retry_on_401
     async def download_tarball(self, repo: str) -> bytes:
         """Gzipped tarball of ``repo``'s default branch."""
         owner, name = repo.split("/", 1)
-        github = await self._get_installation_client(repo)
-        response = await github.rest.repos.async_download_tarball_archive(owner, name, "")
+        response = await self._github.rest.repos.async_download_tarball_archive(owner, name, "")
         return response.content
 
 
 async def download_public_tarball(repo: str) -> bytes:
     """Gzipped tarball of a *public* repo's default branch.
-    Fetched anonymously — no App installation, unlike ``GitHubClient`` whose every
-    call resolves an installation token and so can't reach repos druks isn't on."""
+    Fetched anonymously — no App installation, unlike ``GitHubClient``, which acts
+    with an installation's token and so reaches only the repos the App is on."""
     owner, name = repo.split("/", 1)
     async with GitHub() as github:
         response = await github.rest.repos.async_download_tarball_archive(owner, name, "")

@@ -4,6 +4,7 @@ import pytest
 from druks.apps.config import resolve_app_config
 from druks.apps.exceptions import AppConfigError
 from druks.contrib.software_factory.policy import RepoPolicy
+from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.testing import make_settings
 
 REPO = "acme/widget"
@@ -60,7 +61,7 @@ class TestFetchFile:
         settings = make_settings(tmp_path)
         monkeypatch.setattr("druks.apps.fetcher.load_settings", lambda: settings)
 
-        async def _client():
+        async def _client(repo):
             return github
 
         monkeypatch.setattr("druks.core.services.Github.get_client", _client)
@@ -75,9 +76,6 @@ class TestFetchFile:
                 fetches.append((repo, path))
                 return None
 
-            async def aclose(self):
-                pass
-
         self._wire(monkeypatch, tmp_path, _GitHub())
         assert await fetch_file(repo=REPO, path=".druks/software_factory/config.yml") is None
         assert await fetch_file(repo=REPO, path=".druks/software_factory/config.yml") is None
@@ -90,12 +88,23 @@ class TestFetchFile:
             async def get_file_content(self, repo, path):
                 raise RuntimeError("github down")
 
-            async def aclose(self):
-                pass
-
         self._wire(monkeypatch, tmp_path, _GitHub())
         with pytest.raises(RuntimeError, match="github down"):
             await fetch_file(repo=REPO, path=".druks/software_factory/config.yml")
+
+    async def test_a_repo_the_app_cannot_reach_has_no_file(self, monkeypatch, tmp_path):
+        # The prompt-override lookup probes ``<owner>/.druks``, which may not exist.
+        from druks.apps.fetcher import fetch_file
+
+        settings = make_settings(tmp_path)
+        monkeypatch.setattr("druks.apps.fetcher.load_settings", lambda: settings)
+
+        async def _client(repo):
+            raise GitHubAppNotInstalledError(repo, app="example-app")
+
+        monkeypatch.setattr("druks.core.services.Github.get_client", _client)
+
+        assert await fetch_file(repo="acme/.druks", path="prompts/x.md") is None
 
 
 class TestAppPromptOverridePaths:
