@@ -221,10 +221,10 @@ class SandboxIdentity(Base, Uuid7Pk):
     def is_live(self) -> bool:
         return not self.revoked_at and self.expires_at > Base.utc_now()
 
-    async def bind(self, host_id: str) -> None:
+    async def bind(self, host_id: str, *, lease_seconds: int = SANDBOX_HOST_LEASE_SECONDS) -> None:
         self.host_id = host_id
         # The box lease starts now, after any wait for a slot.
-        self.expires_at = Base.utc_now() + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
+        self.expires_at = Base.utc_now() + timedelta(seconds=lease_seconds)
         await self.session.commit()
 
     async def revoke(self) -> None:
@@ -246,6 +246,16 @@ class SandboxIdentity(Base, Uuid7Pk):
             )
         )
         return [identity for identity in rows if identity.run and not identity.run.is_active]
+
+    @classmethod
+    async def set_expiry_for_host(cls, engine, host_id: str, expires_at: datetime) -> None:
+        async with get_session(engine) as session:
+            await session.execute(
+                update(cls)
+                .where(cls.host_id == host_id, cls.revoked_at.is_(None))
+                .values(expires_at=expires_at)
+            )
+            await session.commit()
 
     @classmethod
     async def revoke_for_host(cls, engine, host_id: str) -> None:
