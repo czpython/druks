@@ -312,8 +312,7 @@ class WorkItem(StoredSubject):
                 await ReviewWork.answer(self, action="merged")
             await self.set_ticket_status(TicketStatus.DONE)
         if resolution == Resolution.CLOSED:
-            # The attempt ended, not the ticket, so the ticket goes back to its resting
-            # status. Branch cleanup is best effort, and a failure must not block that move.
+            # Branch cleanup is best effort, and a failure must not block the ticket's move.
             await Build.cancel(self, failure="pr closed without merge")
             await db_session().flush()
             try:
@@ -322,7 +321,9 @@ class WorkItem(StoredSubject):
                     await github.delete_branch(self.repo, self.branch)
             except Exception:  # noqa: BLE001 — cleanup only
                 logger.warning("Skipped branch cleanup for %s.", self.repo, exc_info=True)
-            await self.set_ticket_status(TicketStatus.BACKLOG)
+        # The attempt ended, not the ticket, so the ticket goes back to its resting status.
+        if resolution in (Resolution.CLOSED, Resolution.CANCELLED):
+            await self.release_ticket()
 
     @classmethod
     async def get_for_ticket_key(
@@ -348,6 +349,22 @@ class WorkItem(StoredSubject):
             .limit(limit)
         )
         return list(await db_session().scalars(statement))
+
+    async def release_ticket(self) -> None:
+        # Import cycle: the app imports this module through ticketing/druks.py.
+        import druks.contrib.software_factory.app as software_factory_app
+
+        tracker = await software_factory_app.SoftwareFactory.get_tracker(self.source)
+        if not tracker:
+            return
+
+        async with tracker:
+            try:
+                await tracker.release(self.ticket_key)
+            except (ValueError, *tracker.known_exceptions):
+                logger.warning(
+                    "Could not release %s ticket %s.", self.source, self.ticket_key, exc_info=True
+                )
 
     async def set_ticket_status(self, status: TicketStatus) -> None:
         # Import cycle: the app imports this module through ticketing/druks.py.

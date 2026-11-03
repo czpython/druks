@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -9,6 +10,9 @@ from druks.contrib.software_factory.app import (
     check_tracker_identity,
     list_tracker_status_choices,
 )
+from druks.contrib.software_factory.enums import Resolution, Status
+from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket
+from druks.contrib.software_factory.ticketing.base import Tracker
 from druks.contrib.software_factory.ticketing.druks import DruksTracker
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.ticketing.github import GitHub
@@ -108,6 +112,23 @@ async def test_tracker_is_none_for_github_and_a_disconnected_identity(monkeypatc
     _pin_software_factory_settings(monkeypatch, tracker="jira")
     assert not await SoftwareFactory.get_tracker("jira")
     assert not await SoftwareFactory.get_tracker("linear")
+
+
+@pytest.mark.parametrize(
+    ("tracker", "resting", "refused"),
+    [
+        ("linear", "Todo", True),
+        ("linear", "Backlog", False),
+        ("linear", "", False),
+        ("druks", "Todo", False),
+        ("none", "Todo", False),
+    ],
+)
+def test_settings_refuse_a_resting_status_equal_to_the_trigger(tracker, resting, refused):
+    settings = SoftwareFactory.Settings(
+        tracker=tracker, trigger_status="Todo", resting_status=resting
+    )
+    assert ("resting_status" in settings.clean()) is refused
 
 
 async def test_linear_lists_each_status_name_once_with_its_type(monkeypatch):
@@ -326,8 +347,14 @@ async def test_tracker_builds_the_board_without_credentials(monkeypatch):
 
 
 class _FakeLinearClient:
+    status = "In Review"
+
     def __init__(self) -> None:
         self.calls: list[tuple] = []
+
+    async def get_issue_status(self, issue_id):
+        self.calls.append(("get_issue_status", issue_id))
+        return self.status
 
     async def update_issue_status(self, issue_id, status_name):
         self.calls.append(("update_issue_status", issue_id, status_name))
@@ -354,6 +381,19 @@ async def test_set_status_maps_the_ticket_status_to_a_provider_name():
         ("update_issue_status", "ACME-270", "Backlog"),
         ("update_issue_status", "ACME-270", "To Agent"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"), [("In Review", TicketStatus.IN_REVIEW), ("Canceled", None)]
+)
+async def test_linear_get_status_maps_the_provider_name_to_a_ticket_status(name, expected):
+    fake = _FakeLinearClient()
+    fake.status = name
+    provider = Linear(
+        client=fake,
+        status_names={TicketStatus.IN_REVIEW: "In Review", TicketStatus.BACKLOG: "Backlog"},
+    )
+    assert await provider.get_status("ACME-270") == expected
 
 
 async def test_set_status_unmapped_raises():
@@ -445,6 +485,18 @@ async def test_linear_client_mutates_a_ticket_not_at_the_status():
     assert requests[1]["variables"] == {"issueId": "ENG-831", "statusId": "target-id"}
 
 
+async def test_linear_client_reads_the_issue_status():
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return _linear_issue_response(current="In Review", states=[])
+
+    assert await _linear_client(handler).get_issue_status("ENG-831") == "In Review"
+    assert requests[0]["variables"] == {"issueId": "ENG-831"}
+    assert "mutation" not in requests[0]["query"]
+
+
 async def test_linear_client_lists_workflow_states_across_pages():
     pages = iter(
         [
@@ -476,6 +528,8 @@ async def test_linear_client_translates_a_null_issue_to_unknown_ticket():
 
     with pytest.raises(UnknownTicketError, match="ENG-9999 doesn't exist in Linear"):
         await _linear_client(handler).update_issue_status("ENG-9999", "Ready for Agent")
+    with pytest.raises(UnknownTicketError, match="ENG-9999 doesn't exist in Linear"):
+        await _linear_client(handler).get_issue_status("ENG-9999")
 
 
 def _tracker_stub(fake):
@@ -488,6 +542,8 @@ def _tracker_stub(fake):
 class _FakeTracker:
     known_exceptions: tuple = ()
 
+    status = TicketStatus.IN_PROGRESS
+
     def __init__(self) -> None:
         self.calls: list = []
 
@@ -496,6 +552,9 @@ class _FakeTracker:
 
     async def __aexit__(self, *exc):
         await self.aclose()
+
+    async def get_status(self, key):
+        return self.status
 
     async def set_status(self, key, status):
         self.calls.append((key, status))
@@ -514,6 +573,61 @@ async def test_ticket_state_pushes_status(monkeypatch):
     await item.set_ticket_status(TicketStatus.DONE)
 
     assert fake.calls == [("ACME-1", TicketStatus.DONE), "aclose"]
+
+
+@pytest.mark.parametrize(
+    ("current", "released"),
+    [
+        (TicketStatus.IN_PROGRESS, True),
+        (TicketStatus.IN_REVIEW, True),
+        (TicketStatus.DONE, False),
+        (None, False),
+    ],
+)
+async def test_release_moves_only_a_held_ticket_to_rest(current, released):
+    tracker = _FakeTracker()
+    tracker.status = current
+
+    await Tracker.release(tracker, "ACME-1")
+
+    assert tracker.calls == ([("ACME-1", TicketStatus.BACKLOG)] if released else [])
+
+
+async def test_release_ticket_closes_the_tracker_on_failure(monkeypatch):
+    item = await make_test_work_item(
+        repo="acme/widget", source="linear", ticket_key="ACME-2", title="t"
+    )
+
+    class _Boom(_FakeTracker):
+        known_exceptions = (LinearAPIError,)
+
+        async def release(self, key):
+            raise LinearAPIError("boom")
+
+    boom = _Boom()
+    monkeypatch.setattr(SoftwareFactory, "get_tracker", _tracker_stub(boom))
+
+    await item.release_ticket()
+
+    assert boom.calls == ["aclose"]
+
+
+@pytest.mark.parametrize("resolution", [Resolution.CLOSED, Resolution.CANCELLED])
+@pytest.mark.parametrize("current", [Status.IN_PROGRESS, Status.IN_REVIEW, Status.DONE])
+async def test_resolution_returns_only_a_working_ticket_to_rest(monkeypatch, resolution, current):
+    project = await Project.create(name="Acme")
+    repo = await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
+    ticket = await Ticket.create(project_repo=repo, title="Ticket")
+    ticket.status = current
+    item = await make_test_work_item(
+        repo=repo.full_name, source="druks", ticket_key=ticket.identifier
+    )
+    monkeypatch.setattr(SoftwareFactory, "get_tracker", _tracker_stub(DruksTracker()))
+
+    await item.resolve(resolution, at=datetime.now(UTC))
+
+    working = current in (Status.IN_PROGRESS, Status.IN_REVIEW)
+    assert ticket.status == (Status.BACKLOG if working else current)
 
 
 async def test_ticket_state_skips_non_tracker_source():
@@ -590,6 +704,13 @@ async def test_jira_set_status_leaves_a_ticket_already_at_the_status_untouched()
     fake.status = "Done"
     await _jira(fake).set_status("PROJ-7", TicketStatus.DONE)
     assert fake.calls == [("get_issue_status", "PROJ-7")]
+
+
+@pytest.mark.parametrize(("name", "expected"), [("Done", TicketStatus.DONE), ("Blocked", None)])
+async def test_jira_get_status_maps_the_provider_name_to_a_ticket_status(name, expected):
+    fake = _FakeJiraClient()
+    fake.status = name
+    assert await _jira(fake).get_status("PROJ-7") == expected
 
 
 def test_jira_declares_known_exceptions():
@@ -721,8 +842,13 @@ async def test_jira_client_lists_the_statuses_of_active_workflows():
 
 
 class _FakeGitHubClient:
+    issue = {"state": "open", "labels": []}
+
     def __init__(self) -> None:
         self.calls: list = []
+
+    async def get_issue(self, repo, issue_number):
+        return self.issue
 
     async def replace_issue_labels(self, repo, issue_number, *, add, remove):
         self.calls.append(("replace_issue_labels", repo, issue_number, add, sorted(remove)))
@@ -771,6 +897,21 @@ async def test_github_set_status_swaps_the_label_within_an_exclusive_group(monke
             ["agent:done", "agent:in-review", "ready-for-agent"],
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("state", "labels", "expected"),
+    [
+        ("open", ["bug", "agent:in-review"], TicketStatus.IN_REVIEW),
+        ("open", ["bug"], None),
+        ("closed", ["agent:in-progress"], TicketStatus.DONE),
+    ],
+)
+async def test_github_get_status_reads_the_status_label(monkeypatch, state, labels, expected):
+    fake = _FakeGitHubClient()
+    fake.issue = {"state": state, "labels": [{"name": label} for label in labels]}
+
+    assert await _github(monkeypatch, fake).get_status("acme/widget#7") == expected
 
 
 async def test_github_done_closes_the_issue(monkeypatch):

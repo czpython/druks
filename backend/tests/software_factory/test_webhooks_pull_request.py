@@ -249,7 +249,11 @@ async def test_external_close_returns_ticket_to_resting_pool(druks_db, tmp_path,
     async def _record(self, status):
         pushed.append((self.id, status))
 
+    async def _release(self):
+        pushed.append((self.id, TicketStatus.BACKLOG))
+
     monkeypatch.setattr(WorkItem, "set_ticket_status", _record)
+    monkeypatch.setattr(WorkItem, "release_ticket", _release)
 
     repo, pr_number, branch = "ClawHaven/acme-app", 91, "agent/eng-20"
     work_item_id, _ = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
@@ -373,7 +377,11 @@ async def test_external_close_survives_policy_resolution_failure(druks_db, tmp_p
     async def _record(self, status):
         pushed.append(status)
 
+    async def _release(self):
+        pushed.append(TicketStatus.BACKLOG)
+
     monkeypatch.setattr(WorkItem, "set_ticket_status", _record)
+    monkeypatch.setattr(WorkItem, "release_ticket", _release)
 
     repo, pr_number, branch = "ClawHaven/acme-app", 95, "agent/eng-24"
     work_item_id, _ = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
