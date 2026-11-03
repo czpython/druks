@@ -116,6 +116,18 @@ async def test_an_edit_takes_what_it_is_given_and_leaves_the_rest(
     assert events == []
 
 
+async def test_a_title_over_200_characters_is_refused_on_create_and_edit(druks_client):
+    repo = await _open_repo(druks_client)
+    ticket = await _open_ticket(druks_client, repo["id"], title="x" * 200)
+    created = await druks_client.post(
+        _TICKETS, json={"title": "x" * 201, "repo_id": int(repo["id"])}
+    )
+    edited = await druks_client.patch(
+        f"{_TICKETS}/{ticket['identifier']}", json={"title": "x" * 201}
+    )
+    assert (created.status_code, edited.status_code) == (422, 422)
+
+
 async def test_a_comment_carries_the_calling_account(druks_db, druks_client):
     account = await Account.get_or_create(druks_db, "op@example.com")
     repo = await _open_repo(druks_client)
