@@ -16,18 +16,23 @@ if TYPE_CHECKING:
 
 class ReviewWork(Gate):
     """The verdict on the built work: approve/request_changes (PR webhook) or
-    revise_contract (UI)."""
+    revise_contract (UI). Work that did not pass evaluation parks in-app, and
+    request_changes with a note is its one control."""
 
     name = "review_work"
     action: Literal["approve", "request_changes", "revise_contract"]
     reviewer: str | None = None
-    body: str | None = None
+    # The dashboard shows a note box only for a reply field named note.
+    note: str | None = None
 
     @classmethod
     async def on_wait(cls, workflow: Workflow) -> None:
         build = cast("Build", workflow)
-        await build.set_pr_draft(draft=False)
-        await build.request_assignee_review()
+        if build.journal.is_verified:
+            await build.set_pr_draft(draft=False)
+            await build.request_assignee_review()
+        else:
+            await build.set_pr_draft(draft=True)
 
 
 class VerificationCommandOutput(AgentOutput):

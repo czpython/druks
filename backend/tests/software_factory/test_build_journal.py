@@ -1,3 +1,4 @@
+import pytest
 from druks.contrib.software_factory.contracts import (
     EvaluationOutput,
     ImplementationOutput,
@@ -75,6 +76,35 @@ def test_pr_base_sha_comes_from_the_first_successful_implementation():
     assert _journal().pr_base_sha is None
 
 
+@pytest.mark.parametrize(
+    ("verdict", "is_verified"),
+    [
+        (EvaluationVerdict.PASS, True),
+        (EvaluationVerdict.FAIL, False),
+        (EvaluationVerdict.BLOCKED, False),
+    ],
+)
+def test_only_a_passing_last_evaluation_verifies_the_work(verdict, is_verified):
+    passed_then_last = _evaluation().model_copy(update={"verdict": EvaluationVerdict.PASS})
+    last = _evaluation().model_copy(update={"verdict": verdict})
+    assert _journal(passed_then_last, last).is_verified is is_verified
+
+
+def test_a_triage_question_waits_until_an_evaluation_follows():
+    triage = TriageOutput(
+        action=HumanFeedbackAction.QUESTION,
+        body="",
+        question="Which file?",
+        implementation_instructions="",
+    )
+    assert _journal(triage).triage_question == "Which file?"
+    assert _journal(triage, _evaluation()).triage_question is None
+    no_change = triage.model_copy(
+        update={"action": HumanFeedbackAction.NO_CHANGE, "question": "N/A"}
+    )
+    assert _journal(no_change).triage_question is None
+
+
 def test_assignee_scan_falls_through_unresolved_revisions():
     journal = _journal(
         PlanData(plan_markdown="v1", assignee_github_login="alice"),
@@ -106,11 +136,11 @@ def test_human_feedback_lists_every_reply_and_marks_the_untriaged_one_pending():
     )
     journal = _journal(
         ReviewWork(action="approve", reviewer="carol"),  # never triaged, never listed
-        ReviewWork(action="request_changes", reviewer="alice", body="raw review text"),
+        ReviewWork(action="request_changes", reviewer="alice", note="raw review text"),
         first_triage,
-        ReviewWork(action="request_changes", reviewer="dana", body="second review"),
+        ReviewWork(action="request_changes", reviewer="dana", note="second review"),
     )
     assert journal.human_feedback == [
-        {"reviewer": "alice", "body": "raw review text", "triage": first_triage},
-        {"reviewer": "dana", "body": "second review", "triage": None},
+        {"reviewer": "alice", "note": "raw review text", "triage": first_triage},
+        {"reviewer": "dana", "note": "second review", "triage": None},
     ]

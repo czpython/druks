@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from druks.contrib import software_factory
+from druks.contrib.software_factory.contracts import ReviewWork
 from druks.contrib.software_factory.journal import BuildJournal
 from druks.contrib.software_factory.models import Project, ProjectRepo
 from druks.contrib.software_factory.policy import RepoPolicy
@@ -179,6 +180,20 @@ async def test_comment_mode_swaps_the_review_event_mapping():
 
     assert "Submit every review as a `COMMENT` event" in prompt
     assert "an **approving** verdict → `APPROVE`" not in prompt
+
+
+async def test_triage_prompt_names_an_in_app_note_as_the_operators():
+    build = _build()
+    build.journal.add(ReviewWork(action="request_changes", note="Split the migration."))
+    prompt = await render_prompt(
+        "software_factory/build/triage_human_feedback.md",
+        build=build,
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+    )
+
+    assert "### The operator, in Druks — PENDING, not yet triaged" in prompt
+    assert "Split the migration." in prompt
 
 
 def test_build_prompt_context_covers_template_attrs():
