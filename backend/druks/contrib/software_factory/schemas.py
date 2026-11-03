@@ -126,6 +126,7 @@ class ReviewSummary(SubjectSummary):
 
 # A title or a comment body as the person typed it, minus the padding.
 NonBlank = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+TicketTitle = Annotated[NonBlank, StringConstraints(max_length=200)]
 # The assignee select submits "" for nobody.
 AssigneeId = Annotated[str | None, BeforeValidator(lambda value: value or None)]
 
@@ -158,7 +159,7 @@ class TicketEdit(BaseModel):
     """A partial edit. An omitted field keeps its value, an empty assignee clears it,
     and ``set_status`` moves a ticket."""
 
-    title: NonBlank | None = None
+    title: TicketTitle | None = None
     description: str | None = None
     priority: Priority | None = None
     assignee_id: AssigneeId = None

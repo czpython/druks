@@ -33,6 +33,7 @@ from druks.contrib.software_factory.schemas import (
     ProjectSummary,
     TicketDetail,
     TicketEdit,
+    TicketTitle,
     WorkItemsHistoryResponse,
 )
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
@@ -421,7 +422,7 @@ async def require_assignee(account_id: str | None) -> str | None:
     responses=agent_error_responses(RepoNotFound(7), AssigneeNotFound("ops@example.com")),
 )
 async def create_ticket(
-    title: Annotated[NonBlank, Body(embed=True, max_length=200)],
+    title: Annotated[TicketTitle, Body(embed=True)],
     repo_id: Annotated[
         int, Body(embed=True, description="the GitHub repo this ticket's PR will target")
     ],
