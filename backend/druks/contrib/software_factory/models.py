@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from druks.accounts import Account
+from druks.contrib.software_factory.contracts import ReviewWork
 from druks.contrib.software_factory.enums import Priority, Resolution, Status
 from druks.contrib.software_factory.exceptions import PrefixTakenError
 from druks.contrib.software_factory.policy import RepoPolicy
@@ -307,10 +308,8 @@ class WorkItem(StoredSubject):
         if resolution in (Resolution.MERGED, Resolution.CLOSED):
             await self.announce(resolution, repo=self.repo, pr_number=self.pr_number)
         if resolution == Resolution.MERGED:
-            # A merge strands a build that is parked on review. A running build finishes
-            # by itself, because its merge step finds the PR closed.
             if (await self.get_status(workflow=Build)).is_parked:
-                await Build.cancel(self, failure="pr merged while parked")
+                await ReviewWork.answer(self, action="merged")
             await self.set_ticket_status(TicketStatus.DONE)
         if resolution == Resolution.CLOSED:
             # The attempt ended, not the ticket, so the ticket goes back to its resting

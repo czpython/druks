@@ -13,6 +13,7 @@ describe('Factory Activity', () => {
     ['review.completed', 'software_factory.pull_request_review', 'Review completed'],
     ['merged', null, 'Pull request merged'],
     ['closed', null, 'Pull request closed'],
+    ['workflow.finished', 'software_factory.build', 'Build finished'],
     ['workflow.failed', 'software_factory.build', 'Build failed'],
     ['build.rejected', null, 'Build could not start'],
     ['workflow.cancelled', 'software_factory.build', 'Build cancelled'],
@@ -44,6 +45,7 @@ it.each([
 })
 
 it.each([
+  ['merged', 'Merged on GitHub'],
   ['approve', 'Approve'], ['request_changes', 'Request changes'], ['revise_contract', 'Revise contract'],
 ])('describes receipt of the actual %s reply', (action, label) => {
   const line = eventLine({ id: 'event:1', seq: 1, at: '2026-09-09T12:00:00Z',

@@ -341,6 +341,8 @@ class Build(Workflow):
                 "url": f"https://github.com/{(await self.subject).repo}/pull/{self.pr_number}",
             }
         )
+        if decision.action == "merged":
+            return True
         if decision.action == "approve":
             return await self._approved_work()
         if decision.action == "request_changes":

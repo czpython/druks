@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 from conftest import installation_key
@@ -7,6 +8,7 @@ from druks.contrib.software_factory.contracts import (
     FindingOutput,
     PlanOutput,
     ReviewReport,
+    ReviewWork,
 )
 from druks.contrib.software_factory.datastructures import PullRequest
 from druks.contrib.software_factory.enums import Resolution
@@ -173,7 +175,14 @@ async def test_operator_stop_records_no_owner_close(druks_db, druks_client, pr_n
 
 @pytest.mark.parametrize("state", ["parked", "failed"])
 @pytest.mark.parametrize("merged", [True, False])
-async def test_owner_outcome_records_once_without_an_operator_stop(druks_db, state, merged):
+async def test_owner_outcome_records_once_without_an_operator_stop(
+    druks_db,
+    monkeypatch,
+    state,
+    merged,
+):
+    answer = AsyncMock()
+    monkeypatch.setattr(ReviewWork, "answer", answer)
     item = await make_test_work_item(repo="acme/widget", title="Merged work")
     await item.update(pr_number=42, branch="agent/merged")
     await seed_run(

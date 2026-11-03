@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import druks.contrib.software_factory.subscribers  # noqa: F401 — registers the lane reactions
 import pytest
@@ -201,3 +202,37 @@ async def test_a_fork_pr_on_the_items_branch_leaves_the_item_alone(druks_db):
     )
 
     assert not item.pr_number
+
+
+async def test_merged_reply_keeps_done_before_resolution_commit(druks_db, monkeypatch):
+    item = await make_test_work_item(repo="acme/widget", title="Merged")
+    push = AsyncMock()
+    monkeypatch.setattr(WorkItem, "set_ticket_status", push)
+
+    await publish(
+        WorkflowEvent.RUNNING,
+        subject=item.identity,
+        kind=Build.kind,
+        result={"action": "merged"},
+    )
+
+    push.assert_not_awaited()
+
+
+async def test_merge_before_park_answers_review(druks_db, monkeypatch):
+    item = await make_test_work_item(repo="acme/widget", title="Merged before park")
+    item.resolution = "merged"
+    await druks_db.flush()
+    push, answer = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(WorkItem, "set_ticket_status", push)
+    monkeypatch.setattr(ReviewWork, "answer", answer)
+
+    await publish(
+        WorkflowEvent.PARKED,
+        subject=item.identity,
+        kind=Build.kind,
+        gate=ReviewWork.name,
+    )
+
+    answer.assert_awaited_once_with(item, action="merged")
+    push.assert_not_awaited()
