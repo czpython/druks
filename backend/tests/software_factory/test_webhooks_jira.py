@@ -28,6 +28,7 @@ def _provider(tmp_path, *, payload, headers=None):
 def _issue(*, key="IT-12", status="Open", project="acme-app", labels=()):
     return {
         "issue": {
+            "id": "10042",
             "key": key,
             "fields": {
                 "status": {"name": status},
@@ -43,6 +44,7 @@ def _issue(*, key="IT-12", status="Open", project="acme-app", labels=()):
 def _jira_payload(*, key="IT-12", status="Open", project="acme-app", labels=None):
     return {
         "source": "jira",
+        "ticket_id": "10042",
         "identifier": key,
         "status": status,
         "title": "Add an endpoint",
@@ -120,6 +122,7 @@ async def test_emits_normalized_ticket_transition(tmp_path, druks_db, monkeypatc
     assert captured["event"] == "ticket.transitioned"
     payload = captured["payload"]
     assert payload["source"] == "jira"
+    assert payload["ticket_id"] == "10042"
     assert payload["identifier"] == "IT-9"
     assert payload["status"] == "Ready"
     assert payload["actor_id"] == "actor-1"

@@ -62,6 +62,7 @@ class JiraEvents(Webhook):
             "ticket.transitioned",
             payload={
                 "source": "jira",
+                "ticket_id": issue["id"],
                 "identifier": key,
                 "status": issue_status["name"],
                 "title": fields["summary"],

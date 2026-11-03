@@ -88,6 +88,7 @@ async def issue_label_transitions_the_ticket(*, repo: str, number: int, payload:
         "ticket.transitioned",
         payload={
             "source": "github",
+            "ticket_id": str(payload["issue_id"]),
             # Issue numbers repeat across repos, so the key carries the repo.
             "identifier": f"{repo}#{number}",
             "status": payload["label"],

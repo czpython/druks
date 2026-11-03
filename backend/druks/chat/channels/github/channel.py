@@ -38,23 +38,29 @@ class GitHubChannel(Channel):
     @classmethod
     async def lookup_account(cls, session: AsyncSession, payload: dict) -> Account | None:
         """The account with a live GitHub sign-in for the person who wrote the comment."""
-        owner_id = await VaultSecret.get_owner_id(
-            session, GITHUB_AUTHORITY, str(payload["author_id"])
-        )
+        owner_id = await VaultSecret.get_owner_id(session, GITHUB_AUTHORITY, payload["actor_id"])
         return await session.get(Account, owner_id) if owner_id else None
 
     @classmethod
     async def route_message(
-        cls, session: AsyncSession, card: VaultSecret, thread_id: str, payload: dict
+        cls,
+        session: AsyncSession,
+        card: VaultSecret,
+        thread_id: str,
+        payload: dict,
+        *,
+        review_thread_id: int | None = None,
     ) -> None:
         """A tag reaches the linked account's conversation for the issue. An unlinked
         writer is told where to connect GitHub."""
         is_addressed = is_tagged(payload["body"], card.identity["slug"])
-        source_id = get_source_id(payload["comment_id"], payload["review_thread_id"])
+        source_id = get_source_id(payload["comment_id"], review_thread_id)
         if is_addressed and not await Message.get_for_source_id(session, source_id):
             linked_account = await cls.lookup_account(session, payload)
             if linked_account:
-                await cls.save_message(session, card, linked_account, thread_id, payload)
+                await cls.save_message(
+                    session, card, linked_account, thread_id, payload, source_id=source_id
+                )
             else:
                 text = CONNECT_MESSAGE.format(author=payload["author"])
                 await cls.post(thread_id, text, source_id=source_id)
@@ -67,6 +73,8 @@ class GitHubChannel(Channel):
         account: Account,
         thread_id: str,
         payload: dict,
+        *,
+        source_id: str,
     ) -> Conversation:
         """Save the comment in the account's conversation for the issue, and start its turn."""
         conversation = await Conversation.get_or_create_for_user(
@@ -74,13 +82,12 @@ class GitHubChannel(Channel):
             card,
             account.id,
             source=ConversationSource.GITHUB,
-            user_id=str(payload["author_id"]),
+            user_id=payload["actor_id"],
             user_name=payload["author"],
             user_phone="",
             thread_id=thread_id,
         )
         conversation.title = thread_id
-        source_id = get_source_id(payload["comment_id"], payload["review_thread_id"])
         await conversation.create_message(session, payload["body"], source_id=source_id)
         await session.commit()
         await DBOS.start_workflow_async(deliver, conversation.id)

@@ -76,39 +76,46 @@ class GitHubEvents(Webhook):
     async def on_issue_comment_created(self) -> Response:
         # GitHub files pull-request comments under issues; only those carry ``pull_request``.
         issue = self.data["issue"]
-        await self._publish_comment(issue["number"], is_pull_request="pull_request" in issue)
+        if "pull_request" in issue:
+            await self._publish_pull_request_comment(issue["number"])
+        else:
+            await publish("ticket.commented", payload={**self._ticket(issue), **self._comment()})
         return _accepted()
 
     async def on_pull_request_review_comment_created(self) -> Response:
         comment = self.data["comment"]
-        await self._publish_comment(
+        await self._publish_pull_request_comment(
             self.data["pull_request"]["number"],
-            is_pull_request=True,
             review_thread_id=comment.get("in_reply_to_id") or comment["id"],
         )
         return _accepted()
 
-    async def _publish_comment(
-        self, number: int, *, is_pull_request: bool, review_thread_id: int | None = None
+    async def _publish_pull_request_comment(
+        self, pr_number: int, *, review_thread_id: int | None = None
     ) -> None:
-        """Publish a person's comment. An inline comment names the review comment GitHub
-        takes replies under. A non-User sender is an app talking to itself."""
+        """Publish a comment on a pull request. An inline comment names the review comment
+        GitHub takes replies under."""
+        await publish(
+            "pr.commented",
+            repo=_repo_name(self.data),
+            pr_number=pr_number,
+            payload={
+                **self._comment(),
+                "actor_id": str(self.data["sender"]["id"]),
+                "review_thread_id": review_thread_id,
+            },
+        )
+
+    def _comment(self) -> dict[str, Any]:
+        """The keys every comment event carries, for the comment in this delivery."""
         sender, comment = self.data["sender"], self.data["comment"]
-        if sender["type"] == "User":
-            await publish(
-                "issue.commented",
-                repo=_repo_name(self.data),
-                number=number,
-                payload={
-                    "author": sender["login"],
-                    "author_id": sender["id"],
-                    "author_can_write": comment["author_association"] in _WRITERS,
-                    "body": comment["body"],
-                    "comment_id": comment["id"],
-                    "review_thread_id": review_thread_id,
-                    "is_pull_request": is_pull_request,
-                },
-            )
+        return {
+            "comment_id": comment["id"],
+            "body": comment["body"],
+            "author": sender["login"],
+            "author_is_bot": sender["type"] == "Bot",
+            "author_can_write": comment["author_association"] in _WRITERS,
+        }
 
     async def on_issues_labeled(self) -> Response:
         """Publish a label that a person or this App put on an issue. Another App's
@@ -123,6 +130,7 @@ class GitHubEvents(Webhook):
                 repo=_repo_name(self.data),
                 number=issue["number"],
                 payload={
+                    "issue_id": issue["id"],
                     "label": self.data["label"]["name"],
                     "actor_id": sender["id"],
                     "title": issue["title"],
@@ -134,31 +142,37 @@ class GitHubEvents(Webhook):
         return _accepted()
 
     async def on_issues_opened(self) -> Response:
-        return await self._publish_issue("issue.opened")
+        return await self._publish_ticket("ticket.created")
 
     async def on_issues_edited(self) -> Response:
-        return await self._publish_issue("issue.edited")
+        return await self._publish_ticket("ticket.updated")
 
     async def on_issues_reopened(self) -> Response:
-        return await self._publish_issue("issue.reopened")
+        return await self._publish_ticket("ticket.updated")
 
-    async def _publish_issue(self, fact: str) -> Response:
-        # GitHub sends a pull request's own changes as ``pull_request`` events, so these
-        # are issues only.
+    async def _publish_ticket(self, fact: str) -> Response:
+        """Publish a change to an issue. GitHub sends a pull request's own changes as
+        ``pull_request`` events, so these are issues only."""
         issue = self.data["issue"]
-        await publish(
-            fact,
-            repo=_repo_name(self.data),
-            number=issue["number"],
-            payload={
-                "title": issue["title"],
-                "body": issue["body"] or "",
-                "url": issue["html_url"],
-                "author": issue["user"]["login"],
-                "author_can_write": issue["author_association"] in _WRITERS,
-            },
-        )
+        await publish(fact, payload=self._ticket(issue))
         return _accepted()
+
+    def _ticket(self, issue: dict[str, Any]) -> dict[str, Any]:
+        """The keys every ``ticket.*`` event carries, for one issue."""
+        repo = _repo_name(self.data)
+        return {
+            "source": "github",
+            # The identifier changes when the repo is renamed; the id does not.
+            "ticket_id": str(issue["id"]),
+            # Issue numbers repeat across repos, so the key carries the repo.
+            "identifier": f"{repo}#{issue['number']}",
+            "title": issue["title"],
+            "url": issue["html_url"],
+            # The issue's repo is where it belongs, as ``ticket.transitioned`` has it.
+            "project_name": repo,
+            "labels": [label["name"] for label in issue["labels"]],
+            "actor_id": str(self.data["sender"]["id"]),
+        }
 
     async def on_pull_request_opened(self) -> Response:
         return await self._publish_pull_request("pr.opened")

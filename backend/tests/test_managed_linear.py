@@ -187,9 +187,11 @@ def _ready_for_agent() -> bytes:
         "updatedFrom": {"stateId": "backlog"},
         "actor": {"id": "user-1", "type": "user"},
         "data": {
+            "id": "issue-1",
             "identifier": "ACME-1",
             "title": "Ship it",
             "url": "https://linear.app/acme/issue/ACME-1",
+            "teamId": "team-1",
             "state": {"name": "Ready for Agent"},
             "labels": [],
         },

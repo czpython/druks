@@ -515,6 +515,7 @@ class Ticket(Base):
             "ticket.transitioned",
             payload={
                 "source": "druks",
+                "ticket_id": str(self.id),
                 "identifier": self.identifier,
                 # The display label, the way Linear and Jira publish state names.
                 "status": status.label,

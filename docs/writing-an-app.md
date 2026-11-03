@@ -1366,10 +1366,14 @@ Each carries `repo`, `pr_number`, and a `payload` with `branch`, `is_fork`,
 `author_can_write`. A fork can use any branch name, so a subscriber that matches
 on `branch` filters with `payload__is_fork=False`.
 
-It also publishes `issue.opened`, `issue.edited`, and `issue.reopened` for
-issues, not pull requests. Each carries `repo`, `number`, and a `payload` with
-`title`, `body`, `url`, `author`, and `author_can_write`. An edit carries the
-issue as it is after the edit, not what changed.
+A comment on a pull request or on a line of its diff publishes `pr.commented`
+with `repo`, `pr_number`, and a `payload` with `comment_id`, `body`, `author`,
+`author_is_bot`, `author_can_write`, `actor_id`, and `review_thread_id`.
+`review_thread_id` is the review comment that GitHub takes replies under, and
+`null` for a comment outside a review thread. A comment on an issue publishes
+`ticket.commented` instead, one of the [tracker events](#tracker-events). Both
+come from any sender, apps included, so filter with `payload__author_is_bot=False`
+to get people only. The GitHub chat channel answers both.
 
 `post_check_run` creates the named check run on the head commit, or updates the
 one the App already posted there. An annotation is GitHub's shape. The App needs
@@ -1403,6 +1407,54 @@ async def check_the_head(*, repo: str, payload: dict, **_: object) -> None:
         ],
     )
 ```
+
+### Tracker events
+
+Linear and GitHub tickets publish the same events, and each `payload` names its
+tracker in `source`. Filter on it:
+
+```python
+from druks.signals import subscribe
+
+
+@subscribe("ticket.created", payload__source="linear")
+async def on_new_issue(*, payload: dict, **_: object) -> None:
+    ...
+```
+
+| Event | Linear | GitHub |
+| --- | --- | --- |
+| `ticket.created` | an issue is created | an issue is opened |
+| `ticket.updated` | an issue's title, description, labels, or project changes | an issue is edited or reopened |
+| `ticket.commented` | a comment on an issue is created | a comment on an issue, from any sender |
+| `ticket.transitioned` | an issue's status changes | a label is added, through Software Factory's GitHub tracker |
+
+Every `ticket.*` event carries the same ticket keys, whatever the tracker:
+`source`, `ticket_id`, `identifier`, `title`, `url`, `project_name`, `labels`,
+and `actor_id`. A key the tracker sends no value for is `null`.
+`identifier` is the ticket's name: `DRU-123` in Linear, `owner/repo#number` on
+GitHub. It changes when a Linear issue moves to another team or a GitHub
+repository is renamed, so key stored state on `ticket_id`, the tracker's own id.
+`actor_id` is whoever made the change. A payload carries the ticket as it is
+after the change, not what changed; read the ticket for its description or body.
+A Linear update that also changes the status publishes only
+`ticket.transitioned`.
+
+| Event | Adds |
+| --- | --- |
+| `ticket.created`, `ticket.updated` | nothing |
+| `ticket.commented` | `comment_id`, `body` |
+| `ticket.transitioned` | `status`, `assignee_id`, `assignee_email`, `assignee_name` |
+
+A key that only one tracker has is only in that tracker's events, so filter on
+`source` before you read it. Every Linear event adds `team`, the team's id, and
+a Linear `ticket.commented` adds `parent_id`. On GitHub, `project_name` is the
+repository, and `ticket.commented` adds `author`, `author_is_bot`, and
+`author_can_write`, as `pr.commented` has them. A Linear comment's payload has
+no project or labels, so
+`ticket.commented` from Linear carries `null` for both, and a Linear comment on
+a project or a document publishes nothing. Jira and Software Factory's own
+board publish `ticket.transitioned` too.
 
 ## Models and migrations
 
