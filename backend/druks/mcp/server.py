@@ -335,6 +335,7 @@ def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
     )
     server = FastMCP(
         name="druks",
+        website_url="https://docs.druks.ai/connect-your-agent",
         providers=[provider],
         instructions=_INSTRUCTIONS,
         auth=PatTokenVerifier(),
