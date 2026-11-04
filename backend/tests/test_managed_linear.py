@@ -222,7 +222,7 @@ async def test_linear_waits_for_its_install_and_keeps_its_grant_across_a_restart
         assert consent.geturl().startswith("https://linear.app/oauth/authorize?")
         assert (query["actor"], query["scope"]) == ("app", "read,write")
         assert query["state"].startswith(f"{AUDIENCE}.")
-        assert query["redirect_uri"] == f"{MANAGER}/linear/oauth/callback"
+        assert query["redirect_uri"] == f"{MANAGER}/services/linear/oauth/callback"
         assert query["client_id"] == CLIENT_ID
         page = await client.get(
             "/api/oauth/callback", params={"state": query["state"], "code": "c-1"}
@@ -238,7 +238,7 @@ async def test_linear_waits_for_its_install_and_keeps_its_grant_across_a_restart
     assert exchange == {
         "grant_type": "authorization_code",
         "code": "c-1",
-        "redirect_uri": f"{MANAGER}/linear/oauth/callback",
+        "redirect_uri": f"{MANAGER}/services/linear/oauth/callback",
         "actor": "app",
         "scope": "read,write",
         "client_id": CLIENT_ID,

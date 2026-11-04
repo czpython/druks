@@ -473,7 +473,7 @@ class Service:
                 extra_authorize_params=client.extra_authorize_params,
                 token_headers={"Authorization": f"Bearer {manager.token.get_secret_value()}"},
                 state_prefix=f"{manager.audience}.",
-                redirect_uri=f"{manager.issuer.rstrip('/')}/{cls.slug}/oauth/callback",
+                redirect_uri=f"{manager.issuer.rstrip('/')}/services/{cls.slug}/oauth/callback",
                 is_grant_revoked=cls.Authentication.is_grant_revoked,
             )
         return OauthClient(
