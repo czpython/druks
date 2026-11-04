@@ -144,8 +144,8 @@ async def test_pr_review_answers_through_the_review_gate(
     )
     answers = []
 
-    async def answer(subject, **reply):
-        answers.append((subject, reply))
+    async def answer(subject, *, workflow, **reply):
+        answers.append((subject, workflow, reply))
 
     monkeypatch.setattr(ReviewWork, "answer", answer)
 
@@ -163,7 +163,7 @@ async def test_pr_review_answers_through_the_review_gate(
     )
 
     reply = {"action": action, "reviewer": "alice", "body": "Please split the migration."}
-    assert answers == ([(item, reply)] if author_can_write else [])
+    assert answers == ([(item, Build, reply)] if author_can_write else [])
 
 
 async def test_github_pr_open_records_the_pr_of_the_items_branch(druks_db):
@@ -234,5 +234,5 @@ async def test_merge_before_park_answers_review(druks_db, monkeypatch):
         gate=ReviewWork.name,
     )
 
-    answer.assert_awaited_once_with(item, action="merged")
+    answer.assert_awaited_once_with(item, workflow=Build, action="merged")
     push.assert_not_awaited()

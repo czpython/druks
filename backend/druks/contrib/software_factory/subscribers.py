@@ -45,7 +45,7 @@ async def build_start_marks_ticket_in_progress(
 async def review_park_marks_ticket_in_review(*, subject: WorkItem, **_: object) -> None:
     # A merge can arrive before the gate parks, when there is no ask to answer yet.
     if subject.resolution == Resolution.MERGED:
-        await ReviewWork.answer(subject, action="merged")
+        await ReviewWork.answer(subject, workflow=Build, action="merged")
     else:
         await subject.set_ticket_status(TicketStatus.IN_REVIEW)
 
@@ -69,6 +69,7 @@ async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict
         if status.is_parked and status.gate == ReviewWork.name:
             await ReviewWork.answer(
                 item,
+                workflow=Build,
                 action=payload["action"],
                 reviewer=payload["reviewer"],
                 body=payload["body"],
