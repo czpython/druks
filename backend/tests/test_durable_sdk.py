@@ -19,7 +19,7 @@ from druks.browser.exceptions import BrowserSessionSignedOutError
 from druks.browser.models import StoredBrowserSession
 from druks.database import configure_session, get_session, session_scope
 from druks.db import db_session
-from druks.durable import FatalError, Run, RunState, WorkflowError, engine
+from druks.durable import FatalError, Run, RunState, WorkflowError, engine, get_run_phase
 from druks.durable.dbos_state import latest_invocations, workflow_status
 from druks.durable.engine import (
     _workflow_schedules,
@@ -499,6 +499,43 @@ async def test_step_gate_resume_finish(runtime):
     )
     assert done.input_gate is None
     assert done.failure is None
+
+
+async def test_wait_takes_only_the_facts_of_its_topic(runtime):
+    class WaitFlow(Workflow):
+        subject = Widget
+
+        async def run_multistep(self) -> None:
+            facts = await self.wait("checks.finished", label="Waiting for checks", ttl_seconds=9)
+            SINK.append(f"waited:{facts['conclusion']}")
+
+    subject = Widget(id=770770)
+    try:
+        workflow_id = await WaitFlow.start(subject=subject)
+
+        async def waiting() -> None:
+            while await get_run_phase(workflow_id) != "Waiting for checks":
+                await asyncio.sleep(0.1)
+
+        await asyncio.wait_for(waiting(), 15)
+        assert (await _get_run(runtime.engine, workflow_id)).state == RunState.RUNNING
+        async with session_scope(runtime.engine):
+            await WaitFlow.answer(subject, "review.completed", decision="approve")
+            await WaitFlow.answer(subject, "checks.finished", conclusion="success")
+
+        done = await _wait_for_run(
+            runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED
+        )
+        assert done.input_gate is None
+        assert SINK[-1] == "waited:success"
+        with runtime.schema_engine.connect() as connection:
+            topics = connection.execute(
+                text("SELECT topic FROM dbos.notifications WHERE destination_uuid = :id"),
+                {"id": workflow_id},
+            ).scalars()
+            assert list(topics) == ["checks.finished"]
+    finally:
+        workflows._items.pop(WaitFlow.kind)
 
 
 async def test_duplicate_replies_to_one_round_collapse(runtime):
