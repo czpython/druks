@@ -64,7 +64,7 @@ OPENCODE_BOT_AGENT = (
 @pytest.fixture
 async def conversation(druks_db, monkeypatch):
     monkeypatch.setattr(
-        "druks.mcp.inbound.load_settings",
+        "druks.mcp.inbound.get_settings",
         lambda: SimpleNamespace(urls=Urls(webhook_host="hooks.example.com", endpoint="")),
     )
     account = await Account.get_or_create(druks_db, "owner@example.com")
@@ -134,7 +134,7 @@ async def test_new_conversation_is_unnamed_private_and_answers_in_order(druks_db
 )
 def test_mcp_address_uses_the_public_host_or_endpoint(monkeypatch, webhook_host, expected):
     monkeypatch.setattr(
-        "druks.mcp.inbound.load_settings",
+        "druks.mcp.inbound.get_settings",
         lambda: SimpleNamespace(
             urls=Urls(webhook_host=webhook_host, endpoint="http://127.0.0.1:8000/")
         ),
@@ -310,11 +310,11 @@ async def test_missing_sandbox_interrupts_delivered_turn_without_provisioning(
     get_running_sandbox.assert_awaited_once_with(druks_db, conversation.account_id)
 
 
+@pytest.mark.usefixtures("tmp_data_dir")
 @pytest.mark.parametrize("terminal_state", ["replied", "cancelled"])
 async def test_recovery_reads_live_events_then_saves_reply_and_replaces_archive(
-    druks_db, conversation, sandbox, tmp_path, monkeypatch, terminal_state
+    druks_db, conversation, sandbox, monkeypatch, terminal_state
 ):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     host, _identity = sandbox
     previous = FileRecord(
         id="previous",
@@ -526,10 +526,10 @@ async def test_bridge_start_retires_the_bridge_of_an_older_druks():
     assert BRIDGE_VERSION in host.exec.await_args.args[0][2]
 
 
+@pytest.mark.usefixtures("tmp_data_dir")
 async def test_new_sandbox_restores_archive_and_drains_pending_messages(
-    druks_db, conversation, sandbox, tmp_path, monkeypatch
+    druks_db, conversation, sandbox, monkeypatch
 ):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     previous = FileRecord(
         id="saved-session",
         name="session.tar.gz",
@@ -1321,7 +1321,7 @@ async def test_a_failed_run_reports_to_its_conversation_whether_or_not_it_parked
 
 async def test_each_turn_opens_with_the_local_time(monkeypatch):
     settings = SimpleNamespace(timezone="Europe/Madrid")
-    monkeypatch.setattr(service, "load_settings", lambda: settings)
+    monkeypatch.setattr(service, "get_settings", lambda: settings)
     monkeypatch.setattr(Base, "utc_now", lambda: datetime(2026, 10, 17, 21, 14, 57, tzinfo=UTC))
     message = Message(body="Remind me in 5 minutes", transcript="", file=None)
 

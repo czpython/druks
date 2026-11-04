@@ -5,7 +5,7 @@ import druks.redis
 import pytest
 from druks.apps import App, loader
 from druks.apps.exceptions import AppSubjectContractError
-from druks.apps.loader import iter_apps, load
+from druks.apps.loader import iter_apps, load, register_apps
 from druks.durable.schemas import SubjectSummary
 from druks.workflows import Subject
 from fastapi import APIRouter, FastAPI
@@ -52,7 +52,7 @@ def _fake_entry(name: str, value: object) -> SimpleNamespace:
     return SimpleNamespace(name=name, load=lambda: value)
 
 
-def test_duplicate_app_name_is_rejected(monkeypatch):
+def test_duplicate_app_name_is_rejected(monkeypatch, registered_apps):
     class DupA(App):
         name = "dup"
         package = "a"
@@ -66,18 +66,18 @@ def test_duplicate_app_name_is_rejected(monkeypatch):
         "entry_points",
         lambda *, group: [_fake_entry("dup", DupA), _fake_entry("dup", DupB)],
     )
-    with pytest.raises(ValueError, match="duplicate app name"):
-        iter_apps()
+    with pytest.raises(ValueError, match="already has key 'dup'"):
+        register_apps()
 
 
-def test_entry_point_resolving_to_a_non_app_is_rejected(monkeypatch):
+def test_entry_point_resolving_to_a_non_app_is_rejected(monkeypatch, registered_apps):
     monkeypatch.setattr(
         loader,
         "entry_points",
         lambda *, group: [_fake_entry("bad", object())],
     )
     with pytest.raises(TypeError, match="not an App"):
-        iter_apps()
+        register_apps()
 
 
 def test_load_confines_app_routers_to_the_app_namespace(monkeypatch):

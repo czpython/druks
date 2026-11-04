@@ -8,7 +8,7 @@ from druks.mcp.models import McpServer
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import Settings, configure_settings, load_settings
 from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy_encrypted_field import SecretDecryptError
@@ -22,6 +22,10 @@ def _key() -> str:
 
 def _set_key(monkeypatch, value: str) -> None:
     monkeypatch.setenv("DRUKS_SECRETS_KEY", value)
+
+
+def _use_key(value: str) -> None:
+    configure_settings(Settings(secrets_key=value))  # pyright: ignore[reportCallIssue]
 
 
 async def _store_token(token: str = _TOKEN) -> None:
@@ -80,16 +84,16 @@ async def test_grant_secret_halves_round_trip(druks_db):
     assert grant.secrets["client_secret"] == "cs-secret"
 
 
-async def test_loaded_secrets_are_lazy_and_redacted(monkeypatch, druks_db):
+async def test_loaded_secrets_are_lazy_and_redacted(druks_db):
     await _store_token()
     druks_db.expunge_all()
 
     # Loading and logging a row never touches key material — decryption
     # happens only on a read of a value, and repr leaks nothing either way.
     row = await _get_token()
-    _set_key(monkeypatch, "")
+    _use_key(_key())
     assert repr(row.secrets) == "SecretsMapping(<redacted>)"
-    with pytest.raises(ValidationError, match="at least one"):
+    with pytest.raises(SecretDecryptError):
         row.secrets["value"]
 
 
@@ -120,12 +124,12 @@ def test_malformed_key_refuses_boot(monkeypatch):
             load_settings()
 
 
-async def test_undecryptable_secret_raises_the_named_error(monkeypatch, druks_db):
+async def test_undecryptable_secret_raises_the_named_error(druks_db):
     # A key dropped from the list while rows written under it existed is the
     # usual cause — the error must say so, not surface a bare crypto traceback.
     await _store_token()
     druks_db.expunge_all()
-    _set_key(monkeypatch, _key())
+    _use_key(_key())
 
     with pytest.raises(SecretDecryptError, match="rotated out"):
         (await _get_token()).secrets["value"]
@@ -143,15 +147,15 @@ async def test_garbled_envelope_raises_the_named_error(druks_db):
         (await _get_token()).secrets["value"]
 
 
-async def test_prepended_key_still_decrypts(monkeypatch, druks_db):
+async def test_prepended_key_still_decrypts(druks_db):
     # Rotation is prepend-only: new writes use the first key; rows written
     # under an older key keep decrypting as long as it stays in the list.
     old_key = _key()
-    _set_key(monkeypatch, old_key)
+    _use_key(old_key)
     await _store_token()
     await _store_grant(refresh_token="rt-secret")
 
-    _set_key(monkeypatch, f"{_key()},{old_key}")
+    _use_key(f"{_key()},{old_key}")
     druks_db.expunge_all()
     assert (await _get_token()).secrets["value"] == _TOKEN
     [grant] = await VaultSecret.list_connections(druks_db, Audience.mcp("notion"))

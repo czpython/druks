@@ -4,7 +4,7 @@ import time
 
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.services import Github
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 _TTL_SECONDS = 60 * 60 * 24  # 24 hours
 _CACHE_DIR = "druks-cache"
@@ -14,7 +14,7 @@ async def fetch_file(*, repo: str, path: str) -> str | None:
     """``path``'s body from ``repo``'s default branch, or ``None`` for a
     404. Served from the disk cache while fresh; a cached empty file is a
     remembered 404."""
-    cache = load_settings().data_dir / _CACHE_DIR / repo / path
+    cache = get_settings().data_dir / _CACHE_DIR / repo / path
     with contextlib.suppress(FileNotFoundError):
         if time.time() - cache.stat().st_mtime < _TTL_SECONDS:
             return cache.read_text() or None
@@ -34,7 +34,7 @@ async def fetch_file(*, repo: str, path: str) -> str | None:
 
 def evict_files(*, repo: str, paths: list[str]) -> None:
     """Delete the cached copies of the ``.druks`` files that a push changed."""
-    root = load_settings().data_dir / _CACHE_DIR / repo
+    root = get_settings().data_dir / _CACHE_DIR / repo
     is_druks_repo = repo.endswith("/.druks")
     for path in paths:
         if is_druks_repo or path.startswith(".druks/"):
@@ -44,4 +44,4 @@ def evict_files(*, repo: str, paths: list[str]) -> None:
 def evict_repo(*, repo: str) -> None:
     """Delete every cached file of ``repo``."""
     with contextlib.suppress(FileNotFoundError):
-        shutil.rmtree(load_settings().data_dir / _CACHE_DIR / repo)
+        shutil.rmtree(get_settings().data_dir / _CACHE_DIR / repo)

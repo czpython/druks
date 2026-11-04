@@ -28,7 +28,7 @@ from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import get_settings
 from druks.usage.models import UsageScrape
 
 from . import exceptions
@@ -758,14 +758,14 @@ class AnthropicProvider(Provider):
 
     @property
     def sign_in(self) -> str:
-        if load_settings().providers.anthropic.sign_in == "setup_token":
+        if get_settings().providers.anthropic.sign_in == "setup_token":
             return "token"
         return "login"
 
     @classmethod
     def check_sign_in(cls, method: str) -> None:
         """Refuse a sign-in method other than the one this installation offers."""
-        offered = load_settings().providers.anthropic.sign_in
+        offered = get_settings().providers.anthropic.sign_in
         if offered != method:
             raise exceptions.ConnectError(
                 f"This installation signs in with {offered}, not {method}. "

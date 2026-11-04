@@ -95,7 +95,7 @@ def _patch_runtime(monkeypatch, tmp_path, payload):
     monkeypatch.setattr("druks.sandbox.client.Client.lease", lease)
     settings = MagicMock()
     settings.artifacts_dir = tmp_path
-    monkeypatch.setattr(agents, "load_settings", lambda: settings)
+    monkeypatch.setattr(agents, "get_settings", lambda: settings)
 
     async def _prompt(name, /, *, repo=None, **context):
         return f"PROMPT:{name}:repo={repo}"
@@ -624,6 +624,7 @@ async def test_crash_after_start_fails_the_call(druks_db, tmp_path, monkeypatch,
     assert "kaboom" in call.last_error
 
 
+@pytest.mark.usefixtures("tmp_data_dir")
 @pytest.mark.parametrize(
     ("error", "message"),
     [
@@ -642,7 +643,6 @@ async def test_file_hydration_failure_fails_the_agent_call(
     message,
 ):
     """A rejected output file closes the already-started call as failed."""
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     current_run.app = "field_notes"
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"image": "shots/home.png"})
     sandbox.download = AsyncMock(side_effect=SandboxDownloadError(error))
@@ -657,6 +657,7 @@ async def test_file_hydration_failure_fails_the_agent_call(
     assert list((tmp_path / "files").iterdir()) == []
 
 
+@pytest.mark.usefixtures("tmp_data_dir")
 async def test_file_output_reaches_the_next_agents_input(
     druks_db,
     tmp_path,
@@ -664,7 +665,6 @@ async def test_file_output_reaches_the_next_agents_input(
     current_run,
 ):
     """Call A's hydrated output reaches its artifact and call B as a fresh in-sandbox path."""
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     current_run.app = "field_notes"
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     sandbox.run_agent = AsyncMock(

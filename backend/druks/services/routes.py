@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +19,7 @@ from druks.services.exceptions import (
 )
 from druks.services.oauth import OauthClient, complete_connect
 from druks.services.schemas import ConnectionResponse, ServiceResponse
-from druks.settings import load_settings
+from druks.settings import get_settings
 from druks.signals import publish
 
 router = APIRouter(prefix="/api/services", tags=["services"])
@@ -29,7 +29,7 @@ oauth_router = APIRouter(prefix="/api/oauth", tags=["oauth"])
 @router.get("", response_model=list[ServiceResponse], response_model_by_alias=True)
 async def list_services(session: SessionDep) -> list[ServiceResponse]:
     entries = []
-    managed_by = load_settings().manager.name
+    managed_by = get_settings().manager.name
     account_connections = await VaultSecret.list_owned_by(session, current_account_id.get())
     for service in services.all():
         audience = Audience.service(service.slug)
@@ -86,7 +86,6 @@ async def disconnect_service(session: SessionDep, slug: str) -> None:
 async def connect_oauth_service(
     session: SessionDep,
     slug: str,
-    request: Request,
     connection: str = "",
     next: str = "",
     install: bool = False,
@@ -106,7 +105,7 @@ async def connect_oauth_service(
     if next and (not next.startswith("/") or next.startswith(("//", "/\\"))):
         # A bare same-origin path only — anything host-shaped is an open redirect.
         raise OauthPageError("next must be a path starting with '/'.", status_code=422)
-    endpoint = request.app.state.settings.urls.endpoint
+    endpoint = get_settings().urls.endpoint
     if not endpoint:
         raise OauthPageError(
             "The provider redirects the operator's browser back to druks. "

@@ -11,11 +11,8 @@ from druks import agents
 from druks.accounts import jwt as assertion
 from druks.accounts.models import Account
 from druks.api.server import app
-from druks.apps.loader import (
-    iter_apps,
-    register_workflow_package,
-)
-from druks.apps.registry import browser_sessions, mcp_servers, services
+from druks.apps.loader import register_workflow_package
+from druks.apps.registry import apps, browser_sessions, mcp_servers, services
 from druks.database import create_engine_from_url
 from druks.db import db_session
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA, workflow_status
@@ -26,6 +23,7 @@ from druks.sandbox.datastructures import AgentResult
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
+from druks.settings import configure_settings, get_settings
 from druks.testing import (
     TEST_DATABASE_URL,
     configure_app_for_test,
@@ -40,9 +38,8 @@ from sqlalchemy import update
 
 # A Workflow class resolves its declaring app at definition time, from
 # packages the loader registers before importing. Tests import workflow modules
-# directly and some declare their own workflows, so both register here — before
+# directly and some declare their own workflows, so they register here — before
 # collection imports any test module.
-iter_apps()
 for test_module in ("test_durable_sdk", "test_notifications_durable"):
     register_workflow_package(test_module, "")
 
@@ -123,6 +120,21 @@ def declared_services():
     yield
     services._items.clear()
     services._items.update(saved)
+
+
+@pytest.fixture
+def tmp_data_dir(tmp_path):
+    # What a test writes under the data directory lands in its own tmp_path.
+    configure_settings(get_settings().model_copy(update={"data_dir": tmp_path}))
+
+
+@pytest.fixture
+def registered_apps():
+    # A test that calls register_apps() leaves the registry as found.
+    saved = dict(apps._items)
+    yield
+    apps._items.clear()
+    apps._items.update(saved)
 
 
 @pytest.fixture(autouse=True)

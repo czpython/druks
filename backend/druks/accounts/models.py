@@ -24,7 +24,7 @@ from druks.core.models import Uuid7Pk, uuid7_str
 from druks.db import db_session
 from druks.models import Base, Model
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import get_settings
 from druks.user_settings.models import InstallationSettings
 
 
@@ -104,7 +104,7 @@ class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
             .values(
                 username=username,
                 is_default=~select(cls.id).exists(),
-                timezone=load_settings().timezone,
+                timezone=get_settings().timezone,
                 gate_park_destination_id=installation.gate_park_destination_id,
             )
             .on_conflict_do_nothing(index_elements=["username"])
@@ -118,7 +118,7 @@ class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
         account = cls(
             username=f"{kind}:{uuid7_str()}",
             kind=kind,
-            timezone=load_settings().timezone,
+            timezone=get_settings().timezone,
         )
         session.add(account)
         await session.flush()

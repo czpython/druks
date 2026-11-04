@@ -230,7 +230,7 @@ async def test_catalogs_list_what_each_provider_offers(tmp_path: Path, druks_db)
 
 def _sign_in_with(monkeypatch, tmp_path: Path, method: str) -> None:
     settings = make_settings(tmp_path, providers={"anthropic": {"sign_in": method}})
-    monkeypatch.setattr("druks.harnesses.providers.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.harnesses.providers.get_settings", lambda: settings)
 
 
 async def test_a_pasted_setup_token_is_the_requesting_accounts_subscription(

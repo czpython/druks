@@ -83,7 +83,7 @@ def test_ssh_connect_kwargs_picks_aws_direct_when_key_is_persisted(
 ):
     """AWS-shape record dials external host with the on-disk key."""
     monkeypatch.setattr(
-        "druks.sandbox.host.load_settings",
+        "druks.sandbox.host.get_settings",
         lambda: type("_S", (), {"sandbox_keys_dir": tmp_path})(),
     )
     (tmp_path / "host-aws").write_text("fakekey")
@@ -100,7 +100,7 @@ def test_ssh_connect_kwargs_dials_a_reattached_record_via_persisted_key(
     """A GET-built record carries no private_key, so the dial trusts the key the
     acquirer persisted."""
     monkeypatch.setattr(
-        "druks.sandbox.host.load_settings",
+        "druks.sandbox.host.get_settings",
         lambda: type("_S", (), {"sandbox_keys_dir": tmp_path})(),
     )
     (tmp_path / "host-aws").write_text("fakekey")
@@ -116,7 +116,7 @@ def test_ssh_connect_kwargs_raises_when_the_key_was_never_persisted(
 ):
     """External host but no key on disk — released or never acquired here."""
     monkeypatch.setattr(
-        "druks.sandbox.host.load_settings",
+        "druks.sandbox.host.get_settings",
         lambda: type("_S", (), {"sandbox_keys_dir": tmp_path})(),
     )
     with pytest.raises(RuntimeError, match="no reachable address"):
@@ -154,7 +154,7 @@ def _stub_acquire_settings(
     )
     monkeypatch.setattr(
         client_module,
-        "load_settings",
+        "get_settings",
         lambda: type(
             "_S",
             (),

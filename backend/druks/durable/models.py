@@ -48,7 +48,7 @@ from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
 from druks.notifications.models import Notification
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import get_settings
 from druks.signals import publish
 
 if TYPE_CHECKING:
@@ -572,7 +572,7 @@ class AgentCall(Base, Uuid7Pk):
 
     @property
     def artifact_dir(self) -> str:
-        return str(load_settings().artifacts_dir / f"run-{self.run_id}")
+        return str(get_settings().artifacts_dir / f"run-{self.run_id}")
 
     @property
     def call_dir(self) -> Path:

@@ -1,6 +1,13 @@
 from druks.exceptions import DruksError
 
 
+class AppsNotRegisteredError(DruksError):
+    """``iter_apps()`` ran before the process registered its apps."""
+
+    def __init__(self) -> None:
+        super().__init__("Apps are not registered. Register them when the process starts.")
+
+
 class AppConfigError(DruksError):
     """An app's ``.druks`` config could not be parsed or validated.
 

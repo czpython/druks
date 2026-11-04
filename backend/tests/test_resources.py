@@ -12,6 +12,7 @@ from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.services import Resource, ResourceError, Service
 from druks.services.resources import ManagedResource
+from druks.settings import Settings, configure_settings
 from pydantic import BaseModel, SecretStr
 
 MANAGER_TOKEN = "manager-secret"
@@ -82,6 +83,7 @@ async def managed(acme, tmp_path, monkeypatch, druks_db):
     (secrets / "manager.token").write_text(MANAGER_TOKEN)
     monkeypatch.setenv("DRUKS_CONFIG", str(tmp_path / "druks.toml"))
     monkeypatch.setenv("DRUKS_SECRETS_DIR", str(secrets))
+    configure_settings(Settings(data_dir=tmp_path))
     bind_ambient_session(druks_db)
     await Service.sync_configuration(druks_db)
 

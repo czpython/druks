@@ -10,14 +10,13 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client(tmp_path: Path, druks_db, monkeypatch):
+def client(tmp_path: Path, druks_db):
     # druks_db pre-seeds the same database that create_app opens, so we
     # just need a vanilla app — the route handlers will open their own
     # per-request Sessions against the same engine and see the seeded rows.
-    # AgentCall.artifact_dir derives from load_settings().artifacts_dir;
+    # AgentCall.artifact_dir derives from get_settings().artifacts_dir;
     # point that at tmp_path so the property and the test agree on
     # where to look for run files.
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     settings = make_settings(tmp_path)
     app = configure_app_for_test(settings=settings)
     with TestClient(app) as client:

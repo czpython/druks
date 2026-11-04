@@ -8,7 +8,6 @@ import httpx
 import pytest
 from conftest import connect_service
 from druks.accounts.models import Account
-from druks.api.server import app
 from druks.apps.settings import field_kind, field_multiline
 from druks.contrib.software_factory import subscribers  # noqa: F401 — the import registers it
 from druks.contrib.software_factory.app import check_review_identity
@@ -23,6 +22,7 @@ from druks.prompts import render_prompt
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.services.exceptions import ServiceNotConnectedError
+from druks.settings import configure_settings
 from druks.testing import configure_app_for_test, make_settings, seed_run
 from druks.workflows import _bind_instance
 from fastapi.testclient import TestClient
@@ -31,8 +31,7 @@ pytestmark = pytest.mark.usefixtures("druks_without_remote_config")
 
 
 @pytest.fixture
-def client(tmp_path: Path, druks_db, monkeypatch):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+def client(tmp_path: Path, druks_db):
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         yield client
 
@@ -214,7 +213,7 @@ def test_the_reviewer_is_an_optional_service_the_app_declares():
 async def test_the_reviewer_app_is_created_with_no_webhook_and_no_sign_in(
     druks_client: httpx.AsyncClient, tmp_path
 ):
-    app.state.settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
+    configure_settings(make_settings(tmp_path, urls={"endpoint": "https://druks.example"}))
 
     page = (await druks_client.get("/api/core/services/github_reviewer/manifest")).text
 

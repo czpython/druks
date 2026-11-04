@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 
 from druks.core.services import Twilio
 from druks.services.exceptions import ServiceNotConnectedError
-from druks.settings import load_settings
+from druks.settings import get_settings
 from druks.webhooks import Webhook
 
 
@@ -48,7 +48,7 @@ class TwilioWebhook(Webhook):
         except ServiceNotConnectedError as error:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(error)) from error
         verify_twilio_signature(
-            url=f"{load_settings().urls.webhook_base}/_external/{self.path}",
+            url=f"{get_settings().urls.webhook_base}/_external/{self.path}",
             fields=self.data,
             signature=self.request.headers.get("X-Twilio-Signature"),
             api_key=row.secrets["api_key"],

@@ -12,7 +12,7 @@ from druks.secrets.enums import IdentityStatus, SecretKind
 from druks.secrets.models import VaultSecret
 from druks.services import Service, auth
 from druks.services.exceptions import ServiceNotConnectedError
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 from .client import WahaClient
 from .constants import SUPPORTED_ENGINES, WAHA_AUDIENCE
@@ -51,7 +51,7 @@ class Waha(Service):
     async def link(cls, session: AsyncSession, owner: Account, *, identity: dict) -> VaultSecret:
         """Create the number's session and its key, save the session, and then write
         its config: WAHA sends events only after the config names the webhook."""
-        base = load_settings().urls.webhook_base
+        base = get_settings().urls.webhook_base
         if not base:
             raise WhatsAppLinkError(
                 "WAHA has no address to send events to. Set urls.webhook_host or urls.endpoint."

@@ -20,6 +20,7 @@ from druks.notifications.exceptions import DeliveryError, NotificationError
 from druks.notifications.models import Destination, Notification
 from druks.notifications.outbox import send_notification
 from druks.notifications.services import respond_to_notification
+from druks.settings import Settings, configure_settings, get_settings
 from druks.testing import configure_app_for_test, init_db, make_settings
 from druks.workflows import Gate, OperatorReply, Run, Workflow
 from fastapi.testclient import TestClient
@@ -126,7 +127,7 @@ def _build_park_flows():
 
 @pytest.fixture(scope="module", autouse=True)
 async def rt():
-    db_url_snap = os.environ.get("DRUKS_DATABASE_URL")
+    original_settings = get_settings()
 
     admin = psycopg.connect(f"{PG_BASE}/postgres", autocommit=True)
     admin.execute(f"DROP DATABASE IF EXISTS {DB} WITH (FORCE)")
@@ -154,7 +155,7 @@ async def rt():
         external_url_flow,
         double_park_flow,
     ) = _build_park_flows()
-    os.environ["DRUKS_DATABASE_URL"] = URL
+    configure_settings(Settings(database_url=URL))  # pyright: ignore[reportCallIssue]
     # The outbox module was imported above — its queue + workflow register
     # before launch(), which is the wiring this whole module runs through.
     init_dbos()
@@ -181,10 +182,7 @@ async def rt():
             "double_park_flow",
         ):
             workflows._items.pop(kind, None)
-        if db_url_snap is None:
-            os.environ.pop("DRUKS_DATABASE_URL", None)
-        else:
-            os.environ["DRUKS_DATABASE_URL"] = db_url_snap
+        configure_settings(original_settings)
 
 
 class _DeliverSpy:

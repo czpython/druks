@@ -733,7 +733,7 @@ async def test_claude_api_key_stays_on_the_server(
         harness_config_root=tmp_path / "harnesses",
         skills_dir=tmp_path / "skills",
     )
-    monkeypatch.setattr("druks.harnesses.claude.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.harnesses.claude.get_settings", lambda: settings)
 
     result = await _run_agent(
         sandbox,
@@ -790,7 +790,7 @@ async def test_claude_subscription_token_stays_on_the_server(
         harness_config_root=tmp_path / "harnesses",
         skills_dir=tmp_path / "skills",
     )
-    monkeypatch.setattr("druks.harnesses.claude.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.harnesses.claude.get_settings", lambda: settings)
 
     result = await _run_agent(
         sandbox,
@@ -845,7 +845,7 @@ async def test_codex_subscription_token_stays_on_the_server(
         harness_config_root=tmp_path / "harnesses",
         skills_dir=tmp_path / "skills",
     )
-    monkeypatch.setattr("druks.harnesses.codex.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.harnesses.codex.get_settings", lambda: settings)
 
     result = await _run_agent(
         sandbox,

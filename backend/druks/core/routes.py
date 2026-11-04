@@ -2,7 +2,7 @@ import json
 from urllib.parse import quote, urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from druks.accounts.dependencies import current_session_account
@@ -11,6 +11,7 @@ from druks.core.apis.github import GITHUB_API_URL
 from druks.core.apis.slack import SLACK_CREATE_APP_URL
 from druks.core.services import GithubApp, Slack
 from druks.core.templates import render_page
+from druks.settings import get_settings
 
 # Mounted by the loader under /api/core, like any app's routes.
 router = APIRouter(prefix="/services", tags=["services"])
@@ -31,10 +32,10 @@ def get_manifest_service(slug: str) -> type[GithubApp]:
 
 
 @router.get("/{slug}/manifest", response_class=HTMLResponse)
-async def create_github_app(request: Request, slug: str) -> HTMLResponse:
+async def create_github_app(slug: str) -> HTMLResponse:
     # GitHub only accepts a manifest via form POST, so this page carries it across.
     service = get_manifest_service(slug)
-    settings = request.app.state.settings
+    settings = get_settings()
     endpoint = settings.urls.endpoint.rstrip("/")
     if not endpoint:
         raise HTTPException(

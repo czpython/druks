@@ -183,9 +183,8 @@ async def test_activity_carries_recorded_facts(druks_db, druks_client):
     )
 
 
-async def test_destinations_report_what_still_exists(druks_db, druks_client, tmp_path, monkeypatch):
+async def test_destinations_report_what_still_exists(druks_db, druks_client):
     db_session.registry.set(druks_db)
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     note = await Note.create(body="Original work")
     run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
     key = await installation_key()

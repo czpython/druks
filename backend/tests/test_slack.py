@@ -82,7 +82,7 @@ def delivery(monkeypatch):
 def endpoint(monkeypatch):
     urls = SimpleNamespace(endpoint="https://druks.example", webhook_base="https://druks.example")
     settings = SimpleNamespace(urls=urls)
-    monkeypatch.setattr("druks.chat.channels.slack.channel.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.chat.channels.slack.channel.get_settings", lambda: settings)
 
 
 async def link_person(session, account, user_id=ANA):
@@ -665,10 +665,10 @@ def shared_file(file_id="F1", name="plan.pdf"):
     }
 
 
+@pytest.mark.usefixtures("tmp_data_dir")
 async def test_a_file_a_linked_person_sends_is_a_druks_file_on_their_message(
-    card, druks_db, slack, delivery, tmp_path, monkeypatch
+    card, druks_db, slack, delivery, monkeypatch
 ):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     downloads = []
 
     async def download(client, url):

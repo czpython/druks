@@ -16,6 +16,7 @@ from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.dependencies import SessionDep
 from druks.chat.constants import CONVERSATION_HEADER
 from druks.chat.models import Conversation
+from druks.settings import get_settings
 
 _BEARER_CHALLENGE = 'Bearer realm="druks"'
 # auto_error=False: absence and malformed both come back None — presence is
@@ -75,7 +76,7 @@ async def _resolve_operator(session: AsyncSession, connection: HTTPConnection) -
     """None only during none/zero setup. header maps the asserted email; jwt
     maps its verified identity claim; none ignores the header entirely. Takes a
     connection, not a request, so a WebSocket upgrade resolves the same way."""
-    settings = connection.app.state.settings
+    settings = get_settings()
     if settings.identity.mode == "none":
         return await resolve_single_operator(session)
     values = connection.headers.getlist(settings.identity.header)

@@ -17,10 +17,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from uuid_utils import uuid7
 
-# Under pytest, druks IS the test instance. A Service class reads druks.toml when it is
-# defined, and the imports below define the core ones, so the file and the key come
-# first: an empty file, so the app under test never reads a druks.toml from the working
-# directory, and a key, so Settings builds without an operator's environment.
+# Under pytest, druks IS the test instance. Settings and app discovery run before
+# collection, so the file and key come first. The empty file keeps the working
+# directory's druks.toml out, and the key avoids an operator's environment.
 with tempfile.NamedTemporaryFile(suffix=".toml", delete=False) as _settings_file:
     _settings_path = Path(_settings_file.name)
 os.environ.setdefault("DRUKS_CONFIG", str(_settings_path))
@@ -39,7 +38,7 @@ import druks.user_settings.models  # noqa: F401
 from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
-from druks.apps.loader import import_app_models, iter_apps
+from druks.apps.loader import import_app_models, register_apps
 from druks.database import configure_session, create_engine_from_url
 from druks.db import db_session
 from druks.durable import AgentCall, Run
@@ -50,7 +49,7 @@ from druks.exceptions import SessionNotBoundError
 from druks.models import Base, StoredSubject
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
-from druks.settings import Settings
+from druks.settings import Settings, configure_settings, get_settings
 from druks.workflows import Workflow, WorkflowError, _bind_instance, current_workflow
 
 # druks.testing is the author door for testing an app: these four, plus the
@@ -123,20 +122,28 @@ def pytest_load_initial_conftests(early_config, parser, args) -> None:
     global _discovery_error
 
     early_config.add_cleanup(_settings_path.unlink)
-    # Infrastructure settings are read from the environment wherever they're needed — the
-    # app's Redis dialer among them — so overriding here keeps the code under test on the
-    # database and Redis the fixtures own.
+    # Build the process settings only after its infrastructure points at the
+    # database and Redis that the fixtures own.
     os.environ["DRUKS_DATABASE_URL"] = TEST_DATABASE_URL
     os.environ["DRUKS_REDIS_URL"] = TEST_REDIS_URL
+    settings = Settings()  # pyright: ignore[reportCallIssue]
+    configure_settings(settings)
     # App commits become savepoints inside the fixture's outer transaction, which
     # remains available for rollback at test teardown.
     db_session.session_factory.configure(join_transaction_mode="create_savepoint")
     # A Workflow class resolves its declaring app at definition time, so
     # ownership must be claimed before collection imports a module that defines one.
     try:
-        iter_apps()
+        register_apps()
     except Exception as error:  # noqa: BLE001 — re-raised from the fixtures below
         _discovery_error = error
+
+
+@pytest.fixture(autouse=True)
+def _restore_settings():
+    settings = get_settings()
+    yield
+    configure_settings(settings)
 
 
 @pytest.fixture(scope="session")
@@ -213,7 +220,8 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
     defaults = {
         "data_dir": tmp_path,
         "database_url": TEST_DATABASE_URL,
-        "secrets_key": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+        # The process key: secrets that a test stored stay readable after a swap.
+        "secrets_key": os.environ["DRUKS_SECRETS_KEY"],
         "redis_url": TEST_REDIS_URL,
         "log_level": "WARNING",
     }
@@ -233,9 +241,9 @@ def configure_app_for_test(
     if not engine:
         engine = _fixture_connection
     configure_session(engine)
+    configure_settings(settings)
     if not any(middleware.cls is _ProductionRequest for middleware in app.user_middleware):
         app.add_middleware(_ProductionRequest)
-    app.state.settings = settings
     app.state.engine = engine
     if authenticated:
         app.dependency_overrides[current_account] = _operator_account

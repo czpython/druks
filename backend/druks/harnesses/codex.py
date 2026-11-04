@@ -23,7 +23,7 @@ from druks.sandbox.datastructures import (
 from druks.sandbox.layout import get_runs_root, get_work_root
 from druks.sandbox.models import SecretRef
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 from .artifacts import write_cost
 from .base import Harness
@@ -595,7 +595,7 @@ class CodexHarness(Harness):
         return args
 
     def _get_credentials(self, manifest: Manifest) -> Credentials:
-        settings = load_settings()
+        settings = get_settings()
         config_dir = settings.harness_config_root / self.name
         return Credentials(
             home=(

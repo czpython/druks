@@ -38,8 +38,7 @@ _MCP_ROUTES = {
 
 
 @pytest.fixture
-def client(tmp_path: Path, druks_db, monkeypatch):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+def client(tmp_path: Path, druks_db):
     app = configure_app_for_test(settings=make_settings(tmp_path))
     with TestClient(app) as client:
         yield client

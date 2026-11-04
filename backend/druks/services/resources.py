@@ -11,7 +11,7 @@ from druks.models import snake_name
 from druks.sandbox.datastructures import SandboxSecret
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 from .exceptions import ResourceError
 
@@ -50,7 +50,7 @@ class Resource:
         return resource
 
     def __init__(self, name: str) -> None:
-        entry = load_settings().services.get(self.service.slug, {})
+        entry = get_settings().services.get(self.service.slug, {})
         self.name = entry.get("resource_prefix", "") + name
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -122,7 +122,7 @@ class ManagedResource(Resource):
         missing_ok: bool = False,
     ) -> httpx.Response:
         card = await self.service.get()
-        token = load_settings().manager.token.get_secret_value()
+        token = get_settings().manager.token.get_secret_value()
         transport = httpx.AsyncHTTPTransport(retries=2)
         try:
             async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:

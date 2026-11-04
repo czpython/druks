@@ -13,7 +13,7 @@ from druks.testing import make_settings
 def _cache_in_tmp_path(tmp_path, monkeypatch):
     # A default-branch push evicts cached .druks files; keep them out of the real data dir.
     settings = make_settings(tmp_path)
-    monkeypatch.setattr("druks.apps.fetcher.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.apps.fetcher.get_settings", lambda: settings)
 
 
 def _push_payload(*, full_name, default_branch, ref, changed_paths=(), forced=False):

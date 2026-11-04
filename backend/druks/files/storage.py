@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from druks.files.constants import REAPER_GRACE_PERIOD
 from druks.files.models import FileRecord
 from druks.models import Base
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 
 class LocalFileStorage:
@@ -48,7 +48,7 @@ class LocalFileStorage:
 
 
 def get_file_storage() -> LocalFileStorage:
-    return LocalFileStorage(load_settings().files_dir)
+    return LocalFileStorage(get_settings().files_dir)
 
 
 async def reap_deleted_file_bytes(session: AsyncSession) -> int:

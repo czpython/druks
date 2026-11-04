@@ -21,6 +21,7 @@ from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.services import Connection, Service
+from druks.settings import configure_settings
 from druks.testing import asgi_client, configure_app_for_test, make_settings
 from githubkit import AppAuthStrategy, TokenAuthStrategy
 from githubkit.exception import RequestFailed
@@ -135,9 +136,11 @@ async def managed_github(tmp_path, monkeypatch, druks_db):
     (secrets / "services.github.private_key").write_text(_INSTANCE_PEM)
     monkeypatch.setenv("DRUKS_CONFIG", str(tmp_path / "druks.toml"))
     monkeypatch.setenv("DRUKS_SECRETS_DIR", str(secrets))
+    settings = make_settings(tmp_path)
+    configure_settings(settings)
     bind_ambient_session(druks_db)
     await Service.sync_configuration(druks_db)
-    return make_settings(tmp_path)
+    return settings
 
 
 @pytest.fixture

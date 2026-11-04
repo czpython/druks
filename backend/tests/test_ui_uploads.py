@@ -8,10 +8,7 @@ from druks.testing import asgi_client, configure_app_for_test, make_settings
 from fastapi import Body, FastAPI
 from sqlalchemy import func, select
 
-
-@pytest.fixture(autouse=True)
-def _file_storage_root(tmp_path, monkeypatch):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+pytestmark = pytest.mark.usefixtures("tmp_data_dir")
 
 
 async def test_an_upload_lands_under_the_app_that_asked_for_it(

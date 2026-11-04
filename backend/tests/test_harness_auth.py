@@ -33,8 +33,8 @@ def config_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
         harness_config_root=tmp_path / "harnesses",
         skills_dir=tmp_path / "skills",
     )
-    monkeypatch.setattr("druks.harnesses.claude.load_settings", lambda: settings)
-    monkeypatch.setattr("druks.harnesses.codex.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.harnesses.claude.get_settings", lambda: settings)
+    monkeypatch.setattr("druks.harnesses.codex.get_settings", lambda: settings)
     return settings.harness_config_root
 
 

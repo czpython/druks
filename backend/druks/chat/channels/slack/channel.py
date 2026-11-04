@@ -21,7 +21,7 @@ from druks.models import Base
 from druks.prompts import render_prompt
 from druks.redis import get_client
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 from .constants import (
     JOINED_THREAD_SECONDS,
@@ -144,7 +144,7 @@ class SlackChannel(Channel):
         return await render_prompt(
             WELCOME_TEMPLATE,
             apps=[app for app in iter_apps() if app.description and not app.builtin],
-            endpoint=load_settings().urls.endpoint.rstrip("/"),
+            endpoint=get_settings().urls.endpoint.rstrip("/"),
         )
 
     @classmethod
@@ -156,7 +156,7 @@ class SlackChannel(Channel):
         await get_client().set(
             LINK_KEY.format(token=token), json.dumps(message), ex=LINK_TTL_SECONDS
         )
-        endpoint = load_settings().urls.endpoint.rstrip("/")
+        endpoint = get_settings().urls.endpoint.rstrip("/")
         client = SlackClient(token=await Slack.get_bot_token())
         is_first_contact = await get_client().set(
             WELCOME_KEY.format(user=message["user"]), "1", nx=True, ex=WELCOME_TTL_SECONDS

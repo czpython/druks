@@ -18,7 +18,7 @@ from druks.mcp.inbound import get_druks_mcp_server
 from druks.sandbox import SandboxMcpServer, SandboxSecret
 from druks.sandbox.layout import get_related_root, get_work_root
 from druks.services.exceptions import ServiceNotConnectedError
-from druks.settings import load_settings
+from druks.settings import get_settings
 from druks.skills.models import Skill
 from druks.workflows import FatalError, Workflow, step
 from druks.workspaces import RepoWorkspace
@@ -211,7 +211,7 @@ class Build(Workflow):
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         work_item = await self.subject
         project_repo = await ProjectRepo.get_for_repo(work_item.repo, raise_on_missing=True)
-        endpoint = load_settings().urls.endpoint.rstrip("/")
+        endpoint = get_settings().urls.endpoint.rstrip("/")
         work_item_url = f"{endpoint}/software_factory/work-items/{work_item.id}" if endpoint else ""
         prompt_context = BuildPromptContext(
             repo=work_item.repo,

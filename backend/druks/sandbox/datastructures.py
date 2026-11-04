@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 from .exceptions import SetupScriptError
 
@@ -64,7 +64,7 @@ class Sandbox:
         # that names its provider builds on that provider's default image.
         if self.provider:
             return ""
-        return load_settings().sandbox.image
+        return get_settings().sandbox.image
 
 
 @dataclass(frozen=True)

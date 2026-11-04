@@ -42,6 +42,13 @@ class SessionNotBoundError(DruksError):
         )
 
 
+class SettingsNotConfiguredError(DruksError):
+    """``get_settings()`` ran before the process configured its settings."""
+
+    def __init__(self) -> None:
+        super().__init__("Settings are not configured. Configure them when the process starts.")
+
+
 class ObjectNotFound(DruksError):
     """Nothing matches the values a read asked for."""
 

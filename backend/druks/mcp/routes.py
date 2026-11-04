@@ -1,7 +1,7 @@
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +30,7 @@ from druks.mcp.schemas import (
     McpServerScopesResponse,
 )
 from druks.secrets.models import VaultSecret
+from druks.settings import get_settings
 
 router = APIRouter(prefix="/api/mcp-servers", tags=["mcp-servers"])
 
@@ -61,8 +62,8 @@ async def list_mcp_servers(session: SessionDep) -> list[McpServerResponse]:
 
 
 @router.get("/directory", response_model=list[McpServerDirectoryResponse])
-async def list_mcp_server_directory(request: Request) -> list[dict]:
-    directory = json.loads(request.app.state.settings.mcp_directory_path.read_text())
+async def list_mcp_server_directory() -> list[dict]:
+    directory = json.loads(get_settings().mcp_directory_path.read_text())
     return [{"name": name, **entry} for name, entry in directory.items()]
 
 
@@ -99,7 +100,7 @@ async def add_mcp_server(session: SessionDep, body: CreateMcpServerRequest) -> M
 
 @router.post("/directory", response_model=McpServerResponse)
 async def add_directory_mcp_server(
-    session: SessionDep, request: Request, name: str = Body(embed=True)
+    session: SessionDep, name: str = Body(embed=True)
 ) -> McpServerResponse:
     if name in mcp_servers:
         raise HTTPException(
@@ -110,7 +111,7 @@ async def add_directory_mcp_server(
         raise HTTPException(
             status_code=409, detail=f"MCP server {name!r} already exists; remove it first."
         )
-    directory = json.loads(request.app.state.settings.mcp_directory_path.read_text())
+    directory = json.loads(get_settings().mcp_directory_path.read_text())
     if name in directory:
         # Every directory server signs in with OAuth, so it ships dark until its
         # Connect lands.
@@ -222,7 +223,6 @@ async def remove_mcp_server_scopes(session: SessionDep, name: str) -> None:
 async def connect_mcp_server(
     session: SessionDep,
     name: str,
-    request: Request,
     identity_mode: Annotated[IdentityMode, Body(embed=True)],
 ) -> ConnectMcpServerResponse:
     access = await McpServer.get_access(session, name, current_account_id.get())
@@ -233,7 +233,7 @@ async def connect_mcp_server(
             status_code=409,
             detail=f"MCP server {name!r} already uses {access.identity_mode!r} identity.",
         )
-    endpoint = request.app.state.settings.urls.endpoint
+    endpoint = get_settings().urls.endpoint
     if not endpoint:
         # The authorization server redirects the operator's browser back to
         # druks, so the flow needs the address that browser reaches druks at.
