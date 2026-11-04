@@ -36,7 +36,6 @@ exceptions:
     - backend/druks/apps/base.py
     - backend/druks/apps/loader.py
     - backend/druks/apps/settings.py
-    - backend/druks/contrib/software_factory/webhooks.py
     - backend/druks/doctor.py
     - backend/druks/mcp/catalog.py
     - backend/druks/mcp/oauth.py
