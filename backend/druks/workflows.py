@@ -56,7 +56,13 @@ from druks.durable.engine import (
     step_session,
 )
 from druks.durable.enums import AgentCallStatus, RunState, WorkflowEvent
-from druks.durable.exceptions import FatalError, GateTimeout, SubjectlessGate, WorkflowError
+from druks.durable.exceptions import (
+    FatalError,
+    GateTimeout,
+    SubjectlessGate,
+    WaitTimeout,
+    WorkflowError,
+)
 from druks.durable.models import AgentCall, Run
 from druks.durable.schemas import (
     AgentCallResponse,
@@ -94,6 +100,7 @@ __all__ = [
     "Subject",
     "SubjectStatus",
     "SubjectSummary",
+    "WaitTimeout",
     "Workflow",
     "WorkflowError",
     "WorkflowEvent",
@@ -916,6 +923,17 @@ class Workflow:
         self.journal.add(reply)
         return reply
 
+    async def wait(self, topic: str, *, label: str, ttl_seconds: float) -> dict[str, Any]:
+        """Wait for the facts that ``answer`` delivers on ``topic``, and return them. The run
+        stays running, shows ``label``, and keeps its warm sandbox."""
+        await set_run_phase(label)
+        await DBOS.set_event_async("waiting_on", topic)
+        facts = await DBOS.recv_async(topic, timeout_seconds=ttl_seconds)
+        await DBOS.set_event_async("waiting_on", "")
+        if facts is None:
+            raise WaitTimeout(topic)
+        return facts
+
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         # Everything an agent's template renders with, beyond the workflow and
         # workspace it always gets. Extend via super() to add an app's standing
@@ -1135,6 +1153,16 @@ class Workflow:
         )
         if run and run.is_active:
             await run.cancel(failure=failure)
+
+    @classmethod
+    async def answer(cls, subject: Subject | StoredSubject, topic: str, **facts: Any) -> None:
+        """Deliver ``facts`` to the subject's run of this workflow, when it waits on ``topic``."""
+        cls._validate_subject(subject)
+        run = await Run.get_latest_for_subject(
+            db_session(), subject.subject_type, str(subject.id), kind=cls.kind
+        )
+        if run and await DBOS.get_event_async(run.id, "waiting_on", timeout_seconds=0) == topic:
+            await DBOS.send_async(run.id, facts, topic=topic)
 
     @classmethod
     async def start(

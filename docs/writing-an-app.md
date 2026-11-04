@@ -1136,6 +1136,31 @@ The workflow class supplies its kind. The caller does not find or handle the
 internal timeline row. A cancel request with no active run has no effect. Thus,
 a redelivered webhook stays idempotent.
 
+## Wait on an event
+
+A gate waits for a person. To wait for a machine, for example a review from a
+bot or the checks on a commit, wait on a topic:
+
+```python
+review = await self.wait("review.completed", label="Waiting for the review", ttl_seconds=3600)
+```
+
+The run stays running. The run page shows the label. Druks sends no
+notification and keeps the warm sandbox. When the wait is longer than
+`ttl_seconds`, the run fails with `WaitTimeout`.
+
+A subscriber answers the wait through the workflow class and the subject. The
+facts it sends are the result of `wait()`:
+
+```python
+@subscribe("review.completed", subject=PullRequest)
+async def review_answers_the_build(*, subject: PullRequest, decision: str, **_: object) -> None:
+    if item := await WorkItem.get_for_pr(repo=subject.repo, pr_number=subject.number):
+        await Build.answer(item, "review.completed", decision=decision)
+```
+
+`answer()` reaches only a run that waits on that topic. Other runs get nothing.
+
 ## Give runs a subject read-side
 
 A subject is what your runs are about — a repository, a work item, a pull
@@ -2490,7 +2515,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.services` | `Service`, `Connection`, `auth`, `Resource`, `ResourceError`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
 | `druks.browser` | `BrowserClient`, `BrowserCommandError`, `BrowserSession`, `BrowserSessionSignedOutError`, `BrowserSessionStatus` |
 | `druks.agents` | `Agent`, `AgentOutput`, `Bot`, `BotUser` |
-| `druks.workflows` | `Workflow`, `Gate`, `GateTimeout`, `step`, run/agent response types, lifecycle enums and workflow errors |
+| `druks.workflows` | `Workflow`, `Gate`, `GateTimeout`, `WaitTimeout`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox`, `SandboxMcpServer`, `SandboxSecret` |
 | `druks.workspaces` | `Workspace`, `RepoWorkspace` |
 | `druks.db` | `Model`, `StoredSubject`, `db_session` |

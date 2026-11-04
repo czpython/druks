@@ -40,6 +40,14 @@ class GateTimeout(FatalError):
         self.gate = gate
 
 
+class WaitTimeout(FatalError):
+    code = "wait_timeout"
+
+    def __init__(self, topic: str) -> None:
+        super().__init__(f"wait on {topic!r} timed out")
+        self.topic = topic
+
+
 class SubjectlessGate(FatalError):
     def __init__(self, gate: str) -> None:
         super().__init__(
