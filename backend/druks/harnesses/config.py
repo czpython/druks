@@ -10,11 +10,12 @@ from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.sandbox.models import SecretRef
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
+from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
 from druks.user_settings.models import InstallationSettings, SettingsOverride
 
+from . import exceptions
 from .base import Harness
-from .exceptions import AgentConfigError, HarnessNotConnectedError
 from .models import ProviderCatalog
 from .providers import get_provider, is_registered, provider_label
 from .registry import get_harness
@@ -76,24 +77,30 @@ async def check_config(
     """The harness that runs the triple; a triple no harness runs raises."""
     harness = get_harness(harness_name)
     if not harness:
-        raise AgentConfigError(f"no installed harness is named {harness_name!r}.")
+        raise exceptions.AgentConfigError(f"no installed harness is named {harness_name!r}.")
     provider_id = model.partition("/")[0]
     if is_registered(provider_id):
         provider = get_provider(provider_id)
         if not harness.has_provider(provider):
-            raise AgentConfigError(f"{harness_name} does not run {provider.label} models.")
+            raise exceptions.AgentConfigError(
+                f"{harness_name} does not run {provider.label} models."
+            )
     else:
         catalog = await session.get(ProviderCatalog, provider_id)
         if not catalog:
-            raise AgentConfigError(
+            raise exceptions.AgentConfigError(
                 f"model {model!r} names no provider; add one in Settings → Providers."
             )
         if harness.provider:
-            raise AgentConfigError(f"{harness_name} does not run {catalog.label} models.")
+            raise exceptions.AgentConfigError(
+                f"{harness_name} does not run {catalog.label} models."
+            )
         if model not in {entry["id"] for entry in catalog.models}:
-            raise AgentConfigError(f"{catalog.label} lists no model {model!r}.")
+            raise exceptions.AgentConfigError(f"{catalog.label} lists no model {model!r}.")
     if billing not in harness.billing_options:
-        raise AgentConfigError(f"{harness_name} runs on an API key only; set billing to api_key.")
+        raise exceptions.AgentConfigError(
+            f"{harness_name} runs on an API key only; set billing to api_key."
+        )
     return harness
 
 
@@ -170,11 +177,19 @@ async def _build_config(
         )
         if not provider_key:
             label = await provider_label(session, provider_id)
-            raise HarnessNotConnectedError(f"add the {label} API key in Settings → Providers.")
+            raise exceptions.HarnessNotConnectedError(
+                f"add the {label} API key in Settings → Providers."
+            )
         secrets = harness_class.get_secrets(provider_id, provider_key.secrets["value"])
     else:
         provider = get_provider(provider_id)
         subscription = await provider.get_subscription(session, account_id)
+        try:
+            await provider.issue_token(session, subscription.id)
+        except MissingSecretError as error:
+            raise exceptions.HarnessNotConnectedError(str(error)) from error
+        except exceptions.OAuthTokenError as error:
+            raise exceptions.HarnessOverloadedError(str(error)) from error
         identity = provider.get_identity(subscription)
         secret_refs = harness_class.get_secret_refs(subscription)
     return AgentConfig(

@@ -5,7 +5,6 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from druks.api.dependencies import SessionDep
-from druks.harnesses.exceptions import OAuthTokenError
 from druks.secrets.exceptions import MissingSecretError
 
 from .exceptions import IdentityDenied
@@ -46,8 +45,6 @@ async def secret(
     except MissingSecretError as exc:
         logger.warning("fetch of %s for identity %s failed: %s", name, identity_id, exc)
         raise HTTPException(status_code=422, detail=str(exc)) from None
-    except OAuthTokenError:
-        raise HTTPException(status_code=503) from None
     except Exception as exc:  # noqa: BLE001 — the source failed; the box gets a 503 and the exchange retries
         logger.warning("fetch of %s for identity %s failed: %s", name, identity_id, exc)
         raise HTTPException(status_code=503) from None

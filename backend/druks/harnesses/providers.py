@@ -26,6 +26,7 @@ from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
+from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
 from druks.usage.models import UsageScrape
@@ -235,8 +236,10 @@ class Provider:
         """The token a box can use now. A due token rotates first, while the
         subscription is idle or the token is urgent. The gate holds every other
         fetch and every new call until the rotation and its refresh requests end.
-        Raises :class:`OAuthTokenError` when the row holds nothing valid."""
+        Raises :class:`MissingSecretError` when a person must reconnect, or
+        :class:`OAuthTokenError` when a later fetch can recover."""
         row = await VaultSecret.reload(session, subscription_id)
+        rotation = None
         if row and cls.refresh_is_due(row):
             async with gate.shut(subscription_id) as is_idle:
                 if is_idle or cls.refresh_is_urgent(row):
@@ -253,8 +256,18 @@ class Provider:
                         )
             row = await VaultSecret.reload(session, subscription_id)
         if not row:
-            raise exceptions.OAuthTokenError("no_credentials", "the subscription is disconnected")
-        return cls.load_token(row)
+            raise MissingSecretError(
+                f"the {cls.label} subscription is disconnected — "
+                "reconnect it in Settings → Providers."
+            )
+        try:
+            return cls.load_token(row)
+        except exceptions.OAuthTokenError as error:
+            if rotation and rotation.action != "no_refresh_token":
+                raise
+            raise MissingSecretError(
+                f"{error} — reconnect the {cls.label} subscription in Settings → Providers."
+            ) from error
 
     @classmethod
     async def rotate_token(
