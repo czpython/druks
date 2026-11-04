@@ -225,7 +225,7 @@ async def test_slack_waits_for_its_install_and_keeps_it_across_a_restart(
         assert query["scope"] == ",".join(SLACK_BOT_SCOPES)
         assert "user_scope" not in query
         assert query["state"].startswith(f"{AUDIENCE}.")
-        assert query["redirect_uri"] == f"{MANAGER}/slack/oauth/callback"
+        assert query["redirect_uri"] == f"{MANAGER}/services/slack/oauth/callback"
         assert query["client_id"] == CLIENT_ID
 
         entry = await _get_entry(client)
@@ -237,7 +237,7 @@ async def test_slack_waits_for_its_install_and_keeps_it_across_a_restart(
     assert exchange == {
         "grant_type": "authorization_code",
         "code": "c-1",
-        "redirect_uri": f"{MANAGER}/slack/oauth/callback",
+        "redirect_uri": f"{MANAGER}/services/slack/oauth/callback",
         "scope": ",".join(SLACK_BOT_SCOPES),
         "client_id": CLIENT_ID,
     }

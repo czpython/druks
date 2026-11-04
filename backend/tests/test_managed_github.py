@@ -300,7 +300,7 @@ async def test_install_binds_at_the_manager_and_links_the_installer(
         query = dict(parse_qsl(consent.query))
         assert consent.geturl().startswith("https://github.com/apps/druks/installations/new?")
         assert query["state"].startswith(f"{INSTANCE_ID}.")
-        assert query["redirect_uri"] == f"{MANAGER}/github/oauth/callback"
+        assert query["redirect_uri"] == f"{MANAGER}/services/github/oauth/callback"
         assert query["client_id"] == "Iv1.abc"
 
         page = await client.get(
@@ -315,7 +315,7 @@ async def test_install_binds_at_the_manager_and_links_the_installer(
         >= {
             "grant_type": "authorization_code",
             "code": "c-1",
-            "redirect_uri": f"{MANAGER}/github/oauth/callback",
+            "redirect_uri": f"{MANAGER}/services/github/oauth/callback",
             "installation_id": "11",
             "client_id": "Iv1.abc",
         }.items()
