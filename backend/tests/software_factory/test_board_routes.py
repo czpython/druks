@@ -2,6 +2,7 @@ import pytest
 from druks.accounts.models import Account
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.enums import Status
+from druks.contrib.software_factory.models import Ticket
 
 _TICKETS = "/api/software_factory/tickets"
 _PROJECTS = "/api/software_factory/projects"
@@ -23,11 +24,12 @@ def _published(monkeypatch):
     return events
 
 
-def _ready(identifier, title, repo):
+def _ready(ticket_id, identifier, title, repo):
     return (
         "ticket.transitioned",
         {
             "source": "druks",
+            "ticket_id": str(ticket_id),
             "identifier": identifier,
             "status": Status.READY_FOR_AGENT.label,
             "title": title,
@@ -90,7 +92,8 @@ async def test_ready_for_agent_publishes_one_transition(druks_client, monkeypatc
         assert moved.status_code == 200
         assert moved.json()["status"] == "ready_for_agent"
 
-    assert events == [_ready("ACM-1", "Add an endpoint", "acme/acme-app")]
+    stored = await Ticket.get_for_identifier("ACM-1")
+    assert events == [_ready(stored.id, "ACM-1", "Add an endpoint", "acme/acme-app")]
 
 
 async def test_an_edit_takes_what_it_is_given_and_leaves_the_rest(

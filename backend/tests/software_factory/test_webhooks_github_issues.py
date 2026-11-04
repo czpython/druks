@@ -24,6 +24,7 @@ def _labeled(*, assignee=None, sender_type="User", sender_login="octocat"):
         "action": "labeled",
         "label": {"name": "ready-for-agent"},
         "issue": {
+            "id": 4242,
             "number": 7,
             "title": "Contacts import drops the last row",
             "html_url": "https://github.com/acme/widget/issues/7",
@@ -66,6 +67,7 @@ async def test_a_persons_label_publishes_the_label_and_who_put_it(druks_db, tmp_
                 "repo": "acme/widget",
                 "number": 7,
                 "payload": {
+                    "issue_id": 4242,
                     "label": "ready-for-agent",
                     "actor_id": 583231,
                     "title": "Contacts import drops the last row",
@@ -113,6 +115,7 @@ async def test_the_trigger_label_dispatches_a_build_for_the_issue(monkeypatch):
         repo="acme/widget",
         number=7,
         payload={
+            "issue_id": 4242,
             "label": "ready-for-agent",
             "actor_id": 583231,
             "title": "Contacts import drops the last row",
@@ -125,6 +128,7 @@ async def test_the_trigger_label_dispatches_a_build_for_the_issue(monkeypatch):
     build.assert_awaited_once_with(
         ticket={
             "source": "github",
+            "ticket_id": "4242",
             "identifier": "acme/widget#7",
             "status": "ready-for-agent",
             "title": "Contacts import drops the last row",

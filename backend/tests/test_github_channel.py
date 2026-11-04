@@ -116,7 +116,14 @@ def comment_event(
         comment["in_reply_to_id"] = in_reply_to_id
     return {
         "repository": {"full_name": "acme/app"},
-        "issue": {"number": 7, **({"pull_request": {}} if is_pull_request else {})},
+        "issue": {
+            "id": 4242,
+            "number": 7,
+            "title": "Import contacts",
+            "html_url": "https://github.com/acme/app/issues/7",
+            "labels": [],
+            **({"pull_request": {}} if is_pull_request else {}),
+        },
         "pull_request": {"number": 7},
         "sender": {"type": sender_type, "login": login, "id": user},
         "comment": comment,
@@ -132,7 +139,7 @@ async def receive(tmp_path, data, *, inline=False):
         await events.on_issue_comment_created()
 
 
-async def test_the_webhook_publishes_every_persons_comment_as_one_fact(tmp_path, monkeypatch):
+async def test_the_webhook_publishes_each_comment_once(tmp_path, monkeypatch):
     published = []
 
     async def publish(name, **kwargs):
@@ -144,37 +151,33 @@ async def test_the_webhook_publishes_every_persons_comment_as_one_fact(tmp_path,
     await receive(tmp_path, comment_event(comment_id=2, is_pull_request=True))
     await receive(tmp_path, comment_event(comment_id=50, association="NONE"), inline=True)
     await receive(tmp_path, comment_event(comment_id=51, in_reply_to_id=50), inline=True)
-    await receive(tmp_path, comment_event(comment_id=3, sender_type="Bot"))
 
-    assert [name for name, _ in published] == ["issue.commented"] * 4
-    assert [(facts["repo"], facts["number"]) for _, facts in published] == [("acme/app", 7)] * 4
+    assert [name for name, _ in published] == ["ticket.commented"] + ["pr.commented"] * 3
     assert [
         (
-            payload["comment_id"],
-            payload["review_thread_id"],
-            payload["is_pull_request"],
-            payload["author_can_write"],
+            facts["repo"],
+            facts["pr_number"],
+            facts["payload"]["comment_id"],
+            facts["payload"]["review_thread_id"],
+            facts["payload"]["author_can_write"],
         )
-        for _, facts in published
-        for payload in [facts["payload"]]
+        for _, facts in published[1:]
     ] == [
-        (1, None, False, True),
-        (2, None, True, True),
-        (50, 50, True, False),
-        (51, 50, True, True),
+        ("acme/app", 7, 2, None, True),
+        ("acme/app", 7, 50, 50, False),
+        ("acme/app", 7, 51, 50, True),
     ]
-    assert published[0][1]["payload"]["author"] == "ana"
-    assert published[0][1]["payload"]["author_id"] == ANA
-    assert published[0][1]["payload"]["body"] == f"@{HANDLE} read my runs"
 
 
+@pytest.mark.parametrize("is_pull_request", [False, True])
 async def test_a_linked_writers_tag_reaches_their_own_conversation(
-    card, druks_db, tmp_path, github, delivery
+    card, druks_db, tmp_path, github, delivery, is_pull_request
 ):
     ana = await Account.get_or_create(druks_db, "ana@example.com")
     await link_person(druks_db, ana)
 
-    await receive(tmp_path, comment_event(body=f"Hey @{HANDLE}, what changed?"))
+    event = comment_event(body=f"Hey @{HANDLE}, what changed?", is_pull_request=is_pull_request)
+    await receive(tmp_path, event)
 
     [conversation] = await Conversation.list_for_account(druks_db, ana)
     assert (
@@ -197,6 +200,7 @@ async def test_a_linked_writers_tag_reaches_their_own_conversation(
     "event",
     [
         {"association": "NONE"},
+        {"sender_type": "Bot"},
         {"body": "no tag here"},
         {"body": f"> @{HANDLE} said this\n\nfine by me"},
         {"body": f"mail ops@{HANDLE}.dev or ask @{HANDLE}-team"},

@@ -86,6 +86,7 @@ async def test_tracker_webhook_starts_under_the_connected_account(
         )
         events._data_cached = {
             "issue": {
+                "id": "10042",
                 "key": item.ticket_key,
                 "fields": {
                     "status": {"name": settings.trigger_status},
@@ -110,9 +111,11 @@ async def test_tracker_webhook_starts_under_the_connected_account(
         events._data_cached = {
             "actor": {"id": "provider-actor-1"},
             "data": {
+                "id": "issue-uuid-1",
                 "identifier": item.ticket_key,
                 "title": item.title,
                 "url": f"https://linear.app/company/issue/{item.ticket_key}",
+                "teamId": "team-1",
                 "state": {"name": settings.trigger_status, "type": "unstarted"},
                 "project": {"name": "company/app"},
                 "labels": [],
@@ -141,12 +144,14 @@ async def test_unconnected_actor_and_assignee_use_the_default_account(druks_db, 
     await Build.dispatch(
         ticket={
             "source": item.source,
+            "ticket_id": "issue-uuid-1",
             "identifier": item.ticket_key,
             "status": "Ready",
             "title": item.title,
             "url": f"https://tracker.example/{item.ticket_key}",
             "project_name": "company/app",
             "labels": [],
+            "team": "team-1",
             "actor_id": "unconnected-actor",
             "assignee_id": "provider-user-1",
             "assignee_email": "boss@company.test",

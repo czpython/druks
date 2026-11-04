@@ -7,6 +7,8 @@ from druks.services import ServiceNotConnectedError
 from druks.signals import publish
 from druks.webhooks import Webhook, verify_hmac_sha256
 
+_CONTENT_FIELDS = frozenset({"title", "description", "labelIds", "projectId"})
+
 
 class LinearEvents(Webhook):
     provider = "linear"
@@ -33,31 +35,37 @@ class LinearEvents(Webhook):
         return compute_delivery_key(headers, self.raw_body, self.data)
 
     def get_action(self) -> str:
-        action = self.data.get("action")
-        if self.data.get("type") == "Comment" and action == "create":
+        action, kind = self.data.get("action"), self.data.get("type")
+        updated_from = self.data.get("updatedFrom") or {}
+        if kind == "Comment" and action == "create":
             return "comment_created"
-        if action == "update" and "stateId" in (self.data.get("updatedFrom") or {}):
+        if kind == "Issue" and action == "create":
+            return "issue_created"
+        if kind == "Issue" and action == "update" and "stateId" in updated_from:
             return "state_transition"
+        # Linear sends an update for every change, a drag on the board included. Only a
+        # change to what the issue says or where it belongs publishes ``ticket.updated``.
+        if kind == "Issue" and action == "update" and _CONTENT_FIELDS & updated_from.keys():
+            return "issue_updated"
         return "ticket_change"
+
+    async def on_issue_created(self) -> Response:
+        await publish("ticket.created", payload=self._ticket())
+        return _accepted()
+
+    async def on_issue_updated(self) -> Response:
+        await publish("ticket.updated", payload=self._ticket())
+        return _accepted()
 
     async def on_state_transition(self) -> Response:
         issue = self.data["data"]
-        state = issue["state"]
-        # An issue outside a project has no project. An unassigned issue has no assignee.
-        project = issue.get("project") or {}
+        # An unassigned issue has no assignee.
         assignee = issue.get("assignee") or {}
-        actor = self.data.get("actor") or {}
         await publish(
             "ticket.transitioned",
             payload={
-                "source": "linear",
-                "identifier": issue["identifier"],
-                "status": state["name"],
-                "title": issue["title"],
-                "url": issue["url"],
-                "project_name": project.get("name"),
-                "labels": [label["name"] for label in issue["labels"]],
-                "actor_id": actor.get("id"),
+                **self._ticket(),
+                "status": issue["state"]["name"],
                 "assignee_id": assignee.get("id"),
                 "assignee_email": assignee.get("email"),
                 "assignee_name": assignee.get("name"),
@@ -67,16 +75,49 @@ class LinearEvents(Webhook):
 
     async def on_comment_created(self) -> Response:
         comment = self.data["data"]
-        await publish(
-            "ticket.commented",
-            payload={
-                "source": "linear",
-                # Top-level comments have no parent.
-                "parent_id": comment.get("parentId"),
-                "issue_id": comment["issueId"],
-            },
-        )
+        # A comment on a project or a document belongs to no ticket.
+        if issue := comment.get("issue"):
+            await publish(
+                "ticket.commented",
+                payload={
+                    "source": "linear",
+                    "ticket_id": issue["id"],
+                    "identifier": issue["identifier"],
+                    "title": issue["title"],
+                    "url": issue["url"],
+                    # A comment's issue carries neither its project nor its labels.
+                    "project_name": None,
+                    "labels": None,
+                    "team": issue["teamId"],
+                    "actor_id": self._actor_id(),
+                    "comment_id": comment["id"],
+                    "body": comment["body"],
+                    # Top-level comments have no parent.
+                    "parent_id": comment.get("parentId"),
+                },
+            )
         return _accepted()
+
+    def _ticket(self) -> dict:
+        """The keys every ``ticket.*`` event carries, for the issue in this delivery."""
+        issue = self.data["data"]
+        # An issue outside a project has no project.
+        project = issue.get("project") or {}
+        return {
+            "source": "linear",
+            # The identifier changes when the issue moves to another team; the id never does.
+            "ticket_id": issue["id"],
+            "identifier": issue["identifier"],
+            "title": issue["title"],
+            "url": issue["url"],
+            "project_name": project.get("name"),
+            "labels": [label["name"] for label in issue["labels"]],
+            "team": issue["teamId"],
+            "actor_id": self._actor_id(),
+        }
+
+    def _actor_id(self) -> str | None:
+        return (self.data.get("actor") or {}).get("id")
 
 
 def _accepted() -> Response:
