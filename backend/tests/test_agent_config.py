@@ -1,6 +1,7 @@
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from conftest import (
     CONFIG_PROBE,
@@ -16,14 +17,20 @@ from druks.apps import App
 from druks.apps.registry import agents as agent_registry
 from druks.db import db_session
 from druks.durable.models import AgentCall
+from druks.harnesses import providers as provider_module
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.config import AgentConfig, check_config, get_config, get_default_config
-from druks.harnesses.exceptions import AgentConfigError, HarnessNotConnectedError
+from druks.harnesses.exceptions import (
+    AgentConfigError,
+    HarnessNotConnectedError,
+    HarnessOverloadedError,
+    Retry,
+)
 from druks.harnesses.models import ProviderCatalog
 from druks.harnesses.opencode import OpenCodeHarness
 from druks.harnesses.pi import PiHarness
-from druks.harnesses.providers import OpenAiProvider
+from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
@@ -74,6 +81,18 @@ async def _key() -> VaultSecret:
         "sk-shared",
         pasted_by=await Account.get_or_create(db_session(), "ops@example.com"),
     )
+
+
+async def _expired_anthropic(refresh_token: str = "") -> VaultSecret:
+    expired = datetime.now(UTC) - timedelta(minutes=1)
+    token = {
+        "accessToken": "old",
+        "scopes": ["user:profile"],
+        "expiresAt": int(expired.timestamp() * 1000),
+    }
+    if refresh_token:
+        token["refreshToken"] = refresh_token
+    return await connect_provider(AnthropicProvider, {"claudeAiOauth": token})
 
 
 _SHARED_ENTRY = Secret(
@@ -156,6 +175,57 @@ async def test_a_subscription_agent_runs_as_its_actor_or_the_default_account(dru
     assert as_actor.harness_class is ClaudeHarness
     assert as_actor.model == "anthropic/claude-opus-4-7"
     assert (as_actor.effort, as_actor.timeout, as_actor.fast_mode) == ("high", 1800, False)
+
+
+async def test_a_subscription_agent_refuses_an_expired_token_without_a_refresh(druks_db):
+    subscription = await _expired_anthropic()
+
+    with pytest.raises(
+        HarnessNotConnectedError,
+        match=(
+            "access token expired.*reconnect the Anthropic subscription "
+            "in Settings → Providers"
+        ),
+    ):
+        await get_config(druks_db, CONFIG_PROBE.id, subscription.account_id)
+
+
+async def test_a_subscription_agent_runs_after_its_expired_token_refreshes(druks_db, monkeypatch):
+    subscription = await _expired_anthropic("R0")
+
+    async def refresh(self, url, *, json, **kwargs):
+        return httpx.Response(
+            200,
+            json={"access_token": "new", "refresh_token": "R1", "expires_in": 28_800},
+        )
+
+    monkeypatch.setattr(provider_module.httpx.AsyncClient, "post", refresh)
+
+    config = await get_config(druks_db, CONFIG_PROBE.id, subscription.account_id)
+    refreshed = await VaultSecret.reload(druks_db, subscription.id)
+
+    assert config.subscription.id == subscription.id
+    assert AnthropicProvider.load_token(refreshed).access_token == "new"
+
+
+@pytest.mark.parametrize("failure", ["network", "http_429", "http_503"])
+async def test_a_subscription_agent_keeps_a_temporary_refresh_failure_transient(
+    druks_db, monkeypatch, failure
+):
+    subscription = await _expired_anthropic("R0")
+
+    async def refresh(self, url, *, json, **kwargs):
+        if failure == "network":
+            raise httpx.ConnectError("offline")
+        status_code = int(failure.removeprefix("http_"))
+        return httpx.Response(status_code, text="unavailable")
+
+    monkeypatch.setattr(provider_module.httpx.AsyncClient, "post", refresh)
+
+    with pytest.raises(HarnessOverloadedError) as error:
+        await get_config(druks_db, CONFIG_PROBE.id, subscription.account_id)
+
+    assert error.value.retry is Retry.TRANSIENT
 
 
 async def test_a_codex_subscription_config_carries_its_login_facts_and_its_ref(druks_db):

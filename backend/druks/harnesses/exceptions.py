@@ -84,9 +84,8 @@ class OAuthTokenError(DruksError):
     """No usable subscription is available.
 
     ``tag`` is a short, stable code surfaced on the usage snapshot's
-    ``error`` column: ``no_credentials`` (harness not connected),
-    ``no_token`` (subscription present, no access token), ``token_expired``
-    (past expiry; the refresh cron hasn't caught up).
+    ``error`` column: ``no_token`` (subscription present, no access token),
+    ``token_expired`` (past expiry; the refresh cron hasn't caught up).
     """
 
     def __init__(self, tag: str, message: str | None = None) -> None:

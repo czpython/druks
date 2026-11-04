@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -265,16 +266,21 @@ async def test_the_issuer_denies_an_identity_revoked_during_the_source_io(
 
 
 async def test_the_issuer_answers_503_when_the_source_holds_nothing_valid(
-    druks_db, tmp_path, monkeypatch
+    druks_db, tmp_path, monkeypatch, caplog
 ):
     subscription = await _subscription(access="old", life=-timedelta(minutes=1))
     identity, bearer = await _bound_identity(subscription)
     _mock_post(monkeypatch, httpx.ConnectError("boom"))
 
-    response = await _fetch(tmp_path, identity.id, bearer)
+    with caplog.at_level(logging.WARNING, logger="druks.sandbox.routes"):
+        response = await _fetch(tmp_path, identity.id, bearer)
 
     assert response.status_code == 503
     assert "old" not in response.text
+    assert (
+        f"fetch of anthropic for identity {identity.id} failed: access token expired at"
+        in caplog.text
+    )
 
 
 async def test_lookup_finds_the_live_bound_identity_of_a_scope(druks_db) -> None:
