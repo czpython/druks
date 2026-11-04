@@ -8,8 +8,8 @@ from druks.contrib.software_factory.enums import Status
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket
 from druks.contrib.software_factory.ticketing.jira import Jira
 from druks.contrib.software_factory.ticketing.linear import Linear
-from druks.contrib.software_factory.webhooks import JiraEvents
 from druks.contrib.software_factory.workflows import Build
+from druks.core.webhooks.jira import JiraEvents
 from druks.core.webhooks.linear import LinearEvents
 from druks.secrets.enums import IdentityStatus
 from druks.secrets.models import VaultSecret

@@ -1,6 +1,5 @@
 import hashlib
 import hmac
-import logging
 
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
@@ -9,12 +8,6 @@ from druks.core import services
 from druks.services import ServiceNotConnectedError
 from druks.signals import publish
 from druks.webhooks import Webhook
-
-logger = logging.getLogger(__name__)
-
-
-def _accepted() -> Response:
-    return JSONResponse({"accepted": True})
 
 
 class JiraEvents(Webhook):
@@ -30,9 +23,9 @@ class JiraEvents(Webhook):
                 "Jira is not connected. Connect it in Settings → Connections → Services.",
             ) from error
         provided = self.request.headers.get("x-druks-webhook-token") or ""
-        if not hmac.compare_digest(provided, webhook_secret):
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid Jira webhook token.")
-        return True
+        if hmac.compare_digest(provided, webhook_secret):
+            return True
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid Jira webhook token.")
 
     def get_action(self) -> str:
         return "issue_event"
@@ -76,3 +69,7 @@ class JiraEvents(Webhook):
             },
         )
         return _accepted()
+
+
+def _accepted() -> Response:
+    return JSONResponse({"accepted": True})
