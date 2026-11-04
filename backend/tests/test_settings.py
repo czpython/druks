@@ -1,9 +1,12 @@
+import logging
 import re
 from pathlib import Path
 
 import pytest
 from druks import database
 from druks.durable import engine as durable_engine
+from druks.exceptions import SessionNotBoundError
+from druks.harnesses.exceptions import HarnessNotConnectedError
 from druks.settings import Settings, ensure_data_dirs
 from druks.testing import TEST_DATABASE_URL, make_settings
 from pydantic import ValidationError
@@ -255,3 +258,17 @@ def test_pool_settings_reach_the_app_engine_and_dbos(tmp_path, monkeypatch):
 
     assert (pool.size(), pool._max_overflow) == (3, 4)
     assert configs[0]["sys_db_pool_size"] == 5
+
+
+def test_dbos_logging_hides_only_expected_workflow_failures(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(durable_engine, "load_settings", lambda: make_settings(tmp_path))
+    monkeypatch.setattr(durable_engine, "_initialized", False)
+    monkeypatch.setattr(durable_engine, "DBOS", lambda config: None)
+    durable_engine.init_dbos()
+    logger = logging.getLogger("dbos")
+
+    with caplog.at_level(logging.ERROR, logger="dbos"):
+        logger.error("workflow failed", exc_info=HarnessNotConnectedError("not connected"))
+        logger.error("workflow failed", exc_info=SessionNotBoundError())
+
+    assert [type(record.exc_info[1]) for record in caplog.records] == [SessionNotBoundError]
