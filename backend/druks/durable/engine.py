@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
@@ -11,7 +12,8 @@ from druks.database import create_async_engine_from_url, session_scope
 from druks.db import db_session
 from druks.durable.constants import NOTIFICATIONS_QUEUE, PAUSE_QUEUE, RUN_QUEUE, TASK_QUEUE
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
-from druks.durable.exceptions import ScheduleUnavailable
+from druks.durable.exceptions import FatalError, ScheduleUnavailable
+from druks.harnesses.exceptions import HarnessError
 from druks.settings import load_settings
 from druks.user_settings.models import InstallationSettings
 
@@ -52,6 +54,15 @@ def init_dbos() -> None:
         # workflow would strand every parked run, because one host cannot drain them.
         "enable_patching": True,
     }
+    # DBOS logs every exception that leaves a workflow, with no opt-out;
+    # _execute_run already records a classified failure on the run.
+    logging.getLogger("dbos").addFilter(
+        lambda record: not (
+            record.exc_info
+            # ast-grep-ignore: rule-3
+            and isinstance(record.exc_info[1], (FatalError, HarnessError))
+        )
+    )
     DBOS(config=config)
     _initialized = True
 
