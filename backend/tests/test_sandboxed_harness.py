@@ -37,7 +37,7 @@ from druks.sandbox.datastructures import (
     HomeFile,
 )
 from druks.sandbox.exceptions import SandboxUnreachable
-from druks.sandbox.host import Host, _first_byte_killer
+from druks.sandbox.host import Host, _first_byte_killer, _wait_for_exit
 from druks.user_settings.models import SettingsOverride
 
 # A manifest for a call with no skills.
@@ -234,13 +234,11 @@ async def test_overall_timeout_raises_harness_timeout_error(
     sandbox = _fake_sandbox(run)
 
     # Compress the actual sleep so the test finishes in <1s. Patch
-    # asyncio.wait_for to enforce a tiny budget.
-    real_wait_for = asyncio.wait_for
-
-    async def fast_wait_for(coro: Any, timeout: float) -> Any:
-        return await real_wait_for(coro, timeout=min(timeout, 0.05))
-
-    monkeypatch.setattr("druks.sandbox.host.asyncio.wait_for", fast_wait_for)
+    # asyncio.timeout to enforce a tiny budget.
+    real_timeout = asyncio.timeout
+    monkeypatch.setattr(
+        "druks.sandbox.host.asyncio.timeout", lambda delay: real_timeout(min(delay, 0.05))
+    )
 
     with pytest.raises(HarnessTimeoutError, match="timed out"):
         await Host._start_run(
@@ -253,6 +251,23 @@ async def test_overall_timeout_raises_harness_timeout_error(
 
     # We tried to clean up by killing the run before bailing.
     assert run.kill_calls >= 1
+
+
+async def test_wait_answers_hooks_in_the_waiting_task():
+    """Hooks run in the step's task, which holds the step's database session."""
+    tasks = []
+
+    async def after_agent() -> str:
+        tasks.append(asyncio.current_task())
+        return ""
+
+    async def wait(*, hooks: dict[str, Any]) -> int:
+        await hooks["after_agent"]()
+        return 0
+
+    run = SimpleNamespace(wait=wait)
+    assert await _wait_for_exit(run, timeout=60, hooks={"after_agent": after_agent}) == (0, False)
+    assert tasks == [asyncio.current_task()]
 
 
 async def test_first_byte_killer_kills_only_a_silent_run():
@@ -393,13 +408,13 @@ async def test_resume_prompt_watches_a_running_call_from_its_recorded_start(
 
     monkeypatch.setattr("druks.sandbox.runner.attach", attach)
     budgets = []
-    real_wait_for = asyncio.wait_for
+    real_timeout = asyncio.timeout
 
-    async def wait_for(coro: Any, timeout: float) -> Any:
-        budgets.append(timeout)
-        return await real_wait_for(coro, timeout=timeout)
+    def timeout(delay: float) -> asyncio.Timeout:
+        budgets.append(delay)
+        return real_timeout(delay)
 
-    monkeypatch.setattr("druks.sandbox.host.asyncio.wait_for", wait_for)
+    monkeypatch.setattr("druks.sandbox.host.asyncio.timeout", timeout)
     harness = SimpleNamespace(
         name="claude", parse=lambda result, *, artifact_dir, run_id: result.stdout
     )

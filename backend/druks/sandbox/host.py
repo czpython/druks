@@ -820,13 +820,17 @@ async def _wait_for_exit(
 ) -> tuple[int, bool]:
     """The run's exit code, and whether it was killed for outliving ``timeout``."""
     try:
-        return await asyncio.wait_for(run.wait(hooks=hooks), timeout=timeout), False
+        # Not wait_for: on 3.11 it waits in a task of its own, and the hooks must
+        # run in the step's task, which holds the step's database session.
+        async with asyncio.timeout(timeout):
+            return await run.wait(hooks=hooks), False
     except TimeoutError:
         with contextlib.suppress(Exception):
             await run.kill()
         # Wait briefly for the helper to write its exit code post-kill; otherwise -1.
         try:
-            return await asyncio.wait_for(run.wait(), timeout=10.0), True
+            async with asyncio.timeout(10.0):
+                return await run.wait(), True
         except Exception:
             return -1, True
 
