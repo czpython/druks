@@ -42,10 +42,10 @@ async def _subject_run(
     return run
 
 
-async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(druks_db, monkeypatch):
-    # A subject can carry runs of several workflows at once; the gate names which one
-    # answers, so a newer run of another kind never hides the parked one. A timed-out
-    # run keeps its stale ``input_gate``, so parked-ness decides, not that column.
+async def test_gate_answer_resumes_only_the_requested_workflow(druks_db, monkeypatch):
+    # A subject can carry parked runs of several workflows on one gate name; the
+    # workflow names which one answers. A timed-out run keeps its stale
+    # ``input_gate``, so parked-ness decides, not that column.
     subject = await _work_item(ticket_key="ENG-748-A")
     parked = await _subject_run(
         druks_db,
@@ -54,7 +54,14 @@ async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(druks_db, monke
         state="parked",
         gate=OperatorReply.name,
     )
-    await _subject_run(druks_db, subject=subject, kind=Profile.kind, state="running", order=1)
+    await _subject_run(
+        druks_db,
+        subject=subject,
+        kind="software_factory.other_work_item",
+        state="parked",
+        gate=OperatorReply.name,
+        order=1,
+    )
     resumed = []
 
     async def resume(self, **reply):
@@ -62,7 +69,7 @@ async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(druks_db, monke
 
     monkeypatch.setattr(Run, "resume", resume)
 
-    await OperatorReply.answer(subject, action="approve")
+    await OperatorReply.answer(subject, workflow=Build, action="approve")
     assert resumed == [parked.id]
 
     timed_out = await _work_item(ticket_key="ENG-748-B")
@@ -73,8 +80,8 @@ async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(druks_db, monke
         state="failed",
         gate=ReviewWork.name,
     )
-    with pytest.raises(WorkflowError, match="is not parked"):
-        await ReviewWork.answer(timed_out, action="approve")
+    with pytest.raises(WorkflowError, match="Build has no run"):
+        await ReviewWork.answer(timed_out, workflow=Build, action="approve")
     assert resumed == [parked.id]
 
 
@@ -103,15 +110,14 @@ async def test_workflow_cancel_takes_its_own_kind_and_passes_over_idle_subjects(
 
 
 async def test_cancel_and_answer_hold_the_caller_to_the_declared_subject(druks_db):
-    # Build is about a work item; a repo names another timeline entirely, and a
-    # non-subject names none. Both fail at the door rather than quietly no-opping.
+    # Build is about a work item, not a repo; both calls reject that mismatch.
     item = await _work_item(ticket_key="ENG-748-F")
     repo = await ProjectRepo.create(project_id=item.project_id, full_name="acme/app")
 
     with pytest.raises(WorkflowError, match="is about WorkItem, not ProjectRepo"):
         await Build.cancel(repo)
-    with pytest.raises(WorkflowError, match="takes the subject"):
-        await ReviewWork.answer("acme/app", action="approve")
+    with pytest.raises(WorkflowError, match="is about WorkItem, not ProjectRepo"):
+        await ReviewWork.answer(repo, workflow=Build, action="approve")
 
 
 async def test_subject_phase_reads_the_driving_running_workflow(druks_db, monkeypatch):

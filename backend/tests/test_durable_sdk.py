@@ -1388,10 +1388,15 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
     approved_id = await Summarize.dispatch(note=approved_note)
     await _wait_for_run(runtime.engine, approved_id, lambda run: run.is_parked)
     async with session_scope(runtime.engine):
-        await OperatorReply.answer(approved_note, action="request_changes", note="Name the pump.")
+        await OperatorReply.answer(
+            approved_note,
+            workflow=Summarize,
+            action="request_changes",
+            note="Name the pump.",
+        )
     await _wait_for_run(runtime.engine, approved_id, lambda run: len(calls) == 2 and run.is_parked)
     async with session_scope(runtime.engine):
-        await OperatorReply.answer(approved_note, action="approve")
+        await OperatorReply.answer(approved_note, workflow=Summarize, action="approve")
     await _wait_for_run(runtime.engine, approved_id, lambda run: len(completed) == 1)
     await DBOS.resume_workflow_async(approved_id)
     await _wait_for_run(runtime.engine, approved_id, lambda run: run.state == RunState.FINISHED)

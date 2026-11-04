@@ -6,6 +6,7 @@ import druks.contrib.software_factory.subscribers  # noqa: F401 — registers th
 import pytest
 from druks.contrib.software_factory.contracts import ReviewWork
 from druks.contrib.software_factory.models import WorkItem
+from druks.contrib.software_factory.workflows import Build
 from druks.core.webhooks.github import GitHubEvents
 from druks.durable import Run
 from druks.events.models import Event
@@ -101,7 +102,7 @@ async def test_external_merge_answers_review_without_cancelling(druks_db, tmp_pa
     assert item.resolved_at == datetime(2026, 7, 25, 21, 59, 9, tzinfo=UTC)
     # ...announced as the milestone...
     assert await _milestone_count(work_item_id, "merged") == 1
-    answer.assert_awaited_once_with(item, action="merged")
+    answer.assert_awaited_once_with(item, workflow=Build, action="merged")
 
 
 @pytest.mark.asyncio
@@ -149,7 +150,7 @@ async def test_a_redelivered_webhook_does_not_rewrite_the_verdict(druks_db, tmp_
     assert item.resolved_at == datetime(2026, 7, 25, 21, 59, 9, tzinfo=UTC)
     assert await _milestone_count(work_item_id, "merged") == 1
     assert await _milestone_count(work_item_id, "closed") == 0
-    answer.assert_awaited_once_with(item, action="merged")
+    answer.assert_awaited_once_with(item, workflow=Build, action="merged")
 
 
 @pytest.mark.asyncio

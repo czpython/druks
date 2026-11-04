@@ -1086,14 +1086,16 @@ workflow through the gate and its subject:
 ```python
 await ApproveReport.answer(
     repository,
+    workflow=Sweep,
     action="approve",
     note="Ship it.",
 )
 ```
 
-`answer()` resolves the subject run that waits on the gate. It raises if no such
-run exists. This includes a gate that has an answer or timeout. A subject can
-have runs from several workflows. The gate identifies the applicable run.
+`answer()` resolves the workflow's subject run that waits on the gate. It raises
+if no such run exists. This includes a gate that has an answer or timeout. A
+subject can have runs from several workflows. The workflow and gate identify the
+applicable run.
 
 For a subject-backed decision inside the Druks dashboard, use:
 

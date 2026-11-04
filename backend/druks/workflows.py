@@ -293,19 +293,26 @@ class Gate(BaseModel):
         return
 
     @classmethod
-    async def answer(cls, subject: Subject | StoredSubject, **reply: Any) -> None:
-        if not isinstance(subject, Subject | StoredSubject):
-            raise WorkflowError(
-                f"{cls.__name__}.answer() takes the subject whose run is parked on it, "
-                f"not {type(subject).__name__}"
-            )
+    async def answer(
+        cls,
+        subject: Subject | StoredSubject,
+        *,
+        workflow: type["Workflow"],
+        **reply: Any,
+    ) -> None:
+        workflow._validate_subject(subject)
         if parked := await Run.get_latest_for_subject(
-            db_session(), subject.subject_type, str(subject.id), gate=cls.name
+            db_session(),
+            subject.subject_type,
+            str(subject.id),
+            kind=workflow.kind,
+            gate=cls.name,
         ):
             await parked.resume(**reply)
             return
         raise WorkflowError(
-            f"subject {subject.subject_type}:{subject.id} is not parked on gate {cls.name!r}"
+            f"{workflow.__name__} has no run for {subject.subject_type}:{subject.id} "
+            f"parked on gate {cls.name!r}"
         )
 
     @classmethod

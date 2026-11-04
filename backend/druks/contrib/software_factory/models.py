@@ -309,7 +309,7 @@ class WorkItem(StoredSubject):
             await self.announce(resolution, repo=self.repo, pr_number=self.pr_number)
         if resolution == Resolution.MERGED:
             if (await self.get_status(workflow=Build)).is_parked:
-                await ReviewWork.answer(self, action="merged")
+                await ReviewWork.answer(self, workflow=Build, action="merged")
             await self.set_ticket_status(TicketStatus.DONE)
         if resolution == Resolution.CLOSED:
             # The attempt ended, not the ticket, so the ticket goes back to its resting
