@@ -1,0 +1,114 @@
+/* Generated from src/tokens/druks.tokens.json and src/components/brand-lockup.css. Do not edit. */
+:root {
+  color-scheme: light;
+  --druks-color-accent: #00677b;
+  --druks-color-background: #f7f7f7;
+  --druks-color-border-control: #71898b;
+  --druks-color-border-default: #dee2de;
+  --druks-color-border-subtle: #e6e9e5;
+  --druks-color-brand-mark: #00677b;
+  --druks-color-chart-series-1: #146276;
+  --druks-color-chart-series-2: #6a4e9b;
+  --druks-color-chart-series-3: #226963;
+  --druks-color-chart-series-4: #915320;
+  --druks-color-field-background: #ffffff;
+  --druks-color-on-accent: #fffcf6;
+  --druks-color-scrim: #173d4847;
+  --druks-color-selection-surface: #e4e6e7;
+  --druks-color-status-danger: #a33134;
+  --druks-color-status-danger-surface: #fcefed;
+  --druks-color-status-info: #2a5fa9;
+  --druks-color-status-info-surface: #e9effa;
+  --druks-color-status-success: #286044;
+  --druks-color-status-success-surface: #eaf5ed;
+  --druks-color-status-warning: #81501d;
+  --druks-color-status-warning-surface: #fff1d8;
+  --druks-color-surface: #fcfcfc;
+  --druks-color-surface-raised: #e7e7e7;
+  --druks-color-surface-subtle: #eeeeee;
+  --druks-color-text-primary: #293638;
+  --druks-color-text-secondary: #424e50;
+  --druks-color-text-tertiary: #5b6668;
+  --druks-shadow-dialog: 0px 8px 28px 0px #234e5229;
+  --druks-identity-logo-height: 40px;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --druks-color-accent: #4dd4f4;
+  --druks-color-background: #0c0c0c;
+  --druks-color-border-control: #878787;
+  --druks-color-border-default: #2b2b2b;
+  --druks-color-border-subtle: #232323;
+  --druks-color-brand-mark: #4dd4f4;
+  --druks-color-chart-series-1: #4dd4f4;
+  --druks-color-chart-series-2: #a78bfa;
+  --druks-color-chart-series-3: #5eead4;
+  --druks-color-chart-series-4: #f5a85c;
+  --druks-color-field-background: #181818;
+  --druks-color-on-accent: #0c0c0c;
+  --druks-color-scrim: #00000080;
+  --druks-color-selection-surface: #1d1d1d;
+  --druks-color-status-danger: #ef4f5b;
+  --druks-color-status-danger-surface: #251313;
+  --druks-color-status-info: #5d97f6;
+  --druks-color-status-info-surface: #101b30;
+  --druks-color-status-success: #4ade80;
+  --druks-color-status-success-surface: #111f14;
+  --druks-color-status-warning: #f4ad63;
+  --druks-color-status-warning-surface: #23190f;
+  --druks-color-surface: #111111;
+  --druks-color-surface-raised: #1c1c1c;
+  --druks-color-surface-subtle: #171717;
+  --druks-color-text-primary: #f0f2f7;
+  --druks-color-text-secondary: #b4bccd;
+  --druks-color-text-tertiary: #99a3b9;
+  --druks-shadow-dialog: 0px 24px 64px 0px #00000080;
+}
+@media (prefers-color-scheme: dark) {
+:root:not([data-theme]) {
+  color-scheme: dark;
+  --druks-color-accent: #4dd4f4;
+  --druks-color-background: #0c0c0c;
+  --druks-color-border-control: #878787;
+  --druks-color-border-default: #2b2b2b;
+  --druks-color-border-subtle: #232323;
+  --druks-color-brand-mark: #4dd4f4;
+  --druks-color-chart-series-1: #4dd4f4;
+  --druks-color-chart-series-2: #a78bfa;
+  --druks-color-chart-series-3: #5eead4;
+  --druks-color-chart-series-4: #f5a85c;
+  --druks-color-field-background: #181818;
+  --druks-color-on-accent: #0c0c0c;
+  --druks-color-scrim: #00000080;
+  --druks-color-selection-surface: #1d1d1d;
+  --druks-color-status-danger: #ef4f5b;
+  --druks-color-status-danger-surface: #251313;
+  --druks-color-status-info: #5d97f6;
+  --druks-color-status-info-surface: #101b30;
+  --druks-color-status-success: #4ade80;
+  --druks-color-status-success-surface: #111f14;
+  --druks-color-status-warning: #f4ad63;
+  --druks-color-status-warning-surface: #23190f;
+  --druks-color-surface: #111111;
+  --druks-color-surface-raised: #1c1c1c;
+  --druks-color-surface-subtle: #171717;
+  --druks-color-text-primary: #f0f2f7;
+  --druks-color-text-secondary: #b4bccd;
+  --druks-color-text-tertiary: #99a3b9;
+  --druks-shadow-dialog: 0px 24px 64px 0px #00000080;
+}
+}
+/* Approved Foundation Druks Logo Lockup contract. Generated as part of dist/druks-base.css. */
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.brand-lockup svg {
+  display: block;
+  flex: none;
+  inline-size: auto;
+  block-size: var(--druks-identity-logo-height);
+}

@@ -16,8 +16,17 @@ npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
-`build` runs TypeScript project compilation before Vite. CI uses Node 22 and
-runs lint, tests, and build for PRs into `main` and `codex/` stack branches.
+`build` runs TypeScript project compilation before Vite. `lint` also fails on a
+`var()` that names a custom property nothing defines. CI uses Node 22 and runs
+lint, tests, and build for PRs into `main` and `codex/` stack branches.
+
+## Design Foundation
+
+The Druks design Foundation supplies the color tokens, the logo, and the icons.
+`src/foundation/` holds the stylesheet, the logo, and the license, and
+`VERSION` names the release. `public/foundation/icons/` holds the icons that
+`index.html` and `site.webmanifest` use. Do not edit these files. To update
+them, copy the same files from a newer release.
 
 ## Ownership
 

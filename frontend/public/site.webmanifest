@@ -6,7 +6,9 @@
   "theme_color": "#f7f7f7",
   "background_color": "#f7f7f7",
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/foundation/icons/pwa-any-light-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/foundation/icons/pwa-any-light-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/foundation/icons/pwa-maskable-light-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/foundation/icons/pwa-maskable-light-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

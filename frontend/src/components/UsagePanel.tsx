@@ -519,10 +519,10 @@ function Spark({ data, tone, id }: { data: number[]; tone: UsageTone; id: string
   const area = `${line} L${x(n - 1).toFixed(1)} ${h} L${x(0).toFixed(1)} ${h} Z`
   const color =
     tone === 'crit'
-      ? 'var(--danger)'
+      ? 'var(--druks-color-status-danger)'
       : tone === 'warn'
-        ? 'var(--warning)'
-        : 'var(--success)'
+        ? 'var(--druks-color-status-warning)'
+        : 'var(--druks-color-status-success)'
   const gid = `us-sg-${id}`
   return (
     <svg className="us-spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
@@ -675,7 +675,7 @@ function HoursTile({
                       height: `${(amount / v) * 100}%`,
                       background:
                         color && i !== nowHour
-                          ? `color-mix(in oklch, ${color} 70%, var(--surface-3))`
+                          ? `color-mix(in oklch, ${color} 70%, var(--druks-color-surface-raised))`
                           : color,
                     }}
                   />

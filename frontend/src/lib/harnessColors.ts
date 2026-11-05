@@ -1,8 +1,8 @@
 const HARNESS_PALETTE = [
-  'var(--chart-series-1)',
-  'var(--chart-series-2)',
-  'var(--chart-series-3)',
-  'var(--chart-series-4)',
+  'var(--druks-color-chart-series-1)',
+  'var(--druks-color-chart-series-2)',
+  'var(--druks-color-chart-series-3)',
+  'var(--druks-color-chart-series-4)',
 ]
 
 export const harnessColors = (names: string[]): Record<string, string> =>
