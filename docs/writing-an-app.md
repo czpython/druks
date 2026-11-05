@@ -1575,7 +1575,8 @@ columns, or `RETURNING OLD/NEW`. Make a UUIDv7 in Python, as Druks does.
 Query through `druks.db.db_session()` inside an
 HTTP request, durable step, or other platform-bound session. Outside those,
 `db_session()` raises. A workflow body holds no session: read inside a `@step`.
-`await self.subject`, `start()`, and `dispatch()` bring their own. A row a step
+`await self.subject`, `start()`, `dispatch()`, `cancel()`, and `answer()` bring
+their own. A row a step
 returns is detached: load what the body reads from it inside that step.
 
 HTTP response models subclass `druks.schemas.Schema`, whose snake_case fields

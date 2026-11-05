@@ -835,6 +835,16 @@ async def test_db_session_on_a_task_with_no_bound_session_raises(runtime):
         await asyncio.create_task(read())
 
 
+async def test_cancel_and_answer_bring_their_own_session(runtime):
+    # A workflow body holds no session and cancels a subject's run before it
+    # starts a changed one, so both read like start() does.
+    async def body() -> None:
+        await runtime.SampleFlow.cancel(Widget(id=7))
+        await runtime.SampleFlow.answer(Widget(id=7), "review")
+
+    await asyncio.create_task(body())
+
+
 async def test_body_starts_a_child_run(runtime):
     workflow_id = await runtime.ParentFlow.start(subject=None)
     await _wait_for_run(runtime.engine, workflow_id, lambda row: row.state == RunState.FINISHED)
