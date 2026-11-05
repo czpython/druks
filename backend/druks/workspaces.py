@@ -236,12 +236,13 @@ class Workspace:
 
 
 class RepoWorkspace(Workspace):
-    """A VM with the subject's ``repo`` cloned at ``branch`` (default branch when
-    None), re-cloned before every agent call. The box holds a placeholder in
+    """A VM with the subject's ``repo`` cloned at the subject's ``ref``, a branch or
+    a commit (the default branch when the subject has none), re-cloned before every
+    agent call. The box holds a placeholder in
     ``GH_TOKEN``, and Drukbox points git and ``gh`` at it; the Druks issuer
     answers the token of the GitHub identity this workspace names."""
 
-    branch: str | None = None
+    ref: str | None
     # Commits are authored as the operator's bot: its name and email.
     git_author: tuple[str, str]
     # The account that dispatched the run, credited as a co-author; None credits nobody.
@@ -255,6 +256,7 @@ class RepoWorkspace(Workspace):
         account_id = current_account_id.get()
         account = await Account.get_or_none(id=account_id) if account_id else None
         self.dispatcher = account.username if account else None
+        self.ref = getattr(self.subject, "ref", None)
 
     @classmethod
     def get_repo(cls, subject: Any) -> str:
@@ -282,7 +284,7 @@ class RepoWorkspace(Workspace):
         await checkout.ensure(
             self.host,
             repo_url=f"https://github.com/{self.get_repo(self.subject)}",
-            ref=self.branch,
+            ref=self.ref,
             target_path=self.repo_path,
         )
 

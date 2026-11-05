@@ -51,7 +51,7 @@ class BuildWorkspace(RepoWorkspace):
         repo = self.get_repo(self.subject)
         project_repo = await ProjectRepo.get_for_repo(repo, raise_on_missing=True)
         # None until the implement phase creates the PR branch.
-        self.branch = self.subject.branch
+        self.ref = self.subject.branch
         self.skills = tuple(project_repo.effective_profile.get("recommended_skills", []))
 
     @classmethod

@@ -760,8 +760,8 @@ class Sweep(Workflow):
     workspace_class = RepoWorkspace
 ```
 
-Before every agent call Druks clones the default branch into
-`workspace.repo_path`. Prompts read `{{ workspace.repo_path }}`. The sandbox
+Before every agent call Druks clones the subject's `ref`, a branch or a commit,
+into `workspace.repo_path`. A subject with no `ref` gets the default branch. Prompts read `{{ workspace.repo_path }}`. The sandbox
 holds a placeholder for its GitHub token in `GH_TOKEN`, and Drukbox points git
 and `gh` at it. The Drukbox secrets proxy swaps the placeholder for a token
 that Druks mints on demand, so a long run never outlives its token. The clone
@@ -818,7 +818,7 @@ need on `self`. `prepare()` runs on the box, after that unit of work closed:
 upload a file, write a wrapper, run a command. `self.host` in `setup()` raises,
 and a read in `prepare()` raises `SessionNotBoundError`, so a hook in the
 wrong place fails on its first run. A value that never changes is a class
-attribute, `branch = "main"`. Override `get_agent_run_kwargs()` to grant
+attribute. Override `get_agent_run_kwargs()` to grant
 directories, set `skills` for the skills the box gets, and `get_env()` for
 environment variables every agent call gets:
 

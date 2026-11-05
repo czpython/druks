@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest import mock
 
 import pytest
 from conftest import connect_service
@@ -75,7 +76,7 @@ async def test_repo_workspace_prepares_the_clone_and_the_identity(
     host = _RecordingHost()
     subject = SimpleNamespace(repo="acme/widgets")
     workspace = RepoWorkspace(subject)
-    workspace.branch = "feature"
+    workspace.ref = "feature"
     workspace.host = host  # type: ignore[assignment]
 
     async def _ensure(_host: Any, *, repo_url: str, ref: str | None, target_path: str) -> None:
@@ -92,6 +93,25 @@ async def test_repo_workspace_prepares_the_clone_and_the_identity(
         ("clone", "https://github.com/acme/widgets", "feature", get_repo_root("exedev")),
         ("git_identity",),
     ]
+
+
+@pytest.mark.parametrize(
+    ("subject", "ref"),
+    [
+        (SimpleNamespace(repo="acme/widgets", ref="0f3c9a1"), "0f3c9a1"),
+        (SimpleNamespace(repo="acme/widgets"), None),
+    ],
+)
+async def test_repo_workspace_clones_the_subject_ref(
+    monkeypatch: pytest.MonkeyPatch, subject: SimpleNamespace, ref: str | None
+):
+    bot = SimpleNamespace(get_bot_git_author=mock.AsyncMock(return_value=("bot", "bot@x")))
+    monkeypatch.setattr(workspace_mod.Github, "get_client", mock.AsyncMock(return_value=bot))
+    workspace = RepoWorkspace(subject)
+
+    await workspace.setup()
+
+    assert workspace.ref == ref
 
 
 async def test_repo_workspace_diff_holds_commits_edits_and_untracked_files(tmp_path: Path):
