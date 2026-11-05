@@ -9,11 +9,13 @@ from druks.contrib.software_factory.contracts import (
     QuestionOptionOutput,
     QuestionOutput,
     ReviewOutput,
+    ReviewReport,
     ReviewWork,
 )
 from druks.contrib.software_factory.enums import ReviewDecision
+from druks.contrib.software_factory.journal import BuildJournal
 from druks.contrib.software_factory.policy import PlanGate, RepoPolicy
-from druks.contrib.software_factory.workflows import Build
+from druks.contrib.software_factory.workflows import Build, PullRequestReview
 from druks.workflows import FatalError, OperatorReply, Run
 
 
@@ -701,3 +703,77 @@ async def test_a_rejected_merge_intent_reparks_the_work_gate(monkeypatch):
 
     assert await flow._approved_work() is True
     assert reparked == [True]
+
+
+def _reviewing_flow(monkeypatch, facts: dict) -> tuple[Build, list[dict]]:
+    flow = Build()
+    flow.subject = SimpleNamespace(repo="acme/widget")
+    flow.account = SimpleNamespace(id="acct-1")
+    flow.journal = BuildJournal()
+    monkeypatch.setattr(Build, "pr_number", property(lambda self: 42))
+    dispatched: list[dict] = []
+
+    async def dispatch(cls, **kwargs):
+        dispatched.append(kwargs)
+
+    async def wait(topic, *, label, ttl_seconds):
+        assert topic == "review.completed"
+        return facts
+
+    monkeypatch.setattr(PullRequestReview, "dispatch", classmethod(dispatch))
+    monkeypatch.setattr(flow, "wait", wait)
+    return flow, dispatched
+
+
+async def test_a_build_hands_its_pull_request_to_the_review(monkeypatch):
+    flow, dispatched = _reviewing_flow(
+        monkeypatch,
+        {
+            "decision": "request_changes",
+            "summary": "Rename the flag.",
+            "findings": [],
+            "context_repos": [],
+        },
+    )
+
+    review = await flow._review_work()
+
+    assert dispatched == [{"repo": "acme/widget", "pr_number": 42, "account": flow.account}]
+    assert review == ReviewReport(
+        decision="request_changes", summary="Rename the flag.", findings=[], context_repos=[]
+    )
+    assert flow.journal.reviews == [review]
+
+
+@pytest.mark.parametrize(("max_revisions", "implemented"), [(5, 2), (1, 1)])
+async def test_requested_changes_go_back_to_implement_until_the_cap(
+    monkeypatch, max_revisions, implemented
+):
+    flow = Build()
+    flow._settings = Build.Settings(max_implementation_revisions=max_revisions)
+    flow.journal = SimpleNamespace(implementation_revision=0)
+    decisions = iter(["request_changes", "approve"])
+    calls: list[str] = []
+
+    async def create_branch():
+        return None
+
+    async def implement():
+        flow.journal.implementation_revision += 1
+        calls.append("implement")
+
+    async def review_work():
+        return ReviewReport(decision=next(decisions), summary="", findings=[], context_repos=[])
+
+    async def work_gate():
+        calls.append("work_gate")
+        return True
+
+    monkeypatch.setattr(flow, "_create_branch", create_branch)
+    monkeypatch.setattr(flow, "implement", implement)
+    monkeypatch.setattr(flow, "_review_work", review_work)
+    monkeypatch.setattr(flow, "_work_gate", work_gate)
+
+    await flow._implement_phase()
+
+    assert calls == ["implement"] * implemented + ["work_gate"]

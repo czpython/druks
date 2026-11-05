@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from druks.contrib import software_factory
+from druks.contrib.software_factory.contracts import FindingOutput, ReviewReport
 from druks.contrib.software_factory.journal import BuildJournal
 from druks.contrib.software_factory.models import Project, ProjectRepo
 from druks.contrib.software_factory.policy import RepoPolicy
@@ -16,7 +17,6 @@ _OP_TEMPLATES = [
     "review_plan.md",
     "revise_contract.md",
     "implement.md",
-    "evaluate_implementation.md",
     "triage_human_feedback.md",
 ]
 
@@ -26,7 +26,7 @@ _CALL_KWARGS = {
 }
 
 
-def _build(*, review_code: bool = True) -> SimpleNamespace:
+def _build() -> SimpleNamespace:
     """A stand-in BuildPromptContext exposing the fields the templates read —
     identity facts faked, the journal real and empty."""
     return SimpleNamespace(
@@ -45,8 +45,6 @@ def _build(*, review_code: bool = True) -> SimpleNamespace:
                 description="Apply the Python house rules.",
             )
         ],
-        review_code=review_code,
-        review_mode="approve",
         journal=BuildJournal(),
     )
 
@@ -137,48 +135,36 @@ async def test_verification_profile_renders_ci_provenance_per_command():
     ]
 
 
-async def test_evaluation_prompt_renders_code_review_lens_only_when_enabled():
-    headings = {}
-    for review_code in (True, False):
-        prompt = await render_prompt(
-            "software_factory/build/evaluate_implementation.md",
-            build=_build(review_code=review_code),
-            verification="VERIFICATION-BLOCK",
-            workspace=_workspace(),
+async def test_implement_prompt_renders_the_prior_review():
+    build = _build()
+    finding = FindingOutput(
+        severity="high",
+        summary="The flag keeps its old name.",
+        evidence="Rename it everywhere.",
+        path="app/flags.py",
+        line=12,
+        start_line=None,
+    )
+    build.journal.add(
+        ReviewReport(
+            decision="request_changes",
+            summary="Rename the flag.",
+            findings=[finding],
+            context_repos=[],
         )
-        headings[review_code] = {line for line in prompt.splitlines() if line.startswith("## ")}
-
-    assert headings[False] < headings[True]
-    assert len(headings[True] - headings[False]) == 1
-
-
-async def test_approve_mode_posts_verdict_reviews():
-    prompt = await render_prompt(
-        "software_factory/build/evaluate_implementation.md",
-        build=_build(),
-        verification="VERIFICATION-BLOCK",
-        workspace=_workspace(),
     )
 
-    assert "an **approving** verdict → `APPROVE`" in prompt
-    assert "Submit every review as a `COMMENT` event" not in prompt
-
-
-async def test_comment_mode_swaps_the_review_event_mapping():
-    # The operator authored the PR, and GitHub refuses an author's APPROVE /
-    # REQUEST_CHANGES — the prompt swaps the event mapping for comment-mode.
-    build = _build()
-    build.review_mode = "comment"
-
     prompt = await render_prompt(
-        "software_factory/build/evaluate_implementation.md",
+        "software_factory/build/implement.md",
         build=build,
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
     )
 
-    assert "Submit every review as a `COMMENT` event" in prompt
-    assert "an **approving** verdict → `APPROVE`" not in prompt
+    assert "## Prior implementation review" in prompt
+    assert "### Round 1 — decision: request_changes" in prompt
+    assert "Rename the flag." in prompt
+    assert "- **high** The flag keeps its old name. (`app/flags.py:12`)" in prompt
 
 
 def test_build_prompt_context_covers_template_attrs():

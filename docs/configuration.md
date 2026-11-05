@@ -488,9 +488,9 @@ sandbox's repo, with the expiry GitHub gives it, and fetches a new one before
 it expires. The token reaches that repo and the project's other repos that the
 same installation covers, and no other repo. The `software_factory` build
 clones and pushes as the operator App. A review clones as the reviewer App when
-one is connected. Builds and reviews
-also get the GitHub MCP server for `api.githubcopilot.com`. It acts as the
-review identity through a second entry.
+one is connected. Builds and reviews also get the GitHub MCP server for
+`api.githubcopilot.com`. The build's server acts as the operator App. The
+review's acts as the review identity.
 
 **To upgrade an existing installation**, paste the credentials one time on each
 active host. Open **Settings → Connections → Services**. Connect GitHub with the
@@ -531,8 +531,9 @@ Connect a second App to let reviews approve pull requests and request changes.
 
 Open **Settings → Connections → Services → Github Reviewer** and select
 **Create App**. The flow is the same as for the operator App. Install the
-reviewer App on every repository that has the operator App, because builds also
-post their reviews through it.
+reviewer App on every repository that has the operator App, because a build
+hands its pull request to a review that runs as the reviewer App. When that
+review fails, the build fails with the review's reason.
 
 To register the reviewer App manually:
 

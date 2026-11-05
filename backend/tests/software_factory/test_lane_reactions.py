@@ -5,10 +5,11 @@ import druks.contrib.software_factory.subscribers  # noqa: F401 — registers th
 import pytest
 from druks.accounts.models import Account
 from druks.contrib.software_factory.contracts import ReviewWork
+from druks.contrib.software_factory.datastructures import PullRequest
 from druks.contrib.software_factory.enums import Resolution
 from druks.contrib.software_factory.models import WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
-from druks.contrib.software_factory.workflows import Build
+from druks.contrib.software_factory.workflows import Build, PullRequestReview
 from druks.durable import Run
 from druks.durable.enums import WorkflowEvent
 from druks.events.models import Event
@@ -236,3 +237,64 @@ async def test_merge_before_park_answers_review(druks_db, monkeypatch):
 
     answer.assert_awaited_once_with(item, workflow=Build, action="merged")
     push.assert_not_awaited()
+
+
+async def _answers_to_the_build(monkeypatch) -> list[tuple]:
+    answers: list[tuple] = []
+
+    async def answer(cls, subject, topic, **facts):
+        answers.append((subject.id, topic, facts))
+
+    monkeypatch.setattr(Build, "answer", classmethod(answer))
+    return answers
+
+
+async def _item_with_pr(ticket_key: str, pr_number: int) -> WorkItem:
+    item = await make_test_work_item(
+        repo="acme/widget", title="t", source="linear", ticket_key=ticket_key
+    )
+    await item.update(pr_number=pr_number, branch=f"agent/{ticket_key.lower()}")
+    return item
+
+
+async def test_a_finished_review_answers_the_build_of_its_pull_request(druks_db, monkeypatch):
+    item = await _item_with_pr("ACME-30", 42)
+    answers = await _answers_to_the_build(monkeypatch)
+    result = {"decision": "approve", "summary": "Looks right.", "findings": [], "context_repos": []}
+
+    await publish(
+        WorkflowEvent.FINISHED,
+        subject=PullRequest(id="acme/widget#42").identity,
+        kind=PullRequestReview.kind,
+        result=result,
+    )
+
+    assert answers == [(item.id, "review.completed", result)]
+
+
+@pytest.mark.parametrize("event", [WorkflowEvent.FAILED, WorkflowEvent.CANCELLED])
+async def test_a_stopped_review_fails_the_build_with_its_failure(druks_db, monkeypatch, event):
+    item = await _item_with_pr("ACME-31", 43)
+    answers = await _answers_to_the_build(monkeypatch)
+
+    await publish(
+        event,
+        subject=PullRequest(id="acme/widget#43").identity,
+        kind=PullRequestReview.kind,
+        failure="druks-review has no access",
+    )
+
+    assert answers == [(item.id, "review.completed", {"failure": "druks-review has no access"})]
+
+
+async def test_a_review_of_a_pull_request_no_build_owns_answers_no_one(druks_db, monkeypatch):
+    answers = await _answers_to_the_build(monkeypatch)
+
+    await publish(
+        WorkflowEvent.FINISHED,
+        subject=PullRequest(id="acme/widget#99").identity,
+        kind=PullRequestReview.kind,
+        result={"decision": "approve", "summary": "", "findings": [], "context_repos": []},
+    )
+
+    assert answers == []

@@ -1,9 +1,10 @@
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import ReviewWork
+from druks.contrib.software_factory.datastructures import PullRequest
 from druks.contrib.software_factory.enums import Resolution, Status
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
-from druks.contrib.software_factory.workflows import Build, Profile
+from druks.contrib.software_factory.workflows import Build, Profile, PullRequestReview
 from druks.models import Base
 from druks.signals import publish, subscribe
 from druks.workflows import WorkflowEvent
@@ -48,6 +49,26 @@ async def review_park_marks_ticket_in_review(*, subject: WorkItem, **_: object) 
         await ReviewWork.answer(subject, workflow=Build, action="merged")
     else:
         await subject.set_ticket_status(TicketStatus.IN_REVIEW)
+
+
+@subscribe(WorkflowEvent.FINISHED, workflow=PullRequestReview)
+async def finished_review_answers_the_build(
+    *, subject: PullRequest, result: dict, **_: object
+) -> None:
+    """The build that handed over the pull request waits for the decision. A review a person
+    asked for has no build waiting, and answers no one."""
+    if item := await WorkItem.get_for_pr(repo=subject.repo, pr_number=subject.number):
+        await Build.answer(item, "review.completed", **result)
+
+
+@subscribe(WorkflowEvent.FAILED, workflow=PullRequestReview)
+@subscribe(WorkflowEvent.CANCELLED, workflow=PullRequestReview)
+async def stopped_review_fails_the_build(
+    *, subject: PullRequest, failure: str = "", **_: object
+) -> None:
+    # The build fails with the review's reason instead of waiting out the TTL.
+    if item := await WorkItem.get_for_pr(repo=subject.repo, pr_number=subject.number):
+        await Build.answer(item, "review.completed", failure=failure or "the review stopped")
 
 
 @subscribe("repo.pushed", to_default_branch=True)

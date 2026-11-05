@@ -5,13 +5,12 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from druks.accounts import Account
-from druks.contrib.software_factory.contracts import ImplementationOutput, ReviewWork
-from druks.contrib.software_factory.enums import (
-    EvaluationVerdict,
-    HumanFeedbackAction,
-    Resolution,
-    ReviewDecision,
+from druks.contrib.software_factory.contracts import (
+    ImplementationOutput,
+    ReviewReport,
+    ReviewWork,
 )
+from druks.contrib.software_factory.enums import HumanFeedbackAction, Resolution, ReviewDecision
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.core.services import Github
@@ -26,7 +25,7 @@ from druks.workflows import FatalError, Workflow, step
 from druks.workspaces import RepoWorkspace
 
 from .app import SoftwareFactory
-from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, TICKET_TOOLS
+from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, REVIEW_TTL_SECONDS, TICKET_TOOLS
 from .datastructures import PullRequest
 from .github import get_review_actor
 from .journal import BuildJournal
@@ -67,12 +66,10 @@ class BuildWorkspace(RepoWorkspace):
 
     @classmethod
     async def get_mcp_servers(cls, subject: Any) -> tuple[SandboxMcpServer, ...]:
-        # GitHub MCP acts as the review actor. The clone acts as the operator.
-        actor = await get_review_actor()
         github = SandboxMcpServer(
             name=GITHUB_MCP_NAME,
             url=GITHUB_MCP_URL,
-            secret_id=(await actor.service.get()).id,
+            secret_id=(await cls.github.get()).id,
             resources=await get_project_repos(cls.get_repo(subject)),
         )
         if (await SoftwareFactory.settings()).tracker == "druks":
@@ -138,11 +135,6 @@ class Build(Workflow):
             le=20,
             title="Max implementation revisions",
             description="Implement/review round-trips before parking for a human.",
-        )
-        review_code: bool = Field(
-            default=True,
-            title="Code review",
-            description="Include the advisory code-review lens in the implementation review.",
         )
 
     @classmethod
@@ -247,8 +239,6 @@ class Build(Workflow):
             skills=await Skill.list_delivered(
                 db_session(), self._profile.get("recommended_skills", [])
             ),
-            review_code=self._settings.review_code,
-            review_mode=(await get_review_actor()).mode,
             journal=self.journal,
         )
         return {
@@ -321,13 +311,26 @@ class Build(Workflow):
         await self._create_branch()
         while True:
             await self.implement()
-            evaluation = await SoftwareFactory.evaluate_implementation()
-            if evaluation.verdict == EvaluationVerdict.FAIL and (
+            review = await self._review_work()
+            if review.decision == "request_changes" and (
                 self.journal.implementation_revision < self._settings.max_implementation_revisions
             ):
                 continue
             if await self._work_gate():
                 return
+
+    async def _review_work(self) -> ReviewReport:
+        """Hand the pull request to the standalone review and wait for its decision."""
+        # The body starts the child run, so a replay gets back the review it started.
+        await PullRequestReview.dispatch(
+            repo=(await self.subject).repo, pr_number=self.pr_number, account=self.account
+        )
+        facts = await self.wait(
+            "review.completed", label="Waiting for the review", ttl_seconds=REVIEW_TTL_SECONDS
+        )
+        review = ReviewReport.model_validate(facts)
+        self.journal.add(review)
+        return review
 
     async def _work_gate(self) -> bool:
         """Park for work approval. Return True when the work is done, or False when it
@@ -551,8 +554,9 @@ class PullRequestReview(Workflow):
             subject=PullRequest(id=f"{repo}#{pr_number}"), account_id=account.id, note=note
         )
 
-    async def run(self, note: str = "") -> None:
-        await SoftwareFactory.review_pull_request()
+    async def run(self, note: str = "") -> ReviewReport:
+        # The finished event carries this, so a build waiting on the review reads it there.
+        return await SoftwareFactory.review_pull_request()
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         project_repo = await ProjectRepo.get_for_repo(

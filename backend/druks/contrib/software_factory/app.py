@@ -7,7 +7,6 @@ from druks.agents import Agent
 from druks.apps import App, AppSettings, Choices
 from druks.contrib.software_factory.contracts import (
     ContractRevisionOutput,
-    EvaluationOutput,
     ImplementationOutput,
     PlanOutput,
     RepoProfilerOutput,
@@ -213,11 +212,6 @@ class SoftwareFactory(App):
         description="plan → diff, in a drukbox",
         prompt="software_factory/build/implement.md",
         contract=ImplementationOutput,
-    )
-    evaluate_implementation = Agent(
-        description="verification + code review of the diff, one verdict",
-        prompt="software_factory/build/evaluate_implementation.md",
-        contract=EvaluationOutput,
     )
     triage_human_feedback = Agent(
         description="routes a human's PR feedback back into the workflow",

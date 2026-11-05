@@ -252,7 +252,7 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
         "timeoutSource": "default",
     }
     assert agents["software_factory.implement"]["model"] == "anthropic/claude-opus-4-7"
-    assert agents["software_factory.evaluate_implementation"]["effortSource"] == "default"
+    assert agents["software_factory.triage_human_feedback"]["effortSource"] == "default"
     fields = {field["name"]: field for field in software_factory["workflows"][0]["fields"]}
     assert fields["max_implementation_revisions"]["value"] == 5
     assert fields["plan_gate"] == {
@@ -602,24 +602,24 @@ def test_apps_reject_non_positive_timeout(tmp_path: Path):
     assert response.status_code == 422
 
 
-def test_build_review_code_is_a_workflow_setting(tmp_path: Path):
+def test_build_revision_cap_is_a_workflow_setting(tmp_path: Path):
     with settings_client(tmp_path) as client:
         workflow = _software_factory_app(client)["workflows"][0]
         fields = {field["name"]: field for field in workflow["fields"]}
-        assert fields["review_code"]["value"]
-        assert not fields["review_code"]["overridden"]
+        assert fields["max_implementation_revisions"]["value"] == 5
+        assert not fields["max_implementation_revisions"]["overridden"]
 
         patch = client.patch(
             "/api/settings/apps",
-            json={"workflowSettings": {workflow["kind"]: {"review_code": False}}},
+            json={"workflowSettings": {workflow["kind"]: {"max_implementation_revisions": 3}}},
         )
         assert patch.status_code == 200
         fields = {
             field["name"]: field
             for field in _software_factory_app(client)["workflows"][0]["fields"]
         }
-        assert not fields["review_code"]["value"]
-        assert fields["review_code"]["overridden"]
+        assert fields["max_implementation_revisions"]["value"] == 3
+        assert fields["max_implementation_revisions"]["overridden"]
 
 
 def test_apps_clearing_an_override_reverts_to_the_operator_default(tmp_path: Path):

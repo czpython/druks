@@ -30,21 +30,17 @@
 {% endfor %}
 
 {% endif %}
-{% if build.journal.evaluations %}
+{% if build.journal.reviews %}
 ## Prior implementation review
 
-{% for review in build.journal.evaluations %}
-### Round {{ loop.index }} — verdict: {{ review.verdict.value if review.verdict.value is defined else review.verdict }}
+{% for review in build.journal.reviews %}
+### Round {{ loop.index }} — decision: {{ review.decision }}
 
-{% if review.body %}
-{{ review.body }}
+{{ review.summary }}
 
-{% endif %}
-{% if review.review_notes %}
-#### Review notes
+{% for finding in review.findings %}
+- **{{ finding.severity }}** {{ finding.summary }}{% if finding.path %} (`{{ finding.path }}{% if finding.line %}:{{ finding.line }}{% endif %}`){% endif %}: {{ finding.evidence }}
+{% endfor %}
 
-{{ review.review_notes }}
-
-{% endif %}
 {% endfor %}
 {% endif %}

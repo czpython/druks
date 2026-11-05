@@ -7,12 +7,6 @@ class ReviewDecision(StrEnum):
     COMMENT = "COMMENT"
 
 
-class EvaluationVerdict(StrEnum):
-    PASS = "pass"
-    FAIL = "fail"
-    BLOCKED = "blocked"
-
-
 class HumanFeedbackAction(StrEnum):
     NO_CHANGE = "no_change"
     CHANGE_REQUIRED = "change_required"
