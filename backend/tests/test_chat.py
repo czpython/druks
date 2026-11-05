@@ -42,6 +42,7 @@ from druks.mcp.models import McpServer
 from druks.models import Base
 from druks.redis import get_client
 from druks.sandbox.exceptions import IdentityDenied
+from druks.sandbox.host import Host
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
@@ -89,14 +90,11 @@ async def sandbox(druks_db, conversation, monkeypatch):
         secrets_hash="",
     )
     await identity.bind("chat-sandbox")
-    host = SimpleNamespace(
-        id="chat-sandbox",
-        ssh_username="druks",
-        aclose=AsyncMock(),
-        upload_file=AsyncMock(),
-        download=AsyncMock(),
-        exec=AsyncMock(return_value=SimpleNamespace(returncode=0, stdout="Gate check\n")),
-    )
+    host = Host(record=SimpleNamespace(id="chat-sandbox", ssh_username="druks"))  # type: ignore[arg-type]
+    host.aclose = AsyncMock()
+    host.upload_file = AsyncMock()
+    host.download = AsyncMock()
+    host.exec = AsyncMock(return_value=SimpleNamespace(returncode=0, stdout="Gate check\n"))
     monkeypatch.setattr(service, "get_sandbox", AsyncMock(return_value=(host, identity)))
     monkeypatch.setattr(service, "get_running_sandbox", AsyncMock(return_value=host))
     config = SimpleNamespace(

@@ -62,8 +62,10 @@ analysis = await NightWatch.analyze(image=shot.image)
 ```
 
 Before the agent starts, Druks copies each stored file into the call directory
-in the sandbox. The prompt context receives the sandbox path. A deleted file or
-missing stored content stops the agent call before it starts.
+in the sandbox, and the template receives the sandbox path. `get_prompt_context`
+runs before the box exists and sees the `File` itself; pass it through
+unchanged. A deleted file or missing stored content stops the agent call before
+it starts.
 
 ## Keep a file on an app row
 

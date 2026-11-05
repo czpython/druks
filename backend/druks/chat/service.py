@@ -667,7 +667,7 @@ async def finish_turn(
     )
     if status["archivePath"]:
         session_file = File(path=status["archivePath"])
-        await Workspace(host=bridge.host).save_files(session, [session_file], app="chat")
+        await bridge.host.save_files(session, [session_file], app="chat")
         await conversation.set_session_file(session, session_file)
     await session.commit()
     await reset_live_stream(conversation.id)

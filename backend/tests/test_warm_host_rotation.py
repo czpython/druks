@@ -86,8 +86,8 @@ async def test_warm_host_reused_while_lease_covers_another_call(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
-    first = await flow._lease_host(db_session(), _NONE, [])
-    second = await flow._lease_host(db_session(), _NONE, [])
+    first = await flow._lease_host(_NONE, [])
+    second = await flow._lease_host(_NONE, [])
 
     assert first == second == "host-1"
     assert fake.provisions == ["wf-1:workflow"]
@@ -100,8 +100,8 @@ async def test_warm_host_near_expiry_stays_available_for_renewal(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
-    first = await flow._lease_host(db_session(), _NONE, [])
-    second = await flow._lease_host(db_session(), _NONE, [])
+    first = await flow._lease_host(_NONE, [])
+    second = await flow._lease_host(_NONE, [])
 
     assert first == second == "host-1"
     assert fake.released == []
@@ -115,10 +115,8 @@ async def test_warm_host_keeps_its_entries_across_calls(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
-    first = await flow._lease_host(db_session(), _ANTHROPIC, [])
-    second = await flow._lease_host(
-        db_session(), _config({"anthropic": _ENTRY}, _ANTHROPIC.secrets_hash), []
-    )
+    first = await flow._lease_host(_ANTHROPIC, [])
+    second = await flow._lease_host(_config({"anthropic": _ENTRY}, _ANTHROPIC.secrets_hash), [])
 
     assert first == second == "host-1"
     assert fake.provisions == ["wf-1:workflow:anthropic.20260907T110000"]
@@ -134,8 +132,8 @@ async def test_warm_host_rotates_when_a_call_needs_other_entries(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
-    first = await flow._lease_host(db_session(), _ANTHROPIC, [])
-    second = await flow._lease_host(db_session(), _NONE, [])
+    first = await flow._lease_host(_ANTHROPIC, [])
+    second = await flow._lease_host(_NONE, [])
 
     assert first == "host-1"
     assert second == "host-2"
@@ -152,9 +150,9 @@ async def test_provisioning_key_names_the_pasted_key(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     replaced = _config({"anthropic": _ENTRY}, "anthropic.20260907T120000")
 
-    await _warm_workflow()._lease_host(db_session(), _ANTHROPIC, [])
-    await _warm_workflow()._lease_host(db_session(), _ANTHROPIC, [])
-    await _warm_workflow()._lease_host(db_session(), replaced, [])
+    await _warm_workflow()._lease_host(_ANTHROPIC, [])
+    await _warm_workflow()._lease_host(_ANTHROPIC, [])
+    await _warm_workflow()._lease_host(replaced, [])
 
     assert fake.provisions == [
         "wf-1:workflow:anthropic.20260907T110000",
@@ -171,7 +169,7 @@ async def test_no_warm_host_when_reuse_disabled(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow(reuse=False)
 
-    assert await flow._lease_host(db_session(), _NONE, []) is None
+    assert await flow._lease_host(_NONE, []) is None
     assert fake.provisions == []
 
 
@@ -204,7 +202,7 @@ async def test_a_replay_finds_the_warm_box_through_its_identity(
     config = SimpleNamespace(secrets={}, secret_refs=secrets, secrets_hash=subscription.id)
     flow.account_id = identity.account_id
 
-    assert await flow._lease_host(db_session(), config, secrets) == "host-crashed"
+    assert await flow._lease_host(config, secrets) == "host-crashed"
 
     assert client.reattached == ["host-crashed"]
     assert client.provisions == []

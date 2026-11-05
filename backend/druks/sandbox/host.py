@@ -1,21 +1,29 @@
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
+import mimetypes
 import shlex
 import subprocess
 from collections.abc import Awaitable, Sequence
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Self
 
 import asyncssh
 from drukbox_sdk import SandboxHost as SandboxHostRecord
 from drukbox_sdk.exceptions import SandboxAPIError, SandboxUnavailableError
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from druks.core.models import uuid7_str
 from druks.core.utils.time import ensure_utc
 from druks.durable.enums import AgentCallStatus
+from druks.files.constants import MAX_FILE_BYTES
+from druks.files.datastructures import File
+from druks.files.models import FileRecord
+from druks.files.storage import get_file_storage
 from druks.harnesses.artifacts import persist_manifest, persist_prompt, read_cost
 from druks.harnesses.exceptions import (
     HarnessError,
@@ -134,6 +142,62 @@ class Host:
                 f"failed to write secret to {remote}: "
                 f"exit={result.returncode} {result.stderr.strip()}"
             )
+
+    async def save_files(
+        self,
+        session: AsyncSession,
+        files: list[File],
+        *,
+        app: str,
+        agent_call_id: str | None = None,
+    ) -> None:
+        storage = get_file_storage()
+        staged: list[tuple[File, FileRecord, Path]] = []
+        try:
+            for file in files:
+                record, temp = await self._pull_output_file(
+                    file, app=app, agent_call_id=agent_call_id
+                )
+                staged.append((file, record, temp))
+            session.add_all([record for _, record, _ in staged])
+            await session.flush()
+            for file, record, temp in staged:
+                storage.save(temp, record.id)
+                file._hydrate(record)
+        except BaseException:
+            for _, record, temp in staged:
+                storage.discard(temp)
+                storage.delete(record.id)
+            raise
+
+    async def _pull_output_file(
+        self, file: File, *, app: str, agent_call_id: str | None
+    ) -> tuple[FileRecord, Path]:
+        reported = file.path
+        name = PurePosixPath(reported).name
+        file_id = uuid7_str()
+        temp = get_file_storage().new_temp(file_id)
+        try:
+            await self.download(
+                remote=reported,
+                local=temp,
+                workspace_root=get_work_root(self.ssh_username),
+                max_bytes=MAX_FILE_BYTES,
+            )
+            sha256 = await asyncio.to_thread(_file_sha256, temp)
+        except BaseException:
+            get_file_storage().discard(temp)
+            raise
+        record = FileRecord(
+            id=file_id,
+            name=name,
+            size=temp.stat().st_size,
+            content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
+            sha256=sha256,
+            app=app,
+            agent_call_id=agent_call_id,
+        )
+        return record, temp
 
     async def download(
         self,
@@ -863,3 +927,8 @@ async def _first_byte_killer(
 
 def _write_metadata(path: Path, data: dict[str, object]) -> None:
     path.write_text(json.dumps(data, indent=2))
+
+
+def _file_sha256(path: Path) -> str:
+    with path.open("rb") as content:
+        return hashlib.file_digest(content, "sha256").hexdigest()

@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import inspect
 import json
@@ -945,77 +946,74 @@ class Workflow:
         # values (expensive derived prose); the call's own kwargs win on collision.
         return dict(context)
 
-    async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
-        # Extend via super() to add the fields workspace_class needs beyond these.
-        return {"host": host, "subject": await self.subject}
-
-    async def get_workspace(self, host: "Host") -> Workspace:
-        # Built per agent call, so nothing is held across steps.
-        return self.workspace_class(**await self.get_workspace_kwargs(host))
-
     @asynccontextmanager
     async def _workspace(
         self,
-        session: AsyncSession,
         host_id: str | None,
         step: str,
         refs: list[SecretRef],
         *,
+        workspace: Workspace,
         secrets: dict[str, Secret],
         secrets_hash: str,
     ) -> AsyncIterator[Workspace]:
         # A warm run attaches the run's held VM; the rest get a fresh ephemeral VM.
-        # Either way get_workspace() turns the VM into the workspace, fresh per call,
-        # so nothing (connection or credential) is held across steps.
-        identity = None
-        if refs and not host_id:
-            identity = await SandboxIdentity.lookup(
-                session,
-                account_id=self.account_id,
-                run_id=self._workflow_id,
-                scoped_to=step,
-                secret_refs=refs,
-            )
-        if host_id:
-            vm = sandbox_client.attach(host_id=host_id)
-        elif identity:
-            # A crashed attempt left its box behind. Its identity finds it again.
-            vm = sandbox_client.resume(host_id=identity.host_id)
-        else:
-            template = None
-            if self.sandbox:
-                template = await get_template_id(self.sandbox)
-                await set_run_phase("provisioning_vm")
-            # A box that fetches gets its own identity, and the key names it. A
-            # replay finds the box through the identity, above.
-            identity, entries, key = None, {}, secrets_hash
-            if refs:
-                identity, entries = await SandboxIdentity.create(
+        # Either way the workspace, read before the box, gets the VM for this call
+        # only, so nothing (connection or credential) is held across steps. The
+        # identity row stays in the session that read it, which binds it to the
+        # box; that session's unit of work closes before the boot.
+        async with step_session() as session:
+            identity = None
+            if refs and not host_id:
+                identity = await SandboxIdentity.lookup(
                     session,
                     account_id=self.account_id,
                     run_id=self._workflow_id,
                     scoped_to=step,
                     secret_refs=refs,
-                    secrets_hash=secrets_hash,
                 )
-                key = identity.id
-            vm = sandbox_client.ephemeral(
-                idempotency_key=provisioning_key(self._workflow_id, step, key),
-                secrets={**secrets, **entries},
-                template=template,
-                identity=identity,
-                lease_seconds=WORKFLOW_HOST_LEASE_SECONDS,
-            )
-        try:
-            async with vm as box, sandbox_client.lease(host_id=box.id):
-                yield await self.get_workspace(box)
-        except HostGone as error:
-            await self._reap_run()
-            raise HarnessSandboxProvisioningError(str(error)) from error
-        except HarnessSandboxProvisioningError:
             if host_id:
+                vm = sandbox_client.attach(host_id=host_id)
+            elif identity:
+                # A crashed attempt left its box behind. Its identity finds it again.
+                vm = sandbox_client.resume(host_id=identity.host_id)
+            else:
+                template = None
+                if self.sandbox:
+                    template = await get_template_id(self.sandbox)
+                    await set_run_phase("provisioning_vm")
+                # A box that fetches gets its own identity, and the key names it. A
+                # replay finds the box through the identity, above.
+                identity, entries, key = None, {}, secrets_hash
+                if refs:
+                    identity, entries = await SandboxIdentity.create(
+                        session,
+                        account_id=self.account_id,
+                        run_id=self._workflow_id,
+                        scoped_to=step,
+                        secret_refs=refs,
+                        secrets_hash=secrets_hash,
+                    )
+                    key = identity.id
+                vm = sandbox_client.ephemeral(
+                    idempotency_key=provisioning_key(self._workflow_id, step, key),
+                    secrets={**secrets, **entries},
+                    template=template,
+                    identity=identity,
+                    lease_seconds=WORKFLOW_HOST_LEASE_SECONDS,
+                )
+            await session.commit()
+            try:
+                async with vm as box, sandbox_client.lease(host_id=box.id):
+                    workspace.host = box
+                    yield workspace
+            except HostGone as error:
                 await self._reap_run()
-            raise
+                raise HarnessSandboxProvisioningError(str(error)) from error
+            except HarnessSandboxProvisioningError:
+                if host_id:
+                    await self._reap_run()
+                raise
 
     async def exec(
         self, command: list[str], *, timeout: float = 600.0
@@ -1023,62 +1021,69 @@ class Workflow:
         """Run one command in a VM of this workflow's workspace, then release the VM.
         The VM comes from the workflow's sandbox template and holds the workspace's
         secrets. Call it from ``run()`` or inside a ``@step``."""
-        refs = await self.workspace_class.get_secret_refs(await self.subject)
+        async with step_session():
+            subject = await self.subject
+            refs = await self.workspace_class.get_secret_refs(subject)
+            workspace = self.workspace_class(subject)
+            await workspace.setup()
         digest = hashlib.sha256(json.dumps([ref.secret_id for ref in refs]).encode()).hexdigest()
         async with self._workspace(
-            db_session(), None, "exec", refs, secrets={}, secrets_hash=digest
+            None, "exec", refs, workspace=workspace, secrets={}, secrets_hash=digest
         ) as workspace:
-            return await workspace.exec(command, timeout=timeout)
+            # The box work is a task of its own, with no session bound.
+            return await asyncio.create_task(workspace.exec(command, timeout=timeout))
 
-    async def _lease_host(
-        self, session: AsyncSession, config: "AgentConfig", refs: list[SecretRef]
-    ) -> str | None:
+    async def _lease_host(self, config: "AgentConfig", refs: list[SecretRef]) -> str | None:
         # The warm VM, provisioned once per segment; state is carried in git, so
         # only the host-id matters across steps — held-across-steps never fights replay.
         if not self.steps_reuse_sandbox:
             return
-        # A crashed process left its box behind. Its identity finds it again.
-        if not self._host and refs:
-            identity = await SandboxIdentity.lookup(
-                session,
-                account_id=self.account_id,
-                run_id=self._workflow_id,
-                scoped_to="workflow",
-                secret_refs=refs,
-            )
-            if identity:
-                self._host = await sandbox_client.reattach(host_id=identity.host_id)
-                self._host_secrets_hash = config.secrets_hash
-        if self._host and self._host_secrets_hash != config.secrets_hash:
-            # Drukbox binds entries at creation.
-            await self._reap_run()
-        if not self._host:
-            template = None
-            if self.sandbox:
-                template = await get_template_id(self.sandbox)
-                await set_run_phase("provisioning_vm")
-            # The key names the pasted key the VM holds, so a replay finds its VM.
-            # A box that fetches gets its own identity, and the key names that
-            # instead. A replay finds the box through the identity, above.
-            identity, entries, key = None, {}, config.secrets_hash
-            if refs:
-                identity, entries = await SandboxIdentity.create(
+        # The identity row stays in the session that read it, which binds it to
+        # the box; that session's unit of work closes before the boot.
+        async with step_session() as session:
+            # A crashed process left its box behind. Its identity finds it again.
+            if not self._host and refs:
+                identity = await SandboxIdentity.lookup(
                     session,
                     account_id=self.account_id,
                     run_id=self._workflow_id,
                     scoped_to="workflow",
                     secret_refs=refs,
-                    secrets_hash=config.secrets_hash,
                 )
-                key = identity.id
-            self._host = await sandbox_client.provision(
-                idempotency_key=provisioning_key(self._workflow_id, "workflow", key),
-                secrets={**config.secrets, **entries},
-                template=template,
-                identity=identity,
-                lease_seconds=WORKFLOW_HOST_LEASE_SECONDS,
-            )
-            self._host_secrets_hash = config.secrets_hash
+                if identity:
+                    self._host = await sandbox_client.reattach(host_id=identity.host_id)
+                    self._host_secrets_hash = config.secrets_hash
+            if self._host and self._host_secrets_hash != config.secrets_hash:
+                # Drukbox binds entries at creation.
+                await self._reap_run()
+            if not self._host:
+                template = None
+                if self.sandbox:
+                    template = await get_template_id(self.sandbox)
+                    await set_run_phase("provisioning_vm")
+                # The key names the pasted key the VM holds, so a replay finds its VM.
+                # A box that fetches gets its own identity, and the key names that
+                # instead. A replay finds the box through the identity, above.
+                identity, entries, key = None, {}, config.secrets_hash
+                if refs:
+                    identity, entries = await SandboxIdentity.create(
+                        session,
+                        account_id=self.account_id,
+                        run_id=self._workflow_id,
+                        scoped_to="workflow",
+                        secret_refs=refs,
+                        secrets_hash=config.secrets_hash,
+                    )
+                    key = identity.id
+                await session.commit()
+                self._host = await sandbox_client.provision(
+                    idempotency_key=provisioning_key(self._workflow_id, "workflow", key),
+                    secrets={**config.secrets, **entries},
+                    template=template,
+                    identity=identity,
+                    lease_seconds=WORKFLOW_HOST_LEASE_SECONDS,
+                )
+                self._host_secrets_hash = config.secrets_hash
         return self._host.id
 
     async def _reap_run(self) -> None:
@@ -1356,6 +1361,9 @@ async def _run_instance(
     instance, run_kwargs = _bind_instance(cls, subject, input, account=account)
     instance._workflow_id = DBOS.workflow_id  # type: ignore[assignment]
     token = current_workflow.set(instance)
+    # The run's account is ambient, as a request's is: a workspace reads the
+    # dispatcher from it, and a child run started from the body attributes to it.
+    account_token = current_account_id.set(instance.account_id)
     try:
         return await _execute_run(
             instance._workflow_id,
@@ -1366,6 +1374,7 @@ async def _run_instance(
             conversation_id=instance.conversation_id,
         )
     finally:
+        current_account_id.reset(account_token)
         current_workflow.reset(token)
         await instance._reap_run()
 

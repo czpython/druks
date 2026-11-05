@@ -1,6 +1,5 @@
 import logging
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -33,9 +32,6 @@ from .journal import BuildJournal
 from .policy import PlanGate, RepoPolicy
 from .prompt_context import BuildPromptContext
 
-if TYPE_CHECKING:
-    from druks.sandbox.host import Host
-
 logger = logging.getLogger(__name__)
 
 
@@ -46,13 +42,18 @@ async def get_project_repos(repo: str) -> tuple[str, ...]:
     return (repo, *(sibling.full_name for sibling in siblings))
 
 
-@dataclass(frozen=True, kw_only=True)
 class BuildWorkspace(RepoWorkspace):
-    skills: tuple[str, ...]
-
     @property
     def workspace_root(self) -> str:
         return get_work_root(self.host.ssh_username)
+
+    async def setup(self) -> None:
+        await super().setup()
+        repo = self.get_repo(self.subject)
+        project_repo = await ProjectRepo.get_for_repo(repo, raise_on_missing=True)
+        # None until the implement phase creates the PR branch.
+        self.branch = self.subject.branch
+        self.skills = tuple(project_repo.effective_profile.get("recommended_skills", []))
 
     @classmethod
     async def get_secrets(cls, subject: Any) -> list[SandboxSecret]:
@@ -79,17 +80,16 @@ class BuildWorkspace(RepoWorkspace):
             return (github, get_druks_mcp_server(allowed_tools=TICKET_TOOLS))
         return (github,)
 
-    async def run_agent(self, *, account_id: str | None, **kwargs: Any):
+    async def prepare(self) -> None:
         # Agents clone related repos on demand. The --add-dir target must exist first.
         related_root = get_related_root(self.host.ssh_username)
         await self.host.exec(["mkdir", "-p", related_root], timeout=10.0)
-        return await super().run_agent(account_id=account_id, **kwargs)
+        await super().prepare()
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
         # Never the repo cwd. Claude hangs with no output on ``--add-dir <cwd>``.
         kwargs = super().get_agent_run_kwargs(**kwargs)
         kwargs["add_dirs"] = (get_related_root(self.host.ssh_username),)
-        kwargs["skills"] = self.skills
         return kwargs
 
 
@@ -218,16 +218,6 @@ class Build(Workflow):
 
         if await self._plan_phase():
             await self._implement_phase()
-
-    async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
-        kwargs = await super().get_workspace_kwargs(host)
-        kwargs = {
-            **kwargs,
-            # None until the implement phase creates the PR branch.
-            "branch": kwargs["subject"].branch,
-            "skills": tuple(self._profile.get("recommended_skills", [])),
-        }
-        return kwargs
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         work_item = await self.subject
@@ -524,9 +514,9 @@ class ReviewWorkspace(RepoWorkspace):
     def related_root(self) -> str:
         return get_related_root(self.host.ssh_username)
 
-    async def run_agent(self, *, account_id: str | None, **kwargs: Any):
+    async def prepare(self) -> None:
         await self.host.exec(["mkdir", "-p", self.related_root], timeout=10.0)
-        return await super().run_agent(account_id=account_id, **kwargs)
+        await super().prepare()
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
         kwargs = super().get_agent_run_kwargs(**kwargs)

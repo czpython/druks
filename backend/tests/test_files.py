@@ -1,5 +1,6 @@
 import hashlib
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -12,8 +13,8 @@ from druks.files.models import FileRecord
 from druks.files.storage import LocalFileStorage, reap_deleted_file_bytes
 from druks.models import Base
 from druks.sandbox.exceptions import SandboxDownloadError
+from druks.sandbox.host import Host
 from druks.testing import seed_call, seed_run
-from druks.workspaces import Workspace
 from sqlalchemy import Integer, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
@@ -39,6 +40,10 @@ async def _survey_call(session) -> AgentCall:
     return await seed_call(session, await seed_run(session, kind="survey"), agent="survey")
 
 
+def _host(ssh_username: str) -> Host:
+    return Host(record=SimpleNamespace(id="h1", ssh_username=ssh_username))  # type: ignore[arg-type]
+
+
 async def _hydrate_file(
     session, tmp_path, monkeypatch, *, name="home.png", content=b"image"
 ) -> File:
@@ -48,18 +53,14 @@ async def _hydrate_file(
         {"shots": [{"screen": "home", "image": f"shots/{name}"}]},
         context={"workspace_files": workspace_files},
     )
-    host = MagicMock(ssh_username="root")
 
-    async def download(*, remote, local, workspace_root, max_bytes):
+    async def download(self, *, remote, local, workspace_root, max_bytes):
         local.write_bytes(content)
 
-    host.download = AsyncMock(side_effect=download)
+    monkeypatch.setattr(Host, "download", download)
     call = await _survey_call(session)
-    await Workspace(host=host).save_files(
-        session,
-        workspace_files,
-        app="field_notes",
-        agent_call_id=call.id,
+    await _host("root").save_files(
+        session, workspace_files, app="field_notes", agent_call_id=call.id
     )
     return output.shots[0].image
 
@@ -202,59 +203,38 @@ async def test_hydration_leaves_no_canonical_bytes_when_a_later_pull_fails(
         },
         context={"workspace_files": workspace_files},
     )
-    host = MagicMock(ssh_username="root")
 
-    async def download(*, remote, local, workspace_root, max_bytes):
+    async def download(self, *, remote, local, workspace_root, max_bytes):
         if remote.endswith("home.png"):
             local.write_bytes(b"first")
             return
         raise SandboxDownloadError("reported file is missing: shots/missing.png")
 
-    host.download = AsyncMock(side_effect=download)
+    monkeypatch.setattr(Host, "download", download)
 
     call = await _survey_call(druks_db)
     with pytest.raises(SandboxDownloadError, match="missing"):
-        await Workspace(host=host).save_files(
-            druks_db,
-            workspace_files,
-            app="field_notes",
-            agent_call_id=call.id,
+        await _host("root").save_files(
+            druks_db, workspace_files, app="field_notes", agent_call_id=call.id
         )
 
     files_dir = tmp_path / "files"
     assert list(files_dir.iterdir()) == []
 
 
-async def test_prepared_context_uploads_into_the_call_directory(druks_db, tmp_path, monkeypatch):
-    """A hydrated handle becomes a path inside the call's own directory."""
+async def test_a_file_uploads_into_the_call_directory(druks_db, tmp_path, monkeypatch):
+    """A hydrated handle lands in the call's own directory on the box and reads
+    as its path there."""
     file = await _hydrate_file(druks_db, tmp_path, monkeypatch)
     host = MagicMock(ssh_username="root")
     host.upload_file = AsyncMock()
 
-    context = await Workspace(host=host).prepare_context(
-        druks_db, {"source": file}, agent_call_id="call-2"
-    )
+    remote = await file.upload(host, "call-2")
 
-    assert context == {"source": f"/root/work/.druks-files/call-2/{file.id}/home.png"}
+    assert remote == f"/root/work/.druks-files/call-2/{file.id}/home.png"
     host.upload_file.assert_awaited_once_with(
-        local=LocalFileStorage(tmp_path / "files").path(file.id),
-        remote=context["source"],
+        local=LocalFileStorage(tmp_path / "files").path(file.id), remote=remote
     )
-
-
-async def test_prepare_context_refuses_a_deleted_file(druks_db, tmp_path, monkeypatch):
-    """A deleted handle never uploads bytes into the next agent call."""
-    file = await _hydrate_file(druks_db, tmp_path, monkeypatch)
-    await file.delete()
-    host = MagicMock(ssh_username="root")
-    host.upload_file = AsyncMock()
-
-    with pytest.raises(FileUnavailableError, match="deleted or missing"):
-        await Workspace(host=host).prepare_context(
-            druks_db, {"source": file}, agent_call_id="call-2"
-        )
-
-    host.upload_file.assert_not_awaited()
 
 
 async def test_file_field_round_trip_loads_metadata_with_the_row(druks_db, tmp_path, monkeypatch):

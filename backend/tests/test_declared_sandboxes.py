@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock
 
 import druks.workflows as workflow_module
 import pytest
-from druks.db import db_session
 from druks.sandbox import datastructures, templates
 from druks.sandbox.client import Client
 from druks.sandbox.constants import WORKFLOW_HOST_LEASE_SECONDS
 from druks.sandbox.datastructures import Sandbox
 from druks.sandbox.exceptions import TemplateNotFound, TemplateUnavailable
 from druks.workflows import Workflow
+from druks.workspaces import Workspace
 
 
 def test_sandbox_reads_the_script_beside_its_class_module(monkeypatch, tmp_path):
@@ -321,9 +321,7 @@ async def test_warm_lease_uses_workflow_template(monkeypatch):
     monkeypatch.setattr(workflow_module, "set_run_phase", AsyncMock())
 
     assert (
-        await workflow._lease_host(
-            db_session(), SimpleNamespace(secrets={}, secret_refs=[], secrets_hash=""), []
-        )
+        await workflow._lease_host(SimpleNamespace(secrets={}, secret_refs=[], secrets_hash=""), [])
         == "host-1"
     )
     resolve.assert_awaited_once_with(sandbox)
@@ -350,7 +348,6 @@ async def test_ephemeral_lease_uses_workflow_template(monkeypatch):
     workflow.sandbox = sandbox
     workflow._workflow_id = "run-1"
     workflow.account_id = None
-    workflow.get_workspace = AsyncMock(return_value="workspace")
     resolve = AsyncMock(return_value="template-1")
     monkeypatch.setattr(
         workflow_module,
@@ -361,9 +358,9 @@ async def test_ephemeral_lease_uses_workflow_template(monkeypatch):
     monkeypatch.setattr(workflow_module, "set_run_phase", AsyncMock())
 
     async with workflow._workspace(
-        db_session(), None, "summarize", [], secrets={}, secrets_hash=""
+        None, "summarize", [], workspace=Workspace(None), secrets={}, secrets_hash=""
     ) as workspace:
-        assert workspace == "workspace"
+        assert workspace.host is box
 
     resolve.assert_awaited_once_with(sandbox)
     assert calls == [

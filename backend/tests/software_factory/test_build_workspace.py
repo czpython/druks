@@ -14,7 +14,7 @@ from druks.contrib.software_factory.constants import (
     TICKET_TOOLS,
 )
 from druks.contrib.software_factory.models import Project, ProjectRepo
-from druks.contrib.software_factory.workflows import Build, BuildWorkspace, ReviewWorkspace
+from druks.contrib.software_factory.workflows import BuildWorkspace, ReviewWorkspace
 from druks.core.services import Github
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox import SandboxSecret
@@ -29,17 +29,13 @@ class _FakeSandbox:
 
 
 def test_build_workspace_grants_related_root_add_dir():
-    workspace = BuildWorkspace(
-        host=_FakeSandbox(),  # type: ignore[arg-type]
-        subject=SimpleNamespace(repo="o/main"),
-        branch="b",
-        skills=("python-house-rules",),
-    )
+    workspace = BuildWorkspace(SimpleNamespace(repo="o/main"))
+    workspace.host = _FakeSandbox()  # type: ignore[assignment]
     kwargs = workspace.get_agent_run_kwargs(model="m")
 
     assert kwargs["model"] == "m"
     assert kwargs["add_dirs"] == (get_related_root("exedev"),)
-    assert kwargs["skills"] == ("python-house-rules",)
+    assert "skills" not in kwargs
     assert "mcp_servers" not in kwargs
     assert "extra_env" not in kwargs
 
@@ -52,21 +48,16 @@ async def test_build_workspace_makes_the_related_root_before_the_clone(
     async def fake_exec(self: Any, argv: list[str], **_: Any) -> None:
         execs.append(argv)
 
-    async def base_run_agent(self: Any, **kwargs: Any) -> str:
-        execs.append(["run_agent"])
-        return "ran"
+    async def base_prepare(self: Any) -> None:
+        execs.append(["prepare"])
 
-    workspace = BuildWorkspace(
-        host=Host(record=SimpleNamespace(id="h1", ssh_username="exedev")),  # type: ignore[arg-type]
-        subject=SimpleNamespace(repo="o/main"),
-        branch="b",
-        skills=(),
-    )
+    workspace = BuildWorkspace(SimpleNamespace(repo="o/main"))
+    workspace.host = Host(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
     monkeypatch.setattr(Host, "exec", fake_exec)
-    monkeypatch.setattr(RepoWorkspace, "run_agent", base_run_agent)
+    monkeypatch.setattr(RepoWorkspace, "prepare", base_prepare)
 
-    assert await workspace.run_agent(account_id=None) == "ran"
-    assert execs == [["mkdir", "-p", get_related_root("exedev")], ["run_agent"]]
+    await workspace.prepare()
+    assert execs == [["mkdir", "-p", get_related_root("exedev")], ["prepare"]]
 
 
 async def test_build_workspace_declares_its_github_mcp_as_the_review_actor(druks_db):
@@ -91,21 +82,24 @@ async def test_build_workspace_declares_its_github_mcp_as_the_review_actor(druks
     )
 
 
-async def test_get_workspace_kwargs_carries_the_build_fields():
-    host = Host(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
+async def test_setup_reads_the_build_fields(monkeypatch: pytest.MonkeyPatch):
+    async def get_for_repo(repo: str, *, raise_on_missing: bool = False) -> SimpleNamespace:
+        return SimpleNamespace(effective_profile={"recommended_skills": ["python-house-rules"]})
 
-    workflow = Build()
-    workflow.input = Build._run_input_model()
-    workflow.subject = SimpleNamespace(repo="o/app", branch="agent/ACME-1")
-    workflow._profile = {"recommended_skills": ["python-house-rules"]}
-    kwargs = await workflow.get_workspace_kwargs(host)
+    monkeypatch.setattr(
+        "druks.contrib.software_factory.workflows.ProjectRepo.get_for_repo", get_for_repo
+    )
+    _bot_author(monkeypatch)
+    subject = SimpleNamespace(repo="o/app", branch="agent/ACME-1")
 
-    assert kwargs == {
-        "host": host,
-        "subject": workflow.__dict__["subject"],
-        "branch": "agent/ACME-1",
-        "skills": ("python-house-rules",),
-    }
+    workspace = BuildWorkspace(subject)
+    await workspace.setup()
+
+    assert workspace.subject is subject
+    assert workspace.branch == "agent/ACME-1"
+    assert workspace.skills == ("python-house-rules",)
+    assert workspace.git_author == ("app[bot]", "1+app[bot]@users.noreply.github.com")
+    assert workspace.dispatcher is None
 
 
 async def _required_servers(monkeypatch: pytest.MonkeyPatch, tracker: str):
@@ -194,7 +188,7 @@ class _IdentitySandbox:
         return SimpleNamespace(returncode=result.returncode, stderr="")
 
 
-def _dispatched_by(monkeypatch: pytest.MonkeyPatch, username: str | None) -> SimpleNamespace:
+def _bot_author(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _bot_git_author() -> tuple[str, str]:
         return "app[bot]", "1+app[bot]@users.noreply.github.com"
 
@@ -202,12 +196,6 @@ def _dispatched_by(monkeypatch: pytest.MonkeyPatch, username: str | None) -> Sim
         return SimpleNamespace(get_bot_git_author=_bot_git_author)
 
     monkeypatch.setattr("druks.core.services.Github.get_client", _client)
-    account = SimpleNamespace(username=username) if username else None
-
-    async def _get_account(_model, _id):
-        return account
-
-    return SimpleNamespace(get=_get_account)
 
 
 async def test_set_git_identity_stamps_the_workspace_repo(
@@ -215,15 +203,14 @@ async def test_set_git_identity_stamps_the_workspace_repo(
 ) -> None:
     repo_path = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", str(repo_path)], check=True)
-    workspace = RepoWorkspace(
-        host=_IdentitySandbox(repo_path),  # type: ignore[arg-type]
-        subject=SimpleNamespace(repo="o/app"),
-    )
+    workspace = RepoWorkspace(SimpleNamespace(repo="o/app"))
+    workspace.git_author = ("app[bot]", "1+app[bot]@users.noreply.github.com")
+    workspace.dispatcher = "dev@example.com"
+    workspace.host = _IdentitySandbox(repo_path)  # type: ignore[assignment]
     hook = repo_path / ".git" / "hooks" / "prepare-commit-msg"
     message = repo_path / "COMMIT_EDITMSG"
 
-    session = _dispatched_by(monkeypatch, "dev@example.com")
-    await workspace.set_git_identity(session, "account-1")
+    await workspace.set_git_identity()
     # A co-author line already in the message does not take the dispatcher's place.
     message.write_text("Change\n\nCo-Authored-By: Dana <dana@example.com>\n")
     subprocess.run([str(hook), str(message), "squash"], check=True)
@@ -238,14 +225,14 @@ async def test_set_git_identity_stamps_the_workspace_repo(
     assert message.read_text().count("Co-Authored-By: dev@example.com <dev@example.com>") == 1
 
     # A reused warm host follows the next run's dispatcher.
-    session = _dispatched_by(monkeypatch, "second@example.com")
-    await workspace.set_git_identity(session, "account-2")
+    workspace.dispatcher = "second@example.com"
+    await workspace.set_git_identity()
     message.write_text("Change\n")
     subprocess.run([str(hook), str(message)], check=True)
     assert "dev@example.com" not in message.read_text()
     assert "Co-Authored-By: second@example.com" in message.read_text()
 
     # A system dispatch keeps the author but credits nobody.
-    session = _dispatched_by(monkeypatch, None)
-    await workspace.set_git_identity(session, None)
+    workspace.dispatcher = None
+    await workspace.set_git_identity()
     assert not hook.exists()

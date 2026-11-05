@@ -812,16 +812,28 @@ The operator connects the service in **Settings → Connections → Services**. 
 sandbox's identity stores the service and the repos. The issuer reads only
 those, so a request cannot select another repo or identity.
 
-Override `Workflow.get_workspace_kwargs()` to pass `branch` or the fields a
-subclass adds. Extend `RepoWorkspace` by adding fields, not by cloning again.
-Override `run_agent()` to prepare the VM before the call,
-`get_agent_run_kwargs()` to grant directories or skills, and `get_env()` to give
-every agent call environment variables:
+A workspace reads before the box exists and acts on it after. `setup()` runs
+inside a unit of work, before the box: read rows and keep what the box will
+need on `self`. `prepare()` runs on the box, after that unit of work closed:
+upload a file, write a wrapper, run a command. `self.host` in `setup()` raises,
+and a read in `prepare()` raises `SessionNotBoundError`, so a hook in the
+wrong place fails on its first run. A value that never changes is a class
+attribute, `branch = "main"`. Override `get_agent_run_kwargs()` to grant
+directories, set `skills` for the skills the box gets, and `get_env()` for
+environment variables every agent call gets:
 
 ```python
-@dataclass(frozen=True, kw_only=True)
 class DeployWorkspace(RepoWorkspace):
     deploy_token: str
+
+    async def setup(self) -> None:
+        await super().setup()
+        deployment = await Deployment.get(id=self.subject.deployment_id)
+        self.deploy_token = deployment.token
+
+    async def prepare(self) -> None:
+        await super().prepare()
+        await self.host.upload_file(local=DEPLOY_SCRIPT, remote="deploy.sh")
 
     def get_env(self) -> dict[str, str]:
         return {"DEPLOY_TOKEN": self.deploy_token}
