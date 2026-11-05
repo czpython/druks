@@ -73,9 +73,8 @@ async def test_repo_workspace_prepares_the_clone_and_the_identity(
     monkeypatch: pytest.MonkeyPatch,
 ):
     host = _RecordingHost()
-    subject = SimpleNamespace(repo="acme/widgets")
+    subject = SimpleNamespace(repo="acme/widgets", ref="feature")
     workspace = RepoWorkspace(subject)
-    workspace.branch = "feature"
     workspace.host = host  # type: ignore[assignment]
 
     async def _ensure(_host: Any, *, repo_url: str, ref: str | None, target_path: str) -> None:

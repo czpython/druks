@@ -45,7 +45,7 @@ async def test_survey_workspace_clones_the_subject_repo(druks_db, monkeypatch):
     await workspace.setup()
     workspace.host = host
 
-    assert (workspace.get_repo(workspace.subject), workspace.branch) == ("acme/widgets", None)
+    assert (workspace.subject.repo, workspace.subject.ref) == ("acme/widgets", None)
     assert workspace.repo_path == get_repo_root("exedev")
     # The box's secret names the operator's vault row and the repo before the box exists.
     row = await connect_service(

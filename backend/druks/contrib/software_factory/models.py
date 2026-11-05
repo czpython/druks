@@ -109,11 +109,17 @@ class ProjectRepo(StoredSubject):
         ForeignKey("projects.id", ondelete="CASCADE"),
     )
     full_name: Mapped[str] = mapped_column(unique=True)
+    # A Profile run clones the default branch.
+    ref = None
     # A free-form role for the dashboard, for example "design", "infra", or "app".
     purpose: Mapped[str | None]
     profile: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 
     project: Mapped[Project] = relationship(back_populates="repos", lazy="joined")
+
+    @property
+    def repo(self) -> str:
+        return self.full_name
 
     @classmethod
     async def list_all(cls) -> list["ProjectRepo"]:
@@ -233,12 +239,17 @@ class WorkItem(StoredSubject):
     # The PR target repo. A project can hold many repos, but a work item targets one.
     repo: Mapped[str]
     pr_number: Mapped[int | None]
+    # None until the implement phase creates the PR branch.
     branch: Mapped[str | None]
     # GitHub's verdict on the PR, or "cancelled" after an operator cancel. None while
     # the work is open.
     resolution: Mapped[str | None] = mapped_column(default=None)
     # The time of the GitHub verdict, or of the cancel reaction.
     resolved_at: Mapped[datetime | None] = mapped_column(default=None)
+
+    @property
+    def ref(self) -> str | None:
+        return self.branch
 
     def __str__(self) -> str:
         return f"{self.ticket_key} {self.title}".strip()

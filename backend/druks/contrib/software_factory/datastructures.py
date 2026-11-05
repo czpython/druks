@@ -19,6 +19,9 @@ class PullRequest(Subject):
             return cls(id=id)
         return
 
+    # The reviewer checks out the PR itself; the box starts on the default branch.
+    ref = None
+
     @property
     def repo(self) -> str:
         return self.id.partition("#")[0]
