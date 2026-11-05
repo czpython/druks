@@ -1,3 +1,4 @@
+import functools
 import logging
 import shlex
 import subprocess
@@ -10,6 +11,7 @@ from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
 from druks.apps.registry import services
 from druks.core.services import Github
+from druks.durable.engine import step_session
 from druks.durable.exceptions import WorkflowError
 from druks.mcp import models as mcp_models
 from druks.mcp.constants import TOKEN_ENV_PREFIX
@@ -18,6 +20,7 @@ from druks.mcp.exceptions import MissingGrantError, MissingTokenError
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.inbound import get_druks_account_token
 from druks.sandbox import repo as checkout
+from druks.sandbox.client import sandbox_client
 from druks.sandbox.datastructures import (
     AgentResult,
     McpServer,
@@ -278,12 +281,39 @@ class RepoWorkspace(Workspace):
     async def clone(self) -> None:
         repo, ref = self.subject.repo, self.subject.ref
         logger.info("cloning %s at %s into %s", repo, ref or "the default branch", self.repo_path)
-        await checkout.ensure(
+        ensure = functools.partial(
+            checkout.ensure,
             self.host,
             repo_url=f"https://github.com/{repo}",
             ref=ref,
             target_path=self.repo_path,
         )
+        try:
+            await ensure()
+        except ExecFailed as error:
+            # GitHub's answer to a token that no longer reaches the repo. The vault and
+            # each box's exchange keep that token until it expires, so drop both and
+            # try once with a new one.
+            if "Repository not found" not in str(error):
+                raise
+            # prepare() holds no session, so the token swap opens its own.
+            async with step_session() as session:
+                await self.github.revoke_tokens(repo)
+                secret = await self.github.get()
+                await sandbox_client.request_refreshes(session, secret.id)
+            try:
+                await ensure()
+            except ExecFailed as retry_error:
+                logger.warning(
+                    "checkout of %s on box %s failed again with a new GitHub token: %s",
+                    repo,
+                    self.host_id,
+                    retry_error,
+                )
+                raise error from retry_error
+            logger.warning(
+                "checkout of %s on box %s succeeded with a new GitHub token", repo, self.host_id
+            )
 
     async def prepare(self) -> None:
         await self.clone()

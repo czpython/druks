@@ -22,6 +22,7 @@ from druks.core.apis.jira import SERVICE_ACCOUNT_DOMAIN, JiraClient
 from druks.core.apis.linear import LINEAR_AUTHORITY, LINEAR_GRAPHQL_URL, LinearClient
 from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
 from druks.core.apis.twilio import TwilioClient
+from druks.database import get_session
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.exceptions import MissingSecretError
@@ -149,6 +150,20 @@ class GithubApp(Service):
             on_miss=functools.partial(app.create_installation_token, installation_id),
         )
         return github.GitHubClient(token, app_id=row.identity["app_id"], slug=row.identity["slug"])
+
+    @classmethod
+    async def revoke_tokens(cls, owner_or_repo: str) -> None:
+        """Revoke every token the vault keeps for the installation that covers a
+        repository or an account, so the next fetch mints a new one. GitHub can refuse
+        a token before its expiry, and the vault would serve it until then."""
+        row = await cls.get()
+        installation_id = await cls._app_client(row).get_installation_id(owner_or_repo)
+        # The issuer reads the vault in its own session, so this commits on its own.
+        async with get_session(row.session.bind) as own:
+            await VaultSecret.revoke_tokens(
+                own, Audience.resource(cls.slug, "installation", installation_id)
+            )
+            await own.commit()
 
     @staticmethod
     def _app_client(row: VaultSecret) -> github.GitHubAppClient:
