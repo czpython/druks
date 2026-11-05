@@ -17,16 +17,18 @@ class DruksTracker(Tracker):
     """The board on this appliance. It writes the ticket row and needs no credentials."""
 
     known_exceptions = (UnknownTicketError,)
-    _status_names = _BOARD
 
-    async def get_status(self, key: str) -> TicketStatus | None:
+    def __init__(self) -> None:
+        super().__init__(status_names=_BOARD)
+
+    async def get_status_name(self, key: str) -> str:
         if ticket := await Ticket.get_for_identifier(key):
-            return self._find_status({ticket.status})
+            return ticket.status
         raise UnknownTicketError(key, "druks")
 
     async def set_status(self, key: str, status: TicketStatus) -> None:
         if ticket := await Ticket.get_for_identifier(key):
-            await ticket.transition(_BOARD[status])
+            await ticket.transition(self._status_names[status])
             return
         raise UnknownTicketError(key, "druks")
 
