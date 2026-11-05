@@ -569,6 +569,10 @@ progress, in review, done, and resting. When the selected tracker is connected
 and lists its statuses, the settings page offers them as choices. After you
 change the tracker, save the settings to list the statuses of the new tracker.
 An empty in review or resting status leaves the ticket where it is.
+An operator cancel or a pull request closed without merge moves the ticket to
+the resting status only if it is still in progress or in review. The settings
+refuse a resting status equal to the trigger status, because that move would
+start a new build.
 
 Select **druks** to use the ticket board on this appliance. That choice needs no
 credentials. The status settings stay hidden. The trigger status is

@@ -53,6 +53,20 @@ class LinearClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    async def get_issue_status(self, issue_id: str) -> str:
+        data = await self._execute(
+            """
+            query DruksIssueStatus($issueId: String!) {
+              issue(id: $issueId) { state { name } }
+            }
+            """,
+            {"issueId": issue_id},
+        )
+        # Linear answers an unknown identifier with a null issue, not an error.
+        if not data["issue"]:
+            raise UnknownTicketError(issue_id, "Linear")
+        return data["issue"]["state"]["name"]
+
     async def update_issue_status(self, issue_id: str, status_name: str) -> dict[str, Any]:
         data = await self._execute(
             """

@@ -16,6 +16,9 @@ class Linear(Tracker):
         # An empty name leaves that status unmapped.
         self._status_names = {status: name for status, name in status_names.items() if name}
 
+    async def get_status(self, key: str) -> TicketStatus | None:
+        return self._find_status({await self._client.get_issue_status(key)})
+
     async def set_status(self, key: str, status: TicketStatus) -> None:
         name = self._status_names.get(status)
         if not name:

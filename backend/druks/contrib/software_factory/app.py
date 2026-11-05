@@ -145,6 +145,18 @@ class SoftwareFactory(App):
             },
         )
 
+        def clean(self) -> dict[str, str]:
+            # A cancel writes the resting status, and the trigger status opens a build,
+            # so the same status would restart every build an operator stops.
+            # The druks and none trackers hide both fields and read neither.
+            if (
+                self.tracker in ("linear", "jira", "github")
+                and self.resting_status
+                and self.resting_status == self.trigger_status
+            ):
+                return {"resting_status": "Must differ from the trigger status."}
+            return {}
+
     checks = [check_tracker_identity, check_review_identity]
 
     @classmethod
