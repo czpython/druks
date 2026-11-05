@@ -756,11 +756,30 @@ from druks.workspaces import RepoWorkspace
 
 
 class Sweep(Workflow):
-    subject = Repository  # a StoredSubject with a ``repo`` column, "owner/name"
+    subject = Repository
     workspace_class = RepoWorkspace
 ```
 
-Before every agent call Druks clones the default branch into
+The subject names where: `repo` is the repository as `owner/name`, and `ref`
+is the commit or branch to clone, `None` for the default branch. A column, a
+property, or a class attribute each do:
+
+```python
+class Repository(StoredSubject):
+    repo: Mapped[str]
+    ref = None
+
+
+class Check(StoredSubject):
+    repo: Mapped[str]
+    head_sha: Mapped[str]
+
+    @property
+    def ref(self) -> str:
+        return self.head_sha
+```
+
+Before every agent call Druks clones that ref into
 `workspace.repo_path`. Prompts read `{{ workspace.repo_path }}`. The sandbox
 holds a placeholder for its GitHub token in `GH_TOKEN`, and Drukbox points git
 and `gh` at it. The Drukbox secrets proxy swaps the placeholder for a token
@@ -768,18 +787,8 @@ that Druks mints on demand, so a long run never outlives its token. The clone
 is idempotent, so a warm host keeps its working tree and a host rotated in
 bare gets one back.
 
-Every workspace holds the run's `subject`. `RepoWorkspace.get_repo(subject)`
-reads its `repo` column. Override it when the subject names the repository
-differently:
-
-```python
-class SweepWorkspace(RepoWorkspace):
-    @classmethod
-    def get_repo(cls, subject) -> str:
-        return subject.full_name
-```
-
-The sandbox's GitHub token reaches only that repository. To let the agent clone
+Every workspace holds the run's `subject`. The sandbox's GitHub token reaches
+only its repository. To let the agent clone
 other repositories, override `get_secrets(subject)` and name them after it in
 the secret's `resources`. The token also reaches each one that the same App
 installation covers.
@@ -817,8 +826,7 @@ inside a unit of work, before the box: read rows and keep what the box will
 need on `self`. `prepare()` runs on the box, after that unit of work closed:
 upload a file, write a wrapper, run a command. `self.host` in `setup()` raises,
 and a read in `prepare()` raises `SessionNotBoundError`, so a hook in the
-wrong place fails on its first run. A value that never changes is a class
-attribute, `branch = "main"`. Override `get_agent_run_kwargs()` to grant
+wrong place fails on its first run. Override `get_agent_run_kwargs()` to grant
 directories, set `skills` for the skills the box gets, and `get_env()` for
 environment variables every agent call gets:
 
@@ -891,7 +899,7 @@ class BuildWorkspace(RepoWorkspace):
                 name="github",
                 url="https://api.githubcopilot.com/mcp/",
                 secret_id=(await actor.service.get()).id,
-                resources=(cls.get_repo(subject),),
+                resources=(subject.repo,),
             ),
         )
 ```

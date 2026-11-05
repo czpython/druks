@@ -48,10 +48,7 @@ class BuildWorkspace(RepoWorkspace):
 
     async def setup(self) -> None:
         await super().setup()
-        repo = self.get_repo(self.subject)
-        project_repo = await ProjectRepo.get_for_repo(repo, raise_on_missing=True)
-        # None until the implement phase creates the PR branch.
-        self.branch = self.subject.branch
+        project_repo = await ProjectRepo.get_for_repo(self.subject.repo, raise_on_missing=True)
         self.skills = tuple(project_repo.effective_profile.get("recommended_skills", []))
 
     @classmethod
@@ -60,7 +57,7 @@ class BuildWorkspace(RepoWorkspace):
             SandboxSecret(
                 name=cls.github.slug,
                 secret_id=(await cls.github.get()).id,
-                resources=await get_project_repos(cls.get_repo(subject)),
+                resources=await get_project_repos(subject.repo),
                 host=cls.github.host,
             )
         ]
@@ -71,7 +68,7 @@ class BuildWorkspace(RepoWorkspace):
             name=GITHUB_MCP_NAME,
             url=GITHUB_MCP_URL,
             secret_id=(await cls.github.get()).id,
-            resources=await get_project_repos(cls.get_repo(subject)),
+            resources=await get_project_repos(subject.repo),
         )
         if (await SoftwareFactory.settings()).tracker == "druks":
             return (github, get_druks_mcp_server(allowed_tools=TICKET_TOOLS))
@@ -428,18 +425,12 @@ class Build(Workflow):
             logger.warning("Could not set draft=%s on %s#%s.", draft, repo, self.pr_number)
 
 
-class ProfileWorkspace(RepoWorkspace):
-    @classmethod
-    def get_repo(cls, subject: Any) -> str:
-        return subject.full_name
-
-
 class Profile(Workflow):
     """Profile a repo once, when it joins a project. ``refresh_only`` skips the agent
     and applies the pinned verification to the stored baseline again."""
 
     subject = ProjectRepo
-    workspace_class = ProfileWorkspace
+    workspace_class = RepoWorkspace
 
     @classmethod
     async def dispatch(cls, project_repo: ProjectRepo, *, refresh_only: bool = False) -> str:
@@ -496,7 +487,7 @@ class ReviewWorkspace(RepoWorkspace):
             SandboxSecret(
                 name=actor.service.slug,
                 secret_id=(await actor.service.get()).id,
-                resources=await get_project_repos(cls.get_repo(subject)),
+                resources=await get_project_repos(subject.repo),
                 host=actor.service.host,
             )
         ]
@@ -509,7 +500,7 @@ class ReviewWorkspace(RepoWorkspace):
                 name=GITHUB_MCP_NAME,
                 url=GITHUB_MCP_URL,
                 secret_id=(await actor.service.get()).id,
-                resources=await get_project_repos(cls.get_repo(subject)),
+                resources=await get_project_repos(subject.repo),
             ),
         )
 

@@ -30,8 +30,9 @@ class Note(StoredSubject, ordering=("-created_at", "-id")):
 
 
 class Repository(StoredSubject):
-    # ``owner/name``; a Survey run's RepoWorkspace clones it.
+    # ``owner/name``; a Survey run's RepoWorkspace clones its default branch.
     repo: Mapped[str] = mapped_column(unique=True)
+    ref = None
     gist: Mapped[str | None]
 
     async def save_gist(self, gist: str) -> None:

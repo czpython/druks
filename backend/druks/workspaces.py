@@ -1,3 +1,4 @@
+import logging
 import shlex
 import subprocess
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -31,6 +32,8 @@ if TYPE_CHECKING:
     from druks.harnesses.base import Harness
     from druks.harnesses.datastructures import Manifest
     from druks.sandbox.host import Host
+
+logger = logging.getLogger(__name__)
 
 
 class Workspace:
@@ -236,12 +239,11 @@ class Workspace:
 
 
 class RepoWorkspace(Workspace):
-    """A VM with the subject's ``repo`` cloned at ``branch`` (default branch when
-    None), re-cloned before every agent call. The box holds a placeholder in
+    """A VM with the subject's ``repo`` cloned at its ``ref``, the default branch
+    when None, re-cloned before every agent call. The box holds a placeholder in
     ``GH_TOKEN``, and Drukbox points git and ``gh`` at it; the Druks issuer
     answers the token of the GitHub identity this workspace names."""
 
-    branch: str | None = None
     # Commits are authored as the operator's bot: its name and email.
     git_author: tuple[str, str]
     # The account that dispatched the run, credited as a co-author; None credits nobody.
@@ -250,16 +252,11 @@ class RepoWorkspace(Workspace):
     github: ClassVar[type[Github]] = Github
 
     async def setup(self) -> None:
-        github = await Github.get_client(self.get_repo(self.subject))
+        github = await Github.get_client(self.subject.repo)
         self.git_author = await github.get_bot_git_author()
         account_id = current_account_id.get()
         account = await Account.get_or_none(id=account_id) if account_id else None
         self.dispatcher = account.username if account else None
-
-    @classmethod
-    def get_repo(cls, subject: Any) -> str:
-        # Override when the subject names its ``owner/name`` differently.
-        return subject.repo
 
     @classmethod
     async def get_secrets(cls, subject: Any) -> list[SandboxSecret]:
@@ -269,7 +266,7 @@ class RepoWorkspace(Workspace):
             SandboxSecret(
                 name=cls.github.slug,
                 secret_id=(await cls.github.get()).id,
-                resources=(cls.get_repo(subject),),
+                resources=(subject.repo,),
                 host=cls.github.host,
             )
         ]
@@ -279,10 +276,12 @@ class RepoWorkspace(Workspace):
         return get_repo_root(self.host.ssh_username)
 
     async def clone(self) -> None:
+        repo, ref = self.subject.repo, self.subject.ref
+        logger.info("cloning %s at %s into %s", repo, ref or "the default branch", self.repo_path)
         await checkout.ensure(
             self.host,
-            repo_url=f"https://github.com/{self.get_repo(self.subject)}",
-            ref=self.branch,
+            repo_url=f"https://github.com/{repo}",
+            ref=ref,
             target_path=self.repo_path,
         )
 

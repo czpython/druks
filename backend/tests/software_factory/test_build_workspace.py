@@ -97,7 +97,6 @@ async def test_setup_reads_the_build_fields(monkeypatch: pytest.MonkeyPatch):
     await workspace.setup()
 
     assert workspace.subject is subject
-    assert workspace.branch == "agent/ACME-1"
     assert workspace.skills == ("python-house-rules",)
     assert workspace.git_author == ("app[bot]", "1+app[bot]@users.noreply.github.com")
     assert workspace.dispatcher is None
