@@ -188,6 +188,15 @@ def test_surfaces_are_enumerable_from_the_loaded_app(installed):
     assert app.migrations_dir() == package_dir / "migrations"
 
 
+def test_get_data_dir_is_the_apps_folder_under_the_data_directory(installed, monkeypatch, tmp_path):
+    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+
+    data_dir = load_app("probe").get_data_dir()
+
+    assert data_dir == tmp_path / "apps" / "probe"
+    assert data_dir.is_dir()
+
+
 def test_load_registers_the_apps_services(installed):
     """The ``services`` module is a discovered role: its declarations register on load."""
     from druks.apps.registry import services
