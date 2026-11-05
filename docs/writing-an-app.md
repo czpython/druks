@@ -1159,13 +1159,24 @@ A subscriber answers the wait through the workflow class and the subject. The
 facts it sends are the result of `wait()`:
 
 ```python
-@subscribe("review.completed", subject=PullRequest)
-async def review_answers_the_build(*, subject: PullRequest, decision: str, **_: object) -> None:
+@subscribe(WorkflowEvent.FINISHED, workflow=PullRequestReview)
+async def finished_review_answers_the_build(*, subject: PullRequest, result: dict, **_: object) -> None:
     if item := await WorkItem.get_for_pr(repo=subject.repo, pr_number=subject.number):
-        await Build.answer(item, "review.completed", decision=decision)
+        await Build.answer(item, "review.completed", **result)
 ```
 
 `answer()` reaches only a run that waits on that topic. Other runs get nothing.
+
+A wait can also fail. If the work the run waits for fails, answer with
+`failure`. The wait raises `WaitFailed` with the topic and the reason, and the
+run fails with it:
+
+```python
+@subscribe(WorkflowEvent.FAILED, workflow=PullRequestReview)
+async def failed_review_fails_the_build(*, subject: PullRequest, failure: str, **_: object) -> None:
+    if item := await WorkItem.get_for_pr(repo=subject.repo, pr_number=subject.number):
+        await Build.answer(item, "review.completed", failure=failure)
+```
 
 ## Give runs a subject read-side
 
@@ -2522,7 +2533,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.services` | `Service`, `Connection`, `auth`, `Resource`, `ResourceError`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
 | `druks.browser` | `BrowserClient`, `BrowserCommandError`, `BrowserSession`, `BrowserSessionSignedOutError`, `BrowserSessionStatus` |
 | `druks.agents` | `Agent`, `AgentOutput`, `Bot`, `BotUser` |
-| `druks.workflows` | `Workflow`, `Gate`, `GateTimeout`, `WaitTimeout`, `step`, run/agent response types, lifecycle enums and workflow errors |
+| `druks.workflows` | `Workflow`, `Gate`, `GateTimeout`, `WaitTimeout`, `WaitFailed`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox`, `SandboxMcpServer`, `SandboxSecret` |
 | `druks.workspaces` | `Workspace`, `RepoWorkspace` |
 | `druks.db` | `Model`, `StoredSubject`, `db_session` |

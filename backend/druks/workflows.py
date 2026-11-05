@@ -60,6 +60,7 @@ from druks.durable.exceptions import (
     FatalError,
     GateTimeout,
     SubjectlessGate,
+    WaitFailed,
     WaitTimeout,
     WorkflowError,
 )
@@ -100,6 +101,7 @@ __all__ = [
     "Subject",
     "SubjectStatus",
     "SubjectSummary",
+    "WaitFailed",
     "WaitTimeout",
     "Workflow",
     "WorkflowError",
@@ -925,13 +927,16 @@ class Workflow:
 
     async def wait(self, topic: str, *, label: str, ttl_seconds: float) -> dict[str, Any]:
         """Wait for the facts that ``answer`` delivers on ``topic``, and return them. The run
-        stays running, shows ``label``, and keeps its warm sandbox."""
+        stays running, shows ``label``, and keeps its warm sandbox. A failure answered
+        instead raises ``WaitFailed``."""
         await set_run_phase(label)
         await DBOS.set_event_async("waiting_on", topic)
         facts = await DBOS.recv_async(topic, timeout_seconds=ttl_seconds)
         await DBOS.set_event_async("waiting_on", "")
         if facts is None:
             raise WaitTimeout(topic)
+        if failure := facts.get("failure"):
+            raise WaitFailed(topic, failure)
         return facts
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
@@ -1156,15 +1161,25 @@ class Workflow:
                 await run.cancel(failure=failure)
 
     @classmethod
-    async def answer(cls, subject: Subject | StoredSubject, topic: str, **facts: Any) -> None:
-        """Deliver ``facts`` to the subject's run of this workflow, when it waits on ``topic``."""
+    async def answer(
+        cls,
+        subject: Subject | StoredSubject,
+        topic: str,
+        *,
+        failure: str | None = None,
+        **facts: Any,
+    ) -> None:
+        """Deliver ``facts`` to the subject's run of this workflow, when it waits on ``topic``.
+        ``failure`` instead fails that wait with the reason."""
         cls._validate_subject(subject)
+        if failure and facts:
+            raise WorkflowError(f"answer() on {topic!r} takes failure= or facts, not both")
         async with bound_session() as session:
             run = await Run.get_latest_for_subject(
                 session, subject.subject_type, str(subject.id), kind=cls.kind
             )
         if run and await DBOS.get_event_async(run.id, "waiting_on", timeout_seconds=0) == topic:
-            await DBOS.send_async(run.id, facts, topic=topic)
+            await DBOS.send_async(run.id, {"failure": failure} if failure else facts, topic=topic)
 
     @classmethod
     async def start(

@@ -48,6 +48,15 @@ class WaitTimeout(FatalError):
         self.topic = topic
 
 
+class WaitFailed(FatalError):
+    code = "wait_failed"
+
+    def __init__(self, topic: str, failure: str) -> None:
+        super().__init__(f"wait on {topic!r} failed: {failure}")
+        self.topic = topic
+        self.failure = failure
+
+
 class SubjectlessGate(FatalError):
     def __init__(self, gate: str) -> None:
         super().__init__(

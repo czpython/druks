@@ -538,6 +538,34 @@ async def test_wait_takes_only_the_facts_of_its_topic(runtime):
         workflows._items.pop(WaitFlow.kind)
 
 
+async def test_wait_fails_with_the_failure_it_is_answered(runtime):
+    class FailingWaitFlow(Workflow):
+        subject = Widget
+
+        async def run_multistep(self) -> None:
+            await self.wait("checks.finished", label="Waiting for checks", ttl_seconds=9)
+
+    subject = Widget(id=770771)
+    try:
+        workflow_id = await FailingWaitFlow.start(subject=subject)
+
+        async def waiting() -> None:
+            while await get_run_phase(workflow_id) != "Waiting for checks":
+                await asyncio.sleep(0.1)
+
+        await asyncio.wait_for(waiting(), 15)
+        async with session_scope(runtime.engine):
+            await FailingWaitFlow.answer(subject, "checks.finished", failure="checks are red")
+
+        done = await _wait_for_run(
+            runtime.engine, workflow_id, lambda run: run.state == RunState.FAILED
+        )
+        assert done.failure == "wait on 'checks.finished' failed: checks are red"
+        assert done.failure_code == "wait_failed"
+    finally:
+        workflows._items.pop(FailingWaitFlow.kind)
+
+
 async def test_duplicate_replies_to_one_round_collapse(runtime):
     workflow_id = await runtime.DoubleGateFlow.start(subject=Widget(id=515151))
     parked = await _wait_for_run(
