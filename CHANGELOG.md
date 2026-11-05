@@ -3,6 +3,106 @@
 All notable changes to Druks. Versions follow [semantic versioning](https://semver.org);
 while Druks is pre-1.0, a minor bump may break compatibility.
 
+## [0.13.0] — 2026-11-05
+
+### Breaking changes
+
+- **An agent call reads, then acts on the box.** `Workspace` is a plain class
+  that Druks builds as `workspace_class(subject)`: `setup()` reads rows before
+  the box exists, `prepare()` acts on the box with no session bound, and Druks
+  sets `host` in between. `Workflow.get_workspace_kwargs()`, `get_workspace()`,
+  `Workspace.prepare_context()`, and dataclass workspaces are gone.
+  `Host.save_files()` replaces `Workspace.save_files()`, `File.upload()` ships
+  a file argument, and `set_git_identity()` takes no session. A read in
+  `prepare()` or in a hook raises `SessionNotBoundError` instead of holding a
+  connection through the run.
+- **A `RepoWorkspace` subject names its `repo` and `ref`.** `ref` is the commit
+  or branch to clone, `None` for the default branch, and a subject without it
+  raises. `RepoWorkspace.branch` and `get_repo()` are gone.
+- **A managed service's OAuth redirect is `<issuer>/services/<slug>/oauth/callback`.**
+  The consent URL and the token exchange both carry it, and
+  `Service.get_oauth_client()` derives it, so apps change nothing. Deploy only
+  after the manager accepts the path. Self-hosted OAuth keeps
+  `<endpoint>/api/oauth/callback`.
+- **`Gate.answer()` requires `workflow=`.** Two workflow kinds on one subject can
+  wait on the same gate name, and the answer now reaches the kind it names.
+- **Short-lived tokens live in the vault, not in Redis.** Resource tokens, GitHub
+  installation tokens, and OAuth access tokens are encrypted rows with an
+  expiry. `GitHubAppClient` signs with the App key and `GitHubClient(token)`
+  makes the installation calls; `GithubApp.get_client(owner_or_repo)` and
+  `get_app_client()` build them. `get_mention_handle` is gone, and
+  `evict_access_token` takes the session.
+- **Druks is licensed under FSL-1.1-ALv2.** Self-hosting, changes, apps, and
+  professional services stay free; a competing hosted service is not allowed.
+  Each release becomes Apache 2.0 two years after it ships. `docs/licensing.md`
+  has the details.
+
+### Added
+
+- **An app has a directory it may write.** `App.get_data_dir()` returns
+  `<DRUKS_DATA_DIR>/apps/<name>` and creates it. A downloaded tool or a tool's
+  state goes there, never under `~`.
+- **A workflow can wait on an event without parking.** `self.wait(topic,
+  label=, ttl_seconds=)` suspends the run while it reads as running, and
+  `Workflow.answer(subject, topic, **facts)` answers it from a subscriber. A
+  wait past its TTL fails the run with `WaitTimeout`, and
+  `answer(subject, topic, failure=...)` fails it with `WaitFailed`.
+- **App code gets its account.** `druks.accounts` exports `Account`,
+  `AccountKind`, and `current_account`. A route takes the caller's row with
+  `Depends(current_account)`, and a run carries `self.account`.
+- **Jira events reach every app.** The Jira webhook moves into core and turns a
+  Jira Automation issue into `ticket.transitioned`, with no Software Factory
+  needed. The URL stays `/_external/jira/events/`.
+- **Linear and GitHub issues publish `ticket.created` and `ticket.updated`.**
+  Every `ticket.*` event carries one set of keys whatever the tracker:
+  `source`, `ticket_id`, `identifier`, `title`, `url`, `project_name`,
+  `labels`, and `actor_id`. Linear events add `team`.
+- **GitHub issues publish `issue.opened`, `issue.edited`, and `issue.reopened`**,
+  with `repo` and `number` beside the payload.
+- **`druks doctor` names runs parked past the gate timeout**, in
+  `stale_parked_runs`, so an operator can cancel them.
+- **The sandbox image has `jq` and `file`.**
+- **Python 3.15.**
+
+### Changed
+
+- **A workflow sandbox starts with a thirty-minute lease**, and an active
+  workspace renews it every five minutes. An idle or dead worker lets its box
+  expire.
+- **A recovered agent call attaches to the agent the stopped process left
+  running**, instead of starting a second one beside it.
+- **The host takes the harness and the manifest, not a session**, so an agent
+  run holds no database connection.
+- **Software Factory** reviews a build's pull request with the standalone
+  review and waits on it: `request_changes` returns to implement, up to
+  `max_implementation_revisions`, and `approve` parks for review. The
+  evaluator, `review_code`, and `journal.evaluations` are gone. A cancel or a
+  close without merge returns the ticket to rest while it is in progress or in
+  review, and a tracker reads a status name with `get_status_name`. A build
+  finishes when GitHub merges its pull request, fails before review when the
+  planner cannot plan, answers 409 with the owning project when a repository
+  is already registered, and caps a ticket title at 200 characters on edit as
+  on create.
+- **The MCP server names its website URL**, and `chat_require_tag` describes its
+  argument.
+
+### Fixed
+
+- **`Workflow.cancel()` and `answer()` bring their own session**, as `start()`
+  does, so a workflow body can cancel a subject's run and start another.
+- **Druks installs beside githubkit 0.17.** hishel is bound below 2, which
+  removed the transport githubkit imports.
+- **After-agent hooks run on boxes without Node**, and a run whose hook never
+  ran fails instead of finishing. On Python 3.11 a hook's agent call runs in the
+  step's own task, so it no longer raises `SessionNotBoundError`.
+- **`druks check-app` accepts an app that imports `druks.services` first.** The
+  notifications package init no longer imports the outbox.
+- **DBOS logs no duplicate traceback** for a `FatalError` or `HarnessError` that
+  Druks already records.
+- **A call with an unusable subscription token is refused** before a box is
+  provisioned.
+- **A run waiting for Claude's usage window shows as running.**
+
 ## [0.12.0] — 2026-10-31
 
 ### Breaking changes
