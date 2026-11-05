@@ -29,6 +29,8 @@ async def test_exec_runs_the_command_in_a_box_with_the_repo_cloned(druks_db, mon
         yield box
 
     monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", ephemeral)
+    bot = SimpleNamespace(get_bot_git_author=AsyncMock(return_value=("bot", "bot@example.com")))
+    monkeypatch.setattr("druks.workspaces.Github.get_client", AsyncMock(return_value=bot))
 
     @asynccontextmanager
     async def lease(self, *, host_id):

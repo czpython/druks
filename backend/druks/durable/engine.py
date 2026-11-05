@@ -57,10 +57,12 @@ def init_dbos() -> None:
     # DBOS logs every exception that leaves a workflow, with no opt-out;
     # _execute_run already records a classified failure on the run.
     logging.getLogger("dbos").addFilter(
-        lambda record: not (
-            record.exc_info
-            # ast-grep-ignore: rule-3
-            and isinstance(record.exc_info[1], (FatalError, HarnessError))
+        lambda record: (
+            not (
+                record.exc_info
+                # ast-grep-ignore: rule-3
+                and isinstance(record.exc_info[1], (FatalError, HarnessError))
+            )
         )
     )
     DBOS(config=config)

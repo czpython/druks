@@ -18,6 +18,7 @@ from druks.harnesses.config import get_config
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.datastructures import McpServer
 from druks.sandbox.exceptions import SandboxDownloadError
+from druks.sandbox.host import Host
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
@@ -100,9 +101,7 @@ def _patch_runtime(monkeypatch, tmp_path, payload):
         return f"PROMPT:{name}:repo={repo}"
 
     monkeypatch.setattr(agents, "render_prompt", _prompt)
-    sandbox = MagicMock()
-    # The base Workspace reads host_id off sandbox.id.
-    sandbox.id = "host-test"
+    sandbox = Host(record=SimpleNamespace(id="host-test", ssh_username="root"))  # type: ignore[arg-type]
     sandbox.run_agent = AsyncMock(return_value=make_agent_result(payload, agent="dummy"))
     return sandbox
 
@@ -209,7 +208,7 @@ async def test_an_agent_browser_gets_its_own_box_and_the_browser_server(
     resolve = AsyncMock(return_value=((other,), []))
     monkeypatch.setattr(Workspace, "get_all_mcp_servers", resolve)
 
-    assert await BROWSER_AGENT._run(db_session(), workflow_id="wf-9") == DummyOutput(ok=True)
+    assert await BROWSER_AGENT._run(workflow_id="wf-9") == DummyOutput(ok=True)
 
     [(session, client, account_id, call_id)] = lent_browser
     assert (session, client, account_id) == (ATLAS, BrowserClient.PINCHTAB, current_run.account_id)
@@ -261,7 +260,7 @@ async def test_run_refuses_unconnected_harness(druks_db, tmp_path, monkeypatch, 
     _patch_ephemeral(monkeypatch, sandbox)
 
     with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
-        await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
+        await DUMMY_AGENT._run(workflow_id="wf-9")
 
     sandbox.run_agent.assert_not_awaited()
 
@@ -272,7 +271,7 @@ async def test_declaration_drives_run_agent_call(druks_db, tmp_path, monkeypatch
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     _patch_ephemeral(monkeypatch, sandbox)
 
-    result = await DUMMY_AGENT._run(db_session(), workflow_id="wf-9", repo="acme/widget")
+    result = await DUMMY_AGENT._run(workflow_id="wf-9", repo="acme/widget")
 
     assert result == DummyOutput(ok=True)
     harness, manifest = sandbox.run_agent.await_args.args
@@ -300,7 +299,7 @@ async def test_declared_plugin_choice_is_forwarded(druks_db, tmp_path, monkeypat
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     _patch_ephemeral(monkeypatch, sandbox)
 
-    await agent._run(db_session(), workflow_id="wf-9")
+    await agent._run(workflow_id="wf-9")
 
     assert sandbox.run_agent.await_args.kwargs["include_plugins"] is False
 
@@ -319,7 +318,7 @@ async def test_an_agent_without_mcp_resolves_no_server(
     resolve = AsyncMock()
     monkeypatch.setattr(Workspace, "get_all_mcp_servers", resolve)
 
-    await agent._run(db_session(), workflow_id="wf-9")
+    await agent._run(workflow_id="wf-9")
 
     resolve.assert_not_awaited()
     assert sandbox.run_agent.await_args.kwargs["mcp_servers"] == ()
@@ -351,7 +350,7 @@ async def test_an_agent_holds_its_declared_service_secrets(
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     _patch_ephemeral(monkeypatch, sandbox)
 
-    await agent._run(db_session(), workflow_id="wf-9")
+    await agent._run(workflow_id="wf-9")
 
     [identity] = await _identities("wf-9")
     refs = await db_session().scalars(
@@ -387,7 +386,7 @@ async def test_an_agent_holds_a_resource_secret_from_its_workspace(
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     _patch_ephemeral(monkeypatch, sandbox)
 
-    await agent._run(db_session(), workflow_id="wf-9")
+    await agent._run(workflow_id="wf-9")
 
     [identity] = await _identities("wf-9")
     [ref] = await db_session().scalars(
@@ -402,28 +401,30 @@ async def test_an_agent_holds_a_resource_secret_from_its_workspace(
 async def test_runner_comes_from_workflow_workspace_factory(
     druks_db, tmp_path, monkeypatch, current_run
 ):
-    """The runner is whatever ``workflow.get_workspace()`` returns — a mode overrides it to
+    """The runner is an instance of ``workflow.workspace_class`` — a mode overrides it to
     decide what the agent runs in (a cloned repo, tokens, MCP). The agent runs through it,
     not a bare VM."""
     from druks.workflows import current_workflow
 
     _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    _patch_ephemeral(monkeypatch, MagicMock())  # the box; the factory below ignores it
-    workspace = MagicMock()
-    workspace.host_id = "host-test"
-    workspace.prepare_context = AsyncMock(side_effect=lambda _session, context, **_: context)
-    workspace.run_agent = AsyncMock(return_value=make_agent_result({"ok": True}, agent="dummy"))
+    box = MagicMock()
+    box.id = "host-test"
+    _patch_ephemeral(monkeypatch, box)  # the workspace below runs nothing on it
 
-    async def _get_workspace(sandbox):
-        return workspace
+    class ModeWorkspace(Workspace):
+        setup = AsyncMock()
+        prepare = AsyncMock()
+        run_agent = AsyncMock(return_value=make_agent_result({"ok": True}, agent="dummy"))
 
-    monkeypatch.setattr(current_workflow.get(), "get_workspace", _get_workspace)
+    monkeypatch.setattr(current_workflow.get(), "workspace_class", ModeWorkspace)
 
-    result = await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
+    result = await DUMMY_AGENT._run(workflow_id="wf-9")
 
     assert result == DummyOutput(ok=True)
-    workspace.run_agent.assert_awaited_once()
-    assert workspace.run_agent.await_args.kwargs["agent"] == "dummy"
+    ModeWorkspace.setup.assert_awaited_once()
+    ModeWorkspace.prepare.assert_awaited_once()
+    ModeWorkspace.run_agent.assert_awaited_once()
+    assert ModeWorkspace.run_agent.await_args.kwargs["agent"] == "dummy"
 
 
 def test_get_loads_the_owning_app_before_it_reads_the_registry(monkeypatch):
@@ -466,7 +467,7 @@ async def test_after_agent_hooks_answer_the_turn_from_a_box_of_their_own(
         return "Run the tests."
 
     warm = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    warm.id = "warm-host"
+    warm.record.id = "warm-host"
     answers = []
 
     async def run_hooked(_harness, _manifest, **kwargs):
@@ -487,7 +488,7 @@ async def test_after_agent_hooks_answer_the_turn_from_a_box_of_their_own(
     nested_box.run_agent = AsyncMock(return_value=make_agent_result({"ok": True}, agent="dummy"))
     _patch_ephemeral(monkeypatch, nested_box)
 
-    await hooked._run(db_session(), workflow_id="wf-9")
+    await hooked._run(workflow_id="wf-9")
 
     assert answers == [
         ClaudeHarness.get_after_agent_reply("The check says True.\n\nRun the tests.")
@@ -512,7 +513,7 @@ async def test_ephemeral_acquisition_keys_idempotency_to_workflow_step(
 
     monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", fake_ephemeral)
 
-    result = await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
+    result = await DUMMY_AGENT._run(workflow_id="wf-9")
 
     assert result == DummyOutput(ok=True)
     [identity] = await _identities("wf-9")
@@ -542,7 +543,7 @@ async def test_running_call_visible_then_finished(
     sandbox.run_agent = _run_agent
     _patch_ephemeral(monkeypatch, sandbox)
 
-    await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
+    await DUMMY_AGENT._run(workflow_id="wf-9")
 
     assert during == {"status": "running", "host": "host-test"}
     [call] = await AgentCall.list_for_run(db_session(), "wf-9")
@@ -573,7 +574,7 @@ async def test_a_recovered_call_resumes_the_agent_its_box_still_runs(
         api_key_id=None,
     )
 
-    assert await DUMMY_AGENT._run(db_session(), workflow_id="wf-9") == DummyOutput(ok=True)
+    assert await DUMMY_AGENT._run(workflow_id="wf-9") == DummyOutput(ok=True)
 
     calls = {call.id: call.status for call in await AgentCall.list_for_run(db_session(), "wf-9")}
     if resumed:
@@ -599,7 +600,7 @@ async def test_provisioning_failure_records_no_call(druks_db, tmp_path, monkeypa
     monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", boom)
 
     with pytest.raises(RuntimeError, match="no capacity"):
-        await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
+        await DUMMY_AGENT._run(workflow_id="wf-9")
 
     assert await AgentCall.list_for_run(db_session(), "wf-9") == []
 
@@ -616,7 +617,7 @@ async def test_crash_after_start_fails_the_call(druks_db, tmp_path, monkeypatch,
     _patch_ephemeral(monkeypatch, sandbox)
 
     with pytest.raises(RuntimeError, match="kaboom"):
-        await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
+        await DUMMY_AGENT._run(workflow_id="wf-9")
 
     [call] = await AgentCall.list_for_run(db_session(), "wf-9")
     assert call.status == "failed"
@@ -644,12 +645,11 @@ async def test_file_hydration_failure_fails_the_agent_call(
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     current_run.app = "field_notes"
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"image": "shots/home.png"})
-    sandbox.ssh_username = "root"
     sandbox.download = AsyncMock(side_effect=SandboxDownloadError(error))
     _patch_ephemeral(monkeypatch, sandbox)
 
     with pytest.raises(SandboxDownloadError, match=message):
-        await FILE_AGENT._run(db_session(), workflow_id="wf-9")
+        await FILE_AGENT._run(workflow_id="wf-9")
 
     [call] = await AgentCall.list_for_run(db_session(), "wf-9")
     assert call.status == "failed"
@@ -667,7 +667,6 @@ async def test_file_output_reaches_the_next_agents_input(
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     current_run.app = "field_notes"
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    sandbox.ssh_username = "root"
     sandbox.run_agent = AsyncMock(
         side_effect=[
             make_agent_result({"image": "shots/home.png"}, agent="file"),
@@ -694,8 +693,8 @@ async def test_file_output_reaches_the_next_agents_input(
         lambda self: {"kind": "markdown", "title": "Shot", "content": self.image.url},
     )
 
-    produced = await FILE_AGENT._run(db_session(), workflow_id="wf-9")
-    consumed = await DUMMY_AGENT._run(db_session(), workflow_id="wf-9", image=produced.image)
+    produced = await FILE_AGENT._run(workflow_id="wf-9")
+    consumed = await DUMMY_AGENT._run(workflow_id="wf-9", image=produced.image)
 
     assert consumed == DummyOutput(ok=True)
     assert prompt_contexts[1]["image"].endswith(f"/{produced.image.id}/{produced.image.name}")
@@ -725,7 +724,7 @@ async def test_a_carried_failure_is_raised_with_its_code(
     _patch_ephemeral(monkeypatch, sandbox)
 
     with pytest.raises(HarnessOverloadedError) as excinfo:
-        await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
+        await DUMMY_AGENT._run(workflow_id="wf-9")
 
     assert excinfo.value is overloaded
     [call] = await AgentCall.list_for_run(db_session(), "wf-9")
@@ -976,7 +975,7 @@ async def test_in_step_transient_retry_uses_asyncio_sleep(monkeypatch, current_r
 
     attempts = 0
 
-    async def run_agent(_self, _session, **_context):
+    async def run_agent(_self, **_context):
         nonlocal attempts
         attempts += 1
         if attempts == 1:
@@ -1007,7 +1006,7 @@ async def test_in_step_quota_reraises_without_sleeping(monkeypatch, current_run)
 
     failure = HarnessRateLimitError("quota")
 
-    async def run_agent(_self, _session, **_context):
+    async def run_agent(_self, **_context):
         raise failure
 
     monkeypatch.setattr(agents.Agent, "_run", run_agent)
@@ -1143,8 +1142,8 @@ async def test_reused_host_retry_presents_a_stable_idempotency_key(monkeypatch, 
 
     config = SimpleNamespace(secrets={}, secret_refs=[], secrets_hash="")
     with pytest.raises(HarnessSandboxProvisioningError):
-        await current_run._lease_host(db_session(), config, [])
-    host_id = await current_run._lease_host(db_session(), config, [])
+        await current_run._lease_host(config, [])
+    host_id = await current_run._lease_host(config, [])
 
     assert host_id == "warm-host"
     assert keys == ["wf-9:workflow", "wf-9:workflow"]
@@ -1202,7 +1201,7 @@ async def test_api_key_billing_hands_claude_a_placeholder(
 
     monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", fake_ephemeral)
 
-    await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
+    await DUMMY_AGENT._run(workflow_id="wf-9")
 
     assert seen == [
         {
@@ -1330,7 +1329,7 @@ async def test_a_replay_resumes_the_ephemeral_box_through_its_identity(
     monkeypatch.setattr("druks.sandbox.client.Client.resume", fake_resume)
     monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", fake_ephemeral)
 
-    result = await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
+    result = await DUMMY_AGENT._run(workflow_id="wf-9")
 
     assert result == DummyOutput(ok=True)
     assert resumed == ["host-crashed"]
@@ -1343,6 +1342,6 @@ async def test_event_requires_an_artifact(druks_db, tmp_path, monkeypatch, curre
     monkeypatch.setattr(DummyOutput, "to_event", lambda self: {"topic": "review.completed"})
 
     with pytest.raises(WorkflowError, match="without an artifact"):
-        await DUMMY_AGENT._run(db_session(), workflow_id="wf-9")
+        await DUMMY_AGENT._run(workflow_id="wf-9")
 
     assert (await AgentCall.list_for_run(db_session(), "wf-9"))[0].status == "failed"

@@ -1,25 +1,15 @@
-import asyncio
-import hashlib
-import mimetypes
 import shlex
 import subprocess
-from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
 from druks.apps.registry import services
-from druks.core.models import uuid7_str
 from druks.core.services import Github
-from druks.db import db_session
-from druks.files.constants import MAX_FILE_BYTES
-from druks.files.datastructures import File
-from druks.files.exceptions import FileUnavailableError
-from druks.files.models import FileRecord
-from druks.files.storage import get_file_storage
+from druks.durable.exceptions import WorkflowError
 from druks.mcp import models as mcp_models
 from druks.mcp.constants import TOKEN_ENV_PREFIX
 from druks.mcp.enums import Credential, IdentityMode, Toolkit
@@ -38,23 +28,49 @@ from druks.sandbox.layout import get_repo_root, get_work_root
 from druks.sandbox.models import SecretRef
 
 if TYPE_CHECKING:
-    from druks.harnesses.config import AgentConfig
+    from druks.harnesses.base import Harness
+    from druks.harnesses.datastructures import Manifest
     from druks.sandbox.host import Host
 
 
-@dataclass(frozen=True)
 class Workspace:
-    # What an agent runs in: the VM it abstracts.
-    host: "Host"
-    # What the run is about; None for a workflow about nothing.
-    subject: Any = None
+    """The place an agent works: a box, what must be in it before the agent
+    starts, and how the agent is run there. ``setup()`` reads rows before the
+    box exists; ``prepare()`` acts on the box, with no database session bound."""
+
+    # The skills the box gets beside the enabled catalog; the manifest records them.
+    skills: tuple[str, ...] = ()
+
+    def __init__(self, subject: Any) -> None:
+        # What the run is about; None for a workflow about nothing.
+        self.subject = subject
+        self._host: Host | None = None
+
+    async def setup(self) -> None:
+        """Read what the box will need and keep it on the instance. The session
+        is bound here, the box is not up yet."""
+
+    async def prepare(self) -> None:
+        """Put on the box what the agent needs: an upload, a clone, a wrapper.
+        No session is bound here; a read raises."""
+
+    @property
+    def host(self) -> "Host":
+        # Core sets it once the box is up; author code never does.
+        if not self._host:
+            raise WorkflowError("the box is not up yet: read in setup(), act in prepare()")
+        return self._host
+
+    @host.setter
+    def host(self, host: "Host") -> None:
+        self._host = host
 
     @property
     def host_id(self) -> str:
         return self.host.id
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
-        # Override to add what the run needs on this workspace (add_dirs, skills).
+        # Override to add what the run needs on this workspace, such as add_dirs.
         return kwargs
 
     def get_env(self) -> dict[str, str]:
@@ -91,118 +107,23 @@ class Workspace:
             command, cwd=get_work_root(self.host.ssh_username), timeout=timeout
         )
 
-    async def prepare_context(
-        self, session: AsyncSession, context: dict[str, Any], *, agent_call_id: str
-    ) -> dict[str, Any]:
-        # Every File in the call's kwargs lands in the VM and reads as its
-        # in-VM path; a file arrives as a File or inside a list, never buried
-        # in a nested structure.
-        prepared: dict[str, Any] = {}
-        for key, value in context.items():
-            if type(value) is File:
-                prepared[key] = await self._upload_input_file(session, value, agent_call_id)
-            elif type(value) is list:
-                prepared[key] = [
-                    await self._upload_input_file(session, item, agent_call_id)
-                    if type(item) is File
-                    else item
-                    for item in value
-                ]
-            else:
-                prepared[key] = value
-        return prepared
-
-    async def save_files(
-        self,
-        session: AsyncSession,
-        files: list[File],
-        *,
-        app: str,
-        agent_call_id: str | None = None,
-    ) -> None:
-        storage = get_file_storage()
-        staged: list[tuple[File, FileRecord, Path]] = []
-        try:
-            for file in files:
-                record, temp = await self._pull_output_file(
-                    file, app=app, agent_call_id=agent_call_id
-                )
-                staged.append((file, record, temp))
-            session.add_all([record for _, record, _ in staged])
-            await session.flush()
-            for file, record, temp in staged:
-                storage.save(temp, record.id)
-                file._hydrate(record)
-        except BaseException:
-            for _, record, temp in staged:
-                storage.discard(temp)
-                storage.delete(record.id)
-            raise
-
-    async def _pull_output_file(
-        self, file: File, *, app: str, agent_call_id: str | None
-    ) -> tuple[FileRecord, Path]:
-        reported = file.path
-        name = PurePosixPath(reported).name
-        file_id = uuid7_str()
-        temp = get_file_storage().new_temp(file_id)
-        try:
-            await self.host.download(
-                remote=reported,
-                local=temp,
-                workspace_root=get_work_root(self.host.ssh_username),
-                max_bytes=MAX_FILE_BYTES,
-            )
-            sha256 = await asyncio.to_thread(_file_sha256, temp)
-        except BaseException:
-            get_file_storage().discard(temp)
-            raise
-        record = FileRecord(
-            id=file_id,
-            name=name,
-            size=temp.stat().st_size,
-            content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
-            sha256=sha256,
-            app=app,
-            agent_call_id=agent_call_id,
-        )
-        return record, temp
-
-    async def _upload_input_file(
-        self, session: AsyncSession, file: File, agent_call_id: str
-    ) -> str:
-        record = await session.get(FileRecord, file.id)
-        if not record or record.deleted_at:
-            raise FileUnavailableError(f"file {file.id} is deleted or missing")
-        source = get_file_storage().path(file.id)
-        if not source.is_file():
-            raise FileUnavailableError(f"file {file.id} content is missing")
-        workspace_root = get_work_root(self.host.ssh_username)
-        remote = f"{workspace_root}/.druks-files/{agent_call_id}/{file.id}/{record.name}"
-        await self.host.upload_file(local=source, remote=remote)
-        return remote
-
     async def run_agent(
-        self, *, account_id: str | None, config: "AgentConfig", **kwargs: Any
+        self,
+        *,
+        harness: "Harness",
+        manifest: "Manifest",
+        timeout: int,
+        identity: dict | None,
+        include_apps: bool,
+        **kwargs: Any,
     ) -> AgentResult:
         run_kwargs = self.get_agent_run_kwargs(extra_env=self.get_env(), **kwargs)
-        harness = config.harness_class(
-            model=config.model, fast_mode=config.fast_mode, effort=config.effort
-        )
-        manifest = await harness.get_manifest(
-            db_session(),
-            mcp_servers=run_kwargs.get("mcp_servers", ()),
-            skills=run_kwargs.pop("skills", ()),
-        )
-        # The host reads nothing, so the step's connection isn't held in a
-        # transaction through the minutes the agent runs.
-        await db_session().commit()
         return await self.host.run_agent(
             harness,
             manifest,
-            timeout=config.timeout,
-            identity=config.identity,
-            include_apps=config.include_apps,
+            timeout=timeout,
+            identity=identity,
+            include_apps=include_apps,
             **run_kwargs,
         )
 
@@ -314,7 +235,6 @@ class Workspace:
         return tuple(servers), refs
 
 
-@dataclass(frozen=True)
 class RepoWorkspace(Workspace):
     """A VM with the subject's ``repo`` cloned at ``branch`` (default branch when
     None), re-cloned before every agent call. The box holds a placeholder in
@@ -322,8 +242,19 @@ class RepoWorkspace(Workspace):
     answers the token of the GitHub identity this workspace names."""
 
     branch: str | None = None
+    # Commits are authored as the operator's bot: its name and email.
+    git_author: tuple[str, str]
+    # The account that dispatched the run, credited as a co-author; None credits nobody.
+    dispatcher: str | None
     # The GitHub identity the box's git and gh act as: a connected service.
     github: ClassVar[type[Github]] = Github
+
+    async def setup(self) -> None:
+        github = await Github.get_client(self.get_repo(self.subject))
+        self.git_author = await github.get_bot_git_author()
+        account_id = current_account_id.get()
+        account = await Account.get_or_none(id=account_id) if account_id else None
+        self.dispatcher = account.username if account else None
 
     @classmethod
     def get_repo(cls, subject: Any) -> str:
@@ -355,10 +286,9 @@ class RepoWorkspace(Workspace):
             target_path=self.repo_path,
         )
 
-    async def run_agent(self, *, account_id: str | None, **kwargs: Any) -> AgentResult:
+    async def prepare(self) -> None:
         await self.clone()
-        await self.set_git_identity(db_session(), account_id)
-        return await super().run_agent(account_id=account_id, **kwargs)
+        await self.set_git_identity()
 
     async def exec(self, command: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
         await self.clone()
@@ -382,22 +312,21 @@ class RepoWorkspace(Workspace):
             )
         return result.stdout
 
-    async def set_git_identity(self, session: AsyncSession, account_id: str | None) -> None:
+    async def set_git_identity(self) -> None:
         """Commits in the repo are authored as the operator's bot user, with a
         prepare-commit-msg hook crediting the account that dispatched the run.
         Rewritten before every agent call so a reused warm host follows the
         current run's dispatcher — a system dispatch carries no hook and
         credits nobody."""
-        github = await Github.get_client(self.get_repo(self.subject))
-        author_name, author_email = await github.get_bot_git_author()
+        author_name, author_email = self.git_author
         steps = [
             f"cd {shlex.quote(self.repo_path)}",
             f"git config user.name {shlex.quote(author_name)}",
             f"git config user.email {shlex.quote(author_email)}",
             "rm -f .git/hooks/prepare-commit-msg",
         ]
-        if account_id and (account := await session.get(Account, account_id)):
-            trailer = f"Co-Authored-By: {account.username} <{account.username}>"
+        if self.dispatcher:
+            trailer = f"Co-Authored-By: {self.dispatcher} <{self.dispatcher}>"
             # The dispatcher's line goes beside any other co-author line, and only once.
             hook = (
                 "#!/bin/sh\n"
@@ -415,8 +344,3 @@ class RepoWorkspace(Workspace):
                 f"exit={result.returncode} stderr={result.stderr.strip()}",
                 exit_code=result.returncode,
             )
-
-
-def _file_sha256(path: Path) -> str:
-    with path.open("rb") as content:
-        return hashlib.file_digest(content, "sha256").hexdigest()

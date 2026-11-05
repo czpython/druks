@@ -33,13 +33,17 @@ async def test_survey_writes_the_repository_gist(druks_db, monkeypatch):
     assert (await Repository.get(id=repository.id)).gist == "Widgets for every shelf."
 
 
-async def test_survey_workspace_clones_the_subject_repo(druks_db):
+async def test_survey_workspace_clones_the_subject_repo(druks_db, monkeypatch):
     workflow = Survey()
     workflow.subject = await Repository.create(repo="acme/widgets")
     workflow.account_id = None
     host = SimpleNamespace(id="h1", ssh_username="exedev")
+    bot = SimpleNamespace(get_bot_git_author=mock.AsyncMock(return_value=("bot", "bot@x")))
+    monkeypatch.setattr("druks.workspaces.Github.get_client", mock.AsyncMock(return_value=bot))
 
-    workspace = await workflow.get_workspace(host)
+    workspace = workflow.workspace_class(await workflow.subject)
+    await workspace.setup()
+    workspace.host = host
 
     assert (workspace.get_repo(workspace.subject), workspace.branch) == ("acme/widgets", None)
     assert workspace.repo_path == get_repo_root("exedev")

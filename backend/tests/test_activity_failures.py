@@ -65,7 +65,7 @@ async def test_spend_limit_records_one_terminal_attempt_without_quota_wait(
     monkeypatch.setattr(UsageScrape, "latest_for", quota)
     attempts = 0
 
-    async def run_agent(self, session, **context):
+    async def run_agent(self, **context):
         nonlocal attempts
         attempts += 1
         CodexHarness.check_returncode(

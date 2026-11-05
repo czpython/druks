@@ -43,6 +43,7 @@ from druks.signals import subscribe
 from druks.testing import init_db
 from druks.user_settings.models import InstallationSettings, SettingsOverride
 from druks.workflows import Gate, OperatorReply, Subject, Workflow, step, task
+from druks.workspaces import Workspace
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from pydantic import ValidationError
@@ -738,13 +739,17 @@ async def test_subjectless_review_fails_loudly(runtime):
     assert "'review'" in failed.failure
 
 
+def _holds_a_connection() -> bool:
+    return db_session.registry.has() and db_session().in_transaction()
+
+
 def _fake_ephemeral_returning(output: dict, seen: list[dict], held: list[bool]):
     @contextlib.asynccontextmanager
     async def _fake_ephemeral(self, **_kw):
         async def _run_agent(_harness, _manifest, **kwargs):
             seen.append(kwargs)
 
-            held.append(db_session().in_transaction())
+            held.append(_holds_a_connection())
 
             return AgentResult(
                 output=output,
@@ -756,6 +761,8 @@ def _fake_ephemeral_returning(output: dict, seen: list[dict], held: list[bool]):
                 started_at=datetime.now(UTC),
             )
 
+        # Neither the boot nor the run sits inside a unit of work.
+        held.append(_holds_a_connection())
         yield SimpleNamespace(run_agent=_run_agent, id="host-test")
 
     return _fake_ephemeral
@@ -798,7 +805,7 @@ async def test_run_agent_step(runtime, monkeypatch):
     assert failed.account_id == account_id
     assert recorded[0].subscription.account_id == account_id
     assert recorded[0].api_key_id is None
-    assert held == [False]
+    assert held == [False, False]
 
 
 async def test_body_level_agent_output_lands_on_the_journal(runtime, monkeypatch):
@@ -1390,6 +1397,39 @@ async def test_failed_retry_attempts_keep_separate_terminal_records(runtime):
         assert {event.payload["failure"] for event in failures} == {"Source unavailable"}
     finally:
         workflows._items.pop(FailingAttempt.kind)
+
+
+@pytest.mark.parametrize("body", ["run", "run_multistep"])
+async def test_a_read_on_the_box_fails_the_run(runtime, monkeypatch, body):
+    # The box work is a task of its own with no session bound, whether the agent
+    # is a step of its own or runs inside the body's step, so a read in prepare()
+    # is a programming error that raises, not a held connection.
+    monkeypatch.setattr(
+        "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning({"action": "go"}, [], [])
+    )
+    monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
+
+    class ReadingWorkspace(Workspace):
+        async def prepare(self) -> None:
+            await db_session().scalar(select(Widget).where(Widget.id == 7))
+
+    async def call_the_agent(self) -> None:
+        await runtime.AgentFlow.DECIDER(body="x")
+
+    ReadingFlow = type(
+        "ReadingFlow",
+        (Workflow,),
+        {"subject": Widget, "workspace_class": ReadingWorkspace, body: call_the_agent},
+    )
+
+    workflow_id = await ReadingFlow.start(subject=Widget(id=7))
+    try:
+        failed = await _wait_for_run(
+            runtime.engine, workflow_id, lambda run: run.state == RunState.FAILED
+        )
+        assert "No database session is bound" in (failed.failure or "")
+    finally:
+        workflows._items.pop(ReadingFlow.kind)
 
 
 async def test_output_event_survives_completed_step_replay(runtime, monkeypatch, tmp_path):

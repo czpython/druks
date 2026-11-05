@@ -47,8 +47,16 @@ async def test_every_agent_call_gets_the_workspace_env(druks_db):
             calls.append(kwargs)
             return "result"
 
-    workspace = DeployWorkspace(host=_Host())  # type: ignore[arg-type]
-    await workspace.run_agent(account_id=None, config=_CONFIG, prompt="p")
+    workspace = DeployWorkspace(None)
+    workspace.host = _Host()  # type: ignore[assignment]
+    await workspace.run_agent(
+        harness=None,
+        manifest=None,
+        timeout=_CONFIG.timeout,
+        identity=_CONFIG.identity,
+        include_apps=_CONFIG.include_apps,
+        prompt="p",
+    )
 
     assert calls == [
         {
@@ -61,32 +69,28 @@ async def test_every_agent_call_gets_the_workspace_env(druks_db):
     ]
 
 
-async def test_repo_workspace_clones_before_every_agent_call_and_writes_no_token(
+async def test_repo_workspace_prepares_the_clone_and_the_identity(
     monkeypatch: pytest.MonkeyPatch,
 ):
     host = _RecordingHost()
     subject = SimpleNamespace(repo="acme/widgets")
-    workspace = RepoWorkspace(host=host, subject=subject, branch="feature")  # type: ignore[arg-type]
+    workspace = RepoWorkspace(subject)
+    workspace.branch = "feature"
+    workspace.host = host  # type: ignore[assignment]
 
     async def _ensure(_host: Any, *, repo_url: str, ref: str | None, target_path: str) -> None:
         host.events.append(("clone", repo_url, ref, target_path))
 
-    async def _git_identity(self: RepoWorkspace, session, account_id: str | None) -> None:
-        host.events.append(("git_identity", account_id))
-
-    async def _run(self: Workspace, *, account_id: str | None, **kwargs: Any) -> str:
-        host.events.append(("run_agent", account_id, kwargs))
-        return "result"
+    async def _git_identity(self: RepoWorkspace) -> None:
+        host.events.append(("git_identity",))
 
     monkeypatch.setattr(workspace_mod.checkout, "ensure", _ensure)
     monkeypatch.setattr(RepoWorkspace, "set_git_identity", _git_identity)
-    monkeypatch.setattr(Workspace, "run_agent", _run)
 
-    assert await workspace.run_agent(account_id="acct", prompt="p") == "result"
+    await workspace.prepare()
     assert host.events == [
         ("clone", "https://github.com/acme/widgets", "feature", get_repo_root("exedev")),
-        ("git_identity", "acct"),
-        ("run_agent", "acct", {"prompt": "p"}),
+        ("git_identity",),
     ]
 
 
@@ -119,7 +123,9 @@ async def test_repo_workspace_diff_holds_commits_edits_and_untracked_files(tmp_p
             assert cwd == get_repo_root(self.ssh_username)
             return subprocess.run(command, cwd=checkout, capture_output=True, text=True)
 
-    diff = await RepoWorkspace(host=_CheckoutHost()).get_diff()  # type: ignore[arg-type]
+    workspace = RepoWorkspace(None)
+    workspace.host = _CheckoutHost()  # type: ignore[assignment]
+    diff = await workspace.get_diff()
 
     for path in ("committed.txt", "kept.txt", "untracked.txt"):
         assert f"+++ b/{path}" in diff

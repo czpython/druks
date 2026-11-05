@@ -1,6 +1,6 @@
 import asyncio
 import hashlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import GetCoreSchemaHandler
 from pydantic_core import CoreSchema, core_schema
@@ -12,6 +12,10 @@ from druks.files.exceptions import FileTooLargeError, FileUnavailableError
 from druks.files.models import FileRecord
 from druks.files.storage import get_file_storage
 from druks.models import Base
+from druks.sandbox.layout import get_work_root
+
+if TYPE_CHECKING:
+    from druks.sandbox.host import Host
 
 _FILE_URL_PREFIX = "/api/files/"
 _FILE_PATH_DESCRIPTION = "Write the file in your workspace and report its path."
@@ -112,6 +116,14 @@ class File:
             return await asyncio.to_thread(get_file_storage().open, self.id)
         except FileNotFoundError as error:
             raise FileUnavailableError(f"file {self.id} content is missing") from error
+
+    async def upload(self, host: "Host", agent_call_id: str) -> str:
+        """Put the file in the call's own directory on the box, and return the
+        path it reads as there."""
+        root = get_work_root(host.ssh_username)
+        remote = f"{root}/.druks-files/{agent_call_id}/{self.id}/{self.name}"
+        await host.upload_file(local=get_file_storage().path(self.id), remote=remote)
+        return remote
 
     async def delete(self) -> None:
         record = await db_session().get(FileRecord, self.id)

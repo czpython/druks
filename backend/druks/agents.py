@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 
 from dbos import DBOS, StepOptions
 from pydantic import BaseModel, ConfigDict, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.apps.exceptions import AppBotError
 from druks.apps.loader import resolve_app
@@ -21,11 +20,13 @@ from druks.chat.bots.dependencies import BotUser
 from druks.chat.enums import BotAccess
 from druks.db import db_session
 from druks.durable.activity import set_run_phase
-from druks.durable.engine import _step_engine, step_session
+from druks.durable.engine import _step_engine, bound_session, step_session
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import AgentCall, Artifact
 from druks.exceptions import ObjectNotFound
 from druks.files.datastructures import File
+from druks.files.exceptions import FileUnavailableError
+from druks.files.models import FileRecord
 from druks.harnesses.config import AgentConfig, get_config
 from druks.harnesses.exceptions import (
     HarnessError,
@@ -43,6 +44,8 @@ from druks.workflows import _in_step, current_workflow
 if TYPE_CHECKING:
     from druks.browser.sessions import BrowserSession
     from druks.harnesses.base import Harness
+    from druks.sandbox.datastructures import AgentResult
+    from druks.sandbox.host import Host
     from druks.services.base import ServiceField
     from druks.workspaces import Workspace
 
@@ -205,17 +208,15 @@ class Agent:
                 "runs aren't supported yet"
             )
 
-        async def _invoke(session: AsyncSession) -> Any:
-            return await self._run(
-                session, workflow_id=workflow.workflow_id, contract=contract, **context
-            )
+        async def _invoke() -> Any:
+            return await self._run(workflow_id=workflow.workflow_id, contract=contract, **context)
 
         if _in_step.get():
             transient_retry_index = 0
             while True:
                 try:
-                    # The enclosing @step owns the session and memoizes the call.
-                    return await _invoke(db_session())
+                    # The enclosing @step memoizes the call.
+                    return await _invoke()
                 except HarnessError as error:
                     # Transient only, on the error's own schedule. Quota waits
                     # are hours; nothing that long belongs inside a held step,
@@ -229,10 +230,6 @@ class Agent:
                     # Plain sleep: nothing checkpoints inside a step — a crash
                     # re-runs the whole enclosing step from attempt one anyway.
                     await asyncio.sleep(delay * random.uniform(0.9, 1.1))
-
-        async def _do() -> Any:  # a standalone run is its own memoized step + session
-            async with step_session() as session:
-                return await _invoke(session)
 
         async def _quota_retry_wait() -> float:
             # Runs as its own step: the body does no IO, and replay reuses the
@@ -257,7 +254,7 @@ class Agent:
         while True:
             try:
                 result = await DBOS.run_step_async(
-                    StepOptions(name=f"{workflow.kind}.agent.{self.id}"), _do
+                    StepOptions(name=f"{workflow.kind}.agent.{self.id}"), _invoke
                 )
             except HarnessError as error:
                 if error.retry is Retry.TRANSIENT:
@@ -306,34 +303,36 @@ class Agent:
 
     async def _run(
         self,
-        session: AsyncSession,
         *,
         workflow_id: str,
         contract: type[AgentOutput] | None = None,
         **context: Any,
     ) -> Any:
-        """The raw execution: provision or attach a host, record the AgentCall, run
-        the harness. ``__call__`` handles the durable wrapping + nesting."""
+        """The raw execution: read what the call needs, provision or attach a host,
+        run the harness, record the call. ``__call__`` handles the durable
+        wrapping + nesting. Each read is a unit of work of its own, so no
+        connection sits idle through the boot, the preparation, or the run."""
         if not self.prompt:
             raise WorkflowError(f"agent {self.id!r} has no prompt template to render")
         contract = contract or self.contract
         workflow = current_workflow.get()
-        # Refusing an unservable call here beats provisioning a VM and
-        # 401ing mid-run.
-        config = await get_config(session, self.id, workflow.account_id)
+        if db_session.registry.has():
+            # An agent call is a durability boundary — its effects don't roll
+            # back — so the enclosing step's work commits now instead of waiting
+            # in an open transaction through the run.
+            await db_session().commit()
+        artifact_dir = load_settings().artifacts_dir / f"run-{workflow_id}"
+        engine = _step_engine()
+
+        async with step_session() as session:
+            # Refusing an unservable call here beats provisioning a VM and
+            # 401ing mid-run.
+            config = await get_config(session, self.id, workflow.account_id)
+            call_id = config.harness_class.mint_run_id(None)
+            running = await AgentCall.lookup_running(session, workflow_id, self.id)
         model = config.model
         subscription_id = config.subscription.id if config.subscription else None
         api_key_id = config.api_key.id if config.api_key else None
-        # An agent call is a durability boundary — its effects don't roll back —
-        # so commit here rather than hold the step's connection idle through the
-        # minutes of provisioning and the run.
-        await session.commit()
-        settings = load_settings()
-        artifact_dir = settings.artifacts_dir / f"run-{workflow_id}"
-
-        engine = _step_engine()
-        call_id = config.harness_class.mint_run_id(None)
-        running = await AgentCall.lookup_running(session, workflow_id, self.id)
 
         # Registered for provisioning through execution — the subscription's
         # rotation defers around it. A key never rotates.
@@ -350,35 +349,55 @@ class Agent:
             )
         async with gate, borrow as lent_browser:
             await set_run_phase("provisioning_vm")
-            # Resolved once: the box's entries and the harness config name the
-            # same servers.
-            subject = await workflow.subject
-            workspace_class = workflow.workspace_class
-            mcp_servers, mcp_secret_refs = (), []
-            if self.include_mcp:
-                mcp_servers, mcp_secret_refs = await workspace_class.get_all_mcp_servers(
-                    session, subject, workflow.account_id
-                )
-            if lent_browser:
-                server, secret = lent_browser
-                mcp_servers, mcp_secret_refs = (*mcp_servers, server), [*mcp_secret_refs, secret]
-            service_refs = []
-            for secret in self.secrets:
-                # An optional service that is not connected leaves its secrets out.
-                if secret.service.required or await secret.service.is_connected():
-                    service_refs.append(
-                        SecretRef(
-                            name=secret.secret_name,
-                            secret_id=(await secret.service.get()).id,
-                            host=secret.service.host,
-                        )
+            async with step_session() as session:
+                # Everything the box and the prompt need, from rows, before the
+                # box exists. The workspace carries it across.
+                subject = await workflow.subject
+                workspace_class = workflow.workspace_class
+                workspace = workspace_class(subject)
+                await workspace.setup()
+                mcp_servers, mcp_secret_refs = (), []
+                if self.include_mcp:
+                    mcp_servers, mcp_secret_refs = await workspace_class.get_all_mcp_servers(
+                        session, subject, workflow.account_id
                     )
-            refs = [
-                *config.secret_refs,
-                *service_refs,
-                *(await workspace_class.get_secret_refs(subject)),
-                *mcp_secret_refs,
-            ]
+                if lent_browser:
+                    server, secret = lent_browser
+                    mcp_servers = (*mcp_servers, server)
+                    mcp_secret_refs = [*mcp_secret_refs, secret]
+                service_refs = []
+                for secret in self.secrets:
+                    # An optional service that is not connected leaves its secrets out.
+                    if secret.service.required or await secret.service.is_connected():
+                        service_refs.append(
+                            SecretRef(
+                                name=secret.secret_name,
+                                secret_id=(await secret.service.get()).id,
+                                host=secret.service.host,
+                            )
+                        )
+                refs = [
+                    *config.secret_refs,
+                    *service_refs,
+                    *(await workspace_class.get_secret_refs(subject)),
+                    *mcp_secret_refs,
+                ]
+                # A deleted or missing File argument stops the call before the box
+                # exists; the workspace ships the rest once it is up, and the
+                # template reads each as its in-VM path.
+                for value in context.values():
+                    for file in value if type(value) is list else [value]:
+                        if type(file) is File:
+                            record = await session.get(FileRecord, file.id)
+                            if not record or record.deleted_at:
+                                raise FileUnavailableError(f"file {file.id} is deleted or missing")
+                prompt_context = await workflow.get_prompt_context(**context)
+                harness = config.harness_class(
+                    model=config.model, fast_mode=config.fast_mode, effort=config.effort
+                )
+                manifest = await harness.get_manifest(
+                    session, mcp_servers=mcp_servers, skills=workspace.skills
+                )
             # An agent browser's box holds the call's key, so the box belongs to
             # the call: it is never the warm box, and no other attempt resumes it.
             # The same goes for a call from an after-agent hook: the hooked agent holds it.
@@ -387,7 +406,7 @@ class Agent:
             if self.browser or _in_after_agent.get():
                 scope = call_id
             else:
-                host_id = await workflow._lease_host(session, config, refs)
+                host_id = await workflow._lease_host(config, refs)
 
             # Record the call RUNNING once it has a host to run on (its id names
             # the on-disk transcript dir) so the live step shows while the agent
@@ -395,10 +414,10 @@ class Agent:
             # starting. A provisioning failure happens before this and records
             # no call.
             async with workflow._workspace(
-                session,
                 host_id,
                 scope,
                 refs,
+                workspace=workspace,
                 secrets=config.secrets,
                 secrets_hash=config.secrets_hash,
             ) as runner:
@@ -406,104 +425,154 @@ class Agent:
                 # this attempt takes that call over, under its id, instead of starting
                 # a second agent beside it. A box that is gone leaves the call to
                 # start over on a new one.
-                resume = running and running.sandbox_host_id == runner.host_id
-                if resume:
+                if running and running.sandbox_host_id == runner.host_id:
                     call_id = running.id
-                context = await runner.prepare_context(session, context, agent_call_id=call_id)
-                # Templates read the live workflow + the workspace the agent runs in,
-                # alongside whatever the workflow's get_prompt_context composes.
-                prompt_context = await workflow.get_prompt_context(**context)
-                prompt_context.setdefault("workflow", workflow)
-                prompt_context.setdefault("workspace", runner)
-                prompt = await render_prompt(self.prompt, **prompt_context)
-                hooks = {}
-                if self._after_agent:
-                    hooks["after_agent"] = functools.partial(
-                        self._run_after_agent,
-                        harness=config.harness_class,
-                        prompt=prompt,
-                        workspace=runner,
-                    )
-                await set_run_phase("agent_running")
-                if resume:
-                    attempt = runner.host.resume_agent(
-                        config.harness_class(
-                            model=config.model, fast_mode=config.fast_mode, effort=config.effort
-                        ),
-                        agent=self.id,
-                        artifact_dir=artifact_dir,
-                        call_id=call_id,
-                        started_at=running.started_at,
-                        timeout=config.timeout,
-                        hooks=hooks,
-                    )
+                    resume_from = running
                 else:
-                    await AgentCall.start(
-                        engine,
-                        call_id=call_id,
-                        run_id=workflow_id,
-                        model=model,
-                        agent=self.id,
-                        host_id=runner.host_id,
-                        subscription_id=subscription_id,
-                        api_key_id=api_key_id,
-                    )
-                    attempt = runner.run_agent(
-                        account_id=workflow.account_id,
-                        config=config,
-                        agent=self.id,
-                        prompt=prompt,
-                        schema=contract.model_json_schema(),
-                        artifact_dir=artifact_dir,
-                        call_id=call_id,
-                        include_plugins=self.include_plugins,
-                        mcp_servers=mcp_servers,
-                        hooks=hooks,
-                    )
-                try:
-                    result = await attempt
-                except BaseException as error:
-                    await AgentCall.fail(engine, call_id=call_id, error=error)
-                    raise
-                if result.error:
-                    await AgentCall.finish(engine, call_id=call_id, result=result)
-                    raise result.error
-                try:
-                    workspace_files: list[File] = []
+                    resume_from = None
+
+                async def run_call() -> tuple[AgentOutput, dict[str, str], dict[str, str]]:
+                    context_on_box = await self._upload_files(prompt_context, runner.host, call_id)
+                    context_on_box.setdefault("workflow", workflow)
+                    context_on_box["workspace"] = runner
+                    prompt = await render_prompt(self.prompt, **context_on_box)
+                    hooks = {}
+                    if self._after_agent:
+                        hooks["after_agent"] = functools.partial(
+                            self._run_after_agent,
+                            harness=config.harness_class,
+                            prompt=prompt,
+                            workspace=runner,
+                        )
+                    # Record the call RUNNING once it has a host to run on (its id
+                    # names the on-disk transcript dir) so the live step shows while
+                    # the agent works, then finish it — or fail it if the run raised
+                    # after starting. A provisioning failure happens before this
+                    # and records no call.
+                    if resume_from:
+                        await set_run_phase("agent_running")
+                        attempt = runner.host.resume_agent(
+                            harness,
+                            agent=self.id,
+                            artifact_dir=artifact_dir,
+                            call_id=call_id,
+                            started_at=resume_from.started_at,
+                            timeout=config.timeout,
+                            hooks=hooks,
+                        )
+                    else:
+                        await runner.prepare()
+                        await set_run_phase("agent_running")
+                        await AgentCall.start(
+                            engine,
+                            call_id=call_id,
+                            run_id=workflow_id,
+                            model=model,
+                            agent=self.id,
+                            host_id=runner.host_id,
+                            subscription_id=subscription_id,
+                            api_key_id=api_key_id,
+                        )
+                        attempt = runner.run_agent(
+                            harness=harness,
+                            manifest=manifest,
+                            timeout=config.timeout,
+                            identity=config.identity,
+                            include_apps=config.include_apps,
+                            agent=self.id,
+                            prompt=prompt,
+                            schema=contract.model_json_schema(),
+                            artifact_dir=artifact_dir,
+                            call_id=call_id,
+                            include_plugins=self.include_plugins,
+                            mcp_servers=mcp_servers,
+                            hooks=hooks,
+                        )
                     try:
-                        output = contract.model_validate(
-                            result.output,
-                            context={"workspace_files": workspace_files},
-                        )
-                    except ValidationError as error:
-                        raise HarnessInvalidOutputError(
-                            f"agent {self.id!r} returned a payload that fails "
-                            f"{contract.__name__}: {error}"
-                        ) from error
-                    if workspace_files:
-                        await runner.save_files(
-                            session,
-                            workspace_files,
-                            app=workflow.app,
-                            agent_call_id=call_id,
-                        )
-                    event = output.to_event()
-                    artifact = output.to_artifact()
-                    if event and not artifact:
-                        raise WorkflowError(
-                            f"{contract.__name__}.to_event() returned an event without an "
-                            "artifact. Implement to_artifact() for the saved result."
-                        )
-                    await AgentCall.finish(engine, call_id=call_id, result=result)
-                except BaseException as error:
-                    await AgentCall.fail(engine, call_id=call_id, error=error)
-                    raise
+                        result = await attempt
+                    except BaseException as error:
+                        await AgentCall.fail(engine, call_id=call_id, error=error)
+                        raise
+                    if result.error:
+                        await AgentCall.finish(engine, call_id=call_id, result=result)
+                        raise result.error
+                    try:
+                        output, workspace_files = self._parse_output(contract, result)
+                        if workspace_files:
+                            # The files come off the box, so they are recorded while it is up.
+                            async with step_session() as session:
+                                await runner.host.save_files(
+                                    session,
+                                    workspace_files,
+                                    app=workflow.app,
+                                    agent_call_id=call_id,
+                                )
+                        event, artifact = self._get_event_and_artifact(contract, output)
+                        await AgentCall.finish(engine, call_id=call_id, result=result)
+                    except BaseException as error:
+                        await AgentCall.fail(engine, call_id=call_id, error=error)
+                        raise
+                    return output, event, artifact
+
+                # The box work is a task of its own: no session is bound there, so a
+                # read in prepare() or in a hook raises instead of holding a
+                # connection through the run.
+                output, event, artifact = await asyncio.create_task(run_call())
 
         if artifact:
-            await Artifact.record(
-                session, call_dir=artifact_dir / call_id, call_id=call_id, event=event, **artifact
-            )
+            async with step_session() as session:
+                await Artifact.record(
+                    session,
+                    call_dir=artifact_dir / call_id,
+                    call_id=call_id,
+                    event=event,
+                    **artifact,
+                )
         return output.to_result()
+
+    async def _upload_files(
+        self, context: dict[str, Any], host: "Host", call_id: str
+    ) -> dict[str, Any]:
+        # Each File argument lands in the call's directory on the box and reads
+        # as its path there, at the top level or inside a list.
+        uploaded = {}
+        for key, value in context.items():
+            if type(value) is File:
+                uploaded[key] = await value.upload(host, call_id)
+            elif type(value) is list:
+                uploaded[key] = [
+                    await item.upload(host, call_id) if type(item) is File else item
+                    for item in value
+                ]
+            else:
+                uploaded[key] = value
+        return uploaded
+
+    def _parse_output(
+        self, contract: type[AgentOutput], result: "AgentResult"
+    ) -> tuple[AgentOutput, list[File]]:
+        workspace_files: list[File] = []
+        try:
+            output = contract.model_validate(
+                result.output, context={"workspace_files": workspace_files}
+            )
+        except ValidationError as error:
+            raise HarnessInvalidOutputError(
+                f"agent {self.id!r} returned a payload that fails {contract.__name__}: {error}"
+            ) from error
+        return output, workspace_files
+
+    def _get_event_and_artifact(
+        self, contract: type[AgentOutput], output: AgentOutput
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        event = output.to_event()
+        artifact = output.to_artifact()
+        if event and not artifact:
+            raise WorkflowError(
+                f"{contract.__name__}.to_event() returned an event without an "
+                "artifact. Implement to_artifact() for the saved result."
+            )
+        return event, artifact
 
     async def _run_after_agent(
         self, *, harness: type["Harness"], prompt: str, workspace: "Workspace"
@@ -513,7 +582,12 @@ class Agent:
         in_step = _in_step.set(True)
         in_after_agent = _in_after_agent.set(True)
         try:
-            texts = [await hook(prompt=prompt, workspace=workspace) for hook in self._after_agent]
+            # The hooks run while the hooked agent does, with no unit of work
+            # open, so they get one of their own.
+            async with bound_session():
+                texts = [
+                    await hook(prompt=prompt, workspace=workspace) for hook in self._after_agent
+                ]
         finally:
             _in_step.reset(in_step)
             _in_after_agent.reset(in_after_agent)
