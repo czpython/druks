@@ -40,6 +40,7 @@ AUTHOR_SURFACE = {
         "Subject",
         "SubjectStatus",
         "SubjectSummary",
+        "WaitFailed",
         "WaitTimeout",
         "Workflow",
         "WorkflowError",
