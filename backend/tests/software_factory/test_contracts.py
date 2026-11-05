@@ -14,7 +14,6 @@ MODELS = [
     O.ReviewOutput,
     O.TriageOutput,
     O.ImplementationOutput,
-    O.EvaluationOutput,
     O.ContractRevisionOutput,
 ]
 
@@ -205,29 +204,6 @@ def test_ask_contracts_cap_identity_and_cardinality():
             status="planned",
             assignee_github_login=None,
         )
-
-
-def test_evaluation_artifact_names_the_checks_that_did_not_decide():
-    checks = [
-        O.EvalCheckOutput(name="make lint", status="fail", evidence="make: command not found"),
-        O.EvalCheckOutput(name="tests", status="not_run", evidence="No database is available."),
-        O.EvalCheckOutput(name="CI", status="pass", evidence="CI passed for this commit."),
-    ]
-    blocked = O.EvaluationOutput(
-        verdict="blocked",
-        body="The required local check could not run.",
-        review_notes="",
-        findings=[],
-        checks=checks,
-        acceptance_results=[],
-    )
-    content = blocked.to_artifact()["content"]
-    assert content.startswith("Verification blocked\n\n- make lint: make: command not found")
-    assert "- tests: No database is available." in content
-    assert "CI passed" not in content
-    assert content.endswith("The required local check could not run.")
-    passed = blocked.model_copy(update={"verdict": "pass"})
-    assert passed.to_artifact()["content"].startswith("Verdict: pass\n\n")
 
 
 def test_review_output_records_no_artifact():

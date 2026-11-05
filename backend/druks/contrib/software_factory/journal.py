@@ -2,10 +2,10 @@ from contextlib import suppress
 from typing import Any
 
 from druks.contrib.software_factory.contracts import (
-    EvaluationOutput,
     ImplementationOutput,
     PlanData,
     ReviewOutput,
+    ReviewReport,
     ReviewWork,
     TriageOutput,
 )
@@ -42,8 +42,8 @@ class BuildJournal(Journal):
         return len(self.implementations)
 
     @property
-    def evaluations(self) -> list[EvaluationOutput]:
-        return self.filter(EvaluationOutput)
+    def reviews(self) -> list[ReviewReport]:
+        return self.filter(ReviewReport)
 
     @property
     def plan_reviews(self) -> list[ReviewOutput]:
@@ -59,13 +59,13 @@ class BuildJournal(Journal):
     @property
     def revision_request(self) -> str | None:
         # The newest triage's instructions drive exactly one implement round.
-        # An evaluation recorded after that triage means the round already ran —
-        # the evaluator's findings are the current request, not these.
+        # A review recorded after that triage means the round already ran —
+        # the review's findings are the current request, not these.
         triage = self.latest(TriageOutput)
         if (
             triage
             and triage.implementation_instructions
-            and not self.filter(EvaluationOutput, after=triage)
+            and not self.filter(ReviewReport, after=triage)
         ):
             return triage.implementation_instructions
         return

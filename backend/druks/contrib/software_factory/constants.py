@@ -11,3 +11,5 @@ TICKET_TOOLS = (
     "software_factory_update_ticket",
     "software_factory_create_ticket",
 )
+# A review takes minutes. A build still waiting after this long was never answered.
+REVIEW_TTL_SECONDS = 2 * 60 * 60

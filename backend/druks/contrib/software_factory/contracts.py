@@ -3,11 +3,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from pydantic import BaseModel, Field, model_validator
 
 from druks.agents import AgentOutput
-from druks.contrib.software_factory.enums import (
-    EvaluationVerdict,
-    HumanFeedbackAction,
-    ReviewDecision,
-)
+from druks.contrib.software_factory.enums import HumanFeedbackAction, ReviewDecision
 from druks.workflows import Gate, OperatorReply, Workflow
 
 if TYPE_CHECKING:
@@ -304,41 +300,3 @@ class ReviewReport(AgentOutput):
 
     def to_event(self) -> dict[str, str]:
         return {"topic": "review.completed", "summary": self.summary}
-
-
-class EvalCheckOutput(AgentOutput):
-    name: str
-    status: Literal["pass", "fail", "not_run"]
-    evidence: str
-
-
-class AcceptanceResultOutput(AgentOutput):
-    criterion_id: str
-    status: Literal["pass", "fail", "not_run"]
-    evidence: str
-
-
-class EvaluationOutput(AgentOutput):
-    verdict: EvaluationVerdict
-    body: str
-    review_notes: str
-    findings: list[FindingOutput]
-    checks: list[EvalCheckOutput]
-    acceptance_results: list[AcceptanceResultOutput]
-
-    def to_artifact(self) -> dict[str, str]:
-        # A blocked verdict says the checks could not decide, not that the work has
-        # a blocker, so the headline names the checks that failed or did not run.
-        if self.verdict == EvaluationVerdict.BLOCKED:
-            sections = ["Verification blocked"]
-            sections.extend(
-                f"- {check.name}: {check.evidence}"
-                for check in self.checks
-                if check.status != "pass"
-            )
-        else:
-            sections = [f"Verdict: {self.verdict}"]
-        sections.append(self.body)
-        for finding in self.findings:
-            sections.extend(finding.to_sections())
-        return {"kind": "markdown", "title": "Evaluation", "content": "\n\n".join(sections)}

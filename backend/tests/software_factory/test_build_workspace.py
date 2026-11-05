@@ -69,11 +69,12 @@ async def test_build_workspace_makes_the_related_root_before_the_clone(
     assert execs == [["mkdir", "-p", get_related_root("exedev")], ["run_agent"]]
 
 
-async def test_build_workspace_declares_its_github_mcp_as_the_review_actor(druks_db):
+async def test_build_workspace_declares_its_github_mcp_as_the_operator(druks_db):
+    # The review runs as the reviewer in its own workflow, so a build never acts as it.
     operator = await connect_service(
         "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
     )
-    reviewer = await connect_service(
+    await connect_service(
         "github_reviewer",
         identity={"app_id": "2", "slug": "druks-reviewer"},
         secrets={"private_key": "reviewer-pem"},
@@ -84,7 +85,7 @@ async def test_build_workspace_declares_its_github_mcp_as_the_review_actor(druks
 
     assert github.url == GITHUB_MCP_URL
     assert github.bearer_token_env_var == get_bearer_token_env_var(GITHUB_MCP_NAME)
-    assert ref.key == ("mcp_github_token", reviewer.id, ("o/main",), "api.githubcopilot.com")
+    assert ref.key == ("mcp_github_token", operator.id, ("o/main",), "api.githubcopilot.com")
     [clone] = await BuildWorkspace.get_secrets(subject)
     assert clone == SandboxSecret(
         name="github", secret_id=operator.id, resources=("o/main",), host="github.com"

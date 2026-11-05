@@ -24,7 +24,9 @@ than them. That reading is the review — the diff is only where it starts.
 Four questions, in this order:
 
 1. **Does it do what it says?** Read the pull request's own description against the diff. A
-   change that quietly does more than it claims, or less, is the finding.
+   change that quietly does more than it claims, or less, is the finding. When the description
+   has a `## Acceptance Criteria` section, hold the diff to each criterion in it: a criterion
+   the diff does not meet is a high-severity finding.
 2. **Is it right where it meets everything else?** Callers it didn't update, a contract or
    shape something else depends on, data it writes that another reader has to parse, a
    migration something else reads. Grep for those callers — do not assume they don't exist,

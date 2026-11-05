@@ -611,7 +611,7 @@ function RunInspector({
   const external = run.state === 'parked' && run.inputRequest?.presentation === 'external'
   const requestedReview = expected && !external
   const isNewestCall = call == null || call.id === run.agentCalls.at(-1)?.id
-  // A finished call's saved result (an evaluation's verdict, a plan) is what the
+  // A finished call's saved result (a plan, a delivery) is what the
   // operator came for; the transcript is how it got there.
   const files = useQuery({
     queryKey: ['agent-call-files', call?.id],
