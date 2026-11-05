@@ -15,6 +15,7 @@ from druks.db import db_session
 from druks.exceptions import ObjectNotFound
 from druks.models import StoredSubject
 from druks.redis import get_client
+from druks.settings import load_settings
 from druks.ui.exceptions import PageContractError, PageReadError, PageRouteError
 from druks.user_settings.models import SettingsOverride
 
@@ -340,6 +341,17 @@ class App:
         if spec and spec.submodule_search_locations:
             return Path(spec.submodule_search_locations[0])
         return
+
+    @classmethod
+    def get_data_dir(cls) -> Path:
+        """The one directory the app writes outside the database:
+        ``<data_dir>/apps/<name>``, created on first use. A cached tool
+        binary or a tool's state lives here, never under ``~``: the process
+        user has no home it can write, and only the instance data directory
+        survives a release."""
+        directory = load_settings().data_dir / "apps" / cls.name
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
 
     @classmethod
     def frontend_dist(cls) -> Path | None:

@@ -154,6 +154,12 @@ every router found in its `routes` modules under `/api/night_watch`, supplies
 transcript routes, and serves `druks_night_watch/dist/` under
 `/app/night_watch` when it contains `entry.js`.
 
+An app writes files outside the database only under `App.get_data_dir()`,
+`<DRUKS_DATA_DIR>/apps/night_watch`, which Druks creates on first use. A
+downloaded tool binary or a tool's state directory goes there, never under
+`~`: the process user has no writable home, and only the data directory
+survives a release.
+
 ## Choose the right workflow shape
 
 The parameters of `run()` or `run_multistep()` are the workflow input. Druks
