@@ -59,7 +59,7 @@ from druks.secrets.models import VaultSecret
 from druks.settings import Urls
 from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_run
 from druks.user_settings import reads
-from druks.user_settings.models import InstallationSettings
+from druks.user_settings.models import InstallationSettings, SettingsOverride
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException
 from sqlalchemy import func, select
 
@@ -824,7 +824,12 @@ async def test_the_bot_row_saves_and_resolves_like_an_agent_row(druks_db, druks_
 
     assert response.status_code == 200
     settings = await InstallationSettings.get_or_create(druks_db)
-    row = await reads.get_agent_setting(druks_db, helpdesk.bot, settings=settings)
+    row = await reads.get_agent_setting(
+        druks_db,
+        helpdesk.bot,
+        settings=settings,
+        overrides=await SettingsOverride.list_by_key(druks_db),
+    )
     assert (row.effort, row.effort_source) == ("low", "agent")
     assert (row.timeout, row.timeout_source) == (120, "agent")
 

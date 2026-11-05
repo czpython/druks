@@ -461,7 +461,10 @@ async def test_two_apps_declare_the_same_agent_name(druks_db):
         bug_hunter = await get_config(druks_db, BugHunter.file_tickets.id, None)
         settings = [
             await reads.get_agent_setting(
-                druks_db, agent, settings=await InstallationSettings.get_or_create(druks_db)
+                druks_db,
+                agent,
+                settings=await InstallationSettings.get_or_create(druks_db),
+                overrides=await SettingsOverride.list_by_key(druks_db),
             )
             for agent in (Ticketing.file_tickets, BugHunter.file_tickets)
         ]

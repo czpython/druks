@@ -1089,15 +1089,23 @@ class Workflow:
     # operator override → the declared default. The reconciler and the settings
     # read both go through these, so the workflow owns its own knobs.
     @classmethod
-    async def get_schedule(cls, session: AsyncSession) -> str | None:
-        return await SettingsOverride.workflow_setting(session, cls.kind, "schedule", cls.every)
+    async def get_schedule(
+        cls, session: AsyncSession, *, overrides: dict[str, SettingsOverride] | None = None
+    ) -> str | None:
+        return await SettingsOverride.workflow_setting(
+            session, cls.kind, "schedule", cls.every, overrides=overrides
+        )
 
     @classmethod
-    async def has_enabled_schedule(cls, session: AsyncSession) -> bool:
+    async def has_enabled_schedule(
+        cls, session: AsyncSession, *, overrides: dict[str, SettingsOverride] | None = None
+    ) -> bool:
         # There is a schedule and it's on — False for unscheduled workflows too.
         if not cls.every:
             return False
-        return await SettingsOverride.workflow_setting(session, cls.kind, "schedule_enabled", True)
+        return await SettingsOverride.workflow_setting(
+            session, cls.kind, "schedule_enabled", True, overrides=overrides
+        )
 
     @classmethod
     async def settings(cls) -> BaseModel:
