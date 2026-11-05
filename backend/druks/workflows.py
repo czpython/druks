@@ -1148,19 +1148,21 @@ class Workflow:
     @classmethod
     async def cancel(cls, subject: Subject | StoredSubject, *, failure: str | None = None) -> None:
         cls._validate_subject(subject)
-        run = await Run.get_latest_for_subject(
-            db_session(), subject.subject_type, str(subject.id), kind=cls.kind
-        )
-        if run and run.is_active:
-            await run.cancel(failure=failure)
+        async with bound_session() as session:
+            run = await Run.get_latest_for_subject(
+                session, subject.subject_type, str(subject.id), kind=cls.kind
+            )
+            if run and run.is_active:
+                await run.cancel(failure=failure)
 
     @classmethod
     async def answer(cls, subject: Subject | StoredSubject, topic: str, **facts: Any) -> None:
         """Deliver ``facts`` to the subject's run of this workflow, when it waits on ``topic``."""
         cls._validate_subject(subject)
-        run = await Run.get_latest_for_subject(
-            db_session(), subject.subject_type, str(subject.id), kind=cls.kind
-        )
+        async with bound_session() as session:
+            run = await Run.get_latest_for_subject(
+                session, subject.subject_type, str(subject.id), kind=cls.kind
+            )
         if run and await DBOS.get_event_async(run.id, "waiting_on", timeout_seconds=0) == topic:
             await DBOS.send_async(run.id, facts, topic=topic)
 
