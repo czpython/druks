@@ -1,14 +1,20 @@
+import logging
+
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import ReviewWork
 from druks.contrib.software_factory.datastructures import PullRequest
 from druks.contrib.software_factory.enums import Resolution, Status
+from druks.contrib.software_factory.exceptions import TicketAlreadyMerged, TicketNotRoutable
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Build, Profile, PullRequestReview
 from druks.db import atomic
 from druks.models import Base
+from druks.services.exceptions import ServiceNotConnectedError
 from druks.signals import publish, subscribe
 from druks.workflows import WorkflowEvent
+
+logger = logging.getLogger(__name__)
 
 
 @subscribe(WorkflowEvent.SCHEDULED, workflow=Build)
@@ -145,4 +151,9 @@ async def ticket_transition_drives_the_funnel(*, payload: dict) -> None:
     if settings.tracker == "druks":
         trigger = Status.READY_FOR_AGENT.label
     if payload["source"] == settings.tracker and payload["status"] == trigger:
-        await Build.dispatch(ticket=payload)
+        try:
+            await Build.dispatch(ticket=payload)
+        except (TicketAlreadyMerged, TicketNotRoutable, ServiceNotConnectedError) as error:
+            # The delivery succeeded. A raise would answer 5xx, and the tracker would deliver
+            # the same ticket again.
+            logger.info("Ticket %s opens no build: %s", payload["identifier"], error)

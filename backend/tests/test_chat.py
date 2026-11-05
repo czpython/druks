@@ -13,6 +13,7 @@ from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.apps.registry import channels, services
 from druks.chat import service, sockets
+from druks.chat.bots import service as bot_service
 from druks.chat.bridge import Bridge
 from druks.chat.constants import (
     BRIDGE_VERSION,
@@ -1317,6 +1318,25 @@ async def test_a_failed_run_reports_to_its_conversation_whether_or_not_it_parked
         True,
         True,
     )
+
+
+async def test_a_parked_run_asks_the_chat_that_started_it(druks_db, conversation):
+    run = await seed_run(
+        druks_db,
+        kind="test",
+        state="parked",
+        input_gate="review",
+        input_request={"presentation": "external", "label": "Approve the plan", "url": "/run"},
+        account_id=conversation.account_id,
+    )
+    run.conversation_id = conversation.id
+    run.input_requested_at = Base.utc_now()
+
+    assert await bot_service.ask_for_answer(druks_db, run) == conversation.id
+    *_, ask = await list_messages(druks_db, conversation)
+    assert ask.is_internal
+    assert run.id in ask.body
+    assert "Approve the plan" in ask.body
 
 
 async def test_each_turn_opens_with_the_local_time(monkeypatch):

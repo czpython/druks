@@ -15,6 +15,27 @@ class Linear(Tracker):
         super().__init__(status_names=status_names)
         self._client = client
 
+    async def get_ticket(self, key: str) -> dict:
+        issue = await self._client.get_issue(key)
+        # An issue outside a project has no project, and an unassigned one no assignee.
+        project = issue["project"] or {}
+        assignee = issue["assignee"] or {}
+        return {
+            "source": "linear",
+            "ticket_id": issue["id"],
+            "identifier": issue["identifier"],
+            "status": issue["state"]["name"],
+            "title": issue["title"],
+            "url": issue["url"],
+            "project_name": project.get("name"),
+            "labels": [label["name"] for label in issue["labels"]["nodes"]],
+            "team": issue["team"]["id"],
+            "actor_id": None,
+            "assignee_id": assignee.get("id"),
+            "assignee_email": assignee.get("email"),
+            "assignee_name": assignee.get("name"),
+        }
+
     async def get_status_name(self, key: str) -> str:
         return await self._client.get_issue_status(key)
 

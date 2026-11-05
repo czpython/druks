@@ -594,6 +594,9 @@ A ticket that enters Ready for Agent opens a build against the selected
 repository. If a scheduled, running, or parked run already exists for that
 ticket, Software Factory does not start another.
 
+An agent's `start` tool does not move the ticket to the trigger status. The
+build moves the ticket to the in-progress status when it runs.
+
 An agent reads and answers a board ticket through this appliance's own `/mcp`. The
 server lists the five ticket tools only while the tracker is **druks**. A
 build whose tracker is **druks** asks for that server. You paste nothing and

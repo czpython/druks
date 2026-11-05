@@ -7,9 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
 from druks.apps.loader import get_app
+from druks.chat.constants import PARKED_MESSAGE
 from druks.chat.enums import BotAccess, PauseSignal
 from druks.chat.models import Conversation
-from druks.chat.service import deliver
+from druks.chat.service import deliver, report_outcome
 from druks.durable.constants import PAUSE_QUEUE
 from druks.durable.engine import step_session
 from druks.durable.models import Run
@@ -241,19 +242,25 @@ async def resume(session: AsyncSession, conversation: Conversation) -> bool:
     return False
 
 
-async def ask_admin(session: AsyncSession, run: Run) -> str | None:
-    """Ask the number's admin to decide for a parked run that a chat on the number
-    started. Returns the admin's conversation."""
+async def ask_for_answer(session: AsyncSession, run: Run) -> str | None:
+    """Ask for the answer a parked run that a chat started waits on. A number's admin
+    decides for the number's chats. Any other chat hears the ask itself. Returns the
+    conversation to deliver."""
+    if not run.input_request:
+        return
     conversation = await session.get(Conversation, run.conversation_id)
-    if conversation.admin_account_id and run.input_request:
-        admin = await get_or_create_admin_conversation(session, conversation)
-        body = QUESTION_MESSAGE.format(
-            run=run.id,
-            parked_at=run.input_requested_at.isoformat(),
-            user_name=conversation.user_name,
-            user_id=conversation.user_id,
-            request=to_json(await run.get_ask()).decode(),
+    request = to_json(await run.get_ask()).decode()
+    if not conversation.admin_account_id:
+        return await report_outcome(
+            session, run, PARKED_MESSAGE.format(run=run.id, request=request)
         )
-        await admin.create_message(session, body, is_internal=True)
-        return admin.id
-    return
+    admin = await get_or_create_admin_conversation(session, conversation)
+    body = QUESTION_MESSAGE.format(
+        run=run.id,
+        parked_at=run.input_requested_at.isoformat(),
+        user_name=conversation.user_name,
+        user_id=conversation.user_id,
+        request=request,
+    )
+    await admin.create_message(session, body, is_internal=True)
+    return admin.id

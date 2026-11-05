@@ -32,6 +32,10 @@ class Tracker(ABC):
         return []
 
     @abstractmethod
+    async def get_ticket(self, key: str) -> dict:
+        """The ticket in the shape of a ``ticket.transitioned`` payload, with no actor."""
+
+    @abstractmethod
     async def get_status_name(self, key: str) -> str | None:
         """The tracker's own name for the status the ticket is at. None when it has none."""
 

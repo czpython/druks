@@ -25,6 +25,26 @@ class Jira(Tracker):
         super().__init__(status_names=status_names)
         self._client = JiraClient(base_url=base_url, email=email, api_key=api_key, client=client)
 
+    async def get_ticket(self, key: str) -> dict:
+        issue = await self._client.get_issue(key)
+        fields = issue["fields"]
+        # An unassigned issue has a null assignee. Privacy settings can hide the email.
+        assignee = fields["assignee"] or {}
+        return {
+            "source": "jira",
+            "ticket_id": issue["id"],
+            "identifier": issue["key"],
+            "status": fields["status"]["name"],
+            "title": fields["summary"],
+            "url": f"{self._client.base_url.rstrip('/')}/browse/{issue['key']}",
+            "project_name": fields["project"]["name"],
+            "labels": fields["labels"],
+            "actor_id": None,
+            "assignee_id": assignee.get("accountId"),
+            "assignee_email": assignee.get("emailAddress"),
+            "assignee_name": assignee.get("displayName"),
+        }
+
     async def get_status_name(self, key: str) -> str:
         return await self._client.get_issue_status(key)
 

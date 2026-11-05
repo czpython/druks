@@ -147,6 +147,9 @@ every permission allowed for an operator. For a Bot it runs an agent that
 denies the file, shell, and web tools.
 
 A run that the agent starts with a tool records its conversation. When the run
+parks with a question, Druks adds an internal message with the request to that
+conversation, except on a WhatsApp number with an admin, where the admin answers
+instead (see [Confirmation](#confirmation)). When the run
 fails, Druks adds an internal message with the failure to that conversation.
 When the run ends, Druks adds an internal message with its result, whether or
 not the run waited for an answer. A run that returns nothing, such as a review

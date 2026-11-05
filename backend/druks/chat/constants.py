@@ -35,6 +35,10 @@ NO_RESULT_ON_SUBJECT_MESSAGE = (
     "[Internal: Run {run} ended with no result. Its output is on its subject, {subject}. "
     "Read it there and tell the person what the run did.]"
 )
+PARKED_MESSAGE = (
+    "[Internal: Run {run} waits for an answer. The request:\n{request}\nTell the person "
+    "what it waits for and where to answer it.]"
+)
 FAILURE_MESSAGE = (
     "[Internal: Run {run} failed: {failure}. Tell the person in one short line, with no "
     "error details, and offer what they can do next. Do not retry it.]"

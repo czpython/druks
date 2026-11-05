@@ -1109,9 +1109,8 @@ async def test_an_operator_on_a_private_number_keeps_normal_gate_access(druks_db
             druks_db, run, account_id=account_id, control="approve", answers={}, note=""
         )
         assert answer["action"] == "approve"
-    assert not await bot_service.ask_admin(druks_db, run)
-    await druks_db.refresh(conversation, ["messages"])
-    assert not conversation.messages
+    # With no admin to decide, the operator's own chat hears the ask.
+    assert await bot_service.ask_for_answer(druks_db, run) == conversation.id
 
 
 async def test_only_the_number_admin_answers_its_questions_or_resumes_its_chats(
@@ -1257,10 +1256,10 @@ async def test_a_waiting_run_asks_the_admin_and_its_end_reaches_the_chat(druks_d
     run.input_requested_at = Base.utc_now()
 
     # With no admin person, the question goes to the phone's chat with itself.
-    phone_chat = await druks_db.get(Conversation, await bot_service.ask_admin(druks_db, run))
+    phone_chat = await druks_db.get(Conversation, await bot_service.ask_for_answer(druks_db, run))
     admin = await bot_service.add_admin(druks_db, connection, user(ANA, "Ana"))
     assert phone_chat.user_id == NUMBER
-    assert await bot_service.ask_admin(druks_db, run) == admin.id
+    assert await bot_service.ask_for_answer(druks_db, run) == admin.id
     assert await service.report_result(druks_db, run, result={"granted": True}) == chat.id
     await druks_db.refresh(admin, ["messages"])
     await druks_db.refresh(chat, ["messages"])

@@ -7,8 +7,10 @@ from druks.contrib.software_factory import subscribers  # noqa: F401 (the import
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import ReviewWork
 from druks.contrib.software_factory.enums import Resolution
+from druks.contrib.software_factory.exceptions import TicketAlreadyMerged, TicketNotRoutable
 from druks.contrib.software_factory.workflows import Build
 from druks.events.models import Event
+from druks.services.exceptions import ServiceNotConnectedError
 from druks.signals import publish
 from druks.testing import seed_run
 from sqlalchemy import select
@@ -63,11 +65,8 @@ async def test_dispatch_leaves_the_item_alone(druks_db, monkeypatch) -> None:
     assert item.resolution == "closed"
 
 
-async def test_dispatch_stands_down_without_github_instead_of_raising(
-    druks_db, monkeypatch, caplog
-) -> None:
-    """A raise here would 5xx the webhook into provider redelivery. Without the
-    GitHub identity, dispatch logs the direction and starts nothing."""
+async def test_dispatch_announces_and_refuses_without_github(druks_db, monkeypatch) -> None:
+    """Without the GitHub identity, dispatch announces the refusal and starts nothing."""
     item = await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-8")
     started = []
 
@@ -77,10 +76,9 @@ async def test_dispatch_stands_down_without_github_instead_of_raising(
 
     monkeypatch.setattr(Build, "start", classmethod(fake_start))
 
-    with caplog.at_level("INFO"):
-        result = await Build.dispatch(ticket=_ticket(item))
+    with pytest.raises(ServiceNotConnectedError):
+        await Build.dispatch(ticket=_ticket(item))
 
-    assert not result
     assert not started
     events = list(await druks_db.scalars(select(Event)))
     assert len(events) == 1
@@ -89,7 +87,6 @@ async def test_dispatch_stands_down_without_github_instead_of_raising(
     assert events[0].subject_id == str(item.id)
     assert "not connected" in events[0].payload["reason"]
     assert "run" not in events[0].payload
-    assert any("not connected" in record.getMessage() for record in caplog.records)
 
 
 async def test_the_tracker_funnel_swallows_the_missing_identity(druks_db, monkeypatch) -> None:
@@ -115,10 +112,10 @@ async def test_the_tracker_funnel_swallows_the_missing_identity(druks_db, monkey
     assert not started
 
 
-async def test_dispatch_merged_noop_still_precedes_the_identity_guard(
-    druks_db, monkeypatch, caplog
+async def test_dispatch_refuses_a_merged_ticket_before_the_identity_check(
+    druks_db, monkeypatch
 ) -> None:
-    """A redelivery for a merged item does nothing, before the identity check runs."""
+    """A merged item refuses a new build before the identity check runs."""
     item = await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-10")
     await item.update(pr_number=7, branch="agent/old")
     await item.resolve(Resolution.MERGED, at=datetime.now(UTC))
@@ -128,16 +125,16 @@ async def test_dispatch_merged_noop_still_precedes_the_identity_guard(
 
     monkeypatch.setattr(Build, "start", classmethod(fake_start))
 
-    with caplog.at_level("INFO"):
-        assert not await Build.dispatch(ticket=_ticket(item))
-
-    assert any("already merged" in record.getMessage() for record in caplog.records)
+    with pytest.raises(TicketAlreadyMerged):
+        await Build.dispatch(ticket=_ticket(item))
 
 
 async def test_dispatch_syncs_a_parked_build_instead_of_restarting(druks_db, monkeypatch) -> None:
     await _connect_github()
     item = await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-12")
-    await seed_build_run(druks_db, work_item_id=item.id, state="parked", input_gate=ReviewWork.name)
+    run = await seed_build_run(
+        druks_db, work_item_id=item.id, state="parked", input_gate=ReviewWork.name
+    )
     started = []
 
     async def fake_start(cls, **kwargs):
@@ -146,12 +143,12 @@ async def test_dispatch_syncs_a_parked_build_instead_of_restarting(druks_db, mon
 
     monkeypatch.setattr(Build, "start", classmethod(fake_start))
 
-    assert not await Build.dispatch(ticket=_ticket(item))
+    assert await Build.dispatch(ticket=_ticket(item)) == run.id
     assert not started
 
 
-async def test_dispatch_unroutable_noop_still_precedes_the_identity_guard(
-    druks_db, monkeypatch, caplog
+async def test_dispatch_refuses_an_unroutable_ticket_before_the_identity_check(
+    druks_db, monkeypatch
 ) -> None:
     started = []
 
@@ -160,8 +157,8 @@ async def test_dispatch_unroutable_noop_still_precedes_the_identity_guard(
 
     monkeypatch.setattr(Build, "start", classmethod(fake_start))
 
-    with caplog.at_level("INFO"):
-        result = await Build.dispatch(
+    with pytest.raises(TicketNotRoutable):
+        await Build.dispatch(
             ticket={
                 "source": "linear",
                 "identifier": "ACME-11",
@@ -177,9 +174,7 @@ async def test_dispatch_unroutable_noop_still_precedes_the_identity_guard(
             }
         )
 
-    assert not result
     assert not started
-    assert any("no routable repo" in record.getMessage() for record in caplog.records)
 
 
 async def test_update_clears_nullable_with_none_and_skips_omitted(druks_db) -> None:

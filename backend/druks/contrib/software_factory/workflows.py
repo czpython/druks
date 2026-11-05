@@ -26,6 +26,7 @@ from druks.workspaces import RepoWorkspace
 from .app import SoftwareFactory
 from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, REVIEW_TTL_SECONDS, TICKET_TOOLS
 from .datastructures import PullRequest
+from .exceptions import TicketAlreadyMerged, TicketNotRoutable
 from .github import get_review_actor
 from .journal import BuildJournal
 from .policy import PlanGate, RepoPolicy
@@ -135,19 +136,15 @@ class Build(Workflow):
         )
 
     @classmethod
-    async def dispatch(cls, *, ticket: dict) -> str | None:
-        # A ticket at the trigger status opens a build. If a build is already active,
-        # start() returns it and announces nothing, so the ticket takes its status.
+    async def dispatch(cls, *, ticket: dict) -> str:
+        # A ticket at the trigger status, or an agent's start, opens a build. An active
+        # build announces nothing again, so the ticket takes its status here.
         item = await WorkItem.get_for_ticket_key(
             source=ticket["source"], ticket_key=ticket["identifier"]
         )
         if item:
             if item.resolution == Resolution.MERGED:
-                logger.info(
-                    "Ticket %s is already merged. The redelivery does nothing.",
-                    ticket["identifier"],
-                )
-                return
+                raise TicketAlreadyMerged(ticket["identifier"])
             await item.update(title=ticket["title"], ticket_url=ticket["url"])
             status = await item.get_status(workflow=cls)
             if status.is_active:
@@ -155,7 +152,7 @@ class Build(Workflow):
                 await item.set_ticket_status(
                     TicketStatus.IN_REVIEW if reviewing else TicketStatus.IN_PROGRESS
                 )
-                return
+                return status.run
         else:
             project_repo = await ProjectRepo.lookup(
                 project_name=ticket["project_name"], labels=ticket["labels"]
@@ -170,18 +167,12 @@ class Build(Workflow):
                     repo=project_repo.full_name,
                 )
             else:
-                logger.info(
-                    "Ticket %s has no routable repo. No build starts.", ticket["identifier"]
-                )
-                return
+                raise TicketNotRoutable(ticket["identifier"])
         try:
             await Github.get()
         except ServiceNotConnectedError as error:
-            # The delivery succeeded. A raise would answer 5xx, and the provider would
-            # deliver it again.
-            logger.info("Ticket %s cannot start a build: %s", ticket["identifier"], error)
             await item.announce("build.rejected", reason=str(error))
-            return
+            raise
         account_id = None
         if tracker := await SoftwareFactory.get_tracker():
             async with tracker:

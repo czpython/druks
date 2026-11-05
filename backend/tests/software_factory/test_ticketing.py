@@ -484,6 +484,41 @@ async def test_linear_client_reads_the_issue_status():
     assert "mutation" not in requests[0]["query"]
 
 
+async def test_linear_reads_the_ticket_as_a_transition_payload():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["variables"] == {"issueId": "ENG-831"}
+        issue = {
+            "id": "issue-uuid",
+            "identifier": "ENG-831",
+            "title": "Build the agent route",
+            "url": "https://linear.app/acme/issue/ENG-831",
+            "state": {"name": "Todo"},
+            "project": None,
+            "labels": {"nodes": [{"name": "widget"}]},
+            "team": {"id": "team-1"},
+            "assignee": {"id": "user-1", "email": "ada@acme.test", "name": "Ada"},
+        }
+        return httpx.Response(200, json={"data": {"issue": issue}})
+
+    tracker = Linear(client=_linear_client(handler), status_names={})
+
+    assert await tracker.get_ticket("ENG-831") == {
+        "source": "linear",
+        "ticket_id": "issue-uuid",
+        "identifier": "ENG-831",
+        "status": "Todo",
+        "title": "Build the agent route",
+        "url": "https://linear.app/acme/issue/ENG-831",
+        "project_name": None,
+        "labels": ["widget"],
+        "team": "team-1",
+        "actor_id": None,
+        "assignee_id": "user-1",
+        "assignee_email": "ada@acme.test",
+        "assignee_name": "Ada",
+    }
+
+
 async def test_linear_client_lists_workflow_states_across_pages():
     pages = iter(
         [
@@ -538,6 +573,9 @@ class _FakeTracker(Tracker):
             }
         )
         self.calls: list = []
+
+    async def get_ticket(self, key):
+        return {"status": self.status_name}
 
     async def get_status_name(self, key):
         return self.status_name
@@ -609,6 +647,27 @@ async def test_resolution_returns_only_a_working_ticket_to_rest(monkeypatch, res
 
     working = current in (Status.IN_PROGRESS, Status.IN_REVIEW)
     assert ticket.status == (Status.BACKLOG if working else current)
+
+
+async def test_the_board_reads_the_ticket_as_its_transition_payload():
+    project = await Project.create(name="Acme")
+    repo = await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
+    ticket = await Ticket.create(project_repo=repo, title="Ticket", status=Status.IN_REVIEW)
+
+    assert await DruksTracker().get_ticket(ticket.identifier) == {
+        "source": "druks",
+        "ticket_id": str(ticket.id),
+        "identifier": ticket.identifier,
+        "status": "In Review",
+        "title": "Ticket",
+        "url": f"/software_factory/tickets/{ticket.identifier}",
+        "project_name": "acme/widget",
+        "labels": [],
+        "actor_id": None,
+        "assignee_id": None,
+        "assignee_email": None,
+        "assignee_name": None,
+    }
 
 
 async def test_ticket_state_skips_non_tracker_source():
@@ -736,10 +795,41 @@ async def test_jira_client_executes_the_transition_to_the_status():
 async def test_jira_client_reads_the_issue_status():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/rest/api/3/issue/PROJ-7"
-        assert request.url.params["fields"] == "status"
+        assert request.url.params["fields"] == "status,summary,project,labels,assignee"
         return httpx.Response(200, json={"fields": {"status": {"name": "In Progress"}}})
 
     assert await _jira_client(handler).get_issue_status("PROJ-7") == "In Progress"
+
+
+async def test_jira_reads_the_ticket_as_a_transition_payload():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/rest/api/3/issue/PROJ-7"
+        fields = {
+            "status": {"name": "To Do"},
+            "summary": "Build the agent route",
+            "project": {"name": "Widget"},
+            "labels": ["backend"],
+            "assignee": None,
+        }
+        return httpx.Response(200, json={"id": "10007", "key": "PROJ-7", "fields": fields})
+
+    tracker = _jira(_FakeJiraClient())
+    tracker._client = _jira_client(handler)
+
+    assert await tracker.get_ticket("PROJ-7") == {
+        "source": "jira",
+        "ticket_id": "10007",
+        "identifier": "PROJ-7",
+        "status": "To Do",
+        "title": "Build the agent route",
+        "url": "https://jira.test/browse/PROJ-7",
+        "project_name": "Widget",
+        "labels": ["backend"],
+        "actor_id": None,
+        "assignee_id": None,
+        "assignee_email": None,
+        "assignee_name": None,
+    }
 
 
 _JIRA_ISSUE_CALLS = [
@@ -816,7 +906,14 @@ async def test_jira_client_lists_the_statuses_of_active_workflows():
 
 
 class _FakeGitHubClient:
-    issue = {"state": "open", "labels": []}
+    issue = {
+        "id": 99,
+        "state": "open",
+        "title": "Build the agent route",
+        "html_url": "https://github.com/acme/widget/issues/7",
+        "labels": [],
+        "assignees": [],
+    }
 
     def __init__(self) -> None:
         self.calls: list = []
@@ -883,9 +980,33 @@ async def test_github_set_status_swaps_the_label_within_an_exclusive_group(monke
 )
 async def test_github_reads_the_status_label_of_an_open_issue(monkeypatch, state, labels, expected):
     fake = _FakeGitHubClient()
-    fake.issue = {"state": state, "labels": [{"name": label} for label in labels]}
+    fake.issue = {**fake.issue, "state": state, "labels": [{"name": label} for label in labels]}
 
     assert await _github(monkeypatch, fake).get_status_name("acme/widget#7") == expected
+
+
+async def test_github_reads_the_ticket_as_a_transition_payload(monkeypatch):
+    fake = _FakeGitHubClient()
+    fake.issue = {
+        **fake.issue,
+        "labels": [{"name": "ready-for-agent"}],
+        "assignees": [{"id": 5, "login": "ada"}],
+    }
+
+    assert await _github(monkeypatch, fake).get_ticket("acme/widget#7") == {
+        "source": "github",
+        "ticket_id": "99",
+        "identifier": "acme/widget#7",
+        "status": "ready-for-agent",
+        "title": "Build the agent route",
+        "url": "https://github.com/acme/widget/issues/7",
+        "project_name": "acme/widget",
+        "labels": [],
+        "actor_id": None,
+        "assignee_id": "5",
+        "assignee_email": None,
+        "assignee_name": "ada",
+    }
 
 
 async def test_github_done_closes_the_issue(monkeypatch):
