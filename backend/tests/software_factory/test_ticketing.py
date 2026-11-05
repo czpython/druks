@@ -383,19 +383,6 @@ async def test_set_status_maps_the_ticket_status_to_a_provider_name():
     ]
 
 
-@pytest.mark.parametrize(
-    ("name", "expected"), [("In Review", TicketStatus.IN_REVIEW), ("Canceled", None)]
-)
-async def test_linear_get_status_maps_the_provider_name_to_a_ticket_status(name, expected):
-    fake = _FakeLinearClient()
-    fake.status = name
-    provider = Linear(
-        client=fake,
-        status_names={TicketStatus.IN_REVIEW: "In Review", TicketStatus.BACKLOG: "Backlog"},
-    )
-    assert await provider.get_status("ACME-270") == expected
-
-
 async def test_set_status_unmapped_raises():
     provider = Linear(client=_FakeLinearClient(), status_names={TicketStatus.BACKLOG: ""})
     with pytest.raises(ValueError, match="no configured status"):
@@ -539,22 +526,21 @@ def _tracker_stub(fake):
     return classmethod(get_tracker)
 
 
-class _FakeTracker:
-    known_exceptions: tuple = ()
-
-    status = TicketStatus.IN_PROGRESS
+class _FakeTracker(Tracker):
+    status_name = "In Progress"
 
     def __init__(self) -> None:
+        super().__init__(
+            status_names={
+                TicketStatus.IN_PROGRESS: "In Progress",
+                TicketStatus.IN_REVIEW: "In Review",
+                TicketStatus.DONE: "Done",
+            }
+        )
         self.calls: list = []
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc):
-        await self.aclose()
-
-    async def get_status(self, key):
-        return self.status
+    async def get_status_name(self, key):
+        return self.status_name
 
     async def set_status(self, key, status):
         self.calls.append((key, status))
@@ -577,18 +563,13 @@ async def test_ticket_state_pushes_status(monkeypatch):
 
 @pytest.mark.parametrize(
     ("current", "released"),
-    [
-        (TicketStatus.IN_PROGRESS, True),
-        (TicketStatus.IN_REVIEW, True),
-        (TicketStatus.DONE, False),
-        (None, False),
-    ],
+    [("In Progress", True), ("In Review", True), ("Done", False), (None, False)],
 )
 async def test_release_moves_only_a_held_ticket_to_rest(current, released):
     tracker = _FakeTracker()
-    tracker.status = current
+    tracker.status_name = current
 
-    await Tracker.release(tracker, "ACME-1")
+    await tracker.release("ACME-1")
 
     assert tracker.calls == ([("ACME-1", TicketStatus.BACKLOG)] if released else [])
 
@@ -704,13 +685,6 @@ async def test_jira_set_status_leaves_a_ticket_already_at_the_status_untouched()
     fake.status = "Done"
     await _jira(fake).set_status("PROJ-7", TicketStatus.DONE)
     assert fake.calls == [("get_issue_status", "PROJ-7")]
-
-
-@pytest.mark.parametrize(("name", "expected"), [("Done", TicketStatus.DONE), ("Blocked", None)])
-async def test_jira_get_status_maps_the_provider_name_to_a_ticket_status(name, expected):
-    fake = _FakeJiraClient()
-    fake.status = name
-    assert await _jira(fake).get_status("PROJ-7") == expected
 
 
 def test_jira_declares_known_exceptions():
@@ -902,16 +876,16 @@ async def test_github_set_status_swaps_the_label_within_an_exclusive_group(monke
 @pytest.mark.parametrize(
     ("state", "labels", "expected"),
     [
-        ("open", ["bug", "agent:in-review"], TicketStatus.IN_REVIEW),
+        ("open", ["bug", "agent:in-review"], "agent:in-review"),
         ("open", ["bug"], None),
-        ("closed", ["agent:in-progress"], TicketStatus.DONE),
+        ("closed", ["agent:in-progress"], None),
     ],
 )
-async def test_github_get_status_reads_the_status_label(monkeypatch, state, labels, expected):
+async def test_github_reads_the_status_label_of_an_open_issue(monkeypatch, state, labels, expected):
     fake = _FakeGitHubClient()
     fake.issue = {"state": state, "labels": [{"name": label} for label in labels]}
 
-    assert await _github(monkeypatch, fake).get_status("acme/widget#7") == expected
+    assert await _github(monkeypatch, fake).get_status_name("acme/widget#7") == expected
 
 
 async def test_github_done_closes_the_issue(monkeypatch):

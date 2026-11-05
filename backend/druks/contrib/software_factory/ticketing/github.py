@@ -16,18 +16,16 @@ class GitHub(Tracker):
     known_exceptions = (GitHubException, GitHubAppNotInstalledError, UnknownTicketError)
     authority = GITHUB_AUTHORITY
 
-    def __init__(self, *, status_names: dict[TicketStatus, str]) -> None:
-        # An empty name leaves that status unmapped.
-        self._status_names = {status: name for status, name in status_names.items() if name}
-
-    async def get_status(self, key: str) -> TicketStatus | None:
+    async def get_status_name(self, key: str) -> str | None:
         repo, number = self._parse_key(key)
         client = await services.Github.get_client(repo)
         issue = await client.get_issue(repo, number)
-        # A closed issue is finished work, whatever labels it keeps.
-        if issue["state"] != "open":
-            return TicketStatus.DONE
-        return self._find_status({label["name"] for label in issue["labels"]})
+        # A closed issue has left every status, whatever labels it keeps.
+        if issue["state"] == "open":
+            labels = {label["name"] for label in issue["labels"]}
+            for name in self._status_names.values():
+                if name in labels:
+                    return name
 
     async def set_status(self, key: str, status: TicketStatus) -> None:
         name = self._status_names.get(status)
