@@ -69,6 +69,7 @@ class GitHubEvents(Webhook):
                     "reviewer": sender["login"],
                     "author_can_write": review["author_association"] in _WRITERS,
                     "body": review["body"] or "",  # body is nullable on an approve
+                    "is_latest_commit": review["commit_id"] == pull_request["head"]["sha"],
                 },
             )
         return _accepted()

@@ -82,7 +82,8 @@ async def policy_push_reprofiles_the_repo(*, repo: str, paths: list, **_: object
             await Profile.dispatch(project_repo, refresh_only=True)
 
 
-@subscribe("pr.review_submitted", payload__author_can_write=True)
+# A review GitHub recorded on an older commit says nothing about the head a merge takes.
+@subscribe("pr.review_submitted", payload__author_can_write=True, payload__is_latest_commit=True)
 async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict) -> None:
     item = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number)
     if item:
