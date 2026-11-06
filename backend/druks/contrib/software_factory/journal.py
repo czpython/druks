@@ -2,6 +2,7 @@ from contextlib import suppress
 from typing import Any
 
 from druks.contrib.software_factory.contracts import (
+    CiReport,
     ImplementationOutput,
     PlanData,
     ReviewOutput,
@@ -57,7 +58,21 @@ class BuildJournal(Journal):
         return
 
     @property
+    def is_ready_for_review(self) -> bool:
+        """The round's review approved a head on which every check is green."""
+        checks = self.latest(CiReport)
+        if not checks or checks.conclusion != "green":
+            return False
+        reviews = self.filter(ReviewReport, after=checks)
+        return bool(reviews) and reviews[-1].decision == "approve"
+
+    @property
     def revision_request(self) -> str | None:
+        # Red CI sends the round back before its review, so a review recorded after it
+        # means the round moved on.
+        checks = self.latest(CiReport)
+        if checks and checks.conclusion == "red" and not self.filter(ReviewReport, after=checks):
+            return checks.revision_request
         # The newest triage's instructions drive exactly one implement round.
         # A review recorded after that triage means the round already ran —
         # the review's findings are the current request, not these.

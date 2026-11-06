@@ -13,3 +13,13 @@ TICKET_TOOLS = (
 )
 # A review takes minutes. A build still waiting after this long was never answered.
 REVIEW_TTL_SECONDS = 2 * 60 * 60
+# A repo with CI registers a check within this long of a push. With none by then, the
+# repo has no CI, and the build goes on as if CI were green.
+CI_REGISTER_SECONDS = 3 * 60
+# CI still running after this long is blocked, not red.
+CI_TTL_SECONDS = 60 * 60
+# A webhook wakes the CI wait early. The poll catches a check that finished before the
+# wait began, and a delivery that never came.
+CI_POLL_SECONDS = 60
+# The end of a failing job's log, where the failure is.
+CI_LOG_LINES = 200

@@ -300,3 +300,16 @@ async def test_a_review_of_a_pull_request_no_build_owns_answers_no_one(druks_db,
     )
 
     assert answers == []
+
+
+async def test_a_ci_update_wakes_the_build_of_its_branch(druks_db, monkeypatch):
+    item = await _item_with_pr("ACME-32", 44)
+    answers = await _answers_to_the_build(monkeypatch)
+
+    await publish(
+        "ci.updated",
+        repo="acme/widget",
+        payload={"branches": ["agent/acme-32", "agent/nobody"]},
+    )
+
+    assert answers == [(item.id, "ci.updated", {})]

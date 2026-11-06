@@ -23,6 +23,7 @@ _OP_TEMPLATES = [
 # The kwargs the workflow passes at each template's agent call site.
 _CALL_KWARGS = {
     "generate_plan.md": {"answered_questions": [], "operator_note": "", "reviewer_notes": ""},
+    "implement.md": {"pre_push_tests": ()},
 }
 
 
@@ -159,6 +160,7 @@ async def test_implement_prompt_renders_the_prior_review():
         build=build,
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
+        pre_push_tests=(),
     )
 
     assert "## Prior implementation review" in prompt
@@ -194,3 +196,24 @@ async def test_get_for_repo_raises_when_the_repo_was_transferred(druks_db):
     await ProjectRepo.create(project_id=project.id, full_name="czpython/druks")
     with pytest.raises(FatalError, match="renamed or transferred"):
         await ProjectRepo.get_for_repo("clawhaven/druks", raise_on_missing=True)
+
+
+@pytest.mark.parametrize(
+    ("pre_push_tests", "instruction"),
+    [
+        (("uv run pytest tests/test_api.py",), "- `uv run pytest tests/test_api.py`"),
+        ((), "its test commands narrowed to the files you changed"),
+    ],
+)
+async def test_implement_prompt_names_the_tests_to_run_before_every_push(
+    pre_push_tests, instruction
+):
+    prompt = await render_prompt(
+        "software_factory/build/implement.md",
+        build=_build(),
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+        pre_push_tests=pre_push_tests,
+    )
+
+    assert instruction in prompt
