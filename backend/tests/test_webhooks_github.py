@@ -189,3 +189,28 @@ async def test_a_pull_request_from_a_fork_says_so(tmp_path, monkeypatch, head_re
     await _events(tmp_path, payload=delivery).on_pull_request_opened()
 
     assert published[0][1]["payload"]["is_fork"] is True
+
+
+@pytest.mark.parametrize(
+    ("commit_id", "is_latest_commit"), [("0f3a2c1d", True), ("9e8d7c6b", False)]
+)
+async def test_a_review_says_whether_it_is_of_the_latest_commit(
+    tmp_path, monkeypatch, commit_id, is_latest_commit
+):
+    published = _capture(monkeypatch)
+    payload = {
+        **_pull_request(action="submitted"),
+        "sender": {"login": "alice", "type": "User"},
+        "review": {
+            "state": "approved",
+            "author_association": "MEMBER",
+            "body": None,
+            "commit_id": commit_id,
+        },
+    }
+
+    await _events(tmp_path, payload=payload).on_pull_request_review_submitted()
+
+    [(event_type, published_event)] = published
+    assert event_type == "pr.review_submitted"
+    assert published_event["payload"]["is_latest_commit"] is is_latest_commit

@@ -117,12 +117,13 @@ async def test_build_lifecycle_reaches_the_tracker(druks_db, monkeypatch):
     assert pushed == [TicketStatus.IN_PROGRESS, TicketStatus.IN_REVIEW]
 
 
-# On a public repo any GitHub account can approve; only a writer's review answers.
+# On a public repo any GitHub account can approve; only a writer's review of the head answers.
 @pytest.mark.parametrize(
-    ("action", "author_can_write"), [("request_changes", True), ("approve", False)]
+    ("action", "author_can_write", "is_latest_commit"),
+    [("request_changes", True, True), ("approve", False, True), ("approve", True, False)],
 )
 async def test_pr_review_answers_through_the_review_gate(
-    druks_db, monkeypatch, action, author_can_write
+    druks_db, monkeypatch, action, author_can_write, is_latest_commit
 ):
     item = await make_test_work_item(
         repo="acme/widget", title="t", source="linear", ticket_key="ACME-9"
@@ -160,11 +161,12 @@ async def test_pr_review_answers_through_the_review_gate(
             "reviewer": "alice",
             "author_can_write": author_can_write,
             "body": "Please split the migration.",
+            "is_latest_commit": is_latest_commit,
         },
     )
 
     reply = {"action": action, "reviewer": "alice", "body": "Please split the migration."}
-    assert answers == ([(item, Build, reply)] if author_can_write else [])
+    assert answers == ([(item, Build, reply)] if author_can_write and is_latest_commit else [])
 
 
 async def test_github_pr_open_records_the_pr_of_the_items_branch(druks_db):
