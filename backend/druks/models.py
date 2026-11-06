@@ -215,12 +215,14 @@ class StoredSubject(Model):
         return str(self)
 
     async def announce(self, topic: str, **facts: Any) -> None:
-        """Record and deliver a domain fact in the current transaction."""
+        """Record and deliver a domain fact. The event and every subscriber's writes
+        commit together, or none does."""
         # The event log is built on this module's Base.
-        from druks.db import db_session
+        from druks.db import atomic, db_session
         from druks.events.models import Event
 
-        await Event.announce(db_session(), self, topic, facts)
+        async with atomic():
+            await Event.announce(db_session(), self, topic, facts)
 
     def get_summary(self) -> "SubjectSummary":
         """The header the platform's own screens show. An app with its own frontend

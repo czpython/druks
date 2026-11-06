@@ -341,8 +341,11 @@ class Report(StoredSubject):
 
 `Subject` and `StoredSubject` both supply `announce()`. Druks gets the owner from
 the registered app package. The call records the subject identity, its current
-key, its optional summary title, and the supplied facts. It then notifies subscribers in the same
-transaction as the domain change. A rollback removes the change and its event.
+key, its optional summary title, and the supplied facts. It then notifies subscribers.
+The event and every subscriber's writes commit together. In a step, put the domain
+change and its announcement in one `atomic()` block, so a failing subscriber removes
+the change with its event.
+
 The app must prevent duplicate domain changes on webhook redelivery.
 
 Authors supply no app ID, run ID, timestamp, or session. Frontend code owns the
@@ -821,33 +824,22 @@ The operator connects the service in **Settings → Connections → Services**. 
 sandbox's identity stores the service and the repos. The issuer reads only
 those, so a request cannot select another repo or identity.
 
-A workspace reads before the box exists and acts on it after. `setup()` runs
-inside a unit of work, before the box: read rows and keep what the box will
-need on `self`. `prepare()` runs on the box, after that unit of work closed:
-upload a file, write a wrapper, run a command. `self.host` in `setup()` raises,
-and a read in `prepare()` raises `SessionNotBoundError`, so a hook in the
-wrong place fails on its first run. A session opened on the box side needs a
-box-side fact, such as a file that came off the box or a refusal the box
-reported. A read that needs nothing from the box moves to `setup()`. Override
-`get_agent_run_kwargs()` to grant
-directories, set `skills` for the skills the box gets, and `get_env()` for
+A workspace answers what the box is from the subject alone, before the box
+exists: `get_secrets(subject)`, `get_mcp_servers(subject)`, and
+`get_skills(subject)` for the skills the box gets beside the enabled catalog.
+`prepare()` readies the box once it is up: read rows, call a service, upload a
+file, write a wrapper, run a command on `self.host`. Each read and write there is
+a unit of work of its own, so the box holds no database connection through the
+run. Override `get_agent_run_kwargs()` to grant directories and `get_env()` for
 environment variables every agent call gets:
 
 ```python
 class DeployWorkspace(RepoWorkspace):
-    deploy_token: str
-
-    async def setup(self) -> None:
-        await super().setup()
-        deployment = await Deployment.get(id=self.subject.deployment_id)
-        self.deploy_token = deployment.token
-
     async def prepare(self) -> None:
         await super().prepare()
+        deployment = await Deployment.get(id=self.subject.deployment_id)
+        await self.host.write_secret(remote="deploy-token", secret=deployment.token)
         await self.host.upload_file(local=DEPLOY_SCRIPT, remote="deploy.sh")
-
-    def get_env(self) -> dict[str, str]:
-        return {"DEPLOY_TOKEN": self.deploy_token}
 ```
 
 Override `get_secrets(subject)` to give the sandbox a secret of its own:
@@ -1607,11 +1599,33 @@ has. For example, do not use the SQL function `uuidv7()`, virtual generated
 columns, or `RETURNING OLD/NEW`. Make a UUIDv7 in Python, as Druks does.
 
 Query through `druks.db.db_session()` inside an
-HTTP request, durable step, or other platform-bound session. Outside those,
+HTTP request, durable step, or a workspace's `prepare()`. Outside those,
 `db_session()` raises. A workflow body holds no session: read inside a `@step`.
 `await self.subject`, `start()`, `dispatch()`, `cancel()`, and `answer()` bring
 their own. A row a step
 returns is detached: load what the body reads from it inside that step.
+
+An HTTP request is one transaction. A step is not: each read and each write in a
+step commits on its own, so a step holds no database connection while it calls
+another service or waits. Writes that must land together go in one
+`druks.db.atomic()` block. They commit at its end, or none does, and the block
+holds its connection until then, so keep calls to other services outside it:
+
+```python
+from druks.db import atomic
+
+
+class Sweep(Workflow):
+    @step
+    async def scan(self, report_id: int) -> None:
+        report = await Report.get(id=report_id)
+        findings = await scanner.scan(report.repo)
+        async with atomic():
+            for text in findings:
+                await Finding.create(report_id=report.id, text=text)
+            report.status = "scanned"
+            await report.save()
+```
 
 HTTP response models subclass `druks.schemas.Schema`, whose snake_case fields
 serialize as camelCase. Request models are ordinary Pydantic models.
@@ -2083,7 +2097,9 @@ before it expires, and lets only one refresher run per connection and scope
 set. This is necessary: two
 refreshes at the same time can make the provider revoke the whole
 connection. It raises `OauthRefreshError` when the refresh fails. Then ask
-the user to reconnect.
+the user to reconnect. The call holds no database connection while it waits
+or refreshes, so call it from a step or from `prepare()`, never inside an
+`atomic()` block.
 
 `get_access_token(scopes=("profile.read",))` asks the provider for a token with
 fewer scopes than the grant. If the token goes to untrusted compute, use it.
@@ -2559,7 +2575,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.workflows` | `Workflow`, `Gate`, `GateTimeout`, `WaitTimeout`, `WaitFailed`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox`, `SandboxMcpServer`, `SandboxSecret` |
 | `druks.workspaces` | `Workspace`, `RepoWorkspace` |
-| `druks.db` | `Model`, `StoredSubject`, `db_session` |
+| `druks.db` | `Model`, `StoredSubject`, `atomic`, `db_session` |
 | `druks.db.fields` | `EncryptedJsonField`, `EncryptedTextField`, `Secret`, `SecretsMapping` |
 | `druks.exceptions` | `DruksError`, `ObjectNotFound` |
 | `druks.schemas` | `Schema` |

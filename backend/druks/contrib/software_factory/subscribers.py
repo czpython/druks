@@ -5,6 +5,7 @@ from druks.contrib.software_factory.enums import Resolution, Status
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Build, Profile, PullRequestReview
+from druks.db import atomic
 from druks.models import Base
 from druks.signals import publish, subscribe
 from druks.workflows import WorkflowEvent
@@ -29,8 +30,9 @@ async def pr_open_fills_the_item(*, repo: str, pr_number: int, payload: dict) ->
     and PR keys off the stored number, so a redelivery finds it and stops."""
     item = await WorkItem.get_for_branch(repo=repo, branch=payload["branch"])
     if item and not item.pr_number:
-        await item.update(pr_number=pr_number)
-        await item.announce("build.pr_opened", repo=item.repo, pr_number=pr_number)
+        async with atomic():
+            await item.update(pr_number=pr_number)
+            await item.announce("build.pr_opened", repo=item.repo, pr_number=pr_number)
 
 
 @subscribe(WorkflowEvent.RUNNING, workflow=Build)

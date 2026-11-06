@@ -125,8 +125,8 @@ def create_async_engine_from_url(database_url: str):
     )
 
 
-def get_session(engine) -> AsyncSession:
-    return AsyncSession(engine, autoflush=True, expire_on_commit=False)
+def get_session(engine, class_: type[AsyncSession] = AsyncSession) -> AsyncSession:
+    return class_(engine, autoflush=True, expire_on_commit=False)
 
 
 def configure_session(engine) -> None:
@@ -134,16 +134,18 @@ def configure_session(engine) -> None:
 
 
 @asynccontextmanager
-async def session_scope(engine=None) -> AsyncIterator[AsyncSession]:
-    """Bind a fresh DB session to ``db_session`` for the block — on ``engine``,
-    else the configured one — commit on success, roll back on error, restore
-    the prior binding. One transaction per request, and per unit of work
-    outside one: an auth middleware, a stream's per-poll snapshot, launch's
-    schedule reconcile."""
+async def session_scope(
+    engine=None, class_: type[AsyncSession] = AsyncSession
+) -> AsyncIterator[AsyncSession]:
+    """Bind a fresh DB session to ``db_session`` for the block — a ``class_`` on
+    ``engine``, else the configured one — commit on success, roll back on error,
+    restore the prior binding. A plain session is one transaction per request,
+    and per unit of work outside one: an auth middleware, a stream's per-poll
+    snapshot, launch's schedule reconcile."""
     # A block nested in a request (a websocket handler's operator check) and
     # the test client on the caller's task find their own session back after.
     previous = db_session() if db_session.registry.has() else None
-    session = get_session(engine) if engine else db_session.session_factory()
+    session = get_session(engine, class_) if engine else db_session.session_factory()
     db_session.registry.set(session)
     try:
         yield session

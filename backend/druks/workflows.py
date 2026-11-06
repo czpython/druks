@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import inspect
 import json
@@ -51,6 +50,7 @@ from druks.durable.constants import NOTIFICATIONS_QUEUE, RUN_QUEUE, TASK_QUEUE
 from druks.durable.datastructures import Subject
 from druks.durable.engine import (
     _step_engine,
+    autocommit_session,
     bound_session,
     register_schedule,
     register_task_schedule,
@@ -930,8 +930,9 @@ class Workflow:
         """Wait for the facts that ``answer`` delivers on ``topic``, and return them. The run
         stays running, shows ``label``, and keeps its warm sandbox. A failure answered
         instead raises ``WaitFailed``."""
-        await set_run_phase(label)
+        # The wait takes answers before its label shows, so an answer sent on seeing it arrives.
         await DBOS.set_event_async("waiting_on", topic)
+        await set_run_phase(label)
         facts = await DBOS.recv_async(topic, timeout_seconds=ttl_seconds)
         await DBOS.set_event_async("waiting_on", "")
         if facts is None:
@@ -1004,7 +1005,9 @@ class Workflow:
                 )
             await session.commit()
             try:
-                async with vm as box, sandbox_client.lease(host_id=box.id):
+                # The box work commits each operation on its own, so a read in
+                # prepare() or in a hook holds no connection through the run.
+                async with vm as box, sandbox_client.lease(host_id=box.id), autocommit_session():
                     workspace.host = box
                     yield workspace
             except HostGone as error:
@@ -1025,13 +1028,11 @@ class Workflow:
             subject = await self.subject
             refs = await self.workspace_class.get_secret_refs(subject)
             workspace = self.workspace_class(subject)
-            await workspace.setup()
         digest = hashlib.sha256(json.dumps([ref.secret_id for ref in refs]).encode()).hexdigest()
         async with self._workspace(
             None, "exec", refs, workspace=workspace, secrets={}, secrets_hash=digest
         ) as workspace:
-            # The box work is a task of its own, with no session bound.
-            return await asyncio.create_task(workspace.exec(command, timeout=timeout))
+            return await workspace.exec(command, timeout=timeout)
 
     async def _lease_host(self, config: "AgentConfig", refs: list[SecretRef]) -> str | None:
         # The warm VM, provisioned once per segment; state is carried in git, so
@@ -1311,12 +1312,13 @@ def _wrap_steps(cls: type[Workflow]) -> None:
 
 def _make_step(kind: str, name: str, method: Callable, retries: int) -> Callable:
     # Run the method inside its own session via a zero-arg closure, so `self` is
-    # never serialized into the DBOS checkpoint.
+    # never serialized into the DBOS checkpoint. Each operation commits on its own,
+    # so the step holds no connection through a call that leaves the database.
     async def _step(self: Workflow, *args: Any, **kwargs: Any) -> Any:
         async def _do() -> Any:
             token = _in_step.set(True)
             try:
-                async with step_session():
+                async with autocommit_session():
                     return await method(self, *args, **kwargs)
             finally:
                 _in_step.reset(token)

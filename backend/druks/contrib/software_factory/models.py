@@ -15,7 +15,7 @@ from druks.contrib.software_factory.policy import RepoPolicy
 from druks.contrib.software_factory.schemas import ProjectRepoSummary, WorkItemSummary
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.core.services import Github
-from druks.db import StoredSubject, db_session
+from druks.db import StoredSubject, atomic, db_session
 from druks.models import Base
 from druks.signals import publish
 from druks.workflows import FatalError
@@ -313,11 +313,12 @@ class WorkItem(StoredSubject):
         announced. The cancel route already records an operator's cancel."""
         from druks.contrib.software_factory.workflows import Build
 
-        self.resolution = resolution
-        self.resolved_at = at
-        await db_session().flush()
-        if resolution in (Resolution.MERGED, Resolution.CLOSED):
-            await self.announce(resolution, repo=self.repo, pr_number=self.pr_number)
+        async with atomic():
+            self.resolution = resolution
+            self.resolved_at = at
+            await db_session().flush()
+            if resolution in (Resolution.MERGED, Resolution.CLOSED):
+                await self.announce(resolution, repo=self.repo, pr_number=self.pr_number)
         if resolution == Resolution.MERGED:
             if (await self.get_status(workflow=Build)).is_parked:
                 await ReviewWork.answer(self, workflow=Build, action="merged")
@@ -464,24 +465,25 @@ class Ticket(Base):
         assignee_id: str | None = None,
         creator_id: str | None = None,
     ) -> "Ticket":
-        # comments=[] loads the collection empty. A read after flush needs no query.
-        ticket = cls(
-            identifier=await Project.mint_identifier(project_repo.project_id),
-            project_repo=project_repo,
-            title=title,
-            description=description,
-            status=status,
-            priority=priority,
-            assignee_id=assignee_id,
-            creator_id=creator_id,
-            comments=[],
-        )
-        session = db_session()
-        session.add(ticket)
-        await session.flush()
-        # Creating in Ready for Agent is the same trigger as moving into it.
-        if status == Status.READY_FOR_AGENT:
-            await ticket._emit_transitioned(status)
+        async with atomic():
+            # comments=[] loads the collection empty. A read after flush needs no query.
+            ticket = cls(
+                identifier=await Project.mint_identifier(project_repo.project_id),
+                project_repo=project_repo,
+                title=title,
+                description=description,
+                status=status,
+                priority=priority,
+                assignee_id=assignee_id,
+                creator_id=creator_id,
+                comments=[],
+            )
+            session = db_session()
+            session.add(ticket)
+            await session.flush()
+            # Creating in Ready for Agent is the same trigger as moving into it.
+            if status == Status.READY_FOR_AGENT:
+                await ticket._emit_transitioned(status)
         return ticket
 
     @classmethod
@@ -533,9 +535,10 @@ class Ticket(Base):
         """Write the status and tell the funnel. A repeat is a no-op, so it never
         opens a second build."""
         if self.status != status:
-            self.status = status
-            await self.save()
-            await self._emit_transitioned(status)
+            async with atomic():
+                self.status = status
+                await self.save()
+                await self._emit_transitioned(status)
 
     async def _emit_transitioned(self, status: Status) -> None:
         assignee = await Account.get_or_none(id=self.assignee_id) if self.assignee_id else None

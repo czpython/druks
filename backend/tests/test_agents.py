@@ -415,7 +415,6 @@ async def test_runner_comes_from_workflow_workspace_factory(
     _patch_ephemeral(monkeypatch, box)  # the workspace below runs nothing on it
 
     class ModeWorkspace(Workspace):
-        setup = AsyncMock()
         prepare = AsyncMock()
         run_agent = AsyncMock(return_value=make_agent_result({"ok": True}, agent="dummy"))
 
@@ -424,7 +423,6 @@ async def test_runner_comes_from_workflow_workspace_factory(
     result = await DUMMY_AGENT._run(workflow_id="wf-9")
 
     assert result == DummyOutput(ok=True)
-    ModeWorkspace.setup.assert_awaited_once()
     ModeWorkspace.prepare.assert_awaited_once()
     ModeWorkspace.run_agent.assert_awaited_once()
     assert ModeWorkspace.run_agent.await_args.kwargs["agent"] == "dummy"

@@ -49,7 +49,7 @@ AUTHOR_SURFACE = {
         "step",
         "task",
     },
-    "druks.db": {"Model", "StoredSubject", "db_session"},
+    "druks.db": {"Model", "StoredSubject", "atomic", "db_session"},
     "druks.db.fields": {"EncryptedJsonField", "EncryptedTextField", "Secret", "SecretsMapping"},
     "druks.schemas": {"Schema"},
     "druks.ui": {
