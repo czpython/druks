@@ -106,5 +106,48 @@ async def ensure(
         )
 
 
+async def set_git_identity(
+    host: Host, author: tuple[str, str], co_author: str | None, *, repo_path: str = ""
+) -> None:
+    """Commits are authored as ``author``, and a prepare-commit-msg hook credits
+    ``co_author``; None credits nobody. With ``repo_path``, this holds in that repo.
+    Without it, it holds for the whole box: each repo that git clones or inits
+    afterwards copies the hook from git's template directory."""
+    name, email = author
+    if repo_path:
+        config = f"git -C {shlex.quote(repo_path)} config"
+        hooks = f"{shlex.quote(repo_path)}/.git/hooks"
+        steps = []
+    else:
+        config = "git config --global"
+        template = '"$HOME"/.druks/git-template'
+        hooks = f"{template}/hooks"
+        steps = [f"mkdir -p {hooks}", f"{config} init.templateDir {template}"]
+    steps += [
+        f"{config} user.name {shlex.quote(name)}",
+        f"{config} user.email {shlex.quote(email)}",
+        f"rm -f {hooks}/prepare-commit-msg",
+    ]
+    if co_author:
+        trailer = f"Co-Authored-By: {co_author} <{co_author}>"
+        # The co-author's line goes beside any other co-author line, and only once.
+        hook = (
+            "#!/bin/sh\n"
+            f"git interpret-trailers --in-place --if-exists addIfDifferent"
+            f' --trailer {shlex.quote(trailer)} "$1"\n'
+        )
+        steps += [
+            f"printf %s {shlex.quote(hook)} > {hooks}/prepare-commit-msg",
+            f"chmod 755 {hooks}/prepare-commit-msg",
+        ]
+    result = await host.exec(["sh", "-c", " && ".join(steps)], timeout=10.0)
+    if result.returncode:
+        raise ExecFailed(
+            f"failed to set the git identity: "
+            f"exit={result.returncode} stderr={result.stderr.strip()}",
+            exit_code=result.returncode,
+        )
+
+
 def _strip_token(text: str) -> str:
     return re.sub(r"x-access-token:[^@]+@", "x-access-token:<redacted>@", text)

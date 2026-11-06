@@ -1,5 +1,4 @@
 import logging
-import shlex
 import subprocess
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
@@ -317,29 +316,6 @@ class RepoWorkspace(Workspace):
         Rewritten before every agent call so a reused warm host follows the
         current run's dispatcher — a system dispatch carries no hook and
         credits nobody."""
-        author_name, author_email = self.git_author
-        steps = [
-            f"cd {shlex.quote(self.repo_path)}",
-            f"git config user.name {shlex.quote(author_name)}",
-            f"git config user.email {shlex.quote(author_email)}",
-            "rm -f .git/hooks/prepare-commit-msg",
-        ]
-        if self.dispatcher:
-            trailer = f"Co-Authored-By: {self.dispatcher} <{self.dispatcher}>"
-            # The dispatcher's line goes beside any other co-author line, and only once.
-            hook = (
-                "#!/bin/sh\n"
-                f"git interpret-trailers --in-place --if-exists addIfDifferent"
-                f' --trailer {shlex.quote(trailer)} "$1"\n'
-            )
-            steps += [
-                f"printf %s {shlex.quote(hook)} > .git/hooks/prepare-commit-msg",
-                "chmod 755 .git/hooks/prepare-commit-msg",
-            ]
-        result = await self.host.exec(["sh", "-c", " && ".join(steps)], timeout=10.0)
-        if result.returncode:
-            raise ExecFailed(
-                f"failed to set the workspace git identity: "
-                f"exit={result.returncode} stderr={result.stderr.strip()}",
-                exit_code=result.returncode,
-            )
+        await checkout.set_git_identity(
+            self.host, self.git_author, self.dispatcher, repo_path=self.repo_path
+        )

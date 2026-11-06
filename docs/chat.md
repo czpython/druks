@@ -134,7 +134,8 @@ An operator's sandbox also holds their own sign-in at each service that names a
 host, so the command line acts as that person. With a GitHub sign-in, git and
 `gh` act as you: your name is on the issues and comments, and the token permits
 only what both you and the App can do. Druks refreshes the token before it
-expires. Without a sign-in the sandbox has no access to that service: see
+expires. Your commits have the App's bot user as their author. A
+`Co-Authored-By` line credits your username, as in a build. Without a sign-in the sandbox has no access to that service: see
 [GitHub](#github). The agent's prompt names each MCP server and sign-in it holds,
 and tells it where you connect a missing one. A Bot's sandbox never holds a sign-in.
 A build still acts as the App: see [GitHub](configuration.md#github).
