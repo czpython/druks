@@ -75,6 +75,8 @@ class VaultSecret(Base, Uuid7Pk):
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
     expires_at: Mapped[datetime | None]
+    # A refresh moves expires_at. Only a new sign-in moves this.
+    refresh_token_expires_at: Mapped[datetime | None]
     # Only a subscription rotation sets it.
     last_refreshed_at: Mapped[datetime | None]
     # Revoking is a state, never a deletion: the facts stay, the secrets go.
@@ -188,6 +190,7 @@ class VaultSecret(Base, Uuid7Pk):
         header: str = "",
         scopes: list[str] | None = None,
         expires_at: datetime | None = None,
+        refresh_token_expires_at: datetime | None = None,
     ) -> "VaultSecret":
         """Store the one row per audience, account, and header. A second store
         replaces the first and revives a revoked row."""
@@ -206,6 +209,7 @@ class VaultSecret(Base, Uuid7Pk):
         row.identity = identity or {}
         row.scopes = scopes or []
         row.expires_at = expires_at
+        row.refresh_token_expires_at = refresh_token_expires_at
         row.last_refreshed_at = None
         row.revoked_at = None
         row.revoked_reason = ""

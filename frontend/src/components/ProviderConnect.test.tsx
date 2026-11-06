@@ -25,6 +25,7 @@ function subscription(overrides: Partial<ProviderSubscription> = {}): ProviderSu
     provider: 'anthropic',
     providerEmail: 'claude-seat@corp.com',
     expiresAt: null,
+    refreshTokenExpiresAt: null,
     updatedAt: '2026-09-01T00:00:00Z',
     lastRefreshedAt: null,
     connected: true,
@@ -209,6 +210,40 @@ describe('ProviderConnect', () => {
       vi.advanceTimersByTime(2 * 60 * 60 * 1000)
     })
     expect(screen.getByText('Reset due')).toBeTruthy()
+  })
+
+  it('a connected login shows when it ends, and after the end asks for a Reconnect', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-12-01T10:00:00Z'))
+    const refreshTokenExpiresAt = '2026-12-03T10:00:00Z'
+    const { view } = renderCard(provider(), {
+      subscription: subscription({ refreshTokenExpiresAt }),
+    })
+
+    expect(screen.getByText(/Login ends/)).toBeTruthy()
+    expect(screen.getByText(/Reconnect before then/)).toBeTruthy()
+    expect(view.container.querySelector('time')?.dateTime).toBe(refreshTokenExpiresAt)
+    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
+
+    view.unmount()
+    vi.setSystemTime(new Date('2026-12-03T11:00:00Z'))
+    renderCard(provider(), { subscription: subscription({ refreshTokenExpiresAt }) })
+    expect(screen.getByText(/Login ended/)).toBeTruthy()
+    expect(screen.getByText(/Reconnect now/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
+    expect(screen.queryByText(/Reconnect before then/)).toBeNull()
+  })
+
+  it('a disconnected login does not show when it ends', () => {
+    renderCard(provider(), {
+      subscription: subscription({
+        connected: false,
+        refreshTokenExpiresAt: '2026-12-03T10:00:00Z',
+        revokedAt: '2026-12-03T10:05:00Z',
+        revokedReason: 'invalid_grant',
+      }),
+    })
+    expect(screen.queryByText(/Login end/)).toBeNull()
   })
 
   it('a shared key shows its tail, who set it, spend today, Replace and Remove', () => {

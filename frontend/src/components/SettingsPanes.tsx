@@ -1865,6 +1865,9 @@ export function ProviderConnect({
   const connected = Boolean(subscription?.connected)
   const disconnected = Boolean(subscription) && !connected
   const needsSignIn = !subscription || disconnected
+  const loginEnds = subscription?.refreshTokenExpiresAt
+  // The subscription stays connected until its next refresh fails.
+  const loginEnded = loginEnds ? secondsUntil(loginEnds) <= 0 : false
   // A pasted token names no email.
   const pasted = subscription?.providerEmail === null
   const showKeyForm = acceptsApiKey && (keyFormOpen || replacing)
@@ -1878,7 +1881,7 @@ export function ProviderConnect({
               <ServiceStatus connected={connected} label={disconnected ? unavailableLabel : undefined} />
             )}
             <div className="hr-conn-actions">
-              {needsSignIn && !pastesToken && !flow.challenge && (
+              {(needsSignIn || loginEnds) && !pastesToken && !flow.challenge && (
                 <button
                   className="set-btn primary"
                   onClick={() => void flow.start()}
@@ -1928,6 +1931,13 @@ export function ProviderConnect({
                     {absTime(subscription.revokedAt)}
                   </time>
                   {' · '}Reason: <code>{subscription.revokedReason}</code>
+                </p>
+              )}
+              {connected && loginEnds && (
+                <p className={loginEnded ? 'provider-stale' : 'provider-account'}>
+                  {loginEnded ? 'Login ended' : 'Login ends'}{' '}
+                  <time dateTime={loginEnds}>{absTime(loginEnds)}</time>
+                  {loginEnded ? '. Reconnect now.' : '. Reconnect before then.'}
                 </p>
               )}
               {subscription.lastRefreshedAt && (

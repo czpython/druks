@@ -1,5 +1,6 @@
 import base64
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -432,6 +433,28 @@ async def test_reconnect_records_provider_email_but_keeps_the_operator(
         druks_db, SecretKind.SUBSCRIPTION, Audience.provider("openai"), account.id
     )
     assert codex.identity["email"] == "corp-seat@corp.com"
+
+
+def test_a_reconnect_starts_a_new_login_lifetime(tmp_path, monkeypatch, druks_db):
+    headers = {IDENTITY_HEADER: "me@example.com"}
+
+    def refresh_token_expires_at(client: TestClient, lifetime: timedelta) -> datetime:
+        start = client.post("/api/providers/anthropic/connection/start", headers=headers)
+        _mock_exchange(
+            monkeypatch, {**_grant(), "refresh_token_expires_in": lifetime.total_seconds()}
+        )
+        client.post(
+            "/api/providers/anthropic/connection/complete",
+            json={"code": "thecode", "connectionId": start.json()["connectionId"]},
+            headers=headers,
+        )
+        [subscription] = client.get("/api/providers/subscriptions", headers=headers).json()
+        return datetime.fromisoformat(subscription["refreshTokenExpiresAt"])
+
+    with header_client(tmp_path) as client:
+        first = refresh_token_expires_at(client, timedelta(days=1))
+        assert first - datetime.now(UTC) < timedelta(days=1)
+        assert refresh_token_expires_at(client, timedelta(days=28)) - first > timedelta(days=26)
 
 
 async def test_connection_flow_rejects_a_bearer(tmp_path, druks_db):

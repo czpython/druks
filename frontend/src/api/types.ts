@@ -608,6 +608,8 @@ export interface ProviderSubscription {
   /** The email the provider reported at connect — display, never authority. Null for a pasted token. */
   providerEmail: string | null
   expiresAt: string | null
+  /** When the person must sign in again. Null when the provider names no end. */
+  refreshTokenExpiresAt: string | null
   updatedAt: string
   lastRefreshedAt: string | null
   revokedAt: string | null
