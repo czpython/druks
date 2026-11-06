@@ -17,6 +17,7 @@ from druks.database import get_session
 from druks.exceptions import LockHeldError
 from druks.locks import lock
 from druks.redis import get_client
+from druks.secrets.constants import TOKEN_MIN_TTL_SECONDS
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.signals import publish
@@ -195,10 +196,10 @@ class OauthClient:
         *,
         connection: VaultSecret,
         scopes: tuple[str, ...] = (),
-        cached: bool = True,
+        min_ttl_seconds: float = TOKEN_MIN_TTL_SECONDS,
     ) -> tuple[str, datetime | None]:
         """The access token for one grant, and its expiry. The vault keeps the token
-        and serves it while more than the skew remains. Else Redis elects one
+        and serves it while it has more than ``min_ttl_seconds`` left. Else Redis elects one
         refresher per connection and scope set, because two concurrent refreshes
         can trip the provider's reuse detection and revoke the grant. Other callers
         wait for the token it keeps, then raise. The expiry is the provider's
@@ -207,8 +208,11 @@ class OauthClient:
 
         ``scopes`` asks for a token narrower than the grant (RFC 6749 section 6),
         for a token that goes to untrusted compute. They must be a subset of the
-        granted scopes. ``cached=False`` skips the kept token, but still elects
-        one refresher and keeps the fresh one."""
+        granted scopes.
+
+        ``min_ttl_seconds`` is how long the token must stay valid: the length of the
+        run that holds it, such as an agent run on a box. A provider whose tokens last
+        less serves a fresh one, with a warning."""
         if connection.revoked_at:
             raise OauthRefreshError(
                 self.provider, "the connection is revoked; sign in again to restore it"
@@ -230,7 +234,9 @@ class OauthClient:
         audience = Audience.oauth(*parts)
         refresh_lock = AsyncExitStack()
         for _ in range(self.mint_wait_attempts):
-            if cached and (kept := await VaultSecret.get_token(session, audience)):
+            if kept := await VaultSecret.get_token(
+                session, audience, min_ttl_seconds=min_ttl_seconds
+            ):
                 return kept
             try:
                 await refresh_lock.enter_async_context(lock(lock_key, blocking=False))
@@ -247,7 +253,7 @@ class OauthClient:
                 session,
                 audience,
                 on_miss=functools.partial(self._refresh, session, connection, requested),
-                reuse=cached,
+                min_ttl_seconds=min_ttl_seconds,
             )
 
     async def _refresh(

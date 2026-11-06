@@ -78,13 +78,18 @@ def _audience(connection: VaultSecret, scopes: tuple[str, ...] = ()) -> str:
     return Audience.oauth(_PROVIDER, connection.id)
 
 
-async def _keep(connection: VaultSecret, value: str, scopes: tuple[str, ...] = ()) -> None:
+async def _keep(
+    connection: VaultSecret,
+    value: str,
+    scopes: tuple[str, ...] = (),
+    lasts: timedelta = timedelta(hours=1),
+) -> None:
     await VaultSecret.store(
         db_session(),
         SecretKind.STATIC,
         _audience(connection, scopes),
         secrets={"value": value},
-        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        expires_at=datetime.now(UTC) + lasts,
     )
 
 
@@ -130,7 +135,7 @@ async def test_get_refreshes_persists_rotation_and_keeps_the_token_in_the_vault(
 
 
 async def test_get_keeps_the_token_only_after_the_rotation_is_saved(token_endpoint, monkeypatch):
-    token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-new", "expires_in": 300}
+    token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-new", "expires_in": 900}
     connection = await _connection()
 
     def _unsavable(self, rotated: str) -> None:
@@ -390,16 +395,30 @@ async def test_downscoped_get_rejects_a_provider_that_ignores_the_ask(token_endp
     assert not await _kept(connection, ("profile.read",))
 
 
-async def test_uncached_get_refreshes_past_a_kept_token_and_keeps_the_new_one(token_endpoint):
+async def test_get_refreshes_a_kept_token_that_ends_within_the_min_ttl(token_endpoint):
     connection = await _connection()
-    await _keep(connection, "at-tail")
+    await _keep(connection, "at-tail", lasts=timedelta(minutes=10))
 
-    token, _ = await _client().get_access_token(db_session(), connection=connection, cached=False)
+    token, _ = await _client().get_access_token(
+        db_session(), connection=connection, min_ttl_seconds=30 * 60
+    )
 
     assert token == "at-1"
     assert len(token_endpoint.requests) == 1
     assert (await _kept(connection))[0] == "at-1"
     assert not await get_client().get(_lock_key(connection))
+
+
+async def test_a_fresh_token_shorter_than_the_min_ttl_serves_with_a_warning(token_endpoint, caplog):
+    token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-1", "expires_in": 600}
+    connection = await _connection()
+
+    token, _ = await _client().get_access_token(
+        db_session(), connection=connection, min_ttl_seconds=30 * 60
+    )
+
+    assert token == "at-2"
+    assert "under the 1800 asked" in caplog.text
 
 
 async def test_refresher_election_is_per_scope_set(token_endpoint):

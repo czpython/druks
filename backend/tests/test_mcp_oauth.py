@@ -612,14 +612,14 @@ async def test_get_refreshes_without_a_kept_token_and_persists_rotation(auth_ser
     auth_server.token_response = {
         "access_token": "at-2",
         "refresh_token": "rt-new",
-        "expires_in": 300,
+        "expires_in": 1800,
     }
 
     token, expires_at = await oauth.get_access_token(druks_db, _NAME, None)
 
     assert token == "at-2"
-    # The expiry is the provider's 300s from now.
-    assert timedelta(seconds=290) < expires_at - datetime.now(UTC) <= timedelta(seconds=300)
+    # The expiry is the provider's 1800s from now.
+    assert timedelta(seconds=1790) < expires_at - datetime.now(UTC) <= timedelta(seconds=1800)
     refresh = auth_server.token_requests[0]
     assert refresh["grant_type"] == "refresh_token"
     # The wire request carries the plaintext; the row carried only ciphertext.

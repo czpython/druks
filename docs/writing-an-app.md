@@ -2092,8 +2092,8 @@ hold, across services, revoked ones shown as history. Replacing a service's
 client credentials revokes its connections: a new client can never refresh
 the old client's tokens, but the consents stay on record.
 
-`get_access_token` serves the access token that the vault keeps until shortly
-before it expires, and lets only one refresher run per connection and scope
+`get_access_token` serves the access token that the vault keeps until five
+minutes before it expires, and lets only one refresher run per connection and scope
 set. This is necessary: two
 refreshes at the same time can make the provider revoke the whole
 connection. It raises `OauthRefreshError` when the refresh fails. Then ask
@@ -2103,8 +2103,13 @@ or refreshes, so call it from a step or from `prepare()`, never inside an
 
 `get_access_token(scopes=("profile.read",))` asks the provider for a token with
 fewer scopes than the grant. If the token goes to untrusted compute, use it.
-Pass a subset of the connection scopes. `cached=False` skips the kept token to
-get a full-lifetime one.
+Pass a subset of the connection scopes.
+
+`get_access_token(min_ttl_seconds=30 * 60)` asks for a token that stays valid at
+least that long, such as one a box holds through an agent run. The vault serves its
+kept token while it has that long left. Else one caller refreshes, and the others
+take its token. A provider whose tokens last less gives a fresh one, and the call
+logs a warning.
 
 ## App settings and checks
 

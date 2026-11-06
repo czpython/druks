@@ -1,3 +1,3 @@
-# A kept token serves while more than this remains before it expires, so a token
-# handed out never expires moments after delivery.
-TOKEN_EXPIRY_SKEW_SECONDS = 60
+# A token is handed out with at least this long left before it expires, unless the
+# caller asks for longer, so it never expires moments after delivery.
+TOKEN_MIN_TTL_SECONDS = 300
