@@ -1039,6 +1039,16 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
                 Install
               </a>
             </div>
+          ) : service.installUrl ? (
+            <div className="svc-actions">
+              <a className="set-btn primary" href={service.installUrl} target="_blank" rel="noreferrer">
+                Install
+              </a>
+              {service.slug === 'slack' && createSlackApp}
+              <button className="set-btn ghost" onClick={() => setFormOpen(true)}>
+                Replace connection
+              </button>
+            </div>
           ) : service.createUrl ? (
             <>
               <div>{createApp}</div>
