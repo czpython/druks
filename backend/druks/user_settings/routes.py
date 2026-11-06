@@ -49,10 +49,13 @@ async def list_harnesses() -> tuple[type[Harness], ...]:
 @agents_router.get("", response_model=AgentsResponse, response_model_by_alias=True)
 async def list_agents(session: SessionDep) -> AgentsResponse:
     settings = await InstallationSettings.get_or_create(session)
+    overrides = await SettingsOverride.list_by_key(session)
     projected = [
         AgentsAppResponse(
             name=app.name,
-            agents=await reads.list_agent_settings(session, app, settings=settings),
+            agents=await reads.list_agent_settings(
+                session, app, settings=settings, overrides=overrides
+            ),
         )
         for app in iter_apps()
     ]
@@ -123,8 +126,10 @@ async def update_personal_settings(
 @router.get("/apps", response_model=AppsSettingsResponse, response_model_by_alias=True)
 async def get_app_settings(session: SessionDep) -> AppsSettingsResponse:
     settings = await InstallationSettings.get_or_create(session)
+    overrides = await SettingsOverride.list_by_key(session)
     projected = [
-        await reads.get_app_settings(session, app, settings=settings) for app in iter_apps()
+        await reads.get_app_settings(session, app, settings=settings, overrides=overrides)
+        for app in iter_apps()
     ]
     return AppsSettingsResponse(
         allowed_efforts=list(ALLOWED_EFFORTS),

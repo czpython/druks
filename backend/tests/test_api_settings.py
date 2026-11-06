@@ -6,8 +6,10 @@ from druks.contrib.software_factory.app import SoftwareFactory
 from druks.db import db_session
 from druks.user_settings.models import SettingsOverride
 from druks_field_notes.app import FieldNotes
+from druks_field_notes.workflows import Summarize
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import event, text
+from sqlalchemy.engine import Engine
 
 
 def test_get_settings_leaves_out_the_timezone(tmp_path: Path):
@@ -712,3 +714,23 @@ def test_apps_reject_out_of_range_workflow_setting(tmp_path: Path):
             },
         )
     assert response.status_code == 422
+
+
+def test_settings_lists_read_the_overrides_in_one_query(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(Summarize, "every", "0 9 * * *")
+    reads: dict[str, int] = {}
+    route = ""
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        if "settings_overrides" in statement:
+            reads[route] = reads.get(route, 0) + 1
+
+    with settings_client(tmp_path) as client:
+        event.listen(Engine, "before_cursor_execute", record)
+        try:
+            for route in ("/api/settings/apps", "/api/agents"):
+                assert client.get(route).status_code == 200
+        finally:
+            event.remove(Engine, "before_cursor_execute", record)
+
+    assert reads == {"/api/settings/apps": 1, "/api/agents": 1}

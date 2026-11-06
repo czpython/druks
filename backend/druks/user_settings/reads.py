@@ -1,7 +1,6 @@
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
-from pydantic.fields import FieldInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.apps.settings import field_kind, field_live_choices
@@ -21,22 +20,41 @@ if TYPE_CHECKING:
 
 
 async def list_agent_settings(
-    session: AsyncSession, app: "type[App]", *, settings: InstallationSettings
+    session: AsyncSession,
+    app: "type[App]",
+    *,
+    settings: InstallationSettings,
+    overrides: dict[str, SettingsOverride],
 ) -> list[AgentSettingResponse]:
     """The rows of the app's Agents tab: its agents, and then its Bot."""
     declared = [*app.agents(), app.bot] if app.bot else app.agents()
-    return [await get_agent_setting(session, agent, settings=settings) for agent in declared]
+    return [
+        await get_agent_setting(session, agent, settings=settings, overrides=overrides)
+        for agent in declared
+    ]
 
 
 async def get_agent_setting(
-    session: AsyncSession, agent: "Agent | Bot", *, settings: InstallationSettings
+    session: AsyncSession,
+    agent: "Agent | Bot",
+    *,
+    settings: InstallationSettings,
+    overrides: dict[str, SettingsOverride],
 ) -> AgentSettingResponse:
-    harness = await SettingsOverride.agent_harness(session, agent.id, settings=settings)
-    model = await SettingsOverride.agent_model(session, agent.id, settings=settings)
-    billing = await SettingsOverride.agent_billing(session, agent.id, settings=settings)
-    effort = await SettingsOverride.agent_effort(session, agent.id, settings=settings)
+    harness = await SettingsOverride.agent_harness(
+        session, agent.id, settings=settings, overrides=overrides
+    )
+    model = await SettingsOverride.agent_model(
+        session, agent.id, settings=settings, overrides=overrides
+    )
+    billing = await SettingsOverride.agent_billing(
+        session, agent.id, settings=settings, overrides=overrides
+    )
+    effort = await SettingsOverride.agent_effort(
+        session, agent.id, settings=settings, overrides=overrides
+    )
     timeout = await SettingsOverride.agent_timeout(
-        session, agent.id, agent.timeout, settings=settings
+        session, agent.id, agent.timeout, settings=settings, overrides=overrides
     )
     return AgentSettingResponse(
         name=agent.id,
@@ -71,24 +89,18 @@ async def list_live_choices(model: type[BaseModel]) -> dict[str, list[dict[str, 
     }
 
 
-async def get_settings_field(
-    session: AsyncSession, name: str, field: FieldInfo, *, value: Any, override_key: str
-) -> SettingsFieldResponse:
-    overridden = bool(await session.get(SettingsOverride, override_key))
-    return SettingsFieldResponse.from_field(name, field, value=value, overridden=overridden)
-
-
 async def get_workflow_settings(
-    session: AsyncSession, workflow: "type[Workflow]"
+    session: AsyncSession, workflow: "type[Workflow]", *, overrides: dict[str, SettingsOverride]
 ) -> WorkflowSettingsResponse:
     kind = workflow.kind
     fields = [
-        await get_settings_field(
-            session,
+        SettingsFieldResponse.from_field(
             name,
             field,
-            value=await SettingsOverride.workflow_setting(session, kind, name, field.default),
-            override_key=f"workflow:{kind}:{name}",
+            value=await SettingsOverride.workflow_setting(
+                session, kind, name, field.default, overrides=overrides
+            ),
+            overridden=f"workflow:{kind}:{name}" in overrides,
         )
         for name, field in workflow.Settings.model_fields.items()
     ]
@@ -104,37 +116,39 @@ async def get_workflow_settings(
                 # "cron" is a UI kind like enum/secret: the frontend renders
                 # cadence presets with a raw-cron escape hatch.
                 type="cron",
-                value=await workflow.get_schedule(session),
+                value=await workflow.get_schedule(session, overrides=overrides),
                 default=workflow.every,
                 choices=None,
                 section="",
                 visible_when_field="",
                 visible_when_values=[],
                 secret_set=None,
-                overridden=await SettingsOverride.read(session, f"workflow:{kind}:schedule")
-                is not None,
+                overridden=f"workflow:{kind}:schedule" in overrides,
             ),
             SettingsFieldResponse(
                 name="schedule_enabled",
                 label=f"{label} enabled",
                 help="Pause the scheduled run without losing its cadence.",
                 type="bool",
-                value=await workflow.has_enabled_schedule(session),
+                value=await workflow.has_enabled_schedule(session, overrides=overrides),
                 default=True,
                 choices=None,
                 section="",
                 visible_when_field="",
                 visible_when_values=[],
                 secret_set=None,
-                overridden=await SettingsOverride.read(session, f"workflow:{kind}:schedule_enabled")
-                is not None,
+                overridden=f"workflow:{kind}:schedule_enabled" in overrides,
             ),
         ]
     return WorkflowSettingsResponse(kind=kind, fields=fields)
 
 
 async def get_app_settings(
-    session: AsyncSession, app: "type[App]", *, settings: InstallationSettings
+    session: AsyncSession,
+    app: "type[App]",
+    *,
+    settings: InstallationSettings,
+    overrides: dict[str, SettingsOverride],
 ) -> AppSettingsResponse:
     model = app.settings_model
     return AppSettingsResponse(
@@ -144,17 +158,16 @@ async def get_app_settings(
         builtin=app.builtin,
         bot=app.bot.id if app.bot else None,
         bot_access=app.bot.access if app.bot else None,
-        agents=await list_agent_settings(session, app, settings=settings),
+        agents=await list_agent_settings(session, app, settings=settings, overrides=overrides),
         # Surface only the workflows with operator knobs: tunable settings or a
         # schedule to retune.
         workflows=[
-            await get_workflow_settings(session, workflow)
+            await get_workflow_settings(session, workflow, overrides=overrides)
             for workflow in app.workflows()
             if workflow.Settings.model_fields or workflow.every
         ],
         settings=[
-            await get_settings_field(
-                session,
+            SettingsFieldResponse.from_field(
                 name,
                 field,
                 value=await SettingsOverride.app_setting(
@@ -163,8 +176,9 @@ async def get_app_settings(
                     name,
                     field.default,
                     is_secret=field_kind(field) == "secret",
+                    overrides=overrides,
                 ),
-                override_key=f"app:{app.name}:{name}",
+                overridden=f"app:{app.name}:{name}" in overrides,
             )
             for name, field in (model.model_fields if model else {}).items()
         ],

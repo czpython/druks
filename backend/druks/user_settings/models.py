@@ -67,8 +67,35 @@ class SettingsOverride(Base):
     secret_value = EncryptedTextField(default="")
 
     @classmethod
-    async def read(cls, session: AsyncSession, key: str) -> Any | None:
-        row = await session.get(cls, key)
+    async def list_by_key(cls, session: AsyncSession) -> dict[str, "SettingsOverride"]:
+        """Every override, keyed by its key. A read of many settings passes this as
+        ``overrides`` so that it queries once. The mapping is a snapshot: a later
+        write does not change it."""
+        return {row.key: row for row in await session.scalars(select(cls))}
+
+    @classmethod
+    async def find(
+        cls,
+        session: AsyncSession,
+        key: str,
+        *,
+        overrides: dict[str, "SettingsOverride"] | None = None,
+    ) -> "SettingsOverride | None":
+        # A session.get of a missing key queries again every time, and most keys
+        # have no row. An empty mapping is a real answer: no overrides at all.
+        if overrides is None:
+            return await session.get(cls, key)
+        return overrides.get(key)
+
+    @classmethod
+    async def read(
+        cls,
+        session: AsyncSession,
+        key: str,
+        *,
+        overrides: dict[str, "SettingsOverride"] | None = None,
+    ) -> Any | None:
+        row = await cls.find(session, key, overrides=overrides)
         return row.value if row else None
 
     @classmethod
@@ -85,9 +112,14 @@ class SettingsOverride(Base):
 
     @classmethod
     async def agent_harness(
-        cls, session: AsyncSession, name: str, *, settings: InstallationSettings
+        cls,
+        session: AsyncSession,
+        name: str,
+        *,
+        settings: InstallationSettings,
+        overrides: dict[str, "SettingsOverride"] | None = None,
     ) -> ResolvedChoice:
-        override = await cls.read(session, f"agent_harness:{name}")
+        override = await cls.read(session, f"agent_harness:{name}", overrides=overrides)
         if override:
             return ResolvedChoice(override, "agent")
         return ResolvedChoice(settings.default_harness, "default")
@@ -98,9 +130,14 @@ class SettingsOverride(Base):
 
     @classmethod
     async def agent_model(
-        cls, session: AsyncSession, name: str, *, settings: InstallationSettings
+        cls,
+        session: AsyncSession,
+        name: str,
+        *,
+        settings: InstallationSettings,
+        overrides: dict[str, "SettingsOverride"] | None = None,
     ) -> ResolvedChoice:
-        override = await cls.read(session, f"agent_model:{name}")
+        override = await cls.read(session, f"agent_model:{name}", overrides=overrides)
         if override:
             return ResolvedChoice(override, "agent")
         return ResolvedChoice(settings.default_model, "default")
@@ -111,9 +148,14 @@ class SettingsOverride(Base):
 
     @classmethod
     async def agent_billing(
-        cls, session: AsyncSession, name: str, *, settings: InstallationSettings
+        cls,
+        session: AsyncSession,
+        name: str,
+        *,
+        settings: InstallationSettings,
+        overrides: dict[str, "SettingsOverride"] | None = None,
     ) -> ResolvedChoice:
-        override = await cls.read(session, f"agent_billing:{name}")
+        override = await cls.read(session, f"agent_billing:{name}", overrides=overrides)
         if override:
             return ResolvedChoice(override, "agent")
         return ResolvedChoice(settings.default_billing, "default")
@@ -124,9 +166,14 @@ class SettingsOverride(Base):
 
     @classmethod
     async def agent_effort(
-        cls, session: AsyncSession, name: str, *, settings: InstallationSettings
+        cls,
+        session: AsyncSession,
+        name: str,
+        *,
+        settings: InstallationSettings,
+        overrides: dict[str, "SettingsOverride"] | None = None,
     ) -> ResolvedChoice:
-        override = await cls.read(session, f"agent_effort:{name}")
+        override = await cls.read(session, f"agent_effort:{name}", overrides=overrides)
         if override:
             return ResolvedChoice(override, "agent")
         return ResolvedChoice(settings.default_effort, "default")
@@ -143,8 +190,9 @@ class SettingsOverride(Base):
         declared: int | None,
         *,
         settings: InstallationSettings,
+        overrides: dict[str, "SettingsOverride"] | None = None,
     ) -> ResolvedTimeout:
-        override = await cls.read(session, f"agent_timeout:{name}")
+        override = await cls.read(session, f"agent_timeout:{name}", overrides=overrides)
         if override:
             return ResolvedTimeout(override, "agent")
         if declared:
@@ -157,9 +205,15 @@ class SettingsOverride(Base):
 
     @classmethod
     async def workflow_setting(
-        cls, session: AsyncSession, kind: str, field: str, default: Any
+        cls,
+        session: AsyncSession,
+        kind: str,
+        field: str,
+        default: Any,
+        *,
+        overrides: dict[str, "SettingsOverride"] | None = None,
     ) -> Any:
-        value = await cls.read(session, f"workflow:{kind}:{field}")
+        value = await cls.read(session, f"workflow:{kind}:{field}", overrides=overrides)
         return default if value is None else value
 
     @classmethod
@@ -170,9 +224,16 @@ class SettingsOverride(Base):
 
     @classmethod
     async def app_setting(
-        cls, session: AsyncSession, app: str, field: str, default: Any, *, is_secret: bool
+        cls,
+        session: AsyncSession,
+        app: str,
+        field: str,
+        default: Any,
+        *,
+        is_secret: bool,
+        overrides: dict[str, "SettingsOverride"] | None = None,
     ) -> Any:
-        row = await session.get(cls, f"app:{app}:{field}")
+        row = await cls.find(session, f"app:{app}:{field}", overrides=overrides)
         if is_secret:
             return row.secret_value.decrypt() if row and row.secret_value else default
         return row.value if row else default
