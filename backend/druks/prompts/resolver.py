@@ -2,7 +2,7 @@ import functools
 import importlib.util
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader, PrefixLoader, StrictUndefined
+from jinja2 import Environment, FileSystemLoader, PrefixLoader, StrictUndefined, Template
 from jinja2.sandbox import ImmutableSandboxedEnvironment
 
 from druks.apps.fetcher import fetch_file
@@ -47,14 +47,8 @@ def _app_template_roots() -> dict[str, FileSystemLoader]:
     return roots
 
 
-async def render_prompt(
-    name: str,
-    /,
-    *,
-    repo: str | None = None,
-    **context: object,
-) -> str:
-    """Render a prompt template through the override hierarchy.
+async def get_template(name: str, *, repo: str | None) -> Template:
+    """The prompt's template through the override hierarchy.
 
     Resolution order (first found wins), always against default branches:
 
@@ -66,15 +60,25 @@ async def render_prompt(
     failures propagate — those are real misconfigurations and the
     caller should decide whether to retry, fall back, or fail.
     """
+    if override := await _resolve_override(name, repo=repo):
+        return _environment().from_string(override)
+    return _environment().get_template(name)
+
+
+async def render_prompt(
+    name: str,
+    /,
+    *,
+    repo: str | None = None,
+    **context: object,
+) -> str:
     # Templates routinely reference ``{{ repo }}``; the kwarg drives
     # override resolution AND lands in the render context so callers
     # don't pass it twice.
     if repo:
         context.setdefault("repo", repo)
-    override = await _resolve_override(name, repo=repo)
-    if override:
-        return await _environment().from_string(override).render_async(**context)
-    return await _environment().get_template(name).render_async(**context)
+    template = await get_template(name, repo=repo)
+    return await template.render_async(**context)
 
 
 async def _resolve_override(name: str, *, repo: str | None) -> str | None:

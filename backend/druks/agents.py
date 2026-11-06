@@ -33,7 +33,7 @@ from druks.harnesses.exceptions import (
     HarnessInvalidOutputError,
     Retry,
 )
-from druks.prompts import render_prompt
+from druks.prompts.resolver import get_template
 from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.models import SecretRef
 from druks.secrets.enums import SecretKind
@@ -392,6 +392,9 @@ class Agent:
                             if not record or record.deleted_at:
                                 raise FileUnavailableError(f"file {file.id} is deleted or missing")
                 prompt_context = await workflow.get_prompt_context(**context)
+                # The override lookup reads the GitHub credential from a row. The
+                # box task holds no session.
+                template = await get_template(self.prompt, repo=prompt_context.get("repo"))
                 harness = config.harness_class(
                     model=config.model, fast_mode=config.fast_mode, effort=config.effort
                 )
@@ -435,7 +438,7 @@ class Agent:
                     context_on_box = await self._upload_files(prompt_context, runner.host, call_id)
                     context_on_box.setdefault("workflow", workflow)
                     context_on_box["workspace"] = runner
-                    prompt = await render_prompt(self.prompt, **context_on_box)
+                    prompt = await template.render_async(**context_on_box)
                     hooks = {}
                     if self._after_agent:
                         hooks["after_agent"] = functools.partial(

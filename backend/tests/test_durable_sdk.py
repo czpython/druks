@@ -766,8 +766,11 @@ def _fake_ephemeral_returning(output: dict, seen: list[dict], held: list[bool]):
     return _fake_ephemeral
 
 
-async def _fake_render(*_a, **_k):
-    return "PROMPT"
+async def _fake_template(*_a, **_k):
+    async def render_async(**_context):
+        return "PROMPT"
+
+    return SimpleNamespace(render_async=render_async)
 
 
 async def test_run_agent_step(runtime, monkeypatch):
@@ -778,7 +781,7 @@ async def test_run_agent_step(runtime, monkeypatch):
         "druks.sandbox.client.Client.ephemeral",
         _fake_ephemeral_returning({"action": "stop"}, seen, held),
     )
-    monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
+    monkeypatch.setattr("druks.agents.get_template", _fake_template)
 
     workflow_id = await runtime.AgentFlow.start(subject=None, repo="owner/app")
     failed = await _wait_for_run(
@@ -813,7 +816,7 @@ async def test_body_level_agent_output_lands_on_the_journal(runtime, monkeypatch
         "druks.sandbox.client.Client.ephemeral",
         _fake_ephemeral_returning({"action": "ship"}, seen, held),
     )
-    monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
+    monkeypatch.setattr("druks.agents.get_template", _fake_template)
 
     workflow_id = await runtime.AgentBodyFlow.start(subject=None, repo="owner/app")
     await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
@@ -1405,7 +1408,7 @@ async def test_a_read_on_the_box_fails_the_run(runtime, monkeypatch, body):
     monkeypatch.setattr(
         "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning({"action": "go"}, [], [])
     )
-    monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
+    monkeypatch.setattr("druks.agents.get_template", _fake_template)
 
     class ReadingWorkspace(Workspace):
         async def prepare(self) -> None:
@@ -1430,6 +1433,30 @@ async def test_a_read_on_the_box_fails_the_run(runtime, monkeypatch, body):
         workflows._items.pop(ReadingFlow.kind)
 
 
+async def test_the_prompt_override_lookup_reads_in_the_call_session(runtime, monkeypatch):
+    # The lookup reads the GitHub credential from a row. The box task holds no
+    # session, so the call loads the template in its session block.
+    seen: list[dict] = []
+    monkeypatch.setattr(
+        "druks.sandbox.client.Client.ephemeral",
+        _fake_ephemeral_returning({"action": "go"}, seen, []),
+    )
+
+    async def resolve_override(*_a, **_k):
+        await db_session().scalar(select(Account))
+        return "TUNED {{ body }}"
+
+    monkeypatch.setattr("druks.prompts.resolver._resolve_override", resolve_override)
+
+    workflow_id = await runtime.AgentFlow.start(subject=None, repo="owner/app")
+    run = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state in (RunState.FINISHED, RunState.FAILED)
+    )
+
+    assert not run.failure
+    assert seen[0]["prompt"] == "TUNED x"
+
+
 @pytest.mark.usefixtures("tmp_data_dir")
 async def test_output_event_survives_completed_step_replay(runtime, monkeypatch):
     calls = []
@@ -1438,7 +1465,7 @@ async def test_output_event_survives_completed_step_replay(runtime, monkeypatch)
         "druks.sandbox.client.Client.ephemeral",
         _fake_ephemeral_returning({"action": "reviewed"}, calls, held),
     )
-    monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
+    monkeypatch.setattr("druks.agents.get_template", _fake_template)
     completed = []
 
     class OutputFlow(Workflow):
@@ -1483,7 +1510,7 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
         _fake_ephemeral_returning({"gist": "The pump ran hot."}, calls, []),
     )
     monkeypatch.setattr("druks.workflows.get_template_id", AsyncMock(return_value="template-test"))
-    monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
+    monkeypatch.setattr("druks.agents.get_template", _fake_template)
     completed = []
     body = Summarize.run_multistep
 
