@@ -435,7 +435,10 @@ class Agent:
                     context_on_box = await self._upload_files(prompt_context, runner.host, call_id)
                     context_on_box.setdefault("workflow", workflow)
                     context_on_box["workspace"] = runner
-                    prompt = await render_prompt(self.prompt, **context_on_box)
+                    # The render looks up the repo's prompt override, and a template
+                    # can read rows, so it gets a unit of work of its own.
+                    async with step_session():
+                        prompt = await render_prompt(self.prompt, **context_on_box)
                     hooks = {}
                     if self._after_agent:
                         hooks["after_agent"] = functools.partial(

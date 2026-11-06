@@ -15,6 +15,7 @@ from druks.exceptions import ObjectNotFound
 from druks.files import File
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.config import get_config
+from druks.prompts import render_prompt
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.datastructures import McpServer
 from druks.sandbox.exceptions import SandboxDownloadError
@@ -287,6 +288,28 @@ async def test_declaration_drives_run_agent_call(druks_db, tmp_path, monkeypatch
     assert kwargs["include_plugins"] is True
     assert kwargs["hooks"] == {}
     assert "model" not in kwargs
+
+
+async def test_a_prompt_override_lookup_reads_with_a_session_bound(
+    druks_db, tmp_path, monkeypatch, current_run
+):
+    # On a cold cache, the lookup reads the GitHub service through db_session().
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    _patch_ephemeral(monkeypatch, sandbox)
+    monkeypatch.setattr(agents, "render_prompt", render_prompt)
+    bound = []
+
+    async def fetch_file(**_kwargs):
+        # The harness opens a session for an unbound task, so db_session() cannot fail here.
+        bound.append(db_session.registry.has())
+        return "OVERRIDE:{{ repo }}"
+
+    monkeypatch.setattr("druks.prompts.resolver.fetch_file", fetch_file)
+
+    await DUMMY_AGENT._run(workflow_id="wf-9", repo="acme/widget")
+
+    assert bound == [True]
+    assert sandbox.run_agent.await_args.kwargs["prompt"] == "OVERRIDE:acme/widget"
 
 
 async def test_declared_plugin_choice_is_forwarded(druks_db, tmp_path, monkeypatch, current_run):
