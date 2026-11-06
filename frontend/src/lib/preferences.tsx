@@ -29,7 +29,7 @@ function applyTheme(theme: PersonalSettings['theme']) {
   const root = document.documentElement
   if (theme === 'system') delete root.dataset.theme
   else root.dataset.theme = theme
-  const background = getComputedStyle(root).getPropertyValue('--bg').trim()
+  const background = getComputedStyle(root).getPropertyValue('--druks-color-background').trim()
   document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute('content', background)
 }
 
