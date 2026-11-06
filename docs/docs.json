@@ -73,6 +73,7 @@
         "pages": [
           "deployment",
           "configuration",
+          "webhook-tunnels",
           "connect-your-agent",
           "chat",
           "troubleshooting"
