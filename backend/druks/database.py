@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy_encrypted_field import configure
 
 from druks.db import db_session
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 _ALEMBIC_INI = Path(__file__).resolve().parent / "alembic.ini"
 _MIGRATION_SUPPORT_ONLY = "migration_support_only"
@@ -95,7 +95,7 @@ def _app_migration_dirs() -> list[tuple[str, Path]]:
 
 # Every encrypted column reads its keys from the settings at each use. The
 # HKDF info predates the library and must never change: stored rows carry it.
-configure(lambda: load_settings().secrets_key.get_secret_value(), info=b"druks-secrets-v1")
+configure(lambda: get_settings().secrets_key.get_secret_value(), info=b"druks-secrets-v1")
 
 
 def create_engine_from_url(database_url: str):
@@ -115,7 +115,7 @@ def create_async_engine_from_url(database_url: str):
     # at once: a modest steady pool, with overflow doing the burst work —
     # overflow connections open on demand and close on return, so the ceiling
     # is high while idle cost is not.
-    settings = load_settings()
+    settings = get_settings()
     return create_async_engine(
         database_url,
         pool_pre_ping=True,

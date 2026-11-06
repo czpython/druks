@@ -16,7 +16,7 @@ from druks.mcp.constants import BEARER_HEADER, BEARER_PREFIX
 from druks.models import Base
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 from .constants import SANDBOX_HOST_LEASE_SECONDS
 from .exceptions import IdentityDenied
@@ -122,7 +122,7 @@ class SandboxIdentity(Base, Uuid7Pk):
         )
         session.add(identity)
         await session.commit()
-        issuer_url = load_settings().sandbox.issuer_url.rstrip("/")
+        issuer_url = get_settings().sandbox.issuer_url.rstrip("/")
         entries = {}
         for ref in secret_refs:
             secret = await session.get(VaultSecret, ref.secret_id)

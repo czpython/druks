@@ -22,7 +22,7 @@ from uuid_utils import uuid7
 from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine
 from druks.harnesses.exceptions import HarnessSandboxProvisioningError
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 from .constants import (
     SANDBOX_HOST_LEASE_SECONDS,
@@ -97,7 +97,7 @@ class Client:
         key = idempotency_key or str(uuid7())
         api = self._api()
         try:
-            settings = load_settings()
+            settings = get_settings()
             if template:
                 # A template names its own image.
                 image = None
@@ -365,7 +365,7 @@ class Client:
         """Terminate the VM; never raises. The identity dies first, so the
         denial never waits on the VM."""
         api = self._api()
-        settings = load_settings()
+        settings = get_settings()
 
         try:
             await self._revoke_identity(host_id)
@@ -384,7 +384,7 @@ class Client:
             await api.aclose()
 
     def _api(self) -> SandboxAPI:
-        settings = load_settings()
+        settings = get_settings()
         return SandboxAPI(
             base_url=settings.sandbox.service_url,
             token=settings.sandbox.service_token.get_secret_value(),

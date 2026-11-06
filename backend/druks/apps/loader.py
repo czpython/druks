@@ -4,10 +4,11 @@ from importlib.metadata import entry_points
 from typing import TYPE_CHECKING
 
 from druks.apps import App
+from druks.apps.registry import apps
 from druks.models import Base
-from druks.settings import load_settings
+from druks.settings import get_settings
 
-from .exceptions import AppImportError, AppNotFound, MalformedApp
+from .exceptions import AppImportError, AppNotFound, AppsNotRegisteredError, MalformedApp
 
 if TYPE_CHECKING:
     from importlib.metadata import EntryPoint
@@ -54,14 +55,10 @@ def resolve_workflow_app(module: str) -> str:
     raise LookupError(module)
 
 
-def iter_apps() -> list[type[App]]:
-    """Every installed app that druks.toml leaves enabled, resolved from the
-    ``druks.apps`` entry points. A disabled entry point never loads, so nothing it
-    declares registers; a table that names no entry point raises. Loading an entry
-    point imports the app's class. An app that fails to import, resolves to a
-    non-``App``, or collides on ``name`` raises — there is no per-app fault
-    tolerance yet (deferred until a real external app exists)."""
-    tables = load_settings().apps
+def register_apps() -> None:
+    """Fill the apps registry with every installed app that druks.toml leaves
+    enabled. A process calls this once where it starts."""
+    tables = get_settings().apps
     entries = entry_points(group=_GROUP)
     for name in tables:
         if name not in entries.names:
@@ -70,8 +67,7 @@ def iter_apps() -> list[type[App]]:
                 f"provides it. Remove [apps.{name}]."
             )
     disabled = {name for name, table in tables.items() if not table.get("enabled", True)}
-    apps: list[type[App]] = []
-    seen: set[str] = set()
+    apps.clear()
     for entry in entries:
         if entry.name in disabled:
             continue
@@ -83,11 +79,14 @@ def iter_apps() -> list[type[App]]:
                 f"app {entry.name!r} entry point resolves to an App named "
                 f"{app.name!r} — the entry-point name must match App.name"
             )
-        if app.name in seen:
-            raise ValueError(f"duplicate app name {app.name!r}")
-        seen.add(app.name)
-        apps.append(app)
-    return apps
+        apps.register(app)
+
+
+def iter_apps() -> list[type[App]]:
+    """Every app ``register_apps`` registered when the process started."""
+    if not apps:
+        raise AppsNotRegisteredError
+    return apps.all()
 
 
 def get_app(name: str) -> type[App]:
@@ -206,8 +205,8 @@ def import_app_models(only: type[App] | None = None) -> None:
     ``<name>_`` prefix — the platform scopes its migrations by that prefix, so an
     unprefixed table would be invisible to them and fails the load instead. Builtin
     apps are exempt: their schema is core's."""
-    apps = [only] if only else iter_apps()
-    for app in apps:
+    selected = [only] if only else iter_apps()
+    for app in selected:
         name = f"{app.package}.models"
         if not importlib.util.find_spec(name):
             continue

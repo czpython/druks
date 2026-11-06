@@ -60,7 +60,7 @@ def twilio(monkeypatch):
         "druks.core.webhooks.twilio",
         "druks.mcp.inbound",
     ):
-        monkeypatch.setattr(f"{module}.load_settings", lambda: settings)
+        monkeypatch.setattr(f"{module}.get_settings", lambda: settings)
 
     async def request(client, method, path, **values):
         calls.append((method, path, values.get("data")))

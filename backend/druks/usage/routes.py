@@ -12,7 +12,7 @@ from druks.harnesses.providers import Provider, get_providers
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import get_settings
 from druks.usage.models import UsageScrape
 from druks.usage.reads import list_finished_calls
 from druks.usage.schemas import (
@@ -114,7 +114,7 @@ async def get_usage_today(
 ) -> UsageTodayResponse:
     # Deriving the operator-local-day window here (the query just takes it) keeps
     # this total identical to the sys-strip's and the agent surface's figures.
-    timezone, local_start = operator_local_day(load_settings().timezone, datetime.now(UTC))
+    timezone, local_start = operator_local_day(get_settings().timezone, datetime.now(UTC))
     rows = await list_finished_calls(
         session, account.id, since=local_start, until=local_start + timedelta(days=1)
     )

@@ -32,7 +32,7 @@ from druks.harnesses.exceptions import (
     HarnessSandboxError,
     HarnessTimeoutError,
 )
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 from .constants import DEFAULT_DIR_EXCLUDES
 from .datastructures import (
@@ -777,7 +777,7 @@ class Host:
             # Gate on the FS-persisted key, not record.private_key: the key
             # is returned once, on create — a reattached record (GET) never
             # has it, but the acquirer wrote it to the shared keys dir.
-            key_path = load_settings().sandbox_keys_dir / self.record.id
+            key_path = get_settings().sandbox_keys_dir / self.record.id
             if key_path.exists():
                 return {
                     **common,

@@ -37,8 +37,8 @@ async def test_schedules_resolve_paused_override_and_operator_timezone(
     monkeypatch.setattr(Summarize, "every", "0 9 * * *")
     await SettingsOverride.set_workflow_setting(druks_db, Summarize.kind, "schedule", "15 10 * * 1")
     await SettingsOverride.set_workflow_setting(druks_db, Summarize.kind, "schedule_enabled", False)
-    settings = dashboard.load_settings().model_copy(update={"timezone": "Europe/Madrid"})
-    monkeypatch.setattr(dashboard, "load_settings", lambda: settings)
+    settings = dashboard.get_settings().model_copy(update={"timezone": "Europe/Madrid"})
+    monkeypatch.setattr(dashboard, "get_settings", lambda: settings)
 
     response = client.get("/api/dashboard/schedules")
 
@@ -109,8 +109,8 @@ async def test_schedule_history_is_bounded_and_excludes_downstream_runs(
 
 async def test_next_invocation_uses_installation_wall_clock(client, monkeypatch):
     monkeypatch.setattr(Summarize, "every", "0 9 * * *")
-    settings = dashboard.load_settings().model_copy(update={"timezone": "Europe/Madrid"})
-    monkeypatch.setattr(dashboard, "load_settings", lambda: settings)
+    settings = dashboard.get_settings().model_copy(update={"timezone": "Europe/Madrid"})
+    monkeypatch.setattr(dashboard, "get_settings", lambda: settings)
     now = datetime.now(UTC)
 
     response = client.get("/api/dashboard/schedules")

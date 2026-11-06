@@ -39,6 +39,7 @@ from druks.sandbox.datastructures import AgentResult
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
+from druks.settings import Settings, configure_settings, get_settings
 from druks.signals import subscribe
 from druks.testing import init_db
 from druks.user_settings.models import InstallationSettings, SettingsOverride
@@ -109,7 +110,7 @@ def sandbox_lease(monkeypatch):
 
 @pytest.fixture(scope="module", autouse=True)
 async def runtime():
-    original_database_url = os.environ.get("DRUKS_DATABASE_URL")
+    original_settings = get_settings()
 
     admin = psycopg.connect(f"{PG_BASE}/postgres", autocommit=True)
     admin.execute(f"DROP DATABASE IF EXISTS {DB}")
@@ -321,7 +322,7 @@ async def runtime():
             if SINK.count(marker) == 1:
                 raise asyncio.CancelledError("Simulated worker interruption")
 
-    os.environ["DRUKS_DATABASE_URL"] = URL
+    configure_settings(Settings(database_url=URL))  # pyright: ignore[reportCallIssue]
     init_dbos()
     await launch()
     try:
@@ -372,10 +373,7 @@ async def runtime():
         workflows._items.pop("enqueue_in_step_flow", None)
         workflows._items.pop("child_flow", None)
         workflows._items.pop("parent_flow", None)
-        if original_database_url is None:
-            os.environ.pop("DRUKS_DATABASE_URL", None)
-        else:
-            os.environ["DRUKS_DATABASE_URL"] = original_database_url
+        configure_settings(original_settings)
 
 
 async def _get_run(engine, workflow_id: str) -> Run | None:
@@ -1057,8 +1055,8 @@ async def test_apply_schedules_evaluates_cron_in_installation_timezone(runtime, 
         await apply_schedules(session)
     assert (await DBOS.get_schedule_async("daily_sweep"))["cron_timezone"] == "UTC"
 
-    settings = engine.load_settings().model_copy(update={"timezone": "Europe/Madrid"})
-    monkeypatch.setattr(engine, "load_settings", lambda: settings)
+    settings = engine.get_settings().model_copy(update={"timezone": "Europe/Madrid"})
+    monkeypatch.setattr(engine, "get_settings", lambda: settings)
     async with session_scope(runtime.engine) as session:
         await apply_schedules(session)
     assert (await DBOS.get_schedule_async("daily_sweep"))["cron_timezone"] == "Europe/Madrid"
@@ -1432,8 +1430,8 @@ async def test_a_read_on_the_box_fails_the_run(runtime, monkeypatch, body):
         workflows._items.pop(ReadingFlow.kind)
 
 
-async def test_output_event_survives_completed_step_replay(runtime, monkeypatch, tmp_path):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+@pytest.mark.usefixtures("tmp_data_dir")
+async def test_output_event_survives_completed_step_replay(runtime, monkeypatch):
     calls = []
     held = []
     monkeypatch.setattr(
@@ -1475,10 +1473,10 @@ async def test_output_event_survives_completed_step_replay(runtime, monkeypatch,
         workflows._items.pop(OutputFlow.kind)
 
 
+@pytest.mark.usefixtures("tmp_data_dir")
 async def test_field_notes_activity_through_admission_review_failure_and_replay(
-    runtime, monkeypatch, tmp_path
+    runtime, monkeypatch
 ):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     calls = []
     monkeypatch.setattr(
         "druks.sandbox.client.Client.ephemeral",

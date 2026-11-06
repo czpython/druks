@@ -228,7 +228,7 @@ async def test_manifest_surfaces_in_agent_call_files(tmp_path, druks_db):
     run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
     call = await seed_call(druks_db, run, "summarize", status="running")
     manifest = await _build()
-    with mock.patch("druks.durable.models.load_settings", return_value=make_settings(tmp_path)):
+    with mock.patch("druks.durable.models.get_settings", return_value=make_settings(tmp_path)):
         persist_manifest(call.call_dir.parent, call_id=call.call_dir.name, manifest=manifest)
         files = await get_agent_call_files(druks_db, call.id)
 

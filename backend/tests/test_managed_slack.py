@@ -21,6 +21,7 @@ from druks.notifications.models import Destination, Notification
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.services import Service
+from druks.settings import configure_settings
 from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_dbos_status
 from uuid_utils import uuid7
 
@@ -92,9 +93,11 @@ async def managed_slack(tmp_path, monkeypatch, druks_db):
     (secrets / "manager.token").write_text(MANAGER_TOKEN)
     monkeypatch.setenv("DRUKS_CONFIG", str(tmp_path / "druks.toml"))
     monkeypatch.setenv("DRUKS_SECRETS_DIR", str(secrets))
+    settings = make_settings(tmp_path)
+    configure_settings(settings)
     bind_ambient_session(druks_db)
     await Service.sync_configuration(druks_db)
-    return make_settings(tmp_path)
+    return settings
 
 
 @pytest.fixture
@@ -318,10 +321,10 @@ async def test_a_personal_link_keeps_the_persons_token_apart_and_in_the_bots_wor
     assert (grant.account_id, await Slack.get_bot_token()) == (None, BOT_TOKEN)
 
 
+@pytest.mark.usefixtures("tmp_data_dir")
 async def test_forwarded_messages_reach_the_bot_once_and_only_from_its_workspace(
-    managed_slack, manager_keys, slack, delivery, druks_db, tmp_path, monkeypatch
+    managed_slack, manager_keys, slack, delivery, druks_db, monkeypatch
 ):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     downloads = []
 
     async def download(client, url):

@@ -6,10 +6,9 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-async def client(tmp_path: Path, druks_db, monkeypatch):
+async def client(tmp_path: Path, druks_db):
     from druks.testing import asgi_client, configure_app_for_test, make_settings
 
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     app = configure_app_for_test(settings=make_settings(tmp_path))
     async with asgi_client(app) as client:
         yield client

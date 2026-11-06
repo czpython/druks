@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from .accounts.models import Account
 from .agents import Agent
-from .apps.loader import iter_apps
+from .apps.loader import iter_apps, register_apps
 from .apps.registry import _ROLES, agents, autodiscover, services, webhooks, workflows
 from .browser.sessions import BrowserSession
 from .chat.bridge import Bridge
@@ -38,7 +38,7 @@ from .secrets.datastructures import Audience
 from .secrets.enums import SecretKind
 from .secrets.models import VaultSecret
 from .services import Service, ServiceNotConnectedError
-from .settings import Settings, load_settings
+from .settings import Settings, configure_settings, load_settings
 from .user_settings.reads import list_live_choices
 from .webhooks.base import Webhook
 from .workflows import GATE_TTL_SECONDS, Workflow, _Task
@@ -688,5 +688,13 @@ def main(*, sandbox: bool = False) -> int:
         print(f"✗  load_settings           {error}")
         print()
         print("doctor: could not load Settings. Fix the configuration and re-run.")
+        return 1
+    configure_settings(settings)
+    try:
+        register_apps()
+    except Exception as error:  # noqa: BLE001 — an app's own import can raise anything
+        print(f"✗  register_apps           {error}")
+        print()
+        print("doctor: could not load the installed apps. Fix them and re-run.")
         return 1
     return print_results(asyncio.run(run_checks(settings, sandbox=sandbox)))

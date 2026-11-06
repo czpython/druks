@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from druks.accounts.constants import PAT_NAME_LENGTH
 from druks.accounts.dependencies import (
@@ -10,6 +10,7 @@ from druks.accounts.models import Account, PersonalAccessToken
 from druks.accounts.schemas import AccountResponse, IdentityResponse, PatResponse
 from druks.api.dependencies import SessionDep
 from druks.secrets.models import VaultSecret
+from druks.settings import get_settings
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -17,11 +18,10 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @router.get("/me", response_model=IdentityResponse, response_model_by_alias=True)
 async def get_identity(
     session: SessionDep,
-    request: Request,
     account: Account | None = Depends(current_account_or_setup),
 ) -> IdentityResponse:
     return IdentityResponse(
-        auth_mode=request.app.state.settings.identity.mode,
+        auth_mode=get_settings().identity.mode,
         account=AccountResponse.model_validate(account) if account else None,
         # none/zero has no account before onboarding. A provider revocation still
         # counts, so the operator can reach Reconnect.

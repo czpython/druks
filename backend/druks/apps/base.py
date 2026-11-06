@@ -15,7 +15,7 @@ from druks.db import db_session
 from druks.exceptions import ObjectNotFound
 from druks.models import StoredSubject
 from druks.redis import get_client
-from druks.settings import load_settings
+from druks.settings import get_settings
 from druks.ui.exceptions import PageContractError, PageReadError, PageRouteError
 from druks.user_settings.models import SettingsOverride
 
@@ -349,7 +349,7 @@ class App:
         binary or a tool's state lives here, never under ``~``: the process
         user has no home it can write, and only the instance data directory
         survives a release."""
-        directory = load_settings().data_dir / "apps" / cls.name
+        directory = get_settings().data_dir / "apps" / cls.name
         directory.mkdir(parents=True, exist_ok=True)
         return directory
 

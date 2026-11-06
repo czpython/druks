@@ -31,7 +31,7 @@ from druks.locks import lock
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.datastructures import Sandbox
 from druks.sandbox.templates import get_template_id
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 SESSION_ROOT = "/work/session"
 CDP_PORT = 9222
@@ -200,7 +200,7 @@ class BrowserSession:
                 env["DRUKS_BROWSER_SITE"] = self.site
             if self.read_only:
                 env["DRUKS_BROWSER_READ_ONLY"] = "1"
-            settings = load_settings()
+            settings = get_settings()
             if settings.browser.proxy_scope == "all":
                 env["TZ"] = settings.browser.timezone
                 env["DRUKS_BROWSER_PROXY"] = settings.browser.proxy.get_secret_value()

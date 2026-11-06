@@ -155,7 +155,7 @@ async def test_import_materializes_the_row_survives_restart_and_delete_removes_i
     wrong_settings = make_settings(tmp_path / "wrong", secrets_key=wrong_key)
     with monkeypatch.context() as patch:
         # The plane reads its keys through druks.database at each use.
-        patch.setattr(database, "load_settings", lambda: wrong_settings)
+        patch.setattr(database, "get_settings", lambda: wrong_settings)
         with pytest.raises(SecretDecryptError):
             row.payload.decrypt()
 

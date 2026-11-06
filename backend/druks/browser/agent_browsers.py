@@ -21,7 +21,7 @@ from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.datastructures import McpServer
 from druks.sandbox.models import SecretRef
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 if TYPE_CHECKING:
     from druks.browser.sessions import BrowserSession
@@ -49,7 +49,7 @@ class AgentBrowser:
         """Borrow ``session`` for the call under a key that allows the browser
         tools. Yields the server and the secret that the call's box gets. After
         the block, the key is revoked and the browser is released."""
-        endpoint = load_settings().urls.webhook_base
+        endpoint = get_settings().urls.webhook_base
         if not endpoint:
             raise MissingEndpointError(BROWSER_SERVER_NAME)
         variable = get_bearer_token_env_var(BROWSER_SERVER_NAME)

@@ -18,7 +18,7 @@ from druks.mcp.models import McpServer
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 from . import auth
 from .exceptions import (
@@ -319,17 +319,17 @@ class Service:
     def is_enabled(cls) -> bool:
         """Whether druks.toml leaves this service in the installation. The registry
         hides a disabled service."""
-        return load_settings().services.get(cls.slug, {}).get("enabled", True)
+        return get_settings().services.get(cls.slug, {}).get("enabled", True)
 
     @classmethod
     def is_configured(cls) -> bool:
         """Whether druks.toml configures this service. Its card then refuses a change."""
-        return cls.slug in load_settings().services
+        return cls.slug in get_settings().services
 
     @classmethod
     def is_managed(cls) -> bool:
         """Whether the manager manages this service, as ``manager.services`` says."""
-        return cls.slug in load_settings().manager.services
+        return cls.slug in get_settings().manager.services
 
     @classmethod
     async def get_grant(cls) -> VaultSecret | None:
@@ -347,7 +347,7 @@ class Service:
     @classmethod
     async def sync_configuration(cls, session: AsyncSession) -> None:
         """Store each service that druks.toml configures as its card."""
-        configuration = load_settings()
+        configuration = get_settings()
         for slug, entry in configuration.services.items():
             if not entry.get("enabled", True):
                 continue
@@ -464,7 +464,7 @@ class Service:
             raise TypeError(f"{cls.__name__} declares no OAuth client")
         connected = await cls.get()
         if cls.is_managed():
-            manager = load_settings().manager
+            manager = get_settings().manager
             return OauthClient(
                 provider=cls.slug,
                 authorization_endpoint=client.authorization_endpoint,

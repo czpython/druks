@@ -722,7 +722,7 @@ async def test_catalog_enabled_false_ships_the_entry_dark(tmp_path, registry_sta
 
 def _declaring_druks(monkeypatch, allowed_tools=()) -> type[Workspace]:
     monkeypatch.setattr(
-        "druks.mcp.inbound.load_settings",
+        "druks.mcp.inbound.get_settings",
         lambda: SimpleNamespace(urls=Urls(endpoint="https://druks.test/", webhook_host="")),
     )
     return _declaring(get_druks_mcp_server(allowed_tools=allowed_tools))
@@ -741,7 +741,7 @@ async def _druks_pat(account_id: str) -> str:
 
 def test_druks_needs_an_address_a_box_reaches(monkeypatch):
     monkeypatch.setattr(
-        "druks.mcp.inbound.load_settings",
+        "druks.mcp.inbound.get_settings",
         lambda: SimpleNamespace(urls=Urls(endpoint="", webhook_host="")),
     )
 

@@ -218,7 +218,7 @@ async def bot_account(session):
 
 def webhook_base(monkeypatch):
     settings = SimpleNamespace(urls=SimpleNamespace(webhook_base="https://hooks.test"))
-    monkeypatch.setattr("druks.chat.channels.whatsapp.services.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.chat.channels.whatsapp.services.get_settings", lambda: settings)
 
 
 async def test_the_webhook_accepts_only_an_event_its_session_signed(druks_db, druks_client):
@@ -608,10 +608,10 @@ async def test_shared_contacts_reach_the_agent_as_names_and_numbers(druks_db, he
     )
 
 
+@pytest.mark.usefixtures("tmp_data_dir")
 async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
-    druks_db, helpdesk, waha, tmp_path, monkeypatch
+    druks_db, helpdesk, waha, monkeypatch
 ):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(WahaClient, "download", AsyncMock(return_value=b"\x89PNG"))
     connection = await link(druks_db, await bot_account(druks_db))
     photo = message_event(ANA, "", key="M2")
@@ -647,7 +647,7 @@ async def test_one_turn_answers_every_pending_message_and_knows_its_own_reply(
     )
     monkeypatch.setattr(service, "get_config", AsyncMock(return_value=config))
     monkeypatch.setattr(
-        "druks.mcp.inbound.load_settings",
+        "druks.mcp.inbound.get_settings",
         lambda: SimpleNamespace(urls=Urls(webhook_host="hooks.test", endpoint="")),
     )
     host = SimpleNamespace(
@@ -1044,7 +1044,7 @@ async def test_operator_turns_use_the_apps_prompt_and_settings_without_a_timeout
     render_prompt = AsyncMock(return_value="Operator prompt")
     monkeypatch.setattr(service, "render_prompt", render_prompt)
     monkeypatch.setattr(
-        "druks.mcp.inbound.load_settings",
+        "druks.mcp.inbound.get_settings",
         lambda: SimpleNamespace(urls=Urls(webhook_host="hooks.test", endpoint="")),
     )
     monkeypatch.setattr(service, "sandbox_client", SimpleNamespace(set_expiry=AsyncMock()))
@@ -1265,7 +1265,7 @@ async def test_a_waiting_run_asks_the_admin_and_its_end_reaches_the_chat(druks_d
 
 def test_a_reminder_cron_keeps_local_time_across_daylight_saving(monkeypatch):
     settings = SimpleNamespace(timezone="Europe/Madrid")
-    monkeypatch.setattr("druks.chat.models.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.chat.models.get_settings", lambda: settings)
     mondays_at_nine = Reminder(cron="0 9 * * 1")
 
     assert mondays_at_nine.get_next_send_at(datetime(2026, 10, 15, tzinfo=UTC)) == datetime(
@@ -1278,7 +1278,7 @@ def test_a_reminder_cron_keeps_local_time_across_daylight_saving(monkeypatch):
 
 async def test_a_reminder_sends_after_a_delay_or_at_a_local_or_offset_time(druks_db, monkeypatch):
     settings = SimpleNamespace(timezone="Europe/Madrid")
-    monkeypatch.setattr("druks.chat.models.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.chat.models.get_settings", lambda: settings)
     chat = SimpleNamespace(id="c")
     before = Base.utc_now()
 
@@ -1335,7 +1335,7 @@ async def test_a_reminder_sends_in_the_calling_chat_unless_told_where(
         response_model_by_alias=True,
     )
     settings = SimpleNamespace(timezone="Europe/Madrid")
-    monkeypatch.setattr("druks.chat.models.load_settings", lambda: settings)
+    monkeypatch.setattr("druks.chat.models.get_settings", lambda: settings)
     operator = await Account.get_or_create(druks_db, "op@example.com")
     chat = await Conversation.create(druks_db, account_id=operator.id, body="Hi")
     other = await Conversation.create(druks_db, account_id=operator.id, body="Hello")

@@ -7,10 +7,7 @@ from druks.files.storage import get_file_storage
 from druks.models import Base
 from druks.testing import asgi_client, configure_app_for_test, make_settings
 
-
-@pytest.fixture(autouse=True)
-def _file_storage_root(tmp_path, monkeypatch):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+pytestmark = pytest.mark.usefixtures("tmp_data_dir")
 
 
 async def _seed_file(druks_db, *, name: str, content_type: str, content: bytes) -> FileRecord:

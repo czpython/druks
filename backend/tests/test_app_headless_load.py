@@ -12,6 +12,7 @@ from druks.apps.exceptions import (
     MalformedApp,
 )
 from druks.apps.loader import load_app
+from druks.settings import Settings, configure_settings
 
 # An out-of-tree app package, written to disk and put on sys.path so a real
 # importlib.metadata.EntryPoint resolves it — the same machinery an editable
@@ -188,8 +189,8 @@ def test_surfaces_are_enumerable_from_the_loaded_app(installed):
     assert app.migrations_dir() == package_dir / "migrations"
 
 
-def test_get_data_dir_is_the_apps_folder_under_the_data_directory(installed, monkeypatch, tmp_path):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+def test_get_data_dir_is_the_apps_folder_under_the_data_directory(installed, tmp_path):
+    configure_settings(Settings(data_dir=tmp_path))
 
     data_dir = load_app("probe").get_data_dir()
 
@@ -282,14 +283,14 @@ def test_entry_point_key_mismatch_raises_malformed_app(installed, monkeypatch):
         load_app("not_probe")
 
 
-def test_boot_rejects_an_entry_point_key_mismatch(installed, monkeypatch):
+def test_boot_rejects_an_entry_point_key_mismatch(installed, monkeypatch, registered_apps):
     """Full boot applies the same key/name validation as the single load — an
-    aliased entry the headless path rejects must not slip through iter_apps()."""
+    aliased entry the headless path rejects must not slip through register_apps()."""
     aliased = EntryPoint(name="not_probe", value=f"{_PACKAGE}.app:Probe", group="druks.apps")
     monkeypatch.setattr(loader, "entry_points", lambda *, group: [aliased])
 
     with pytest.raises(MalformedApp, match="must match App.name"):
-        loader.iter_apps()
+        loader.register_apps()
 
 
 def test_import_error_in_entry_module_raises_app_import_error(tmp_path, monkeypatch):

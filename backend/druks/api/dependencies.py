@@ -6,11 +6,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.database import session_scope
-from druks.settings import Settings
-
-
-def get_settings(request: Request) -> Settings:
-    return request.app.state.settings
+from druks.settings import Settings, get_settings
 
 
 def get_engine(request: Request) -> Engine:

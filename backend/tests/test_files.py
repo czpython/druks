@@ -19,6 +19,8 @@ from sqlalchemy import Integer, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
+pytestmark = pytest.mark.usefixtures("tmp_data_dir")
+
 
 class SurveyShot(AgentOutput):
     screen: str
@@ -44,10 +46,7 @@ def _host(ssh_username: str) -> Host:
     return Host(record=SimpleNamespace(id="h1", ssh_username=ssh_username))  # type: ignore[arg-type]
 
 
-async def _hydrate_file(
-    session, tmp_path, monkeypatch, *, name="home.png", content=b"image"
-) -> File:
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+async def _hydrate_file(session, monkeypatch, *, name="home.png", content=b"image") -> File:
     workspace_files: list[File] = []
     output = SurveyOutput.model_validate(
         {"shots": [{"screen": "home", "image": f"shots/{name}"}]},
@@ -65,9 +64,8 @@ async def _hydrate_file(
     return output.shots[0].image
 
 
-async def test_create_stores_an_upload_against_its_account(druks_db, tmp_path, monkeypatch):
+async def test_create_stores_an_upload_against_its_account(druks_db):
     """File.create stores bytes against the account that sent them."""
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
 
     file = await File.create(
         name="shopfront.jpg",
@@ -107,9 +105,8 @@ async def test_create_refuses_an_oversized_upload(monkeypatch):
         )
 
 
-async def test_uploaded_file_delete_and_reap(druks_db, tmp_path, monkeypatch):
+async def test_uploaded_file_delete_and_reap(druks_db, tmp_path):
     """A deleted upload loses its bytes to the reaper and keeps its tombstone."""
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     file = await File.create(
         name="shopfront.jpg",
         content_type="image/jpeg",
@@ -138,7 +135,7 @@ def test_file_contract_is_a_strict_nested_workspace_path():
 
 async def test_hydration_pulls_and_stores_a_nested_file(druks_db, tmp_path, monkeypatch):
     """Hydration stores immutable bytes and stamps the handle and provenance."""
-    file = await _hydrate_file(druks_db, tmp_path, monkeypatch, content=b"png bytes")
+    file = await _hydrate_file(druks_db, monkeypatch, content=b"png bytes")
 
     record = await druks_db.get(FileRecord, file.id)
     assert (file.name, file.size, file.content_type, file.url) == (
@@ -158,7 +155,7 @@ async def test_a_deleted_agent_call_leaves_its_file_without_a_source(
     druks_db, tmp_path, monkeypatch
 ):
     """A file outlives the call that made it, and stops naming it."""
-    file = await _hydrate_file(druks_db, tmp_path, monkeypatch)
+    file = await _hydrate_file(druks_db, monkeypatch)
     record = await druks_db.get(FileRecord, file.id)
 
     await druks_db.delete(await druks_db.get(AgentCall, record.agent_call_id))
@@ -169,9 +166,8 @@ async def test_a_deleted_agent_call_leaves_its_file_without_a_source(
     assert await file.open() == b"image"
 
 
-async def test_an_upload_holds_its_uploader(druks_db, tmp_path, monkeypatch):
+async def test_an_upload_holds_its_uploader(druks_db):
     """An upload holds its uploader, so the account cannot leave without it."""
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     account = Account(username="shopkeeper@example.com")
     druks_db.add(account)
     await druks_db.flush()
@@ -192,7 +188,6 @@ async def test_hydration_leaves_no_canonical_bytes_when_a_later_pull_fails(
     druks_db, tmp_path, monkeypatch
 ):
     """A failed batch removes every staged byte before any canonical file exists."""
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     workspace_files: list[File] = []
     SurveyOutput.model_validate(
         {
@@ -225,7 +220,7 @@ async def test_hydration_leaves_no_canonical_bytes_when_a_later_pull_fails(
 async def test_a_file_uploads_into_the_call_directory(druks_db, tmp_path, monkeypatch):
     """A hydrated handle lands in the call's own directory on the box and reads
     as its path there."""
-    file = await _hydrate_file(druks_db, tmp_path, monkeypatch)
+    file = await _hydrate_file(druks_db, monkeypatch)
     host = MagicMock(ssh_username="root")
     host.upload_file = AsyncMock()
 
@@ -239,7 +234,7 @@ async def test_a_file_uploads_into_the_call_directory(druks_db, tmp_path, monkey
 
 async def test_file_field_round_trip_loads_metadata_with_the_row(druks_db, tmp_path, monkeypatch):
     """FileField persists a real FK and projects complete handle metadata on load."""
-    file = await _hydrate_file(druks_db, tmp_path, monkeypatch, content=b"1234")
+    file = await _hydrate_file(druks_db, monkeypatch, content=b"1234")
     reference = FileReference(image=file)
     druks_db.add(reference)
     await druks_db.flush()
@@ -262,7 +257,7 @@ async def test_file_field_round_trip_loads_metadata_with_the_row(druks_db, tmp_p
 
 async def test_delete_and_reaper_leave_the_tombstone(druks_db, tmp_path, monkeypatch):
     """The reaper removes bytes while the soft-deleted row and app FK remain."""
-    file = await _hydrate_file(druks_db, tmp_path, monkeypatch)
+    file = await _hydrate_file(druks_db, monkeypatch)
     reference = FileReference(image=file)
     druks_db.add(reference)
     await druks_db.flush()

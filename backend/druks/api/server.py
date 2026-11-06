@@ -20,7 +20,7 @@ from druks.api.dependencies import request_session
 from druks.api.exceptions import AgentApiError
 from druks.api.runs import router as runs_router
 from druks.api.subjects import router as subjects_router
-from druks.apps.loader import iter_apps, load
+from druks.apps.loader import iter_apps, load, register_apps
 from druks.apps.routes import router as apps_router
 from druks.browser.exceptions import BrowserApiError
 from druks.browser.routes import agent_browser_router
@@ -54,7 +54,14 @@ from druks.services.base import Service
 from druks.services.exceptions import OauthPageError, ServiceManagedError, ServiceNotConnectedError
 from druks.services.routes import oauth_router
 from druks.services.routes import router as service_identities_router
-from druks.settings import Settings, ensure_data_dirs, load_settings, setup_logging
+from druks.settings import (
+    Settings,
+    configure_settings,
+    ensure_data_dirs,
+    get_settings,
+    load_settings,
+    setup_logging,
+)
 from druks.skills.routes import router as skills_router
 from druks.ui.exceptions import PageReadError
 from druks.user_settings.routes import agents_router
@@ -66,7 +73,6 @@ from .routes import router as health_router
 
 def configure_state(app: FastAPI, settings: Settings) -> None:
     ensure_data_dirs(settings)
-    app.state.settings = settings
     app.state.engine = create_async_engine_from_url(settings.database_url.get_secret_value())
     # Bind the ambient (``scoped_session``) factory to this engine so
     # request handlers can use ``db_session()`` without per-call setup.
@@ -77,12 +83,11 @@ def configure_state(app: FastAPI, settings: Settings) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # Tests pre-populate ``app.state.settings`` before lifespan fires (their
-    # engine is a fixture-owned connection this lifespan must not dispose).
-    # Production hits this branch and reads env config.
+    # Tests pre-populate the engine before lifespan fires. Production creates
+    # its engine here from the settings that assembled this API.
     created_engine = None
-    if not hasattr(app.state, "settings"):
-        settings = load_settings()
+    if not hasattr(app.state, "engine"):
+        settings = get_settings()
         configure_state(app, settings)
         created_engine = app.state.engine
         # uvicorn runs this module directly and never calls setup_logging, so
@@ -103,7 +108,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         async with session_scope(app.state.engine) as session:
             await Service.sync_configuration(session)
         # DBOS runs embedded here: this process both serves HTTP and executes
-        # durable workflows. Tests pre-populate app.state.settings and never
+        # durable workflows. Tests pre-populate app.state.engine and never
         # reach here — they drive DBOS through their own fixtures.
         init_dbos()
         await launch()
@@ -132,6 +137,10 @@ def _mcp_lifespan(app: FastAPI) -> AbstractAsyncContextManager[Mapping[str, Any]
     # app further down.
     return mcp_app.lifespan(app)
 
+
+settings = load_settings()
+configure_settings(settings)
+register_apps()
 
 app = FastAPI(
     title="Druks",

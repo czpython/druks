@@ -112,13 +112,12 @@ async def _seed_call(session, run, *, agent, status="succeeded"):
 
 
 @pytest.fixture
-async def client(tmp_path: Path, druks_db, monkeypatch):
+async def client(tmp_path: Path, druks_db):
     # The real app mounts every app's routers before its catch-all 404, so the
     # fake app's router has to slot in there too — appending lands after the
     # catch-all and gets shadowed. Pulled back out on teardown; the app is a singleton.
     from druks.testing import configure_app_for_test, make_settings
 
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     for subject_id in TITLES:
         await druks_db.merge(Thing(id=subject_id))
     await druks_db.flush()

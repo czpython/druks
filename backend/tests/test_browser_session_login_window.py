@@ -2,7 +2,6 @@ import json
 import shlex
 import subprocess
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,6 +12,7 @@ from druks.browser.exceptions import BrowserExportError, BrowserLoginWindowGoneE
 from druks.browser.login import LoginWindow, is_same_origin
 from druks.browser.models import StoredBrowserSession
 from druks.db import db_session
+from druks.settings import configure_settings
 from druks.testing import make_settings
 from fastapi import HTTPException, WebSocket
 
@@ -79,7 +79,7 @@ def window_runtime(tmp_path, monkeypatch):
     settings = make_settings(tmp_path)
     client = FakeSandboxClient()
     monkeypatch.setattr(login, "sandbox_client", client)
-    monkeypatch.setattr(login, "load_settings", lambda: settings)
+    monkeypatch.setattr(login, "get_settings", lambda: settings)
     monkeypatch.setattr(login, "get_template_id", AsyncMock(return_value="browser-template"))
     return client
 
@@ -117,7 +117,7 @@ def _runtime_with_browser(tmp_path, monkeypatch, **browser) -> FakeSandboxClient
     settings = make_settings(tmp_path, browser=browser)
     client = FakeSandboxClient()
     monkeypatch.setattr(login, "sandbox_client", client)
-    monkeypatch.setattr(login, "load_settings", lambda: settings)
+    monkeypatch.setattr(login, "get_settings", lambda: settings)
     monkeypatch.setattr(login, "get_template_id", AsyncMock(return_value="browser-template"))
     return client
 
@@ -238,7 +238,7 @@ async def test_get_for_session_reports_a_missing_window():
         await LoginWindow.get_for_session("nope")
 
 
-def _websocket(headers: list[tuple[bytes, bytes]], *, app=None) -> WebSocket:
+def _websocket(headers: list[tuple[bytes, bytes]]) -> WebSocket:
     async def receive():
         return {"type": "websocket.disconnect"}
 
@@ -257,7 +257,6 @@ def _websocket(headers: list[tuple[bytes, bytes]], *, app=None) -> WebSocket:
             "client": ("testclient", 50000),
             "server": ("druks.test", 80),
             "subprotocols": [],
-            "app": app,
         },
         receive,
         send,
@@ -265,14 +264,15 @@ def _websocket(headers: list[tuple[bytes, bytes]], *, app=None) -> WebSocket:
 
 
 async def test_websocket_identity_resolves_and_cross_origin_is_refused(druks_db, tmp_path):
-    settings = make_settings(tmp_path, identity={"mode": "header", "header": "X-Edge-Email"})
+    configure_settings(
+        make_settings(tmp_path, identity={"mode": "header", "header": "X-Edge-Email"})
+    )
     connection = _websocket(
         [
             (b"host", b"druks.test"),
             (b"origin", b"http://attacker.test"),
             (b"x-edge-email", b"operator@example.com"),
-        ],
-        app=SimpleNamespace(state=SimpleNamespace(settings=settings)),
+        ]
     )
 
     account = await require_operator(druks_db, connection)
@@ -291,11 +291,8 @@ async def test_websocket_identity_resolves_and_cross_origin_is_refused(druks_db,
 def test_origin_matches_the_endpoint_host_else_the_host_header(
     tmp_path, endpoint, host, origin, is_expected
 ):
-    settings = make_settings(tmp_path, urls={"endpoint": endpoint})
-    connection = _websocket(
-        [(b"host", host.encode()), (b"origin", origin.encode())],
-        app=SimpleNamespace(state=SimpleNamespace(settings=settings)),
-    )
+    configure_settings(make_settings(tmp_path, urls={"endpoint": endpoint}))
+    connection = _websocket([(b"host", host.encode()), (b"origin", origin.encode())])
 
     assert is_same_origin(connection) == is_expected
 

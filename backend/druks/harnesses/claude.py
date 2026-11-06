@@ -18,7 +18,7 @@ from druks.sandbox.datastructures import (
 from druks.sandbox.layout import get_runs_root
 from druks.sandbox.models import SecretRef
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 from . import exceptions
 from .artifacts import call_dir, write_cost
@@ -300,7 +300,7 @@ def _get_credentials(manifest: Manifest, *, include_plugins: bool = True) -> Cre
     placeholder for its token or key. ``include_plugins=False`` skips the
     operator's plugin state, for prompts that use no MCP server and would
     otherwise die on a misconfigured plugin."""
-    settings = load_settings()
+    settings = get_settings()
     config_dir = settings.harness_config_root / ClaudeHarness.name
     home: list[HomeFile | HomeCopy] = []
     claude_json = config_dir / ".claude.json"

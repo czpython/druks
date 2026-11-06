@@ -37,7 +37,7 @@ from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.models import SecretRef
 from druks.secrets.enums import SecretKind
-from druks.settings import load_settings
+from druks.settings import get_settings
 from druks.usage.models import UsageScrape
 from druks.workflows import _in_step, current_workflow
 
@@ -321,7 +321,7 @@ class Agent:
             # back — so the enclosing step's work commits now instead of waiting
             # in an open transaction through the run.
             await db_session().commit()
-        artifact_dir = load_settings().artifacts_dir / f"run-{workflow_id}"
+        artifact_dir = get_settings().artifacts_dir / f"run-{workflow_id}"
         engine = _step_engine()
 
         async with step_session() as session:

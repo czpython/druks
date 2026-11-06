@@ -47,6 +47,9 @@ class Registry:
         self._items[key] = item
         return item
 
+    def clear(self) -> None:
+        self._items.clear()
+
     def get(self, key: str) -> Any:
         return self._items.get(key)
 
@@ -94,6 +97,7 @@ webhooks = Registry("webhooks", key=lambda cls: f"{cls.__module__}.{cls.__qualna
 pages = Registry("pages", key=lambda page_route: page_route.key)
 
 
+apps = Registry("apps", key=lambda app: app.name)
 services = ServiceRegistry("services", key=lambda cls: cls.slug)
 workflows = Registry("workflows", key=lambda cls: cls.kind)
 agents = Registry("agents", key=lambda agent: agent.id)

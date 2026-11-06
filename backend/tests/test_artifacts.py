@@ -194,9 +194,9 @@ async def test_run_response_projects_the_parked_gate(druks_db):
     assert response.gate == "review"
 
 
-async def test_get_artifact_returns_recorded_content(druks_db, tmp_path, monkeypatch):
-    # call_dir resolves through load_settings().artifacts_dir, so point it at tmp.
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+@pytest.mark.usefixtures("tmp_data_dir")
+async def test_get_artifact_returns_recorded_content(druks_db):
+    # call_dir resolves through get_settings().artifacts_dir, so point it at tmp.
     druks_db.add(
         Run(
             id="run-1",
@@ -237,10 +237,10 @@ async def test_get_artifact_404_when_missing(druks_db):
     assert exc.value.status_code == 404
 
 
-async def test_get_artifact_404_when_content_gone(druks_db, tmp_path, monkeypatch):
+@pytest.mark.usefixtures("tmp_data_dir")
+async def test_get_artifact_404_when_content_gone(druks_db):
     # Descriptor row present but the file never written — the read repairs to a 404,
     # not a 500.
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     druks_db.add(
         Run(
             id="run-1",

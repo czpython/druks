@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from druks import database
+from druks.apps import loader
 from druks.durable import engine as durable_engine
 from druks.exceptions import SessionNotBoundError
 from druks.harnesses.exceptions import HarnessNotConnectedError
@@ -12,6 +13,17 @@ from druks.testing import TEST_DATABASE_URL, make_settings
 from pydantic import ValidationError
 
 _SECRETS_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+
+
+async def test_a_request_reads_what_startup_learned(druks_client, monkeypatch):
+    def refuse(*args, **kwargs):
+        raise AssertionError("a request re-read what startup already knows")
+
+    monkeypatch.setattr(Settings, "__init__", refuse)
+    monkeypatch.setattr(loader, "entry_points", refuse)
+
+    for path in ("/api/services", "/api/settings/apps", "/api/agents", "/api/apps"):
+        assert (await druks_client.get(path)).status_code == 200, path
 
 
 def test_auth_defaults_to_none_and_blesses_no_header(tmp_path):
@@ -247,8 +259,8 @@ def test_pool_settings_reach_the_app_engine_and_dbos(tmp_path, monkeypatch):
     settings = make_settings(
         tmp_path, database_pool_size=3, database_max_overflow=4, dbos_pool_size=5
     )
-    monkeypatch.setattr(database, "load_settings", lambda: settings)
-    monkeypatch.setattr(durable_engine, "load_settings", lambda: settings)
+    monkeypatch.setattr(database, "get_settings", lambda: settings)
+    monkeypatch.setattr(durable_engine, "get_settings", lambda: settings)
     monkeypatch.setattr(durable_engine, "_initialized", False)
     configs = []
     monkeypatch.setattr(durable_engine, "DBOS", lambda config: configs.append(config))
@@ -261,7 +273,7 @@ def test_pool_settings_reach_the_app_engine_and_dbos(tmp_path, monkeypatch):
 
 
 def test_dbos_logging_hides_only_expected_workflow_failures(tmp_path, monkeypatch, caplog):
-    monkeypatch.setattr(durable_engine, "load_settings", lambda: make_settings(tmp_path))
+    monkeypatch.setattr(durable_engine, "get_settings", lambda: make_settings(tmp_path))
     monkeypatch.setattr(durable_engine, "_initialized", False)
     monkeypatch.setattr(durable_engine, "DBOS", lambda config: None)
     durable_engine.init_dbos()

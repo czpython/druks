@@ -29,7 +29,7 @@ from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
 from druks.services import Service, ServiceConnectError, auth
 from druks.services.exceptions import OauthExchangeError, ServiceNotConnectedError
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -476,7 +476,7 @@ class Slack(Service):
 
     @classmethod
     def get_manifest(cls) -> dict[str, Any]:
-        urls = load_settings().urls
+        urls = get_settings().urls
         return {
             "display_information": {
                 "name": "Druks",

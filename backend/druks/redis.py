@@ -1,6 +1,6 @@
 import redis.asyncio as aioredis
 
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 _client: aioredis.Redis | None = None
 
@@ -8,7 +8,7 @@ _client: aioredis.Redis | None = None
 def get_client() -> aioredis.Redis:
     global _client
     if not _client:
-        _client = aioredis.from_url(load_settings().redis_url.get_secret_value())
+        _client = aioredis.from_url(get_settings().redis_url.get_secret_value())
     return _client
 
 

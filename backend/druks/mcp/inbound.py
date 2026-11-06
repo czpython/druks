@@ -8,12 +8,12 @@ from druks.sandbox.datastructures import SandboxMcpServer
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 
 def get_druks_mcp_server(*, allowed_tools: tuple[str, ...]) -> SandboxMcpServer:
     """Druks' own `/mcp` as a workspace's server, at the address a box reaches."""
-    if endpoint := load_settings().urls.webhook_base:
+    if endpoint := get_settings().urls.webhook_base:
         return SandboxMcpServer(
             name=DRUKS_SERVER_NAME, url=f"{endpoint}/mcp", allowed_tools=allowed_tools
         )

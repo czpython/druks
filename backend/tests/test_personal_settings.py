@@ -36,7 +36,7 @@ async def test_account_creation_copies_defaults_once(tmp_path, druks_db, monkeyp
     installation = await InstallationSettings.get_or_create(druks_db)
     await installation.update(gate_park_destination_id=destination.id)
     monkeypatch.setattr(
-        "druks.accounts.models.load_settings",
+        "druks.accounts.models.get_settings",
         lambda: make_settings(tmp_path, timezone="Europe/Madrid"),
     )
     alice = await Account.get_or_create(druks_db, "alice@example.com")

@@ -107,7 +107,7 @@ async def _required_servers(monkeypatch: pytest.MonkeyPatch, tracker: str):
         "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
     )
     monkeypatch.setattr(
-        "druks.mcp.inbound.load_settings",
+        "druks.mcp.inbound.get_settings",
         lambda: SimpleNamespace(urls=Urls(endpoint="https://druks.test", webhook_host="")),
     )
     settings = SoftwareFactory.Settings(tracker=tracker)

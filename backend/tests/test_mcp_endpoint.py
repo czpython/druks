@@ -73,8 +73,7 @@ _BOARD_TOOLS = {
 
 
 @pytest.fixture
-def app(tmp_path, druks_db, monkeypatch):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+def app(tmp_path, druks_db):
     return configure_app_for_test(settings=make_settings(tmp_path), authenticated=False)
 
 
@@ -747,8 +746,7 @@ async def test_lifespan_composes_the_endpoint_once(app, monkeypatch):
     assert entered == [1]
 
 
-async def test_mcp_server_registry_routes_stay_untouched(tmp_path, druks_db, monkeypatch):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+async def test_mcp_server_registry_routes_stay_untouched(tmp_path, druks_db):
     app = configure_app_for_test(settings=make_settings(tmp_path))
     async with asgi_client(app) as client:
         listed = await client.get("/api/mcp-servers")

@@ -7,7 +7,7 @@ from druks.apps.exceptions import AppNotFound
 from druks.apps.registry import services
 from druks.services import Service
 from druks.services.exceptions import ServiceDisabledError
-from druks.settings import Settings
+from druks.settings import Settings, configure_settings
 from druks.testing import asgi_client, configure_app_for_test
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -21,9 +21,12 @@ def configuration(tmp_path, monkeypatch):
     return path
 
 
-async def test_a_disabled_app_is_not_installed(configuration, druks_db, tmp_path):
+async def test_a_disabled_app_is_not_installed(configuration, druks_db, tmp_path, registered_apps):
     configuration.write_text("[apps.software_factory]\nenabled = false\n")
-    api = configure_app_for_test(settings=Settings(data_dir=tmp_path))
+    settings = Settings(data_dir=tmp_path)
+    configure_settings(settings)
+    loader.register_apps()
+    api = configure_app_for_test(settings=settings)
     async with asgi_client(api) as client:
         names = [app["name"] for app in (await client.get("/api/apps")).json()]
     assert "core" in names
@@ -36,20 +39,23 @@ async def test_a_disabled_app_is_not_installed(configuration, druks_db, tmp_path
         assert (await client.get("/api/software_factory/pages")).status_code == 404
 
 
-def test_a_disabled_app_never_loads(configuration, monkeypatch):
+def test_a_disabled_app_never_loads(configuration, monkeypatch, registered_apps):
     configuration.write_text("[apps.broken]\nenabled = false\n")
     installed = entry_points(group="druks.apps")
     broken = EntryPoint("broken", "broken_app:App", "druks.apps")
     monkeypatch.setattr(loader, "entry_points", lambda group: EntryPoints([*installed, broken]))
 
+    configure_settings(Settings())
+    loader.register_apps()
     assert "broken" not in {app.name for app in loader.iter_apps()}
 
 
 def test_an_app_that_no_package_provides_refuses_to_start(configuration):
     configuration.write_text("[apps.unknown]\nenabled = false\n")
+    configure_settings(Settings())
 
     with pytest.raises(AppNotFound, match="apps.unknown"):
-        loader.iter_apps()
+        loader.register_apps()
 
 
 def test_a_service_registers_before_druks_toml_is_read(
@@ -74,9 +80,11 @@ async def test_a_disabled_service_is_not_installed(
         class Settings(BaseModel):
             url: str
 
+    settings = Settings(data_dir=tmp_path)
+    configure_settings(settings)
     bind_ambient_session(druks_db)
     await Service.sync_configuration(druks_db)
-    api = configure_app_for_test(settings=Settings(data_dir=tmp_path))
+    api = configure_app_for_test(settings=settings)
     async with asgi_client(api) as client:
         slugs = [card["slug"] for card in (await client.get("/api/services")).json()]
         response = await client.post("/api/services/acme", json={"url": "https://acme.test"})

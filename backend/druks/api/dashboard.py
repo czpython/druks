@@ -27,7 +27,7 @@ from druks.durable.enums import RunState
 from druks.durable.exceptions import ScheduleUnavailable
 from druks.durable.models import Artifact, Run
 from druks.events.models import Event
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 PREVIEW_SIZE = 4
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -154,7 +154,7 @@ async def get_overview(
 async def list_current_schedules(session: SessionDep, response: Response) -> DashboardSchedules:
     """Configured cadence and recorded invocations, not scheduler health."""
     response.headers["Cache-Control"] = "no-store"
-    timezone = load_settings().timezone
+    timezone = get_settings().timezone
     declared = [
         (owner.name, workflow)
         for owner in iter_apps()

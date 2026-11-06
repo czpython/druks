@@ -12,7 +12,7 @@ from druks.chat.enums import BotAccess, ConversationSource
 from druks.chat.models import Conversation
 from druks.core.services import Twilio
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 from .channel import CallsChannel
 from .exceptions import CallsLinkError
@@ -50,7 +50,7 @@ async def link_number(
         raise HTTPException(404, f"Unknown app {app!r}") from error
     if not bot or bot.access != BotAccess.PUBLIC:
         raise HTTPException(404, f"App {app!r} declares no public Bot.")
-    webhook_base = load_settings().urls.webhook_base
+    webhook_base = get_settings().urls.webhook_base
     if not webhook_base:
         raise CallsLinkError(
             "Druks has no public address that Twilio can send calls to. "

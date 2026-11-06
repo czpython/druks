@@ -6,8 +6,11 @@ import textwrap
 # already cover the settings-value and migration reads that need one.
 _CHECK = textwrap.dedent(
     """
-    from druks.apps.loader import iter_apps, load_app
+    from druks.apps.loader import iter_apps, load_app, register_apps
+    from druks.settings import configure_settings, load_settings
 
+    configure_settings(load_settings())
+    register_apps()
     names = {app.name for app in iter_apps()}
     assert "field_notes" in names, names
 

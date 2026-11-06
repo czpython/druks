@@ -81,7 +81,7 @@ class FakeBrowser:
 @pytest.fixture
 def borrow(druks_db, tmp_path, monkeypatch):
     settings = make_settings(tmp_path)
-    monkeypatch.setattr(sessions_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(sessions_module, "get_settings", lambda: settings)
     browser = FakeBrowser()
 
     @asynccontextmanager
@@ -216,7 +216,7 @@ async def test_borrow_launch_routes_through_the_proxy_when_the_scope_is_all(
         tmp_path,
         browser={"proxy": proxy, "proxy_scope": "all", "timezone": "Europe/Madrid"},
     )
-    monkeypatch.setattr(sessions_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(sessions_module, "get_settings", lambda: settings)
     await stored_session(notebook.journal)
 
     async with notebook.journal.cdp():
@@ -234,7 +234,7 @@ async def test_borrow_launch_keeps_the_box_ip_under_the_login_scope(
     settings = make_settings(
         tmp_path, browser={"proxy": "http://172.17.0.1:8888", "timezone": "Europe/Madrid"}
     )
-    monkeypatch.setattr(sessions_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(sessions_module, "get_settings", lambda: settings)
     await stored_session(notebook.journal)
 
     async with notebook.journal.cdp():

@@ -59,7 +59,7 @@ class TestFetchFile:
 
     def _wire(self, monkeypatch, tmp_path, github):
         settings = make_settings(tmp_path)
-        monkeypatch.setattr("druks.apps.fetcher.load_settings", lambda: settings)
+        monkeypatch.setattr("druks.apps.fetcher.get_settings", lambda: settings)
 
         async def _client(repo):
             return github
@@ -97,7 +97,7 @@ class TestFetchFile:
         from druks.apps.fetcher import fetch_file
 
         settings = make_settings(tmp_path)
-        monkeypatch.setattr("druks.apps.fetcher.load_settings", lambda: settings)
+        monkeypatch.setattr("druks.apps.fetcher.get_settings", lambda: settings)
 
         async def _client(repo):
             raise GitHubAppNotInstalledError(repo, app="example-app")

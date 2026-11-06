@@ -3,7 +3,7 @@ import hmac
 
 import pytest
 from druks.apps.registry import webhooks
-from druks.settings import Settings
+from druks.settings import Settings, configure_settings
 from druks.webhooks import InvalidWebhookError, Webhook, verify_hmac_sha256
 from druks.webhooks.router import match_webhook
 from druks.webhooks.router import router as webhooks_router
@@ -177,8 +177,8 @@ def _client_for(*hook_classes: type[Webhook], settings: Settings) -> TestClient:
     Use as a context manager: delivery marking talks to Redis, and only the
     ``with`` form gives every request one shared event loop for that client.
     """
+    configure_settings(settings)
     app = FastAPI()
-    app.state.settings = settings
     app.include_router(webhooks_router)
     return TestClient(app, raise_server_exceptions=False)
 

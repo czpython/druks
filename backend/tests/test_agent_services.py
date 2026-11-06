@@ -31,13 +31,7 @@ from druks.testing import seed_call, seed_dbos_status, seed_run
 from druks.usage.models import UsageScrape
 from druks_field_notes.workflows import Summarize
 
-pytestmark = pytest.mark.usefixtures("_data_dir")
-
-
-@pytest.fixture
-def _data_dir(tmp_path, monkeypatch):
-    # AgentCall.call_dir derives from load_settings().artifacts_dir.
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+pytestmark = pytest.mark.usefixtures("tmp_data_dir")
 
 
 @pytest.fixture

@@ -26,6 +26,7 @@ from pydantic_settings import (
 from sqlalchemy_encrypted_field import validate_keys
 
 from druks.core.utils.time import validate_timezone
+from druks.exceptions import SettingsNotConfiguredError
 
 DEFAULT_DATA_DIR = Path("/var/lib/druks")
 
@@ -428,6 +429,20 @@ class Settings(BaseSettings):
 
 def load_settings() -> Settings:
     return Settings()  # pyright: ignore[reportCallIssue]
+
+
+_settings: Settings | None = None
+
+
+def configure_settings(settings: Settings) -> None:
+    global _settings
+    _settings = settings
+
+
+def get_settings() -> Settings:
+    if not _settings:
+        raise SettingsNotConfiguredError
+    return _settings
 
 
 def setup_logging(settings: Settings) -> None:

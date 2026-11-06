@@ -19,7 +19,7 @@ from druks.browser.sessions import BrowserSession, export_state, launch, seed_st
 from druks.redis import get_client
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.templates import get_template_id
-from druks.settings import load_settings
+from druks.settings import get_settings
 
 
 class LoginWindow:
@@ -38,7 +38,7 @@ class LoginWindow:
         stale = await get_client().get(_key(session.name))
         if stale:
             await cls(session.name, json.loads(stale)["host_id"])._close()
-        settings = load_settings()
+        settings = get_settings()
         try:
             # A web request is not a run, so it does not wait for a template build.
             template = await get_template_id(BrowserSession.sandbox, wait=False)
@@ -136,7 +136,7 @@ def is_same_origin(websocket: WebSocket) -> bool:
     # upstream address, so Host is the fallback only when no endpoint is set.
     # A TLS edge leaves us seeing ws while the browser's Origin says https, so
     # only the host is comparable — and it's the boundary that matters.
-    endpoint = websocket.app.state.settings.urls.endpoint
+    endpoint = get_settings().urls.endpoint
     origins = websocket.headers.getlist("origin")
     hosts = [urlsplit(endpoint).netloc] if endpoint else websocket.headers.getlist("host")
     return (

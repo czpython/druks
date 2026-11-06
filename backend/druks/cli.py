@@ -2,7 +2,7 @@ import argparse
 
 from .database import make_app_migration, run_migrations
 from .exceptions import DruksError
-from .settings import ensure_data_dirs, load_settings, setup_logging
+from .settings import configure_settings, ensure_data_dirs, load_settings, setup_logging
 
 
 def main() -> None:
@@ -145,8 +145,12 @@ def main() -> None:
         return
 
     settings = load_settings()
+    configure_settings(settings)
     setup_logging(settings)
     ensure_data_dirs(settings)
+    from .apps.loader import register_apps
+
+    register_apps()
 
     if args.command == "init-db":
         run_migrations(settings.database_url.get_secret_value())

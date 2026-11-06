@@ -63,7 +63,7 @@ async def test_prepare_sandbox_templates_requests_each_declaration(monkeypatch, 
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
     monkeypatch.setattr(
         datastructures,
-        "load_settings",
+        "get_settings",
         lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base")),
     )
     monkeypatch.setattr(
@@ -97,7 +97,7 @@ async def test_prepare_templates_labels_each_module_and_script(monkeypatch):
     create_template = AsyncMock(return_value=SimpleNamespace(status="available"))
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: self.setup.encode())
     monkeypatch.setattr(
-        datastructures, "load_settings", lambda: SimpleNamespace(sandbox=SimpleNamespace(image=""))
+        datastructures, "get_settings", lambda: SimpleNamespace(sandbox=SimpleNamespace(image=""))
     )
     monkeypatch.setattr(
         templates,
@@ -124,7 +124,7 @@ async def test_a_sandbox_on_its_own_provider_builds_on_that_provider_image(monke
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
     monkeypatch.setattr(
         datastructures,
-        "load_settings",
+        "get_settings",
         lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base")),
     )
     monkeypatch.setattr(
@@ -160,7 +160,7 @@ async def test_prepare_sandbox_templates_waits_for_each_build_and_reports_a_fail
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
     monkeypatch.setattr(
         datastructures,
-        "load_settings",
+        "get_settings",
         lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base")),
     )
     monkeypatch.setattr(
@@ -191,7 +191,7 @@ async def test_get_template_id_uses_available_template(monkeypatch):
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
     monkeypatch.setattr(
         datastructures,
-        "load_settings",
+        "get_settings",
         lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base")),
     )
     monkeypatch.setattr(
@@ -219,7 +219,7 @@ async def test_get_template_id_waits_with_visible_phase(monkeypatch):
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
     monkeypatch.setattr(
         datastructures,
-        "load_settings",
+        "get_settings",
         lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base")),
     )
     monkeypatch.setattr(
@@ -242,7 +242,7 @@ async def test_get_template_id_without_wait_refuses_a_building_template(monkeypa
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
     monkeypatch.setattr(
         datastructures,
-        "load_settings",
+        "get_settings",
         lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base")),
     )
     monkeypatch.setattr(
@@ -264,7 +264,7 @@ async def test_get_template_id_rejects_missing_template(monkeypatch):
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
     monkeypatch.setattr(
         datastructures,
-        "load_settings",
+        "get_settings",
         lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base")),
     )
     monkeypatch.setattr(
@@ -282,7 +282,7 @@ async def test_get_template_id_rejects_failed_template(monkeypatch):
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
     monkeypatch.setattr(
         datastructures,
-        "load_settings",
+        "get_settings",
         lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base")),
     )
     monkeypatch.setattr(

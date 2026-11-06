@@ -14,7 +14,7 @@ from druks.durable.constants import NOTIFICATIONS_QUEUE, PAUSE_QUEUE, RUN_QUEUE,
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
 from druks.durable.exceptions import FatalError, ScheduleUnavailable
 from druks.harnesses.exceptions import HarnessError
-from druks.settings import load_settings
+from druks.settings import get_settings
 from druks.user_settings.models import InstallationSettings
 
 if TYPE_CHECKING:
@@ -39,7 +39,7 @@ def init_dbos() -> None:
     global _initialized
     if _initialized:
         return
-    settings = load_settings()
+    settings = get_settings()
     # System URL is the app database: DBOS self-migrates its bookkeeping into
     # the dbos schema there, so derived Run.state is a same-DB read.
     url = _dbos_database_url(settings.database_url.get_secret_value())
@@ -95,7 +95,7 @@ async def apply_schedules(session: AsyncSession) -> None:
         await DBOS.delete_schedule_async(name)
     # Evaluate in the installation timezone so daily cadence follows DST.
     # Personal display preferences must not move a shared schedule.
-    timezone = load_settings().timezone
+    timezone = get_settings().timezone
     for workflow, entry in _workflow_schedules:
         cron = await workflow.get_schedule(session)
         current = existing.get(workflow.kind)
@@ -161,7 +161,7 @@ async def launch() -> None:
 
 def shutdown() -> None:
     # No-op when this process never launched DBOS — a test that runs the app
-    # lifespan with app.state.settings pre-set skips the branch that launches it
+    # lifespan with app.state.engine pre-set skips the branch that launches it
     # — so the lifespan can call shutdown() unconditionally.
     global _initialized
     if _initialized:
@@ -177,7 +177,7 @@ def configure_engine(engine) -> None:
 def _step_engine():
     global _engine
     if not _engine:
-        _engine = create_async_engine_from_url(load_settings().database_url.get_secret_value())
+        _engine = create_async_engine_from_url(get_settings().database_url.get_secret_value())
     return _engine
 
 

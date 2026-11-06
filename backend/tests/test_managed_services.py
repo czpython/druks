@@ -12,7 +12,7 @@ from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.services import Service, auth
 from druks.services.exceptions import ServiceConnectError, ServiceManagedError
-from druks.settings import Settings
+from druks.settings import Settings, configure_settings
 from druks.testing import asgi_client, configure_app_for_test
 from druks.webhooks import Webhook
 from pydantic import BaseModel, field_validator
@@ -123,6 +123,7 @@ async def test_a_managed_service_that_no_app_declares_is_ignored(configuration, 
     )
     (secrets / "manager.token").write_text("manager-secret")
 
+    configure_settings(Settings())
     await Service.sync_configuration(druks_db)
 
     audience = Audience.service("unknown")
@@ -152,6 +153,7 @@ async def test_a_configured_service_keeps_its_own_verifier_and_oauth_client(
     configuration.write_text(MANAGER + '[services.acme]\nclient_id = "id-1"')
     (secrets / "manager.token").write_text("manager-secret")
     (secrets / "services.acme.client_secret").write_text("acme-secret")
+    configure_settings(Settings())
     bind_ambient_session(druks_db)
     await Service.sync_configuration(druks_db)
 
@@ -174,6 +176,7 @@ async def test_an_undeclared_service_table_is_skipped_without_its_values(
     acme, configuration, secrets, druks_db, caplog
 ):
     configuration.write_text('[services.unknown]\nurl = "sensitive-value"')
+    configure_settings(Settings())
     with caplog.at_level(logging.INFO, logger="druks.services.base"):
         await Service.sync_configuration(druks_db)
     assert "Druks ignores [services.unknown]." in caplog.text
@@ -193,6 +196,7 @@ async def test_invalid_service_entry_stops_the_sync_without_its_values(
 ):
     configuration.write_text(body)
     (secrets / "services.acme.api_key").write_text(secret)
+    configure_settings(Settings())
     with pytest.raises(ServiceConnectError, match=message) as error:
         await Service.sync_configuration(druks_db)
     output = "".join(traceback.format_exception(error.value)) + caplog.text
@@ -210,6 +214,7 @@ async def test_sync_keeps_the_vault_id_and_replaces_credentials(
     original_id = original.id
     configuration.write_text('[services.acme]\nurl = "https://acme.test"')
     (secrets / "services.acme.api_key").write_text("configured-key")
+    configure_settings(Settings())
     for _ in range(2):
         await Service.sync_configuration(druks_db)
         row = await acme.get()
@@ -219,6 +224,7 @@ async def test_sync_keeps_the_vault_id_and_replaces_credentials(
         assert await row.issue_token((), name="acme_key") == ("configured-key", None)
 
     (secrets / "services.acme.api_key").write_text("rotated-key")
+    configure_settings(Settings())
     await Service.sync_configuration(druks_db)
     assert (await acme.get()).id == original_id
     assert (await acme.get()).secrets == {"api_key": "rotated-key"}
@@ -230,6 +236,7 @@ async def test_sync_keeps_the_vault_id_and_replaces_credentials(
     assert len(rows) == 1
 
     configuration.write_text("")
+    configure_settings(Settings())
     await Service.sync_configuration(druks_db)
     assert (await acme.get()).secrets == {"api_key": "rotated-key"}
     pasted = await acme.connect({"url": "https://self-hosted.test", "api_key": "pasted-key"})
@@ -240,12 +247,14 @@ async def test_sync_keeps_the_facts_the_card_learned(acme, configuration, secret
     bind_ambient_session(druks_db)
     configuration.write_text('[services.acme]\nurl = "https://acme.test"')
     (secrets / "services.acme.api_key").write_text("configured-key")
+    configure_settings(Settings())
     await Service.sync_configuration(druks_db)
     card = await acme.get()
     card.identity = {**card.identity, "installations": ["acme", "paulo"]}
     await druks_db.flush()
 
     configuration.write_text('[services.acme]\nurl = "https://moved.test"')
+    configure_settings(Settings())
     await Service.sync_configuration(druks_db)
 
     assert (await acme.get()).identity == {
@@ -259,6 +268,7 @@ async def test_managed_card_is_read_only(acme, configuration, secrets, druks_db,
     (secrets / "manager.token").write_text("manager-secret")
     (secrets / "services.acme.api_key").write_text("configured-key")
     settings = Settings(data_dir=tmp_path)
+    configure_settings(settings)
     bind_ambient_session(druks_db)
     await Service.sync_configuration(druks_db)
     api = configure_app_for_test(settings=settings)
@@ -289,6 +299,7 @@ async def test_waha_link_uses_the_synced_card_and_keeps_the_session_key(
         '[urls]\nendpoint = "https://instance.test"\n[services.waha]\nurl = "http://cloud.test/_instance/123/waha"'
     )
     (secrets / "services.waha.api_key").write_text("instance-key")
+    configure_settings(Settings())
     bind_ambient_session(druks_db)
     await Service.sync_configuration(druks_db)
     owner = await Account.get_or_create(druks_db, "operator@example.com")

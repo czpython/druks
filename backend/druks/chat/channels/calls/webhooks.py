@@ -22,7 +22,7 @@ from druks.mcp.constants import BEARER_PREFIX
 from druks.mcp.inbound import get_druks_account_token, get_druks_mcp_server
 from druks.redis import get_client
 from druks.secrets.models import VaultSecret
-from druks.settings import load_settings
+from druks.settings import get_settings
 from druks.webhooks import Webhook
 
 from .constants import (
@@ -38,7 +38,7 @@ from .services import Voice
 
 def get_stream_url(token: str) -> str:
     """Where Twilio streams a call's audio: the calls server, behind the webhook host."""
-    return f"wss://{urlsplit(load_settings().urls.webhook_base).netloc}/_calls/{token}"
+    return f"wss://{urlsplit(get_settings().urls.webhook_base).netloc}/_calls/{token}"
 
 
 def sign_claim(connection: VaultSecret, claim: str) -> str:
@@ -148,7 +148,7 @@ class CallsEvents(Webhook):
             session, account_id=conversation.account_id, allowed_tools=tools, name=CALLS_KEY_NAME
         )
         voice = await Voice.get()
-        local_time = datetime.now(tz=ZoneInfo(load_settings().timezone))
+        local_time = datetime.now(tz=ZoneInfo(get_settings().timezone))
         earlier_lines = await self.list_earlier_lines(session)
         run_outcomes = await self.end_run_outcomes(session)
         return JSONResponse(

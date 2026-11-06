@@ -11,7 +11,6 @@ import pytest
 from conftest import connect_service
 from druks.accounts.models import Account
 from druks.agents import Agent, AgentOutput
-from druks.api.server import app
 from druks.apps.registry import services
 from druks.core.apis.github import GitHubAppClient
 from druks.core.services import Github
@@ -25,6 +24,7 @@ from druks.secrets.models import VaultSecret
 from druks.services import Service, auth
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.services.oauth import OauthClient
+from druks.settings import configure_settings
 from druks.testing import configure_app_for_test, make_settings
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -318,7 +318,7 @@ def _manifest_from(page: str) -> dict:
 async def test_manifest_page_submits_the_documented_app_to_github(
     druks_client: httpx.AsyncClient, tmp_path
 ):
-    app.state.settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example/"})
+    configure_settings(make_settings(tmp_path, urls={"endpoint": "https://druks.example/"}))
 
     response = await druks_client.get("/api/core/services/github/manifest")
 
@@ -346,9 +346,11 @@ async def test_manifest_page_submits_the_documented_app_to_github(
 async def test_manifest_page_prefers_the_webhook_host_for_deliveries(
     druks_client: httpx.AsyncClient, tmp_path
 ):
-    app.state.settings = make_settings(
-        tmp_path,
-        urls={"endpoint": "https://druks.example", "webhook_host": "hooks.druks.example"},
+    configure_settings(
+        make_settings(
+            tmp_path,
+            urls={"endpoint": "https://druks.example", "webhook_host": "hooks.druks.example"},
+        )
     )
 
     manifest = _manifest_from((await druks_client.get("/api/core/services/github/manifest")).text)
@@ -363,7 +365,7 @@ async def test_manifest_page_lets_the_operator_target_an_org(
 ):
     # The org lives on the page, not in the card: naming one reroutes the
     # form to that org's create URL, and the input itself never reaches GitHub.
-    app.state.settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
+    configure_settings(make_settings(tmp_path, urls={"endpoint": "https://druks.example"}))
 
     response = await druks_client.get("/api/core/services/github/manifest")
 
