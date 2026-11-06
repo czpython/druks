@@ -206,7 +206,11 @@ async def _store_connection(
         Audience.provider(provider.id),
         account_id=resolved.id,
         secrets=completed.payload,
-        identity={"email": completed.provider_email},
+        identity={
+            "email": completed.provider_email,
+            "login_expires_at": completed.login_expires_at
+            and completed.login_expires_at.isoformat(),
+        },
         expires_at=completed.expires_at,
     )
     # Build the reply, then commit before provider I/O. Flushed rows hold their locks

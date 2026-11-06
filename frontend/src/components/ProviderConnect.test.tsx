@@ -25,6 +25,7 @@ function subscription(overrides: Partial<ProviderSubscription> = {}): ProviderSu
     provider: 'anthropic',
     providerEmail: 'claude-seat@corp.com',
     expiresAt: null,
+    loginExpiresAt: null,
     updatedAt: '2026-09-01T00:00:00Z',
     lastRefreshedAt: null,
     connected: true,
@@ -209,6 +210,26 @@ describe('ProviderConnect', () => {
       vi.advanceTimersByTime(2 * 60 * 60 * 1000)
     })
     expect(screen.getByText('Reset due')).toBeTruthy()
+  })
+
+  it('a connected login shows when it ends, and a disconnected one does not', () => {
+    const loginExpiresAt = '2026-12-03T10:00:00Z'
+    const { view } = renderCard(provider(), { subscription: subscription({ loginExpiresAt }) })
+
+    expect(screen.getByText(/Login ends/)).toBeTruthy()
+    expect(screen.getByText(/Reconnect before then/)).toBeTruthy()
+    expect(view.container.querySelector('time')?.dateTime).toBe(loginExpiresAt)
+
+    view.unmount()
+    renderCard(provider(), {
+      subscription: subscription({
+        connected: false,
+        loginExpiresAt,
+        revokedAt: '2026-12-03T10:05:00Z',
+        revokedReason: 'invalid_grant',
+      }),
+    })
+    expect(screen.queryByText(/Login ends/)).toBeNull()
   })
 
   it('a shared key shows its tail, who set it, spend today, Replace and Remove', () => {

@@ -1920,6 +1920,15 @@ export function ProviderConnect({
                   {' · '}Reason: <code>{subscription.revokedReason}</code>
                 </p>
               )}
+              {connected && subscription.loginExpiresAt && (
+                <p className="provider-account">
+                  Login ends{' '}
+                  <time dateTime={subscription.loginExpiresAt}>
+                    {absTime(subscription.loginExpiresAt)}
+                  </time>
+                  . Reconnect before then.
+                </p>
+              )}
               {subscription.lastRefreshedAt && (
                 <p className="provider-account">
                   Last refreshed{' '}

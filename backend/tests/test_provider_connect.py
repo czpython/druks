@@ -42,6 +42,7 @@ _CLAUDE_GRANT = {
     "access_token": "AT",
     "refresh_token": "RT",
     "expires_in": 28800,
+    "refresh_token_expires_in": 2396257,
     "scope": "user:profile user:inference",
     "account": {"email_address": "me@example.com"},
 }
@@ -78,6 +79,8 @@ async def test_claude_connect_complete_returns_the_exchange(monkeypatch, druks_d
     assert block["scopes"] == ["user:profile", "user:inference"]
     assert completed.provider_email == "me@example.com"
     assert completed.expires_at
+    login_lifetime = completed.login_expires_at - datetime.now(UTC)
+    assert timedelta(days=27) < login_lifetime < timedelta(days=28)
     # The account the flow was started under rides along for resolution.
     assert completed.account_id == "acct-1"
     # Claude exchanges JSON with the code + state echoed in the body.
