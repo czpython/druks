@@ -313,6 +313,25 @@ async def test_codex_no_refresh_token(monkeypatch, druks_db):
     assert calls == []
 
 
+@pytest.mark.parametrize(
+    "code", ["refresh_token_expired", "refresh_token_reused", "refresh_token_invalidated"]
+)
+async def test_codex_dead_refresh_token_revokes_the_subscription(monkeypatch, druks_db, code):
+    stale = _jwt(int((_NOW + timedelta(hours=1)).timestamp()))
+    connection = await _seed_codex(access=stale)
+    account_id = connection.account_id
+    _mock_post(
+        monkeypatch,
+        _resp(401, {"error": {"type": "invalid_request_error", "param": None, "code": code}}),
+    )
+    result = await OpenAiProvider.rotate_token(druks_db, connection.id, now=_NOW)
+    assert result.action == "failed"
+    assert result.error == "invalid_grant"
+    assert not await VaultSecret.list_subscriptions(db_session())
+    with pytest.raises(HarnessNotConnectedError):
+        await OpenAiProvider.get_subscription(druks_db, account_id)
+
+
 async def test_rotation_touches_only_the_addressed_row(monkeypatch, druks_db):
     stale = await _seed_claude(
         access="old",
