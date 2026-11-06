@@ -46,10 +46,10 @@ class BuildWorkspace(RepoWorkspace):
     def workspace_root(self) -> str:
         return get_work_root(self.host.ssh_username)
 
-    async def setup(self) -> None:
-        await super().setup()
-        project_repo = await ProjectRepo.get_for_repo(self.subject.repo, raise_on_missing=True)
-        self.skills = tuple(project_repo.effective_profile.get("recommended_skills", []))
+    @classmethod
+    async def get_skills(cls, subject: Any) -> tuple[str, ...]:
+        project_repo = await ProjectRepo.get_for_repo(subject.repo, raise_on_missing=True)
+        return tuple(project_repo.effective_profile.get("recommended_skills", []))
 
     @classmethod
     async def get_secrets(cls, subject: Any) -> list[SandboxSecret]:

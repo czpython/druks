@@ -9,7 +9,7 @@ from dbos import DBOS, DBOSConfig
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.database import create_async_engine_from_url, session_scope
-from druks.db import db_session
+from druks.db import AutocommitSession, db_session
 from druks.durable.constants import NOTIFICATIONS_QUEUE, PAUSE_QUEUE, RUN_QUEUE, TASK_QUEUE
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
 from druks.durable.exceptions import FatalError, ScheduleUnavailable
@@ -182,8 +182,14 @@ def _step_engine():
 
 
 def step_session() -> AbstractAsyncContextManager[AsyncSession]:
-    # One transaction per durable step (the body itself does no IO).
+    # One transaction for the block: core's own short units of row work.
     return session_scope(_step_engine())
+
+
+def autocommit_session() -> AbstractAsyncContextManager[AsyncSession]:
+    # Author code in a step and on the box: each operation commits on its own, so
+    # the code holds no connection between operations; atomic() groups writes.
+    return session_scope(_step_engine(), AutocommitSession)
 
 
 @asynccontextmanager

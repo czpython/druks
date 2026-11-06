@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from conftest import connect_service
+from druks.accounts.context import current_account_id
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.constants import (
     GITHUB_MCP_NAME,
@@ -83,23 +84,17 @@ async def test_build_workspace_declares_its_github_mcp_as_the_operator(druks_db)
     )
 
 
-async def test_setup_reads_the_build_fields(monkeypatch: pytest.MonkeyPatch):
+async def test_a_build_gets_the_skills_its_repo_profile_recommends(monkeypatch: pytest.MonkeyPatch):
     async def get_for_repo(repo: str, *, raise_on_missing: bool = False) -> SimpleNamespace:
         return SimpleNamespace(effective_profile={"recommended_skills": ["python-house-rules"]})
 
     monkeypatch.setattr(
         "druks.contrib.software_factory.workflows.ProjectRepo.get_for_repo", get_for_repo
     )
-    _bot_author(monkeypatch)
-    subject = SimpleNamespace(repo="o/app", branch="agent/ACME-1")
 
-    workspace = BuildWorkspace(subject)
-    await workspace.setup()
+    skills = await BuildWorkspace.get_skills(SimpleNamespace(repo="o/app"))
 
-    assert workspace.subject is subject
-    assert workspace.skills == ("python-house-rules",)
-    assert workspace.git_author == ("app[bot]", "1+app[bot]@users.noreply.github.com")
-    assert workspace.dispatcher is None
+    assert skills == ("python-house-rules",)
 
 
 async def _required_servers(monkeypatch: pytest.MonkeyPatch, tracker: str):
@@ -203,10 +198,15 @@ async def test_set_git_identity_stamps_the_workspace_repo(
 ) -> None:
     repo_path = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", str(repo_path)], check=True)
+    _bot_author(monkeypatch)
+
+    async def get_or_none(*, id: str) -> SimpleNamespace:
+        return SimpleNamespace(username=id)
+
+    monkeypatch.setattr("druks.workspaces.Account.get_or_none", get_or_none)
     workspace = RepoWorkspace(SimpleNamespace(repo="o/app"))
-    workspace.git_author = ("app[bot]", "1+app[bot]@users.noreply.github.com")
-    workspace.dispatcher = "dev@example.com"
     workspace.host = _IdentitySandbox(repo_path)  # type: ignore[assignment]
+    dispatch = current_account_id.set("dev@example.com")
     hook = repo_path / ".git" / "hooks" / "prepare-commit-msg"
     message = repo_path / "COMMIT_EDITMSG"
 
@@ -225,7 +225,7 @@ async def test_set_git_identity_stamps_the_workspace_repo(
     assert message.read_text().count("Co-Authored-By: dev@example.com <dev@example.com>") == 1
 
     # A reused warm host follows the next run's dispatcher.
-    workspace.dispatcher = "second@example.com"
+    current_account_id.set("second@example.com")
     await workspace.set_git_identity()
     message.write_text("Change\n")
     subprocess.run([str(hook), str(message)], check=True)
@@ -233,6 +233,7 @@ async def test_set_git_identity_stamps_the_workspace_repo(
     assert "Co-Authored-By: second@example.com" in message.read_text()
 
     # A system dispatch keeps the author but credits nobody.
-    workspace.dispatcher = None
+    current_account_id.set(None)
     await workspace.set_git_identity()
     assert not hook.exists()
+    current_account_id.reset(dispatch)

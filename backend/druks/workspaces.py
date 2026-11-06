@@ -41,30 +41,28 @@ logger = logging.getLogger(__name__)
 
 class Workspace:
     """The place an agent works: a box, what must be in it before the agent
-    starts, and how the agent is run there. ``setup()`` reads rows before the
-    box exists; ``prepare()`` acts on the box, with no database session bound."""
-
-    # The skills the box gets beside the enabled catalog; the manifest records them.
-    skills: tuple[str, ...] = ()
+    starts, and how the agent is run there. The classmethods answer what the box
+    is from the subject alone, before it exists; ``prepare()`` readies it."""
 
     def __init__(self, subject: Any) -> None:
         # What the run is about; None for a workflow about nothing.
         self.subject = subject
         self._host: Host | None = None
 
-    async def setup(self) -> None:
-        """Read what the box will need and keep it on the instance. The session
-        is bound here, the box is not up yet."""
+    @classmethod
+    async def get_skills(cls, subject: Any) -> tuple[str, ...]:
+        # The skills the box gets beside the enabled catalog; the manifest records them.
+        return ()
 
     async def prepare(self) -> None:
         """Put on the box what the agent needs: an upload, a clone, a wrapper.
-        No session is bound here; a read raises."""
+        Reads and calls work here, each a unit of work of its own."""
 
     @property
     def host(self) -> "Host":
         # Core sets it once the box is up; author code never does.
         if not self._host:
-            raise WorkflowError("the box is not up yet: read in setup(), act in prepare()")
+            raise WorkflowError("the box is not up yet: act on it in prepare()")
         return self._host
 
     @host.setter
@@ -247,19 +245,8 @@ class RepoWorkspace(Workspace):
     ``GH_TOKEN``, and Drukbox points git and ``gh`` at it; the Druks issuer
     answers the token of the GitHub identity this workspace names."""
 
-    # Commits are authored as the operator's bot: its name and email.
-    git_author: tuple[str, str]
-    # The account that dispatched the run, credited as a co-author; None credits nobody.
-    dispatcher: str | None
     # The GitHub identity the box's git and gh act as: a connected service.
     github: ClassVar[type[Github]] = Github
-
-    async def setup(self) -> None:
-        github = await Github.get_client(self.subject.repo)
-        self.git_author = await github.get_bot_git_author()
-        account_id = current_account_id.get()
-        account = await Account.get_or_none(id=account_id) if account_id else None
-        self.dispatcher = account.username if account else None
 
     @classmethod
     async def get_secrets(cls, subject: Any) -> list[SandboxSecret]:
@@ -296,7 +283,7 @@ class RepoWorkspace(Workspace):
             # try once with a new one.
             if "Repository not found" not in str(error):
                 raise
-            # prepare() holds no session, so the token swap opens its own.
+            # The token swap is one unit of work.
             async with step_session() as session:
                 await self.github.revoke_tokens(repo)
                 secret = await self.github.get()
@@ -347,15 +334,19 @@ class RepoWorkspace(Workspace):
         Rewritten before every agent call so a reused warm host follows the
         current run's dispatcher — a system dispatch carries no hook and
         credits nobody."""
-        author_name, author_email = self.git_author
+        github = await Github.get_client(self.subject.repo)
+        author_name, author_email = await github.get_bot_git_author()
+        account_id = current_account_id.get()
+        account = await Account.get_or_none(id=account_id) if account_id else None
+        dispatcher = account.username if account else None
         steps = [
             f"cd {shlex.quote(self.repo_path)}",
             f"git config user.name {shlex.quote(author_name)}",
             f"git config user.email {shlex.quote(author_email)}",
             "rm -f .git/hooks/prepare-commit-msg",
         ]
-        if self.dispatcher:
-            trailer = f"Co-Authored-By: {self.dispatcher} <{self.dispatcher}>"
+        if dispatcher:
+            trailer = f"Co-Authored-By: {dispatcher} <{dispatcher}>"
             # The dispatcher's line goes beside any other co-author line, and only once.
             hook = (
                 "#!/bin/sh\n"

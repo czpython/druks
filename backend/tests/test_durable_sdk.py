@@ -18,7 +18,7 @@ from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatu
 from druks.browser.exceptions import BrowserSessionSignedOutError
 from druks.browser.models import StoredBrowserSession
 from druks.database import configure_session, get_session, session_scope
-from druks.db import db_session
+from druks.db import atomic, db_session
 from druks.durable import FatalError, Run, RunState, WorkflowError, engine, get_run_phase
 from druks.durable.dbos_state import latest_invocations, workflow_status
 from druks.durable.engine import (
@@ -1401,18 +1401,19 @@ async def test_failed_retry_attempts_keep_separate_terminal_records(runtime):
 
 
 @pytest.mark.parametrize("body", ["run", "run_multistep"])
-async def test_a_read_on_the_box_fails_the_run(runtime, monkeypatch, body):
-    # The box work is a task of its own with no session bound, whether the agent
-    # is a step of its own or runs inside the body's step, so a read in prepare()
-    # is a programming error that raises, not a held connection.
+async def test_a_read_on_the_box_holds_no_connection(runtime, monkeypatch, body):
+    # Whether the agent is a step of its own or runs inside the body's step, a read
+    # in prepare() commits on its own, so the box holds no connection through the run.
     monkeypatch.setattr(
         "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning({"action": "go"}, [], [])
     )
     monkeypatch.setattr("druks.agents.get_template", _fake_template)
+    seen: list[tuple[bool, bool]] = []
 
     class ReadingWorkspace(Workspace):
         async def prepare(self) -> None:
-            await db_session().scalar(select(Widget).where(Widget.id == 7))
+            widget = await db_session().scalar(select(Widget).where(Widget.id == 7))
+            seen.append((bool(widget), _holds_a_connection()))
 
     async def call_the_agent(self) -> None:
         await runtime.AgentFlow.DECIDER(body="x")
@@ -1425,17 +1426,76 @@ async def test_a_read_on_the_box_fails_the_run(runtime, monkeypatch, body):
 
     workflow_id = await ReadingFlow.start(subject=Widget(id=7))
     try:
-        failed = await _wait_for_run(
-            runtime.engine, workflow_id, lambda run: run.state == RunState.FAILED
-        )
-        assert "No database session is bound" in (failed.failure or "")
+        await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+        assert seen == [(True, False)]
     finally:
         workflows._items.pop(ReadingFlow.kind)
 
 
+async def test_a_step_holds_no_connection_between_operations(runtime):
+    held: list[bool] = []
+
+    async def read_the_widget(self) -> None:
+        await Widget.get(id=7)
+        held.append(_holds_a_connection())
+
+    async def run_multistep(self) -> None:
+        await self.read_the_widget()
+
+    ProbeFlow = type(
+        "ProbeFlow",
+        (Workflow,),
+        {
+            "subject": Widget,
+            "read_the_widget": step(read_the_widget),
+            "run_multistep": run_multistep,
+        },
+    )
+
+    workflow_id = await ProbeFlow.start(subject=Widget(id=7))
+    try:
+        await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+        assert held == [False]
+    finally:
+        workflows._items.pop(ProbeFlow.kind)
+
+
+async def test_writes_in_an_atomic_block_commit_together_or_not_at_all(runtime):
+    async def write_and_fail(self) -> None:
+        await Widget.create(id=7201)
+        with contextlib.suppress(ValueError):
+            async with atomic():
+                await Widget.create(id=7202)
+                raise ValueError("abandoned")
+
+    async def run_multistep(self) -> None:
+        await self.write_and_fail()
+
+    AtomicFlow = type(
+        "AtomicFlow",
+        (Workflow,),
+        {
+            "subject": Widget,
+            "write_and_fail": step(write_and_fail),
+            "run_multistep": run_multistep,
+        },
+    )
+
+    workflow_id = await AtomicFlow.start(subject=Widget(id=7))
+    try:
+        await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+        session = get_session(runtime.engine)
+        try:
+            ids = set(await session.scalars(select(Widget.id).where(Widget.id.in_((7201, 7202)))))
+        finally:
+            await session.close()
+        assert ids == {7201}
+    finally:
+        workflows._items.pop(AtomicFlow.kind)
+
+
 async def test_the_prompt_override_lookup_reads_in_the_call_session(runtime, monkeypatch):
-    # The lookup reads the GitHub credential from a row. The box task holds no
-    # session, so the call loads the template in its session block.
+    # The lookup reads the GitHub credential from a row.
     seen: list[dict] = []
     monkeypatch.setattr(
         "druks.sandbox.client.Client.ephemeral",

@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
-from druks.db import db_session
+from druks.db import atomic, db_session
 from druks.durable.schemas import SubjectSummary
 from druks.events.models import Event
 from druks.exceptions import ObjectNotFound
@@ -46,8 +46,10 @@ class Subject:
         return str(self)
 
     async def announce(self, topic: str, **facts: Any) -> None:
-        """Record and deliver a domain fact in the current transaction."""
-        await Event.announce(db_session(), self, topic, facts)
+        """Record and deliver a domain fact. The event and every subscriber's writes
+        commit together, or none does."""
+        async with atomic():
+            await Event.announce(db_session(), self, topic, facts)
 
     @classmethod
     async def get_or_none(cls, id: str) -> Self | None:

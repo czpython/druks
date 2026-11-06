@@ -38,11 +38,8 @@ async def test_survey_workspace_clones_the_subject_repo(druks_db, monkeypatch):
     workflow.subject = await Repository.create(repo="acme/widgets")
     workflow.account_id = None
     host = SimpleNamespace(id="h1", ssh_username="exedev")
-    bot = SimpleNamespace(get_bot_git_author=mock.AsyncMock(return_value=("bot", "bot@x")))
-    monkeypatch.setattr("druks.workspaces.Github.get_client", mock.AsyncMock(return_value=bot))
 
     workspace = workflow.workspace_class(await workflow.subject)
-    await workspace.setup()
     workspace.host = host
 
     assert (workspace.subject.repo, workspace.subject.ref) == ("acme/widgets", None)
