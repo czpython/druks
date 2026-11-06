@@ -97,10 +97,13 @@ def _patch_runtime(monkeypatch, tmp_path, payload):
     settings.artifacts_dir = tmp_path
     monkeypatch.setattr(agents, "get_settings", lambda: settings)
 
-    async def _prompt(name, /, *, repo=None, **context):
-        return f"PROMPT:{name}:repo={repo}"
+    async def _template(name, *, repo):
+        async def render_async(**_context):
+            return f"PROMPT:{name}:repo={repo}"
 
-    monkeypatch.setattr(agents, "render_prompt", _prompt)
+        return SimpleNamespace(render_async=render_async)
+
+    monkeypatch.setattr(agents, "get_template", _template)
     sandbox = Host(record=SimpleNamespace(id="host-test", ssh_username="root"))  # type: ignore[arg-type]
     sandbox.run_agent = AsyncMock(return_value=make_agent_result(payload, agent="dummy"))
     return sandbox
@@ -682,11 +685,14 @@ async def test_file_output_reaches_the_next_agents_input(
     _patch_ephemeral(monkeypatch, sandbox)
     prompt_contexts = []
 
-    async def render(name, /, **context):
-        prompt_contexts.append(context)
-        return name
+    async def _template(name, *, repo):
+        async def render_async(**context):
+            prompt_contexts.append(context)
+            return name
 
-    monkeypatch.setattr(agents, "render_prompt", render)
+        return SimpleNamespace(render_async=render_async)
+
+    monkeypatch.setattr(agents, "get_template", _template)
     monkeypatch.setattr(
         FileOutput,
         "to_artifact",

@@ -826,7 +826,10 @@ inside a unit of work, before the box: read rows and keep what the box will
 need on `self`. `prepare()` runs on the box, after that unit of work closed:
 upload a file, write a wrapper, run a command. `self.host` in `setup()` raises,
 and a read in `prepare()` raises `SessionNotBoundError`, so a hook in the
-wrong place fails on its first run. Override `get_agent_run_kwargs()` to grant
+wrong place fails on its first run. A session opened on the box side needs a
+box-side fact, such as a file that came off the box or a refusal the box
+reported. A read that needs nothing from the box moves to `setup()`. Override
+`get_agent_run_kwargs()` to grant
 directories, set `skills` for the skills the box gets, and `get_env()` for
 environment variables every agent call gets:
 
