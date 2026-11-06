@@ -47,6 +47,15 @@ from .models import ProviderCatalog
 logger = logging.getLogger(__name__)
 
 _TOKEN_REQUEST_TIMEOUT_SECONDS = 30.0
+# A refresh answer with one of these codes means the refresh token is dead.
+# Anthropic sends invalid_grant. OpenAI sends refresh_token_expired,
+# refresh_token_reused, or refresh_token_invalidated.
+_DEAD_REFRESH_TOKEN_CODES = (
+    "invalid_grant",
+    "refresh_token_expired",
+    "refresh_token_reused",
+    "refresh_token_invalidated",
+)
 _USAGE_TIMEOUT_SECONDS = 20.0
 _CATALOG_TIMEOUT_SECONDS = 20.0
 _OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
@@ -658,7 +667,7 @@ async def _post_grant(url: str, body: dict) -> dict:
             url,
             response.text[:300],
         )
-        if "invalid_grant" in response.text:
+        if any(code in response.text for code in _DEAD_REFRESH_TOKEN_CODES):
             tag = "invalid_grant"
         else:
             tag = f"http_{response.status_code}"
