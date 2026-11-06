@@ -533,6 +533,35 @@ class GitHubClient:
             body["output"] = {**output, "annotations": list(annotations[start : start + limit])}
             await checks.async_update(owner, repo_name, check_run_id, data=body)
 
+    async def list_check_runs(self, repo: str, ref: str) -> list[dict[str, Any]]:
+        """The latest run of each check on ``ref``."""
+        owner, name = repo.split("/", 1)
+        runs = self._github.rest.paginate(
+            self._github.rest.checks.async_list_for_ref,
+            map_func=lambda response: response.parsed_data.check_runs,
+            owner=owner,
+            repo=name,
+            ref=ref,
+            per_page=100,
+        )
+        return [run.model_dump() async for run in runs]
+
+    async def list_commit_statuses(self, repo: str, ref: str) -> list[dict[str, Any]]:
+        """The latest status of each context on ``ref``."""
+        owner, name = repo.split("/", 1)
+        response = await self._github.rest.repos.async_get_combined_status_for_ref(
+            owner, name, ref, per_page=100
+        )
+        return [status.model_dump() for status in response.parsed_data.statuses]
+
+    async def get_job_log(self, repo: str, job_id: int) -> str:
+        """The plain-text log of a GitHub Actions job."""
+        owner, name = repo.split("/", 1)
+        response = await self._github.rest.actions.async_download_job_logs_for_workflow_run(
+            owner, name, job_id
+        )
+        return response.text
+
     async def get_file_content(
         self,
         repo: str,

@@ -513,6 +513,25 @@ reviewer approves the pull request:
 | `none` | Default. Druks marks the pull request ready for review and ends the build. The repository's own process merges it. Druks records the merge when GitHub announces it. |
 | `merge` | Druks squash-merges the pull request, or arms auto-merge when checks are still running. |
 
+`pre_push_tests` lists the test commands the implementer runs before every
+push. Without it, the implementer runs the repository's test commands narrowed
+to the files it changed. It is a top-level key and does not replace the
+commands under `verification`:
+
+```yaml
+pre_push_tests:
+  - uv run pytest backend/tests/test_api.py
+```
+
+After each push, the build waits until every check run and commit status on
+the pull request's head has finished. A red check sends the round back to the
+implementer with the end of the failing job's log, within the build's
+implementation revisions. A check that is also red on the default branch, or CI
+that has not finished after an hour, blocks the round instead. A repository
+that registers no check within three minutes of a push counts as green. The
+pull request leaves draft when the review approves a head with every check
+green, or when a person approves it.
+
 When Druks receives a push to the default branch that changes `config.yml`, the
 next build uses the new file.
 

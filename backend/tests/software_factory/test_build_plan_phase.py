@@ -4,6 +4,7 @@ import pytest
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import (
     AcceptanceCriterionOutput,
+    CiReport,
     PlanData,
     PlanOutput,
     QuestionOptionOutput,
@@ -625,7 +626,9 @@ async def test_blocked_redraft_fails_the_run_instead_of_implementing(monkeypatch
 async def test_review_work_ask_renders_a_notification_body(monkeypatch):
     workflow = _flow()
     workflow.subject = SimpleNamespace(repo="org/repo")
-    workflow.journal = SimpleNamespace(implementations=[SimpleNamespace(pr_number=42)])
+    workflow.journal = BuildJournal()
+    workflow.journal.add(CiReport(head_sha="0f3a2c1d", conclusion="green"))
+    monkeypatch.setattr(Build, "pr_number", property(lambda self: 42))
     input_requests: list[dict] = []
 
     async def fake_wait(*, input_request):
@@ -644,6 +647,31 @@ async def test_review_work_ask_renders_a_notification_body(monkeypatch):
     assert (await run.get_rendered_ask())["body"]
     assert input_requests[0]["url"] == "https://github.com/org/repo/pull/42"
     assert input_requests[0]["label"] == "Review implementation on GitHub: PR #42"
+
+
+async def test_a_blocked_round_parks_with_the_reason_ci_is_blocked(monkeypatch):
+    workflow = _flow()
+    workflow.subject = SimpleNamespace(repo="org/repo")
+    workflow.journal = BuildJournal()
+    workflow.journal.add(
+        CiReport(
+            head_sha="0f3a2c1d", conclusion="blocked", reason="the default branch fails e2e too."
+        )
+    )
+    monkeypatch.setattr(Build, "pr_number", property(lambda self: 42))
+    input_requests: list[dict] = []
+
+    async def fake_wait(*, input_request):
+        input_requests.append(input_request)
+        return ReviewWork(action="merged")
+
+    monkeypatch.setattr(ReviewWork, "wait", fake_wait)
+
+    await workflow._work_gate()
+
+    assert input_requests[0]["label"] == (
+        "Review implementation on GitHub: PR #42. CI is blocked: the default branch fails e2e too."
+    )
 
 
 async def test_needs_clarification_delivery_stops_the_run(monkeypatch):
@@ -698,8 +726,12 @@ async def test_a_rejected_merge_intent_reparks_the_work_gate(monkeypatch):
         reparked.append(True)
         return True
 
+    async def clear_draft():
+        pass
+
     monkeypatch.setattr(flow, "declare_merge_intent", declined)
     monkeypatch.setattr(flow, "_work_gate", fake_work_gate)
+    monkeypatch.setattr(flow, "_clear_draft", clear_draft)
 
     assert await flow._approved_work() is True
     assert reparked == [True]
@@ -762,6 +794,9 @@ async def test_requested_changes_go_back_to_implement_until_the_cap(
         flow.journal.implementation_revision += 1
         calls.append("implement")
 
+    async def wait_for_ci():
+        return CiReport(head_sha="0f3a2c1d", conclusion="green")
+
     async def review_work():
         return ReviewReport(decision=next(decisions), summary="", findings=[], context_repos=[])
 
@@ -771,9 +806,92 @@ async def test_requested_changes_go_back_to_implement_until_the_cap(
 
     monkeypatch.setattr(flow, "_create_branch", create_branch)
     monkeypatch.setattr(flow, "implement", implement)
+    monkeypatch.setattr(flow, "_wait_for_ci", wait_for_ci)
     monkeypatch.setattr(flow, "_review_work", review_work)
     monkeypatch.setattr(flow, "_work_gate", work_gate)
 
     await flow._implement_phase()
 
     assert calls == ["implement"] * implemented + ["work_gate"]
+
+
+@pytest.mark.parametrize(
+    ("max_revisions", "expected"),
+    [
+        (5, ["implement", "ci:red", "implement", "ci:green", "review", "work_gate"]),
+        (1, ["implement", "ci:red", "review", "work_gate"]),
+    ],
+)
+async def test_red_ci_goes_back_to_implement_before_the_review_until_the_cap(
+    monkeypatch, max_revisions, expected
+):
+    flow = Build()
+    flow._settings = Build.Settings(max_implementation_revisions=max_revisions)
+    flow.journal = SimpleNamespace(implementation_revision=0)
+    conclusions = iter(["red", "green"])
+    calls: list[str] = []
+
+    async def create_branch():
+        return None
+
+    async def implement():
+        flow.journal.implementation_revision += 1
+        calls.append("implement")
+
+    async def wait_for_ci():
+        conclusion = next(conclusions)
+        calls.append(f"ci:{conclusion}")
+        return CiReport(head_sha="0f3a2c1d", conclusion=conclusion)
+
+    async def review_work():
+        calls.append("review")
+        return ReviewReport(decision="approve", summary="", findings=[], context_repos=[])
+
+    async def work_gate():
+        calls.append("work_gate")
+        return True
+
+    monkeypatch.setattr(flow, "_create_branch", create_branch)
+    monkeypatch.setattr(flow, "implement", implement)
+    monkeypatch.setattr(flow, "_wait_for_ci", wait_for_ci)
+    monkeypatch.setattr(flow, "_review_work", review_work)
+    monkeypatch.setattr(flow, "_work_gate", work_gate)
+
+    await flow._implement_phase()
+
+    assert calls == expected
+
+
+def _parked_build(monkeypatch, *entries) -> list[bool]:
+    drafts: list[bool] = []
+    flow = Build()
+    for entry in entries:
+        flow.journal.add(entry)
+
+    async def set_pr_draft(*, draft):
+        drafts.append(draft)
+
+    async def request_assignee_review():
+        pass
+
+    monkeypatch.setattr(flow, "set_pr_draft", set_pr_draft)
+    monkeypatch.setattr(flow, "request_assignee_review", request_assignee_review)
+    return flow, drafts
+
+
+@pytest.mark.parametrize(
+    ("conclusion", "decision", "leaves_draft"),
+    [("green", "approve", True), ("blocked", "approve", False)],
+)
+async def test_the_work_park_takes_the_pr_out_of_draft_only_when_ready(
+    monkeypatch, conclusion, decision, leaves_draft
+):
+    flow, drafts = _parked_build(
+        monkeypatch,
+        CiReport(head_sha="0f3a2c1d", conclusion=conclusion),
+        ReviewReport(decision=decision, summary="", findings=[], context_repos=[]),
+    )
+
+    await ReviewWork.on_wait(flow)
+
+    assert drafts == ([False] if leaves_draft else [])

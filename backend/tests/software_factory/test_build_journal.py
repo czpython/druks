@@ -1,4 +1,6 @@
 from druks.contrib.software_factory.contracts import (
+    CheckFailure,
+    CiReport,
     ImplementationOutput,
     PlanData,
     ReviewReport,
@@ -106,3 +108,27 @@ def test_human_feedback_lists_every_reply_and_marks_the_untriaged_one_pending():
         {"reviewer": "alice", "body": "raw review text", "triage": first_triage},
         {"reviewer": "dana", "body": "second review", "triage": None},
     ]
+
+
+def _review(decision: str) -> ReviewReport:
+    return ReviewReport(decision=decision, summary="", findings=[], context_repos=[])
+
+
+def test_red_ci_is_the_revision_request_until_a_review_supersedes_it():
+    red = CiReport(
+        head_sha="b",
+        conclusion="red",
+        failures=[CheckFailure(name="tests", url="https://ci/1", log="FAILED test_x")],
+    )
+    request = _journal(_implementation(), red).revision_request
+    assert request and "FAILED test_x" in request and "tests" in request
+    assert _journal(_implementation(), red, _review("approve")).revision_request is None
+
+
+def test_only_an_approving_review_after_green_ci_is_ready_for_review():
+    green = CiReport(head_sha="b", conclusion="green")
+    blocked = CiReport(head_sha="b", conclusion="blocked", reason="CI did not finish.")
+    assert _journal(green, _review("approve")).is_ready_for_review
+    assert not _journal(green, _review("request_changes")).is_ready_for_review
+    assert not _journal(blocked, _review("approve")).is_ready_for_review
+    assert not _journal(_review("approve"), green).is_ready_for_review

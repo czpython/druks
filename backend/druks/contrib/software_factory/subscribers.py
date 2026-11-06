@@ -106,6 +106,15 @@ async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict
             )
 
 
+@subscribe("ci.updated")
+async def ci_update_wakes_the_build(*, repo: str, payload: dict) -> None:
+    """A build waiting on CI reads its checks again. A commit no build delivered wakes
+    no one."""
+    for branch in payload["branches"]:
+        if item := await WorkItem.get_for_branch(repo=repo, branch=branch):
+            await Build.answer(item, "ci.updated")
+
+
 @subscribe("pr.closed")
 async def pr_close_settles_the_item(*, repo: str, pr_number: int, payload: dict) -> None:
     """GitHub announcing the verdict on a PR druks owns — one path for every merge,

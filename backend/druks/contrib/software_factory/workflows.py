@@ -1,10 +1,13 @@
 import logging
+import time
+from contextlib import suppress
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from druks.accounts import Account
 from druks.contrib.software_factory.contracts import (
+    CiReport,
     ImplementationOutput,
     ReviewReport,
     ReviewWork,
@@ -20,12 +23,18 @@ from druks.sandbox.layout import get_related_root, get_work_root
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.settings import get_settings
 from druks.skills.models import Skill
-from druks.workflows import FatalError, Workflow, step
+from druks.workflows import FatalError, WaitTimeout, Workflow, step
 from druks.workspaces import RepoWorkspace
 
 from .app import SoftwareFactory
-from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, REVIEW_TTL_SECONDS, TICKET_TOOLS
-from .datastructures import PullRequest
+from .constants import (
+    CI_POLL_SECONDS,
+    GITHUB_MCP_NAME,
+    GITHUB_MCP_URL,
+    REVIEW_TTL_SECONDS,
+    TICKET_TOOLS,
+)
+from .datastructures import Check, PullRequest
 from .exceptions import TicketAlreadyMerged, TicketNotRoutable
 from .github import get_review_actor
 from .journal import BuildJournal
@@ -224,6 +233,7 @@ class Build(Workflow):
                 profile=self._profile, repo=work_item.repo
             ),
             "build": prompt_context,
+            "pre_push_tests": self._policy.pre_push_tests,
             **await super().get_prompt_context(**context),
         }
 
@@ -289,13 +299,61 @@ class Build(Workflow):
         await self._create_branch()
         while True:
             await self.implement()
-            review = await self._review_work()
-            if review.decision == "request_changes" and (
+            can_revise = (
                 self.journal.implementation_revision < self._settings.max_implementation_revisions
-            ):
+            )
+            checks = await self._wait_for_ci()
+            if checks.conclusion == "red" and can_revise:
+                continue
+            review = await self._review_work()
+            if review.decision == "request_changes" and can_revise:
                 continue
             if await self._work_gate():
                 return
+
+    async def _wait_for_ci(self) -> CiReport:
+        """Wait until CI has finished on the delivered head, and return its verdict."""
+        head_sha = self.journal.last_implementation.head_sha
+        started_at = await self._now()
+        while not (report := await self._read_ci(head_sha, started_at)):
+            with suppress(WaitTimeout):
+                await self.wait("ci.updated", label="Waiting for CI", ttl_seconds=CI_POLL_SECONDS)
+        self.journal.add(report)
+        return report
+
+    @step
+    async def _now(self) -> float:
+        return time.time()
+
+    @step
+    async def _read_ci(self, head_sha: str, started_at: float) -> CiReport | None:
+        """CI's verdict on ``head_sha``, or None while it can still change."""
+        repo = (await self.subject).repo
+        github = await Github.get_client(repo)
+        checks = await Check.list_for_ref(github, repo, head_sha)
+        red = [check for check in checks if not check.is_green]
+        red_on_default: set[str] = set()
+        logs: dict[str, str] = {}
+        # The default branch and the logs matter only once every check has finished red.
+        if red and all(check.is_finished for check in checks):
+            default_branch = (await github.get_repository(repo))["default_branch"]
+            red_on_default = {
+                check.name
+                for check in await Check.list_for_ref(github, repo, default_branch)
+                if check.is_finished and not check.is_green
+            }
+            logs = {
+                check.name: await check.get_log(github, repo)
+                for check in red
+                if check.name not in red_on_default
+            }
+        return CiReport.judge(
+            head_sha,
+            checks,
+            waited=time.time() - started_at,
+            red_on_default=red_on_default,
+            logs=logs,
+        )
 
     async def _review_work(self) -> ReviewReport:
         """Hand the pull request to the standalone review and wait for its decision."""
@@ -315,10 +373,14 @@ class Build(Workflow):
         goes back to implementation."""
         if self._policy.implementation_approval_gate() == "none":
             return await self._approved_work()
+        label = f"Review implementation on GitHub: PR #{self.pr_number}"
+        checks = self.journal.latest(CiReport)
+        if checks.conclusion == "blocked":
+            label = f"{label}. CI is blocked: {checks.reason}"
         decision = await ReviewWork.wait(
             input_request={
                 "presentation": "external",
-                "label": f"Review implementation on GitHub: PR #{self.pr_number}",
+                "label": label,
                 "url": f"https://github.com/{(await self.subject).repo}/pull/{self.pr_number}",
             }
         )
@@ -333,6 +395,9 @@ class Build(Workflow):
         return False
 
     async def _approved_work(self) -> bool:
+        # A person's approval takes the PR out of draft, whatever CI says. GitHub
+        # merges no draft.
+        await self._clear_draft()
         # GitHub announces the merge. The pr.closed reaction stores the result.
         if self._policy.on_approval == "merge":
             if await self.declare_merge_intent():
@@ -343,7 +408,6 @@ class Build(Workflow):
                 self.pr_number,
             )
             return await self._work_gate()
-        await self._clear_draft()
         return True
 
     async def _triage(self) -> bool:

@@ -214,3 +214,37 @@ async def test_a_review_says_whether_it_is_of_the_latest_commit(
     [(event_type, published_event)] = published
     assert event_type == "pr.review_submitted"
     assert published_event["payload"]["is_latest_commit"] is is_latest_commit
+
+
+async def test_a_finished_check_names_the_branch_of_its_commit(tmp_path, monkeypatch):
+    published = _capture(monkeypatch)
+    payload = {
+        "action": "completed",
+        "repository": {"full_name": "acme/widget"},
+        "check_run": {"head_sha": "0f3a2c1d", "check_suite": {"head_branch": "agent/eng-1"}},
+    }
+
+    await _events(tmp_path, payload=payload).on_check_run_completed()
+
+    assert published == [
+        (
+            "ci.updated",
+            {
+                "repo": "acme/widget",
+                "payload": {"branches": ["agent/eng-1"]},
+            },
+        )
+    ]
+
+
+async def test_a_status_names_the_branches_its_commit_heads(tmp_path, monkeypatch):
+    published = _capture(monkeypatch)
+    payload = {
+        "repository": {"full_name": "acme/widget"},
+        "sha": "0f3a2c1d",
+        "branches": [{"name": "agent/eng-1"}, {"name": "agent/eng-1-2"}],
+    }
+
+    await _events(tmp_path, payload=payload).on_status()
+
+    assert published[0][1]["payload"] == {"branches": ["agent/eng-1", "agent/eng-1-2"]}

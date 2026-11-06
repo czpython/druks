@@ -230,6 +230,20 @@ class GitHubEvents(Webhook):
         )
         return _accepted()
 
+    async def on_check_run_completed(self) -> Response:
+        # A check on a fork's commit or a tag has no head branch.
+        branch = self.data["check_run"]["check_suite"]["head_branch"]
+        return await self._publish_ci_update([branch] if branch else [])
+
+    async def on_status(self) -> Response:
+        return await self._publish_ci_update([branch["name"] for branch in self.data["branches"]])
+
+    async def _publish_ci_update(self, branches: list[str]) -> Response:
+        """Publish that a check changed on the commit these branches head. A subscriber
+        reads the checks themselves."""
+        await publish("ci.updated", repo=_repo_name(self.data), payload={"branches": branches})
+        return _accepted()
+
     async def on_push(self) -> Response:
         repository = self.data["repository"]
         repo = repository["full_name"]

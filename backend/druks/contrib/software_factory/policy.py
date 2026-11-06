@@ -53,6 +53,9 @@ class RepoPolicy(BaseModel):
     sandbox: Profile = Field(default_factory=Profile)
     on_approval: Literal["merge", "none"] = "none"
     delete_branch: bool = True
+    # The tests the implementer runs before every push. A key of its own, because a
+    # pinned ``verification`` replaces every command the profiler found.
+    pre_push_tests: tuple[str, ...] = ()
     # Operator-pinned verification commands. None → the repo profiler's
     # detected commands stand; an explicit (even empty) profile replaces them.
     verification: VerificationProfile | None = None

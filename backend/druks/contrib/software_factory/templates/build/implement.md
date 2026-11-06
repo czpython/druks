@@ -45,7 +45,12 @@ acceptance criterion — nothing more, nothing less.
 
 {% endif %}When the checkout has `.druks/software_factory/review.md`, read it before you write: it is the repo's standing rules for code and prose, and the reviewer holds your diff to it.
 
-Implement the approved plan (rendered above as **Current plan**) on the PR branch (see "Delivering your work" below). When a **Revision request** section is rendered above, implement it on top of the plan — it is the reviewer's feedback, already triaged into instructions. Verification is yours: before pushing, run the commands in the **Verification profile** above. Fix a failure your diff causes. A failure you cannot attribute to your own diff is environment noise to report, not a gate to chase. Do not run ad hoc install, build, or smoke commands beyond that unless the plan explicitly requires changing those commands or generated outputs. Never leave dependency lockfile, generated, or cache changes unless they are part of the requested implementation. Return structured evidence for every acceptance criterion, every check you ran or intentionally did not run, changed files, and known risks. If a check was not run, include status not_run and a reason.
+Implement the approved plan (rendered above as **Current plan**) on the PR branch (see "Delivering your work" below). When a **Revision request** section is rendered above, implement it on top of the plan — it is the reviewer's feedback, already triaged into instructions, or the CI failures on your last push. Verification is yours: before every push, run the lint and typecheck commands in the **Verification profile** above, and {% if pre_push_tests %}each of these tests, which this repo requires before every push:
+{% for command in pre_push_tests %}
+- `{{ command }}`
+{% endfor %}
+
+Report each result in `checks`.{% else %}its test commands narrowed to the files you changed. Report each result in `checks`.{% endif %} Fix a failure your diff causes. A failure you cannot attribute to your own diff is environment noise to report, not a gate to chase. Do not run ad hoc install, build, or smoke commands beyond that unless the plan explicitly requires changing those commands or generated outputs. Never leave dependency lockfile, generated, or cache changes unless they are part of the requested implementation. Return structured evidence for every acceptance criterion, every check you ran or intentionally did not run, changed files, and known risks. If a check was not run, include status not_run and a reason.
 
 ## Delivering your work
 

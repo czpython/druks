@@ -3,6 +3,8 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from pydantic import BaseModel, Field, model_validator
 
 from druks.agents import AgentOutput
+from druks.contrib.software_factory.constants import CI_REGISTER_SECONDS, CI_TTL_SECONDS
+from druks.contrib.software_factory.datastructures import Check
 from druks.contrib.software_factory.enums import HumanFeedbackAction, ReviewDecision
 from druks.workflows import Gate, OperatorReply, Workflow
 
@@ -22,7 +24,9 @@ class ReviewWork(Gate):
     @classmethod
     async def on_wait(cls, workflow: Workflow) -> None:
         build = cast("Build", workflow)
-        await build.set_pr_draft(draft=False)
+        # A blocked or capped round parks for a person, but its PR is not ready to merge.
+        if build.journal.is_ready_for_review:
+            await build.set_pr_draft(draft=False)
         await build.request_assignee_review()
 
 
@@ -300,3 +304,77 @@ class ReviewReport(AgentOutput):
 
     def to_event(self) -> dict[str, str]:
         return {"topic": "review.completed", "summary": self.summary}
+
+
+class CheckFailure(BaseModel):
+    name: str
+    url: str
+    log: str
+
+
+class CiReport(BaseModel):
+    """CI's verdict on one delivered head. ``red`` sends the round back to implement.
+    ``blocked`` is CI the diff cannot fix: every red check is also red on the default
+    branch, or CI did not finish in time."""
+
+    head_sha: str
+    conclusion: Literal["green", "red", "blocked"]
+    failures: list[CheckFailure] = []
+    reason: str = ""
+
+    @classmethod
+    def judge(
+        cls,
+        head_sha: str,
+        checks: list[Check],
+        *,
+        waited: float,
+        red_on_default: set[str],
+        logs: dict[str, str],
+    ) -> "CiReport | None":
+        """The verdict on ``head_sha`` after ``waited`` seconds, or None while CI can still
+        change. ``red_on_default`` names the checks red on the default branch, and ``logs``
+        holds the log of each other red check."""
+        if not checks:
+            return (
+                cls(head_sha=head_sha, conclusion="green")
+                if waited >= CI_REGISTER_SECONDS
+                else None
+            )
+        if not all(check.is_finished for check in checks):
+            if waited < CI_TTL_SECONDS:
+                return None
+            return cls(
+                head_sha=head_sha,
+                conclusion="blocked",
+                reason=f"it did not finish within {CI_TTL_SECONDS // 60} minutes.",
+            )
+        red = [check for check in checks if not check.is_green]
+        if not red:
+            return cls(head_sha=head_sha, conclusion="green")
+        failures = [check for check in red if check.name not in red_on_default]
+        if not failures:
+            names = ", ".join(sorted(check.name for check in red))
+            return cls(
+                head_sha=head_sha,
+                conclusion="blocked",
+                reason=f"the default branch fails {names} too.",
+            )
+        return cls(
+            head_sha=head_sha,
+            conclusion="red",
+            failures=[
+                CheckFailure(name=check.name, url=check.url, log=logs[check.name])
+                for check in failures
+            ],
+        )
+
+    @property
+    def revision_request(self) -> str:
+        sections = [
+            f"CI failed on `{self.head_sha}`. Fix the failures your diff causes. "
+            "Each failing check follows, with the end of its log."
+        ]
+        for failure in self.failures:
+            sections.append(f"### {failure.name}\n\n{failure.url}\n\n```\n{failure.log}\n```")
+        return "\n\n".join(sections)
