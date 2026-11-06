@@ -360,4 +360,7 @@ async def test_an_operator_answers_a_run_that_a_call_parked(druks_db, twilio):
     )
 
     assert answer["action"] == "approve"
-    assert not await bot_service.ask_admin(druks_db, run)
+    # A call runs no turns of its own, so the ask waits for the caller's next call.
+    assert not await bot_service.ask_for_answer(druks_db, run)
+    [ask] = await conversation.list_pending_messages(druks_db)
+    assert run.id in ask.body

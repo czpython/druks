@@ -47,6 +47,18 @@ async def test_trigger_status_dispatches_build_with_the_webhook_payload(tmp_path
     build.assert_awaited_once_with(ticket=payload)
 
 
+async def test_the_in_progress_move_a_build_makes_dispatches_nothing(monkeypatch):
+    # A build that a chat starts moves its ticket to In Progress, and the tracker's webhook
+    # for that move must not open a second build.
+    _pin_settings(monkeypatch, trigger_status="Ready", in_progress_status="In Progress")
+    build = AsyncMock()
+    monkeypatch.setattr(subs.Build, "dispatch", build)
+
+    await subs.ticket_transition_drives_the_funnel(payload=_jira_payload(status="In Progress"))
+
+    build.assert_not_awaited()
+
+
 async def test_trigger_status_does_not_redispatch_a_merged_item(druks_db, monkeypatch):
     item = await make_test_work_item(
         repo="octo/gadget",

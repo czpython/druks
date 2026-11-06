@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 from conftest import connect_anthropic_subscription, connect_service
-from druks.accounts.models import Account, PersonalAccessToken
+from druks.accounts.models import Account
 from druks.api.server import app
 from druks.contrib.software_factory.app import SoftwareFactory
-from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
-from druks.contrib.software_factory.ticketing.enums import TicketStatus
+from druks.contrib.software_factory.models import Project, ProjectRepo
+from druks.contrib.software_factory.ticketing.base import Tracker
 from druks.contrib.software_factory.workflows import Build, PullRequestReview
-from druks.core.apis.exceptions import LinearAPIError, TicketNotMovableError, UnknownTicketError
+from druks.core.apis.exceptions import LinearAPIError, UnknownTicketError
 from druks.db import db_session
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
@@ -166,25 +166,41 @@ async def test_review_request_returns_the_run_id_start_hands_back(
     assert {call["note"] for call in starts} == {"Mind the upgrade path."}
 
 
-class _FakeTracker:
-    """Records the status moves the route delegates to — no HTTP."""
+class _FakeTracker(Tracker):
+    """Answers the ticket read the route delegates to — no HTTP."""
 
-    known_exceptions = (LinearAPIError, TicketNotMovableError, UnknownTicketError)
+    known_exceptions = (LinearAPIError, UnknownTicketError)
 
     def __init__(self, error: Exception | None = None) -> None:
+        super().__init__(status_names={})
         self.error = error
         self.calls: list = []
 
-    async def __aenter__(self):
-        return self
+    async def get_ticket(self, key):
+        self.calls.append(("get_ticket", key))
+        if self.error:
+            raise self.error
+        return {
+            "source": "linear",
+            "ticket_id": "issue-uuid",
+            "identifier": key,
+            "status": "Todo",
+            "title": "Build the agent route",
+            "url": f"https://linear.app/acme/issue/{key}",
+            "project_name": "Nowhere",
+            "labels": [],
+            "team": "team-1",
+            "actor_id": None,
+            "assignee_id": None,
+            "assignee_email": None,
+            "assignee_name": None,
+        }
 
-    async def __aexit__(self, *exc):
-        await self.aclose()
+    async def get_status_name(self, key):
+        return "Todo"
 
     async def set_status(self, key, status):
         self.calls.append((key, status))
-        if self.error:
-            raise self.error
 
     async def aclose(self):
         self.calls.append("aclose")
@@ -197,50 +213,36 @@ def _tracker_stub(fake):
     return classmethod(get_tracker)
 
 
-async def test_software_factory_start_stamps_the_trigger_status_for_known_and_unknown_tickets(
-    druks_db, client: TestClient, account: Account, monkeypatch
-):
-    # ENG-831 has a local work item, ENG-777 has never been seen — both take
-    # the same tracker path; webhook intake, not the route, opens builds.
-    project = await Project.create(name="Acme")
-    await ProjectRepo.create(project_id=project.id, full_name="acme/app")
-    await WorkItem.create(
-        project=project,
-        source="linear",
-        title="Build the agent route",
-        ticket_key="ENG-831",
-        repo="acme/app",
-    )
-    _, pat_token = await PersonalAccessToken.create(druks_db, account_id=account.id, name="agent")
+def test_software_factory_start_dispatches_the_tracker_ticket(client: TestClient, monkeypatch):
+    # The start dispatches in the agent's request, so the run records its conversation.
+    # The ticket stays where it is until the build moves it to In Progress.
     fake = _FakeTracker()
     monkeypatch.setattr(SoftwareFactory, "get_tracker", _tracker_stub(fake))
-    starts = []
+    dispatched = []
 
-    async def start(cls, **kwargs):
-        starts.append(kwargs)
+    async def dispatch(cls, *, ticket):
+        dispatched.append(ticket)
+        return "build-run-id"
 
-    monkeypatch.setattr(Build, "start", classmethod(start))
+    monkeypatch.setattr(Build, "dispatch", classmethod(dispatch))
 
-    responses = [
-        client.post(
-            f"/api/software_factory/work-items/{ticket}/start",
-            headers={"Authorization": f"Bearer {pat_token}"},
-        )
-        for ticket in ("ENG-831", "ENG-777", "ENG-831")
-    ]
+    response = client.post("/api/software_factory/work-items/ENG-831/start")
 
-    assert [response.status_code for response in responses] == [202, 202, 202]
-    # Accepted-and-pending: no run id, no invented acknowledgement fields.
-    assert [response.json() for response in responses] == [None, None, None]
-    assert fake.calls == [
-        ("ENG-831", TicketStatus.TRIGGER),
-        "aclose",
-        ("ENG-777", TicketStatus.TRIGGER),
-        "aclose",
-        ("ENG-831", TicketStatus.TRIGGER),
-        "aclose",
-    ]
-    assert starts == []  # a repeat call re-stamps; it never dispatches locally
+    assert response.status_code == 202
+    assert response.json() == "build-run-id"
+    assert [ticket["identifier"] for ticket in dispatched] == ["ENG-831"]
+    assert fake.calls == [("get_ticket", "ENG-831"), "aclose"]
+
+
+def test_software_factory_start_answers_a_ticket_with_no_routable_repo(
+    client: TestClient, monkeypatch
+):
+    monkeypatch.setattr(SoftwareFactory, "get_tracker", _tracker_stub(_FakeTracker()))
+
+    response = client.post("/api/software_factory/work-items/ENG-831/start")
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "TICKET_NOT_ROUTABLE"
 
 
 def test_software_factory_start_takes_a_github_key(client: TestClient, monkeypatch):
@@ -249,10 +251,9 @@ def test_software_factory_start_takes_a_github_key(client: TestClient, monkeypat
     fake = _FakeTracker()
     monkeypatch.setattr(SoftwareFactory, "get_tracker", _tracker_stub(fake))
 
-    response = client.post("/api/software_factory/work-items/acme/widget%2312/start")
+    client.post("/api/software_factory/work-items/acme/widget%2312/start")
 
-    assert response.status_code == 202
-    assert fake.calls == [("acme/widget#12", TicketStatus.TRIGGER), "aclose"]
+    assert fake.calls[0] == ("get_ticket", "acme/widget#12")
 
 
 def test_software_factory_start_translates_an_unknown_tracker_ticket(
@@ -283,39 +284,18 @@ def test_software_factory_start_reports_a_missing_tracker_configuration(client: 
     assert body["retryable"] is False
 
 
-@pytest.mark.parametrize(
-    ("error", "status_code", "body"),
-    [
-        (
-            TicketNotMovableError("ENG-831 has no transition to status 'Todo'."),
-            409,
-            {
-                "code": "TICKET_NOT_MOVABLE",
-                "message": "ENG-831 has no transition to status 'Todo'.",
-                "retryable": False,
-            },
-        ),
-        (
-            LinearAPIError("linear fell over"),
-            502,
-            {
-                "code": "TRACKER_REFUSED",
-                "message": "The ticket tracker refused the request: linear fell over",
-                "retryable": False,
-            },
-        ),
-    ],
-)
-def test_software_factory_start_reports_a_tracker_refusal(
-    client: TestClient, monkeypatch, error, status_code, body
-):
-    fake = _FakeTracker(error=error)
+def test_software_factory_start_reports_a_tracker_refusal(client: TestClient, monkeypatch):
+    fake = _FakeTracker(error=LinearAPIError("linear fell over"))
     monkeypatch.setattr(SoftwareFactory, "get_tracker", _tracker_stub(fake))
 
     response = client.post("/api/software_factory/work-items/ENG-831/start")
 
-    assert response.status_code == status_code
-    assert response.json() == body
+    assert response.status_code == 502
+    assert response.json() == {
+        "code": "TRACKER_REFUSED",
+        "message": "The ticket tracker refused the request: linear fell over",
+        "retryable": False,
+    }
 
 
 async def test_review_request_refuses_when_github_is_not_connected(client: TestClient, monkeypatch):

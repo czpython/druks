@@ -56,14 +56,19 @@ class JiraClient:
     async def get_myself(self) -> dict[str, Any]:
         return await self._request("GET", "/rest/api/3/myself")
 
-    async def get_issue_status(self, key: str) -> str:
+    async def get_issue(self, key: str) -> dict[str, Any]:
+        """The REST issue JSON with the fields a ticket payload reads."""
         try:
-            issue = await self._request("GET", f"/rest/api/3/issue/{key}?fields=status")
+            return await self._request(
+                "GET", f"/rest/api/3/issue/{key}?fields=status,summary,project,labels,assignee"
+            )
         except JiraAPIError as error:
             if error.status_code == 404:
                 raise UnknownTicketError(key, "Jira") from error
             raise
-        return issue["fields"]["status"]["name"]
+
+    async def get_issue_status(self, key: str) -> str:
+        return (await self.get_issue(key))["fields"]["status"]["name"]
 
     async def transition_issue(self, key: str, status_name: str) -> None:
         # Jira moves status only via transitions: find the one whose target is

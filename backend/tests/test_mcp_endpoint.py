@@ -6,7 +6,14 @@ from typing import Literal
 import httpx
 import httpx2
 import pytest
-from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed_note_run
+from conftest import (
+    connect_service,
+    finish_agent_run,
+    make_test_note,
+    seed_note_agent_run,
+    seed_note_run,
+)
+from druks.accounts.context import current_conversation_id
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.server import mcp_app
@@ -17,6 +24,8 @@ from druks.chat.enums import ConversationSource
 from druks.chat.models import Conversation
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket
+from druks.contrib.software_factory.ticketing.base import Tracker
+from druks.contrib.software_factory.workflows import Build
 from druks.core.apis.exceptions import UnknownTicketError
 from druks.durable.models import Artifact, Run
 from druks.mcp.exceptions import InvalidAgentToolError
@@ -233,11 +242,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
     assert tools["software_factory_start"].input_schema["properties"]["ticket"]["description"] == (
         "The tracker's ticket key, e.g. ENG-831, or owner/repo#12 for GitHub."
     )
-    # software_factory_start moves the tracker ticket and waits on webhook intake — its
-    # derived description must say so, run-id-free.
-    assert "trigger status" in tools["software_factory_start"].description
-    assert "webhook intake" in tools["software_factory_start"].description
-    assert "list_open_subjects" in tools["software_factory_start"].description
+    assert "run id" in tools["software_factory_start"].description
     assert not tools["list_open_subjects"].input_schema.get("required")
     assert not tools["get_usage"].input_schema.get("required")
 
@@ -701,7 +706,7 @@ async def test_software_factory_start_embeds_the_typed_ticket_error(
         async def __aexit__(self, *exc):
             pass
 
-        async def set_status(self, key, status):
+        async def get_ticket(self, key):
             raise UnknownTicketError(key, "Linear")
 
         async def aclose(self):
@@ -720,6 +725,67 @@ async def test_software_factory_start_embeds_the_typed_ticket_error(
         "message": "ENG-9999 doesn't exist in Linear",
         "retryable": False,
     }
+
+
+async def test_software_factory_start_opens_the_build_in_the_calling_chat(
+    app, account, pat_token, druks_db, monkeypatch
+):
+    # The chat agent calls the tool with its conversation. The build starts in that
+    # request, so the run records the conversation that its park and result go back to.
+    project = await Project.create(name="Acme")
+    await ProjectRepo.create(project_id=project.id, full_name="acme/app")
+    await connect_service(
+        "github",
+        identity={"app_id": "1", "slug": "druks-operator"},
+        secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},
+    )
+    conversation = await Conversation.create(druks_db, account_id=account.id, body="Run ENG-831")
+
+    class _Tracker(Tracker):
+        async def get_ticket(self, key):
+            return {
+                "source": "linear",
+                "ticket_id": "issue-uuid",
+                "identifier": key,
+                "status": "Backlog",
+                "title": "Build the agent route",
+                "url": f"https://linear.app/acme/issue/{key}",
+                "project_name": "acme/app",
+                "labels": [],
+                "team": "team-1",
+                "actor_id": None,
+                "assignee_id": None,
+                "assignee_email": None,
+                "assignee_name": None,
+            }
+
+        async def get_status_name(self, key):
+            return "Backlog"
+
+        async def set_status(self, key, status):
+            pass
+
+        async def aclose(self):
+            pass
+
+    async def _get_tracker(cls, source=None):
+        return _Tracker(status_names={})
+
+    started_in = []
+
+    async def start(cls, **kwargs):
+        started_in.append(current_conversation_id.get())
+        return "build-run-id"
+
+    monkeypatch.setattr(SoftwareFactory, "get_tracker", classmethod(_get_tracker))
+    monkeypatch.setattr(Build, "start", classmethod(start))
+
+    headers = {CONVERSATION_HEADER: conversation.id}
+    async with live(app), _client(app, pat_token, headers=headers) as client:
+        result = await client.call_tool("software_factory_start", {"ticket": "ENG-831"})
+
+    assert result.data == "build-run-id"
+    assert started_in == [conversation.id]
 
 
 async def test_get_usage_reads_within_budget(app, pat_token):

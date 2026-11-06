@@ -41,7 +41,7 @@ from druks.apps.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
-from druks.chat.bots.service import ask_admin
+from druks.chat.bots.service import ask_for_answer
 from druks.chat.service import deliver, report_failure, report_result
 from druks.database import get_session
 from druks.db import db_session
@@ -401,7 +401,8 @@ async def _park(
         # Every subjected park notifies the designated destination — no author opt-in.
         await _notify_designated_destination(workflow.workflow_id, workflow._subject)
     if workflow.conversation_id:
-        await _post_to_chat(workflow.workflow_id, "chat.ask_admin", ask_admin)
+        # The step keeps its recorded name, so a parked run replays it.
+        await _post_to_chat(workflow.workflow_id, "chat.ask_admin", ask_for_answer)
     payload = await DBOS.recv_async(gate.name, timeout_seconds=ttl_seconds)
     if payload is None:
         raise GateTimeout(gate.name)

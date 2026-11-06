@@ -26,11 +26,6 @@ class TicketNotFound(AgentApiError):
         super().__init__(f"{ticket} doesn't exist in {tracker}")
 
 
-class TicketNotMovable(AgentApiError):
-    status_code = 409
-    code = "TICKET_NOT_MOVABLE"
-
-
 class TrackerRefused(AgentApiError):
     # The tracker failed the call: a revoked token, a status it does not know, or an outage.
     status_code = 502
@@ -52,6 +47,25 @@ class TrackerNotConfigured(AgentApiError):
             "Linear, Jira, and GitHub also need their identity in "
             "Settings → Connections → Services."
         )
+
+
+class TicketNotRoutable(AgentApiError):
+    status_code = 409
+    code = "TICKET_NOT_ROUTABLE"
+
+    def __init__(self, ticket: str) -> None:
+        super().__init__(
+            f"No project repo matches the project or labels of {ticket}, so no build starts. "
+            "Add the repo to a project, or label the ticket with the repo's name."
+        )
+
+
+class TicketAlreadyMerged(AgentApiError):
+    status_code = 409
+    code = "TICKET_ALREADY_MERGED"
+
+    def __init__(self, ticket: str) -> None:
+        super().__init__(f"The pull request for {ticket} already merged, so no build starts.")
 
 
 class RepoNotFound(AgentApiError):

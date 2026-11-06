@@ -483,7 +483,7 @@ class Ticket(Base):
             await session.flush()
             # Creating in Ready for Agent is the same trigger as moving into it.
             if status == Status.READY_FOR_AGENT:
-                await ticket._emit_transitioned(status)
+                await ticket._emit_transitioned()
         return ticket
 
     @classmethod
@@ -538,28 +538,29 @@ class Ticket(Base):
             async with atomic():
                 self.status = status
                 await self.save()
-                await self._emit_transitioned(status)
+                await self._emit_transitioned()
 
-    async def _emit_transitioned(self, status: Status) -> None:
+    async def _emit_transitioned(self) -> None:
+        await publish("ticket.transitioned", payload=await self.to_tracker_ticket())
+
+    async def to_tracker_ticket(self) -> dict:
+        """The ticket in the shape of a ``ticket.transitioned`` payload."""
         assignee = await Account.get_or_none(id=self.assignee_id) if self.assignee_id else None
-        await publish(
-            "ticket.transitioned",
-            payload={
-                "source": "druks",
-                "ticket_id": str(self.id),
-                "identifier": self.identifier,
-                # The display label, the way Linear and Jira publish state names.
-                "status": status.label,
-                "title": self.title,
-                "url": f"/software_factory/tickets/{self.identifier}",
-                "project_name": self.project_repo.full_name,
-                "labels": [],
-                "actor_id": None,
-                "assignee_id": self.assignee_id,
-                "assignee_email": assignee.username if assignee else None,
-                "assignee_name": assignee.username if assignee else None,
-            },
-        )
+        return {
+            "source": "druks",
+            "ticket_id": str(self.id),
+            "identifier": self.identifier,
+            # The display label, the way Linear and Jira publish state names.
+            "status": Status(self.status).label,
+            "title": self.title,
+            "url": f"/software_factory/tickets/{self.identifier}",
+            "project_name": self.project_repo.full_name,
+            "labels": [],
+            "actor_id": None,
+            "assignee_id": self.assignee_id,
+            "assignee_email": assignee.username if assignee else None,
+            "assignee_name": assignee.username if assignee else None,
+        }
 
     async def add_comment(self, *, author: Account, body: str) -> Comment:
         comment = Comment(author=author, body=body)

@@ -21,6 +21,11 @@ class DruksTracker(Tracker):
     def __init__(self) -> None:
         super().__init__(status_names=_BOARD)
 
+    async def get_ticket(self, key: str) -> dict:
+        if ticket := await Ticket.get_for_identifier(key):
+            return await ticket.to_tracker_ticket()
+        raise UnknownTicketError(key, "druks")
+
     async def get_status_name(self, key: str) -> str:
         if ticket := await Ticket.get_for_identifier(key):
             return ticket.status

@@ -16,16 +16,35 @@ class GitHub(Tracker):
     known_exceptions = (GitHubException, GitHubAppNotInstalledError, UnknownTicketError)
     authority = GITHUB_AUTHORITY
 
-    async def get_status_name(self, key: str) -> str | None:
+    async def get_ticket(self, key: str) -> dict:
         repo, number = self._parse_key(key)
         client = await services.Github.get_client(repo)
         issue = await client.get_issue(repo, number)
+        status = None
         # A closed issue has left every status, whatever labels it keeps.
         if issue["state"] == "open":
             labels = {label["name"] for label in issue["labels"]}
-            for name in self._status_names.values():
-                if name in labels:
-                    return name
+            status = next((name for name in self._status_names.values() if name in labels), None)
+        # The client leaves out a null assignee. GitHub's assignee is the first of these.
+        assignee = issue["assignees"][0] if issue["assignees"] else {}
+        return {
+            "source": "github",
+            "ticket_id": str(issue["id"]),
+            "identifier": key,
+            "status": status,
+            "title": issue["title"],
+            "url": issue["html_url"],
+            # The issue's own repo is the build's repo, so no label routes it elsewhere.
+            "project_name": repo,
+            "labels": [],
+            "actor_id": None,
+            "assignee_id": str(assignee["id"]) if assignee else None,
+            "assignee_email": None,
+            "assignee_name": assignee.get("login"),
+        }
+
+    async def get_status_name(self, key: str) -> str | None:
+        return (await self.get_ticket(key))["status"]
 
     async def set_status(self, key: str, status: TicketStatus) -> None:
         name = self._status_names.get(status)
