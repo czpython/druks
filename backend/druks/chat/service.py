@@ -17,8 +17,10 @@ from pydantic_core import to_json
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
+from druks.accounts.models import Account
 from druks.apps.loader import get_app, iter_apps
 from druks.apps.registry import services
+from druks.core.services import Github
 from druks.durable.engine import step_session
 from druks.durable.models import Run
 from druks.files.constants import MAX_UPLOAD_BYTES
@@ -36,6 +38,7 @@ from druks.mcp.server import get_tool_name
 from druks.models import Base
 from druks.prompts import render_prompt
 from druks.redis import get_client
+from druks.sandbox import repo as checkout
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.datastructures import McpServer
@@ -191,6 +194,16 @@ async def get_sandbox(
         ):
             await sandbox_client.release(host_id=previous.host_id)
         template = await get_template_id(Bridge.sandbox)
+        account = await session.get(Account, account_id)
+        git_author = None
+        # Only an operator's agent has a shell. Without an installed GitHub App, the box
+        # holds no GitHub token, so no commit leaves it.
+        if account.kind == AccountKind.OPERATOR:
+            with suppress(ServiceNotConnectedError):
+                app = await Github.get_app_client()
+                if owners := await app.list_installation_accounts():
+                    github = await Github.get_client(owners[0])
+                    git_author = await github.get_bot_git_author()
         identity, entries = await SandboxIdentity.create(
             session,
             account_id=account_id,
@@ -205,6 +218,8 @@ async def get_sandbox(
             template=template,
             identity=identity,
         )
+        if git_author:
+            await checkout.set_git_identity(host, git_author, account.username)
         await Bridge(host).start()
         return host, identity
 

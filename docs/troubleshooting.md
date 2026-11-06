@@ -188,6 +188,11 @@ agent process. Recovery follows the durable operation boundary.
 Druks tries a delivery up to five times. If every attempt fails, the message
 shows **Failed**, and Druks replies in a connected channel that it failed.
 
+When Druks starts a new sandbox for an operator, it asks GitHub for the App's
+bot user, the author of the sandbox's commits. If GitHub does not answer, and
+Druks has no recent answer from it, the delivery fails. The web log names the
+GitHub error. Send the message again when GitHub answers.
+
 ## A run waits
 
 `parked` means that DBOS suspended the workflow on a gate. The workflow did not stall.

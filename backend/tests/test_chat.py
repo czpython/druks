@@ -1,6 +1,8 @@
 import asyncio
 import hashlib
 import json
+import os
+import subprocess
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -46,6 +48,7 @@ from druks.sandbox.host import Host
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
+from druks.services.exceptions import ServiceNotConnectedError
 from druks.settings import Urls
 from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_run
 from druks.user_settings.models import SettingsOverride
@@ -212,6 +215,10 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
     )
     monkeypatch.setattr(service, "get_template_id", AsyncMock(return_value="chat-template"))
     monkeypatch.setattr(Bridge, "start", AsyncMock())
+    # Without the GitHub App, a box starts with no git identity.
+    monkeypatch.setattr(
+        service.Github, "get_app_client", AsyncMock(side_effect=ServiceNotConnectedError("github"))
+    )
     second = await Conversation.create(
         druks_db, account_id=conversation.account_id, body="another conversation"
     )
@@ -256,6 +263,81 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
     assert moved_host.id != first_host.id
     assert rekeyed_host.id != moved_host.id
     assert release.await_args_list == [call(host_id=first_host.id), call(host_id=moved_host.id)]
+
+
+async def test_new_operator_sandbox_commits_as_the_bot_and_credits_the_account(
+    druks_db, conversation, monkeypatch, tmp_path
+):
+    env = {**os.environ, "HOME": str(tmp_path)}
+
+    async def exec(command, *, timeout):
+        result = subprocess.run(command, env=env, check=False, capture_output=True, text=True)
+        return SimpleNamespace(returncode=result.returncode, stderr=result.stderr)
+
+    async def provision(**values):
+        await values["identity"].bind("sandbox-1")
+        return SimpleNamespace(id="sandbox-1", exec=exec)
+
+    app = SimpleNamespace(list_installation_accounts=AsyncMock(return_value=("acme",)))
+    github = SimpleNamespace(
+        get_bot_git_author=AsyncMock(
+            return_value=("app[bot]", "1+app[bot]@users.noreply.github.com")
+        )
+    )
+    monkeypatch.setattr(service.Github, "get_app_client", AsyncMock(return_value=app))
+    monkeypatch.setattr(service.Github, "get_client", AsyncMock(return_value=github))
+    monkeypatch.setattr(service, "sandbox_client", SimpleNamespace(provision=provision))
+    monkeypatch.setattr(service, "get_template_id", AsyncMock(return_value="chat-template"))
+    monkeypatch.setattr(Bridge, "start", AsyncMock())
+
+    await service.get_sandbox(
+        druks_db,
+        conversation.account_id,
+        config=SimpleNamespace(secret_refs=[], secrets={}, secrets_hash="key"),
+        allowed_tools=Toolkit.ALL,
+        secret_refs=[],
+    )
+    # The agent clones its repos after the box starts.
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", str(repo)], env=env, check=True)
+    message = tmp_path / "COMMIT_EDITMSG"
+    message.write_text("Change\n")
+    hook = repo / ".git" / "hooks" / "prepare-commit-msg"
+    subprocess.run([str(hook), str(message)], cwd=repo, env=env, check=True)
+    email = subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert email.stdout.strip() == "1+app[bot]@users.noreply.github.com"
+    assert "Co-Authored-By: owner@example.com <owner@example.com>" in message.read_text()
+
+
+async def test_new_bot_sandbox_gets_no_git_identity(druks_db, conversation, monkeypatch):
+    async def provision(**values):
+        await values["identity"].bind("sandbox-1")
+        return SimpleNamespace(id="sandbox-1")
+
+    get_app_client = AsyncMock()
+    monkeypatch.setattr(service.Github, "get_app_client", get_app_client)
+    monkeypatch.setattr(service, "sandbox_client", SimpleNamespace(provision=provision))
+    monkeypatch.setattr(service, "get_template_id", AsyncMock(return_value="chat-template"))
+    monkeypatch.setattr(Bridge, "start", AsyncMock())
+    bot = await Account.create_for_bot(druks_db, AccountKind.BOT)
+
+    await service.get_sandbox(
+        druks_db,
+        bot.id,
+        config=SimpleNamespace(secret_refs=[], secrets={}, secrets_hash="key"),
+        allowed_tools=Toolkit.ALL,
+        secret_refs=[],
+    )
+
+    # A Bot's agent has no shell, so it never commits.
+    get_app_client.assert_not_awaited()
 
 
 async def test_delivered_turn_is_sent_again_when_the_bridge_never_got_the_prompt(
