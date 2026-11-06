@@ -245,6 +245,10 @@ at most one active run for each workflow kind. A duplicate start returns the
 active run ID. Attribution does not change this rule. Two accounts that start
 the same subject share one run.
 
+Outside a workflow, `start()` puts a new run in the queue when the caller's
+transaction commits. If the transaction rolls back, the run does not start. Before the commit, a
+duplicate start in the same transaction returns the same run ID.
+
 If the app requires prelaunch policy, wrap
 `start()` in a domain `dispatch()` method. This method can own lookup, snapshot,
 or routing policy. It binds its own database session, so a workflow body can
