@@ -77,6 +77,19 @@ async def test_a_revoked_secret_keeps_its_facts_and_loses_its_secrets(druks_db):
     )
 
 
+async def test_revoking_tokens_spares_a_sibling_audience(druks_db):
+    installation = await _static("resource:github/installation/7")
+    repos = await _static("resource:github/installation/7/widgets")
+    sibling = await _static("resource:github/installation/71")
+
+    await VaultSecret.revoke_tokens(db_session(), "resource:github/installation/7")
+    for row in (installation, repos, sibling):
+        await db_session().refresh(row)
+
+    assert installation.revoked_at and repos.revoked_at
+    assert sibling.is_live
+
+
 async def test_the_secrets_column_is_ciphertext_bound_to_the_vault(druks_db):
     row = await _static()
 

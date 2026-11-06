@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ColumnElement, ForeignKey, Index, select, text, update
+from sqlalchemy import ColumnElement, ForeignKey, Index, or_, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -271,7 +271,7 @@ class VaultSecret(Base, Uuid7Pk):
             update(cls)
             .where(
                 cls.kind == SecretKind.STATIC,
-                cls.audience.startswith(audience),
+                or_(cls.audience == audience, cls.audience.startswith(audience + "/")),
                 cls.revoked_at.is_(None),
             )
             .values(revoked_at=Base.utc_now(), secrets={})

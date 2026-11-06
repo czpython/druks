@@ -1,8 +1,10 @@
+import asyncio
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import ANY
 
 import pytest
 from conftest import connect_service
@@ -10,8 +12,11 @@ from druks import workspaces as workspace_mod
 from druks.contrib.software_factory.services import GithubReviewer
 from druks.core.apis.github import GitHubAppClient
 from druks.core.services import Github
+from druks.db import db_session
+from druks.exceptions import SessionNotBoundError
 from druks.harnesses.claude import ClaudeHarness
 from druks.sandbox import SandboxSecret
+from druks.sandbox.exceptions import ExecFailed
 from druks.sandbox.layout import get_repo_root
 from druks.secrets.models import VaultSecret
 from druks.workspaces import RepoWorkspace, Workspace
@@ -183,3 +188,87 @@ async def test_the_github_service_issues_its_installation_token(
 
     assert await Github.issue_token(("acme/widgets",)) == ("ghs_operator", expiry)
     assert asked == [("1", 7, "widgets")]
+
+
+def _mint_tokens(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    minted: list[str] = []
+
+    async def get_installation_id(self, owner_or_repo: str) -> int:
+        return 7
+
+    async def create_installation_token(self, installation_id, repositories=()):
+        minted.append(f"ghs_{len(minted)}")
+        return minted[-1], datetime.now(UTC) + timedelta(hours=1)
+
+    monkeypatch.setattr(GitHubAppClient, "get_installation_id", get_installation_id)
+    monkeypatch.setattr(GitHubAppClient, "create_installation_token", create_installation_token)
+    return minted
+
+
+def _refuse_checkouts(monkeypatch: pytest.MonkeyPatch, *answers: str) -> list[str]:
+    """Each checkout fails with the next answer; an empty answer succeeds."""
+    asked: list[str] = []
+
+    async def _ensure(_host: Any, *, repo_url: str, ref: str | None, target_path: str) -> None:
+        asked.append(repo_url)
+        if answer := answers[len(asked) - 1]:
+            raise ExecFailed(f"git clone {repo_url} failed: {answer}", exit_code=128)
+
+    monkeypatch.setattr(workspace_mod.checkout, "ensure", _ensure)
+    return asked
+
+
+def _raise_session_not_bound() -> None:
+    raise SessionNotBoundError
+
+
+def _record_refreshes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    refreshed: list[str] = []
+
+    async def request_refreshes(session, secret_id: str, *, except_host_id: str = "") -> None:
+        refreshed.append(secret_id)
+
+    monkeypatch.setattr(workspace_mod.sandbox_client, "request_refreshes", request_refreshes)
+    return refreshed
+
+
+async def test_a_refused_checkout_retries_once_with_a_new_github_token(
+    druks_db, monkeypatch: pytest.MonkeyPatch
+):
+    minted = _mint_tokens(monkeypatch)
+    row = await _connect()
+    assert await Github.issue_token(("acme/widgets",)) == (minted[0], ANY)
+    asked = _refuse_checkouts(monkeypatch, "remote: Repository not found.", "")
+    refreshed = _record_refreshes(monkeypatch)
+    workspace = RepoWorkspace(SimpleNamespace(repo="acme/widgets", ref=None))
+    workspace.host = _RecordingHost()  # type: ignore[assignment]
+
+    # prepare() runs on a task of its own with no session bound, so a read there raises.
+    monkeypatch.setattr(db_session.registry, "createfunc", _raise_session_not_bound)
+    await asyncio.create_task(workspace.clone())
+
+    assert len(asked) == 2
+    assert refreshed == [row.id]
+    # The kept token is gone, so the box's next fetch mints a new one.
+    assert await Github.issue_token(("acme/widgets",)) == (minted[1], ANY)
+
+
+async def test_a_checkout_refused_again_raises_the_first_failure(
+    druks_db, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    _mint_tokens(monkeypatch)
+    await _connect()
+    asked = _refuse_checkouts(monkeypatch, "remote: Repository not found.", "second failure")
+    _record_refreshes(monkeypatch)
+    workspace = RepoWorkspace(SimpleNamespace(repo="acme/widgets", ref=None))
+    workspace.host = _RecordingHost()  # type: ignore[assignment]
+
+    with (
+        caplog.at_level("WARNING", logger="druks.workspaces"),
+        pytest.raises(ExecFailed, match="Repository not found") as raised,
+    ):
+        await workspace.clone()
+
+    assert len(asked) == 2
+    assert "second failure" in str(raised.value.__cause__)
+    assert "second failure" in caplog.text
