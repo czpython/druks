@@ -15,6 +15,7 @@ from druks.apps.registry import services
 from druks.apps.settings import field_kind, field_multiline
 from druks.db import db_session
 from druks.mcp.models import McpServer
+from druks.secrets.constants import TOKEN_MIN_TTL_SECONDS
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
@@ -64,10 +65,12 @@ class Connection:
     def connected_at(self):
         return self.row.updated_at
 
-    async def get_access_token(self, scopes: tuple[str, ...] = (), cached: bool = True) -> str:
+    async def get_access_token(
+        self, scopes: tuple[str, ...] = (), min_ttl_seconds: float = TOKEN_MIN_TTL_SECONDS
+    ) -> str:
         client = await self.service.get_oauth_client()
         token, _ = await client.get_access_token(
-            db_session(), connection=self.row, scopes=scopes, cached=cached
+            db_session(), connection=self.row, scopes=scopes, min_ttl_seconds=min_ttl_seconds
         )
         return token
 
