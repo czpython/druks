@@ -98,6 +98,8 @@ async def sandbox(druks_db, conversation, monkeypatch):
     host.exec = AsyncMock(return_value=SimpleNamespace(returncode=0, stdout="Gate check\n"))
     monkeypatch.setattr(service, "get_sandbox", AsyncMock(return_value=(host, identity)))
     monkeypatch.setattr(service, "get_running_sandbox", AsyncMock(return_value=host))
+    # The box is not real, so it has no git to configure.
+    monkeypatch.setattr(services.get("github"), "prepare_sandbox", AsyncMock())
     config = SimpleNamespace(
         harness_class=ClaudeHarness,
         model="anthropic/claude-opus-4-7",
@@ -257,6 +259,42 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
     assert moved_host.id != first_host.id
     assert rekeyed_host.id != moved_host.id
     assert release.await_args_list == [call(host_id=first_host.id), call(host_id=moved_host.id)]
+
+
+@pytest.mark.parametrize("kind, prepares", [(AccountKind.OPERATOR, 1), (AccountKind.BOT, 0)])
+async def test_each_operator_turn_prepares_the_box_for_its_sign_ins(
+    druks_db, conversation, sandbox, monkeypatch, kind, prepares
+):
+    host, _identity = sandbox
+    conversation.account.kind = kind
+    github = services.get("github")
+    sign_in = await VaultSecret.connect(
+        druks_db,
+        Audience.service(github.slug),
+        account_id=conversation.account_id,
+        refresh_token="ghr_one",
+        scopes=[],
+        identity={"authority": "https://github.com", "subject": "42", "login": "octocat"},
+    )
+    prepare_sandbox = AsyncMock()
+
+    async def request(self, method, **values):
+        return {"status": "idle", "sessionId": "one"}
+
+    async def follow_turn(session, conversation, message, bridge, naming):
+        message.state = MessageState.REPLIED
+        await session.commit()
+
+    monkeypatch.setattr(github, "prepare_sandbox", prepare_sandbox)
+    monkeypatch.setattr(Bridge, "request", request)
+    monkeypatch.setattr(service, "follow_turn", follow_turn)
+
+    await service.deliver_pending(druks_db, conversation)
+
+    # The sandbox fixture hands back a box that already runs: a reused box is prepared too.
+    assert [
+        (args[0], args[1].service, args[1].id) for args, _ in prepare_sandbox.await_args_list
+    ] == [(host, github, sign_in.id)] * prepares
 
 
 async def test_delivered_turn_is_sent_again_when_the_bridge_never_got_the_prompt(

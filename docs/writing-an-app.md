@@ -1901,6 +1901,18 @@ the row. Override `issue_token` when the row holds a credential that no sandbox
 must get, and return the token and its expiry. Raise `MissingSecretError` when
 the row cannot give a token until a person acts.
 
+Before each chat turn, Druks asks the service to prepare an operator's sandbox,
+once for each sign-in that the sandbox holds:
+
+```python
+@classmethod
+async def prepare_sandbox(cls, host: Host, connection: Connection) -> None:
+```
+
+The default does nothing. `Github` overrides it to set the git author of the
+sandbox's commits. Catch the failures that the sandbox can do without, and log
+them. Anything that `prepare_sandbox` raises fails the turn.
+
 ## Connect provider accounts (OAuth)
 
 Declare the client people sign in through as `sign_in`, or the service's own

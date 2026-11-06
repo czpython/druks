@@ -1,6 +1,5 @@
 import functools
 import logging
-import shlex
 import subprocess
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
@@ -334,33 +333,8 @@ class RepoWorkspace(Workspace):
         Rewritten before every agent call so a reused warm host follows the
         current run's dispatcher — a system dispatch carries no hook and
         credits nobody."""
-        github = await Github.get_client(self.subject.repo)
-        author_name, author_email = await github.get_bot_git_author()
+        author = await self.github.get_bot_git_author()
         account_id = current_account_id.get()
         account = await Account.get_or_none(id=account_id) if account_id else None
-        dispatcher = account.username if account else None
-        steps = [
-            f"cd {shlex.quote(self.repo_path)}",
-            f"git config user.name {shlex.quote(author_name)}",
-            f"git config user.email {shlex.quote(author_email)}",
-            "rm -f .git/hooks/prepare-commit-msg",
-        ]
-        if dispatcher:
-            trailer = f"Co-Authored-By: {dispatcher} <{dispatcher}>"
-            # The dispatcher's line goes beside any other co-author line, and only once.
-            hook = (
-                "#!/bin/sh\n"
-                f"git interpret-trailers --in-place --if-exists addIfDifferent"
-                f' --trailer {shlex.quote(trailer)} "$1"\n'
-            )
-            steps += [
-                f"printf %s {shlex.quote(hook)} > .git/hooks/prepare-commit-msg",
-                "chmod 755 .git/hooks/prepare-commit-msg",
-            ]
-        result = await self.host.exec(["sh", "-c", " && ".join(steps)], timeout=10.0)
-        if result.returncode:
-            raise ExecFailed(
-                f"failed to set the workspace git identity: "
-                f"exit={result.returncode} stderr={result.stderr.strip()}",
-                exit_code=result.returncode,
-            )
+        dispatcher = (account.username, account.username) if account else None
+        await checkout.set_git_identity(self.host, author, dispatcher, repo_path=self.repo_path)

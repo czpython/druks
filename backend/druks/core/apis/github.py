@@ -13,7 +13,7 @@ from githubkit.exception import GraphQLFailed, RequestFailed
 from githubkit.retry import RETRY_SERVER_ERROR
 from githubkit.utils import UNSET
 
-from druks.core.apis.exceptions import GitHubAppNotInstalledError
+from druks.core.apis.exceptions import GitHubAppNotActiveError, GitHubAppNotInstalledError
 from druks.core.utils.time import ensure_utc
 
 logger = logging.getLogger(__name__)
@@ -43,9 +43,6 @@ _ANNOTATIONS_PER_REQUEST = 50
 # serves the last-known set when GitHub hiccups.
 _INSTALLATION_ACCOUNTS_TTL_SECONDS = 600.0
 _INSTALLATION_ACCOUNTS_CACHE: dict[str, tuple[float, tuple[str, ...]]] = {}
-
-# An App's bot user id is fixed for its life, so this needs no expiry.
-_BOT_USER_ID_CACHE: dict[str, int] = {}
 
 
 class GitHubAppClient:
@@ -99,6 +96,24 @@ class GitHubAppClient:
         )
         minted = response.parsed_data
         return str(minted.token), ensure_utc(datetime.fromisoformat(str(minted.expires_at)))
+
+    async def get_bot_user_id(self) -> int:
+        """The user id of the App's bot user, ``<slug>[bot]``. The users endpoint
+        answers a token of the first installation that is not suspended: GitHub
+        limits anonymous requests to 60 an hour per IP."""
+        response = await self._app.rest.apps.async_list_installations(per_page=100)
+        installation_ids = [item.id for item in response.parsed_data if not item.suspended_at]
+        if not installation_ids:
+            raise GitHubAppNotActiveError(self._slug)
+        token, _ = await self.create_installation_token(installation_ids[0])
+        async with GitHub(
+            TokenAuthStrategy(token),
+            base_url=GITHUB_API_URL,
+            timeout=DEFAULT_TIMEOUT,
+            auto_retry=RETRY_SERVER_ERROR,
+        ) as client:
+            response = await client.rest.users.async_get_by_username(f"{self._slug}[bot]")
+        return response.parsed_data.id
 
     async def list_installation_accounts(self, cached: bool = True) -> tuple[str, ...]:
         """Account logins (orgs/users) this App is installed on — the
@@ -204,20 +219,6 @@ class GitHubClient:
                 return full_name
             raise
         return full_name
-
-    async def get_bot_git_author(self) -> tuple[str, str]:
-        """Name and email for commits made as the App's bot user — the
-        ``<id>+<slug>[bot]@users.noreply.github.com`` convention, the same
-        identity a squash-merge advertises. The id comes from the users endpoint
-        with the installation's token: GitHub limits anonymous requests to 60 an
-        hour per IP."""
-        bot_name = f"{self._slug}[bot]"
-        user_id = _BOT_USER_ID_CACHE.get(self._app_id)
-        if not user_id:
-            response = await self._github.rest.users.async_get_by_username(bot_name)
-            user_id = response.parsed_data.id
-            _BOT_USER_ID_CACHE[self._app_id] = user_id
-        return bot_name, f"{user_id}+{bot_name}@users.noreply.github.com"
 
     async def get_repository(self, repo: str) -> dict[str, Any]:
         owner, name = repo.split("/", 1)

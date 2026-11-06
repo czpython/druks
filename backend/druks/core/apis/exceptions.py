@@ -15,6 +15,16 @@ class GitHubAppNotInstalledError(DruksError):
         self.repo = repo
 
 
+class GitHubAppNotActiveError(DruksError):
+    """The GitHub App has no installation that is not suspended."""
+
+    def __init__(self, app: str) -> None:
+        super().__init__(
+            f"The GitHub App {app} has no active installation. Install the App on an "
+            "account, or unsuspend its installation."
+        )
+
+
 class LinearAPIError(DruksError):
     """Raised when Linear's GraphQL endpoint returns a logical error.
 

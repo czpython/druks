@@ -187,10 +187,7 @@ def _bot_author(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _bot_git_author() -> tuple[str, str]:
         return "app[bot]", "1+app[bot]@users.noreply.github.com"
 
-    async def _client(repo):
-        return SimpleNamespace(get_bot_git_author=_bot_git_author)
-
-    monkeypatch.setattr("druks.core.services.Github.get_client", _client)
+    monkeypatch.setattr("druks.core.services.Github.get_bot_git_author", _bot_git_author)
 
 
 async def test_set_git_identity_stamps_the_workspace_repo(
@@ -223,6 +220,10 @@ async def test_set_git_identity_stamps_the_workspace_repo(
     )
     assert email.stdout.strip() == "1+app[bot]@users.noreply.github.com"
     assert message.read_text().count("Co-Authored-By: dev@example.com <dev@example.com>") == 1
+    # An empty message stays empty, so git still aborts the commit.
+    message.write_text("\n# Please enter the commit message.\n")
+    subprocess.run([str(hook), str(message)], check=True)
+    assert "Co-Authored-By" not in message.read_text()
 
     # A reused warm host follows the next run's dispatcher.
     current_account_id.set("second@example.com")

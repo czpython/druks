@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, ValidationError, create_model
 from pydantic.fields import FieldInfo
@@ -30,6 +30,9 @@ from .exceptions import (
 )
 from .oauth import OauthClient
 from .resources import Resource
+
+if TYPE_CHECKING:
+    from druks.sandbox.host import Host
 
 logger = logging.getLogger(__name__)
 
@@ -459,6 +462,11 @@ class Service:
         client = cls.Authentication.get_client()
         hidden = ("authority", client.identity_key if client else "")
         return {key: value for key, value in identity.items() if key not in hidden}
+
+    @classmethod
+    async def prepare_sandbox(cls, host: "Host", connection: Connection) -> None:
+        """Put on a sandbox what this service's sign-in needs there. Chat calls it for
+        each sign-in that the sandbox holds, before each turn."""
 
     @classmethod
     async def get_oauth_client(cls) -> OauthClient:
