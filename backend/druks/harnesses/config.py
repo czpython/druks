@@ -70,6 +70,12 @@ class AgentConfig:
     def charged_account_id(self) -> str | None:
         return self.subscription.account_id if self.subscription else None
 
+    @property
+    def quota_holder(self) -> str:
+        """Whom a usage limit binds: the model's provider and the account signed in to it."""
+        email = self.subscription.identity.get("email") if self.subscription else None
+        return f"{self.model}|{self.billing}|{email}"
+
 
 async def check_config(
     session: AsyncSession, harness_name: str, model: str, billing: str
