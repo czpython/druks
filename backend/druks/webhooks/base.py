@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import HTTPException, Request, status
 from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.routing import compile_path
 
 from druks.accounts.exceptions import InvalidAssertionError
@@ -162,7 +163,7 @@ class Webhook:
         digest = hashlib.sha256(self.raw_body).hexdigest()
         return claims.get("sub") == delivery and claims.get("body_sha256") == digest
 
-    async def respond(self) -> Response:
+    async def respond(self, session: AsyncSession) -> Response:
         self.raw_body = await self.request.body()
 
         # The manager forwards a managed service's events with its own signature.
@@ -183,14 +184,17 @@ class Webhook:
             return await self.on_duplicate()
 
         # The claim is held for the attempt so concurrent duplicates still short-circuit;
-        # if the handler fails, release it so the provider's retry re-processes instead of
-        # being silently swallowed as a duplicate until the dedup TTL expires.
+        # if the handler or its commit fails, release it so the provider's retry re-processes
+        # instead of being silently swallowed as a duplicate until the dedup TTL expires.
         try:
             action = self.get_action()
             handler = getattr(self, f"on_{action}", None)
-            if not handler:
-                return await self.on_unhandled(action)
-            return await handler()
+            if handler:
+                response = await handler()
+            else:
+                response = await self.on_unhandled(action)
+            await session.commit()
+            return response
         except BaseException:
             await release_delivery(provider, key)
             raise

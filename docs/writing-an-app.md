@@ -1609,7 +1609,7 @@ HTTP request, durable step, or a workspace's `prepare()`. Outside those,
 their own. A row a step
 returns is detached: load what the body reads from it inside that step.
 
-An HTTP request is one transaction. A step is not: each read and each write in a
+An HTTP request is one transaction, which commits before the response goes out. A step is not: each read and each write in a
 step commits on its own, so a step holds no database connection while it calls
 another service or waits. Writes that must land together go in one
 `druks.db.atomic()` block. They commit at its end, or none does, and the block

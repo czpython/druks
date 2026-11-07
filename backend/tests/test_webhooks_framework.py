@@ -3,13 +3,18 @@ import hmac
 
 import pytest
 from druks.apps.registry import webhooks
+from druks.database import configure_session
+from druks.db import db_session
 from druks.settings import Settings, configure_settings
+from druks.testing import TEST_DATABASE_URL
 from druks.webhooks import InvalidWebhookError, Webhook, verify_hmac_sha256
 from druks.webhooks.router import match_webhook
 from druks.webhooks.router import router as webhooks_router
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, Response
 from fastapi.testclient import TestClient
+from sqlalchemy import NullPool, text
+from sqlalchemy.ext.asyncio import create_async_engine
 from starlette.requests import ClientDisconnect, Request
 
 
@@ -367,6 +372,44 @@ def test_failed_handler_releases_claim_so_retry_reprocesses(settings):
         assert r2.status_code == 200
         assert r2.json() == {"ok": True}
     assert attempts == [1, 2]  # reprocessed, not swallowed as a duplicate
+
+
+def test_failed_commit_releases_claim_so_retry_reprocesses(settings):
+    # A deferred check fails only at COMMIT, after the handler returned. Its own
+    # engine, not druks_db: there a commit only releases a savepoint.
+    attempts: list[int] = []
+
+    class Hook(Webhook):
+        provider = "unsaved"
+        category = "events"
+
+        async def request_is_authentic(self):
+            return True
+
+        def get_delivery_key(self):
+            return self.data["key"]
+
+        def get_action(self):
+            return "ping"
+
+        async def on_ping(self):
+            attempts.append(self.data["seq"])
+            if len(attempts) == 1:
+                session = db_session()
+                await session.execute(
+                    text("CREATE TEMP TABLE claims (id int UNIQUE DEFERRABLE INITIALLY DEFERRED)")
+                )
+                await session.execute(text("INSERT INTO claims VALUES (1), (1)"))
+            return JSONResponse({"ok": True})
+
+    configure_session(create_async_engine(TEST_DATABASE_URL, poolclass=NullPool))
+    with _client_for(Hook, settings=settings) as client:
+        r1 = client.post("/_external/unsaved/events/", json={"key": "K", "seq": 1})
+        assert r1.status_code == 500
+
+        r2 = client.post("/_external/unsaved/events/", json={"key": "K", "seq": 2})
+        assert r2.json() == {"ok": True}
+    assert attempts == [1, 2]
 
 
 # Signature helper
