@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock
 
 import psycopg
 import pytest
-from dbos import DBOS
+from dbos import DBOS, DBOSClient
+from dbos._error import DBOSQueueDeduplicatedError
 from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
 from druks.agents import Agent, AgentOutput
@@ -481,6 +482,22 @@ async def test_duplicate_start_shares_the_run_across_accounts(runtime):
 
     await parked.resume(action="merge")
     await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+
+
+async def test_a_start_in_a_transaction_that_rolls_back_queues_nothing(runtime):
+    with pytest.raises(RuntimeError):
+        async with session_scope(runtime.engine):
+            workflow_id = await runtime.SampleFlow.start(
+                subject=Widget(id=454545), repo="owner/app"
+            )
+            raise RuntimeError
+    with runtime.schema_engine.connect() as connection:
+        queued = connection.execute(
+            select(workflow_status.c.workflow_uuid).where(
+                workflow_status.c.workflow_uuid == workflow_id
+            )
+        ).first()
+    assert not queued
 
 
 async def test_step_gate_resume_finish(runtime):
@@ -1232,7 +1249,7 @@ async def test_failed_enqueue_claims_no_slot(runtime, monkeypatch):
         raise RuntimeError("queue down")
 
     with monkeypatch.context() as patched:
-        patched.setattr("druks.workflows.DBOS.enqueue_workflow_async", enqueue_unavailable)
+        patched.setattr("druks.workflows.enqueue_in_transaction", enqueue_unavailable)
         with pytest.raises(RuntimeError, match="queue down"):
             await runtime.SubjectFlow.start(subject=subject)
 
@@ -1290,7 +1307,7 @@ async def test_announcements_survive_subscriber_retry_and_workflow_replay(runtim
         await DBOS.cancel_workflow_async(workflow_id)
 
 
-async def test_admission_commits_before_the_request_and_deduplicates(runtime):
+async def test_admission_waits_for_the_commit_and_deduplicates(runtime):
     class AdmissionFlow(Workflow):
         subject = Widget
 
@@ -1298,35 +1315,25 @@ async def test_admission_commits_before_the_request_and_deduplicates(runtime):
             await DBOS.recv_async("finish")
 
     subject = Widget(id=750750)
+    scheduled = select(Event).filter_by(type="workflow.scheduled", subject_id="750750")
     workflow_id = ""
     try:
-        with pytest.raises(ValueError, match="Roll back the request"):
-            async with session_scope(runtime.engine):
-                request_session = db_session()
-                await request_session.execute(select(Widget).where(Widget.id == 750750))
-                workflow_id = await AdmissionFlow.start(subject=subject)
-                assert await AdmissionFlow.start(subject=subject) == workflow_id
-                assert db_session() is request_session
-                assert request_session.in_transaction()
+        async with session_scope(runtime.engine):
+            request_session = db_session()
+            await request_session.execute(select(Widget).where(Widget.id == 750750))
+            workflow_id = await AdmissionFlow.start(subject=subject)
+            assert await AdmissionFlow.start(subject=subject) == workflow_id
+            assert db_session() is request_session
+            assert request_session.in_transaction()
 
-                async with get_session(runtime.engine) as reader:
-                    events = list(
-                        await reader.scalars(
-                            select(Event).filter_by(type="workflow.scheduled", subject_id="750750")
-                        )
-                    )
-                assert len(events) == 1
-                assert events[0].payload == {"run": workflow_id, "kind": AdmissionFlow.kind}
-                assert events[0].subject_key == "W-750750"
-                raise ValueError("Roll back the request")
+            async with get_session(runtime.engine) as reader:
+                assert not list(await reader.scalars(scheduled))
 
         async with get_session(runtime.engine) as reader:
-            events = list(
-                await reader.scalars(
-                    select(Event).filter_by(type="workflow.scheduled", subject_id="750750")
-                )
-            )
+            events = list(await reader.scalars(scheduled))
         assert len(events) == 1
+        assert events[0].payload == {"run": workflow_id, "kind": AdmissionFlow.kind}
+        assert events[0].subject_key == "W-750750"
     finally:
         if workflow_id:
             await DBOS.send_async(workflow_id, "done", topic="finish")
@@ -1334,6 +1341,61 @@ async def test_admission_commits_before_the_request_and_deduplicates(runtime):
                 runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED
             )
         workflows._items.pop(AdmissionFlow.kind)
+
+
+async def test_a_concurrent_start_of_a_held_subject_returns_the_live_run(runtime):
+    class HeldFlow(Workflow):
+        subject = Widget
+
+        async def run_multistep(self) -> None:
+            await DBOS.recv_async("finish")
+
+    subject = Widget(id=760760)
+
+    async def start_in_another_transaction() -> str:
+        async with session_scope(runtime.engine):
+            run_id = await HeldFlow.start(subject=subject)
+            # The collision left the transaction usable.
+            await db_session().execute(select(1))
+            return run_id
+
+    workflow_id = ""
+    try:
+        async with session_scope(runtime.engine):
+            workflow_id = await HeldFlow.start(subject=subject)
+            second = asyncio.create_task(start_in_another_transaction())
+            # The second start waits on DBOS's unique index until this transaction commits.
+            await asyncio.sleep(0.5)
+            assert not second.done()
+        assert await second == workflow_id
+    finally:
+        if workflow_id:
+            await DBOS.send_async(workflow_id, "done", topic="finish")
+            await _wait_for_run(
+                runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED
+            )
+
+
+async def test_a_slot_freed_before_the_holder_read_is_claimed(runtime, monkeypatch):
+    enqueue = DBOSClient.enqueue_in_transaction
+    calls = []
+
+    def collide_once(self, conn_or_session, options, *args):
+        calls.append(options["workflow_id"])
+        if len(calls) == 1:
+            # A holder that ended between the collision and the read leaves the slot free.
+            raise DBOSQueueDeduplicatedError(
+                options["workflow_id"], options["queue_name"], options["deduplication_id"]
+            )
+        return enqueue(self, conn_or_session, options, *args)
+
+    monkeypatch.setattr(DBOSClient, "enqueue_in_transaction", collide_once)
+    async with session_scope(runtime.engine):
+        widget = await Widget.create(id=781781)
+        workflow_id = await runtime.SubjectFlow.start(subject=widget)
+
+    assert calls == [workflow_id, workflow_id]
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
 
 
 async def test_retry_reruns_the_step_whose_result_the_body_refused(runtime):

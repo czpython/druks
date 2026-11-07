@@ -9,10 +9,9 @@ from druks.durable.enums import RunState
 # points the system URL at it), so a run's state is one correlated read away.
 DBOS_SYSTEM_SCHEMA = "dbos"
 
-# start() commits the durable_runs row before DBOS commits the enqueue, so a
-# brand-new run legitimately has no workflow_status row for a moment. A run
-# still rowless past this window will never start (DBOS system tables wiped, or
-# its executor destroyed) and reads orphaned rather than scheduled forever.
+# A run whose workflow_status row is still missing past this window will never
+# start (DBOS system tables wiped, or its executor destroyed) and reads orphaned
+# rather than scheduled forever.
 _MISSING_STATUS_GRACE = timedelta(minutes=5)
 
 # Read-only handle on the columns the derivation and subject keying need; DBOS
@@ -30,6 +29,8 @@ workflow_status = sa.Table(
     sa.Column("completed_at", sa.BigInteger),
     sa.Column("updated_at", sa.BigInteger),
     sa.Column("attributes", JSONB),
+    sa.Column("queue_name", sa.String),
+    sa.Column("deduplication_id", sa.String),
     sa.Column("forked_from", sa.String),
 )
 

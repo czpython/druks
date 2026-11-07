@@ -137,29 +137,25 @@ class Run(Base):
     @classmethod
     async def create_row(
         cls,
-        engine,
+        session: AsyncSession,
         *,
         workflow_id: str,
         kind: str,
         account_id: str,
         conversation_id: str | None = None,
     ) -> None:
-        # Own committed transaction (not the caller's request txn) so the row
-        # exists before the running workflow's first lifecycle event. Idempotent:
-        # a scheduled run creates its row inside the (replayable) body, and a
-        # start that races its own retry must not double-insert.
-        async with get_session(engine) as session:
-            await session.execute(
-                pg_insert(cls)
-                .values(
-                    id=workflow_id,
-                    kind=kind,
-                    account_id=account_id,
-                    conversation_id=conversation_id,
-                )
-                .on_conflict_do_nothing()
+        # Idempotent: a scheduled run creates its row inside the (replayable) body,
+        # and a start that races its own retry must not double-insert.
+        await session.execute(
+            pg_insert(cls)
+            .values(
+                id=workflow_id,
+                kind=kind,
+                account_id=account_id,
+                conversation_id=conversation_id,
             )
-            await session.commit()
+            .on_conflict_do_nothing()
+        )
 
     @classmethod
     async def list_for_subject(
@@ -468,13 +464,15 @@ class Run(Base):
             queue_name=RUN_QUEUE,
         )
         workflow_id = handle.workflow_id
-        await Run.create_row(
-            _step_engine(),
-            workflow_id=workflow_id,
-            kind=self.kind,
-            account_id=self.account_id,
-            conversation_id=self.conversation_id,
-        )
+        async with get_session(_step_engine()) as session:
+            await Run.create_row(
+                session,
+                workflow_id=workflow_id,
+                kind=self.kind,
+                account_id=self.account_id,
+                conversation_id=self.conversation_id,
+            )
+            await session.commit()
         if self.input_requested_at:
             # The fork reuses the steps that parked, so its row takes their fact from here.
             async with get_session(_step_engine()) as session:
