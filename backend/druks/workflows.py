@@ -542,7 +542,20 @@ class _Task:
             wire = self._input_model.model_validate(input).model_dump(mode="json")
         elif input:
             raise WorkflowError(f"task {self.name} takes no input")
-        await DBOS.enqueue_workflow_async(TASK_QUEUE, self._entry, wire)
+        if DBOS.workflow_id:
+            # Inside a workflow, DBOS records the enqueue as the workflow's child, so a
+            # replay does not enqueue the task again.
+            await DBOS.enqueue_workflow_async(TASK_QUEUE, self._entry, wire)
+        else:
+            # Elsewhere the task enters the queue in the caller's transaction, so a
+            # rollback enqueues nothing.
+            options: EnqueueOptions = {
+                "workflow_name": self.name,
+                "queue_name": TASK_QUEUE,
+                "workflow_id": str(uuid7()),
+            }
+            async with bound_session() as session:
+                await enqueue_in_transaction(session, options, wire)
 
     async def _run(self, input: dict[str, Any]) -> None:
         kwargs: dict[str, Any] = {}
