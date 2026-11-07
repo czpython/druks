@@ -20,7 +20,14 @@ from typing import (
 )
 
 from croniter import croniter
-from dbos import DBOS, SetEnqueueOptions, SetWorkflowAttributes, SetWorkflowID, StepOptions
+from dbos import (
+    DBOS,
+    EnqueueOptions,
+    SetEnqueueOptions,
+    SetWorkflowAttributes,
+    SetWorkflowID,
+    StepOptions,
+)
 from dbos._dbos import _get_or_create_dbos_registry
 from dbos._error import (
     DBOSAwaitedWorkflowCancelledError,
@@ -43,15 +50,14 @@ from druks.apps.settings import (
 )
 from druks.chat.bots.service import ask_for_answer
 from druks.chat.service import deliver, report_failure, report_result
-from druks.database import get_session
 from druks.db import db_session
 from druks.durable.activity import set_run_phase
 from druks.durable.constants import NOTIFICATIONS_QUEUE, RUN_QUEUE, TASK_QUEUE
 from druks.durable.datastructures import Subject
 from druks.durable.engine import (
-    _step_engine,
     autocommit_session,
     bound_session,
+    enqueue_in_transaction,
     register_schedule,
     register_task_schedule,
     step_session,
@@ -724,13 +730,14 @@ async def _execute_run(
     # Every failure re-raises so DBOS records the terminal ERROR derived state
     # reads; an operator cancel already carries its own reason and terminal
     # status, so it passes through untouched.
-    await Run.create_row(
-        _step_engine(),
-        workflow_id=workflow_id,
-        kind=kind,
-        account_id=account_id,
-        conversation_id=conversation_id,
-    )
+    async with step_session() as session:
+        await Run.create_row(
+            session,
+            workflow_id=workflow_id,
+            kind=kind,
+            account_id=account_id,
+            conversation_id=conversation_id,
+        )
     await _emit_run_event(workflow_id, RunState.RUNNING, subject=subject)
 
     async def record_failed(exc: BaseException, code: str) -> None:
@@ -1204,7 +1211,7 @@ class Workflow:
         account_id: str | None = None,
         **input: Any,
     ) -> str:
-        # Mint the id, write the projection row, enqueue the body. Returns the
+        # Mint the id, enqueue the body, write the projection row. Returns the
         # run to follow — a freshly enqueued run, or the subject's already-live
         # one handed back. Enqueuing (not start_workflow) routes execution
         # onto the shared queue, so the process that kicks a run off — often the
@@ -1228,66 +1235,74 @@ class Workflow:
             if conversation_id:
                 wire[_CONVERSATION_INPUT_KEY] = conversation_id
             workflow_id = str(uuid7())
-            # A subject has at most one active run per workflow kind, enforced by
-            # DBOS queue deduplication: the slot is claimed atomically at enqueue,
-            # held while the workflow is enqueued or pending (a parked run keeps
-            # it), and freed by DBOS itself at the terminal outcome — including
-            # when DBOS gives up on a dead workflow. On a held slot, return-existing
-            # hands back the holder's handle. Subjectless runs are unbounded.
-            enqueue_options = (
-                SetEnqueueOptions(
-                    deduplication_id=f"{cls.kind}:{subject.subject_type}:{subject.id}",
-                    duplication_policy="return-existing",
-                )
-                if subject
-                else nullcontext()
-            )
-            # The workflow's routing metadata, stamped as DBOS custom attributes so
-            # "runs for this subject" is answered by workflow_status itself. The
-            # subject id is stamped as a string — the one shape every reader compares.
-            attributes = None
+            options: EnqueueOptions = {
+                "workflow_name": cls.kind,
+                "queue_name": RUN_QUEUE,
+                "workflow_id": workflow_id,
+            }
             if subject:
-                attributes = {
+                # A subject has at most one active run per workflow kind, enforced by
+                # DBOS queue deduplication: the slot is claimed atomically at enqueue,
+                # held while the workflow is enqueued or pending (a parked run keeps
+                # it), and freed by DBOS itself at the terminal outcome — including
+                # when DBOS gives up on a dead workflow. Subjectless runs are unbounded.
+                options["deduplication_id"] = f"{cls.kind}:{subject.subject_type}:{subject.id}"
+                # The routing metadata, stamped as DBOS custom attributes so "runs for
+                # this subject" is answered by workflow_status itself. The subject id is
+                # a string — the one shape every reader compares.
+                options["attributes"] = {
                     "subject_type": subject.subject_type,
                     "subject_id": str(subject.id),
                     "subject_key": subject.key,
                 }
             subject_record = subject.identity if subject else None
-            with (
-                SetWorkflowID(workflow_id),
-                SetWorkflowAttributes(attributes),
-                enqueue_options,
-            ):
-                handle = await DBOS.enqueue_workflow_async(
-                    RUN_QUEUE, cls._entry, subject_record, wire
+            if DBOS.workflow_id:
+                # Inside a workflow, DBOS records the start as the workflow's child, so a
+                # replay finds the run instead of starting it again.
+                deduplication = (
+                    SetEnqueueOptions(
+                        deduplication_id=options["deduplication_id"],
+                        duplication_policy="return-existing",
+                    )
+                    if subject
+                    else nullcontext()
                 )
-            if handle.workflow_id == workflow_id:
-                # The body also creates its row (idempotently) — this one just makes it
-                # visible before an executor picks the workflow up.
-                await Run.create_row(
-                    _step_engine(),
-                    workflow_id=workflow_id,
+                with (
+                    SetWorkflowID(workflow_id),
+                    SetWorkflowAttributes(options.get("attributes")),
+                    deduplication,
+                ):
+                    handle = await DBOS.enqueue_workflow_async(
+                        RUN_QUEUE, cls._entry, subject_record, wire
+                    )
+                run_id = handle.workflow_id
+            else:
+                # Elsewhere the run enters the queue in the caller's transaction, so a
+                # rollback starts nothing.
+                run_id = await enqueue_in_transaction(session, options, subject_record, wire)
+            if run_id != workflow_id:
+                # The slot was held — the run is the subject's live one.
+                return run_id
+            # The body also creates its row (idempotently); this one commits with the start.
+            await Run.create_row(
+                session,
+                workflow_id=workflow_id,
+                kind=cls.kind,
+                account_id=account_id,
+                conversation_id=conversation_id,
+            )
+            if subject:
+                await Event.emit(
+                    session,
+                    type=WorkflowEvent.SCHEDULED,
+                    subject=subject.identity,
+                    key=subject.key,
+                    run=workflow_id,
                     kind=cls.kind,
-                    account_id=account_id,
-                    conversation_id=conversation_id,
+                    app=cls.app,
                 )
-                if subject:
-                    # Its own transaction lets readers see the admission before the caller commits.
-                    async with get_session(_step_engine()) as session:
-                        await Event.emit(
-                            session,
-                            type=WorkflowEvent.SCHEDULED,
-                            subject=subject.identity,
-                            key=attributes["subject_key"],
-                            run=workflow_id,
-                            kind=cls.kind,
-                            app=cls.app,
-                        )
-                        await session.commit()
-                    await publish(WorkflowEvent.SCHEDULED, subject=subject.identity, kind=cls.kind)
-                return workflow_id
-            # The slot was held — the handle is the subject's live run.
-            return handle.workflow_id
+                await publish(WorkflowEvent.SCHEDULED, subject=subject.identity, kind=cls.kind)
+            return workflow_id
 
 
 def _bind_dispatch(method: classmethod) -> classmethod:
