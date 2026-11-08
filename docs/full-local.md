@@ -199,7 +199,9 @@ reuse and cleanup. Existing hosts keep their original image.
 
 ## Webhook caveat
 
-GitHub, Linear, and Jira cannot connect to a loopback listener. Dashboard-initiated
+GitHub, Linear, and Jira cannot connect to a loopback listener. Thus, **Create
+App** makes the GitHub App with no webhook. To receive GitHub events through a
+tunnel, set `urls.webhook_host` before you create the App. Dashboard-initiated
 actions work locally, including Software Factory's **druks** board, which needs
 no tracker credentials. Provider-driven Linear and Jira flows need an HTTPS
 tunnel forwarding to `127.0.0.1:8001`. Connect Linear or Jira under
