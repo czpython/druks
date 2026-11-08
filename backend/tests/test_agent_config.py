@@ -183,8 +183,7 @@ async def test_a_subscription_agent_refuses_an_expired_token_without_a_refresh(d
     with pytest.raises(
         HarnessNotConnectedError,
         match=(
-            "access token expired.*reconnect the Anthropic subscription "
-            "in Settings → Providers"
+            "access token expired.*reconnect the Anthropic subscription in Settings → Providers"
         ),
     ):
         await get_config(druks_db, CONFIG_PROBE.id, subscription.account_id)
