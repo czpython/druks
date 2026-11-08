@@ -138,6 +138,20 @@ async def test_webhook_rejects_a_missing_identity_before_dispatch(druks_db, tmp_
     assert "not connected" in raised.value.detail
 
 
+async def test_webhook_rejects_a_delivery_when_the_app_has_no_webhook_secret(druks_db, tmp_path):
+    await connect_service(
+        "github",
+        identity={"app_id": "12345", "slug": "druks-operator"},
+        secrets={"private_key": _PEM},
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        await _events(b"{}", "sha256=anything", tmp_path).request_is_authentic()
+
+    assert raised.value.status_code == 401
+    assert "no webhook secret" in raised.value.detail
+
+
 def _mock_authenticated_app(monkeypatch, slug: str = "druks-operator") -> None:
     async def _slug(self) -> str:
         return slug
@@ -304,7 +318,7 @@ async def test_blank_fields_are_rejected_without_touching_github(
 
     assert response.status_code == 422
     assert response.json()["detail"] == (
-        "Enter App ID, Webhook secret, Private key (PEM), Client ID, Client secret."
+        "Enter App ID, Private key (PEM), Client ID, Client secret."
     )
     with pytest.raises(ServiceNotConnectedError):
         await Github.get()
@@ -358,6 +372,17 @@ async def test_manifest_page_prefers_the_webhook_host_for_deliveries(
     assert (
         manifest["hook_attributes"]["url"] == "https://hooks.druks.example/_external/github/events/"
     )
+
+
+async def test_manifest_page_gives_a_local_install_no_webhook(
+    druks_client: httpx.AsyncClient, tmp_path
+):
+    configure_settings(make_settings(tmp_path, urls={"endpoint": "http://127.0.0.1:8001"}))
+
+    manifest = _manifest_from((await druks_client.get("/api/core/services/github/manifest")).text)
+
+    assert "hook_attributes" not in manifest
+    assert manifest["callback_urls"] == ["http://127.0.0.1:8001/api/oauth/callback"]
 
 
 async def test_manifest_page_lets_the_operator_target_an_org(
@@ -438,6 +463,38 @@ async def test_manifest_callback_exchanges_the_code_and_connects(
     db_session().expunge_all()
     revoked = await db_session().get(VaultSecret, old_sign_in.id)
     assert revoked.revoked_reason == "client_replaced"
+
+
+async def test_manifest_callback_connects_an_app_with_no_webhook(
+    druks_client: httpx.AsyncClient, druks_db, monkeypatch
+):
+    # GitHub answers null for the webhook secret of an App with no webhook.
+    _mock_authenticated_app(monkeypatch, slug="druks")
+
+    async def fake_post(self, url, **kwargs):
+        return httpx.Response(
+            200,
+            json={
+                "id": 4242,
+                "client_id": "Iv1.abc",
+                "client_secret": "client-secret-value",
+                "pem": _PEM,
+                "webhook_secret": None,
+            },
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    response = await druks_client.get(
+        "/api/core/services/github/manifest/callback", params={"code": "fresh-code"}
+    )
+
+    assert response.status_code == 200
+    druks_db.expunge_all()
+    assert (await Github.get()).secrets == {
+        "client_secret": "client-secret-value",
+        "private_key": _PEM,
+    }
 
 
 async def test_manifest_callback_rejects_a_dead_code(

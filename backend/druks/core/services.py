@@ -187,7 +187,11 @@ class Github(GithubApp):
     mcp_host = "api.githubcopilot.com"
 
     class Settings(GithubApp.Settings):
-        webhook_secret: SecretStr = Field(title="Webhook secret")
+        webhook_secret: SecretStr = Field(
+            default=SecretStr(""),
+            title="Webhook secret",
+            description="Leave it empty for an App that has no webhook.",
+        )
 
     class Authentication(GithubApp.Authentication):
         # A fresh sign-in by the same GitHub user updates their row.
@@ -246,10 +250,15 @@ class Github(GithubApp):
 
     @classmethod
     def get_manifest(cls, *, endpoint: str, webhook_base: str) -> dict[str, Any]:
-        return {
-            **super().get_manifest(endpoint=endpoint, webhook_base=webhook_base),
-            "hook_attributes": {"url": f"{webhook_base}/_external/github/events/", "active": True},
-        }
+        manifest = super().get_manifest(endpoint=endpoint, webhook_base=webhook_base)
+        # GitHub refuses a webhook that the internet cannot reach. Druks is reachable only
+        # behind a TLS edge, so a plain-HTTP address, such as a local install's, gets none.
+        if webhook_base.startswith("https://"):
+            manifest["hook_attributes"] = {
+                "url": f"{webhook_base}/_external/github/events/",
+                "active": True,
+            }
+        return manifest
 
 
 class Linear(Service):

@@ -39,12 +39,16 @@ class GitHubEvents(Webhook):
                 status.HTTP_401_UNAUTHORIZED,
                 "GitHub is not connected — connect it in Settings → Connections → Services.",
             ) from error
-        verify_hmac_sha256(
-            self.raw_body,
-            self.request.headers.get(self.SIGNATURE_HEADER),
-            identity.secrets["webhook_secret"],
+        if secret := identity.secrets.get("webhook_secret"):
+            verify_hmac_sha256(
+                self.raw_body, self.request.headers.get(self.SIGNATURE_HEADER), secret
+            )
+            return True
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "The GitHub connection has no webhook secret. Paste the App's webhook secret "
+            "in Settings → Connections → Services.",
         )
-        return True
 
     def get_delivery_key(self) -> str:
         return self.request.headers[self.DELIVERY_HEADER]
