@@ -863,7 +863,7 @@ export function ServicesPane() {
                     <td data-label="Setup">
                       <ServiceStatus
                         connected={service.connected}
-                        label={managedLabel(service) ?? (service.connected ? 'Configured' : 'Not configured')}
+                        label={statusLabel(service) ?? (service.connected ? 'Configured' : 'Not configured')}
                       />
                     </td>
                     <td data-label="Access">
@@ -896,9 +896,9 @@ export function ServicesPane() {
   )
 }
 
-const managedLabel = (service: Service) => {
-  if (!service.managed) return undefined
-  return service.connected ? `Managed by ${service.managedBy || 'configuration'}` : 'Not installed'
+const statusLabel = (service: Service) => {
+  if (service.connected) return service.managed ? `Managed by ${service.managedBy || 'configuration'}` : undefined
+  return service.managed || service.installUrl ? 'Not installed' : undefined
 }
 
 function ServiceStatus({ connected, label }: { connected: boolean; label?: string }) {
@@ -987,7 +987,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
       <header className="mcp-pane-head">
         <div className="svc-detail-head">
           <h2 className="mcp-pane-title">{service.title}</h2>
-          <ServiceStatus connected={service.connected} label={managedLabel(service)} />
+          <ServiceStatus connected={service.connected} label={statusLabel(service)} />
         </div>
         <Markdown className="mcp-pane-sub" source={service.description} />
       </header>
@@ -1038,6 +1038,16 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
               <a className="set-btn primary" href={service.installUrl} target="_blank" rel="noreferrer">
                 Install
               </a>
+            </div>
+          ) : service.installUrl ? (
+            <div className="svc-actions">
+              <a className="set-btn primary" href={service.installUrl} target="_blank" rel="noreferrer">
+                Install
+              </a>
+              {service.slug === 'slack' && createSlackApp}
+              <button className="set-btn ghost" onClick={() => setFormOpen(true)}>
+                Replace connection
+              </button>
             </div>
           ) : service.createUrl ? (
             <>
