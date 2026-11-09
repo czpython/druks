@@ -49,7 +49,7 @@ from druks.workspaces import Workspace
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from pydantic import ValidationError
-from sqlalchemy import NullPool, create_engine, delete, select, text
+from sqlalchemy import NullPool, column, create_engine, delete, func, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 PG_BASE = os.environ.get("DRUKS_TEST_PG", "postgresql://druks:druks@localhost:5432")
@@ -239,6 +239,10 @@ async def runtime():
         async def run_multistep(self) -> None:
             await self.misuse()
 
+    class EnqueueInBodyFlow(Workflow):
+        async def run_multistep(self) -> None:
+            await record_task.enqueue(repo="from-a-body")
+
     class DailySweep(Workflow):
         every = "0 6 * * *"
 
@@ -344,6 +348,7 @@ async def runtime():
             ScheduledDispatch=ScheduledDispatch,
             RetryingStepFlow=RetryingStepFlow,
             EnqueueInStepFlow=EnqueueInStepFlow,
+            EnqueueInBodyFlow=EnqueueInBodyFlow,
             ParentFlow=ParentFlow,
             PolicyFlow=PolicyFlow,
             DispatchingFlow=DispatchingFlow,
@@ -372,6 +377,7 @@ async def runtime():
         workflows._items.pop("scheduled_dispatch", None)
         workflows._items.pop("retrying_step_flow", None)
         workflows._items.pop("enqueue_in_step_flow", None)
+        workflows._items.pop("enqueue_in_body_flow", None)
         workflows._items.pop("child_flow", None)
         workflows._items.pop("parent_flow", None)
         configure_settings(original_settings)
@@ -858,6 +864,22 @@ async def test_durable_task_enqueue(runtime):
     assert "task:owner/queued" in SINK
 
 
+async def test_a_task_enqueued_in_a_transaction_that_rolls_back_queues_nothing(runtime):
+    queued = (
+        select(func.count())
+        .select_from(workflow_status)
+        .where(column("name") == runtime.record_task.name)
+    )
+    with runtime.schema_engine.connect() as connection:
+        before = connection.scalar(queued)
+    with pytest.raises(RuntimeError):
+        async with session_scope(runtime.engine):
+            await runtime.record_task.enqueue(repo="owner/rolled-back")
+            raise RuntimeError
+    with runtime.schema_engine.connect() as connection:
+        assert connection.scalar(queued) == before
+
+
 async def test_durable_task_retries(runtime):
     global TASK_RETRY_ATTEMPTS
     TASK_RETRY_ATTEMPTS = 0
@@ -931,6 +953,22 @@ async def test_enqueue_inside_a_step_fails_the_run(runtime):
         runtime.engine, workflow_id, lambda run: run.state == RunState.FAILED
     )
     assert "inside a @step" in failed.failure
+
+
+async def test_a_body_enqueues_its_task_as_the_runs_child(runtime):
+    workflow_id = await runtime.EnqueueInBodyFlow.start(subject=None)
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+    # A replay finds the child instead of enqueuing the task again.
+    children = (
+        select(func.count())
+        .select_from(workflow_status)
+        .where(
+            column("parent_workflow_id") == workflow_id,
+            column("name") == runtime.record_task.name,
+        )
+    )
+    with runtime.schema_engine.connect() as connection:
+        assert connection.scalar(children) == 1
 
 
 async def test_scheduled_task_runs_nullary_body(runtime):

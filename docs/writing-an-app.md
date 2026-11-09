@@ -412,7 +412,9 @@ Call `await sync_labels.enqueue(pull_request_id=7)` from a route, subscriber, or
 workflow body. Never call it inside a `@step`. Like a workflow, the signature is
 the wire contract. Parameters are
 annotated. `enqueue()` validates them and stores JSON. A task keeps no run row
-and never reaches the timeline.
+and never reaches the timeline. Outside a workflow, `enqueue()` puts the task in
+the queue when the caller's transaction commits. If the transaction rolls back,
+the task does not run.
 
 It has no subject, gate, or operator settings.
 It cannot make agent calls. `every=` on a task is a fixed UTC cadence that the
