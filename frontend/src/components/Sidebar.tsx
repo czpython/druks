@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { Menu, X } from 'lucide-react'
 import { Link, useLocation } from 'wouter'
 
+import brandLockup from '../foundation/brand-lockup.svg?raw'
 import type { Account } from '../api/types'
 
 export function Sidebar({
@@ -33,8 +34,7 @@ export function Sidebar({
   const content = (
     <>
       <Link href={home} className="sidebar-brand brand-lockup" aria-label="Druks home">
-        <span className="brand-lockup-mark" aria-hidden="true" />
-        <span>Druks</span>
+        <span aria-hidden="true" dangerouslySetInnerHTML={{ __html: brandLockup }} />
       </Link>
       {children}
       <div className="sidebar-account" title={account.username}>
