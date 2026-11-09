@@ -11,6 +11,7 @@ from druks.accounts.context import current_conversation_id
 from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
+from druks.sandbox.exceptions import SandboxUploadError
 
 from .channels.whatsapp.exceptions import NumberNotOnWhatsAppError, WahaError
 from .enums import MessageState
@@ -239,7 +240,10 @@ async def read_file(
         raise HTTPException(404, str(error)) from error
     except (SlackApiError, RequestFailed, WahaError) as error:
         raise HTTPException(502, str(error)) from error
-    path = await upload_file(session, conversation, file_id, name, content)
+    try:
+        path = await upload_file(session, conversation, file_id, name, content)
+    except SandboxUploadError as error:
+        raise HTTPException(502, str(error)) from error
     return {"path": path, "name": name, "content_type": content_type}
 
 

@@ -43,7 +43,7 @@ from .datastructures import (
     Hook,
     McpServer,
 )
-from .exceptions import SandboxDownloadError, SandboxError
+from .exceptions import SandboxDownloadError, SandboxError, SandboxUploadError
 from .layout import get_helper_script_path, get_work_root
 
 if TYPE_CHECKING:
@@ -64,6 +64,10 @@ STDERR_BUFFER_LIMIT = 10 * 1024 * 1024
 
 _CONNECT_TIMEOUT_SECONDS = 30.0
 _KEEPALIVE_INTERVAL_SECONDS = 15.0
+# OpenSSH's sftp-server drops the session on a packet over 256 KiB and advertises a
+# max-write-length of 255 KiB. asyncssh sizes writes from the advertised limits, and
+# a gateway in front of sftp-server can advertise more than sftp-server takes.
+_SFTP_WRITE_BYTES = 255 * 1024
 
 
 class Host:
@@ -107,14 +111,20 @@ class Host:
     ) -> None:
         """SFTP-put ``local`` to ``remote``, mkdir-p its parent, chmod
         to ``mode``. The default mode matches credential files (operator
-        wants tight perms by default)."""
+        wants tight perms by default). A failed connect or transfer raises
+        ``SandboxUploadError``."""
         parent = remote.rsplit("/", 1)[0] if "/" in remote.lstrip("/") else ""
-        if parent:
-            await self.exec(["mkdir", "-p", parent], timeout=10.0)
-        conn = await self._ensure_conn()
-        async with conn.start_sftp_client() as sftp:
-            await sftp.put(str(local), remote)
-        await self.exec(["chmod", f"{mode:o}", remote], timeout=10.0)
+        try:
+            if parent:
+                await self.exec(["mkdir", "-p", parent], timeout=10.0)
+            conn = await self._ensure_conn()
+            async with conn.start_sftp_client() as sftp:
+                await sftp.put(str(local), remote, block_size=_SFTP_WRITE_BYTES)
+            await self.exec(["chmod", f"{mode:o}", remote], timeout=10.0)
+        except (asyncssh.Error, OSError) as error:
+            raise SandboxUploadError(
+                f"failed to upload {remote}: {type(error).__name__}: {error}"
+            ) from error
 
     async def write_secret(
         self,

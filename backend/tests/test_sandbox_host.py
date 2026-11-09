@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Any, Self
 from unittest.mock import AsyncMock
 
+import asyncssh
 import pytest
 from drukbox_sdk import SandboxHost as SandboxHostRecord
-from druks.sandbox.exceptions import SandboxError
+from druks.sandbox.exceptions import SandboxError, SandboxUploadError
 from druks.sandbox.host import Host, _stream_local_tar_into
 
 
@@ -32,11 +33,11 @@ class _FakeCompletedProcess:
 
 class _FakeSFTP:
     def __init__(self) -> None:
-        self.puts: list[tuple[str, str]] = []
+        self.puts: list[tuple[str, str, int]] = []
         self.gets: list[tuple[str, str]] = []
 
-    async def put(self, local: str, remote: str) -> None:
-        self.puts.append((local, remote))
+    async def put(self, local: str, remote: str, *, block_size: int) -> None:
+        self.puts.append((local, remote, block_size))
 
     async def get(self, remote: str, local: str) -> None:
         self.gets.append((remote, local))
@@ -245,7 +246,25 @@ async def test_upload_pushes_via_sftp(
     local.write_text('{"token": "..."}')
     await sandbox.upload_file(local=local, remote="/creds/anthropic.json")
 
-    assert fake_conn.sftp.puts == [(str(local), "/creds/anthropic.json")]
+    assert fake_conn.sftp.puts == [(str(local), "/creds/anthropic.json", 255 * 1024)]
+
+
+async def test_upload_raises_a_sandbox_upload_error_when_the_connect_or_transfer_fails(
+    fake_record: SandboxHostRecord,
+    patched_asyncssh: tuple[AsyncMock, _FakeConnection],
+    tmp_path: Path,
+):
+    connect_mock, fake_conn = patched_asyncssh
+    local = tmp_path / "plan.pdf"
+    local.write_bytes(b"%PDF")
+
+    fake_conn.sftp.put = AsyncMock(side_effect=asyncssh.SFTPConnectionLost("Connection lost"))
+    with pytest.raises(SandboxUploadError, match="/work/plan.pdf: SFTPConnectionLost"):
+        await Host(record=fake_record).upload_file(local=local, remote="/work/plan.pdf")
+
+    connect_mock.side_effect = ConnectionRefusedError("refused")
+    with pytest.raises(SandboxUploadError, match="/work/plan.pdf: ConnectionRefusedError"):
+        await Host(record=fake_record).upload_file(local=local, remote="/work/plan.pdf")
 
 
 async def test_download_fetches_via_sftp_and_creates_parent_dir(
