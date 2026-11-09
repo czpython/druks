@@ -4,6 +4,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       python-runtime:
         dependency-type: production
@@ -24,6 +26,8 @@ updates:
     directory: /frontend
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       frontend-runtime:
         dependency-type: production
@@ -41,6 +45,8 @@ updates:
     directory: /deploy/sandbox
     schedule:
       interval: daily
+    cooldown:
+      default-days: 7
     groups:
       sandbox-harnesses:
         dependency-type: production
@@ -49,6 +55,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: docker
     directory: /
