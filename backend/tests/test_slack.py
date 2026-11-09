@@ -24,6 +24,7 @@ from druks.core.services import Slack
 from druks.core.webhooks.slack import SlackEvents, SlackInteractivity
 from druks.models import Base
 from druks.redis import close_client, get_client
+from druks.sandbox.exceptions import SandboxUploadError
 from druks.sandbox.layout import get_work_root
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
@@ -602,6 +603,37 @@ async def test_chat_read_file_puts_a_thread_file_in_the_agents_workspace(
     assert served.json() == {"path": path, "name": "plan.pdf", "content_type": "application/pdf"}
     assert uploads == [(b"%PDF", path)]
     assert (elsewhere.status_code, outside.status_code) == (404, 409)
+
+
+async def test_chat_read_file_answers_502_when_the_upload_to_the_sandbox_fails(
+    card, druks_db, tmp_path, monkeypatch
+):
+    """A failed upload answers which file failed and why, not a bare 500."""
+    configure_app_for_test(settings=make_settings(tmp_path), authenticated=False)
+    api = FastAPI(dependencies=[Depends(request_session)])
+    api.add_api_route("/thread/files/{file_id}", read_file, methods=["GET"])
+
+    async def api_call(client, api_method, *, params=None, json=None, **request):
+        shared = {**shared_file(params["file"]), "channels": ["C1"], "groups": []}
+        return Answer(ok=True, file=shared)
+
+    error = SandboxUploadError("failed to upload plan.pdf: SFTPConnectionLost: Connection lost")
+    upload_file = AsyncMock(side_effect=error)
+    host = SimpleNamespace(ssh_username="agent", upload_file=upload_file, aclose=AsyncMock())
+    monkeypatch.setattr(SlackClient, "api_call", api_call)
+    monkeypatch.setattr(SlackClient, "download", AsyncMock(return_value=b"%PDF"))
+    monkeypatch.setattr("druks.chat.service.get_running_sandbox", AsyncMock(return_value=host))
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    conversation = await thread_conversation(druks_db, card, ana)
+    _, token = await PersonalAccessToken.create(druks_db, account_id=ana.id, name="chat")
+    await druks_db.commit()
+    headers = {"Authorization": f"Bearer {token}", CONVERSATION_HEADER: conversation.id}
+
+    async with asgi_client(api) as client:
+        response = await client.get("/thread/files/F1", headers=headers)
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == str(error)
 
 
 async def test_a_person_who_requires_a_tag_is_answered_only_when_they_tag(
