@@ -39,6 +39,10 @@ PARKED_MESSAGE = (
     "[Internal: Run {run} waits for an answer. The request:\n{request}\nTell the person "
     "what it waits for and where to answer it.]"
 )
+QUOTA_RESUMED_MESSAGE = (
+    "[Internal: Run {run} continues now that the provider's usage limit reset. Tell the "
+    "person in one short line.]"
+)
 FAILURE_MESSAGE = (
     "[Internal: Run {run} failed: {failure}. Tell the person in one short line, with no "
     "error details, and offer what they can do next. Do not retry it.]"
@@ -52,6 +56,9 @@ NO_ANSWER_MESSAGE = (
 VOICE_NOTE_MARKER = "[Voice note]"
 # The person reads this, so it holds no error details.
 DELIVERY_FAILED_MESSAGE = "The reply is unavailable. Send the message again to retry."
+# Druks sends this line itself: the chat's agent shares the run's login, so its turn
+# would fail on the same limit.
+QUOTA_WAIT_MESSAGE = "The run hit the provider's usage limit. It continues at about {resumes_at}."
 TRANSCRIPTION_FAILED_MESSAGE = (
     "[Internal: Druks could not turn the person's voice note into text. Tell the person "
     "in one short line to write it instead.]"

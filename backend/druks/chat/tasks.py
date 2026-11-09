@@ -1,12 +1,8 @@
-import logging
-
 from druks.db import db_session
 from druks.workflows import task
 
 from .models import Reminder
-from .service import publish
-
-logger = logging.getLogger(__name__)
+from .service import send_assistant_message
 
 
 @task(every="* * * * *")
@@ -21,10 +17,4 @@ async def send_due_reminders() -> None:
     # cannot send a reminder twice.
     await session.commit()
     for conversation, message in messages:
-        if conversation.channel:
-            try:
-                await conversation.channel.send_reply(session, conversation, message)
-            except Exception:
-                # One source that refuses a message must not hold back the others.
-                logger.exception("Reminder message %s did not reach its source.", message.id)
-        await publish(conversation.id, {"type": "messages"})
+        await send_assistant_message(session, conversation, message)

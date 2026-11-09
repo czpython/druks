@@ -6,7 +6,7 @@ import logging
 import tempfile
 from collections.abc import Sequence
 from contextlib import suppress
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -64,6 +64,8 @@ from .constants import (
     NO_ANSWER_MESSAGE,
     NO_RESULT_MESSAGE,
     NO_RESULT_ON_SUBJECT_MESSAGE,
+    QUOTA_RESUMED_MESSAGE,
+    QUOTA_WAIT_MESSAGE,
     RESULT_MESSAGE,
     TIME_MESSAGE,
     TRANSCRIPTION_FAILED_MESSAGE,
@@ -87,6 +89,22 @@ async def publish(conversation_id: str, event: dict) -> None:
         transaction.xadd(key, {"event": json.dumps(event)})
         transaction.expire(key, SANDBOX_HOST_LEASE_SECONDS)
         await transaction.execute()
+
+
+async def send_assistant_message(
+    session: AsyncSession, conversation: Conversation, message: Message
+) -> None:
+    """Send an assistant message to where the conversation lives, and show it in the
+    web chat. A source that refuses it only logs, so the caller goes on."""
+    # It sends while a person answers the chat from the phone too: nothing sends a held
+    # message later.
+    channel = conversation.channel
+    if channel and channel.has_turns:
+        try:
+            await channel.send_reply(session, conversation, message)
+        except Exception:
+            logger.exception("Message %s did not reach its source.", message.id)
+    await publish(conversation.id, {"type": "messages"})
 
 
 async def get_agent(
@@ -712,6 +730,26 @@ async def report_failure(session: AsyncSession, run: Run, *, failure: str) -> st
     """Report a run's failure to the chat that started it, whether or not the run waited
     for an answer. Returns the conversation to deliver."""
     return await report_outcome(session, run, FAILURE_MESSAGE.format(run=run.id, failure=failure))
+
+
+async def report_quota_wait(session: AsyncSession, run: Run, *, resumes_at: datetime) -> None:
+    """Tell the person in the run's chat that the run waits for the usage limit, and when
+    it continues, in the installation's timezone. No agent turn runs."""
+    conversation = await session.get(Conversation, run.conversation_id)
+    local_time = resumes_at.astimezone(ZoneInfo(get_settings().timezone))
+    notice = await conversation.create_message(
+        session,
+        QUOTA_WAIT_MESSAGE.format(resumes_at=local_time.strftime("%H:%M %Z")),
+        role=MessageRole.ASSISTANT,
+    )
+    await session.commit()
+    await send_assistant_message(session, conversation, notice)
+
+
+async def report_quota_resume(session: AsyncSession, run: Run) -> str | None:
+    """Tell the chat that started a run that it continues after the usage limit reset.
+    Returns the conversation to deliver."""
+    return await report_outcome(session, run, QUOTA_RESUMED_MESSAGE.format(run=run.id))
 
 
 async def report_outcome(session: AsyncSession, run: Run, body: str) -> str | None:

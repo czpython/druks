@@ -275,6 +275,19 @@ async def issue_conversation(session, card, account):
     )
 
 
+async def test_a_line_druks_wrote_goes_where_the_last_tag_was(card, druks_db, github):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    conversation = await issue_conversation(druks_db, card, ana)
+    await conversation.create_message(druks_db, f"@{HANDLE} why?", source_id="review_comment:50:51")
+    notice = await conversation.create_message(
+        druks_db, "The run waits.", role=MessageRole.ASSISTANT
+    )
+
+    await GitHubChannel.send_reply(druks_db, conversation, notice)
+
+    assert github == [("reply_to_review_comment", "acme/app", 7, 50, "The run waits.")]
+
+
 async def test_a_reply_goes_where_the_tag_was(card, druks_db, github):
     ana = await Account.get_or_create(druks_db, "ana@example.com")
     conversation = await issue_conversation(druks_db, card, ana)

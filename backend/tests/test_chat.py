@@ -1341,6 +1341,29 @@ async def test_a_run_with_no_result_names_its_subject_so_the_agent_reads_it_ther
     assert (report.is_internal, "acme/widget#7" in report.body) == (True, True)
 
 
+async def test_a_quota_wait_tells_the_person_when_the_run_continues_without_a_turn(
+    druks_db, conversation, monkeypatch
+):
+    conversation.source = "slack"
+    run = await seed_run(druks_db, kind="test", account_id=conversation.account_id)
+    run.conversation_id = conversation.id
+    await druks_db.commit()
+    send_reply = AsyncMock()
+    monkeypatch.setattr(channels.get("slack"), "send_reply", send_reply)
+    monkeypatch.setattr(service, "get_settings", lambda: SimpleNamespace(timezone="Europe/Madrid"))
+
+    resumes_at = datetime(2026, 8, 1, 10, 31, 30, tzinfo=UTC)
+    assert not await service.report_quota_wait(druks_db, run, resumes_at=resumes_at)
+
+    *_, notice = await list_messages(druks_db, conversation)
+    assert (notice.role, notice.is_internal, "12:31 CEST" in notice.body) == (
+        MessageRole.ASSISTANT,
+        False,
+        True,
+    )
+    send_reply.assert_awaited_once_with(druks_db, conversation, notice)
+
+
 async def test_a_failed_run_reports_to_its_conversation_whether_or_not_it_parked(
     druks_db, conversation
 ):

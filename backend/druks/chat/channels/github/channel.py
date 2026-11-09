@@ -113,7 +113,7 @@ class GitHubChannel(Channel):
     ) -> None:
         """Post the reply where the tag it answers was, or the last tag before a message
         Druks wrote."""
-        asked = await session.get(Message, reply.reply_to)
+        asked = await session.get(Message, reply.reply_to) if reply.reply_to else reply
         source_id = await conversation.get_answered_source_id(session, asked)
         reply.source_id = await cls.post(conversation.thread_id, reply.answer, source_id=source_id)
         await session.commit()

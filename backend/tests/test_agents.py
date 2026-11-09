@@ -8,6 +8,7 @@ from conftest import connect_service, installation_key, make_agent_result
 from druks import agents
 from druks.accounts.models import Account
 from druks.browser import BrowserClient, BrowserSession
+from druks.chat.service import report_quota_resume, report_quota_wait
 from druks.db import db_session
 from druks.durable import AgentCall, WorkflowError
 from druks.durable.engine import _step_engine
@@ -872,7 +873,10 @@ async def test_body_level_quota_waits_for_the_reset_once(
     monkeypatch.setattr(agents.random, "uniform", jitter)
     set_run_phase = AsyncMock()
     monkeypatch.setattr(agents, "set_run_phase", set_run_phase)
+    post_to_chat = AsyncMock()
+    monkeypatch.setattr(agents, "_post_to_chat", post_to_chat)
     current_run._reap_run = AsyncMock()
+    current_run.conversation_id = "conversation-1"
     checkpoints, sleep = _inline_agent_steps
 
     with pytest.raises(HarnessRateLimitError) as excinfo:
@@ -880,6 +884,13 @@ async def test_body_level_quota_waits_for_the_reset_once(
 
     assert excinfo.value is failures[-1]
     sleep.assert_awaited_once_with(60 * 60 + 90.0)
+    [wait, resume] = [call.args for call in post_to_chat.await_args_list]
+    assert (wait[:2], wait[2].func, wait[2].keywords) == (
+        ("wf-9", "chat.report_quota_wait"),
+        report_quota_wait,
+        {"resumes_at": now + timedelta(hours=1, seconds=90)},
+    )
+    assert resume == ("wf-9", "chat.report_quota_resume", report_quota_resume)
     jitter.assert_called_once_with(60.0, 120.0)
     set_run_phase.assert_any_await(
         "waiting_for_quota",
