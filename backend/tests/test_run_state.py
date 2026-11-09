@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from unittest import mock
 
 import pytest
@@ -12,7 +12,6 @@ from druks.durable.models import Run
 from druks.events.models import Event
 from druks.harnesses.config import get_config
 from druks.harnesses.exceptions import HarnessNotConnectedError
-from druks.models import Base
 from druks.signals import subscribe
 from druks.testing import seed_run
 from druks.workflows import Workflow, WorkflowError, WorkflowEvent, _emit_run_event, _execute_run
@@ -42,33 +41,13 @@ async def test_pending_splits_on_the_gate(druks_db):
     assert (await ambient_session().get(Run, live.id)).state == RunState.RUNNING.value
 
 
-async def _rowless_run(session):
-    """A run with no ``dbos.workflow_status`` row — the gap these tests are about,
-    which ``seed_run`` closes by design."""
+async def test_run_without_a_dbos_row_reads_orphaned(druks_db):
     run = Run(
         id=str(uuid7()),
         kind=Summarize.kind,
-        account_id=(await Account.get_or_create(session, "op@example.com")).id,
+        account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
     )
-    session.add(run)
-    await session.flush()
-    return run
-
-
-async def test_fresh_run_without_a_dbos_row_reads_scheduled(druks_db):
-    # start() writes the row before DBOS commits the enqueue; inside that gap a
-    # brand-new run legitimately has no workflow_status row and reads scheduled.
-    run = await _rowless_run(druks_db)
-    druks_db.expunge_all()
-    assert (await ambient_session().get(Run, run.id)).state == RunState.SCHEDULED.value
-
-
-async def test_run_without_a_dbos_row_past_grace_reads_orphaned(druks_db):
-    # A run still rowless past the grace window won't start — its DBOS row is
-    # gone (system tables wiped, or the executor destroyed) — so derived state
-    # reads orphaned instead of scheduled forever.
-    run = await _rowless_run(druks_db)
-    run.created_at = Base.utc_now() - timedelta(minutes=10)
+    druks_db.add(run)
     await druks_db.flush()
     druks_db.expunge_all()
     assert (await ambient_session().get(Run, run.id)).state == RunState.ORPHANED.value
