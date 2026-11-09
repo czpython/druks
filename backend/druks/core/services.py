@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 import httpx
 from githubkit import GitHub
+from githubkit.retry import RETRY_SERVER_ERROR
 from pydantic import BaseModel, Field, SecretStr
 from slack_sdk.errors import SlackApiError
 from sqlalchemy import select
@@ -200,7 +201,12 @@ class Github(GithubApp):
         @classmethod
         async def get_identity(cls, access_token: str) -> dict[str, Any]:
             """The person behind a user token, keyed the way ``Account.lookup`` finds them."""
-            async with GitHub(access_token, base_url=github.GITHUB_API_URL) as client:
+            async with GitHub(
+                access_token,
+                base_url=github.GITHUB_API_URL,
+                timeout=github.DEFAULT_TIMEOUT,
+                auto_retry=RETRY_SERVER_ERROR,
+            ) as client:
                 person = (await client.rest.users.async_get_authenticated()).parsed_data
             return {
                 "authority": github.GITHUB_AUTHORITY,

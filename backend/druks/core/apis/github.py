@@ -7,8 +7,10 @@ from datetime import datetime
 from functools import partial
 from typing import Any, Literal
 
+import httpx
 from githubkit import AppAuthStrategy, GitHub, TokenAuthStrategy
 from githubkit.exception import GraphQLFailed, RequestFailed
+from githubkit.retry import RETRY_SERVER_ERROR
 from githubkit.utils import UNSET
 
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
@@ -19,6 +21,10 @@ logger = logging.getLogger(__name__)
 GITHUB_API_URL = "https://api.github.com"
 # The authority of a GitHub sign-in: one GitHub, so a user id names one person.
 GITHUB_AUTHORITY = "https://github.com"
+
+# githubkit waits with no limit unless it gets a timeout. The read limit applies to
+# each read, not to the whole response, so a large tarball still downloads.
+DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=5.0, write=10.0, pool=5.0)
 
 
 @dataclass(frozen=True)
@@ -56,7 +62,12 @@ class GitHubAppClient:
     ) -> None:
         self._app_id = app_id
         self._slug = slug
-        self._app = GitHub(AppAuthStrategy(app_id, private_key), base_url=app_url)
+        self._app = GitHub(
+            AppAuthStrategy(app_id, private_key),
+            base_url=app_url,
+            timeout=DEFAULT_TIMEOUT,
+            auto_retry=RETRY_SERVER_ERROR,
+        )
 
     async def get_installation_id(self, owner_or_repo: str) -> int:
         """The installation that covers a repository ``owner/name``, or an account."""
@@ -146,7 +157,12 @@ class GitHubClient:
     def __init__(self, token: str, *, app_id: str, slug: str) -> None:
         self._app_id = app_id
         self._slug = slug
-        self._github = GitHub(TokenAuthStrategy(token), base_url=GITHUB_API_URL)
+        self._github = GitHub(
+            TokenAuthStrategy(token),
+            base_url=GITHUB_API_URL,
+            timeout=DEFAULT_TIMEOUT,
+            auto_retry=RETRY_SERVER_ERROR,
+        )
 
     async def list_repos(self) -> list[dict[str, Any]]:
         """The repositories the installation can see, as
@@ -568,7 +584,7 @@ async def download_public_tarball(repo: str) -> bytes:
     Fetched anonymously — no App installation, unlike ``GitHubClient``, which acts
     with an installation's token and so reaches only the repos the App is on."""
     owner, name = repo.split("/", 1)
-    async with GitHub() as github:
+    async with GitHub(timeout=DEFAULT_TIMEOUT, auto_retry=RETRY_SERVER_ERROR) as github:
         response = await github.rest.repos.async_download_tarball_archive(owner, name, "")
         return response.content
 

@@ -7,6 +7,7 @@ import pytest
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.apis.github import GitHubAppClient, GitHubClient
 from githubkit.exception import GraphQLFailed, RequestFailed
+from githubkit.retry import RETRY_SERVER_ERROR
 
 
 class _Parsed:
@@ -439,3 +440,13 @@ async def test_post_check_run_updates_the_run_this_app_already_posted() -> None:
             },
         )
     ]
+
+
+def test_github_clients_wait_with_a_limit() -> None:
+    clients = [
+        GitHubClient("token", app_id="1", slug="druks")._github,
+        GitHubAppClient(app_id="1", private_key="key")._app,
+    ]
+
+    assert [client.config.timeout for client in clients] == [github_api.DEFAULT_TIMEOUT] * 2
+    assert [client.config.auto_retry for client in clients] == [RETRY_SERVER_ERROR] * 2

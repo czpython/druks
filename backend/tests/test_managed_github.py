@@ -79,7 +79,9 @@ class _GitHubKit:
         self.calls: list[str] = []
         self.minted = 0
 
-    def __call__(self, auth: object = None, *, base_url: str = GITHUB_API_URL) -> SimpleNamespace:
+    def __call__(
+        self, auth: object = None, *, base_url: str = GITHUB_API_URL, **config: object
+    ) -> SimpleNamespace:
         self.clients.append((auth, base_url))
         apps = SimpleNamespace(
             async_get_repo_installation=self._installation_of,
