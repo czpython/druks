@@ -1,4 +1,87 @@
 {
   "projectName": "druks",
-  "projectOwner": "czpython"
+  "projectOwner": "czpython",
+  "contributors": [
+    {
+      "login": "czpython",
+      "name": "Paulo Alvarado",
+      "avatar_url": "https://avatars.githubusercontent.com/u/994951?v=4",
+      "profile": "https://github.com/czpython",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "chaosk",
+      "name": "Krzysztof Socha",
+      "avatar_url": "https://avatars.githubusercontent.com/u/99521?v=4",
+      "profile": "https://github.com/chaosk",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "p-r-a-v-i-n",
+      "name": "Pravin",
+      "avatar_url": "https://avatars.githubusercontent.com/u/91125540?v=4",
+      "profile": "https://github.com/p-r-a-v-i-n",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "dserbano",
+      "name": "Dan Serbanoiu",
+      "avatar_url": "https://avatars.githubusercontent.com/u/32792904?v=4",
+      "profile": "https://github.com/dserbano",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "RCheesley",
+      "name": "Sīlavāpi Cheesley",
+      "avatar_url": "https://avatars.githubusercontent.com/u/2930593?v=4",
+      "profile": "https://github.com/RCheesley",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "stefanfoulis",
+      "name": "Stefan Foulis",
+      "avatar_url": "https://avatars.githubusercontent.com/u/14330?v=4",
+      "profile": "https://github.com/stefanfoulis",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "yuripulga",
+      "name": "yuripulga",
+      "avatar_url": "https://avatars.githubusercontent.com/u/33295524?v=4",
+      "profile": "https://github.com/yuripulga",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "kakshilshah",
+      "name": "Kakshil Shah",
+      "avatar_url": "https://avatars.githubusercontent.com/u/6019787?v=4",
+      "profile": "https://github.com/kakshilshah",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "jasoneka",
+      "name": "Andrzej Jasonek",
+      "avatar_url": "https://avatars.githubusercontent.com/u/10392346?v=4",
+      "profile": "https://github.com/jasoneka",
+      "contributions": [
+        "code"
+      ]
+    }
+  ]
 }

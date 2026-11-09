@@ -158,6 +158,23 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/czpython"><img src="https://avatars.githubusercontent.com/u/994951?v=4&size=100" width="100px" height="100px" alt="Paulo Alvarado"/><br /><sub><b>Paulo Alvarado</b></sub></a><br /><a href="https://github.com/czpython/druks/commits?author=czpython" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/chaosk"><img src="https://avatars.githubusercontent.com/u/99521?v=4&size=100" width="100px" height="100px" alt="Krzysztof Socha"/><br /><sub><b>Krzysztof Socha</b></sub></a><br /><a href="https://github.com/czpython/druks/commits?author=chaosk" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/p-r-a-v-i-n"><img src="https://avatars.githubusercontent.com/u/91125540?v=4&size=100" width="100px" height="100px" alt="Pravin"/><br /><sub><b>Pravin</b></sub></a><br /><a href="https://github.com/czpython/druks/commits?author=p-r-a-v-i-n" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/dserbano"><img src="https://avatars.githubusercontent.com/u/32792904?v=4&size=100" width="100px" height="100px" alt="Dan Serbanoiu"/><br /><sub><b>Dan Serbanoiu</b></sub></a><br /><a href="https://github.com/czpython/druks/commits?author=dserbano" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/RCheesley"><img src="https://avatars.githubusercontent.com/u/2930593?v=4&size=100" width="100px" height="100px" alt="Sīlavāpi Cheesley"/><br /><sub><b>Sīlavāpi Cheesley</b></sub></a><br /><a href="https://github.com/czpython/druks/commits?author=RCheesley" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/stefanfoulis"><img src="https://avatars.githubusercontent.com/u/14330?v=4&size=100" width="100px" height="100px" alt="Stefan Foulis"/><br /><sub><b>Stefan Foulis</b></sub></a><br /><a href="https://github.com/czpython/druks/commits?author=stefanfoulis" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/yuripulga"><img src="https://avatars.githubusercontent.com/u/33295524?v=4&size=100" width="100px" height="100px" alt="yuripulga"/><br /><sub><b>yuripulga</b></sub></a><br /><a href="https://github.com/czpython/druks/commits?author=yuripulga" title="Code">💻</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/kakshilshah"><img src="https://avatars.githubusercontent.com/u/6019787?v=4&size=100" width="100px" height="100px" alt="Kakshil Shah"/><br /><sub><b>Kakshil Shah</b></sub></a><br /><a href="https://github.com/czpython/druks/commits?author=kakshilshah" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/jasoneka"><img src="https://avatars.githubusercontent.com/u/10392346?v=4&size=100" width="100px" height="100px" alt="Andrzej Jasonek"/><br /><sub><b>Andrzej Jasonek</b></sub></a><br /><a href="https://github.com/czpython/druks/commits?author=jasoneka" title="Code">💻</a></td>
+    </tr>
+  </tbody>
+</table>
 
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
