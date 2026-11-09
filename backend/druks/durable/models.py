@@ -624,11 +624,16 @@ class AgentCall(Base, Uuid7Pk):
         # exists once there's a host to run on.
         async with get_session(engine) as session:
             # A recovered step whose box is gone re-runs with a fresh call id;
-            # abandon the prior attempt's RUNNING row (a run's calls are
-            # sequential) so it doesn't linger as a phantom live step.
+            # abandon the prior attempt's RUNNING row so it doesn't linger as a
+            # phantom live step. Only this agent's row: an after-agent hook
+            # starts its agent while the hooked agent still runs.
             await session.execute(
                 update(cls)
-                .where(cls.run_id == run_id, cls.status == AgentCallStatus.RUNNING.value)
+                .where(
+                    cls.run_id == run_id,
+                    cls.agent == agent,
+                    cls.status == AgentCallStatus.RUNNING.value,
+                )
                 .values(status=AgentCallStatus.ABANDONED.value, finished_at=Base.utc_now())
             )
             session.add(
@@ -679,7 +684,7 @@ class AgentCall(Base, Uuid7Pk):
     async def lookup_running(
         cls, session: AsyncSession, run_id: str, agent: str
     ) -> "AgentCall | None":
-        # A run's calls are sequential, so at most one row is RUNNING: the call a
+        # An agent's calls are sequential, so at most one row is RUNNING: the call a
         # stopped process left on its box.
         return await session.scalar(
             select(cls).where(
