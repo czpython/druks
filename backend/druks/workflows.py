@@ -52,7 +52,12 @@ from druks.chat.bots.service import ask_for_answer
 from druks.chat.service import deliver, report_failure, report_result
 from druks.db import db_session
 from druks.durable.activity import set_run_phase
-from druks.durable.constants import NOTIFICATIONS_QUEUE, RUN_QUEUE, TASK_QUEUE
+from druks.durable.constants import (
+    NOTIFICATIONS_QUEUE,
+    REPLACED_FAILURE,
+    RUN_QUEUE,
+    TASK_QUEUE,
+)
 from druks.durable.datastructures import Subject
 from druks.durable.engine import (
     autocommit_session,
@@ -1316,6 +1321,19 @@ class Workflow:
                 )
                 await publish(WorkflowEvent.SCHEDULED, subject=subject.identity, kind=cls.kind)
             return workflow_id
+
+    @classmethod
+    async def replace(cls, *, subject: Subject | StoredSubject, **arguments: Any) -> str:
+        """Start a new run of this workflow in place of the subject's active run."""
+        if _in_step.get() or not DBOS.workflow_id:
+            raise WorkflowError("replace() runs in the workflow body, not inside a @step")
+        # DBOS has no start that replaces the active run, and its cancel joins no
+        # transaction. As one recorded step, a replay cannot cancel the new run.
+        await DBOS.run_step_async(
+            StepOptions(name=f"{cls.kind}.replace"),
+            partial(cls.cancel, subject, failure=REPLACED_FAILURE),
+        )
+        return await cls.start(subject=subject, **arguments)
 
 
 def _bind_dispatch(method: classmethod) -> classmethod:

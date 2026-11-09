@@ -6,3 +6,5 @@ TASK_QUEUE = "druks_tasks"
 PAUSE_QUEUE = "druks_chat_pauses"
 # Delivery retries on its own schedule, fully decoupled from run lifecycles.
 NOTIFICATIONS_QUEUE = "druks_notifications"
+# The failure a run records when a newer run replaces it.
+REPLACED_FAILURE = "A newer run replaced this run."
