@@ -21,6 +21,11 @@ command:
     exit-status: 0
   pi --version:
     exit-status: 0
+  # The adapter registers --mcp-config, so help lists it only when the adapter loaded.
+  pi -e /usr/lib/node_modules/pi-mcp-adapter/index.ts --help:
+    exit-status: 0
+    stdout:
+      - --mcp-config
 process:
   sshd:
     running: true
