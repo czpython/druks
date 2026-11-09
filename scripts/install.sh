@@ -16,6 +16,8 @@
 #
 # Env knobs:
 #   DRUKS_INSTALL_DIR     default ~/druks
+#   DRUKS_REPO            default czpython/druks — GitHub repository to fetch
+#                         deploy files from
 #   DRUKS_REF             default main — tag or full SHA to fetch deploy files from
 #   DRUKS_TAG             image tag to pull/run; defaults to the v* DRUKS_REF,
 #                         sha-<DRUKS_REF> for a full SHA, or latest for main
@@ -23,6 +25,9 @@
 #                         which picks the install shape: `docker` local, `exe`
 #                         exe.dev + tailnet, any other name generic remote. Drukbox
 #                         validates it. Ignored after druks.toml exists.
+#   DRUKS_SKIP_PULL       set to skip docker pull and docker compose pull, so
+#                         DRUKS_TAG can name an image you built. Compose still
+#                         pulls the images that are missing.
 
 set -euo pipefail
 
@@ -47,8 +52,9 @@ set_env_var() {
 
 main() {
   INSTALL_DIR="${DRUKS_INSTALL_DIR:-$HOME/druks}"
-  REPO="czpython/druks"
+  REPO="${DRUKS_REPO:-czpython/druks}"
   REF="${DRUKS_REF:-main}"
+  SKIP_PULL="${DRUKS_SKIP_PULL:-}"
   # Validated by ``druks setup`` (the single authority on provider names).
   PROVIDER="${DRUKS_PROVIDER:-docker}"
 
@@ -89,8 +95,10 @@ main() {
   fetch_from_repo deploy/caddy/Caddyfile caddy/Caddyfile
 
   BACKEND_IMAGE="ghcr.io/czpython/druks:$IMAGE_TAG"
-  echo "→ pulling $BACKEND_IMAGE"
-  docker pull -q "$BACKEND_IMAGE" >/dev/null
+  if [ -z "$SKIP_PULL" ]; then
+    echo "→ pulling $BACKEND_IMAGE"
+    docker pull -q "$BACKEND_IMAGE" >/dev/null
+  fi
 
   # TOML setup and .env render. ``druks setup`` decides the required values:
   # exit 0 is boot-ready, exit 3 is gaps. A gaps exit still renders .env. The
@@ -117,9 +125,6 @@ main() {
     DATA_HOST_DIR=$(sed -n 's/^DRUKS_DATA_DIR=//p' .env)
   fi
   HARNESS_CONFIG_ROOT=$(sed -n 's/^DRUKS_HARNESS_CONFIG_ROOT=//p' .env)
-  if [ -z "$HARNESS_CONFIG_ROOT" ]; then
-    HARNESS_CONFIG_ROOT="$HOME/.config/druks/harnesses"
-  fi
   mkdir -p "$DATA_HOST_DIR" "$HARNESS_CONFIG_ROOT"
 
   # Pin the deploy user's uid/gid → the backend containers run as them, not
@@ -194,8 +199,10 @@ main() {
     exit 0
   fi
 
-  echo "→ docker compose pull"
-  docker compose pull
+  if [ -z "$SKIP_PULL" ]; then
+    echo "→ docker compose pull"
+    docker compose pull
+  fi
 
   # The shared sandbox-keys volume: a fresh named volume mounts root-owned, but
   # the backend runs as the deploy user and must write the per-VM SSH keys here.
@@ -213,11 +220,9 @@ main() {
   echo "→ druks init-db (idempotent)"
   docker compose run --rm web druks init-db
 
-  # drukbox keeps its schema in its own database in the shared Postgres; alembic
-  # creates the schema but never the database, so create it here — idempotent,
-  # covering both a fresh install and an upgrade from the old SQLite volume.
-  PG_USER=$(sed -n 's/^DRUKS_POSTGRES_USER=//p' .env)
-  PG_USER=${PG_USER:-druks}
+  # drukbox keeps its schema in its own database in the shared Postgres. Alembic
+  # creates the schema but never the database, so create it here. Idempotent.
+  PG_USER=$(docker compose exec -T postgres printenv POSTGRES_USER)
   echo "→ ensure drukbox database exists"
   docker compose exec -T postgres \
     psql -U "$PG_USER" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname='drukbox'" \
