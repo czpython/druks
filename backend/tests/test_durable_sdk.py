@@ -21,6 +21,7 @@ from druks.browser.models import StoredBrowserSession
 from druks.database import configure_session, get_session, session_scope
 from druks.db import atomic, db_session
 from druks.durable import FatalError, Run, RunState, WorkflowError, engine, get_run_phase
+from druks.durable.constants import REPLACED_FAILURE
 from druks.durable.dbos_state import latest_invocations, workflow_status
 from druks.durable.engine import (
     _workflow_schedules,
@@ -272,6 +273,10 @@ async def runtime():
         async def run_multistep(self) -> None:
             SINK.append(f"dispatched:{await PolicyFlow.dispatch()}")
 
+    class ReplacingFlow(Workflow):
+        async def run_multistep(self) -> None:
+            SINK.append(f"replaced:{await DoubleGateFlow.replace(subject=Widget(id=818181))}")
+
     class SubjectFlow(Workflow):
         subject = Widget
 
@@ -339,6 +344,7 @@ async def runtime():
             AgentBodyFlow=AgentBodyFlow,
             RecordFeedback=RecordFeedback,
             SubjectFlow=SubjectFlow,
+            ReplacingFlow=ReplacingFlow,
             DoubleGateFlow=DoubleGateFlow,
             ConfirmFlow=ConfirmFlow,
             SubjectlessConfirmFlow=SubjectlessConfirmFlow,
@@ -1343,6 +1349,35 @@ async def test_announcements_survive_subscriber_retry_and_workflow_replay(runtim
         assert deliveries == [(1, 1), (1, 1), (2, 2)]
     finally:
         await DBOS.cancel_workflow_async(workflow_id)
+
+
+async def test_replace_starts_a_new_run_in_place_of_the_active_run(runtime):
+    subject = Widget(id=818181)
+    first = await runtime.DoubleGateFlow.start(subject=subject)
+    await _wait_for_run(runtime.engine, first, lambda run: run.state == RunState.PARKED)
+
+    parent = await runtime.ReplacingFlow.start(subject=None)
+
+    await _wait_for_run(runtime.engine, parent, lambda run: run.state == RunState.FINISHED)
+    cancelled = await _wait_for_run(
+        runtime.engine, first, lambda run: run.state == RunState.CANCELLED
+    )
+    assert cancelled.failure == REPLACED_FAILURE
+    second = SINK[-1].removeprefix("replaced:")
+    await _wait_for_run(runtime.engine, second, lambda run: run.state == RunState.PARKED)
+
+    # A replay of the body returns the new run, and leaves it running.
+    steps = await DBOS.list_workflow_steps_async(parent)
+    replay = await DBOS.fork_workflow_async(parent, steps[-1]["function_id"] + 1)
+    await replay.get_result()
+    assert SINK[-1] == f"replaced:{second}"
+    assert (await _get_run(runtime.engine, second)).state == RunState.PARKED
+    await runtime.DoubleGateFlow.cancel(subject)
+
+
+async def test_replace_refuses_outside_a_workflow_body(runtime):
+    with pytest.raises(WorkflowError, match="workflow body"):
+        await runtime.DoubleGateFlow.replace(subject=Widget(id=818182))
 
 
 async def test_admission_waits_for_the_commit_and_deduplicates(runtime):

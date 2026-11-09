@@ -249,6 +249,11 @@ Outside a workflow, `start()` puts a new run in the queue when the caller's
 transaction commits. If the transaction rolls back, the run does not start. Before the commit, a
 duplicate start in the same transaction returns the same run ID.
 
+When a new start must replace the active run, call `replace()` with the same
+arguments. It cancels the subject's active run, with the failure "A newer run
+replaced this run.", and starts a new one. `replace()` runs only in a workflow
+body.
+
 If the app requires prelaunch policy, wrap
 `start()` in a domain `dispatch()` method. This method can own lookup, snapshot,
 or routing policy. It binds its own database session, so a workflow body can
