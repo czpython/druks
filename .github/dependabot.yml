@@ -10,6 +10,16 @@ updates:
       python-development:
         dependency-type: development
 
+  - package-ecosystem: uv
+    directory: /druks-calls
+    schedule:
+      interval: weekly
+    groups:
+      python-runtime:
+        dependency-type: production
+      python-development:
+        dependency-type: development
+
   - package-ecosystem: npm
     directory: /frontend
     schedule:
@@ -52,6 +62,14 @@ updates:
       # CI + frontend target node 22; hold major jumps of the build-stage image
       - dependency-name: "node"
         update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: docker
+    directory: /deploy/calls
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: docker
     directory: /deploy/sandbox
