@@ -34,6 +34,7 @@ class ProviderSubscriptionResponse(Schema):
     # Display only. Druks never authorizes by it. None for a pasted token, which names no email.
     provider_email: str | None = Field(validation_alias=AliasPath("identity", "email"))
     expires_at: datetime | None
+    refresh_token_expires_at: datetime | None
     updated_at: datetime
     last_refreshed_at: datetime | None
     revoked_at: datetime | None

@@ -168,7 +168,9 @@ class Provider:
     async def _complete(
         cls, *, code: str, verifier: str, account_id: str | None
     ) -> CompletedConnect:
-        payload, provider_email = await cls.exchange(code=code, verifier=verifier)
+        payload, provider_email, refresh_token_expires_at = await cls.exchange(
+            code=code, verifier=verifier
+        )
         if not provider_email:
             raise exceptions.ConnectError(
                 "The provider returned no account email — authorize with an account "
@@ -179,6 +181,7 @@ class Provider:
             payload=payload,
             provider_email=provider_email,
             expires_at=expires_at,
+            refresh_token_expires_at=refresh_token_expires_at,
             account_id=account_id,
         )
 
@@ -190,9 +193,11 @@ class Provider:
         raise NotImplementedError
 
     @classmethod
-    async def exchange(cls, *, code: str, verifier: str) -> tuple[dict, str | None]:
+    async def exchange(
+        cls, *, code: str, verifier: str
+    ) -> tuple[dict, str | None, datetime | None]:
         """Exchange the authorization code for tokens; return (subscription
-        payload, provider-reported account email)."""
+        payload, provider-reported account email, when the refresh token ends)."""
         raise NotImplementedError
 
     @classmethod
@@ -880,7 +885,9 @@ class AnthropicProvider(Provider):
         return f"https://claude.ai/oauth/authorize?{urlencode(params)}", verifier
 
     @classmethod
-    async def exchange(cls, *, code: str, verifier: str) -> tuple[dict, str | None]:
+    async def exchange(
+        cls, *, code: str, verifier: str
+    ) -> tuple[dict, str | None, datetime | None]:
         grant = await post_token(
             cls._TOKEN_URL,
             {
@@ -902,7 +909,13 @@ class AnthropicProvider(Provider):
             refresh_token=grant["refresh_token"],
         )
         account = (grant.get("account") or {}).get("email_address")
-        return credentials, account
+        refresh_token_expires_in = grant.get("refresh_token_expires_in")
+        refresh_token_expires_at = (
+            datetime.now(UTC) + timedelta(seconds=refresh_token_expires_in)
+            if refresh_token_expires_in
+            else None
+        )
+        return credentials, account, refresh_token_expires_at
 
     @classmethod
     def _apply_refresh(cls, data: dict, grant: dict, now: datetime) -> datetime | None:
@@ -1156,7 +1169,9 @@ class OpenAiProvider(Provider):
         )
 
     @classmethod
-    async def exchange(cls, *, code: str, verifier: str) -> tuple[dict, str | None]:
+    async def exchange(
+        cls, *, code: str, verifier: str
+    ) -> tuple[dict, str | None, datetime | None]:
         grant = await post_token(
             cls._TOKEN_URL,
             {
@@ -1182,7 +1197,7 @@ class OpenAiProvider(Provider):
             },
             "last_refresh": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         }
-        return payload, profile.get("email")
+        return payload, profile.get("email"), None
 
     @classmethod
     def _apply_refresh(cls, data: dict, grant: dict, now: datetime) -> datetime | None:

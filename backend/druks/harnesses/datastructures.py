@@ -78,6 +78,7 @@ class CompletedConnect:
     payload: dict
     provider_email: str
     expires_at: datetime | None
+    refresh_token_expires_at: datetime | None
     # The operator account the flow was bound to at start; None on an unbound
     # none/zero setup flow.
     account_id: str | None

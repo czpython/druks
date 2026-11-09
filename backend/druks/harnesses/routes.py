@@ -208,6 +208,7 @@ async def _store_connection(
         secrets=completed.payload,
         identity={"email": completed.provider_email},
         expires_at=completed.expires_at,
+        refresh_token_expires_at=completed.refresh_token_expires_at,
     )
     # Build the reply, then commit before provider I/O. Flushed rows hold their locks
     # across an await, and after the commit the reply would need another read.

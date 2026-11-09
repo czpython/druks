@@ -53,6 +53,7 @@ function renderProviders(snapshot: UsageProviderSummary = usage) {
             revokedAt: null,
             revokedReason: '',
             expiresAt: null,
+            refreshTokenExpiresAt: null,
             updatedAt: '2026-09-05T08:00:00Z',
             lastRefreshedAt: null,
           },
