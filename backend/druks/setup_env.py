@@ -374,8 +374,9 @@ def _canonical_config(raw: dict[str, Any]) -> dict[str, Any]:
 
 # Tables the runtime reads from druks.toml itself: ``[apps.<name>]`` and
 # ``[services.<slug>]`` switch an app or a service off, or make a service managed.
+# ``[providers.<id>]`` selects how a person signs in to a provider.
 # Setup renders nothing from them and writes them back as they are.
-_RUNTIME_TABLES = ("apps", "services")
+_RUNTIME_TABLES = ("apps", "services", "providers")
 
 
 def _provider_tables(sandbox: dict[str, Any]) -> dict[str, Any]:

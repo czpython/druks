@@ -1,8 +1,9 @@
 import argparse
 
+import druks.settings
+
 from .database import make_app_migration, run_migrations
 from .exceptions import DruksError
-from .settings import configure_settings, ensure_data_dirs, load_settings, setup_logging
 
 
 def main() -> None:
@@ -46,6 +47,11 @@ def main() -> None:
             "Pull each declared sandbox's base image and build its template. "
             "Run after every deploy."
         ),
+    ).add_argument(
+        "labels",
+        nargs="*",
+        metavar="label",
+        help="Build only these templates, by the label the command prints.",
     )
     setup_parser = subparsers.add_parser(
         "setup",
@@ -144,10 +150,10 @@ def main() -> None:
         print(f"{args.app}: ok")
         return
 
-    settings = load_settings()
-    configure_settings(settings)
-    setup_logging(settings)
-    ensure_data_dirs(settings)
+    settings = druks.settings.load_settings()
+    druks.settings.configure_settings(settings)
+    druks.settings.setup_logging(settings)
+    druks.settings.ensure_data_dirs(settings)
     from .apps.loader import register_apps
 
     register_apps()
@@ -170,7 +176,11 @@ def main() -> None:
 
         for app in iter_apps():
             app.discover()
-        asyncio.run(prepare_sandbox_templates(extra=(Bridge.sandbox, BrowserSession.sandbox)))
+        asyncio.run(
+            prepare_sandbox_templates(
+                extra=(Bridge.sandbox, BrowserSession.sandbox), labels=args.labels
+            )
+        )
         return
 
     raise AssertionError(f"Unhandled command: {args.command}")

@@ -19,7 +19,7 @@ Caddy. See [Full local](full-local.md).
 
 A **remote** installation uses each other `DRUKS_PROVIDER` value. It enables
 `COMPOSE_PROFILES=hosted,proxy`. The `hosted` profile includes a remote Drukbox
-control plane, the periodic janitor, and stock Caddy. Caddy supplies the
+control plane and stock Caddy. Caddy supplies the
 identity edge and proxy with a bind-mounted Caddyfile. The `proxy` profile
 includes the secrets proxy.
 
@@ -343,7 +343,8 @@ docker compose exec web druks sandboxes build
 ```
 
 The command asks Drukbox to prepare each declared sandbox, including Chat and
-the browser.
+the browser. It prints a label for each template. To build only some templates,
+give their labels: `druks sandboxes build druks.chat.bridge:sandboxes/chat.sh`.
 Drukbox pulls the base image and reuses a template only when its digest and
 setup script match. A changed digest starts a new template build. Docker
 Sandboxes also loads the refreshed base image into its separate image store.

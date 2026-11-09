@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import druks.workflows as workflow_module
 import pytest
+from druks.exceptions import ObjectNotFound
 from druks.sandbox import datastructures, templates
 from druks.sandbox.client import Client
 from druks.sandbox.constants import WORKFLOW_HOST_LEASE_SECONDS
@@ -115,6 +116,18 @@ async def test_prepare_templates_labels_each_module_and_script(monkeypatch):
         "site_builder.workflows:sandboxes/preview.sh",
     ]
     assert all(call.kwargs["base_image"] is None for call in create_template.await_args_list)
+
+    create_template.reset_mock()
+    await templates.prepare_sandbox_templates(
+        labels=["site_builder.workflows:sandboxes/preview.sh"]
+    )
+    assert [call.kwargs["label"] for call in create_template.await_args_list] == [
+        "site_builder.workflows:sandboxes/preview.sh"
+    ]
+    with pytest.raises(ObjectNotFound, match="label site_builder.workflows:sandboxes/missing.sh"):
+        await templates.prepare_sandbox_templates(
+            labels=["site_builder.workflows:sandboxes/missing.sh"]
+        )
 
 
 async def test_a_sandbox_on_its_own_provider_builds_on_that_provider_image(monkeypatch):

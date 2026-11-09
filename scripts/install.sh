@@ -152,7 +152,7 @@ main() {
 
   # Shape selection, written to .env. After that, `docker compose` in this
   # directory starts the services of the shape. The `hosted` profile adds the
-  # Caddy edge and the janitor. The `proxy` profile adds the secrets proxy on
+  # Caddy edge. The `proxy` profile adds the secrets proxy on
   # every provider but docker-sbx, where sbx swaps the placeholders itself.
   # A `docker` box runs without Caddy, with the dashboard on :8001. docker-sbx
   # also layers the overlay, which connects drukbox to the host sandboxd, and

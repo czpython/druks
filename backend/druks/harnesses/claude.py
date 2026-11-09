@@ -73,7 +73,12 @@ class ClaudeHarness(Harness):
                 "settingSources": [],
                 "strictMcpConfig": True,
             }
-        env: dict[str, str | None] = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+        # The bridge saves the session files as soon as a turn ends. Claude Code buffers its
+        # transcript, so without an eager flush the files miss the turn.
+        env: dict[str, str | None] = {
+            "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+            "CLAUDE_CODE_EAGER_FLUSH": "1",
+        }
         if identity and include_apps:
             # Claude Code loads a person's connectors only from CLAUDE_CODE_OAUTH_TOKEN, and
             # ANTHROPIC_API_KEY outranks it. The bridge fills the placeholder and removes a
