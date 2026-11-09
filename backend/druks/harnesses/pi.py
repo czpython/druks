@@ -21,7 +21,7 @@ from .subprocess import read_result_json
 
 _DRUKS_OUTPUT_TEMPLATE = Path(__file__).parent / "druks-output.ts"
 
-# deploy/sandbox/Dockerfile installs pi-mcp-adapter globally and asserts this path.
+# deploy/sandbox/Dockerfile links pi-mcp-adapter at this path and asserts it.
 _PI_MCP_ADAPTER_PATH = "/usr/lib/node_modules/pi-mcp-adapter/index.ts"
 _PROVIDER_ERROR_STATUS = re.compile(r" API error \((\d{3})\):")
 _STATUS_ERRORS = {

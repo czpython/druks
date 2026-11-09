@@ -48,14 +48,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends nodejs gh \
     && rm -rf /var/lib/apt/lists/*
 
-COPY package.json /tmp/harnesses.json
+COPY package.json package-lock.json /opt/druks-harnesses/
 
-# Dependabot watches package.json. pi loads the adapter extension from this
-# absolute path, so a moved npm global root has to fail the build rather than
-# every run.
-RUN node -p "Object.entries(require('/tmp/harnesses.json').dependencies).map(([name, version]) => name + '@' + version).join(' ')" \
-    | xargs npm install -g \
-    && rm /tmp/harnesses.json \
+RUN npm ci --prefix /opt/druks-harnesses --no-audit --no-fund \
+    && ln -s /opt/druks-harnesses/node_modules/.bin/claude /opt/druks-harnesses/node_modules/.bin/codex \
+        /opt/druks-harnesses/node_modules/.bin/opencode /opt/druks-harnesses/node_modules/.bin/pi /usr/local/bin/ \
+    && ln -s /opt/druks-harnesses/node_modules/pi-mcp-adapter /usr/lib/node_modules/pi-mcp-adapter \
     && test -f /usr/lib/node_modules/pi-mcp-adapter/index.ts
 
 RUN useradd --create-home --shell /bin/bash druks

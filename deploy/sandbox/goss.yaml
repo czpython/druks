@@ -9,6 +9,18 @@ file:
     group: druks
     contents:
       - ssh-ed25519 AAAA goss
+  /usr/lib/node_modules/pi-mcp-adapter/index.ts:
+    exists: true
+    filetype: file
+command:
+  claude --version:
+    exit-status: 0
+  codex --version:
+    exit-status: 0
+  opencode --version:
+    exit-status: 0
+  pi --version:
+    exit-status: 0
 process:
   sshd:
     running: true
