@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import asyncssh
 import pytest
 from conftest import CONFIG_PROBE, connect_provider, installation_key, make_jwt
 from druks.durable.enums import AgentCallStatus
@@ -282,6 +283,22 @@ async def test_first_byte_killer_kills_only_a_silent_run():
     )
     assert silent_run.kill_calls == 1
     assert stderr_run.kill_calls == 0
+
+
+@pytest.mark.parametrize(
+    "error", [asyncssh.ConnectionLost("channel closed"), ConnectionRefusedError()]
+)
+async def test_first_byte_killer_reports_a_failed_kill(error: Exception, caplog):
+    async def kill() -> None:
+        raise error
+
+    assert not await _first_byte_killer(
+        run=SimpleNamespace(run_id="rid", kill=kill),
+        stdout_buf=bytearray(),
+        stderr_buf=bytearray(),
+        delay_seconds=0,
+    )
+    assert "first-byte killer failed to kill run rid" in caplog.text
 
 
 async def test_sandbox_unreachable_translates_to_harness_error(
