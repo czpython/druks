@@ -113,14 +113,16 @@ async def test_get_serves_the_kept_token_without_a_refresh(token_endpoint):
 
 
 async def test_get_refreshes_persists_rotation_and_keeps_the_token_in_the_vault(token_endpoint):
-    token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-new", "expires_in": 300}
+    # Longer than TOKEN_MIN_TTL_SECONDS: utc_now() drops microseconds, so a token
+    # that lasts exactly the minimum is kept only within the second of its refresh.
+    token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-new", "expires_in": 600}
     connection = await _connection()
 
     token, expires_at = await _client().get_access_token(db_session(), connection=connection)
 
     assert token == "at-2"
-    # The expiry is the provider's 300s from now.
-    assert timedelta(seconds=290) < expires_at - datetime.now(UTC) <= timedelta(seconds=300)
+    # The expiry is the provider's 600s from now.
+    assert timedelta(seconds=590) < expires_at - datetime.now(UTC) <= timedelta(seconds=600)
     db_session().expunge_all()
     assert (await db_session().get(VaultSecret, connection.id)).secrets["refresh_token"] == "rt-new"
     refresh = token_endpoint.requests[0]

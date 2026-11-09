@@ -23,3 +23,12 @@ async def request_session() -> AsyncIterator[AsyncSession]:
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 EngineDep = Annotated[Engine, Depends(get_engine)]
 SessionDep = Annotated[AsyncSession, Depends(request_session)]
+
+
+async def commit_before_response(session: SessionDep) -> AsyncIterator[None]:
+    """Commit the request's transaction before the response goes out, so a
+    failed commit answers 500, not a success for writes that never landed.
+    FastAPI closes ``request_session`` only after it sends the response; the
+    app declares this with function scope, which closes first."""
+    yield
+    await session.commit()

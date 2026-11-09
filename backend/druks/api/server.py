@@ -16,7 +16,7 @@ from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.routes import router as auth_router
 from druks.api.artifacts import router as artifacts_router
 from druks.api.dashboard import router as dashboard_router
-from druks.api.dependencies import request_session
+from druks.api.dependencies import commit_before_response
 from druks.api.exceptions import AgentApiError
 from druks.api.runs import router as runs_router
 from druks.api.subjects import router as subjects_router
@@ -145,7 +145,7 @@ register_apps()
 app = FastAPI(
     title="Druks",
     lifespan=combine_lifespans(lifespan, _mcp_lifespan),
-    dependencies=[Depends(request_session)],
+    dependencies=[Depends(commit_before_response, scope="function")],
 )
 
 
