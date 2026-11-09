@@ -317,8 +317,7 @@ async def disconnect_mcp_server(session: SessionDep, name: str) -> None:
     await oauth.disconnect(session, name, account_id)
     if not await oauth.list_connections(session, name):
         # The last grant leaving reopens the mode choice: the next connect is
-        # a first connect again.
+        # a first connect again. An enabled server with no grant fails every run.
         server = await McpServer.get_for_name(session, name)
         server.identity_mode = None
-    if access.identity_mode == IdentityMode.SHARED:
-        await McpServer.set_enabled(session, name, is_enabled=False)
+        server.is_enabled = False

@@ -1134,6 +1134,22 @@ async def test_per_user_disconnect_preserves_other_accounts_grant_and_token(tmp_
     assert (await _kept(connected_token))[0] == "connected-token"
 
 
+async def test_per_user_last_disconnect_disables_and_reopens_the_mode(tmp_path, druks_db):
+    account = await Account.get_or_create(druks_db, "last@example.com")
+    await _store_grant(account_id=account.id, identity_mode=IdentityMode.PER_USER)
+    settings = make_settings(tmp_path, identity={"mode": "header", "header": "X-Test-User"})
+
+    with TestClient(configure_app_for_test(settings=settings, authenticated=False)) as client:
+        response = client.delete(
+            f"/api/mcp-servers/{_NAME}/grant", headers={"X-Test-User": account.username}
+        )
+        assert response.status_code == 204
+
+    server = await McpServer.get_for_name(druks_db, _NAME)
+    assert server.identity_mode is None
+    assert server.is_enabled is False
+
+
 async def test_removal_drops_every_grant_and_kept_token(tmp_path, druks_db):
     first = await Account.get_or_create(druks_db, "first@example.com")
     second = await Account.get_or_create(druks_db, "second@example.com")
