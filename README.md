@@ -1,135 +1,155 @@
-<h1 align="center">
-  <img src="frontend/public/brand-mark.svg" alt="Dragon head" width="72" height="72" align="middle" />
-  druks
-</h1>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo/web/DruksLockup_Dark.svg">
+    <img src="docs/assets/logo/web/DruksLockup_Light.svg" alt="Druks" width="240">
+  </picture>
+</p>
 
-[![All Contributors](https://img.shields.io/github/all-contributors/czpython/druks?color=ee8449&style=flat-square)](#contributors)
+<h3 align="center">AI agents work. You make the call.</h3>
 
-> [!WARNING]
-> Druks is under active development. Breaking changes and rough edges can occur
-> before version 1.0. `main` and `latest` contain edge builds. They are not
-> stable releases.
+<p align="center">
+  Druks finds the work, does it on the tools you already use,<br>
+  and brings the important decisions to you. Self-hosted or Druks Cloud.
+</p>
 
-Druks is a self-hosted **home for durable agent apps**. It runs agents through
-connected harnesses. The included Software Factory app automates software
-delivery from a ticket to a reviewed pull request.
+<p align="center">
+  <a href="https://app.druks.ai/sign-in?utm_source=github&utm_medium=readme"><b>Try it now</b></a> ·
+  <a href="#get-started"><b>Install on your AI</b></a> ·
+  <a href="https://docs.druks.ai/?utm_source=github&utm_medium=readme">Docs</a>
+</p>
 
-An ordinary agent script loses its place when the process dies. A Druks
-workflow records the result of each completed durable operation in Postgres.
-After a restart or deploy, Druks replays the workflow and reuses those recorded
-results instead of repeating completed work. If the process stops *inside* an
-operation, that operation can run again. Thus, side effects still require
-idempotency. [Durability and recovery](https://docs.druks.ai/concepts#durability-and-recovery)
-explains this boundary.
+<p align="center">
+  <a href="LICENSE"><img alt="License: FSL-1.1-ALv2" src="https://img.shields.io/badge/license-FSL--1.1--ALv2-blue"></a>
+  <img alt="Status: pre-1.0" src="https://img.shields.io/badge/status-pre--1.0-orange">
+  <img alt="Works with Claude Code and Codex" src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex-00677b">
+  <a href="#contributors"><img alt="All Contributors" src="https://img.shields.io/github/all-contributors/czpython/druks?color=00677b"></a>
+</p>
 
-## Install
+<p align="center">
+  <img src="docs/assets/readme/approval-light.png" alt="A Druks security sweep waiting for approval: upgrade 3 packages in acme/api, closes 7 vulnerabilities, cost so far $0.41, with Approve, Change and Stop buttons" width="860">
+</p>
 
-The installer supports three deployment shapes backed by
-[Drukbox](https://github.com/czpython/drukbox):
+**Druks is a self-hosted or cloud platform where AI agents such as Claude Code and Codex do a company's recurring engineering work, and a person approves each change.**
 
-- **Docker:** `docker` (default) starts local sandbox containers on the host Docker daemon.
-- **Remote:** `exe` starts exe.dev sandbox VMs over a tailnet.
-- Each other provider name selects the generic remote shape.
+- **It finds the work.** A schedule, an alert or a button starts it. Nobody writes a prompt.
+- **It does the work with your tools.** Claude Code or Codex, with your own Claude or OpenAI account, in a sandbox, on your real repositories. You see the cost after every step.
+- **You make the call.** The run stops and asks you: Approve, Change or Stop. You answer in Slack, the dashboard, the Druks chat or Claude Code. It waits up to 14 days and costs nothing while it waits.
 
-The default is the local shape, so the bare command boots a stack with no
-authored values:
+## Why Druks
+
+| If you use… | It helps when… | Druks adds… |
+| --- | --- | --- |
+| A coding assistant (Claude Code, Codex, Copilot) | A developer sits down and asks | Work that starts by itself, every week, with nobody at the keyboard |
+| An agent board | You write a ticket and assign it to an agent | Processes that find the work themselves, like a weekly security sweep |
+| A workflow builder | You design each step of the flow | Apps that already work. Build your own only when you want to |
+
+Druks does not replace your coding agent. It puts the agent on a schedule, runs it in a sandbox, and brings you its result as one decision.
+
+## What a run looks like
+
+<!-- Publish this section when the security sweep app ships. Until then, link to the Software Factory example in docs. -->
+
+The **security sweep** checks one repository every Monday:
+
+1. It reads the open Dependabot alerts and checks which ones touch code you actually call.
+2. It upgrades the packages in a sandbox and runs your tests.
+3. It asks you: *"Upgrade 3 packages. Closes 7 vulnerabilities, 2 in code you call. Approve?"* After your yes, it opens a pull request.
+4. You get a summary: the pull request, what was fixed, how long it took and what it cost.
+
+The included **Ticket to pull request** app (`software_factory`) takes a ticket, writes and checks the change, and opens a pull request for review.
+
+## Get started
+
+Druks Cloud and self-hosted Druks work the same way. You get the same apps and approve in the same places. The only difference is where Druks runs.
+
+**Druks Cloud.** Druks runs on our servers. Nothing to install. [Try it now](https://app.druks.ai/sign-in?utm_source=github&utm_medium=readme).
+
+**Self-hosted.** Druks runs on your laptop or your own server. You need Docker with Compose. Paste this into Claude Code, Codex or any coding agent on the machine:
+
+```text
+Install Druks on this machine with https://druks.ai/install.sh. Read the script, then run it. Then run the steps it prints: build the sandbox images and run druks doctor. If a step fails, stop. Show me the failed step and its output. Do not improvise a fix. When druks doctor passes, open http://127.0.0.1:8001 in my browser.
+```
+
+Or run the installer yourself:
 
 ```bash
 curl -fsSL https://druks.ai/install.sh | bash
 ```
 
-That command follows the edge channel while Druks has no stable release.
-Versioned releases use an installer script and an image from the same tag.
-[The release process](https://docs.druks.ai/releasing#install-an-immutable-version)
-explains this method. Run the installer again to upgrade Druks.
+Then build the sandbox images, check the install and open the dashboard:
 
-Then follow [full local setup](https://docs.druks.ai/full-local). Connect the
-agent harnesses in the dashboard. Connect the GitHub App that
-`software_factory` uses. A standalone app can require different integrations.
+```bash
+cd ~/druks
+docker compose exec web druks sandboxes build
+docker compose exec web druks doctor
+open http://127.0.0.1:8001   # on Linux: xdg-open
+```
 
-Or hand the install to a coding agent — paste this into Claude Code, Codex,
-or any agent with shell access on the target machine:
+In the dashboard, connect your AI account under **Settings → Providers** and the GitHub App under **Settings → Connections → Services**.
 
-> Install druks on this machine by following
-> <https://raw.githubusercontent.com/czpython/druks/main/INSTALL.md>
-> exactly. Run each verification step. If a verification fails, stop. Show me
-> the failed step and its output. Do not improvise a fix.
+<details>
+<summary>Remote installs (exe.dev and other providers)</summary>
 
-For a remote install, name the provider — `exe` for exe.dev VMs, any other
-Drukbox provider name for the generic remote shape:
+Name the provider. The installer lists the values only you know, then exits. Set them in `~/druks/druks.toml` and `~/druks/.env`, and run the same command again.
 
 ```bash
 curl -fsSL https://druks.ai/install.sh | DRUKS_PROVIDER=exe bash
 ```
 
-The installer does not ask questions. The first run writes
-`~/druks/druks.toml`, and `~/druks/.env` with generated secrets. A remote shape
-can require values
-that only you know. These values include provider credentials and identity-edge
-details.
+The [deployment guide](https://docs.druks.ai/deployment) covers access control, upgrades and rollback.
+</details>
 
-The installer prints this list and exits. Set the values in
-`druks.toml` and `.env`. Then run the same command again.
+## What runs where
 
-See the [deployment runbook](https://docs.druks.ai/deployment) for
-prerequisites, access control, verification, and rollback.
+When you self-host, this is what happens with your code and your keys:
 
-```text
-trigger ──> app workflow ──> durable step ──> agent ──> sandbox
-                 │                     │              │
-                 │                     │              └─ harness CLI
-                 │                     └─ result checkpointed in Postgres
-                 ├─ event ──> feed / app reaction
-                 └─ gate  ──> wait for human or external system ──> resume
-```
+- **Druks runs on your machine.** The dashboard, Postgres, Redis and the sandbox service run in Docker on your host.
+- **By default, each agent call runs in its own Drukbox sandbox,** with the tools and credentials of that step.
+- **Your code goes to the AI provider you choose,** through your own Claude or OpenAI account, and back to GitHub as pull requests.
+- **Connection secrets are encrypted** in your own database.
+- **GitHub access goes through your own GitHub App,** on the repositories you pick.
+- **No telemetry.** Druks does not send usage data to us.
+- **Apps ask before they act.** The security sweep opens a pull request only after your yes. Every proposal, decision and cost stays in the run history.
 
-**Platform and apps stay separate**
+Found a security problem? Follow the [security policy](SECURITY.md). Do not open a public issue.
 
-Druks owns the execution and operating substrate:
+## How it works
 
-- DBOS workflows and queues that use Postgres
-- Typed human gates, cancellation, schedules, and observable run state
-- Agent harness dispatch through isolated Drukbox sandboxes
-- Append-only events, live feeds, webhooks, notifications, MCP servers, and skills
-- Validated operator settings, encrypted MCP and OAuth secrets, and the dashboard shell
-- App discovery, API namespaces, and independent migration histories.
+<p align="center">
+  <img src="docs/assets/readme/how-it-works-light.svg" alt="How Druks works: a trigger starts an app workflow. Each durable step saves its result in Postgres. An agent step runs Claude Code or Codex in an isolated Drukbox sandbox. A gate pauses the workflow until a person or a system answers in Slack, the dashboard, the chat or Claude Code, then it resumes. Events go to the run history, feed, notifications and webhooks." width="880">
+</p>
 
-An **app** owns its workflows, agents, domain models, routes, events, provider
-reactions, and optional dashboard pages. It is a Python distribution that uses
-the `druks.apps` entry-point group. Install the distribution to register it.
-Druks does not require an app-specific plugin list.
-
-Scaffold one with the published CLI, no checkout required:
-
-```bash
-uvx --from druks druks create app daily-quote
-```
-
-The generated project root carries an `AGENTS.md` with the contracts and a link
-to the authoring guide.
-
-The bundled `software_factory` app is a concrete example. It coordinates coding
-agents through tickets and GitHub pull requests. GitHub pull-request
-orchestration belongs to `software_factory`, not to Druks.
+Each process is an **app**. After a restart or deploy, Druks picks up where it left off and does not repeat finished work. [Concepts and guarantees](https://docs.druks.ai/concepts) explains the details.
 
 ## Documentation
 
-- **Start here:** [Quickstart](https://docs.druks.ai/quickstart)
-- **Understand recovery:** [Concepts and guarantees](https://docs.druks.ai/concepts)
-- **Build an app:** [Author guide](https://docs.druks.ai/writing-an-app)
-- **Operate Druks:** [Deployment](https://docs.druks.ai/deployment) and [configuration](https://docs.druks.ai/configuration)
-- **Diagnose a failure:** [Troubleshooting](https://docs.druks.ai/troubleshooting)
-- **Contributing to Druks:** [Contribution guide](https://github.com/czpython/druks/blob/main/CONTRIBUTING.md)
-- **Reporting a vulnerability:** [Security policy](https://github.com/czpython/druks/blob/main/SECURITY.md)
-- **All documentation:** [docs.druks.ai](https://docs.druks.ai).
+| I want to… | Start here |
+| --- | --- |
+| Install Druks on my machine | [Quickstart](https://docs.druks.ai/quickstart) |
+| Run Druks for my team | [Deployment](https://docs.druks.ai/deployment) and [configuration](https://docs.druks.ai/configuration) |
+| Automate my own process | [Writing an app](https://docs.druks.ai/writing-an-app), then `uvx --from druks druks create app my-app` |
+| Understand restarts and approvals | [Concepts](https://docs.druks.ai/concepts) |
+| Fix a problem | [Troubleshooting](https://docs.druks.ai/troubleshooting) |
+
+## Status
+
+Druks is **pre-1.0**. Breaking changes can happen. `main` and `latest` are edge builds, not stable releases. Run the installer again to upgrade. For a fixed version, see [installing an immutable version](https://docs.druks.ai/releasing#install-an-immutable-version).
+
+## Community
+
+- **Bugs, questions and ideas:** [open an issue](https://github.com/czpython/druks/issues)
+- **Contributing:** [contribution guide](CONTRIBUTING.md)
 
 ## License
 
-Druks uses the [Functional Source License](LICENSE) (FSL-1.1-ALv2). You can
-self-host Druks, change it, and build apps on it. You cannot sell it as a
-competing hosted service. Each release becomes Apache 2.0 two years after it
-ships. The [licensing page](https://docs.druks.ai/licensing) explains the
-details.
+Druks is available under the [Functional Source License](LICENSE) (FSL-1.1-ALv2):
+
+- You can read, run and change all of the code.
+- You can self-host Druks for your company's work and build apps on it.
+- You cannot sell it as a competing hosted service.
+- Each release becomes Apache 2.0 two years after it ships.
+
+The [licensing page](https://docs.druks.ai/licensing) explains the details.
 
 ## Contributors
 

@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-24 -24 1008 356" width="1008" height="356" role="img" aria-label="How Druks works: a trigger starts an app workflow. Each durable step saves its result in Postgres. An agent step runs Claude Code or Codex in an isolated Drukbox sandbox. A gate pauses the workflow until a person or a system answers in Slack, the dashboard, the chat or Claude Code, then the workflow resumes. Events go to the run history, the live feed, notifications and webhooks.">
+<rect x="-24" y="-24" width="1008" height="356" rx="14" fill="#f7f7f7"/>
+<rect x="0.75" y="8.75" width="166.5" height="102.5" rx="10" fill="#fcfcfc" stroke="#dee2de" stroke-width="1"/>
+<text x="16" y="34" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6668">Trigger</text>
+<text x="16" y="60" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#293638">Schedule, webhook</text>
+<text x="16" y="94" font-family="'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="11.5" fill="#5b6668">or button</text>
+<path d="M172 60.0 L194 60.0" stroke="#5b6668" stroke-width="1.25"/>
+<path d="M189 56.0 L194 60.0 L189 64.0" fill="none" stroke="#5b6668" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="198.75" y="8.75" width="166.5" height="102.5" rx="10" fill="#fcfcfc" stroke="#dee2de" stroke-width="1"/>
+<text x="214" y="34" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6668">App workflow</text>
+<text x="214" y="60" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#293638">Your app&#x27;s code</text>
+<text x="214" y="94" font-family="'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="11.5" fill="#5b6668">DBOS on Postgres</text>
+<path d="M370 60.0 L392 60.0" stroke="#5b6668" stroke-width="1.25"/>
+<path d="M387 56.0 L392 60.0 L387 64.0" fill="none" stroke="#5b6668" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="396.75" y="8.75" width="166.5" height="102.5" rx="10" fill="#fcfcfc" stroke="#dee2de" stroke-width="1"/>
+<text x="412" y="34" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6668">Durable step</text>
+<text x="412" y="60" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#293638">Result saved</text>
+<text x="412" y="94" font-family="'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="11.5" fill="#5b6668">in Postgres</text>
+<path d="M568 60.0 L590 60.0" stroke="#5b6668" stroke-width="1.25"/>
+<path d="M585 56.0 L590 60.0 L585 64.0" fill="none" stroke="#5b6668" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="594.75" y="8.75" width="166.5" height="102.5" rx="10" fill="#fcfcfc" stroke="#dee2de" stroke-width="1"/>
+<text x="610" y="34" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6668">Agent</text>
+<text x="610" y="60" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#293638">Claude Code</text>
+<text x="610" y="94" font-family="'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="11.5" fill="#5b6668">or Codex CLI</text>
+<path d="M766 60.0 L788 60.0" stroke="#5b6668" stroke-width="1.25"/>
+<path d="M783 56.0 L788 60.0 L783 64.0" fill="none" stroke="#5b6668" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="792.75" y="8.75" width="166.5" height="102.5" rx="10" fill="#fcfcfc" stroke="#dee2de" stroke-width="1"/>
+<text x="808" y="34" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6668">Sandbox</text>
+<text x="808" y="60" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#293638">Isolated workspace</text>
+<text x="808" y="94" font-family="'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="11.5" fill="#5b6668">Drukbox</text>
+<rect x="198.75" y="176.75" width="364.5" height="90.5" rx="10" fill="#e6f0f2" stroke="#00677b" stroke-width="1.5"/>
+<text x="214" y="202" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#00677b">Gate</text>
+<text x="214" y="228" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#293638">Waits for a person or a system</text>
+<text x="214" y="250" font-family="'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="11.5" fill="#5b6668">Slack · dashboard · chat · Claude Code</text>
+<rect x="594.75" y="176.75" width="364.5" height="90.5" rx="10" fill="#fcfcfc" stroke="#dee2de" stroke-width="1"/>
+<text x="610" y="202" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12" font-weight="600" fill="#5b6668">Events</text>
+<text x="610" y="228" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#293638">Append-only run history</text>
+<text x="610" y="250" font-family="'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="11.5" fill="#5b6668">live feed · notifications · webhooks</text>
+<path d="M246 116 L246 172" stroke="#5b6668" stroke-width="1.25"/>
+<path d="M242 167 L246 172 L250 167" fill="none" stroke="#5b6668" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M242 121 L246 116 L250 121" fill="none" stroke="#5b6668" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="256" y="148" font-family="'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="11" fill="#5b6668">pause · resume</text>
+<path d="M326 116 V134 H777.0 " fill="none" stroke="#5b6668" stroke-width="1.25"/>
+<path d="M777.0 134 L777.0 172" stroke="#5b6668" stroke-width="1.25"/>
+<path d="M773.0 167 L777.0 172 L781.0 167" fill="none" stroke="#5b6668" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="480.0" y="296" text-anchor="middle" font-family="'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace" font-size="11" letter-spacing="0.4" fill="#5b6668">After a restart, a run resumes from its last saved step  ·  No cost while a gate waits</text>
+</svg>

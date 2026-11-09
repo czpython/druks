@@ -2,24 +2,25 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "linden",
   "name": "Druks",
-  "description": "Build and operate durable agent apps on your own infrastructure.",
+  "description": "AI agents work. You make the call. Druks runs Claude Code and Codex on your recurring engineering work, self-hosted or in the cloud, and asks a person before anything changes.",
   "seo": {
     "metatags": {
       "canonical": "https://docs.druks.ai"
     }
   },
   "colors": {
-    "primary": "#0F766E",
-    "light": "#2DD4BF",
-    "dark": "#0F766E"
+    "primary": "#00677b",
+    "light": "#00677b",
+    "dark": "#00677b"
   },
   "logo": {
-    "light": "/assets/logo/web/DruksLogo_Black.svg",
-    "dark": "/assets/logo/web/DruksLogo_White.svg",
+    "light": "/assets/logo/web/DruksLockup_Light.svg",
+    "dark": "/assets/logo/web/DruksLockup_Dark.svg",
     "href": "https://druks.ai"
   },
   "appearance": {
-    "default": "system"
+    "default": "light",
+    "strict": true
   },
   "icons": {
     "library": "lucide"
@@ -29,6 +30,10 @@
       {
         "label": "Website",
         "href": "https://druks.ai"
+      },
+      {
+        "label": "Try it now",
+        "href": "https://app.druks.ai/sign-in?utm_source=docs"
       }
     ],
     "primary": {
@@ -43,6 +48,8 @@
         "pages": [
           "index",
           "quickstart",
+          "cloud",
+          "approvals",
           "full-local",
           {
             "group": "Container runtimes",
@@ -111,5 +118,21 @@
         ]
       }
     ]
+  },
+  "fonts": {
+    "heading": {
+      "family": "Geist",
+      "weight": 600
+    },
+    "body": {
+      "family": "Geist",
+      "weight": 400
+    }
+  },
+  "background": {
+    "color": {
+      "light": "#f7f7f7",
+      "dark": "#f7f7f7"
+    }
   }
 }

@@ -1,20 +1,45 @@
 ---
 title: "Quickstart"
-description: "Install Druks locally, connect an agent harness, and examine the complete execution path."
+description: "From nothing to your first approval, on Druks Cloud or on your own machine."
 icon: "rocket"
 ---
+
+Druks Cloud and self-hosted Druks work the same way. The only difference is
+where Druks runs. See [Druks Cloud](cloud.md) to compare them.
+
+<Tabs>
+  <Tab title="Druks Cloud">
+
+1. [Sign in to Druks Cloud](https://app.druks.ai/sign-in?utm_source=docs) with
+   your email address. We email you a code. Nothing to install.
+2. Connect your AI account and your repositories.
+3. Start a run, and answer it when it asks you. See [Approvals](approvals.md).
+
+  </Tab>
+  <Tab title="Self-hosted">
+
+### Install with your AI
+
+Paste this into Claude Code, Codex or any coding agent with shell access on the
+machine:
+
+```text
+Install Druks on this machine with https://druks.ai/install.sh. Read the script, then run it. Then run the steps it prints: build the sandbox images and run druks doctor. If a step fails, stop. Show me the failed step and its output. Do not improvise a fix. When druks doctor passes, open http://127.0.0.1:8001 in my browser.
+```
+
+Or follow the steps below by hand.
 
 This path runs Druks, Postgres, Redis, and Drukbox on one machine. It uses the
 same durable engine and isolated sandbox path as a hosted installation. It does
 not require public ingress.
 
-## Prerequisites
+### Prerequisites
 
 - Docker with the Compose plugin
 - Sufficient Docker capacity for the stack and short-lived sandbox containers
 - A subscription or API key for a supported agent harness.
 
-## Install
+### Install
 
 Run the installer with its default `docker` sandbox provider:
 
@@ -42,7 +67,7 @@ The health response is:
 
 Open the dashboard at [http://127.0.0.1:8001](http://127.0.0.1:8001).
 
-## Connect a provider
+### Connect a provider
 
 Open **Settings → Providers** and connect a provider for your selected harness.
 Use a subscription or API key, as the provider supports. Druks stores the
@@ -64,7 +89,7 @@ docker compose exec web druks doctor --sandbox
 The second command does real provisioning. It is stronger evidence than a
 healthy Drukbox HTTP endpoint.
 
-## Run an app
+### Run an app
 
 Druks does not create a generic job. An installed app supplies the workflow and
 its trigger. The distribution includes **Software Factory** as its reference
@@ -89,8 +114,12 @@ internet. Use an HTTPS tunnel for provider triggers. You can also use local
 dashboard actions. The exact paths are in
 [full local setup](full-local.md#webhook-caveat).
 
+  </Tab>
+</Tabs>
+
 ## Next steps
 
+- See where you answer a waiting run in [approvals](approvals.md).
 - Read [concepts and guarantees](concepts.md) before judging recovery behavior.
 - Follow [full local setup](full-local.md) for browser sessions, webhook ingress,
   and sandbox-image changes.
