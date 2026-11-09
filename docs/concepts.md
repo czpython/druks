@@ -111,9 +111,9 @@ scheduled -> running -> finished
                     \-> cancelled
 ```
 
-A run whose DBOS status row is missing reads `scheduled` during the short
-enqueue window and `orphaned` after five minutes. `orphaned` is terminal: the
-workflow record needed to execute it no longer exists.
+A run whose DBOS status row is missing reads `orphaned`. A run's row commits
+with or after its workflow's, so a missing workflow record no longer exists, and
+the run will never start. `orphaned` is terminal.
 
 Subjected workflow starts use DBOS queue deduplication per workflow kind and
 subject. A duplicate start returns the active run's id. Druks does not impose

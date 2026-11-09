@@ -1,5 +1,3 @@
-from datetime import timedelta
-
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -9,15 +7,10 @@ from druks.durable.enums import RunState
 # points the system URL at it), so a run's state is one correlated read away.
 DBOS_SYSTEM_SCHEMA = "dbos"
 
-# A run whose workflow_status row is still missing past this window will never
-# start (DBOS system tables wiped, or its executor destroyed) and reads orphaned
-# rather than scheduled forever.
-_MISSING_STATUS_GRACE = timedelta(minutes=5)
-
 # Read-only handle on the columns the derivation and subject keying need; DBOS
 # owns and migrates the real table. NOTE: DBOS workflow_status GC/retention must
-# stay off — a purged workflow row derives as orphaned once past the grace
-# window and falls out of its subject's timeline.
+# stay off — a purged workflow row derives as orphaned and falls out of its
+# subject's timeline.
 workflow_status = sa.Table(
     "workflow_status",
     sa.MetaData(schema=DBOS_SYSTEM_SCHEMA),
@@ -87,9 +80,7 @@ def latest_invocations(schedule_names: list[str], limit: int) -> sa.Select:
     )
 
 
-def state_expression(
-    run_id: sa.ColumnElement, input_gate: sa.ColumnElement, created_at: sa.ColumnElement
-) -> sa.ColumnElement:
+def state_expression(run_id: sa.ColumnElement, input_gate: sa.ColumnElement) -> sa.ColumnElement:
     # The run's state IS the DBOS workflow's, projected onto our vocabulary; the
     # one fact DBOS can't know — parked on a gate — splits PENDING. A NULL status
     # means enqueued, not yet running: scheduled. ELSE keeps a future DBOS status
@@ -117,14 +108,9 @@ def state_expression(
         .correlate_except(workflow_status)
         .scalar_subquery()
     )
-    # No workflow row at all: inside the start-gap it's a scheduled run mid-enqueue;
-    # past the grace window the row is gone for good, so the run is orphaned — it
-    # will never start, rather than reading scheduled forever.
-    missing = sa.case(
-        (created_at < sa.func.now() - _MISSING_STATUS_GRACE, RunState.ORPHANED.value),
-        else_=RunState.SCHEDULED.value,
-    )
-    return sa.func.coalesce(mapped, missing)
+    # A run's row commits with or after its workflow's, so a missing workflow row
+    # is gone for good (DBOS system tables wiped): the run will never start.
+    return sa.func.coalesce(mapped, RunState.ORPHANED.value)
 
 
 def subject_attribute_expression(run_id: sa.ColumnElement, name: str) -> sa.ColumnElement:

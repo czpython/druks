@@ -82,7 +82,7 @@ class Run(Base):
     # SELECT (session.get() on a not-yet-loaded instance included) computes it
     # fresh; an already-loaded instance keeps what it read until expired.
     # Read-only; an operator ends a run through cancel().
-    state: Mapped[str] = column_property(state_expression(id, input_gate, created_at))
+    state: Mapped[str] = column_property(state_expression(id, input_gate))
     # How the subject showed itself when this run started — read with the row, so
     # every event the run writes names it without a second lookup.
     subject_key: Mapped[str | None] = column_property(
@@ -252,7 +252,7 @@ class Run(Base):
     def open_subject_ids(cls, subject_type: str) -> Select:
         """The subjects of ``subject_type`` whose newest run hasn't handed off, that
         run's most recent first — a subquery their own read composes."""
-        state = state_expression(cls.id, cls.input_gate, cls.created_at).label("state")
+        state = state_expression(cls.id, cls.input_gate).label("state")
         subject_id = workflow_status.c.attributes["subject_id"].as_string().label("subject_id")
         driving = (
             select(
@@ -288,7 +288,7 @@ class Run(Base):
         include_subjectless: bool = False,
     ) -> Select:
         """Current runs per kind and subject, ranked before state filtering."""
-        state = state_expression(cls.id, cls.input_gate, cls.created_at).label("state")
+        state = state_expression(cls.id, cls.input_gate).label("state")
         attributes = workflow_status.c.attributes
         subject_type = attributes["subject_type"].as_string().label("subject_type")
         subject_id = attributes["subject_id"].as_string().label("subject_id")
