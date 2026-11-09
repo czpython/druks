@@ -46,6 +46,7 @@ from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
+from druks.services import Connection
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.settings import get_settings
 from druks.workspaces import Workspace
@@ -341,7 +342,7 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
             await reset_live_stream(conversation.id)
             # A bot serves outside people, so only the operator reaches the enabled MCP
             # servers and holds their own sign-ins.
-            mcp_servers, secret_refs, sign_ins = (), [], []
+            mcp_servers, secret_refs, connections, sign_ins = (), [], [], []
             if conversation.account.kind == AccountKind.OPERATOR:
                 # A server the operator has not connected must not stop the chat.
                 mcp_servers, secret_refs = await Workspace.get_all_mcp_servers(
@@ -353,10 +354,11 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                             session, Audience.service(service.slug), conversation.account_id
                         )
                         # A sandbox has one variable per service, so it holds one sign-in.
-                        secret_refs += [
-                            SecretRef(name=service.slug, secret_id=row.id, host=service.host)
-                            for row in sign_in_rows[:1]
-                        ]
+                        for row in sign_in_rows[:1]:
+                            secret_refs.append(
+                                SecretRef(name=service.slug, secret_id=row.id, host=service.host)
+                            )
+                            connections.append(Connection(service, row))
                 sign_ins = await list_sign_ins(session, conversation.account_id)
             bot_id, prompt, tools = await get_agent(session, conversation, sign_ins=sign_ins)
             try:
@@ -380,6 +382,8 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
             )
             naming = None
             try:
+                for connection in connections:
+                    await connection.service.prepare_sandbox(host, connection)
                 bridge = Bridge(host)
                 turn = await send_turn(
                     session,

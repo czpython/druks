@@ -106,5 +106,82 @@ async def ensure(
         )
 
 
+async def set_git_identity(
+    host: Host,
+    author: tuple[str, str],
+    co_author: tuple[str, str] | None,
+    *,
+    repo_path: str,
+) -> None:
+    """Git authors each commit in the repo at ``repo_path`` as ``author``. A
+    prepare-commit-msg hook credits ``co_author``. None credits nobody."""
+    repo = shlex.quote(repo_path)
+    await _write_git_identity(
+        host, f"git -C {repo} config", f"{repo}/.git/hooks", author, co_author
+    )
+
+
+async def set_box_git_identity(
+    host: Host, author: tuple[str, str], co_author: tuple[str, str] | None
+) -> None:
+    """Git authors each commit in the box as ``author``. Git copies a
+    prepare-commit-msg hook that credits ``co_author`` into each repo that it
+    clones or inits afterwards. None credits nobody."""
+    template = '"$HOME"/.druks/git-template'
+    # A template directory replaces git's default one, which holds info/exclude.
+    setup = (
+        f"mkdir -p {template}/hooks {template}/info",
+        f"touch {template}/info/exclude",
+        f"git config --global init.templateDir {template}",
+    )
+    await _write_git_identity(
+        host, "git config --global", f"{template}/hooks", author, co_author, setup=setup
+    )
+
+
+async def _write_git_identity(
+    host: Host,
+    config: str,
+    hooks: str,
+    author: tuple[str, str],
+    co_author: tuple[str, str] | None,
+    *,
+    setup: tuple[str, ...] = (),
+) -> None:
+    name, email = author
+    hook_path = f"{hooks}/prepare-commit-msg"
+    steps = [
+        *setup,
+        f"{config} user.name {shlex.quote(name)}",
+        f"{config} user.email {shlex.quote(email)}",
+    ]
+    if co_author:
+        trailer = f"Co-Authored-By: {co_author[0]} <{co_author[1]}>"
+        # An empty message stays empty, so git still aborts the commit. The co-author's
+        # line goes beside any other co-author line, and only once.
+        hook = (
+            "#!/bin/sh\n"
+            'git stripspace --strip-comments < "$1" | grep -q . || exit 0\n'
+            f"git interpret-trailers --in-place --if-exists addIfDifferent"
+            f' --trailer {shlex.quote(trailer)} "$1"\n'
+        )
+        # A commit can run the hook while Druks rewrites it, so the new hook replaces
+        # the old one in one rename.
+        steps += [
+            f"printf %s {shlex.quote(hook)} > {hook_path}.$$",
+            f"chmod 755 {hook_path}.$$",
+            f"mv -f {hook_path}.$$ {hook_path}",
+        ]
+    else:
+        steps.append(f"rm -f {hook_path}")
+    result = await host.exec(["sh", "-c", " && ".join(steps)], timeout=10.0)
+    if result.returncode:
+        raise ExecFailed(
+            f"failed to set the git identity: "
+            f"exit={result.returncode} stderr={result.stderr.strip()}",
+            exit_code=result.returncode,
+        )
+
+
 def _strip_token(text: str) -> str:
     return re.sub(r"x-access-token:[^@]+@", "x-access-token:<redacted>@", text)

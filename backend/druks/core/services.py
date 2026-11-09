@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import functools
 import logging
@@ -10,6 +11,7 @@ from urllib.parse import quote
 
 import httpx
 from githubkit import GitHub
+from githubkit.exception import RequestError
 from githubkit.retry import RETRY_SERVER_ERROR
 from pydantic import BaseModel, Field, SecretStr
 from slack_sdk.errors import SlackApiError
@@ -17,24 +19,29 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.models import Account
-from druks.core.apis import github
-from druks.core.apis.exceptions import GitHubAppNotInstalledError, TwilioError, TwilioNotFoundError
+from druks.core.apis import exceptions, github
 from druks.core.apis.jira import SERVICE_ACCOUNT_DOMAIN, JiraClient
 from druks.core.apis.linear import LINEAR_AUTHORITY, LINEAR_GRAPHQL_URL, LinearClient
 from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
 from druks.core.apis.twilio import TwilioClient
 from druks.database import get_session
+from druks.sandbox import repo as checkout
+from druks.sandbox.host import Host
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
 from druks.services import Service, ServiceConnectError, auth
+from druks.services.base import Connection
 from druks.services.exceptions import OauthExchangeError, ServiceNotConnectedError
 from druks.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
 _VERIFY_TIMEOUT = 10.0
+# The lookup makes three calls, each with its own timeout and retries, and a chat turn
+# can wait on it.
+_BOT_LOOKUP_TIMEOUT = 10.0
 
 
 class GithubApp(Service):
@@ -89,12 +96,12 @@ class GithubApp(Service):
             first, *others = resources
             try:
                 installation_id = await app.get_installation_id(first)
-            except GitHubAppNotInstalledError as error:
+            except exceptions.GitHubAppNotInstalledError as error:
                 raise MissingSecretError(str(error)) from error
             names = [first.split("/", 1)[1]]
             for repo in others:
                 # GitHub refuses the whole token when one named repository is out of reach.
-                with suppress(GitHubAppNotInstalledError):
+                with suppress(exceptions.GitHubAppNotInstalledError):
                     if await app.get_installation_id(repo) == installation_id:
                         names.append(repo.split("/", 1)[1])
             names.sort()
@@ -136,6 +143,20 @@ class GithubApp(Service):
     async def get_app_client(cls) -> github.GitHubAppClient:
         """The App client of the connected App's vault row."""
         return cls._app_client(await cls.get())
+
+    @classmethod
+    async def get_bot_git_author(cls) -> tuple[str, str]:
+        """Name and email for commits made as the App's bot user — the
+        ``<id>+<slug>[bot]@users.noreply.github.com`` convention, the same identity a
+        squash-merge advertises. The row keeps the bot's user id once GitHub names it."""
+        row = await cls.get()
+        user_id = row.identity.get("bot_user_id")
+        if not user_id:
+            async with asyncio.timeout(_BOT_LOOKUP_TIMEOUT):
+                user_id = await cls._app_client(row).get_bot_user_id()
+            row.identity = {**row.identity, "bot_user_id": user_id}
+        bot_name = f"{row.identity['slug']}[bot]"
+        return bot_name, f"{user_id}+{bot_name}@users.noreply.github.com"
 
     @classmethod
     async def get_client(cls, owner_or_repo: str) -> github.GitHubClient:
@@ -213,6 +234,26 @@ class Github(GithubApp):
                 "subject": str(person.id),
                 "login": person.login,
             }
+
+    @classmethod
+    async def prepare_sandbox(cls, host: Host, connection: Connection) -> None:
+        """Make the App's bot user the author of the box's commits, and credit the
+        GitHub user of the sign-in."""
+        try:
+            author = await cls.get_bot_git_author()
+        except (
+            ServiceNotConnectedError,
+            exceptions.GitHubAppNotActiveError,
+            RequestError,
+            TimeoutError,
+        ) as error:
+            # The box works without the bot as author, and the next turn asks again.
+            logger.warning("Sandbox %s has no bot author: %s", host.id, error)
+            return
+        login, user_id = connection.identity["login"], connection.identity["subject"]
+        await checkout.set_box_git_identity(
+            host, author, (login, f"{user_id}+{login}@users.noreply.github.com")
+        )
 
     # What the created App is: the single operator identity documented in
     # docs/configuration.md — keep the two in step.
@@ -547,7 +588,7 @@ class Twilio(Service):
         client = TwilioClient(settings.account_sid, settings.api_key.get_secret_value())
         try:
             await client.get_account()
-        except TwilioError as error:
+        except exceptions.TwilioError as error:
             raise ServiceConnectError(
                 "Twilio did not accept this account SID and auth token. Paste them from the "
                 "Twilio Console."
@@ -586,7 +627,7 @@ class Twilio(Service):
         """Clear the number's voice URL, so its calls stop. The row stays, with its calls."""
         client = await cls.get_client(session)
         # The account may have released the number. Then there is no URL to clear.
-        with suppress(TwilioNotFoundError):
+        with suppress(exceptions.TwilioNotFoundError):
             await client.set_voice_url(sid=connection.identity["sid"], url="")
         await connection.revoke(reason)
 

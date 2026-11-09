@@ -1,12 +1,18 @@
+import os
+import subprocess
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock, call
 
 import druks.core.apis.github as github_api
 import pytest
-from druks.core.apis.exceptions import GitHubAppNotInstalledError
+from conftest import connect_service
+from druks.core.apis.exceptions import GitHubAppNotActiveError, GitHubAppNotInstalledError
 from druks.core.apis.github import GitHubAppClient, GitHubClient
-from githubkit.exception import GraphQLFailed, RequestFailed
+from druks.core.services import Github
+from druks.services import Connection, ServiceNotConnectedError
+from githubkit.exception import GraphQLFailed, RequestFailed, RequestTimeout
 from githubkit.retry import RETRY_SERVER_ERROR
 
 
@@ -314,26 +320,126 @@ async def test_list_repos_paginates() -> None:
     )
 
 
-async def test_get_bot_git_author_looks_up_the_bot_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The author is the App's bot user with GitHub's <id>+<login> noreply
-    # address; the id comes from one lookup, cached for the life of the process.
-    monkeypatch.setattr(github_api, "_BOT_USER_ID_CACHE", {})
+async def test_get_bot_user_id_asks_with_an_active_installation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     users = SimpleNamespace(
         async_get_by_username=AsyncMock(
             return_value=SimpleNamespace(parsed_data=SimpleNamespace(id=123456789))
         )
     )
-    client = _TestGitHubClient(SimpleNamespace(rest=SimpleNamespace(users=users)))
-    client._app_id, client._slug = "12345", "example-app"
+    tokens = []
 
-    author = await client.get_bot_git_author()
+    @asynccontextmanager
+    async def github(auth, *, base_url, **_):
+        tokens.append(auth.token)
+        yield SimpleNamespace(rest=SimpleNamespace(users=users))
 
-    assert author == (
-        "example-app[bot]",
-        "123456789+example-app[bot]@users.noreply.github.com",
+    monkeypatch.setattr(github_api, "GitHub", github)
+    installations = [
+        SimpleNamespace(id=1, suspended_at="2026-11-01T00:00:00Z"),
+        SimpleNamespace(id=2, suspended_at=None),
+    ]
+    apps = SimpleNamespace(
+        async_list_installations=AsyncMock(return_value=SimpleNamespace(parsed_data=installations))
     )
-    assert await client.get_bot_git_author() == author
+    client = _TestGitHubAppClient(apps)
+    client.create_installation_token = AsyncMock(return_value=("ghs_two", None))
+
+    assert await client.get_bot_user_id() == 123456789
+    # A suspended installation mints no token.
+    client.create_installation_token.assert_awaited_once_with(2)
+    assert tokens == ["ghs_two"]
     users.async_get_by_username.assert_awaited_once_with("example-app[bot]")
+
+
+async def test_get_bot_user_id_without_an_active_installation_says_so() -> None:
+    installations = [SimpleNamespace(id=1, suspended_at="2026-11-01T00:00:00Z")]
+    apps = SimpleNamespace(
+        async_list_installations=AsyncMock(return_value=SimpleNamespace(parsed_data=installations))
+    )
+
+    with pytest.raises(GitHubAppNotActiveError, match="no active installation"):
+        await _TestGitHubAppClient(apps).get_bot_user_id()
+
+
+async def test_the_app_row_keeps_the_bot_user_id(druks_db, monkeypatch: pytest.MonkeyPatch):
+    row = await connect_service(
+        "github", identity={"app_id": "1", "slug": "druks-acme"}, secrets={"private_key": "pem"}
+    )
+    app = SimpleNamespace(get_bot_user_id=AsyncMock(return_value=7))
+    monkeypatch.setattr(Github, "_app_client", staticmethod(lambda row: app))
+
+    author = await Github.get_bot_git_author()
+
+    assert author == ("druks-acme[bot]", "7+druks-acme[bot]@users.noreply.github.com")
+    assert row.identity["bot_user_id"] == 7
+    assert await Github.get_bot_git_author() == author
+    app.get_bot_user_id.assert_awaited_once()
+
+
+async def test_github_prepares_a_box_with_the_bot_and_the_github_user(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+):
+    env = {**os.environ, "HOME": str(tmp_path), "GIT_CONFIG_GLOBAL": str(tmp_path / ".gitconfig")}
+
+    async def exec(command, *, timeout):
+        result = subprocess.run(command, env=env, check=False, capture_output=True, text=True)
+        return SimpleNamespace(returncode=result.returncode, stderr=result.stderr)
+
+    monkeypatch.setattr(
+        Github,
+        "get_bot_git_author",
+        AsyncMock(return_value=("app[bot]", "1+app[bot]@users.noreply.github.com")),
+    )
+    sign_in = SimpleNamespace(
+        identity={"authority": "https://github.com", "subject": "42", "login": "octocat"}
+    )
+
+    await Github.prepare_sandbox(
+        SimpleNamespace(id="sandbox-1", exec=exec),  # type: ignore[arg-type]
+        Connection(Github, sign_in),  # type: ignore[arg-type]
+    )
+    # The agent clones its repos after Druks writes the identity.
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", str(repo)], env=env, check=True)
+    hook = repo / ".git" / "hooks" / "prepare-commit-msg"
+    message = tmp_path / "COMMIT_EDITMSG"
+    message.write_text("Change\n")
+    subprocess.run([str(hook), str(message)], cwd=repo, env=env, check=True)
+    email = subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert email.stdout.strip() == "1+app[bot]@users.noreply.github.com"
+    assert "Co-Authored-By: octocat <42+octocat@users.noreply.github.com>" in message.read_text()
+    assert (repo / ".git" / "info" / "exclude").exists()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ServiceNotConnectedError("github"),
+        GitHubAppNotActiveError("druks-acme"),
+        TimeoutError(),
+        RequestTimeout(Mock()),
+    ],
+)
+async def test_a_failed_bot_lookup_leaves_the_box_without_an_author(
+    monkeypatch: pytest.MonkeyPatch, caplog, error
+):
+    monkeypatch.setattr(Github, "get_bot_git_author", AsyncMock(side_effect=error))
+    host = SimpleNamespace(id="sandbox-1", exec=AsyncMock())
+    sign_in = SimpleNamespace(identity={"subject": "42", "login": "octocat"})
+
+    await Github.prepare_sandbox(host, Connection(Github, sign_in))  # type: ignore[arg-type]
+
+    host.exec.assert_not_awaited()
+    assert "Sandbox sandbox-1 has no bot author" in caplog.text
 
 
 def _template_generating_client(repo_apis: Any) -> _TestGitHubClient:

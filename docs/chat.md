@@ -134,7 +134,13 @@ An operator's sandbox also holds their own sign-in at each service that names a
 host, so the command line acts as that person. With a GitHub sign-in, git and
 `gh` act as you: your name is on the issues and comments, and the token permits
 only what both you and the App can do. Druks refreshes the token before it
-expires. Without a sign-in the sandbox has no access to that service: see
+expires. Before each turn, Druks makes the App's bot user the author of the
+sandbox's commits. Druks asks GitHub for the bot's user id once and keeps it. If
+GitHub does not answer, the turn runs without that author or the co-author line,
+and the next turn asks again. A commit in a repo that the agent clones or
+creates afterwards gets a `Co-Authored-By` line for your GitHub user. A repo with
+its own hooks directory, as husky sets, gets no such line. Without a sign-in the
+sandbox has no access to that service: see
 [GitHub](#github). The agent's prompt names each MCP server and sign-in it holds,
 and tells it where you connect a missing one. A Bot's sandbox never holds a sign-in.
 A build still acts as the App: see [GitHub](configuration.md#github).
