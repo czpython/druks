@@ -1270,8 +1270,6 @@ async def test_fatal_sdk_error_does_not_trigger_agent_retry(
 async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
     """A worker crash leaves a RUNNING row; the recovered step re-runs with a
     fresh id and abandons the orphan, so the timeline shows one live step."""
-    from druks.durable.engine import _step_engine
-
     engine = _step_engine()
     await AgentCall.start(
         engine,
@@ -1298,6 +1296,23 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
     assert by_id["a"].status == "abandoned"
     assert by_id["a"].finished_at is not None
     assert by_id["b"].status == "running"
+
+
+async def test_an_after_agent_hook_call_leaves_the_hooked_call_running(druks_db):
+    for call_id, agent in (("hooked", "implement"), ("hook", "nudge")):
+        await AgentCall.start(
+            _step_engine(),
+            call_id=call_id,
+            run_id="wf-9",
+            model="m",
+            agent=agent,
+            host_id="h",
+            subscription_id=None,
+            api_key_id=(await installation_key()).id,
+        )
+
+    calls = await AgentCall.list_for_run(db_session(), "wf-9")
+    assert {call.id: call.status for call in calls} == {"hooked": "running", "hook": "running"}
 
 
 async def test_a_replay_resumes_the_ephemeral_box_through_its_identity(
