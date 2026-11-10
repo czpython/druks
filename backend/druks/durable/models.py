@@ -27,6 +27,7 @@ from druks.core.models import Uuid7Pk
 from druks.database import get_session
 from druks.durable.constants import RUN_QUEUE
 from druks.durable.dbos_state import (
+    retry_chain,
     retry_from_expression,
     state_expression,
     subject_attribute_expression,
@@ -783,11 +784,13 @@ class Artifact(Base, Uuid7Pk):
     @classmethod
     async def get_latest_for_run(cls, session: AsyncSession, run_id: str) -> "Artifact | None":
         # The run's most recent renderable output, reached through its calls — an
-        # in-app review shows this beside its controls. Newest call wins.
+        # in-app review shows this beside its controls. Newest call wins. A retry
+        # replays the finished steps of the run it forked, and their calls stay on
+        # that run, so the lookup reads the calls of every run in the fork chain.
         return await session.scalar(
             select(cls)
             .join(AgentCall, AgentCall.id == cls.agent_call_id)
-            .where(AgentCall.run_id == run_id)
+            .where(AgentCall.run_id.in_(retry_chain(run_id)))
             # uuid7 ids are time-ordered, so they break a created_at tie toward the
             # call recorded last.
             .order_by(AgentCall.created_at.desc(), AgentCall.id.desc())
