@@ -519,6 +519,21 @@ async def test_bridge_is_unavailable_only_when_it_sends_no_answer(opened, error)
     assert raised.type is error
 
 
+async def test_bridge_reads_an_answer_longer_than_a_line_buffer_without_an_end_of_stream():
+    text = "x" * 3_000_000
+    reader = asyncio.StreamReader()
+    reader.feed_data(json.dumps({"ok": True, "text": text}).encode() + b"\n")
+    host = SimpleNamespace(
+        open_tcp_connection=AsyncMock(
+            return_value=(reader, MagicMock(drain=AsyncMock(), wait_closed=AsyncMock()))
+        )
+    )
+
+    response = await Bridge(host).request("events")
+
+    assert response["text"] == text
+
+
 async def test_bridge_start_uploads_the_bridge_only_when_none_answers():
     pong = b'{"ok": true}\n'
     host = SimpleNamespace(

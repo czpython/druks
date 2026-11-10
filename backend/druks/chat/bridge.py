@@ -29,16 +29,22 @@ class Bridge:
         try:
             writer.write((json.dumps({"method": method, **values}) + "\n").encode())
             await writer.drain()
+            # asyncssh's readline returns a partial line when the 2 MiB channel window fills.
+            # The drukbox gateway does not end the stream, so the read stops at the newline.
+            chunks = []
             async with asyncio.timeout(120):
-                line = await reader.readline()
+                while chunk := await reader.read(64 * 1024):
+                    chunks.append(chunk)
+                    if b"\n" in chunk:
+                        break
         finally:
             writer.close()
             await writer.wait_closed()
         # A docker-sbx gateway accepts a channel to a closed port and then ends it.
-        if not line:
+        if not chunks:
             raise ChatBridgeUnavailable("The Chat bridge is not available.")
         try:
-            response = json.loads(line)
+            response = json.loads(b"".join(chunks))
         except ValueError as error:
             raise ChatBridgeError("The Chat bridge sent an answer that is not JSON.") from error
         if response["ok"]:
