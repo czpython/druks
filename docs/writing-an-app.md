@@ -272,6 +272,11 @@ and `self.account_id`. A route takes the caller's row with
 An unattended start records the default account. Druks refuses to start a run
 before an account is available. A parked run keeps its account after resume.
 
+A run starts only as an account that can use the app. Druks refuses the start
+for an account that a [team](concepts.md) keeps out. A route answers 403. A
+webhook acknowledges the delivery, and the delivery changes nothing. An app
+makes no check and does not catch the refusal.
+
 Each agent call uses the installation execution defaults. Agent overrides take
 priority. Subscription billing uses the run account's subscription.
 The call records exactly one billing reference: `subscription_id` or

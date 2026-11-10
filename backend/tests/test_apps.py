@@ -3,10 +3,14 @@ from types import ModuleType, SimpleNamespace
 
 import druks.redis
 import pytest
+from conftest import IDENTITY_HEADER, header_client
+from druks.accounts.enums import Role
+from druks.accounts.models import Account
 from druks.apps import App, loader
 from druks.apps.exceptions import AppSubjectContractError
 from druks.apps.loader import iter_apps, load, register_apps
 from druks.durable.schemas import SubjectSummary
+from druks.teams.models import Team
 from druks.workflows import Subject
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
@@ -108,13 +112,28 @@ def test_load_confines_app_routers_to_the_app_namespace(monkeypatch):
     # Mounting is under test, not the identity gate.
     from druks.accounts.dependencies import current_account
 
-    app.dependency_overrides[current_account] = lambda: None
+    app.dependency_overrides[current_account] = lambda: Account(role=Role.ADMIN)
 
     # Behavioral, not app.routes introspection: FastAPI ≥0.139 mounts included
     # routers lazily, so the flattened paths aren't visible there anymore.
     client = TestClient(app)
     assert client.get("/api/evil/health/ping").status_code == 200
     assert client.get("/health/ping").status_code == 404
+
+
+async def test_app_routes_allow_the_team_and_admin_and_refuse_other_members(tmp_path, druks_db):
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    allowed = await Account.get_or_create(druks_db, "allowed@example.com")
+    refused = await Account.get_or_create(druks_db, "refused@example.com")
+    await Team.create(druks_db, name="Field notes", member_ids=[allowed.id], apps=["field_notes"])
+
+    with header_client(tmp_path) as client:
+        responses = [
+            client.get("/api/field_notes/notes", headers={IDENTITY_HEADER: account.username})
+            for account in (refused, allowed, admin)
+        ]
+
+    assert [response.status_code for response in responses] == [403, 200, 200]
 
 
 def _routes_module(name: str, **routers: APIRouter) -> ModuleType:
@@ -130,7 +149,7 @@ def _boot(registered_app: type[App], monkeypatch) -> TestClient:
     load(api)
     from druks.accounts.dependencies import current_account
 
-    api.dependency_overrides[current_account] = lambda: None
+    api.dependency_overrides[current_account] = lambda: Account(role=Role.ADMIN)
     return TestClient(api)
 
 

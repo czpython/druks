@@ -9,6 +9,7 @@ from druks.api import dashboard
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import Artifact, Run
 from druks.events.models import Event
+from druks.teams.models import Team
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
 from druks.user_settings.models import SettingsOverride
 from druks_field_notes.models import Note
@@ -160,6 +161,17 @@ async def test_run_now_rejects_unknown_unscheduled_and_unavailable_workflows(cli
     monkeypatch.setattr(Summarize, "every", "0 9 * * *")
     monkeypatch.setattr(DBOS, "get_schedule_async", AsyncMock(return_value=None))
     assert client.post(f"/api/dashboard/schedules/{Summarize.kind}/run").status_code == 503
+
+
+async def test_run_now_refuses_a_member_outside_the_apps_team(client, druks_db, monkeypatch):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    await Account.get_or_create(druks_db, "op@example.com")
+    await Team.create(druks_db, name="Notes", member_ids=[], apps=["field_notes"])
+    monkeypatch.setattr(Summarize, "every", "0 9 * * *")
+
+    response = client.post(f"/api/dashboard/schedules/{Summarize.kind}/run")
+
+    assert response.status_code == 403
 
 
 @pytest.mark.parametrize("has_artifact", [True, False])
