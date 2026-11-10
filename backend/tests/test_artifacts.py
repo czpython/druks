@@ -2,13 +2,14 @@ import pytest
 from conftest import installation_key
 from druks.accounts.models import Account
 from druks.api.artifacts import get_artifact
+from druks.durable.dbos_state import workflow_status
 from druks.durable.enums import RunState
 from druks.durable.models import AgentCall, Artifact, Run
 from druks.durable.schemas import RunResponse
 from druks.testing import seed_run
 from druks_field_notes.workflows import Summarize
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 
@@ -124,6 +125,55 @@ async def test_get_latest_for_run_returns_the_newest_calls_artifact(druks_db, tm
         )
     latest = await Artifact.get_latest_for_run(druks_db, "run-1")
     assert latest is not None and latest.title == "Revised plan"
+
+
+async def test_get_latest_for_run_reads_the_runs_it_was_forked_from(druks_db, tmp_path):
+    # Retry 2 forks retry 1, which forked the first run; only the first run made a plan.
+    await seed_run(druks_db, kind="build", run_id="run-1", state="failed")
+    await seed_run(druks_db, kind="build", run_id="run-2", state="failed")
+    retry = await seed_run(
+        druks_db,
+        kind="build",
+        run_id="run-3",
+        state="parked",
+        input_gate="review_plan",
+        input_request={"presentation": "in_app", "controls": ["approve"]},
+    )
+    for run_id, forked_from in (("run-2", "run-1"), ("run-3", "run-2")):
+        await druks_db.execute(
+            update(workflow_status)
+            .where(workflow_status.c.workflow_uuid == run_id)
+            .values(forked_from=forked_from)
+        )
+
+    async def record(call_id: str, run_id: str, title: str) -> None:
+        druks_db.add(
+            AgentCall(
+                api_key_id=(await installation_key()).id,
+                id=call_id,
+                run_id=run_id,
+                agent="summarize",
+                model="m",
+                sandbox_host_id="host-1",
+            )
+        )
+        await druks_db.flush()
+        await Artifact.record(
+            druks_db,
+            call_dir=tmp_path / call_id,
+            call_id=call_id,
+            kind="markdown",
+            title=title,
+            content="x",
+            event={},
+        )
+
+    await record("call-1", "run-1", "Plan")
+    assert (await retry.get_ask())["label"] == "Review: Plan"
+
+    # The retry's own artifact is newer, so it wins.
+    await record("call-3", "run-3", "Revised plan")
+    assert (await Artifact.get_latest_for_run(druks_db, "run-3")).title == "Revised plan"
 
 
 async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):

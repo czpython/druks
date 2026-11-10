@@ -133,6 +133,18 @@ def retry_from_expression(run_id: sa.ColumnElement) -> sa.ColumnElement:
     )
 
 
+def retry_chain(run_id: str) -> sa.Select:
+    """The run's id and the id of every run it was forked from, back to the first."""
+    chain = sa.select(sa.literal(run_id, sa.String).label("run_id")).cte(recursive=True)
+    chain = chain.union_all(
+        sa.select(workflow_status.c.forked_from).where(
+            workflow_status.c.workflow_uuid == chain.c.run_id,
+            workflow_status.c.forked_from.is_not(None),
+        )
+    )
+    return sa.select(chain.c.run_id)
+
+
 def updated_at_expression(run_id: sa.ColumnElement) -> sa.ColumnElement:
     # DBOS stamps updated_at in epoch milliseconds; convert so it compares
     # against our timestamptz columns.
