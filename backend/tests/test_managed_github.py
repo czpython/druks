@@ -19,6 +19,7 @@ from druks.db import db_session
 from druks.redis import get_client
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
+from druks.secrets.exceptions import MissingSecretError
 from druks.secrets.models import VaultSecret
 from druks.services import Connection, Service
 from druks.settings import configure_settings
@@ -48,6 +49,8 @@ slug = "druks"
 """
 # This Druks's installations, by account login.
 INSTALLATIONS = {"acme": 11, "paulo": 22}
+SELECTED_REPOSITORIES = {"paulo": ("site", "blog")}
+DELETED_REPOSITORIES = ("gone",)
 EVENTS = "/_external/github/events/"
 
 _INSTANCE_PEM = (
@@ -93,13 +96,18 @@ class _GitHubKit:
 
     async def _installation_of(self, owner: str, name: str) -> SimpleNamespace:
         self.calls.append(f"GET repos/{owner}/{name}/installation")
-        if owner not in INSTALLATIONS:
+        selected = SELECTED_REPOSITORIES.get(owner)
+        if owner not in INSTALLATIONS or (selected and name not in selected):
             raise _refused(404)
-        return SimpleNamespace(parsed_data=SimpleNamespace(id=INSTALLATIONS[owner]))
+        selection = "selected" if selected else "all"
+        installation = SimpleNamespace(id=INSTALLATIONS[owner], repository_selection=selection)
+        return SimpleNamespace(parsed_data=installation)
 
     async def _mint(self, installation_id: int, repositories: object) -> SimpleNamespace:
         call = f"POST app/installations/{installation_id}/access_tokens"
         self.calls.append(f"{call} {repositories}" if repositories else call)
+        if set(DELETED_REPOSITORIES) & set(repositories or ()):
+            raise _refused(422)
         self.minted += 1
         expires_at = (datetime.now(UTC) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
         token = SimpleNamespace(token=f"ghs_{installation_id}_{self.minted}", expires_at=expires_at)
@@ -293,6 +301,53 @@ async def test_a_box_token_names_the_repos_its_first_repos_installation_covers(
         "POST app/installations/11/access_tokens ['api', 'web']",
         "POST app/installations/11/access_tokens ['api']",
     ]
+
+
+async def test_an_installation_on_all_of_an_owners_repos_is_looked_up_once_per_token(
+    managed_github, githubkit, monkeypatch
+):
+    repos = ("acme/web", "acme/api", "acme/docs")
+    await Github.issue_token(repos)
+    monkeypatch.setitem(INSTALLATIONS, "acme", 33)
+    await Github.issue_token(repos)
+
+    assert githubkit.calls == [
+        "GET repos/acme/web/installation",
+        "POST app/installations/11/access_tokens ['api', 'docs', 'web']",
+        "GET repos/acme/web/installation",
+        "POST app/installations/33/access_tokens ['api', 'docs', 'web']",
+    ]
+
+
+async def test_an_installation_on_selected_repos_is_looked_up_for_each_repo(
+    managed_github, githubkit
+):
+    await Github.issue_token(("paulo/site", "acme/web", "paulo/blog", "acme/api", "paulo/private"))
+
+    assert githubkit.calls == [
+        "GET repos/paulo/site/installation",
+        "GET repos/paulo/blog/installation",
+        "GET repos/paulo/private/installation",
+        "POST app/installations/22/access_tokens ['blog', 'site']",
+    ]
+
+
+async def test_a_stale_repo_name_stops_the_token_with_the_fix(managed_github, githubkit):
+    with pytest.raises(MissingSecretError) as error:
+        await Github.issue_token(("acme/web", "acme/gone"))
+
+    assert "acme/gone" in str(error.value)
+    assert "Remove the renamed or deleted repository from the project." in str(error.value)
+    assert githubkit.calls == [
+        "GET repos/acme/web/installation",
+        "POST app/installations/11/access_tokens ['gone', 'web']",
+    ]
+
+
+async def test_an_owner_in_another_letter_case_is_the_same_owner(managed_github, githubkit):
+    await Github.issue_token(("acme/web", "Acme/api"))
+
+    assert githubkit.calls[-1] == "POST app/installations/11/access_tokens ['api', 'web']"
 
 
 async def test_install_binds_at_the_manager_and_links_the_installer(

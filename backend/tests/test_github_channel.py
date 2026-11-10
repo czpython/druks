@@ -32,13 +32,13 @@ THREAD = "acme/app#7"
 
 @pytest.fixture
 async def card(druks_db, monkeypatch):
-    async def get_installation_id(self, owner_or_repo):
-        return 1
+    async def get_installation(self, owner_or_repo):
+        return SimpleNamespace(id=1)
 
     async def create_installation_token(self, installation_id, repositories=()):
         return "ghs_test", datetime.now(UTC) + timedelta(hours=1)
 
-    monkeypatch.setattr(GitHubAppClient, "get_installation_id", get_installation_id)
+    monkeypatch.setattr(GitHubAppClient, "get_installation", get_installation)
     monkeypatch.setattr(GitHubAppClient, "create_installation_token", create_installation_token)
     bind_ambient_session(druks_db)
     card = await connect_service(

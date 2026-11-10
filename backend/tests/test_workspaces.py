@@ -171,14 +171,14 @@ async def test_the_github_service_issues_its_installation_token(
     expiry = datetime.now(UTC) + timedelta(hours=1)
     asked: list[tuple] = []
 
-    async def get_installation_id(self, owner_or_repo: str) -> int:
-        return 7
+    async def get_installation(self, owner_or_repo: str) -> SimpleNamespace:
+        return SimpleNamespace(id=7)
 
     async def create_installation_token(self, installation_id, repositories=()):
         asked.append((self._app_id, installation_id, *repositories))
         return "ghs_operator", expiry
 
-    monkeypatch.setattr(GitHubAppClient, "get_installation_id", get_installation_id)
+    monkeypatch.setattr(GitHubAppClient, "get_installation", get_installation)
     monkeypatch.setattr(GitHubAppClient, "create_installation_token", create_installation_token)
     await connect_service(
         "github",
@@ -193,14 +193,14 @@ async def test_the_github_service_issues_its_installation_token(
 def _mint_tokens(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     minted: list[str] = []
 
-    async def get_installation_id(self, owner_or_repo: str) -> int:
-        return 7
+    async def get_installation(self, owner_or_repo: str) -> SimpleNamespace:
+        return SimpleNamespace(id=7)
 
     async def create_installation_token(self, installation_id, repositories=()):
         minted.append(f"ghs_{len(minted)}")
         return minted[-1], datetime.now(UTC) + timedelta(hours=1)
 
-    monkeypatch.setattr(GitHubAppClient, "get_installation_id", get_installation_id)
+    monkeypatch.setattr(GitHubAppClient, "get_installation", get_installation)
     monkeypatch.setattr(GitHubAppClient, "create_installation_token", create_installation_token)
     return minted
 

@@ -258,7 +258,7 @@ async def test_an_account_installation_falls_back_to_the_user_endpoint() -> None
         ),
     )
 
-    assert await _TestGitHubAppClient(apps).get_installation_id("czpython") == 42
+    assert (await _TestGitHubAppClient(apps).get_installation("czpython")).id == 42
     apps.async_get_org_installation.assert_awaited_once_with("czpython")
     apps.async_get_user_installation.assert_awaited_once_with("czpython")
 
@@ -271,7 +271,7 @@ async def test_an_org_installation_does_not_consult_the_user_endpoint() -> None:
         async_get_user_installation=AsyncMock(),
     )
 
-    assert await _TestGitHubAppClient(apps).get_installation_id("clawhaven") == 41
+    assert (await _TestGitHubAppClient(apps).get_installation("clawhaven")).id == 41
     apps.async_get_user_installation.assert_not_awaited()
 
 
@@ -285,7 +285,7 @@ async def test_installation_lookup_404_names_the_repo() -> None:
     )
 
     with pytest.raises(GitHubAppNotInstalledError) as raised:
-        await _TestGitHubAppClient(apps).get_installation_id("ClawHaven/acme-app")
+        await _TestGitHubAppClient(apps).get_installation("ClawHaven/acme-app")
 
     assert "The GitHub App example-app has no access to ClawHaven/acme-app" in str(raised.value)
     assert "install the app" in str(raised.value)
