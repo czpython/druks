@@ -64,9 +64,9 @@ def normalize_token_usage(metadata: dict[str, Any] | None) -> dict[str, int] | N
         input_total = _int(metadata.get("input_tokens"))
         cached_input = _int(metadata.get("cached_input_tokens"))
         cache_creation = 0
-        visible_output = _int(metadata.get("output_tokens"))
+        # Codex's output_tokens already include its reasoning tokens.
+        output = _int(metadata.get("output_tokens"))
         reasoning = _int(metadata.get("reasoning_output_tokens"))
-        output = visible_output + reasoning
     else:
         # Unknown provider — try the fields generously so a future
         # adapter that writes the canonical names just works.

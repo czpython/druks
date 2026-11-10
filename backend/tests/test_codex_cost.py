@@ -32,7 +32,9 @@ def test_read_from_jsonl_handles_event_msg_payload_wrapper(tmp_path: Path) -> No
 
     cost, metadata = read_codex_cost_from_jsonl(path, model="gpt-5.5")
 
-    assert cost is not None and cost > 0
+    # 39,613 uncached x $1.25 + 2,432 cached x $0.125 + 738 output x $10, per million.
+    # The 263 reasoning tokens are part of the 738 output tokens, so they bill once.
+    assert cost == 0.0572
     assert metadata is not None
     assert metadata["input_tokens"] == 42045
     assert metadata["output_tokens"] == 738
