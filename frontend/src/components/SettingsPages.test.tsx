@@ -489,9 +489,14 @@ describe('SettingsPages app fields', () => {
     expect(await screen.findByRole('heading', { name: 'Services' })).toBeTruthy()
     expect(screen.queryByRole('link', { name: 'Agents' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Skills' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Teams' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Browser' })).toBeNull()
     fireEvent.change(screen.getByLabelText('Search settings'), {
       target: { value: 'Field Notes' },
+    })
+    expect(screen.getByText('No matching settings.')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Search settings'), {
+      target: { value: 'Teams' },
     })
     expect(screen.getByText('No matching settings.')).toBeTruthy()
 
@@ -499,6 +504,11 @@ describe('SettingsPages app fields', () => {
     renderSettings('/settings/providers', 'member')
     await screen.findByRole('heading', { name: 'Providers' })
     expect(screen.queryByRole('button', { name: 'Add provider' })).toBeNull()
+
+    cleanup()
+    renderSettings('/settings/providers')
+    await screen.findByRole('heading', { name: 'Providers' })
+    expect(screen.getByRole('link', { name: 'Teams' })).toBeTruthy()
   })
 
   it('hides an app settings link from a member', async () => {

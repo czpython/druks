@@ -34,6 +34,7 @@ import druks.notifications.models  # noqa: F401
 import druks.redis
 import druks.services.models  # noqa: F401
 import druks.skills.models  # noqa: F401
+import druks.teams.models  # noqa: F401
 import druks.user_settings.models  # noqa: F401
 from druks.accounts.context import current_account_id
 from druks.accounts.models import Account

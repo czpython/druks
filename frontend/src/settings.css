@@ -108,6 +108,11 @@
 .connections-table tbody th { font-weight: 400; }
 .connections-table td { color: var(--druks-color-text-secondary); }
 .connections-table .set-select { width: auto; }
+.teams-table thead th:first-child { width: 22%; }
+.teams-table thead th:nth-child(2) { width: auto; }
+.teams-table thead th:nth-child(3) { width: 20%; }
+.teams-table thead th:last-child { width: 180px; }
+.teams-table td span { display: block; }
 .connection-name { display: block; color: var(--druks-color-text-primary); font-weight: 500; }
 .connection-context { display: block; margin-top: 6px; color: var(--druks-color-text-tertiary); font-size: 13px; }
 .connection-actions .set-btn { white-space: nowrap; }
