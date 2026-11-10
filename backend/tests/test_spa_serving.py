@@ -5,6 +5,7 @@ from druks.api.server import SpaCacheControl, serve_spa
 from druks.db import db_session
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 
 def _app_with_spa(dist: Path) -> FastAPI:
@@ -30,7 +31,7 @@ def test_spa_serves_index_assets_and_client_routes(tmp_path):
     assert "druks" in client.get("/").text
     assert client.get("/assets/app.js").status_code == 200
     # An unknown path is a client-side route: index.html, not a 404.
-    assert "druks" in client.get("/work_items/42").text
+    assert "druks" in client.get("/work_items/42", headers={"Accept": "text/html"}).text
 
 
 def test_api_paths_win_over_the_spa(tmp_path):
@@ -55,15 +56,16 @@ def test_cache_policy_lives_with_the_server(tmp_path):
     assert asset.headers["cache-control"] == "public, max-age=31536000, immutable"
     # index.html must revalidate every load or a deploy leaves stale bundles.
     assert client.get("/").headers["cache-control"] == "no-cache"
-    assert client.get("/work_items/42").headers["cache-control"] == "no-cache"
+    assert (
+        client.get("/work_items/42", headers={"Accept": "text/html"}).headers["cache-control"]
+        == "no-cache"
+    )
     # API responses carry no frontend cache policy; nor does a missing asset.
     assert "cache-control" not in client.get("/api/thing").headers
     assert "cache-control" not in client.get("/assets/gone.js").headers
 
 
 def test_request_that_never_touches_the_db_opens_no_connection(monkeypatch):
-    from sqlalchemy.orm import Session
-
     connected = []
     original = Session._connection_for_bind
 

@@ -376,11 +376,12 @@ _SPA_DIST = Path(__file__).resolve().parents[3] / "dist"
 
 
 def serve_spa(app: FastAPI, dist: Path = _SPA_DIST) -> None:
-    """Serve the platform's own dashboard the way an app's ``dist/`` is
-    served — FastAPI's low-priority frontend routes, so every API path (and every
-    app frontend, registered earlier) wins, and unknown paths fall back to
-    index.html for client-side routing. A bare pip install ships no SPA build;
-    then the API serves JSON only."""
+    """Serve the platform's own dashboard the way Druks serves an app's ``dist/``.
+    FastAPI serves both from low-priority frontend routes. Every API path wins over
+    them. Every app frontend registers earlier and also wins. An unknown path falls
+    back to index.html for client-side routing. The index.html fallback needs a
+    navigation request with an ``Accept: text/html`` header. A bare pip install
+    ships no SPA build. Without a build, the API serves JSON only."""
     if (dist / "index.html").is_file():
         app.frontend("/", directory=dist)
 
