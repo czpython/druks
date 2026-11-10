@@ -96,9 +96,43 @@ def read_codex_cost_from_jsonl(
         return None, None
 
     latest = max(events, key=lambda event: event["timestamp"])
-    usage: _Usage = latest["usage"]
-    event_model = latest.get("model") or model
-    rate, used_default = _rate_for(event_model)
+    return _price(
+        latest["usage"],
+        model=latest.get("model") or model,
+    )
+
+
+def read_codex_cost_from_stdout(
+    stdout: bytes,
+    *,
+    model: str | None,
+) -> tuple[float | None, dict[str, Any] | None]:
+    """Price the run's usage from the last ``turn.completed`` event of ``codex exec --json``.
+
+    Its usage is the run's running total, the same figure the session's last
+    ``token_count`` carries.
+    """
+    usage_raw = {}
+    for line in stdout.splitlines():
+        if b'"turn.completed"' not in line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event["type"] == "turn.completed":
+            usage_raw = event["usage"]
+    if not usage_raw:
+        return None, None
+    return _price(_normalize_usage(usage_raw), model=model)
+
+
+def _price(
+    usage: _Usage,
+    *,
+    model: str | None,
+) -> tuple[float, dict[str, Any]]:
+    rate, used_default = _rate_for(model)
 
     uncached_input = max(usage.input_tokens - usage.cached_input_tokens, 0)
     billable_output = usage.output_tokens + usage.reasoning_output_tokens
@@ -110,13 +144,12 @@ def read_codex_cost_from_jsonl(
 
     metadata: dict[str, Any] = {
         "provider": "openai",
-        "model": event_model or "unknown",
+        "model": model or "unknown",
         "input_tokens": usage.input_tokens,
         "cached_input_tokens": usage.cached_input_tokens,
         "output_tokens": usage.output_tokens,
         "reasoning_output_tokens": usage.reasoning_output_tokens,
         "total_tokens": usage.total_tokens,
-        "source": "codex_session_jsonl_sandboxed",
         "input_per_million_usd": rate.input,
         "cached_input_per_million_usd": rate.cached_input,
         "output_per_million_usd": rate.output,
@@ -298,7 +331,7 @@ def _load_overrides() -> dict[str, _Rate]:
 class CodexHarness(Harness):
     # With ``--json``, codex streams its rollout (reasoning, tool calls,
     # messages) to stdout as it runs — so stdout.jsonl is the live transcript,
-    # symmetric with claude. session.jsonl is still snapshotted for cost.
+    # symmetric with claude. session.jsonl is snapshotted as its cost fallback.
     name = "codex"
     provider = OpenAiProvider.id
     billing_options = frozenset({"subscription", "api_key"})
@@ -449,8 +482,7 @@ class CodexHarness(Harness):
         # Codex runs against its real ``~/.codex`` because CODEX_HOME re-homes
         # all home-resolved state: auth, skills, and future features. A marker
         # file plus ``-newer`` identifies the session JSONL. More than one match
-        # warns on stderr and copies nothing rather than mis-attributing cost;
-        # a missing session degrades to cost=None.
+        # warns on stderr and copies nothing rather than mis-attributing cost.
         wrapper = (
             f"mkdir -p {shlex.quote(in_vm_run_dir)} && "
             f"printf %s {shlex.quote(schema_body)} > {shlex.quote(in_vm_schema)} && "
@@ -521,10 +553,12 @@ class CodexHarness(Harness):
 
     def parse(self, result: HarnessRunResult, *, artifact_dir: Path, run_id: str) -> Any:
         call_dir = artifact_dir / run_id
-        cost_usd, cost_metadata = read_codex_cost_from_jsonl(
-            call_dir / "session.jsonl",
-            model=self.model_id,
-        )
+        cost_usd, cost_metadata = read_codex_cost_from_stdout(result.stdout, model=self.model_id)
+        if not cost_metadata:
+            cost_usd, cost_metadata = read_codex_cost_from_jsonl(
+                call_dir / "session.jsonl",
+                model=self.model_id,
+            )
         write_cost(call_dir, cost_usd=cost_usd, metadata=cost_metadata)
         self.check_returncode(result)
 

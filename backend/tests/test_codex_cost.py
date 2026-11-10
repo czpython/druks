@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
 
-from druks.harnesses.codex import read_codex_cost_from_jsonl
+from druks.harnesses.codex import CodexHarness, read_codex_cost_from_jsonl
+from druks.sandbox.datastructures import HarnessRunResult
 
 
 def test_read_from_jsonl_handles_event_msg_payload_wrapper(tmp_path: Path) -> None:
@@ -93,3 +94,46 @@ def test_dated_nano_variant_uses_nano_rates_not_generic_gpt5(tmp_path: Path) -> 
     assert "note" not in metadata
     # 1M uncached input at $0.05 + 1M output at $0.40, per-million.
     assert cost == 0.45
+
+
+def _parse_codex_call(tmp_path: Path, stdout: bytes) -> dict:
+    call_dir = tmp_path / "call"
+    call_dir.mkdir(exist_ok=True)
+    (call_dir / "output.json").write_text("{}")
+    harness = CodexHarness(model="openai/gpt-5.5", fast_mode=False, effort=None)
+    harness.parse(
+        HarnessRunResult(returncode=0, stdout=stdout, stderr=b""),
+        artifact_dir=tmp_path,
+        run_id="call",
+    )
+    return json.loads((call_dir / "cost.json").read_text())
+
+
+def test_parse_prices_turn_completed_without_a_session_file(tmp_path: Path) -> None:
+    turn = {
+        "type": "turn.completed",
+        "usage": {
+            "input_tokens": 1_000_000,
+            "cached_input_tokens": 0,
+            "output_tokens": 1_000_000,
+            "reasoning_output_tokens": 0,
+        },
+    }
+    stdout = b'{"type":"turn.started"}\n' + json.dumps(turn).encode() + b"\n"
+
+    cost = _parse_codex_call(tmp_path, stdout)
+
+    # 1M uncached input at $1.25 + 1M output at $10.00, per-million.
+    assert cost["cost_usd"] == 11.25
+    assert cost["metadata"]["input_tokens"] == 1_000_000
+    assert cost["metadata"]["output_tokens"] == 1_000_000
+
+
+def test_parse_falls_back_to_the_session_file_without_turn_completed(tmp_path: Path) -> None:
+    (tmp_path / "call").mkdir()
+    _write_token_count_event(tmp_path / "call" / "session.jsonl", "gpt-5.5")
+    stdout = b'{"type":"turn.failed","error":{"message":"stream disconnected"}}\n'
+
+    cost = _parse_codex_call(tmp_path, stdout)
+
+    assert cost["cost_usd"] == 11.25
