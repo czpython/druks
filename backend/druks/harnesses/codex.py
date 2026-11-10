@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import os
+import re
 import shlex
 from collections.abc import Collection, Iterator
 from dataclasses import dataclass
@@ -43,6 +44,9 @@ logger = logging.getLogger(__name__)
 _TOKEN_COUNT_MARKERS = ('"type":"token_count"', '"type": "token_count"')
 _CHATGPT_HOST = "chatgpt.com"
 _SUBSCRIPTION_TOKEN = "codex_subscription_token"
+# OpenAI web search leaves this citation in model text. The pattern runs on
+# serialized JSON. It stops at a quote, so a match stays in one string.
+_CITATION_MARKER = re.compile(r' *\ue200cite(?:\ue202[^\ue201"]*)?\ue201')
 
 
 @dataclass(frozen=True)
@@ -566,6 +570,9 @@ class CodexHarness(Harness):
         payload = read_result_json(
             call_dir / "output.json",
             name=self.name,
+        )
+        payload = json.loads(
+            _CITATION_MARKER.sub("", json.dumps(payload, ensure_ascii=False)),
         )
         (call_dir / "output.json").write_text(
             json.dumps(payload, indent=2, sort_keys=True),

@@ -190,6 +190,29 @@ def test_failed_codex_call_writes_cost_before_raising(tmp_path: Path):
     assert metadata["output_tokens"] == 1_000
 
 
+def test_codex_parse_strips_citation_markers(tmp_path: Path):
+    call_dir = tmp_path / "call"
+    call_dir.mkdir()
+    citation = "\ue200cite\ue202turn905355view5\ue202turn430332view7\ue201"
+    output = {
+        "summary": f"Calls can require fresh execution. {citation}",
+        "sources": [f"Docs {citation} say so.", "\ue200cite\ue201"],
+    }
+    (call_dir / "output.json").write_text(json.dumps(output))
+    harness = CodexHarness(model="openai/gpt-5.5", fast_mode=False, effort=None)
+
+    payload = harness.parse(
+        HarnessRunResult(returncode=0, stdout=b"", stderr=b""),
+        artifact_dir=tmp_path,
+        run_id="call",
+    )
+
+    assert payload == {
+        "summary": "Calls can require fresh execution.",
+        "sources": ["Docs say so.", ""],
+    }
+
+
 def test_failed_pi_call_writes_cost_before_raising(tmp_path: Path):
     message = {
         "type": "message_end",
