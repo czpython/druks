@@ -156,6 +156,10 @@ A run that the agent starts with a tool records its conversation. When the run
 parks with a question, Druks adds an internal message with the request to that
 conversation, except on a WhatsApp number with an admin, where the admin answers
 instead (see [Confirmation](#confirmation)). When the run
+waits for the provider's usage limit to reset, Druks itself posts a line with the
+time the run continues, in the installation's timezone. The agent shares the
+run's login, so its own turn would fail on the same limit. When the run
+continues, Druks adds an internal message that says so. When the run
 fails, Druks adds an internal message with the failure to that conversation.
 When the run ends, Druks adds an internal message with its result, whether or
 not the run waited for an answer. A run that returns nothing, such as a review

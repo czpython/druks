@@ -18,6 +18,7 @@ from druks.browser.agent_browsers import AgentBrowser
 from druks.browser.enums import BrowserClient
 from druks.chat.bots.dependencies import BotUser
 from druks.chat.enums import BotAccess
+from druks.chat.service import report_quota_resume, report_quota_wait
 from druks.db import db_session
 from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, step_session
@@ -39,7 +40,7 @@ from druks.sandbox.models import SecretRef
 from druks.secrets.enums import SecretKind
 from druks.settings import get_settings
 from druks.usage.models import UsageScrape
-from druks.workflows import _in_step, current_workflow
+from druks.workflows import _in_step, _post_to_chat, current_workflow
 
 if TYPE_CHECKING:
     from druks.browser.sessions import BrowserSession
@@ -281,10 +282,14 @@ class Agent:
                     if wait_seconds > _QUOTA_MAX_WAIT_SECONDS:
                         raise
                     wait_seconds += random.uniform(60, 120)
-                    await set_run_phase(
-                        "waiting_for_quota",
-                        ends_at=datetime.now(UTC) + timedelta(seconds=wait_seconds),
-                    )
+                    resumes_at = datetime.now(UTC) + timedelta(seconds=wait_seconds)
+                    await set_run_phase("waiting_for_quota", ends_at=resumes_at)
+                    if workflow.conversation_id:
+                        await _post_to_chat(
+                            workflow.workflow_id,
+                            "chat.report_quota_wait",
+                            functools.partial(report_quota_wait, resumes_at=resumes_at),
+                        )
                 else:
                     # Permanent or unclassified — never retried.
                     raise
@@ -295,6 +300,10 @@ class Agent:
                 # Durable: the end time checkpoints now, so a restart resumes
                 # with the remaining wait, and replay skips it entirely.
                 await DBOS.sleep_async(wait_seconds)
+                if error.retry is Retry.QUOTA and workflow.conversation_id:
+                    await _post_to_chat(
+                        workflow.workflow_id, "chat.report_quota_resume", report_quota_resume
+                    )
             else:
                 # Body-level only, on both passes: in-step calls hit the early return
                 # live and are skipped with their step on replay.

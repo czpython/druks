@@ -448,8 +448,8 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
 
 
 async def _post_to_chat(workflow_id: str, name: str, post: Callable) -> None:
-    # A run that a chat's tool call started talks back through chat: post() adds an
-    # internal message, and the conversation's agent takes it from there.
+    # A run that a chat's tool call started talks back through chat. When post() returns
+    # the conversation, the conversation's agent takes its message from there.
     async def _post() -> str | None:
         async with step_session() as session:
             return await post(session, await session.get(Run, workflow_id))
