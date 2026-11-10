@@ -3,6 +3,11 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from pydantic import BaseModel, Field, model_validator
 
 from druks.agents import AgentOutput
+from druks.contrib.software_factory.constants import (
+    CI_GREEN_CONCLUSIONS,
+    CI_REGISTER_SECONDS,
+    CI_TTL_SECONDS,
+)
 from druks.contrib.software_factory.enums import HumanFeedbackAction, ReviewDecision
 from druks.workflows import Gate, OperatorReply, Workflow
 
@@ -22,7 +27,10 @@ class ReviewWork(Gate):
     @classmethod
     async def on_wait(cls, workflow: Workflow) -> None:
         build = cast("Build", workflow)
-        await build.set_pr_draft(draft=False)
+        # A round parks for a person even when its CI is not green or its review requested
+        # changes, but its PR is not ready to merge.
+        if build.journal.is_ready_for_review:
+            await build.set_pr_draft(draft=False)
         await build.request_assignee_review()
 
 
@@ -300,3 +308,45 @@ class ReviewReport(AgentOutput):
 
     def to_event(self) -> dict[str, str]:
         return {"topic": "review.completed", "summary": self.summary}
+
+
+class CiReport(BaseModel):
+    """CI's verdict on one delivered head. ``red`` sends the round back to implement.
+    ``unfinished`` is CI that did not finish in time."""
+
+    head_sha: str
+    conclusion: Literal["green", "red", "unfinished"]
+
+    @classmethod
+    def judge(
+        cls,
+        head_sha: str,
+        suites: list[dict[str, Any]],
+        statuses: list[dict[str, Any]],
+        *,
+        waited: float,
+    ) -> "CiReport | None":
+        """The verdict on ``head_sha`` from its check suites and commit statuses after
+        ``waited`` seconds, or None while CI can still change."""
+        is_registering = waited < CI_REGISTER_SECONDS
+        # Some apps leave a queued suite with no check runs for good, so such a suite, or
+        # nothing at all, is a verdict only once checks have had time to register.
+        if is_registering and (
+            not (suites or statuses)
+            or any(not suite["latest_check_runs_count"] for suite in suites)
+        ):
+            return None
+        suites = [suite for suite in suites if suite["latest_check_runs_count"]]
+        # A suite stays open until its workflow run completes, while the check run of a
+        # ``needs:`` job appears only once the jobs it needs finish.
+        is_finished = all(suite["status"] == "completed" for suite in suites) and all(
+            status["state"] != "pending" for status in statuses
+        )
+        if not is_finished:
+            if waited < CI_TTL_SECONDS:
+                return None
+            return cls(head_sha=head_sha, conclusion="unfinished")
+        is_green = all(suite["conclusion"] in CI_GREEN_CONCLUSIONS for suite in suites) and all(
+            status["state"] == "success" for status in statuses
+        )
+        return cls(head_sha=head_sha, conclusion="green" if is_green else "red")

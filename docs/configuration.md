@@ -516,6 +516,10 @@ reviewer approves the pull request:
 | `none` | Default. Druks marks the pull request ready for review and ends the build. The repository's own process merges it. Druks records the merge when GitHub announces it. |
 | `merge` | Druks squash-merges the pull request, or arms auto-merge when checks are still running. |
 
+After each push, the build waits for CI on the head before the review, and red
+CI goes back to the implementer. The pull request leaves draft when the review of
+a head with green CI requests no changes, or when a person approves it.
+
 When Druks receives a push to the default branch that changes `config.yml`, the
 next build uses the new file.
 

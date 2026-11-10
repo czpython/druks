@@ -264,3 +264,45 @@ async def test_a_writer_or_a_bot_is_not_looked_up(tmp_path, monkeypatch, sender_
     await _events(tmp_path, payload=payload).on_issue_comment_created()
 
     assert asked == []
+
+
+async def test_a_completed_check_suite_names_its_commit_and_branch(tmp_path, monkeypatch):
+    published = _capture(monkeypatch)
+    payload = {
+        "action": "completed",
+        "repository": {"full_name": "acme/widget"},
+        "check_suite": {"head_sha": "0f3a2c1d", "head_branch": "agent/eng-1"},
+    }
+
+    await _events(tmp_path, payload=payload).on_check_suite_completed()
+
+    [(event_type, published_event)] = published
+    assert event_type == "commit.check_suite_completed"
+    assert published_event == {
+        "repo": "acme/widget",
+        "payload": {"head_sha": "0f3a2c1d", "branches": ["agent/eng-1"]},
+    }
+
+
+@pytest.mark.parametrize(("state", "is_pending"), [("failure", False), ("pending", True)])
+async def test_a_status_names_its_state_and_the_branches_its_commit_heads(
+    tmp_path, monkeypatch, state, is_pending
+):
+    published = _capture(monkeypatch)
+    payload = {
+        "repository": {"full_name": "acme/widget"},
+        "sha": "0f3a2c1d",
+        "state": state,
+        "branches": [{"name": "agent/eng-1"}, {"name": "agent/eng-1-2"}],
+    }
+
+    await _events(tmp_path, payload=payload).on_status()
+
+    [(event_type, published_event)] = published
+    assert event_type == "commit.status_updated"
+    assert published_event["payload"] == {
+        "head_sha": "0f3a2c1d",
+        "branches": ["agent/eng-1", "agent/eng-1-2"],
+        "state": state,
+        "is_pending": is_pending,
+    }

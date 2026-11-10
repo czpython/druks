@@ -2,6 +2,7 @@ from contextlib import suppress
 from typing import Any
 
 from druks.contrib.software_factory.contracts import (
+    CiReport,
     ImplementationOutput,
     PlanData,
     ReviewOutput,
@@ -54,6 +55,29 @@ class BuildJournal(Journal):
         for plan in reversed(self.filter(PlanData)):
             if plan.assignee_github_login:
                 return plan.assignee_github_login
+        return
+
+    @property
+    def is_ready_for_review(self) -> bool:
+        """The round's review of a head with green CI requested no changes."""
+        ci_report = self.latest(CiReport)
+        if not ci_report or ci_report.conclusion != "green":
+            return False
+        reviews = self.filter(ReviewReport, after=ci_report)
+        return bool(reviews) and reviews[-1].decision != "request_changes"
+
+    @property
+    def red_ci_report(self) -> CiReport | None:
+        """The latest CI report when it is red and no review follows it."""
+        ci_report = self.latest(CiReport)
+        # Red CI sends the round back before its review, so a review recorded after it
+        # means the round moved on.
+        if (
+            ci_report
+            and ci_report.conclusion == "red"
+            and not self.filter(ReviewReport, after=ci_report)
+        ):
+            return ci_report
         return
 
     @property

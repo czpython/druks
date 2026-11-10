@@ -799,7 +799,7 @@ class Workflow:
     # dispatch() on that cadence if the class declares one (the policy starts the
     # real subject-backed run), else run() with no subject (a framework cron).
     every: ClassVar[str | None] = None
-    # True holds one warm VM across the run's agent calls (released at gate parks);
+    # True holds one warm VM across the run's agent calls (released at gate parks and sleeps);
     # False gives each call a throwaway VM.
     steps_reuse_sandbox: ClassVar[bool] = False
     # The environment this workflow's agents need. None uses the platform base.
@@ -976,6 +976,20 @@ class Workflow:
         if failure := facts.get("failure"):
             raise WaitFailed(topic, failure)
         return facts
+
+    async def sleep(self, seconds: float, *, label: str, until: str = "") -> None:
+        """Sleep for ``seconds``, or until ``answer`` arrives on ``until``. The run stays
+        running, shows ``label``, and releases its warm sandbox."""
+        # ``answer`` drops what arrives before ``waiting_on`` is set, and the release
+        # takes time.
+        await DBOS.set_event_async("waiting_on", until)
+        await self._reap_run()
+        await set_run_phase(label)
+        if until:
+            await DBOS.recv_async(until, timeout_seconds=seconds)
+            await DBOS.set_event_async("waiting_on", "")
+        else:
+            await DBOS.sleep_async(seconds)
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         # Everything an agent's template renders with, beyond the workflow and

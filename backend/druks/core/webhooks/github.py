@@ -249,6 +249,34 @@ class GitHubEvents(Webhook):
         )
         return _accepted()
 
+    async def on_check_suite_completed(self) -> Response:
+        check_suite = self.data["check_suite"]
+        # A suite on a fork's commit or a tag has no head branch.
+        branch = check_suite["head_branch"]
+        return await self._publish_commit(
+            "commit.check_suite_completed", check_suite["head_sha"], [branch] if branch else []
+        )
+
+    async def on_status(self) -> Response:
+        return await self._publish_commit(
+            "commit.status_updated",
+            self.data["sha"],
+            [branch["name"] for branch in self.data["branches"]],
+            state=self.data["state"],
+            is_pending=self.data["state"] == "pending",
+        )
+
+    async def _publish_commit(
+        self, fact: str, head_sha: str, branches: list[str], **facts: Any
+    ) -> Response:
+        """Publish a change to the checks of one commit, with the branches it heads."""
+        await publish(
+            fact,
+            repo=_repo_name(self.data),
+            payload={"head_sha": head_sha, "branches": branches, **facts},
+        )
+        return _accepted()
+
     async def on_push(self) -> Response:
         repository = self.data["repository"]
         repo = repository["full_name"]

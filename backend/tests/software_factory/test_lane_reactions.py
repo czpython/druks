@@ -300,3 +300,52 @@ async def test_a_review_of_a_pull_request_no_build_owns_answers_no_one(druks_db,
     )
 
     assert answers == []
+
+
+async def test_a_finished_check_wakes_the_build_of_its_branch(druks_db, monkeypatch):
+    item = await _item_with_pr("ACME-32", 44)
+    answers = await _answers_to_the_build(monkeypatch)
+
+    await publish(
+        "commit.check_suite_completed",
+        repo="acme/widget",
+        payload={"head_sha": "0f3a2c1d", "branches": ["agent/acme-32", "agent/nobody"]},
+    )
+
+    assert answers == [(item.id, "check.completed", {})]
+
+
+async def test_a_settled_status_wakes_the_build_of_its_branch(druks_db, monkeypatch):
+    item = await _item_with_pr("ACME-34", 46)
+    answers = await _answers_to_the_build(monkeypatch)
+
+    await publish(
+        "commit.status_updated",
+        repo="acme/widget",
+        payload={
+            "head_sha": "0f3a2c1d",
+            "branches": ["agent/acme-34"],
+            "state": "failure",
+            "is_pending": False,
+        },
+    )
+
+    assert answers == [(item.id, "check.completed", {})]
+
+
+async def test_a_pending_status_wakes_no_build(druks_db, monkeypatch):
+    await _item_with_pr("ACME-33", 45)
+    answers = await _answers_to_the_build(monkeypatch)
+
+    await publish(
+        "commit.status_updated",
+        repo="acme/widget",
+        payload={
+            "head_sha": "0f3a2c1d",
+            "branches": ["agent/acme-33"],
+            "state": "pending",
+            "is_pending": True,
+        },
+    )
+
+    assert answers == []

@@ -955,8 +955,8 @@ The result is a `subprocess.CompletedProcess`: `returncode`, `stdout`, and `stde
 
 Keep durable state outside the VM. A workflow can set
 `steps_reuse_sandbox = True` to retain one host across a segment. Druks releases
-the host at a gate and at workflow exit. It rotates the host near lease expiry,
-and when the next agent call needs other secret entries.
+the host at a gate, during a `sleep`, and at workflow exit. It rotates the host
+near lease expiry, and when the next agent call needs other secret entries.
 
 ### Borrow a browser session
 
@@ -1217,6 +1217,17 @@ async def failed_review_fails_the_build(*, subject: PullRequest, failure: str, *
         await Build.answer(item, "review.completed", failure=failure)
 ```
 
+To look again later rather than wait for an answer, sleep:
+
+```python
+await self.sleep(60, label="Waiting to look again", until="source.changed")
+```
+
+The run stays running and shows the label. The sleep releases the warm sandbox,
+as a gate park does, and the next agent call boots a new one. It ends after the
+given seconds, or earlier when `answer()` arrives on `until`. It returns nothing
+and never fails.
+
 ## Give runs a subject read-side
 
 A subject is what your runs are about — a repository, a work item, a pull
@@ -1457,6 +1468,12 @@ with `repo`, `pr_number`, and a `payload` with `comment_id`, `body`, `author`,
 `ticket.commented` instead, one of the [tracker events](#tracker-events). Both
 come from any sender, apps included, so filter with `payload__author_is_bot=False`
 to get people only. The GitHub chat channel answers both.
+
+A completed check suite publishes `commit.check_suite_completed`, and a commit
+status publishes `commit.status_updated`. Each carries `repo` and a `payload`
+with `head_sha` and `branches`, the branches that commit heads. The status fact
+also carries `state` and `is_pending`, which is true while that state is
+`pending`. A commit on a fork or a tag heads no branch.
 
 `post_check_run` creates the named check run on the head commit, or updates the
 one the App already posted there. An annotation is GitHub's shape. The App needs
