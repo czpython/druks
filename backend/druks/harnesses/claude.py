@@ -164,6 +164,8 @@ class ClaudeHarness(Harness):
             self.no_ask_mode,
             "--debug-file",
             in_vm_debug,
+            "--session-id",
+            run_id,
             "--disallowedTools",
             *CLAUDE_DISALLOWED_TOOLS,
         ]
@@ -173,10 +175,8 @@ class ClaudeHarness(Harness):
         for extra_dir in add_dirs:
             claude_argv += ["--add-dir", extra_dir]
         claude_argv += self._mcp_flags(mcp_servers)
-        # Wrap so we can snapshot the per-invocation session JSONL that
-        # claude writes under ``~/.claude/projects/<cwd-hash>/`` — the
-        # codex-equivalent of CODEX_HOME/sessions. Sentinel + ``-newer``
-        # picks the right one when prior calls left files behind.
+        # The wrapper copies the run's transcript, found by its session id. A
+        # killed claude still writes its cost totals there as it exits.
         claude_cmdline = " ".join(shlex.quote(a) for a in claude_argv)
         run_dir_q = shlex.quote(in_vm_run_dir)
         session_q = shlex.quote(in_vm_session)
@@ -195,13 +195,14 @@ class ClaudeHarness(Harness):
         wrapper = (
             f"mkdir -p {run_dir_q} && "
             f"{write_hook}"
-            f"touch {run_dir_q}/.start && "
+            # The kill stops claude, and the wrapper lives on to copy.
+            "trap : TERM && "
             f"{login}"
             f"{claude_cmdline}; "
             "ec=$?; "
-            f"sf=$(find $HOME/.claude/projects -name '*.jsonl' -type f "
-            f"-newer {run_dir_q}/.start 2>/dev/null | head -1); "
-            f'if [ -n "$sf" ]; then cp "$sf" {session_q}; fi; '
+            # Quiet: a claude that died before it streamed leaves its reason
+            # on the last stderr line.
+            f"cp $HOME/.claude/projects/*/{run_id}.jsonl {session_q} 2>/dev/null; "
             "exit $ec"
         )
         return AgentInvocation(
@@ -213,10 +214,34 @@ class ClaudeHarness(Harness):
             extra_artifact_filenames=("debug.log", "session.jsonl"),
         )
 
+    def _get_session_cost(
+        self, *, artifact_dir: Path, run_id: str
+    ) -> tuple[float | None, dict[str, Any] | None]:
+        """The totals Claude Code writes to its session file as it exits: the
+        last ``cost-state`` line."""
+        cost_state: dict[str, Any] = {}
+        session = artifact_dir / run_id / "session.jsonl"
+        if session.exists():
+            for line in session.read_bytes().splitlines():
+                # A message that quotes this marker escapes its quotes.
+                if b'"type":"cost-state"' in line:
+                    cost_state = json.loads(line)
+        return extract_claude_cost_from_envelope(
+            {
+                "total_cost_usd": cost_state.get("totalCostUSD"),
+                "modelUsage": cost_state.get("modelUsage"),
+            }
+        )
+
     def parse(self, result: HarnessRunResult, *, artifact_dir: Path, run_id: str) -> Any:
         try:
             envelope = collapse_claude_stream(result.stdout)
         except exceptions.StreamJsonError as error:
+            # A killed claude streams no result event.
+            cost_usd, cost_metadata = self._get_session_cost(
+                artifact_dir=artifact_dir, run_id=run_id
+            )
+            write_cost(artifact_dir / run_id, cost_usd=cost_usd, metadata=cost_metadata)
             # Keep a provider failure when its stream is incomplete. Only a
             # successful malformed response is an output failure.
             self.check_returncode(result)
@@ -367,25 +392,30 @@ def collapse_claude_stream(stdout: bytes) -> dict[str, Any]:
     return envelope
 
 
+_MODEL_USAGE_FIELDS = {
+    "input_tokens": "inputTokens",
+    "output_tokens": "outputTokens",
+    "cache_creation_input_tokens": "cacheCreationInputTokens",
+    "cache_read_input_tokens": "cacheReadInputTokens",
+}
+
+
 def extract_claude_cost_from_envelope(
     envelope: dict[str, Any],
 ) -> tuple[float | None, dict[str, Any] | None]:
     cost = envelope.get("total_cost_usd")
-    usage = envelope.get("usage")
+    # ``usage`` counts only the top-level loop; ``modelUsage`` adds subagents.
+    model_usage = envelope.get("modelUsage")
     cost_usd: float | None = None
     if isinstance(cost, int | float):
         cost_usd = float(cost)
     metadata: dict[str, Any] = {"provider": "anthropic"}
-    if isinstance(usage, dict):
-        for key in (
-            "input_tokens",
-            "output_tokens",
-            "cache_creation_input_tokens",
-            "cache_read_input_tokens",
-        ):
-            value = usage.get(key)
-            if isinstance(value, int):
-                metadata[key] = value
+    if isinstance(model_usage, dict):
+        for usage in model_usage.values():
+            for key, field in _MODEL_USAGE_FIELDS.items():
+                value = usage.get(field)
+                if isinstance(value, int):
+                    metadata[key] = metadata.get(key, 0) + value
     model = envelope.get("model")
     if isinstance(model, str):
         metadata["model"] = model

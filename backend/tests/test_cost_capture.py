@@ -14,7 +14,12 @@ from druks.harnesses.claude import (
     extract_claude_cost_from_envelope,
 )
 from druks.harnesses.codex import CodexHarness
-from druks.harnesses.exceptions import HarnessError, HarnessSpendLimitError, StreamJsonError
+from druks.harnesses.exceptions import (
+    HarnessError,
+    HarnessSpendLimitError,
+    HarnessTimeoutError,
+    StreamJsonError,
+)
 from druks.harnesses.opencode import OpenCodeHarness
 from druks.harnesses.pi import PiHarness
 from druks.sandbox.datastructures import HarnessRunResult
@@ -23,7 +28,18 @@ from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 
 
-def test_extract_claude_cost_pulls_total_and_usage():
+def _model_usage(input_tokens: int, output_tokens: int, cache_write: int, cache_read: int) -> dict:
+    return {
+        "inputTokens": input_tokens,
+        "outputTokens": output_tokens,
+        "cacheCreationInputTokens": cache_write,
+        "cacheReadInputTokens": cache_read,
+        "webSearchRequests": 0,
+        "costUSD": 0.01,
+    }
+
+
+def test_extract_claude_cost_sums_the_tokens_of_every_model():
     envelope = {
         "type": "result",
         "is_error": False,
@@ -31,24 +47,26 @@ def test_extract_claude_cost_pulls_total_and_usage():
         "total_cost_usd": 0.0423,
         "model": "claude-opus-4-7",
         "duration_ms": 12345,
-        "usage": {
-            "input_tokens": 1500,
-            "output_tokens": 600,
-            "cache_creation_input_tokens": 100,
-            "cache_read_input_tokens": 0,
+        # The top-level loop only; the subagent's haiku tokens are in modelUsage.
+        "usage": {"input_tokens": 1500, "output_tokens": 600},
+        "modelUsage": {
+            "claude-opus-4-7": _model_usage(1500, 600, 100, 0),
+            "claude-haiku-4-5": _model_usage(20, 5, 0, 300),
         },
     }
 
     cost_usd, metadata = extract_claude_cost_from_envelope(envelope)
 
     assert cost_usd == 0.0423
-    assert metadata is not None
-    assert metadata["input_tokens"] == 1500
-    assert metadata["output_tokens"] == 600
-    assert metadata["cache_creation_input_tokens"] == 100
-    assert metadata["model"] == "claude-opus-4-7"
-    assert metadata["provider"] == "anthropic"
-    assert metadata["duration_ms"] == 12345
+    assert metadata == {
+        "provider": "anthropic",
+        "input_tokens": 1520,
+        "output_tokens": 605,
+        "cache_creation_input_tokens": 100,
+        "cache_read_input_tokens": 300,
+        "model": "claude-opus-4-7",
+        "duration_ms": 12345,
+    }
 
 
 def test_extract_claude_cost_returns_none_when_envelope_lacks_cost():
@@ -71,12 +89,7 @@ def test_failed_claude_call_writes_cost_before_raising(tmp_path: Path):
                 "is_error": True,
                 "result": message,
                 "total_cost_usd": 190.25,
-                "usage": {
-                    "input_tokens": 100,
-                    "output_tokens": 20,
-                    "cache_creation_input_tokens": 30,
-                    "cache_read_input_tokens": 400,
-                },
+                "modelUsage": {"claude-opus-4-7": _model_usage(100, 20, 30, 400)},
             }
         ).encode()
         + b"\n"
@@ -99,6 +112,45 @@ def test_failed_claude_call_writes_cost_before_raising(tmp_path: Path):
         "cache_creation_input_tokens": 30,
         "cache_read_input_tokens": 400,
     }
+
+
+def test_killed_claude_call_records_the_cost_state_of_its_transcript(tmp_path: Path):
+    call = tmp_path / "killed-call"
+    call.mkdir()
+    cost_state = {
+        "type": "cost-state",
+        "totalCostUSD": 0.0024,
+        "modelUsage": {"claude-haiku-4-5": _model_usage(1215, 188, 10258, 11873)},
+    }
+    events = [
+        {"type": "cost-state", "totalCostUSD": 0.001, "modelUsage": {}},
+        cost_state,
+        {"type": "assistant", "message": {"content": '{"type":"cost-state"}'}},
+    ]
+    # Claude Code writes compact JSON.
+    (call / "session.jsonl").write_text(
+        "".join(json.dumps(event, separators=(",", ":")) + "\n" for event in events)
+    )
+    stdout = _stream({"type": "assistant", "message": {"id": "msg_1", "content": []}})
+    harness = ClaudeHarness(model="anthropic/claude-haiku-4-5", fast_mode=False, effort=None)
+
+    with pytest.raises(HarnessTimeoutError):
+        harness.parse(
+            HarnessRunResult(returncode=143, stdout=stdout, stderr=b"", timed_out=True),
+            artifact_dir=tmp_path,
+            run_id="killed-call",
+        )
+
+    assert read_cost(call) == (
+        0.0024,
+        {
+            "provider": "anthropic",
+            "input_tokens": 1215,
+            "output_tokens": 188,
+            "cache_creation_input_tokens": 10258,
+            "cache_read_input_tokens": 11873,
+        },
+    )
 
 
 def test_failed_codex_call_writes_cost_before_raising(tmp_path: Path):

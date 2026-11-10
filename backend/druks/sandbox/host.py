@@ -30,7 +30,6 @@ from druks.harnesses.exceptions import (
     HarnessFirstByteTimeoutError,
     HarnessHookError,
     HarnessSandboxError,
-    HarnessTimeoutError,
 )
 from druks.settings import get_settings
 
@@ -636,14 +635,12 @@ class Host:
                 f"{name} produced no output within {first_byte_kill_seconds}s; killed.",
             )
 
-        if timed_out:
-            raise HarnessTimeoutError(f"{name} timed out after {timeout}s.")
-
         return HarnessRunResult(
             returncode=int(returncode),
             stdout=bytes(stdout_buf),
             stderr=bytes(stderr_buf),
             unasked_hooks=run.unasked_hooks,
+            timed_out=timed_out,
         )
 
     async def exec(

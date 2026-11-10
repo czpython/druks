@@ -321,6 +321,29 @@ def test_parse_maps_the_deadline_exit_to_timeout(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("stdout", "expected_cost"),
+    [
+        # The response the kill cut short: its error is the kill's doing.
+        (_response(error={"name": "APIError", "data": {"isRetryable": True}}, cost=0.5), 0.5),
+        # No usable response: not a retried invalid output.
+        (b"", None),
+    ],
+)
+def test_parse_fails_a_killed_run_with_its_timeout(
+    tmp_path: Path, stdout: bytes, expected_cost: float | None
+) -> None:
+    with pytest.raises(HarnessTimeoutError, match="opencode timed out"):
+        _harness().parse(
+            HarnessRunResult(returncode=143, stdout=stdout, stderr=b"", timed_out=True),
+            artifact_dir=tmp_path,
+            run_id="run-1",
+        )
+
+    cost_usd, _ = read_cost(tmp_path / "run-1")
+    assert cost_usd == expected_cost
+
+
 def test_parse_includes_stderr_when_failed_process_wrote_no_json(tmp_path: Path) -> None:
     with pytest.raises(HarnessInvalidOutputError, match="server failed"):
         _harness().parse(
