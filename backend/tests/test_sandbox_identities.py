@@ -444,10 +444,10 @@ async def test_the_issuer_answers_503_when_github_refuses(druks_db, tmp_path, mo
 async def test_the_issuer_answers_422_with_the_reason_when_the_app_is_not_on_the_repo(
     druks_db, tmp_path, monkeypatch
 ):
-    async def get_installation_id(self, owner_or_repo: str) -> int:
+    async def get_installation(self, owner_or_repo: str):
         raise GitHubAppNotInstalledError(owner_or_repo, app="druks-reviewer")
 
-    monkeypatch.setattr(GitHubAppClient, "get_installation_id", get_installation_id)
+    monkeypatch.setattr(GitHubAppClient, "get_installation", get_installation)
     await _connect_github()
     identity, bearer = await _github_identity()
 

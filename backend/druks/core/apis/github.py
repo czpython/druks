@@ -66,7 +66,7 @@ class GitHubAppClient:
             auto_retry=RETRY_SERVER_ERROR,
         )
 
-    async def get_installation_id(self, owner_or_repo: str) -> int:
+    async def get_installation(self, owner_or_repo: str):
         """The installation that covers a repository ``owner/name``, or an account."""
         owner, _, name = owner_or_repo.partition("/")
         apps = self._app.rest.apps
@@ -80,7 +80,7 @@ class GitHubAppClient:
             ]
         for lookup in lookups:
             try:
-                return (await lookup()).parsed_data.id
+                return (await lookup()).parsed_data
             except RequestFailed as error:
                 if error.response.status_code != 404:
                     raise

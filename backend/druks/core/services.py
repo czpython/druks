@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 import httpx
 from githubkit import GitHub
-from githubkit.exception import RequestError
+from githubkit.exception import RequestError, RequestFailed
 from githubkit.retry import RETRY_SERVER_ERROR
 from pydantic import BaseModel, Field, SecretStr
 from slack_sdk.errors import SlackApiError
@@ -95,21 +95,40 @@ class GithubApp(Service):
             app = cls.service._app_client(row)
             first, *others = resources
             try:
-                installation_id = await app.get_installation_id(first)
+                installation = await app.get_installation(first)
             except exceptions.GitHubAppNotInstalledError as error:
                 raise MissingSecretError(str(error)) from error
-            names = [first.split("/", 1)[1]]
+            owner, repo_name = first.split("/", 1)
+            names = [repo_name]
             for repo in others:
-                # GitHub refuses the whole token when one named repository is out of reach.
-                with suppress(exceptions.GitHubAppNotInstalledError):
-                    if await app.get_installation_id(repo) == installation_id:
-                        names.append(repo.split("/", 1)[1])
+                repo_owner, repo_name = repo.split("/", 1)
+                # An installation is on one account, so a repo of another owner is never in it.
+                if repo_owner.lower() != owner.lower():
+                    continue
+                if installation.repository_selection == "selected":
+                    try:
+                        await app.get_installation(repo)
+                    except exceptions.GitHubAppNotInstalledError:
+                        continue
+                names.append(repo_name)
             names.sort()
-            return await VaultSecret.get_or_mint_token(
-                row.session,
-                Audience.resource(cls.service.slug, "installation", installation_id, *names),
-                on_miss=functools.partial(app.create_installation_token, installation_id, names),
-            )
+            try:
+                return await VaultSecret.get_or_mint_token(
+                    row.session,
+                    Audience.resource(cls.service.slug, "installation", installation.id, *names),
+                    on_miss=functools.partial(
+                        app.create_installation_token, installation.id, names
+                    ),
+                )
+            except RequestFailed as error:
+                if error.response.status_code == 422:
+                    raise MissingSecretError(
+                        "GitHub refused a token for "
+                        f"{', '.join(f'{owner}/{repo_name}' for repo_name in names)}. GitHub has "
+                        "no repository under one of these names. Remove the renamed or deleted "
+                        "repository from the project."
+                    ) from error
+                raise
 
     @classmethod
     def get_manifest(cls, *, endpoint: str, webhook_base: str) -> dict[str, Any]:
@@ -165,7 +184,7 @@ class GithubApp(Service):
         an App reinstall mints for the new one."""
         row = await cls.get()
         app = cls._app_client(row)
-        installation_id = await app.get_installation_id(owner_or_repo)
+        installation_id = (await app.get_installation(owner_or_repo)).id
         token, _ = await VaultSecret.get_or_mint_token(
             row.session,
             Audience.resource(cls.slug, "installation", installation_id),
@@ -179,7 +198,7 @@ class GithubApp(Service):
         repository or an account, so the next fetch mints a new one. GitHub can refuse
         a token before its expiry, and the vault would serve it until then."""
         row = await cls.get()
-        installation_id = await cls._app_client(row).get_installation_id(owner_or_repo)
+        installation_id = (await cls._app_client(row).get_installation(owner_or_repo)).id
         # The issuer reads the vault in its own session, so this commits on its own.
         async with get_session(row.session.bind) as own:
             await VaultSecret.revoke_tokens(
