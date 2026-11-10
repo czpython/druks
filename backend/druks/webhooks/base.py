@@ -11,6 +11,7 @@ from starlette.routing import compile_path
 from druks.accounts.exceptions import InvalidAssertionError
 from druks.accounts.jwt import verify_claims
 from druks.apps.registry import services, webhooks
+from druks.exceptions import PermissionDenied
 from druks.settings import Settings
 
 from .deliveries import mark_delivery, release_delivery
@@ -195,6 +196,14 @@ class Webhook:
                 response = await self.on_unhandled(action)
             await session.commit()
             return response
+        except PermissionDenied as error:
+            # Druks refused the account behind the delivery. A second delivery gets the
+            # same answer, so the claim stays and the sender gets an acknowledgement.
+            await session.rollback()
+            logger.info("webhook refused: %s", error)
+            return Response(
+                content=b'{"accepted":false,"refused":true}', media_type="application/json"
+            )
         except BaseException:
             await release_delivery(provider, key)
             raise

@@ -213,6 +213,8 @@ The first account becomes the default account, including in header and JWT modes
 Unattended calls use its subscriptions. The flag grants no extra
 permissions. Calls with an explicit account use that account's subscriptions.
 Missing subscriptions fail the call. API keys belong to the installation.
+The unattended account must be able to use each app that runs on a schedule.
+If it is a member, an admin adds it to a team that lists each scheduled app.
 
 The first account is also an admin. Each later person joins as a member when
 Druks first resolves their identity. An admin changes a person's role in
@@ -642,6 +644,9 @@ with **Connect your account**. A connection for everyone has no account, so it
 does not match. A GitHub person has the account that their
 [GitHub sign-in](#github) links. Two matching accounts do not match. A **druks**
 ticket build uses the account of the ticket assignee.
+
+When a team lists Software Factory, a build that would start under an account
+that cannot use it does not start, and the work item says why.
 
 ### GitHub Issues as the tracker
 

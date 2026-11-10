@@ -28,6 +28,7 @@ from druks.durable.exceptions import ScheduleUnavailable
 from druks.durable.models import Artifact, Run
 from druks.events.models import Event
 from druks.settings import get_settings
+from druks.teams.dependencies import app_access_for_schedule
 
 PREVIEW_SIZE = 4
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -192,7 +193,11 @@ async def list_current_schedules(session: SessionDep, response: Response) -> Das
     return DashboardSchedules(rows=rows)
 
 
-@router.post("/schedules/{kind}/run", status_code=202)
+@router.post(
+    "/schedules/{kind}/run",
+    status_code=202,
+    dependencies=[Depends(app_access_for_schedule)],
+)
 async def run_schedule(kind: str) -> dict[str, str]:
     workflow = workflows.get(kind)
     if not workflow or not workflow.every:

@@ -57,6 +57,7 @@ from druks.notifications.services import validate_in_app_answer
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.settings import Urls
+from druks.teams.models import Team
 from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_run
 from druks.user_settings import reads
 from druks.user_settings.models import InstallationSettings, SettingsOverride
@@ -871,6 +872,31 @@ async def test_member_cannot_open_a_public_number_code(druks_db, tmp_path, helpd
     async with asgi_client(api) as client:
         response = await client.post(
             f"/api/chat/connections/{connection.id}/one-time-code",
+            headers={IDENTITY_HEADER: member.username},
+        )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("helpdesk", [BotAccess.PRIVATE], indirect=True)
+async def test_member_cannot_pair_a_private_number_from_a_teams_app(druks_db, tmp_path, helpdesk):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    connection = await link(
+        druks_db,
+        await bot_account(druks_db),
+        app="helpdesk",
+        access=BotAccess.PRIVATE,
+    )
+    # The fixture app is not in the registry that Team.create checks.
+    druks_db.add(Team(name="Helpdesk", members=[], apps=["helpdesk"]))
+    await druks_db.flush()
+    settings = make_settings(tmp_path, identity={"mode": "header", "header": IDENTITY_HEADER})
+    api = configure_app_for_test(settings=settings, authenticated=False)
+
+    async with asgi_client(api) as client:
+        response = await client.post(
+            f"/api/chat/connections/{connection.id}/pairing",
             headers={IDENTITY_HEADER: member.username},
         )
 

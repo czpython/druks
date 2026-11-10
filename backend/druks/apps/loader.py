@@ -8,7 +8,7 @@ from druks.apps.registry import apps
 from druks.models import Base
 from druks.settings import get_settings
 
-from .exceptions import AppImportError, AppNotFound, AppsNotRegisteredError, MalformedApp
+from . import exceptions
 
 if TYPE_CHECKING:
     from importlib.metadata import EntryPoint
@@ -29,7 +29,7 @@ def register_workflow_package(package: str, app: str) -> None:
     # can't share a workflow package.
     if package in _workflow_packages:
         if _workflow_packages[package] != app:
-            raise MalformedApp(
+            raise exceptions.MalformedApp(
                 f"package {package!r} already belongs to "
                 f"{_workflow_packages[package]!r} — {app!r} can't claim it"
             )
@@ -37,7 +37,7 @@ def register_workflow_package(package: str, app: str) -> None:
     for registered, owner in _workflow_packages.items():
         nested = registered.startswith(f"{package}.") or package.startswith(f"{registered}.")
         if nested and owner != app:
-            raise MalformedApp(
+            raise exceptions.MalformedApp(
                 f"package {package!r} overlaps {registered!r} (owned by {owner!r}) — "
                 "workflow ownership must be unambiguous"
             )
@@ -58,11 +58,15 @@ def resolve_workflow_app(module: str) -> str:
 def register_apps() -> None:
     """Fill the apps registry with every installed app that druks.toml leaves
     enabled. A process calls this once where it starts."""
+    # A model can name a model of another package: Account.teams names Team. The
+    # name resolves only when that package is loaded, so a process loads it here.
+    import druks.teams.models  # noqa: F401
+
     tables = get_settings().apps
     entries = entry_points(group=_GROUP)
     for name in tables:
         if name not in entries.names:
-            raise AppNotFound(
+            raise exceptions.AppNotFound(
                 f"druks.toml configures the app {name!r}, and no installed package "
                 f"provides it. Remove [apps.{name}]."
             )
@@ -75,7 +79,7 @@ def register_apps() -> None:
         if not (isinstance(app, type) and issubclass(app, App)):
             raise TypeError(f"app entry point {entry.name!r} is not an App")
         if app.name != entry.name:
-            raise MalformedApp(
+            raise exceptions.MalformedApp(
                 f"app {entry.name!r} entry point resolves to an App named "
                 f"{app.name!r} — the entry-point name must match App.name"
             )
@@ -85,7 +89,7 @@ def register_apps() -> None:
 def iter_apps() -> list[type[App]]:
     """Every app ``register_apps`` registered when the process started."""
     if not apps:
-        raise AppsNotRegisteredError
+        raise exceptions.AppsNotRegisteredError
     return apps.all()
 
 
@@ -116,7 +120,7 @@ def load_app(name: str) -> type[App]:
         import_app_models(app)
         app.discover()
     except Exception as error:
-        raise AppImportError(f"app {name!r} failed to import: {error}") from error
+        raise exceptions.AppImportError(f"app {name!r} failed to import: {error}") from error
     # Outside the try: a contract break is not an import error.
     app.subjects()
     app.navigation_pages()
@@ -130,12 +134,12 @@ def resolve_app(name: str) -> type[App]:
     any app code runs."""
     matches = [e for e in entry_points(group=_GROUP) if e.name == name]
     if not matches:
-        raise AppNotFound(f"no installed app named {name!r} — install its package first")
+        raise exceptions.AppNotFound(f"no installed app named {name!r} — install its package first")
     if len(matches) > 1:
         # Two installed distributions register the same entry-point key — the name
         # keys the /api, settings, and migration namespaces, so this is a broken
         # install. Caught from metadata alone, without importing anything.
-        raise MalformedApp(
+        raise exceptions.MalformedApp(
             f"app {name!r} is declared by {len(matches)} installed packages "
             f"({', '.join(e.value for e in matches)}) — uninstall all but one"
         )
@@ -145,7 +149,7 @@ def resolve_app(name: str) -> type[App]:
     # duplicate-key check above stand in for a duplicate-name check without
     # importing sibling apps.
     if app.name != name:
-        raise MalformedApp(
+        raise exceptions.MalformedApp(
             f"app {name!r} entry point resolves to an App named "
             f"{app.name!r} — the entry-point name must match App.name"
         )
@@ -162,15 +166,15 @@ def _load_entry(entry: "EntryPoint") -> type[App]:
         module = importlib.import_module(entry.module)
     except ModuleNotFoundError as error:
         if error.name == entry.module or entry.module.startswith(f"{error.name}."):
-            raise MalformedApp(
+            raise exceptions.MalformedApp(
                 f"entry point {entry.value!r} points at a module that isn't installed: {error}"
             ) from error
         # A dependency the entry module imports is missing — its code ran and failed.
-        raise AppImportError(
+        raise exceptions.AppImportError(
             f"app entry module {entry.module!r} failed to import: {error}"
         ) from error
     except Exception as error:
-        raise AppImportError(
+        raise exceptions.AppImportError(
             f"app entry module {entry.module!r} failed to import: {error}"
         ) from error
 
@@ -179,11 +183,11 @@ def _load_entry(entry: "EntryPoint") -> type[App]:
         try:
             app = getattr(app, attribute)
         except AttributeError as error:
-            raise MalformedApp(
+            raise exceptions.MalformedApp(
                 f"entry point {entry.value!r} names {attribute!r}, which its module doesn't define"
             ) from error
     if not (isinstance(app, type) and issubclass(app, App)):
-        raise MalformedApp(f"entry point {entry.value!r} is not an App")
+        raise exceptions.MalformedApp(f"entry point {entry.value!r} is not an App")
     return app
 
 
@@ -230,6 +234,7 @@ def mount(api: "FastAPI", app: type[App], modules: list["ModuleType"]) -> None:
     from fastapi import Depends
 
     from druks.accounts.dependencies import current_account
+    from druks.teams.dependencies import app_access
 
     prefix = f"/api/{app.name}"
     for router in app.get_routers(modules):
@@ -237,7 +242,7 @@ def mount(api: "FastAPI", app: type[App], modules: list["ModuleType"]) -> None:
             router,
             prefix=prefix,
             tags=[app.name],
-            dependencies=[Depends(current_account)],
+            dependencies=[Depends(current_account), Depends(app_access(app))],
         )
     dist = app.frontend_dist()
     if dist:

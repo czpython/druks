@@ -40,7 +40,7 @@ from uuid_utils import uuid7
 
 from druks.accounts.context import current_account_id, current_conversation_id
 from druks.accounts.models import Account
-from druks.apps.loader import resolve_workflow_app
+from druks.apps.loader import get_app, resolve_workflow_app
 from druks.apps.registry import workflows
 from druks.apps.settings import (
     coerce_setting_value,
@@ -84,6 +84,7 @@ from druks.durable.schemas import (
     SubjectSummary,
 )
 from druks.events.models import Event
+from druks.exceptions import PermissionDenied
 from druks.harnesses.exceptions import HarnessError, HarnessSandboxProvisioningError
 from druks.models import StoredSubject, snake_name
 from druks.notifications.outbox import send_notification
@@ -1222,6 +1223,29 @@ class Workflow:
             await DBOS.send_async(run.id, {"failure": failure} if failure else facts, topic=topic)
 
     @classmethod
+    async def _get_run_account(cls, session: AsyncSession, account_id: str | None) -> Account:
+        """The account that a new run starts as. It must be able to use the workflow's app."""
+        account = await Account.get_for_run(session, account_id)
+        # A workflow in a package that no app declares has no app to keep an account out of.
+        if not cls.app:
+            return account
+        app = get_app(cls.app)
+        if DBOS.workflow_id:
+            # A replay runs the caller's body again. The step keeps the first answer, so a
+            # later change to a team cannot refuse a run that started.
+            async def _can_use() -> bool:
+                return await account.can_use_app(app)
+
+            can_use = await DBOS.run_step_async(
+                StepOptions(name=f"{cls.kind}.start_access"), _can_use
+            )
+        else:
+            can_use = await account.can_use_app(app)
+        if can_use:
+            return account
+        raise PermissionDenied(f"{account.username} cannot use the app {app.name}.")
+
+    @classmethod
     async def start(
         cls,
         *,
@@ -1241,7 +1265,7 @@ class Workflow:
         # timeline by omission — pass subject=None explicitly for a background run.
         cls._validate_subject(subject)
         async with bound_session() as session:
-            account = await Account.get_for_run(session, account_id or current_account_id.get())
+            account = await cls._get_run_account(session, account_id or current_account_id.get())
             account_id = account.id
             wire: dict[str, Any] = {}
             if cls._run_input_model:
@@ -1443,6 +1467,16 @@ async def _dispatch_instance(cls: type[Workflow], _context: dict[str, Any] | Non
     return await cls.dispatch()
 
 
+async def _run_scheduled_instance(
+    cls: type[Workflow], context: dict[str, Any] | None = None
+) -> Any:
+    # The cron tick of a workflow with no dispatch() is the run itself, as the default
+    # account.
+    async with step_session() as session:
+        account = await cls._get_run_account(session, None)
+    return await _run_instance(cls, context, {_ACCOUNT_INPUT_KEY: account.id})
+
+
 def _register_entry(cls: type[Workflow]) -> None:
     # The closure binds cls outside the durable arguments: the DBOS workflow
     # NAME (the kind) is what says which class this is, so recovery rebinds by
@@ -1454,5 +1488,5 @@ def _register_entry(cls: type[Workflow]) -> None:
     cls._entry = staticmethod(_entry)  # type: ignore[assignment]
 
     if cls.every:
-        fire = _dispatch_instance if getattr(cls, "dispatch", None) else _run_instance
+        fire = _dispatch_instance if getattr(cls, "dispatch", None) else _run_scheduled_instance
         register_schedule(cls, partial(fire, cls))

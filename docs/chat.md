@@ -584,9 +584,9 @@ that are not linked yet. It also skips a number that a TwiML App or a SIP trunk
 handles, because Twilio ignores the voice URL of such a number.
 
 A phone number has no admin, and no agent turn runs on a call. When a call
-starts a run that asks a question, any operator can answer it in the app that
-owns the run. The Dashboard does not show these runs, because they belong to
-the number's bot account.
+starts a run that asks a question, an account that can use the app can answer
+it. The Dashboard does not show these runs, because they belong to the number's
+bot account.
 
 **Remove** clears the number's voice URL in Twilio, so Druks stops answering
 its calls. The number and its calls stay as history. If you link the number
