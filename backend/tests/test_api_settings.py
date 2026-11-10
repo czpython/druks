@@ -2,6 +2,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 from conftest import settings_client
+from druks.accounts.enums import Role
 from druks.accounts.models import Account
 from druks.agents import Agent
 from druks.contrib.software_factory.app import SoftwareFactory
@@ -99,6 +100,8 @@ def test_a_switched_provider_wakes_the_runs_waiting_out_a_quota(tmp_path: Path, 
 
 async def test_accounts_report_the_default_without_a_fallback_setting(druks_db, tmp_path: Path):
     account = await Account.get_or_create(druks_db, "ops@example.com")
+    test_operator = await Account.get_or_create(druks_db, "op@example.com")
+    await test_operator.set_role(Role.ADMIN)
     with settings_client(tmp_path) as client:
         expected = {
             "id": account.id,

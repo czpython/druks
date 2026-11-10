@@ -15,6 +15,7 @@ async def test_disconnect_revokes_the_card_and_every_sign_in_of_that_service_onl
     other = await connect_service(
         "github_reviewer", identity={"app_id": "456"}, secrets={"private_key": "reviewer"}
     )
+    await Account.get_or_create(druks_db, "op@example.com")
     account = await Account.get_or_create(druks_db, "one@example.com")
     connection = await VaultSecret.connect(
         druks_db,
@@ -44,7 +45,7 @@ async def test_disconnect_revokes_the_login_its_mcp_server_derived(druks_db, dru
     await McpServer.create(
         druks_db, name="atlassian", url="https://mcp.atlassian.com/v2/mcp", is_oauth=True
     )
-    account = await Account.get_or_create(druks_db, "default@example.com")
+    account = await Account.get_or_create(druks_db, "op@example.com")
     derived = await McpServer.store_login(druks_db, "atlassian", login, account.id)
 
     assert (await druks_client.delete("/api/services/jira")).status_code == 204

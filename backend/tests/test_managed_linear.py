@@ -218,7 +218,7 @@ async def test_linear_waits_for_its_install_and_keeps_its_grant_across_a_restart
     async with asgi_client(configure_app_for_test(settings=managed_linear)) as client:
         entry = await _get_entry(client)
         assert not entry["connected"] and entry["managed"] and entry["isOauth"]
-        assert entry["installUrl"] == "/api/oauth/linear/connect?install=1"
+        assert entry["installUrl"] == "/api/oauth/linear/install"
 
         consent = urlparse((await client.get(entry["installUrl"])).headers["location"])
         query = dict(parse_qsl(consent.query))
@@ -310,7 +310,7 @@ async def test_a_revoked_grant_asks_for_the_install_again(
     async with asgi_client(configure_app_for_test(settings=managed_linear)) as client:
         entry = await _get_entry(client)
     assert not entry["connected"]
-    assert entry["installUrl"] == "/api/oauth/linear/connect?install=1"
+    assert entry["installUrl"] == "/api/oauth/linear/install"
 
 
 async def test_the_default_account_sends_the_apps_token_to_linears_mcp_server(

@@ -2,7 +2,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 
-from druks.accounts.dependencies import current_account, current_session_account
+from druks.accounts.dependencies import (
+    current_account,
+    current_admin_account,
+    current_session_account,
+)
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.apps.loader import get_app
@@ -49,11 +53,29 @@ async def resume_conversation(
 async def open_one_time_code(
     session: SessionDep,
     connection_id: str,
+    account: Account = Depends(current_admin_account),
+) -> OneTimeCodeResponse:
+    """Open a code that makes its sender the public number's admin."""
+    connection = await get_bot_connection(session, connection_id)
+    if connection and get_app(connection.identity["app"]).bot.access == BotAccess.PUBLIC:
+        code = await create_one_time_code(connection, account.id)
+        return OneTimeCodeResponse(code=code, expires_in=ONE_TIME_CODE_TTL_SECONDS)
+    raise HTTPException(404, "Connection not found.")
+
+
+@router.post(
+    "/connections/{connection_id}/pairing",
+    response_model=OneTimeCodeResponse,
+    response_model_by_alias=True,
+)
+async def pair(
+    session: SessionDep,
+    connection_id: str,
     account: Account = Depends(current_session_account),
 ) -> OneTimeCodeResponse:
-    """A one-time code that pairs a phone, or makes its sender the number's admin."""
+    """Open a code that pairs its sender with the caller's account."""
     connection = await get_bot_connection(session, connection_id)
-    if connection:
+    if connection and get_app(connection.identity["app"]).bot.access == BotAccess.PRIVATE:
         code = await create_one_time_code(connection, account.id)
         return OneTimeCodeResponse(code=code, expires_in=ONE_TIME_CODE_TTL_SECONDS)
     raise HTTPException(404, "Connection not found.")

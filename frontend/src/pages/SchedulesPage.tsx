@@ -25,9 +25,10 @@ type ScheduleEdits = {
   schedule_enabled?: boolean | null
 }
 
-export function SchedulesPage({ apps, unsavedFormRef }: {
+export function SchedulesPage({ apps, unsavedFormRef, isAdmin }: {
   apps: string[]
   unsavedFormRef: RefObject<UnsavedForm | null>
+  isAdmin: boolean
 }) {
   const [, navigate] = useLocation()
   const app = new URLSearchParams(useSearch()).get('app') ?? ''
@@ -72,7 +73,11 @@ export function SchedulesPage({ apps, unsavedFormRef }: {
       <header className="schedules-head">
         <div>
           <h1>Schedules</h1>
-          <p>Change cadence, pause a declared schedule, or trigger a run outside it. Changes save automatically.</p>
+          <p>
+            {isAdmin
+              ? 'Change cadence, pause a declared schedule, or trigger a run outside it. Changes save automatically.'
+              : 'View declared schedules or trigger a run outside them.'}
+          </p>
         </div>
         <Select
           aria-label="Filter by app"
@@ -111,12 +116,15 @@ export function SchedulesPage({ apps, unsavedFormRef }: {
               <Box size={16} aria-hidden="true" />
               <h2 id={`schedules-${owner}`}>{appLabel(owner)}</h2>
               <span>{owned.length} {owned.length === 1 ? 'schedule' : 'schedules'}{pausedCount > 0 && ` · ${pausedCount} paused`}</span>
-              <Link href={`/apps/${encodeURIComponent(owner)}/settings`}>App settings</Link>
+              {isAdmin && (
+                <Link href={`/apps/${encodeURIComponent(owner)}/settings`}>App settings</Link>
+              )}
             </header>
             <div className="schedules-rows">
               {owned.map((schedule) => <ScheduleRow
                 key={schedule.kind}
                 schedule={schedule}
+                isAdmin={isAdmin}
                 edits={edits[schedule.kind] ?? {}}
                 onEdit={(nextEdits) => setEdits((all) => {
                   const rest = { ...all }
@@ -135,11 +143,12 @@ export function SchedulesPage({ apps, unsavedFormRef }: {
   )
 }
 
-function ScheduleRow({ schedule, edits, onEdit, onSaving }: {
+function ScheduleRow({ schedule, edits, onEdit, onSaving, isAdmin }: {
   schedule: DashboardSchedule
   edits: ScheduleEdits
   onEdit: (edits: ScheduleEdits) => void
   onSaving: (isSaving: boolean) => void
+  isAdmin: boolean
 }) {
   const queryClient = useQueryClient()
   const request = useRef(false)
@@ -206,29 +215,37 @@ function ScheduleRow({ schedule, edits, onEdit, onSaving }: {
       onSubmit={(event) => { event.preventDefault(); if (hasEdits) void save(edits) }}
     >
       <div className="schedule-identity">
-        <button
-          type="button"
-          className="schedule-switch"
-          role="switch"
-          aria-checked={isEnabled}
-          aria-label={`${label} enabled`}
-          title={isEnabled ? 'Pause schedule' : 'Enable schedule'}
-          disabled={Boolean(pending)}
-          onClick={() => void save({ schedule_enabled: !isEnabled })}
-        ><span /></button>
+        {isAdmin ? (
+          <button
+            type="button"
+            className="schedule-switch"
+            role="switch"
+            aria-checked={isEnabled}
+            aria-label={`${label} enabled`}
+            title={isEnabled ? 'Pause schedule' : 'Enable schedule'}
+            disabled={Boolean(pending)}
+            onClick={() => void save({ schedule_enabled: !isEnabled })}
+          ><span /></button>
+        ) : (
+          <span>{isEnabled ? 'Enabled' : 'Paused'}</span>
+        )}
         <div><h3>{label}</h3><code>{cron}</code></div>
       </div>
       <div className="schedule-cadence">
         <span className="schedule-mobile-label">Cadence</span>
-        <CronField
-          label={`${label} cadence`}
-          value={cron ?? ''}
-          onChange={(value) => { onEdit({ ...edits, schedule: value }); setNotice('') }}
-          onCommit={(value) => {
-            if (value !== schedule.cron || hasEdits) void save({ ...edits, schedule: value })
-          }}
-          disabled={Boolean(pending)}
-        />
+        {isAdmin ? (
+          <CronField
+            label={`${label} cadence`}
+            value={cron ?? ''}
+            onChange={(value) => { onEdit({ ...edits, schedule: value }); setNotice('') }}
+            onCommit={(value) => {
+              if (value !== schedule.cron || hasEdits) void save({ ...edits, schedule: value })
+            }}
+            disabled={Boolean(pending)}
+          />
+        ) : (
+          <code>{cron}</code>
+        )}
       </div>
       <div className="schedule-next">
         <span className="schedule-mobile-label">Next run</span>
@@ -265,9 +282,11 @@ function ScheduleRow({ schedule, edits, onEdit, onSaving }: {
         </div> : <span className="schedule-no-history">—</span>}
       </div>
       <div className="schedule-actions">
-        <button type="button" className="schedule-reset" aria-label={`Use defaults for ${label}`} title="Use defaults" disabled={Boolean(pending)} onClick={() => void save({ schedule: null, schedule_enabled: null })}>
-          <RotateCcw size={14} aria-hidden="true" />
-        </button>
+        {isAdmin && (
+          <button type="button" className="schedule-reset" aria-label={`Use defaults for ${label}`} title="Use defaults" disabled={Boolean(pending)} onClick={() => void save({ schedule: null, schedule_enabled: null })}>
+            <RotateCcw size={14} aria-hidden="true" />
+          </button>
+        )}
         <Button disabled={Boolean(pending) || hasEdits} onClick={() => void runNow()}><Play size={12} aria-hidden="true" />{pending === 'run' ? 'Queuing…' : 'Run now'}</Button>
       </div>
       {(pending || error || notice || hasEdits) && <div className="schedule-feedback">

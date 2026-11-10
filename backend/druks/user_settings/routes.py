@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.accounts.dependencies import current_account, current_session_account
+from druks.accounts.dependencies import current_account, current_admin_account
 from druks.accounts.models import Account
 from druks.agents import Agent
 from druks.api.dependencies import SessionDep
@@ -89,7 +89,12 @@ async def check_agent_configs(session: AsyncSession, settings: InstallationSetti
             raise AgentConfigError(f"{agent.id}: {error}") from error
 
 
-@router.patch("", response_model=SettingsResponse, response_model_by_alias=True)
+@router.patch(
+    "",
+    response_model=SettingsResponse,
+    response_model_by_alias=True,
+    dependencies=[Depends(current_admin_account)],
+)
 async def update_settings(session: SessionDep, body: UpdateSettingsRequest) -> InstallationSettings:
     fields = body.model_dump(exclude_unset=True, exclude_none=True)
     settings = await InstallationSettings.get_or_create(session)
@@ -154,7 +159,7 @@ async def get_app_setting_choices(name: str) -> dict[str, list[dict[str, str]]]:
     "/apps",
     response_model=AppsSettingsResponse,
     response_model_by_alias=True,
-    dependencies=[Depends(current_session_account)],
+    dependencies=[Depends(current_admin_account)],
 )
 async def update_app_settings(
     session: SessionDep, body: AppsSettingsUpdate

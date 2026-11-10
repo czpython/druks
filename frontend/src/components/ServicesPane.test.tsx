@@ -111,13 +111,13 @@ function stubFetch(states: Service[][]) {
   return fetchMock
 }
 
-function renderPane() {
+function renderPane(isAdmin = true) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   render(
     <QueryClientProvider client={queryClient}>
-      <ServicesPane />
+      <ServicesPane isAdmin={isAdmin} />
     </QueryClientProvider>,
   )
 }
@@ -138,6 +138,18 @@ async function flush() {
 }
 
 describe('ServicesPane', () => {
+  it('keeps personal sign-in and hides shared controls from a member', async () => {
+    stubFetch([[{ ...connected, isOauth: true, connections: [] }]])
+    renderPane(false)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'View GitHub' }))
+
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Replace connection' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Disconnect service' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Create App' })).toBeNull()
+  })
+
   it('confirms service removal and refreshes its connection state', async () => {
     const fetchMock = stubFetch([[connected], [disconnected]])
     const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true)
@@ -359,7 +371,7 @@ describe('ServicesPane', () => {
       managed: true,
       managedBy: 'Manager',
       facts: { url: 'https://manager.test/slack', client_id: '1234.5678' },
-      installUrl: '/api/oauth/slack/connect?install=1',
+      installUrl: '/api/oauth/slack/install',
     }
     const ready: Service = { ...waiting, connected: true, facts: { ...waiting.facts, team: 'Acme' } }
     stubFetch([[waiting], [ready]])
@@ -381,7 +393,7 @@ describe('ServicesPane', () => {
   })
 
   it('offers Install on a self-hosted Slack card with a client but no grant', async () => {
-    const installUrl = '/api/oauth/slack/connect?install=1'
+    const installUrl = '/api/oauth/slack/install'
     stubFetch([[{ ...pasteOnly, slug: 'slack', title: 'Slack', installUrl }]])
     renderPane()
 

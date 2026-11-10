@@ -22,7 +22,7 @@ it.each([true, false])('names affected accounts before removal, confirmed=%s', a
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(confirmed)
   const remove = vi.spyOn(api, 'removeMcpServer').mockResolvedValue()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={client}><McpServersPane /></QueryClientProvider>)
+  render(<QueryClientProvider client={client}><McpServersPane isAdmin /></QueryClientProvider>)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Remove' }))
   await waitFor(() => expect(confirm).toHaveBeenCalledOnce())

@@ -21,7 +21,7 @@ function renderPane(installed: string[] = []) {
   vi.spyOn(api, 'mcpServers').mockResolvedValue(installed.map((name) => ({ name }) as McpServer))
   vi.spyOn(api, 'mcpServerDirectory').mockResolvedValue(directory)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={client}><McpServersPane /></QueryClientProvider>)
+  render(<QueryClientProvider client={client}><McpServersPane isAdmin /></QueryClientProvider>)
 }
 
 it('offers the directory servers not yet added and filters them as you type', async () => {

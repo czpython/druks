@@ -5,7 +5,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Web
 
 from druks.accounts.dependencies import (
     current_account,
-    current_session_account,
+    current_admin_account,
     require_operator,
 )
 from druks.accounts.models import Account
@@ -61,12 +61,11 @@ async def list_browser_sessions(session: SessionDep, account: Account = Depends(
     return sessions
 
 
-@router.put("/{name}/state", status_code=204)
+@router.put("/{name}/state", status_code=204, dependencies=[Depends(current_admin_account)])
 async def upload_state(
     name: str,
     payload_format: Annotated[BrowserSessionPayloadFormat, Query(alias="payloadFormat")],
     request: Request,
-    account: Account = Depends(current_session_account),
 ) -> None:
     if declaration := browser_sessions.get(name):
         if declaration.anonymous:
@@ -88,11 +87,8 @@ async def upload_state(
     raise exceptions.BrowserSessionUnknownError(name)
 
 
-@router.post("/{name}/login-window", status_code=204)
-async def open_login_window(
-    name: str,
-    account: Account = Depends(current_session_account),
-) -> None:
+@router.post("/{name}/login-window", status_code=204, dependencies=[Depends(current_admin_account)])
+async def open_login_window(name: str) -> None:
     if declaration := browser_sessions.get(name):
         if declaration.anonymous:
             raise exceptions.BrowserSessionAnonymousError(name)
@@ -108,9 +104,12 @@ async def login_window_socket(websocket: WebSocket, name: str) -> None:
         return
     try:
         async with session_scope(websocket.app.state.engine) as session:
-            await require_operator(session, websocket)
+            account = await require_operator(session, websocket)
         window = await LoginWindow.get_for_session(name)
     except (HTTPException, exceptions.BrowserApiError):
+        await websocket.close(code=1008)
+        return
+    if not account.is_admin:
         await websocket.close(code=1008)
         return
     try:
@@ -119,31 +118,24 @@ async def login_window_socket(websocket: WebSocket, name: str) -> None:
         await websocket.close(code=1011)
 
 
-@router.post("/{name}/login-window/save", status_code=204)
-async def save_login_window(
-    session: SessionDep,
-    name: str,
-    account: Account = Depends(current_session_account),
-) -> None:
+@router.post(
+    "/{name}/login-window/save", status_code=204, dependencies=[Depends(current_admin_account)]
+)
+async def save_login_window(session: SessionDep, name: str) -> None:
     window = await LoginWindow.get_for_session(name)
     await window.save(session)
 
 
-@router.post("/{name}/login-window/cancel", status_code=204)
-async def cancel_login_window(
-    name: str,
-    account: Account = Depends(current_session_account),
-) -> None:
+@router.post(
+    "/{name}/login-window/cancel", status_code=204, dependencies=[Depends(current_admin_account)]
+)
+async def cancel_login_window(name: str) -> None:
     window = await LoginWindow.get_for_session(name)
     await window.cancel()
 
 
-@router.delete("/{name}", status_code=204)
-async def delete_browser_session(
-    session: SessionDep,
-    name: str,
-    account: Account = Depends(current_session_account),
-) -> None:
+@router.delete("/{name}", status_code=204, dependencies=[Depends(current_admin_account)])
+async def delete_browser_session(session: SessionDep, name: str) -> None:
     if row := await StoredBrowserSession.get_for_name(session, name):
         await row.delete()
         return
