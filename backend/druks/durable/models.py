@@ -696,6 +696,11 @@ class AgentCall(Base, Uuid7Pk):
         )
 
     @classmethod
+    async def get_cost_for_run(cls, session: AsyncSession, run_id: str) -> float:
+        stmt = select(func.sum(cls.cost_usd)).where(cls.run_id == run_id)
+        return await session.scalar(stmt) or 0.0
+
+    @classmethod
     async def list_for_run(cls, session: AsyncSession, run_id: str) -> list["AgentCall"]:
         # Execution order — the same order Run.agent_calls loads.
         stmt = select(cls).where(cls.run_id == run_id).order_by(cls.created_at, cls.id)
