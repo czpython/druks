@@ -928,6 +928,16 @@ class Workflow:
 
         await DBOS.run_step_async(StepOptions(name=f"{topic}:propagate", **_IO_RETRIES), notify)
 
+    async def get_cost(self) -> float:
+        """What this run's agent calls have cost so far, in US dollars, as recorded. A
+        checkpoint: a replay reads the cost the run read the first time."""
+
+        async def read() -> float:
+            async with step_session() as session:
+                return await AgentCall.get_cost_for_run(session, self.workflow_id)
+
+        return await DBOS.run_step_async(StepOptions(name="get_cost", **_IO_RETRIES), read)
+
     async def review(
         self, *, questions: list[BaseModel] | None = None, context: str = ""
     ) -> OperatorReply:

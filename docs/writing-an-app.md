@@ -360,6 +360,19 @@ The app must prevent duplicate domain changes on webhook redelivery.
 Authors supply no app ID, run ID, timestamp, or session. Frontend code owns the
 wording.
 
+### Read what the run has cost
+
+Read the run's cost so far from the workflow body, for example for a summary:
+
+```python
+cost = await self.get_cost()
+```
+
+It is the sum, in US dollars, of the costs that the run's agent calls recorded. A
+call that recorded no cost counts as zero. The read is a checkpoint, so a replay
+returns the cost the run read the first time. Inside a `@step` or `run()`, the
+read shares that checkpoint.
+
 ### Schedules and settings
 
 Set `every` to declare a cron:

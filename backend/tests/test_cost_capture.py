@@ -272,6 +272,20 @@ async def test_record_agent_run_cost_noop_when_empty(druks_db):
     assert fetched.cost_metadata is None
 
 
+async def test_a_runs_cost_sums_its_calls_and_counts_a_missing_cost_as_zero(druks_db):
+    note = await Note.create(body="run cost")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    other = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    empty = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    for on, cost in ((run, 0.25), (run, 1.5), (run, None), (other, 9.0)):
+        call = await seed_call(druks_db, on, "summarize")
+        call.cost_usd = cost
+    await druks_db.flush()
+
+    assert await AgentCall.get_cost_for_run(druks_db, run.id) == 1.75
+    assert await AgentCall.get_cost_for_run(druks_db, empty.id) == 0.0
+
+
 def test_cost_file_format_is_loadable_json(tmp_path: Path):
     write_cost(tmp_path, cost_usd=0.42, metadata={"input_tokens": 50})
 
