@@ -6,7 +6,7 @@ license = "FSL-1.1-ALv2"
 requires-python = ">=3.11"
 dependencies = [
     # Pinned: the realtime services and the MCP client change between releases.
-    "pipecat-ai[google,mcp,openai,websocket]==1.12.0",
+    "pipecat-ai[google,mcp,openai,websocket]==1.15.0",
     "httpx>=0.28.0",
     "uvicorn>=0.38.0",
 ]
