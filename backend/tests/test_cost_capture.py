@@ -300,7 +300,7 @@ def test_normalize_token_usage_anthropic_folds_cache_into_input_total():
     }
 
 
-def test_normalize_token_usage_openai_keeps_input_inclusive_and_adds_reasoning():
+def test_normalize_token_usage_openai_keeps_input_and_output_inclusive():
     metadata = {
         "provider": "openai",
         "input_tokens": 200,
@@ -313,11 +313,11 @@ def test_normalize_token_usage_openai_keeps_input_inclusive_and_adds_reasoning()
 
     assert canonical == {
         "input_tokens": 200,  # unchanged — already inclusive of cached
-        "output_tokens": 140,  # 100 visible + 40 reasoning
+        "output_tokens": 100,  # already includes the 40 reasoning
         "cached_input_tokens": 50,
         "cache_creation_tokens": 0,
         "reasoning_tokens": 40,
-        "total_tokens": 340,
+        "total_tokens": 300,
     }
 
 

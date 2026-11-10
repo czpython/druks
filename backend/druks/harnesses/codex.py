@@ -135,11 +135,10 @@ def _price(
     rate, used_default = _rate_for(model)
 
     uncached_input = max(usage.input_tokens - usage.cached_input_tokens, 0)
-    billable_output = usage.output_tokens + usage.reasoning_output_tokens
     cost = (
         uncached_input * rate.input
         + usage.cached_input_tokens * rate.cached_input
-        + billable_output * rate.output
+        + usage.output_tokens * rate.output
     ) / 1_000_000
 
     metadata: dict[str, Any] = {
@@ -269,7 +268,7 @@ def _normalize_usage(raw: dict[str, Any]) -> _Usage:
     reasoning = _num(raw.get("reasoning_output_tokens"))
     total = _num(raw.get("total_tokens"))
     if total <= 0:
-        total = input_tokens + output_tokens + reasoning
+        total = input_tokens + output_tokens
     return _Usage(
         input_tokens=input_tokens,
         cached_input_tokens=cached_input,

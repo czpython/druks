@@ -282,7 +282,7 @@ async def test_usage_today_aggregates_spend_and_tokens_by_provider(
 
     codex = _provider(body, "openai")
     assert codex["spendUsd"] == 1.25
-    assert codex["tokens"] == 1250  # 1000 input + (200 + 50) output
+    assert codex["tokens"] == 1200  # 1000 input + 200 output, reasoning included
     assert codex["runs"] == 1
     claude = _provider(body, "anthropic")
     assert claude["spendUsd"] == 2.5
