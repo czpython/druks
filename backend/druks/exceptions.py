@@ -11,6 +11,10 @@ class DruksError(Exception):
         return copyreg.__newobj__, (type(self),), {"args": self.args, **vars(self)}
 
 
+class ValidationError(DruksError):
+    """A person's input is refused. The message says why."""
+
+
 class DetachedRowError(DruksError):
     """A row was used outside the session that loaded it."""
 

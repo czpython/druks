@@ -312,6 +312,10 @@ admin. Each later account joins as a member. An admin changes a person's role
 in **Settings → People**. Only admins can change settings and connections that
 the installation shares. Druks refuses to remove the last admin.
 
+A team is a named group of people with a list of apps. A person can be on more
+than one team, and more than one team can list the same app. An admin manages
+teams in **Settings → Teams**.
+
 In `none` mode, Druks has no authentication and exactly one operator account.
 The first completed provider connection creates this account. Public
 `/_external` routes stay outside the identity gate. These routes include
