@@ -336,7 +336,7 @@ function stubFetch(
         return new Response(JSON.stringify(resolvedAgents), { status: 200 })
       }
       if (path === '/api/auth/accounts') {
-        return new Response(JSON.stringify([{ id: 'acc-1', username: 'paulo@example.com', isDefault: true }]), {
+        return new Response(JSON.stringify([{ id: 'acc-1', username: 'paulo@example.com', isDefault: true, role: 'admin' }]), {
           status: 200,
         })
       }
@@ -386,7 +386,12 @@ function stubFetch(
             {
               provider: 'groq',
               keyTail: '4f2a',
-              updatedBy: { id: 'acc-1', username: 'paulo@example.com', isDefault: true },
+              updatedBy: {
+                id: 'acc-1',
+                username: 'paulo@example.com',
+                isDefault: true,
+                role: 'admin',
+              },
               updatedAt: '2026-09-05T08:00:00Z',
             },
           ]),
@@ -454,7 +459,14 @@ function renderSettings(workPath?: string) {
   render(
     <QueryClientProvider client={queryClient}>
       <UserPreferencesProvider accountId="operator">
-        <App account={{ id: 'operator', username: 'operator@example.invalid', isDefault: true }} />
+        <App
+          account={{
+            id: 'operator',
+            username: 'operator@example.invalid',
+            isDefault: true,
+            role: 'admin',
+          }}
+        />
       </UserPreferencesProvider>
     </QueryClientProvider>,
   )
@@ -1083,7 +1095,14 @@ it('restores the work return URL when a settings fragment route reloads', async 
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
       <UserPreferencesProvider accountId="operator">
-        <App account={{ id: 'operator', username: 'operator@example.invalid', isDefault: true }} />
+        <App
+          account={{
+            id: 'operator',
+            username: 'operator@example.invalid',
+            isDefault: true,
+            role: 'admin',
+          }}
+        />
       </UserPreferencesProvider>
     </QueryClientProvider>,
   )
@@ -1447,7 +1466,12 @@ describe('settings resource read failures', () => {
     const key = {
       provider: 'cerebras',
       keyTail: 'test',
-      updatedBy: { id: 'acc-1', username: 'test@example.invalid', isDefault: true },
+      updatedBy: {
+        id: 'acc-1',
+        username: 'test@example.invalid',
+        isDefault: true,
+        role: 'admin',
+      },
       updatedAt: '2026-09-05T08:00:00Z',
     }
     vi.stubGlobal(
