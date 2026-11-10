@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import HTTPConnection
 
 from druks.accounts.context import current_account_id, current_conversation_id
+from druks.accounts.enums import Role
 from druks.accounts.exceptions import (
     AuthConfigurationError,
     InvalidAssertionError,
@@ -167,6 +168,16 @@ async def current_session_account(request: Request, session: SessionDep) -> Asyn
         yield account
     finally:
         current_account_id.reset(token)
+
+
+async def current_admin_account(account: Account = Depends(current_session_account)) -> Account:
+    """The signed-in admin, never a bearer."""
+    if account.role == Role.ADMIN:
+        return account
+    raise HTTPException(
+        status_code=403,
+        detail="Only an admin can make this change. Ask an admin of this installation.",
+    )
 
 
 async def current_session_or_setup(

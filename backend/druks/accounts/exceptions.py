@@ -16,3 +16,13 @@ class InvalidAssertionError(DruksError):
     """An edge-minted JWT assertion that fails verification — bad signature,
     wrong issuer or audience, expired, unknown signing key, or a missing
     identity claim. The raw token never appears in the message."""
+
+
+class LastAdminError(DruksError):
+    """The last admin cannot become a member."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This account is the last admin. Before you change this account to member, "
+            "make another account an admin."
+        )

@@ -4,6 +4,7 @@ import hmac
 import secrets
 from datetime import datetime
 
+import sqlalchemy
 from sqlalchemy import CheckConstraint, ForeignKey, Index, LargeBinary, String, select, text
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,8 +19,8 @@ from druks.accounts.constants import (
     PAT_SECRET_BYTES,
     PAT_TOKEN_TAG,
 )
-from druks.accounts.enums import AccountKind, Theme
-from druks.accounts.exceptions import AuthConfigurationError, InvalidPatError
+from druks.accounts.enums import AccountKind, Role, Theme
+from druks.accounts.exceptions import AuthConfigurationError, InvalidPatError, LastAdminError
 from druks.core.models import Uuid7Pk, uuid7_str
 from druks.db import db_session
 from druks.models import Base, Model
@@ -30,6 +31,7 @@ from druks.settings import get_settings
 class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
     __tablename__ = "accounts"
     __table_args__ = (
+        CheckConstraint("role IN ('admin', 'member')", name="accounts_role_allowed"),
         CheckConstraint("theme IN ('system', 'light', 'dark')", name="accounts_theme_allowed"),
         Index(
             "accounts_default_idx", "is_default", unique=True, postgresql_where=text("is_default")
@@ -42,6 +44,9 @@ class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
     username: Mapped[str] = mapped_column(CITEXT, unique=True)
     kind: Mapped[str] = mapped_column(
         default=AccountKind.OPERATOR, server_default=text("'operator'")
+    )
+    role: Mapped[str | None] = mapped_column(
+        String, default=Role.MEMBER, server_default=text("'member'")
     )
     is_default: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     timezone: Mapped[str] = mapped_column(String, default="UTC")
@@ -96,11 +101,13 @@ class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
         account = await cls.get_for_username(session, username)
         if account:
             return account
+        is_first_account = ~select(cls.id).exists()
         await session.execute(
             insert(cls)
             .values(
                 username=username,
-                is_default=~select(cls.id).exists(),
+                is_default=is_first_account,
+                role=sqlalchemy.case((is_first_account, Role.ADMIN), else_=Role.MEMBER),
                 timezone=get_settings().timezone,
             )
             .on_conflict_do_nothing(index_elements=["username"])
@@ -114,6 +121,7 @@ class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
         account = cls(
             username=f"{kind}:{uuid7_str()}",
             kind=kind,
+            role=sqlalchemy.null(),
             timezone=get_settings().timezone,
         )
         session.add(account)
@@ -123,6 +131,18 @@ class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
     async def update_preferences(self, **fields: object) -> None:
         for field, value in fields.items():
             setattr(self, field, value)
+        await self.session.flush()
+
+    async def set_role(self, role: Role) -> None:
+        if self.role == Role.ADMIN and role == Role.MEMBER:
+            admin_count = await self.session.scalar(
+                select(sqlalchemy.func.count())
+                .select_from(Account)
+                .where(Account.role == Role.ADMIN)
+            )
+            if admin_count == 1:
+                raise LastAdminError
+        self.role = role
         await self.session.flush()
 
     @classmethod

@@ -100,9 +100,13 @@ def test_a_switched_provider_wakes_the_runs_waiting_out_a_quota(tmp_path: Path, 
 async def test_accounts_report_the_default_without_a_fallback_setting(druks_db, tmp_path: Path):
     account = await Account.get_or_create(druks_db, "ops@example.com")
     with settings_client(tmp_path) as client:
-        assert {"id": account.id, "username": "ops@example.com", "isDefault": True} in client.get(
-            "/api/auth/accounts"
-        ).json()
+        expected = {
+            "id": account.id,
+            "username": "ops@example.com",
+            "isDefault": True,
+            "role": "admin",
+        }
+        assert expected in client.get("/api/auth/accounts").json()
         assert (
             client.patch("/api/settings", json={"fallbackAccountId": account.id}).status_code == 422
         )

@@ -30,7 +30,7 @@ function stubRoutes(routes: Record<string, () => { status: number; body: unknown
 function identity(overrides: Partial<Identity> = {}): Identity {
   return {
     authMode: 'none',
-    account: { id: 'a1', username: 'me@example.com', isDefault: true },
+    account: { id: 'a1', username: 'me@example.com', isDefault: true, role: 'admin' },
     onboardingRequired: false,
     ...overrides,
   }
@@ -101,7 +101,10 @@ describe('IdentityBootstrap', () => {
       '/api/providers/anthropic/connection/complete': () => {
         // The completed connection created the operator; /me now resolves it.
         me = identity()
-        return { status: 200, body: { id: 'a1', username: 'me@example.com', isDefault: true } }
+        return {
+          status: 200,
+          body: { id: 'a1', username: 'me@example.com', isDefault: true, role: 'admin' },
+        }
       },
     })
     renderBootstrap()
@@ -135,8 +138,8 @@ describe('IdentityBootstrap', () => {
 
   it('an account-id change replaces the query-cache mount', async () => {
     stubRoutes({})
-    const first = { id: 'a1', username: 'one@example.com', isDefault: true }
-    const second = { id: 'a2', username: 'two@example.com', isDefault: true }
+    const first = { id: 'a1', username: 'one@example.com', isDefault: true, role: 'admin' as const }
+    const second = { id: 'a2', username: 'two@example.com', isDefault: true, role: 'admin' as const }
     const { rerender } = render(<AuthedApp account={first} />)
     rerender(<AuthedApp account={first} />)
     // Same account: the mount (and its QueryClient) survives re-renders.
