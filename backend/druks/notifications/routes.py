@@ -1,7 +1,8 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
+from druks.accounts.dependencies import current_admin_account
 from druks.api.dependencies import SessionDep
 from druks.core.services import Slack
 from druks.notifications.delivery import deliver
@@ -34,7 +35,11 @@ async def list_destinations(session: SessionDep) -> list[Destination]:
     return await Destination.list_all(session)
 
 
-@router.post("/destinations", response_model=DestinationResponse)
+@router.post(
+    "/destinations",
+    response_model=DestinationResponse,
+    dependencies=[Depends(current_admin_account)],
+)
 async def create_destination(session: SessionDep, body: CreateDestinationRequest) -> Destination:
     if not body.name.strip():
         raise HTTPException(status_code=422, detail="Destination needs a name.")
@@ -55,7 +60,11 @@ async def create_destination(session: SessionDep, body: CreateDestinationRequest
     return destination
 
 
-@router.patch("/destinations/{destination_id}", response_model=DestinationResponse)
+@router.patch(
+    "/destinations/{destination_id}",
+    response_model=DestinationResponse,
+    dependencies=[Depends(current_admin_account)],
+)
 async def set_destination_enabled(
     session: SessionDep, destination_id: str, is_enabled: Annotated[bool, Body(embed=True)]
 ) -> Destination:
@@ -67,7 +76,11 @@ async def set_destination_enabled(
     return destination
 
 
-@router.delete("/destinations/{destination_id}", status_code=204)
+@router.delete(
+    "/destinations/{destination_id}",
+    status_code=204,
+    dependencies=[Depends(current_admin_account)],
+)
 async def delete_destination(session: SessionDep, destination_id: str) -> None:
     destination = await session.get(Destination, destination_id)
     if not destination:

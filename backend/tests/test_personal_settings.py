@@ -321,6 +321,7 @@ async def test_invalid_edit_keeps_account_preferences(tmp_path, druks_db, field,
 async def test_shared_agent_overrides_use_installation_settings_after_a_personal_edit(
     tmp_path, druks_db
 ):
+    await Account.get_or_create(druks_db, "op@example.com")
     account = await Account.get_or_create(druks_db, "bob@example.com")
     await account.update_preferences(timezone="Europe/Madrid")
 

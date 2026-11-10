@@ -873,6 +873,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .mcp-conn.is-live { color: var(--druks-color-status-success); }
 .mcp-conn.is-live .mcp-conn-dot { box-shadow: 0 0 8px color-mix(in oklch, var(--druks-color-status-success) 60%, transparent); }
 .mcp-row-foot { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 12px; padding-top: 11px; border-top: 1px solid var(--druks-color-border-subtle); }
+.mcp-row-foot:not(:has(button)) { display: none; }
 .mcp-enable { display: inline-flex; align-items: center; gap: 9px; }
 .mcp-enable-label { font-size: 12.5px; color: var(--druks-color-text-secondary); }
 .mcp-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }

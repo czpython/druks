@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from druks.accounts.dependencies import current_session_account
+from druks.accounts.dependencies import current_admin_account, current_session_account
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
@@ -34,7 +34,11 @@ async def list_sessions(
 
 
 @router.post(
-    "/sessions", status_code=201, response_model=SessionResponse, response_model_by_alias=True
+    "/sessions",
+    status_code=201,
+    response_model=SessionResponse,
+    response_model_by_alias=True,
+    dependencies=[Depends(current_admin_account)],
 )
 async def link_session(session: SessionDep, app: Annotated[str, Body(embed=True)]) -> VaultSecret:
     """Link a number for the Bot of an app."""
@@ -63,7 +67,10 @@ async def get_qr(session: SessionDep, session_id: str) -> dict[str, str]:
 
 
 @router.post(
-    "/sessions/{session_id}/relink", response_model=SessionResponse, response_model_by_alias=True
+    "/sessions/{session_id}/relink",
+    response_model=SessionResponse,
+    response_model_by_alias=True,
+    dependencies=[Depends(current_admin_account)],
 )
 async def relink_session(session: SessionDep, session_id: str) -> VaultSecret:
     """Take a new scan on a number that lost its link."""
@@ -74,7 +81,9 @@ async def relink_session(session: SessionDep, session_id: str) -> VaultSecret:
     raise HTTPException(404, "Session not found.")
 
 
-@router.delete("/sessions/{session_id}", status_code=204)
+@router.delete(
+    "/sessions/{session_id}", status_code=204, dependencies=[Depends(current_admin_account)]
+)
 async def remove_session(session: SessionDep, session_id: str) -> None:
     connection = await Waha.get_session(session, session_id)
     if not connection:

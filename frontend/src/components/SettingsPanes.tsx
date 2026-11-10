@@ -794,7 +794,7 @@ function ResolvedAgentRow({
   )
 }
 
-export function ServicesPane() {
+export function ServicesPane({ isAdmin }: { isAdmin: boolean }) {
   const queryClient = useQueryClient()
   const query = useQuery({
     queryKey: ['services'],
@@ -829,13 +829,19 @@ export function ServicesPane() {
         </p>
       )}
       {selected ? (
-        <ServiceDetail service={selected} onBack={() => setSelectedSlug(null)} />
+        <ServiceDetail
+          service={selected}
+          isAdmin={isAdmin}
+          onBack={() => setSelectedSlug(null)}
+        />
       ) : (
         <>
           <header className="mcp-pane-head">
             <h2 className="mcp-pane-title">Services</h2>
             <p className="mcp-pane-sub">
-              Configure the services your apps use. Manage account access in Accounts.
+              {isAdmin
+                ? 'Configure the services your apps use. Manage account access in Accounts.'
+                : 'View the services your apps use. Manage your account access in Accounts.'}
             </p>
           </header>
           <table className="connections-table" aria-label="Services">
@@ -879,10 +885,10 @@ export function ServicesPane() {
                       <button
                         type="button"
                         className="set-btn ghost"
-                        aria-label={`Configure ${service.title}`}
+                        aria-label={`${isAdmin ? 'Configure' : 'View'} ${service.title}`}
                         onClick={() => setSelectedSlug(service.slug)}
                       >
-                        Configure
+                        {isAdmin ? 'Configure' : 'View'}
                       </button>
                     </td>
                   </tr>
@@ -913,7 +919,15 @@ function ServiceStatus({ connected, label }: { connected: boolean; label?: strin
 // Credential fields stay hidden until the user explicitly chooses to connect
 // or replace. Pasted secrets are write-only: a success drops them from state,
 // and the connected rendering shows identity facts only.
-function ServiceDetail({ service, onBack }: { service: Service; onBack: () => void }) {
+function ServiceDetail({
+  service,
+  isAdmin,
+  onBack,
+}: {
+  service: Service
+  isAdmin: boolean
+  onBack: () => void
+}) {
   const queryClient = useQueryClient()
   const [formOpen, setFormOpen] = useState(false)
   const [values, setValues] = useState<Record<string, string>>({})
@@ -1013,7 +1027,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
             <p className="svc-meta">Connected {new Date(service.connectedAt).toLocaleString()}</p>
           )}
           {service.isOauth && <ServiceAccess service={service} />}
-          {!formOpen && (
+          {isAdmin && !formOpen && (
             <div className="svc-actions">
               {service.installUrl && (
                 <a className="set-btn ghost" href={service.installUrl} target="_blank" rel="noreferrer">
@@ -1031,7 +1045,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
           )}
         </section>
       )}
-      {!service.connected && !formOpen && (
+      {isAdmin && !service.connected && !formOpen && (
         <section className="mcp-section">
           {service.managed ? (
             <div className="svc-actions">
@@ -1066,7 +1080,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
           )}
         </section>
       )}
-      {formOpen && (
+      {isAdmin && formOpen && (
         <section className="mcp-section">
           {service.createUrl && service.connected && (
             <>
@@ -1428,6 +1442,7 @@ export function ProvidersPane({
   loading,
   requestError,
   onRetry,
+  isAdmin,
 }: {
   providers: Provider[]
   registeredProviders: Provider[]
@@ -1437,6 +1452,7 @@ export function ProvidersPane({
   loading: boolean
   requestError: string | null
   onRetry: () => void
+  isAdmin: boolean
 }) {
   const [adding, setAdding] = useState(false)
   const [managing, setManaging] = useState<string | null>(null)
@@ -1446,7 +1462,7 @@ export function ProvidersPane({
     queryKey: ['providerDirectory'],
     queryFn: () => api.providerDirectory(),
     enabled:
-      adding ||
+      (isAdmin && adding) ||
       providers.some(
         (provider) => !registeredProviders.some((entry) => entry.id === provider.id),
       ),
@@ -1508,16 +1524,18 @@ export function ProvidersPane({
           <div>
             <p className="mcp-pane-sub">Connect the accounts your agents use.</p>
           </div>
-          <button
-            type="button"
-            className="set-btn primary provider-add-button"
-            aria-expanded={adding}
-            aria-controls="provider-add-panel"
-            onClick={() => setAdding((open) => !open)}
-          >
-            <Plus size={14} aria-hidden="true" />
-            Add provider
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              className="set-btn primary provider-add-button"
+              aria-expanded={adding}
+              aria-controls="provider-add-panel"
+              onClick={() => setAdding((open) => !open)}
+            >
+              <Plus size={14} aria-hidden="true" />
+              Add provider
+            </button>
+          )}
         </div>
       </header>
       {adding && (
@@ -1624,7 +1642,11 @@ export function ProvidersPane({
       {!loading && !requestError && configured.length === 0 && (
         <div className="provider-empty">
           <strong>No provider is configured.</strong>
-          <span>Add one to make models available to agents.</span>
+          <span>
+            {isAdmin
+              ? 'Add one to make models available to agents.'
+              : 'An admin can add one to make models available to agents.'}
+          </span>
         </div>
       )}
       <div className="hrs-list">
@@ -1744,6 +1766,7 @@ export function ProvidersPane({
                     todayQuery.data?.providers.find((row) => row.id === provider.id)
                       ?.keySpendUsd ?? null
                   }
+                  isAdmin={isAdmin}
                 />
                 <p className="provider-catalog">
                   {catalog ? (
@@ -1766,9 +1789,11 @@ export function ProvidersPane({
           )
         })}
       </div>
-      <p className="provider-save-note">
-        Save keys in Manage. Connection and removal actions take effect immediately.
-      </p>
+      {isAdmin && (
+        <p className="provider-save-note">
+          Save keys in Manage. Connection and removal actions take effect immediately.
+        </p>
+      )}
     </div>
   )
 }
@@ -1779,12 +1804,14 @@ export function ProviderConnect({
   apiKey,
   usage = null,
   keySpendToday = null,
+  isAdmin,
 }: {
   provider: Provider
   subscription: ProviderSubscription | null
   apiKey: ProviderKey | null
   usage?: UsageProviderSummary | null
   keySpendToday?: number | null
+  isAdmin: boolean
 }) {
   const { absTime } = useFormatters()
   const queryClient = useQueryClient()
@@ -1870,7 +1897,7 @@ export function ProviderConnect({
   const loginEnded = loginEnds ? secondsUntil(loginEnds) <= 0 : false
   // A pasted token names no email.
   const pasted = subscription?.providerEmail === null
-  const showKeyForm = acceptsApiKey && (keyFormOpen || replacing)
+  const showKeyForm = isAdmin && acceptsApiKey && (keyFormOpen || replacing)
   return (
     <div className="hr-connect">
       {acceptsSubscription && (
@@ -1996,7 +2023,7 @@ export function ProviderConnect({
         <section className="hr-block" aria-label={`${provider.label} API key`}>
           <div className="provider-method-head">
             <h4 className="hr-block-title">API key</h4>
-            <div className="hr-conn-actions">
+            {isAdmin && <div className="hr-conn-actions">
               {apiKey ? (
                 <>
                   <button
@@ -2027,7 +2054,7 @@ export function ProviderConnect({
                   </button>
                 )
               )}
-            </div>
+            </div>}
           </div>
           {apiKey ? (
             <div className="provider-key-details">
@@ -2409,7 +2436,7 @@ function CollectionCard({
   )
 }
 
-export function McpServersPane() {
+export function McpServersPane({ isAdmin }: { isAdmin: boolean }) {
   const queryClient = useQueryClient()
   const serversQuery = useQuery({
     queryKey: ['mcpServers'],
@@ -2425,10 +2452,11 @@ export function McpServersPane() {
   const [directoryError, setDirectoryError] = useState<string | null>(null)
   const [connectingName, setConnectingName] = useState<string | null>(null)
   const fieldId = useId()
-  const servers = serversQuery.data ?? []
+  const servers = (serversQuery.data ?? []).filter((server) => isAdmin || server.isEnabled)
   const directoryQuery = useQuery({
     queryKey: ['mcpServerDirectory'],
     queryFn: () => api.mcpServerDirectory(),
+    enabled: isAdmin,
     staleTime: Infinity,
   })
   const installed = new Set(servers.map((server) => server.name))
@@ -2557,7 +2585,13 @@ export function McpServersPane() {
         message.setAttribute('role', 'status')
         consentTab.document.body.replaceChildren(message)
       }
-      const { authorizationUrl } = await api.connectMcpServer(name, identityMode)
+      const server = servers.find((entry) => entry.name === name)!
+      const isPersonal =
+        (server.credential === 'grant' && server.identityMode === 'per_user') ||
+        (server.credential === 'service_connection' && !isAdmin)
+      const { authorizationUrl } = isPersonal
+        ? await api.connectPersonalMcpServer(name)
+        : await api.connectMcpServer(name, identityMode)
       if (consentTab) consentTab.location.assign(authorizationUrl)
       else window.location.assign(authorizationUrl)
     } catch (e) {
@@ -2574,7 +2608,9 @@ export function McpServersPane() {
       setBusy(true)
       setError(null)
       try {
-        await api.disconnectMcpServer(name)
+        const server = servers.find((entry) => entry.name === name)!
+        if (server.identityMode === 'per_user') await api.disconnectPersonalMcpServer(name)
+        else await api.disconnectMcpServer(name)
         await refresh()
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
@@ -2588,7 +2624,10 @@ export function McpServersPane() {
     setBusy(true)
     setError(null)
     try {
-      await api.setMcpServerHeaders(name, secretHeaders)
+      const server = servers.find((entry) => entry.name === name)!
+      if (server.identityMode === 'per_user')
+        await api.setPersonalMcpServerHeaders(name, secretHeaders)
+      else await api.setMcpServerHeaders(name, secretHeaders)
       await refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -2626,7 +2665,8 @@ export function McpServersPane() {
   }
 
   async function removeHeaders(name: string) {
-    const isPersonal = servers.find((server) => server.name === name)?.identityMode === 'per_user'
+    const server = servers.find((entry) => entry.name === name)!
+    const isPersonal = server.identityMode === 'per_user'
     const question = isPersonal
       ? `Remove your key for ${name}? Your agents lose its tools until you set one again.`
       : `Remove the key for ${name}? Every run fails while it is enabled without one.`
@@ -2634,7 +2674,8 @@ export function McpServersPane() {
       setBusy(true)
       setError(null)
       try {
-        await api.removeMcpServerHeaders(name)
+        if (isPersonal) await api.removePersonalMcpServerHeaders(name)
+        else await api.removeMcpServerHeaders(name)
         await refresh()
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
@@ -2657,7 +2698,9 @@ export function McpServersPane() {
       )}
       <header className="mcp-pane-head">
         <p className="mcp-pane-sub">
-          Connect tools for your agents. Enable a server to make its tools available on new runs.
+          {isAdmin
+            ? 'Connect tools for your agents. Enable a server to make its tools available on new runs.'
+            : 'View the tools available to your agents and connect your own account.'}
         </p>
       </header>
 
@@ -2677,6 +2720,7 @@ export function McpServersPane() {
               <McpServerRow
                 key={server.name}
                 server={server}
+                isAdmin={isAdmin}
                 busy={busy}
                 isConnecting={connectingName === server.name}
                 onToggle={toggle}
@@ -2696,136 +2740,140 @@ export function McpServersPane() {
         <p className="mcp-help">No MCP servers installed.</p>
       )}
 
-      <section className="mcp-section">
-        <h3 className="mcp-h">Add a server</h3>
-        <p className="mcp-help">
-          Vendor-hosted servers that Druks has checked. Each one signs in with OAuth: add it, then
-          use <b>Connect</b> to authorize it.
-        </p>
-        <label className="mcp-sr-only" htmlFor={`${fieldId}-filter`}>
-          Filter MCP servers
-        </label>
-        <TextInput
-          id={`${fieldId}-filter`}
-          placeholder="grafana, sentry, …"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          autoComplete="off"
-          data-1p-ignore=""
-          data-lpignore="true"
-        />
-        {directoryQuery.isError && (
-          <div className="mcp-error" role="alert">
-            {directoryQuery.error.message}
-          </div>
-        )}
-        {directoryError && (
-          <div className="mcp-error" role="alert">
-            {directoryError}
-          </div>
-        )}
-        {directoryQuery.isSuccess && offered.length === 0 && (
-          <p className="mcp-help">No listed server matches. Add it as a custom server below.</p>
-        )}
-        {offered.length > 0 && (
-          <div className="mcp-offers">
-            {offered.map((server) => (
-              <div key={server.name} className="set-card mcp-offer">
-                <span className="mcp-offer-head">
-                  <span className="mcp-name">{server.title}</span>
-                  <button
-                    className="set-btn"
-                    disabled={busy}
-                    aria-label={`Add ${server.title}`}
-                    onClick={() => void addFromDirectory(server.name)}
-                  >
-                    Add
-                  </button>
-                </span>
-                <span className="mcp-offer-desc">{server.description}</span>
-                <span className="mcp-url">{server.url}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <details className="set-card mcp-custom">
-        <summary className="mcp-custom-summary">Add a custom server</summary>
-        <div className="mcp-custom-body">
-          <p className="mcp-help">
-            For a server that isn&apos;t listed above. Every field is required.
-          </p>
-          <div className="mcp-form-grid">
-            <div className="mcp-field">
-              <label className="mcp-label" htmlFor={`${fieldId}-name`}>
-                Name <span className="mcp-req">(required)</span>
-              </label>
-              <TextInput
-                id={`${fieldId}-name`}
-                placeholder="linear"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                autoComplete="off"
-                data-1p-ignore=""
-                data-lpignore="true"
-                disabled={busy}
-              />
-            </div>
-            <div className="mcp-field">
-              <label className="mcp-label" htmlFor={`${fieldId}-url`}>
-                URL <span className="mcp-req">(required)</span>
-              </label>
-              <TextInput
-                id={`${fieldId}-url`}
-                placeholder="https://mcp.linear.app/mcp"
-                required
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                autoComplete="off"
-                data-1p-ignore=""
-                data-lpignore="true"
-                disabled={busy}
-              />
-            </div>
-            <McpAuthFields
-              auth={auth}
-              onChange={setAuth}
-              onSubmit={() => void add()}
-              busy={busy}
-              fieldId={fieldId}
-            />
-          </div>
-          <div className="mcp-field">
-            <label className="mcp-check">
-              <input
-                type="checkbox"
-                checked={perUser}
-                onChange={(e) => setPerUser(e.target.checked)}
-                disabled={busy}
-              />{' '}
-              Each person uses their own key
+      {isAdmin && (
+        <>
+          <section className="mcp-section">
+            <h3 className="mcp-h">Add a server</h3>
+            <p className="mcp-help">
+              Vendor-hosted servers that Druks has checked. Each one signs in with OAuth: add it,
+              then use <b>Connect</b> to authorize it.
+            </p>
+            <label className="mcp-sr-only" htmlFor={`${fieldId}-filter`}>
+              Filter MCP servers
             </label>
-            {perUser && (
-              <p className="mcp-help">
-                This key is stored under your account. Other people set theirs on the
-                server&apos;s row.
-              </p>
+            <TextInput
+              id={`${fieldId}-filter`}
+              placeholder="grafana, sentry, …"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              autoComplete="off"
+              data-1p-ignore=""
+              data-lpignore="true"
+            />
+            {directoryQuery.isError && (
+              <div className="mcp-error" role="alert">
+                {directoryQuery.error.message}
+              </div>
             )}
-          </div>
-          <div>
-            <button
-              className="set-btn primary"
-              disabled={busy || !name.trim() || !url.trim() || !isAuthReady(auth)}
-              aria-busy={busy}
-              onClick={() => void add()}
-            >
-              {busy ? 'Adding…' : 'Add server'}
-            </button>
-          </div>
-        </div>
-      </details>
+            {directoryError && (
+              <div className="mcp-error" role="alert">
+                {directoryError}
+              </div>
+            )}
+            {directoryQuery.isSuccess && offered.length === 0 && (
+              <p className="mcp-help">No listed server matches. Add it as a custom server below.</p>
+            )}
+            {offered.length > 0 && (
+              <div className="mcp-offers">
+                {offered.map((server) => (
+                  <div key={server.name} className="set-card mcp-offer">
+                    <span className="mcp-offer-head">
+                      <span className="mcp-name">{server.title}</span>
+                      <button
+                        className="set-btn"
+                        disabled={busy}
+                        aria-label={`Add ${server.title}`}
+                        onClick={() => void addFromDirectory(server.name)}
+                      >
+                        Add
+                      </button>
+                    </span>
+                    <span className="mcp-offer-desc">{server.description}</span>
+                    <span className="mcp-url">{server.url}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <details className="set-card mcp-custom">
+            <summary className="mcp-custom-summary">Add a custom server</summary>
+            <div className="mcp-custom-body">
+              <p className="mcp-help">
+                For a server that isn&apos;t listed above. Every field is required.
+              </p>
+              <div className="mcp-form-grid">
+                <div className="mcp-field">
+                  <label className="mcp-label" htmlFor={`${fieldId}-name`}>
+                    Name <span className="mcp-req">(required)</span>
+                  </label>
+                  <TextInput
+                    id={`${fieldId}-name`}
+                    placeholder="linear"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    autoComplete="off"
+                    data-1p-ignore=""
+                    data-lpignore="true"
+                    disabled={busy}
+                  />
+                </div>
+                <div className="mcp-field">
+                  <label className="mcp-label" htmlFor={`${fieldId}-url`}>
+                    URL <span className="mcp-req">(required)</span>
+                  </label>
+                  <TextInput
+                    id={`${fieldId}-url`}
+                    placeholder="https://mcp.linear.app/mcp"
+                    required
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    autoComplete="off"
+                    data-1p-ignore=""
+                    data-lpignore="true"
+                    disabled={busy}
+                  />
+                </div>
+                <McpAuthFields
+                  auth={auth}
+                  onChange={setAuth}
+                  onSubmit={() => void add()}
+                  busy={busy}
+                  fieldId={fieldId}
+                />
+              </div>
+              <div className="mcp-field">
+                <label className="mcp-check">
+                  <input
+                    type="checkbox"
+                    checked={perUser}
+                    onChange={(e) => setPerUser(e.target.checked)}
+                    disabled={busy}
+                  />{' '}
+                  Each person uses their own key
+                </label>
+                {perUser && (
+                  <p className="mcp-help">
+                    This key is stored under your account. Other people set theirs on the
+                    server&apos;s row.
+                  </p>
+                )}
+              </div>
+              <div>
+                <button
+                  className="set-btn primary"
+                  disabled={busy || !name.trim() || !url.trim() || !isAuthReady(auth)}
+                  aria-busy={busy}
+                  onClick={() => void add()}
+                >
+                  {busy ? 'Adding…' : 'Add server'}
+                </button>
+              </div>
+            </div>
+          </details>
+        </>
+      )}
     </div>
   )
 }
@@ -2974,6 +3022,7 @@ function McpAuthFields({
 
 function McpServerRow({
   server,
+  isAdmin,
   busy,
   isConnecting,
   onToggle,
@@ -2986,6 +3035,7 @@ function McpServerRow({
   onRemoveScopes,
 }: {
   server: McpServer
+  isAdmin: boolean
   busy: boolean
   isConnecting: boolean
   onToggle: (name: string, isEnabled: boolean) => Promise<void>
@@ -3074,16 +3124,20 @@ function McpServerRow({
       {isConnecting && <p className="mcp-help" role="status">Preparing sign-in…</p>}
       <div className="mcp-row-foot">
         <span className="mcp-enable">
-          <Switch
-            on={server.isEnabled}
-            onClick={() => void onToggle(server.name, !server.isEnabled)}
-            disabled={busy}
-            label={`Enabled — ${server.name}`}
-          />
-          <span className="mcp-enable-label">Enabled</span>
+          {isAdmin && (
+            <>
+              <Switch
+                on={server.isEnabled}
+                onClick={() => void onToggle(server.name, !server.isEnabled)}
+                disabled={busy}
+                label={`Enabled — ${server.name}`}
+              />
+              <span className="mcp-enable-label">Enabled</span>
+            </>
+          )}
         </span>
         <div className="mcp-actions">
-          {server.credential === 'headers' && (
+          {server.credential === 'headers' && (isAdmin || isPersonal) && (
             <>
               <button
                 className={'set-btn ' + (server.hasToken ? 'ghost' : 'primary')}
@@ -3117,6 +3171,7 @@ function McpServerRow({
             </button>
           )}
           {supportsScopeSelection &&
+            (isAdmin || isPersonal) &&
             (claimedMode === null ? (
               // The first connect claims how this server's credential is held;
               // afterwards the choice is fixed until the last grant is dropped.
@@ -3160,7 +3215,7 @@ function McpServerRow({
                 )}
               </>
             ))}
-          {supportsScopeSelection && (
+          {supportsScopeSelection && isAdmin && (
             <button
               className="set-btn ghost"
               onClick={() => (editingScopes ? closeScopes() : setEditingScopes(true))}
@@ -3171,7 +3226,7 @@ function McpServerRow({
             </button>
           )}
           {/* A built-in (catalog entry) is managed by druks: disable, never remove. */}
-          {!server.builtin && (
+          {isAdmin && !server.builtin && (
             <button
               className="set-btn danger"
               onClick={() => void onRemove(server.name)}

@@ -2,7 +2,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from conftest import connect_service
+from conftest import IDENTITY_HEADER, connect_service
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.apps.registry import mcp_servers
 from druks.db import db_session
@@ -467,18 +467,64 @@ async def test_routes_set_and_remove_the_signed_in_account_key(tmp_path, druks_d
         assert (created.json()["identityMode"], created.json()["hasToken"]) == ("per_user", True)
         assert not await VaultSecret.list_installation_tokens(druks_db)
 
-        removed = await client.delete("/api/mcp-servers/lusha/headers")
+        removed = await client.delete("/api/mcp-servers/lusha/headers/me")
         assert removed.status_code == 204
         listed = await client.get("/api/mcp-servers")
         assert listed.json()[0]["hasToken"] is False
 
         replaced = await client.put(
-            "/api/mcp-servers/lusha/headers", json={"secret_headers": _BEARER}
+            "/api/mcp-servers/lusha/headers/me", json={"secret_headers": _BEARER}
         )
         assert replaced.json()["hasToken"] is True
         operator = await Account.get_or_create(druks_db, "op@example.com")
         rows = await VaultSecret.list_secret_headers(druks_db, Audience.mcp("lusha"), operator.id)
         assert [row.header for row in rows] == [BEARER_HEADER]
+
+
+async def test_member_sets_a_personal_key_but_not_a_shared_key(tmp_path, druks_db):
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    await McpServer.create(
+        druks_db,
+        name="personal",
+        url="https://personal.example/mcp",
+        secret_headers={"x-api-key": "admin-key"},
+        account_id=admin.id,
+    )
+    await McpServer.create(
+        druks_db,
+        name="shared",
+        url="https://shared.example/mcp",
+        secret_headers={"x-api-key": "shared-key"},
+    )
+    settings = make_settings(tmp_path, identity={"mode": "header", "header": IDENTITY_HEADER})
+
+    async with asgi_client(
+        configure_app_for_test(settings=settings, authenticated=False)
+    ) as client:
+        headers = {IDENTITY_HEADER: member.username}
+        personal = await client.put(
+            "/api/mcp-servers/personal/headers/me",
+            json={"secret_headers": {"x-api-key": "member-key"}},
+            headers=headers,
+        )
+        shared = await client.put(
+            "/api/mcp-servers/shared/headers",
+            json={"secret_headers": {"x-api-key": "member-key"}},
+            headers=headers,
+        )
+        personal_shared = await client.put(
+            "/api/mcp-servers/shared/headers/me",
+            json={"secret_headers": {"x-api-key": "member-key"}},
+            headers=headers,
+        )
+
+    assert personal.status_code == 200
+    assert personal.json()["hasToken"] is True
+    assert shared.status_code == 403
+    assert personal_shared.status_code == 409
+    [stored] = await VaultSecret.list_secret_headers(druks_db, Audience.mcp("personal"), member.id)
+    assert stored.secrets["value"] == "member-key"
 
 
 async def test_routes_reject_creating_an_authless_custom_server(tmp_path, druks_db):

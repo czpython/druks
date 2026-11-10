@@ -4,7 +4,11 @@ from contextlib import suppress
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.accounts.dependencies import current_session_account, current_session_or_setup
+from druks.accounts.dependencies import (
+    current_admin_account,
+    current_session_account,
+    current_session_or_setup,
+)
 from druks.accounts.models import Account
 from druks.accounts.schemas import AccountResponse
 from druks.api.dependencies import SessionDep
@@ -232,7 +236,7 @@ async def _store_connection(
 async def create_key(
     provider_id: str,
     session: SessionDep,
-    account: Account = Depends(current_session_account),
+    account: Account = Depends(current_admin_account),
     key: str = Body(..., embed=True),
 ) -> VaultSecret:
     """The installation's key at a provider. A key for a directory provider also adds it."""
@@ -254,9 +258,7 @@ async def create_key(
     return await VaultSecret.paste(session, Audience.provider(provider_id), key, pasted_by=account)
 
 
-@router.delete(
-    "/{provider_id}/key", status_code=204, dependencies=[Depends(current_session_account)]
-)
+@router.delete("/{provider_id}/key", status_code=204, dependencies=[Depends(current_admin_account)])
 async def remove_key(session: SessionDep, provider_id: str) -> None:
     """Removing a directory provider's key also removes the provider."""
     if stored := await VaultSecret.lookup(

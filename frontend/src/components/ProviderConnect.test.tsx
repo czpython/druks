@@ -49,11 +49,13 @@ function renderCard(
     apiKey = null,
     usage = null,
     keySpendToday = null,
+    isAdmin = true,
   }: {
     subscription?: ProviderSubscription | null
     apiKey?: ProviderKey | null
     usage?: UsageProviderSummary | null
     keySpendToday?: number | null
+    isAdmin?: boolean
   } = {},
 ) {
   const queryClient = new QueryClient()
@@ -66,6 +68,7 @@ function renderCard(
         apiKey={apiKey}
         usage={usage}
         keySpendToday={keySpendToday}
+        isAdmin={isAdmin}
       />
     </QueryClientProvider>,
   )
@@ -85,6 +88,15 @@ async function flush() {
 }
 
 describe('ProviderConnect', () => {
+  it('keeps personal sign-in and hides installation key controls from a member', () => {
+    renderCard(provider(), { apiKey: sharedKey, isAdmin: false })
+
+    expect(screen.getByRole('button', { name: 'Sign in with Anthropic' })).toBeTruthy()
+    expect(screen.getByText('…4f2a')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Replace' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Remove Anthropic API key' })).toBeNull()
+  })
+
   it('keeps the API-key input collapsed until the user asks for it', () => {
     renderCard(provider())
 

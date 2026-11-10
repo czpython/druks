@@ -216,7 +216,10 @@ Missing subscriptions fail the call. API keys belong to the installation.
 
 The first account is also an admin. Each later person joins as a member when
 Druks first resolves their identity. An admin changes a person's role in
-**Settings → People**.
+**Settings → People**. Only an admin can change shared settings, app settings,
+installation connections, provider keys, browser profiles, MCP servers, and
+notification destinations. A member can change personal preferences,
+subscriptions, API tokens, and per-person connections and keys.
 
 The installation timezone controls schedules and operational day boundaries.
 Your personal timezone controls timestamp display. Gate notifications use the
@@ -351,7 +354,7 @@ provider-specific behavior.
 A subscription is always one person's. An API key is the installation's:
 one per provider, owned by no account, and visible to every account in
 **Settings → Providers** with the name of the person who last pasted it. A
-paste from any account replaces it. Disconnect clears the secret and retains
+paste from an admin replaces it. Disconnect clears the secret and retains
 the credential identity for historical agent-call billing references.
 
 Before you enable `jwt` mode, make sure that the edge uses the configured header,

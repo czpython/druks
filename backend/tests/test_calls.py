@@ -162,6 +162,7 @@ async def test_a_linked_number_sends_its_calls_to_druks_until_it_is_removed(
 
 
 async def test_disconnecting_twilio_removes_its_numbers_first(druks_db, druks_client, twilio):
+    await Account.get_or_create(druks_db, "op@example.com")
     connection = await link(druks_db)
 
     response = await druks_client.delete("/api/services/twilio")

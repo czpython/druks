@@ -62,10 +62,11 @@ describe('WhatsAppNumbersPane', () => {
   it.each(['public', 'private'] as const)('closes the used one-time code for %s access', async (botAccess) => {
     const app = 'helpdesk'
     const number = { ...waiting, number: '+41000000000', identityStatus: 'resolved' as const }
+    const codePath = botAccess === 'private' ? 'pairing' : 'one-time-code'
     const fetchMock = vi.fn(async (url: string, request?: RequestInit) => {
       if (url === `/api/chat/services/waha/sessions?app=${app}`)
         return new Response(JSON.stringify([number]))
-      if (url === '/api/chat/connections/number-1/one-time-code' && request?.method === 'POST')
+      if (url === `/api/chat/connections/number-1/${codePath}` && request?.method === 'POST')
         return new Response(JSON.stringify({ code: '12345678', expiresIn: 600 }))
       return new Response('{}', { status: 404 })
     })
@@ -76,8 +77,8 @@ describe('WhatsAppNumbersPane', () => {
     fireEvent.click(await screen.findByRole('button', { name: action }))
 
     expect(await screen.findByText('12345678')).toBeTruthy()
-    const [url, request] = fetchMock.mock.calls.find(([url]) => url.endsWith('/one-time-code'))!
-    expect(url).toBe('/api/chat/connections/number-1/one-time-code')
+    const [url, request] = fetchMock.mock.calls.find(([url]) => url.endsWith(`/${codePath}`))!
+    expect(url).toBe(`/api/chat/connections/number-1/${codePath}`)
     expect(JSON.parse(String((request as RequestInit).body))).toEqual({})
     await act(async () => {
       client.setQueryData(['wahaSessions', app], [{

@@ -60,6 +60,10 @@ class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
     is_tag_required: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
+    @property
+    def is_admin(self) -> bool:
+        return self.role == Role.ADMIN
+
     @classmethod
     async def get_default(cls, session: AsyncSession) -> "Account | None":
         """The unattended account, or None before account setup."""

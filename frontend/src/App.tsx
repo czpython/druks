@@ -275,7 +275,7 @@ function AppShell({
     ui?.navigation ??
     rosterQuery.data?.find((entry) => entry.name === app)?.navigation
   const appSettingsPath =
-    urlApp && settingsQuery.data?.apps.some((entry) => entry.name === urlApp)
+    account.role === 'admin' && urlApp && settingsQuery.data?.apps.some((entry) => entry.name === urlApp)
       ? `/apps/${urlApp}/settings`
       : undefined
   const navigation = urlApp ? (declaredNavigation ?? []) : []
@@ -465,6 +465,7 @@ function AppShell({
                 rosterQuery.data?.filter((entry) => !entry.builtin).map((entry) => entry.name) ?? []
               }
               unsavedFormRef={unsavedFormRef}
+              isAdmin={account.role === 'admin'}
             />
           </Route>
           <Route path="/events">

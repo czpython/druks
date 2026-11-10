@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from githubkit.exception import RequestFailed, RequestTimeout
 
+from druks.accounts.dependencies import current_admin_account
 from druks.api.dependencies import SessionDep, SettingsDep
 
 from .install import fetch_collection, remove_files
@@ -15,7 +16,7 @@ async def list_collections(session: SessionDep) -> list[SkillCollection]:
     return await SkillCollection.list_all(session)
 
 
-@router.post("", response_model=CollectionResponse)
+@router.post("", response_model=CollectionResponse, dependencies=[Depends(current_admin_account)])
 async def install_collection(
     session: SessionDep,
     settings: SettingsDep,
@@ -42,7 +43,11 @@ async def install_collection(
     )
 
 
-@router.post("/{collection_id}/sync", response_model=CollectionResponse)
+@router.post(
+    "/{collection_id}/sync",
+    response_model=CollectionResponse,
+    dependencies=[Depends(current_admin_account)],
+)
 async def sync_collection(
     session: SessionDep, collection_id: str, settings: SettingsDep
 ) -> SkillCollection:
@@ -85,7 +90,11 @@ async def sync_collection(
     return collection
 
 
-@router.patch("/{collection_id}/skills/{name}", response_model=SkillResponse)
+@router.patch(
+    "/{collection_id}/skills/{name}",
+    response_model=SkillResponse,
+    dependencies=[Depends(current_admin_account)],
+)
 async def set_skill_enabled(
     session: SessionDep,
     collection_id: str,
@@ -100,7 +109,7 @@ async def set_skill_enabled(
     return skill
 
 
-@router.delete("/{collection_id}", status_code=204)
+@router.delete("/{collection_id}", status_code=204, dependencies=[Depends(current_admin_account)])
 async def remove_collection(session: SessionDep, collection_id: str) -> None:
     collection = await session.get(SkillCollection, collection_id)
     if not collection:

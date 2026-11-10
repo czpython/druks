@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import HTTPConnection
 
 from druks.accounts.context import current_account_id, current_conversation_id
-from druks.accounts.enums import Role
 from druks.accounts.exceptions import (
     AuthConfigurationError,
     InvalidAssertionError,
@@ -172,7 +171,7 @@ async def current_session_account(request: Request, session: SessionDep) -> Asyn
 
 async def current_admin_account(account: Account = Depends(current_session_account)) -> Account:
     """The signed-in admin, never a bearer."""
-    if account.role == Role.ADMIN:
+    if account.is_admin:
         return account
     raise HTTPException(
         status_code=403,
