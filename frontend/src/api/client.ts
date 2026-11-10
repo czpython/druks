@@ -1,5 +1,6 @@
 import type {
   Account,
+  AccountRole,
   AgentsResponse,
   AgentCallFiles,
   ArtifactContent,
@@ -304,6 +305,8 @@ export const api = {
   harnesses: () => getJSON<Harness[]>('/api/settings/harnesses'),
   agents: () => getJSON<AgentsResponse>('/api/agents'),
   accounts: () => getJSON<Account[]>('/api/auth/accounts'),
+  setAccountRole: (accountId: string, role: AccountRole) =>
+    patchJSON<Account>(`/api/auth/accounts/${encodeURIComponent(accountId)}`, { role }),
   providers: () => getJSON<Provider[]>('/api/providers'),
   providerSubscriptions: () => getJSON<ProviderSubscription[]>('/api/providers/subscriptions'),
   providerKeys: () => getJSON<ProviderKey[]>('/api/providers/keys'),

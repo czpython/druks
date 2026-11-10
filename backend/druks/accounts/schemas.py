@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import ConfigDict, Field
 
+from druks.accounts.enums import Role
 from druks.schemas import Schema
 
 
@@ -11,6 +12,7 @@ class AccountResponse(Schema):
     id: str
     username: str
     is_default: bool
+    role: Role
 
 
 class IdentityResponse(Schema):

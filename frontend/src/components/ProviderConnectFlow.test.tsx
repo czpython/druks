@@ -4,7 +4,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { Onboarding } from './Onboarding'
 
-const account = { id: 'operator', username: 'operator@example.com', isDefault: true }
+const account = {
+  id: 'operator',
+  username: 'operator@example.com',
+  isDefault: true,
+  role: 'admin' as const,
+}
 const onConnected = vi.fn()
 
 beforeEach(() => {

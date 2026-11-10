@@ -60,7 +60,11 @@ beforeEach(() => {
   artifact.mockResolvedValue({ kind: 'markdown', title: 'Gist', content: '# Saved finding\nExact old result.' })
   settings.mockResolvedValue({ timezone: 'UTC', theme: 'system', gateParkDestinationId: null, isTagRequired: false })
   vi.spyOn(api, 'listApps').mockResolvedValue([app, { ...app, name: 'core', builtin: true }, { ...app, name: 'usage', builtin: true }])
-  vi.spyOn(identityApi, 'me').mockResolvedValue({ authMode: 'none', account: { id: 'a', username: 'op', isDefault: true }, onboardingRequired: false })
+  vi.spyOn(identityApi, 'me').mockResolvedValue({
+    authMode: 'none',
+    account: { id: 'a', username: 'op', isDefault: true, role: 'admin' },
+    onboardingRequired: false,
+  })
   registerAppUI({ name: 'field_notes', routes: [], subjectPath: ({ id }, target) => `/notes/${id}${targetQuery(target)}` })
 })
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals() })

@@ -27,6 +27,7 @@ import { absTime } from '../lib/format'
 import { harnessColors } from '../lib/harnessColors'
 import { useThemePreference } from '../lib/preferences'
 import { Page } from './Page'
+import { PeoplePane } from './PeoplePane'
 import { Sidebar } from './Sidebar'
 import { BrowserProfilesPane } from './BrowserProfilesPane'
 import { CallsPane } from './CallsPane'
@@ -60,6 +61,7 @@ const SECTIONS = [
   { id: 'connections', label: 'Connections', group: 'Tools & access' },
   { id: 'mcp', label: 'MCP servers', group: 'Tools & access' },
   { id: 'skills', label: 'Skills', group: 'Tools & access' },
+  { id: 'people', label: 'People', group: 'Organization' },
   { id: 'personal', label: 'Preferences', group: 'Personal' },
   { id: 'api-tokens', label: 'API tokens', group: 'Personal' },
 ]
@@ -531,7 +533,7 @@ export function SettingsPages({
               </Link>
               <h2 className="settings-sidebar-title">Settings</h2>
               <nav className="settings-navigation" aria-label="Settings">
-                {['AI execution', 'Tools & access', 'Personal'].map((group) => (
+                {['AI execution', 'Tools & access', 'Organization', 'Personal'].map((group) => (
                   <div key={group}>
                     <div className="sidebar-group-title">{group}</div>
                     {SECTIONS.filter((entry) => entry.group === group).map((entry) => (
@@ -777,6 +779,7 @@ export function SettingsPages({
               )}
               {page === 'mcp' && <McpServersPane />}
               {page === 'skills' && <SkillsPane />}
+              {page === 'people' && <PeoplePane account={account} />}
               {page === 'api-tokens' && <AgentAccessPane />}
               {app && hasChannels && validAppPage && paneSection === 'channels' &&
                 page === `apps/${app.name}` &&

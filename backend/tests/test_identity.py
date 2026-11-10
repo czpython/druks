@@ -7,6 +7,7 @@ import httpx
 import pytest
 from conftest import IDENTITY_HEADER, connect_provider, header_client
 from druks.accounts.dependencies import resolve_single_operator
+from druks.accounts.enums import AccountKind, Role
 from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.harnesses import providers
@@ -119,6 +120,70 @@ async def test_an_asserted_email_open_enrolls_once_across_case_variants(tmp_path
         again = client.get("/api/auth/me", headers={IDENTITY_HEADER: "op@example.COM"})
         assert again.json()["account"]["id"] == body["account"]["id"]
     assert len(await Account.list_operators(druks_db)) == 1
+
+
+async def test_first_operator_is_admin_and_later_operators_are_members(tmp_path, druks_db):
+    first = await Account.get_or_create(druks_db, "first@example.com")
+    second = await Account.get_or_create(druks_db, "second@example.com")
+
+    assert first.role == Role.ADMIN
+    assert second.role == Role.MEMBER
+    with header_client(tmp_path) as client:
+        headers = {IDENTITY_HEADER: first.username}
+        assert client.get("/api/auth/me", headers=headers).json()["account"]["role"] == "admin"
+        response = client.get("/api/auth/accounts", headers=headers)
+        roles = [account["role"] for account in response.json()]
+        assert roles == ["admin", "member"]
+
+
+async def test_only_an_admin_browser_identity_can_change_roles(tmp_path, druks_db):
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    _, token = await PersonalAccessToken.create(druks_db, account_id=admin.id, name="admin")
+
+    with header_client(tmp_path) as client:
+        member_response = client.patch(
+            f"/api/auth/accounts/{member.id}",
+            json={"role": "admin"},
+            headers={IDENTITY_HEADER: member.username},
+        )
+        bearer_response = client.patch(
+            f"/api/auth/accounts/{member.id}",
+            json={"role": "admin"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert member_response.status_code == 403
+    assert bearer_response.status_code == 401
+
+
+async def test_role_changes_keep_an_admin_and_reject_bot_accounts(tmp_path, druks_db):
+    first = await Account.get_or_create(druks_db, "first@example.com")
+    second = await Account.get_or_create(druks_db, "second@example.com")
+    bot = await Account.create_for_bot(druks_db, AccountKind.BOT)
+
+    with header_client(tmp_path) as client:
+        headers = {IDENTITY_HEADER: first.username}
+        refused = client.patch(
+            f"/api/auth/accounts/{first.id}", json={"role": "member"}, headers=headers
+        )
+        promoted = client.patch(
+            f"/api/auth/accounts/{second.id}", json={"role": "admin"}, headers=headers
+        )
+        demoted = client.patch(
+            f"/api/auth/accounts/{first.id}", json={"role": "member"}, headers=headers
+        )
+        bot_response = client.patch(
+            f"/api/auth/accounts/{bot.id}",
+            json={"role": "admin"},
+            headers={IDENTITY_HEADER: second.username},
+        )
+
+    assert refused.status_code == 409
+    assert promoted.json()["role"] == "admin"
+    assert demoted.json()["role"] == "member"
+    assert not bot.role
+    assert bot_response.status_code == 404
 
 
 async def test_get_or_create_losing_the_insert_race_still_converges(druks_db, monkeypatch):
