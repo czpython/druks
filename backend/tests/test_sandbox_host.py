@@ -10,7 +10,7 @@ import asyncssh
 import pytest
 from drukbox_sdk import SandboxHost as SandboxHostRecord
 from druks.sandbox.exceptions import SandboxError, SandboxUploadError
-from druks.sandbox.host import Host, _stream_local_tar_into
+from druks.sandbox.host import Host, _stream_local_tar_into, _tee_stream
 
 
 @dataclass
@@ -500,3 +500,23 @@ async def test_write_secret_raises_when_the_remote_write_fails(fake_record):
     # The secret must never ride the surfaced error.
     assert "s3cret-token" not in str(error.value)
     assert "permission denied" in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("buffer_limit", "chunks"),
+    [
+        (20, [b"first line\nsecond", b" line\nthird line\n"]),
+        # The cut lands on a line start: that line is kept whole.
+        (11, [b"first line\n", b"third line\n"]),
+    ],
+)
+async def test_tee_stream_trims_the_buffer_to_whole_lines(tmp_path: Path, buffer_limit, chunks):
+    async def tail():
+        for chunk in chunks:
+            yield chunk
+
+    buffer = bytearray()
+    await _tee_stream(tail(), tmp_path / "stdout.jsonl", buffer, buffer_limit)
+
+    assert buffer == b"third line\n"
+    assert (tmp_path / "stdout.jsonl").read_bytes() == b"".join(chunks)
