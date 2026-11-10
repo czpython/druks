@@ -38,7 +38,7 @@ from druks.database import (
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.durable.exceptions import AgentCallNotFound
 from druks.events.routes import router as events_router
-from druks.exceptions import ObjectNotFound
+from druks.exceptions import ObjectNotFound, ValidationError
 from druks.files.routes import router as files_router
 from druks.harnesses.exceptions import AgentConfigError, CatalogError
 from druks.harnesses.routes import router as providers_router
@@ -63,6 +63,7 @@ from druks.settings import (
     setup_logging,
 )
 from druks.skills.routes import router as skills_router
+from druks.teams.routes import router as teams_router
 from druks.ui.exceptions import PageReadError
 from druks.user_settings.routes import agents_router
 from druks.user_settings.routes import router as settings_router
@@ -179,6 +180,11 @@ async def _agent_call_not_found_handler(request: Request, exc: AgentCallNotFound
 @app.exception_handler(ObjectNotFound)
 async def _object_not_found_handler(request: Request, exc: ObjectNotFound) -> JSONResponse:
     return await _http_exception_handler(request, HTTPException(404, str(exc)))
+
+
+@app.exception_handler(ValidationError)
+async def _validation_error_handler(request: Request, exc: ValidationError) -> JSONResponse:
+    return await _http_exception_handler(request, HTTPException(422, str(exc)))
 
 
 @app.exception_handler(PageReadError)
@@ -315,6 +321,7 @@ app.include_router(health_router)
 app.include_router(notifications_external_router)
 app.include_router(webhooks_router)
 app.include_router(auth_router)
+app.include_router(teams_router)
 app.include_router(providers_router)
 app.include_router(secrets_router)
 app.include_router(browser_sessions_router)

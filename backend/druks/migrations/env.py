@@ -11,6 +11,7 @@ import druks.mcp.models  # noqa: F401
 import druks.notifications.models  # noqa: F401
 import druks.services.models  # noqa: F401
 import druks.skills.models  # noqa: F401
+import druks.teams.models  # noqa: F401
 import druks.user_settings.models  # noqa: F401
 from alembic import context
 from druks.alembic_support import run_alembic_env
