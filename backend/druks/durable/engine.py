@@ -3,6 +3,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
+from functools import cache
 from typing import TYPE_CHECKING, Any
 
 from dbos import DBOS, DBOSClient, DBOSConfig, EnqueueOptions
@@ -29,7 +30,6 @@ _task_schedules: list[tuple[str, str, Callable]] = []
 
 _initialized = False
 _engine = None
-_client: DBOSClient | None = None
 
 
 def _dbos_database_url(database_url: str) -> str:
@@ -195,22 +195,23 @@ def autocommit_session() -> AbstractAsyncContextManager[AsyncSession]:
     return session_scope(_step_engine(), AutocommitSession)
 
 
+@cache
+def get_dbos_client() -> DBOSClient:
+    """The client that writes to DBOS inside a caller's transaction."""
+    url = _dbos_database_url(get_settings().database_url.get_secret_value())
+    return DBOSClient(system_database_url=url, dbos_system_schema=DBOS_SYSTEM_SCHEMA, lazy=True)
+
+
 async def enqueue_in_transaction(session: AsyncSession, options: EnqueueOptions, *args: Any) -> str:
     """Enqueue a workflow in the session's transaction: it enters the queue when the
     transaction commits, and a rollback drops it. Returns the workflow that holds the
     deduplication slot: this one, or the live one."""
-    global _client
-    if not _client:
-        url = _dbos_database_url(get_settings().database_url.get_secret_value())
-        _client = DBOSClient(
-            system_database_url=url, dbos_system_schema=DBOS_SYSTEM_SCHEMA, lazy=True
-        )
     while True:
         try:
             # The savepoint drops a held slot's collision; the caller's transaction goes on.
             async with session.begin_nested():
                 await session.run_sync(
-                    lambda sync: _client.enqueue_in_transaction(sync, options, *args)
+                    lambda sync: get_dbos_client().enqueue_in_transaction(sync, options, *args)
                 )
             return options["workflow_id"]
         except DBOSQueueDeduplicatedError:

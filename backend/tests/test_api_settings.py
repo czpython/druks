@@ -1,7 +1,9 @@
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from conftest import settings_client
 from druks.accounts.models import Account
+from druks.agents import Agent
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.db import db_session
 from druks.user_settings.models import SettingsOverride
@@ -72,6 +74,27 @@ def test_patch_settings_judges_the_default_triple_together(tmp_path: Path):
         claude = client.patch("/api/settings", json={"defaultHarness": "claude"})
         assert claude.status_code == 422
         assert "does not run OpenAI" in claude.json()["detail"]
+
+
+def test_a_switched_provider_wakes_the_runs_waiting_out_a_quota(tmp_path: Path, monkeypatch):
+    wake = AsyncMock()
+    monkeypatch.setattr(Agent, "wake_quota_waits", wake)
+    with settings_client(tmp_path) as client:
+        client.patch(
+            "/api/settings/apps", json={"agentEfforts": {"software_factory.implement": "low"}}
+        )
+        client.patch("/api/settings", json={"defaultEffort": "low"})
+        wake.assert_not_awaited()
+        client.patch(
+            "/api/settings/apps",
+            json={
+                "agentHarnesses": {"software_factory.implement": "codex"},
+                "agentModels": {"software_factory.implement": "openai/gpt-5.5"},
+            },
+        )
+        wake.assert_awaited_once()
+        client.patch("/api/settings", json={"defaultModel": "anthropic/claude-sonnet-4-5"})
+    assert wake.await_count == 2
 
 
 async def test_accounts_report_the_default_without_a_fallback_setting(druks_db, tmp_path: Path):

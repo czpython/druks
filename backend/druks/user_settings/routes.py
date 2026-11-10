@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
+from druks.agents import Agent
 from druks.api.dependencies import SessionDep
 from druks.apps.loader import get_app, iter_apps
 from druks.apps.registry import agents, bots, channels, workflows
@@ -108,6 +109,8 @@ async def update_settings(session: SessionDep, body: UpdateSettingsRequest) -> I
         await settings.update(**fields)
         if any(field in fields for field in _EXECUTION_DEFAULTS):
             await check_agent_configs(session, settings)
+        if "default_model" in fields or "default_billing" in fields:
+            await Agent.wake_quota_waits(session)
     return settings
 
 
@@ -216,5 +219,8 @@ async def update_app_settings(
         # Repoint the DBOS crons now, not at the next launch; the reconcile reads
         # the just-written overrides off this request's session.
         await apply_schedules(session)
+
+    if body.agent_models or body.agent_billings:
+        await Agent.wake_quota_waits(session)
 
     return await get_app_settings(session)

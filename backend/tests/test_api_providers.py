@@ -1,8 +1,10 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from conftest import connect_provider
 from druks.accounts.models import Account
+from druks.agents import Agent
 from druks.harnesses import directory
 from druks.harnesses.models import ProviderCatalog
 from druks.harnesses.providers import AnthropicProvider
@@ -257,6 +259,15 @@ async def test_a_pasted_setup_token_is_the_requesting_accounts_subscription(
     assert row.secrets["claudeAiOauth"]["scopes"] == ["user:inference"]
     assert "refreshToken" not in row.secrets["claudeAiOauth"]
     assert row.identity == {"email": None}
+
+
+def test_a_pasted_token_wakes_the_runs_waiting_out_a_quota(tmp_path: Path, monkeypatch):
+    _sign_in_with(monkeypatch, tmp_path, "setup_token")
+    wake = AsyncMock()
+    monkeypatch.setattr(Agent, "wake_quota_waits", wake)
+    with _build_client(tmp_path) as client:
+        client.post("/api/providers/anthropic/sign-in/token", json={"token": "sk-ant-oat01-x"})
+    wake.assert_awaited_once()
 
 
 def test_a_token_of_another_shape_is_refused(tmp_path: Path, monkeypatch):

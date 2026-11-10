@@ -40,8 +40,7 @@ PARKED_MESSAGE = (
     "what it waits for and where to answer it.]"
 )
 QUOTA_RESUMED_MESSAGE = (
-    "[Internal: Run {run} continues now that the provider's usage limit reset. Tell the "
-    "person in one short line.]"
+    "[Internal: Run {run} continues after its usage-limit wait. Tell the person in one short line.]"
 )
 FAILURE_MESSAGE = (
     "[Internal: Run {run} failed: {failure}. Tell the person in one short line, with no "
