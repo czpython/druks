@@ -73,9 +73,11 @@ async def test_claude_build_invocation_carries_every_flag():
         "ScheduleWakeup",
         "--add-dir /work/related/sib",
         "--mcp-config",
-        # The session-snapshot wrapper (claude's CODEX_HOME equivalent).
-        "find $HOME/.claude/projects",
-        "session.jsonl",
+        "--session-id run-1",
+        # The wrapper outlives the kill and copies the transcript by session id.
+        "trap : TERM",
+        "cp $HOME/.claude/projects/*/run-1.jsonl ",
+        "/work/runs/run-1/session.jsonl 2>/dev/null",
     ):
         assert token in wrapper, f"missing from claude argv: {token}"
     # The MCP token rides only in env — never in argv.
@@ -152,6 +154,7 @@ async def test_codex_build_invocation_carries_every_flag():
         "mcp_servers.github.url",
         "mcp_servers.github.bearer_token_env_var",
         "touch /home/exedev/work/runs/run-1/session.marker",
+        "trap : TERM",
         "-newer /home/exedev/work/runs/run-1/session.marker",
         "session.jsonl",
         "refusing to guess",

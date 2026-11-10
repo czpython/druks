@@ -101,6 +101,7 @@ class HarnessRunResult:
     stdout: bytes
     stderr: bytes
     unasked_hooks: tuple[str, ...] = ()
+    timed_out: bool = False
 
 
 @dataclass(frozen=True)

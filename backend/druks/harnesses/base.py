@@ -83,6 +83,8 @@ class Harness(ABC):
 
     @classmethod
     def check_returncode(cls, result: HarnessRunResult) -> None:
+        if result.timed_out:
+            raise exceptions.HarnessTimeoutError(f"{cls.name} timed out.")
         if result.returncode != 0:
             detail = _terminal_detail(result)
             message = f"{cls.name} exited with {result.returncode}.{detail}"

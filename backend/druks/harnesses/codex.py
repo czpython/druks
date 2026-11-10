@@ -457,6 +457,8 @@ class CodexHarness(Harness):
             f"{write_hook}"
             f"{login}"
             f"touch {marker_q} && "
+            # The kill stops codex, and the wrapper lives on to copy.
+            "trap : TERM && "
             f"{codex_cmdline}; "
             "ec=$?; "
             f"sessions=$(find \"$HOME/.codex/sessions\" -type f -name '*.jsonl' "

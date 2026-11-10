@@ -226,7 +226,7 @@ async def test_forwards_invocation_to_lifecycle(
     ]
 
 
-async def test_overall_timeout_raises_harness_timeout_error(
+async def test_overall_timeout_kills_the_run_and_returns_its_output(
     ctx: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -240,16 +240,16 @@ async def test_overall_timeout_raises_harness_timeout_error(
         "druks.sandbox.host.asyncio.timeout", lambda delay: real_timeout(min(delay, 0.05))
     )
 
-    with pytest.raises(HarnessTimeoutError, match="timed out"):
-        await Host._start_run(
-            sandbox,
-            _inv(("claude",)),
-            run_id=_DEFAULT_RUN_ID,
-            artifact_dir=ctx.artifact_dir,
-            timeout=60,
-        )
+    result = await Host._start_run(
+        sandbox,
+        _inv(("claude",)),
+        run_id=_DEFAULT_RUN_ID,
+        artifact_dir=ctx.artifact_dir,
+        timeout=60,
+    )
 
-    # We tried to clean up by killing the run before bailing.
+    assert result.timed_out is True
+    assert result.stdout == b"some output\n"
     assert run.kill_calls >= 1
 
 
@@ -483,6 +483,16 @@ def test_check_returncode_surfaces_the_streams_terminal_error():
     )
     with pytest.raises(HarnessError, match="session limit"):
         ClaudeHarness.check_returncode(HarnessRunResult(returncode=1, stdout=stdout, stderr=b""))
+
+
+def test_check_returncode_fails_a_killed_run_with_its_timeout():
+    # The kill's exit code and the cut-off stream would read as a crash.
+    result = HarnessRunResult(
+        returncode=143, stdout=b'{"type":"assistant"', stderr=b"Terminated\n", timed_out=True
+    )
+
+    with pytest.raises(HarnessTimeoutError, match="claude timed out"):
+        ClaudeHarness.check_returncode(result)
 
 
 def test_check_returncode_stays_bare_without_a_terminal_event():

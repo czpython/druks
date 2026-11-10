@@ -164,6 +164,9 @@ class OpenCodeHarness(Harness):
             cost_usd = sum(float(response["cost"]) for response in responses)
             output_dir = call_dir(artifact_dir, run_id)
             write_cost(output_dir, cost_usd=cost_usd, metadata=metadata)
+            # The kill caused whatever opencode reports after it.
+            if result.timed_out:
+                self.check_returncode(result)
             if result.returncode == 124:
                 raise exceptions.HarnessTimeoutError(
                     "opencode hit the agent deadline; the session was aborted."
@@ -178,6 +181,8 @@ class OpenCodeHarness(Harness):
             structured = info["structured"]
             self.check_returncode(result)
         except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
+            if result.timed_out:
+                self.check_returncode(result)
             if result.returncode == 124:
                 raise exceptions.HarnessTimeoutError(
                     "opencode hit the agent deadline; the session was aborted."

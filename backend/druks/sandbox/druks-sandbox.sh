@@ -18,8 +18,9 @@
 #       prompt to a file in the run dir and points stdin at it.
 #
 #   exec-kill --run-id ID
-#       SIGTERM the pid recorded for ID. Best-effort: succeeds even
-#       when the process is already gone.
+#       SIGTERM the process group led by the pid recorded for ID, so
+#       the CLI under a harness's wrapper stops too. Best-effort:
+#       succeeds even when the process is already gone.
 #
 #   read-file <workspace> <reported-path> <max-bytes>
 #       Stream a bounded regular file that resolves inside <workspace>
@@ -101,7 +102,8 @@ case "$verb" in
     exec-kill)
         pid_file="$run_dir/pid"
         if [ -r "$pid_file" ]; then
-            kill "$(cat "$pid_file")" 2>/dev/null || true
+            # dash rejects `kill -TERM -- -<pgid>`; `kill --` sends TERM.
+            kill -- "-$(cat "$pid_file")" 2>/dev/null || true
         fi
         exit 0
         ;;
@@ -146,8 +148,11 @@ fi
 # typist) unless ``--stdin-from`` pointed it at a real file — that's
 # how the harness ships multi-hundred-KB prompts without hitting the
 # SSH exec-channel size limit. stdout/stderr append-redirected to
-# the per-run files the orchestrator tails over SFTP.
-"$@" <"$stdin_from" >> "$run_dir/stdout.jsonl" 2>> "$run_dir/stderr.log" &
+# the per-run files the orchestrator tails over SFTP. setsid makes the
+# command lead its own process group, which exec-kill stops whole. A
+# background job of this shell leads no group, so setsid runs in place
+# without a fork and $! is the group's id.
+setsid "$@" <"$stdin_from" >> "$run_dir/stdout.jsonl" 2>> "$run_dir/stderr.log" &
 child_pid=$!
 printf '%s' "$child_pid" > "$run_dir/pid"
 
