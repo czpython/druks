@@ -544,9 +544,11 @@ async def test_linear_client_lists_workflow_states_across_pages():
     assert cursors == [None, "cursor-1"]
 
 
-async def test_linear_client_translates_a_null_issue_to_unknown_ticket():
+async def test_linear_client_translates_not_found_to_unknown_ticket():
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"data": {"issue": None}})
+        return httpx.Response(
+            200, json={"errors": [{"message": "Entity not found: Issue"}], "data": None}
+        )
 
     with pytest.raises(UnknownTicketError, match="ENG-9999 doesn't exist in Linear"):
         await _linear_client(handler).update_issue_status("ENG-9999", "Ready for Agent")

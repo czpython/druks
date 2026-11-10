@@ -72,9 +72,6 @@ class LinearClient:
             """,
             {"issueId": issue_id},
         )
-        # Linear answers an unknown identifier with a null issue, not an error.
-        if not data["issue"]:
-            raise UnknownTicketError(issue_id, "Linear")
         return data["issue"]
 
     async def get_issue_status(self, issue_id: str) -> str:
@@ -99,9 +96,6 @@ class LinearClient:
             {"issueId": issue_id},
         )
         issue = data["issue"]
-        # Linear answers an unknown identifier with a null issue, not an error.
-        if not issue:
-            raise UnknownTicketError(issue_id, "Linear")
         current_status = issue["state"]["name"]
         if current_status == status_name:
             return {
@@ -169,6 +163,8 @@ class LinearClient:
         body = response.json()
         errors = body.get("errors")
         if errors:
+            if any(error["message"].startswith("Entity not found") for error in errors):
+                raise UnknownTicketError(variables["issueId"], "Linear")
             raise LinearAPIError(f"Linear API returned errors: {errors}")
 
         data = body.get("data")
