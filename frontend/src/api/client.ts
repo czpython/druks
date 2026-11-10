@@ -23,6 +23,8 @@ import type {
   PersonalSettings,
   SubjectResponse,
   SubjectSummary,
+  Team,
+  TeamInput,
   UpdateAppsSettingsRequest,
   UpdatePersonalSettingsRequest,
   UpdateSettingsRequest,
@@ -307,6 +309,11 @@ export const api = {
   accounts: () => getJSON<Account[]>('/api/auth/accounts'),
   setAccountRole: (accountId: string, role: AccountRole) =>
     patchJSON<Account>(`/api/auth/accounts/${encodeURIComponent(accountId)}`, { role }),
+  teams: () => getJSON<Team[]>('/api/teams'),
+  createTeam: (body: TeamInput) => postJSON<Team>('/api/teams', body),
+  updateTeam: (teamId: string, body: TeamInput) =>
+    postJSON<Team>(`/api/teams/${encodeURIComponent(teamId)}`, body, 'PUT'),
+  deleteTeam: (teamId: string) => deleteRequest(`/api/teams/${encodeURIComponent(teamId)}`),
   providers: () => getJSON<Provider[]>('/api/providers'),
   providerSubscriptions: () => getJSON<ProviderSubscription[]>('/api/providers/subscriptions'),
   providerKeys: () => getJSON<ProviderKey[]>('/api/providers/keys'),

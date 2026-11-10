@@ -635,6 +635,19 @@ export interface Account {
 
 export type AccountRole = 'admin' | 'member'
 
+export interface Team {
+  id: string
+  name: string
+  members: Account[]
+  apps: string[]
+}
+
+export interface TeamInput {
+  name: string
+  memberIds: string[]
+  apps: string[]
+}
+
 /** What /api/auth/me answers: how this deployment authenticates, who the
  * request resolved to (null in the none/zero setup state), and whether that
  * identity still needs its first provider credential. */

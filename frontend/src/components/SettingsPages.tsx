@@ -28,6 +28,7 @@ import { harnessColors } from '../lib/harnessColors'
 import { useThemePreference } from '../lib/preferences'
 import { Page } from './Page'
 import { PeoplePane } from './PeoplePane'
+import { TeamsPane } from './TeamsPane'
 import { Sidebar } from './Sidebar'
 import { BrowserProfilesPane } from './BrowserProfilesPane'
 import { CallsPane } from './CallsPane'
@@ -62,6 +63,7 @@ const SECTIONS = [
   { id: 'mcp', label: 'MCP servers', group: 'Tools & access' },
   { id: 'skills', label: 'Skills', group: 'Tools & access' },
   { id: 'people', label: 'People', group: 'Organization' },
+  { id: 'teams', label: 'Teams', group: 'Organization' },
   { id: 'personal', label: 'Preferences', group: 'Personal' },
   { id: 'api-tokens', label: 'API tokens', group: 'Personal' },
 ]
@@ -107,7 +109,9 @@ export function SettingsPages({
 }) {
   const [location, navigate] = useLocation()
   const isAdmin = account.role === 'admin'
-  const sections = SECTIONS.filter((entry) => isAdmin || !['agents', 'skills'].includes(entry.id))
+  const sections = SECTIONS.filter((entry) =>
+    isAdmin || !['agents', 'skills', 'teams'].includes(entry.id),
+  )
   const connectionTabs = CONNECTION_TABS.filter((tab) => isAdmin || tab.id !== 'browser')
   const searchParams = new URLSearchParams(useSearch())
   const fieldTarget = searchParams.get('field')
@@ -790,6 +794,7 @@ export function SettingsPages({
               {page === 'mcp' && <McpServersPane isAdmin={isAdmin} />}
               {isAdmin && page === 'skills' && <SkillsPane />}
               {page === 'people' && <PeoplePane account={account} />}
+              {isAdmin && page === 'teams' && <TeamsPane />}
               {page === 'api-tokens' && <AgentAccessPane />}
               {app && hasChannels && validAppPage && paneSection === 'channels' &&
                 page === `apps/${app.name}` &&

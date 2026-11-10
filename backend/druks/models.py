@@ -119,20 +119,23 @@ class Model(Base):
         await self.session.flush()
 
     @classmethod
-    async def get(cls, **fields: object) -> Self:
+    async def get(cls, session: AsyncSession | None = None, **fields: object) -> Self:
         """The one row whose fields hold these values. A miss raises ``ObjectNotFound``,
-        which a route answers with 404 and a page with an empty state."""
-        if row := await cls.get_or_none(**fields):
+        which a route answers with 404 and a page with an empty state. Platform code
+        passes its session, and an app leaves it out."""
+        if row := await cls.get_or_none(session, **fields):
             return row
         raise ObjectNotFound(snake_name(cls.__name__).replace("_", " "), fields)
 
     @classmethod
-    async def get_or_none(cls, **fields: object) -> Self | None:
+    async def get_or_none(
+        cls, session: AsyncSession | None = None, **fields: object
+    ) -> Self | None:
         """The one row whose fields hold these values, or None. Two rows raise
         SQLAlchemy's ``MultipleResultsFound``."""
         from druks.db import db_session
 
-        return (await db_session().scalars(cls._select_matching(fields))).one_or_none()
+        return (await (session or db_session()).scalars(cls._select_matching(fields))).one_or_none()
 
     @classmethod
     async def all(cls) -> list[Self]:

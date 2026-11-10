@@ -58,6 +58,10 @@ SESSION_ONLY_API_ROUTES = {
 
 # Shared settings and connections admit an admin from the browser only.
 ADMIN_API_ROUTES = {
+    ("GET", "/api/teams"),
+    ("POST", "/api/teams"),
+    ("PUT", "/api/teams/{team_id}"),
+    ("DELETE", "/api/teams/{team_id}"),
     ("PATCH", "/api/auth/accounts/{account_id}"),
     ("DELETE", "/api/browser-sessions/{name}"),
     ("POST", "/api/browser-sessions/{name}/login-window"),
