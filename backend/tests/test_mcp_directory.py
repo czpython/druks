@@ -1,5 +1,7 @@
 import json
 
+from conftest import IDENTITY_HEADER
+from druks.accounts.models import Account
 from druks.mcp.constants import NAME_PATTERN
 from druks.mcp.enums import IdentityMode
 from druks.mcp.models import McpServer
@@ -51,10 +53,12 @@ async def test_adding_a_directory_server_ships_dark_and_connects(tmp_path, monke
             return "https://consent.example/authorize"
 
         monkeypatch.setattr("druks.mcp.oauth.begin_connect", fake_begin_connect)
+        personal = client.post("/api/mcp-servers/grafana/connect/me")
         connect = client.post(
             "/api/mcp-servers/grafana/connect", json={"identity_mode": IdentityMode.PER_USER}
         )
 
+        assert personal.status_code == 409
         assert connect.json()["authorizationUrl"] == "https://consent.example/authorize"
         assert begun == [
             ("grafana", "https://mcp.grafana.com/mcp", "http://druks.test", IdentityMode.PER_USER)
@@ -82,6 +86,44 @@ async def test_github_connects_through_the_service(tmp_path, druks_db):
             "/api/mcp-servers/github/connect", json={"identity_mode": IdentityMode.SHARED}
         )
         assert shared.status_code == 409
+
+
+async def test_member_connect_keeps_a_disabled_server_disabled(tmp_path, druks_db):
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    settings = make_settings(
+        tmp_path,
+        identity={"mode": "header", "header": IDENTITY_HEADER},
+        urls={"endpoint": "http://druks.test"},
+    )
+    app = configure_app_for_test(settings=settings, authenticated=False)
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/mcp-servers/directory",
+            json={"name": "github"},
+            headers={IDENTITY_HEADER: admin.username},
+        )
+        established = client.post(
+            "/api/mcp-servers/github/connect",
+            json={"identity_mode": IdentityMode.PER_USER},
+            headers={IDENTITY_HEADER: admin.username},
+        )
+        disabled = client.patch(
+            "/api/mcp-servers/github",
+            json={"is_enabled": False},
+            headers={IDENTITY_HEADER: admin.username},
+        )
+        connected = client.post(
+            "/api/mcp-servers/github/connect/me",
+            headers={IDENTITY_HEADER: member.username},
+        )
+
+    assert created.status_code == 200
+    assert established.status_code == 200
+    assert disabled.status_code == 200
+    assert connected.status_code == 200
+    assert (await McpServer.get_for_name(druks_db, "github")).is_enabled is False
 
 
 def test_adding_an_unknown_or_existing_server_is_refused(tmp_path, druks_db):

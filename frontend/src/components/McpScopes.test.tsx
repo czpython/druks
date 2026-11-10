@@ -23,7 +23,7 @@ it('ticks scopes off the advertised list and pins them', async () => {
   })
   const set = vi.spyOn(api, 'setMcpServerScopes').mockResolvedValue({ ...server, scopes: ['read:me'] })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={client}><McpServersPane /></QueryClientProvider>)
+  render(<QueryClientProvider client={client}><McpServersPane isAdmin /></QueryClientProvider>)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Scopes' }))
   fireEvent.click(await screen.findByLabelText('delete:jira:agent-interface'))

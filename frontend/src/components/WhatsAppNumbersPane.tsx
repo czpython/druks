@@ -75,9 +75,11 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
       void changeNumbers(() => api.removeWahaSession(number.id))
   }
 
-  function addAdmin(number: WahaSession) {
+  function openOneTimeCode(number: WahaSession) {
     void changeNumbers(async () => {
-      const opened = await api.openOneTimeCode(number.id)
+      const opened = isPrivate
+        ? await api.pair(number.id)
+        : await api.openOneTimeCode(number.id)
       const oneTimeCode = { ...opened, numberId: number.id, admin: number.admin }
       setOneTimeCodes((current) => [
         ...current.filter((entry) => entry.numberId !== number.id),
@@ -195,7 +197,7 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
                     {isLinked && !(isPrivate && number.isPhonePaired) && (
                       <button
                         className="set-btn ghost"
-                        onClick={() => addAdmin(number)}
+                        onClick={() => openOneTimeCode(number)}
                         disabled={isBusy}
                       >
                         {isPrivate ? 'Pair my phone' : 'Add admin'}

@@ -43,6 +43,7 @@ function renderProviders(snapshot: UsageProviderSummary = usage) {
   render(
     <QueryClientProvider client={queryClient}>
       <ProvidersPane
+        isAdmin
         providers={[provider]}
         registeredProviders={[provider]}
         subscriptions={[
@@ -244,7 +245,7 @@ describe('Account grant groups', () => {
     ])
     const view = render(
       <QueryClientProvider client={queryClient}>
-        <McpServersPane />
+        <McpServersPane isAdmin />
       </QueryClientProvider>,
     )
     await screen.findByText('No MCP servers installed.')

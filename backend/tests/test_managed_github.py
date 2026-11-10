@@ -354,7 +354,7 @@ async def test_install_binds_at_the_manager_and_links_the_installer(
     managed_github, githubkit, manager, github_identity
 ):
     async with asgi_client(configure_app_for_test(settings=managed_github)) as client:
-        response = await client.get("/api/oauth/github/connect", params={"install": "1"})
+        response = await client.get("/api/oauth/github/install")
         assert response.status_code == 307
         consent = urlparse(response.headers["location"])
         query = dict(parse_qsl(consent.query))
@@ -428,7 +428,7 @@ async def test_a_refused_exchange_links_nothing(managed_github, manager):
     manager.answer = {"error": "access_denied"}
 
     async with asgi_client(configure_app_for_test(settings=managed_github)) as client:
-        response = await client.get("/api/oauth/github/connect", params={"install": "1"})
+        response = await client.get("/api/oauth/github/install")
         state = dict(parse_qsl(urlparse(response.headers["location"]).query))["state"]
         page = await client.get(
             "/api/oauth/callback",

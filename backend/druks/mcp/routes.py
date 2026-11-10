@@ -6,12 +6,14 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.context import current_account_id
-from druks.accounts.dependencies import current_session_account
+from druks.accounts.dependencies import current_admin_account, current_session_account
+from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.apps.registry import mcp_servers
 from druks.core.templates import render_page
 from druks.mcp import oauth
 from druks.mcp.constants import HEADER_NAME_PATTERN, SCOPE_PATTERN
+from druks.mcp.datastructures import McpServerAccess
 from druks.mcp.enums import Credential, IdentityMode
 from druks.mcp.exceptions import (
     InvalidServerNameError,
@@ -67,7 +69,7 @@ async def list_mcp_server_directory() -> list[dict]:
     return [{"name": name, **entry} for name, entry in directory.items()]
 
 
-@router.post("", response_model=McpServerResponse)
+@router.post("", response_model=McpServerResponse, dependencies=[Depends(current_admin_account)])
 async def add_mcp_server(session: SessionDep, body: CreateMcpServerRequest) -> McpServerResponse:
     if body.name in mcp_servers:
         raise HTTPException(
@@ -98,7 +100,9 @@ async def add_mcp_server(session: SessionDep, body: CreateMcpServerRequest) -> M
     return await _response(session, body.name)
 
 
-@router.post("/directory", response_model=McpServerResponse)
+@router.post(
+    "/directory", response_model=McpServerResponse, dependencies=[Depends(current_admin_account)]
+)
 async def add_directory_mcp_server(
     session: SessionDep, name: str = Body(embed=True)
 ) -> McpServerResponse:
@@ -122,7 +126,9 @@ async def add_directory_mcp_server(
     raise HTTPException(status_code=404, detail=f"{name!r} is not in the MCP server directory.")
 
 
-@router.patch("/{name}", response_model=McpServerResponse)
+@router.patch(
+    "/{name}", response_model=McpServerResponse, dependencies=[Depends(current_admin_account)]
+)
 async def set_mcp_server_enabled(
     session: SessionDep, name: str, is_enabled: bool = Body(embed=True)
 ) -> McpServerResponse:
@@ -133,9 +139,15 @@ async def set_mcp_server_enabled(
     return await _response(session, name)
 
 
-@router.put("/{name}/headers", response_model=McpServerResponse)
+@router.put(
+    "/{name}/headers",
+    response_model=McpServerResponse,
+    dependencies=[Depends(current_admin_account)],
+)
 async def set_mcp_server_secret_headers(
-    session: SessionDep, name: str, secret_headers: Annotated[dict[str, str], Body(embed=True)]
+    session: SessionDep,
+    name: str,
+    secret_headers: Annotated[dict[str, str], Body(embed=True)],
 ) -> McpServerResponse:
     # The merged view decides: only a built-in's definition knows it is OAuth.
     access = await McpServer.get_access(session, name, current_account_id.get())
@@ -148,10 +160,39 @@ async def set_mcp_server_secret_headers(
     raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no pasted key.")
 
 
-@router.delete("/{name}/headers", status_code=204)
+@router.delete("/{name}/headers", status_code=204, dependencies=[Depends(current_admin_account)])
 async def remove_mcp_server_secret_headers(session: SessionDep, name: str) -> None:
     access = await McpServer.get_access(session, name, current_account_id.get())
     if access and access.credential == Credential.HEADERS:
+        server = await McpServer.get_or_create(session, name)
+        await server.remove_secret_headers(current_account_id.get())
+        return
+    raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no pasted key.")
+
+
+@router.put("/{name}/headers/me", response_model=McpServerResponse)
+async def set_personal_mcp_server_secret_headers(
+    session: SessionDep, name: str, secret_headers: Annotated[dict[str, str], Body(embed=True)]
+) -> McpServerResponse:
+    """Set the caller's own key on a server that takes a key per person."""
+    access = await McpServer.get_access(session, name, current_account_id.get())
+    if access and access.credential == Credential.HEADERS:
+        if access.identity_mode != IdentityMode.PER_USER:
+            raise HTTPException(status_code=409, detail=f"MCP server {name!r} takes one key.")
+        server = await McpServer.get_or_create(session, name)
+        await server.set_secret_headers(
+            current_account_id.get(), _valid_secret_headers(name, secret_headers)
+        )
+        return await _response(session, name)
+    raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no pasted key.")
+
+
+@router.delete("/{name}/headers/me", status_code=204)
+async def remove_personal_mcp_server_secret_headers(session: SessionDep, name: str) -> None:
+    access = await McpServer.get_access(session, name, current_account_id.get())
+    if access and access.credential == Credential.HEADERS:
+        if access.identity_mode != IdentityMode.PER_USER:
+            raise HTTPException(status_code=409, detail=f"MCP server {name!r} takes one key.")
         server = await McpServer.get_or_create(session, name)
         await server.remove_secret_headers(current_account_id.get())
         return
@@ -165,7 +206,7 @@ async def list_mcp_server_connections(session: SessionDep, name: str) -> list[Va
     return await oauth.list_connections(session, name)
 
 
-@router.delete("/{name}", status_code=204)
+@router.delete("/{name}", status_code=204, dependencies=[Depends(current_admin_account)])
 async def remove_mcp_server(session: SessionDep, name: str) -> None:
     if name in mcp_servers:
         # A built-in is druks-owned — removing it would silently drop it from
@@ -194,7 +235,11 @@ async def get_mcp_server_scopes(session: SessionDep, name: str) -> McpServerScop
     raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no scope selection.")
 
 
-@router.put("/{name}/scopes", response_model=McpServerResponse)
+@router.put(
+    "/{name}/scopes",
+    response_model=McpServerResponse,
+    dependencies=[Depends(current_admin_account)],
+)
 async def set_mcp_server_scopes(
     session: SessionDep, name: str, scopes: Annotated[list[str], Body(embed=True)]
 ) -> McpServerResponse:
@@ -210,7 +255,7 @@ async def set_mcp_server_scopes(
     raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no scope selection.")
 
 
-@router.delete("/{name}/scopes", status_code=204)
+@router.delete("/{name}/scopes", status_code=204, dependencies=[Depends(current_admin_account)])
 async def remove_mcp_server_scopes(session: SessionDep, name: str) -> None:
     access = await McpServer.get_access(session, name, current_account_id.get())
     if access and access.supports_scope_selection:
@@ -219,7 +264,11 @@ async def remove_mcp_server_scopes(session: SessionDep, name: str) -> None:
     raise HTTPException(status_code=404, detail=f"MCP server {name!r} takes no scope selection.")
 
 
-@router.post("/{name}/connect", response_model=ConnectMcpServerResponse)
+@router.post(
+    "/{name}/connect",
+    response_model=ConnectMcpServerResponse,
+    dependencies=[Depends(current_admin_account)],
+)
 async def connect_mcp_server(
     session: SessionDep,
     name: str,
@@ -233,6 +282,30 @@ async def connect_mcp_server(
             status_code=409,
             detail=f"MCP server {name!r} already uses {access.identity_mode!r} identity.",
         )
+    response = await _begin_mcp_connect(name, access, identity_mode)
+    if access.credential == Credential.SERVICE_CONNECTION:
+        # The account's sign-in at the service is its credential here, and a
+        # sign-in belongs to one account. The service's callback knows nothing of
+        # this server, so Connect is where it becomes enabled.
+        await McpServer.set_enabled(session, name, is_enabled=True)
+    return response
+
+
+@router.post("/{name}/connect/me", response_model=ConnectMcpServerResponse)
+async def connect_personal_mcp_server(session: SessionDep, name: str) -> ConnectMcpServerResponse:
+    access = await McpServer.get_access(session, name, current_account_id.get())
+    if not access or not access.is_oauth:
+        raise HTTPException(status_code=404, detail=f"MCP server {name!r} is not an OAuth server.")
+    if access.credential == Credential.SERVICE_CONNECTION or (
+        access.credential == Credential.GRANT and access.identity_mode == IdentityMode.PER_USER
+    ):
+        return await _begin_mcp_connect(name, access, IdentityMode.PER_USER)
+    raise HTTPException(status_code=409, detail=f"MCP server {name!r} takes no personal grant.")
+
+
+async def _begin_mcp_connect(
+    name: str, access: McpServerAccess, identity_mode: IdentityMode
+) -> ConnectMcpServerResponse:
     endpoint = get_settings().urls.endpoint
     if not endpoint:
         # The authorization server redirects the operator's browser back to
@@ -243,11 +316,7 @@ async def connect_mcp_server(
             "at, to connect OAuth MCP servers.",
         )
     if access.credential == Credential.SERVICE_CONNECTION:
-        # The account's sign-in at the service is its credential here, and a
-        # sign-in belongs to one account. The service's callback knows nothing of
-        # this server, so Connect is where it becomes enabled.
         if identity_mode == IdentityMode.PER_USER:
-            await McpServer.set_enabled(session, name, is_enabled=True)
             return ConnectMcpServerResponse(
                 authorization_url=f"{endpoint.rstrip('/')}/api/oauth/{access.service}"
                 "/connect?next=/settings/mcp"
@@ -270,13 +339,13 @@ async def connect_mcp_server(
     return ConnectMcpServerResponse(authorization_url=authorization_url)
 
 
-@router.get(
-    "/oauth/callback",
-    response_class=HTMLResponse,
-    dependencies=[Depends(current_session_account)],
-)
+@router.get("/oauth/callback", response_class=HTMLResponse)
 async def oauth_callback(
-    session: SessionDep, state: str = "", code: str = "", error: str = ""
+    session: SessionDep,
+    state: str = "",
+    code: str = "",
+    error: str = "",
+    account: Account = Depends(current_session_account),
 ) -> HTMLResponse:
     # The operator's browser lands here from the consent screen — a human-facing
     # page, not a JSON API. Failures surface as loud HTTP errors (the app's
@@ -291,16 +360,16 @@ async def oauth_callback(
         name = await oauth.complete_connect(session, state=state, code=code)
     except OauthConnectError as exchange_error:
         raise HTTPException(status_code=400, detail=str(exchange_error)) from exchange_error
-    # Connecting is the operator's explicit "use this server" — a
-    # connected-but-disabled server is a dead end nobody asks for.
-    await McpServer.set_enabled(session, name, is_enabled=True)
+    # A member's connect must leave the server as an admin set it.
+    if account.is_admin:
+        await McpServer.set_enabled(session, name, is_enabled=True)
     # druks opened this tab via window.open, so the page may close itself; the
     # broadcast tells the settings page to refetch before the tab goes. The
     # text stays for browsers that refuse the close.
     return render_page("mcp_oauth_callback.html", name=name)
 
 
-@router.delete("/{name}/grant", status_code=204)
+@router.delete("/{name}/grant", status_code=204, dependencies=[Depends(current_admin_account)])
 async def disconnect_mcp_server(session: SessionDep, name: str) -> None:
     access = await McpServer.get_access(session, name, current_account_id.get())
     if not access or not access.is_oauth:
@@ -308,6 +377,20 @@ async def disconnect_mcp_server(session: SessionDep, name: str) -> None:
     if not access.identity_mode:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} has no grant.")
     account_id = get_grant_account(access.identity_mode, current_account_id.get())
+    await _remove_mcp_grant(session, name, account_id)
+
+
+@router.delete("/{name}/grant/me", status_code=204)
+async def disconnect_personal_mcp_server(session: SessionDep, name: str) -> None:
+    access = await McpServer.get_access(session, name, current_account_id.get())
+    if not access or not access.is_oauth:
+        raise HTTPException(status_code=404, detail=f"MCP server {name!r} is not an OAuth server.")
+    if access.identity_mode != IdentityMode.PER_USER:
+        raise HTTPException(status_code=409, detail=f"MCP server {name!r} takes no personal grant.")
+    await _remove_mcp_grant(session, name, current_account_id.get())
+
+
+async def _remove_mcp_grant(session: AsyncSession, name: str, account_id: str | None) -> None:
     connection = await oauth.get_connection(session, name, account_id)
     if not connection:
         raise HTTPException(

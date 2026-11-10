@@ -1,6 +1,7 @@
 import base64
 
 import pytest
+from conftest import IDENTITY_HEADER, header_client
 from druks import database
 from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account, PersonalAccessToken
@@ -10,6 +11,7 @@ from druks.browser.models import StoredBrowserSession
 from druks.browser.sessions import BrowserSession
 from druks.db import db_session
 from druks.testing import configure_app_for_test, make_settings
+from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy_encrypted_field import SecretDecryptError
@@ -222,3 +224,20 @@ async def test_bearer_pat_reads_sessions_but_cannot_mutate_them(tmp_path, druks_
         )
 
     assert [response.status_code for response in mutations] == [401, 401, 401]
+
+
+async def test_member_cannot_open_a_login_window_socket(tmp_path, druks_db):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+
+    with (
+        header_client(tmp_path) as client,
+        pytest.raises(WebSocketDisconnect) as refused,
+        client.websocket_connect(
+            "/api/browser-sessions/notebook.archive/login-window/ws",
+            headers={IDENTITY_HEADER: member.username, "origin": "http://testserver"},
+        ),
+    ):
+        pass
+
+    assert refused.value.code == 1008

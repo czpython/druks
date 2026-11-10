@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from druks.accounts.dependencies import current_session_account
+from druks.accounts.dependencies import current_admin_account
 from druks.apps.registry import services
 from druks.core.apis.github import GITHUB_API_URL
 from druks.core.apis.slack import SLACK_CREATE_APP_URL
@@ -50,7 +50,7 @@ async def create_github_app(slug: str) -> HTMLResponse:
 @router.get(
     "/{slug}/manifest/callback",
     response_class=HTMLResponse,
-    dependencies=[Depends(current_session_account)],
+    dependencies=[Depends(current_admin_account)],
 )
 async def github_manifest_callback(slug: str, code: str = "") -> HTMLResponse:
     service = get_manifest_service(slug)
