@@ -4,7 +4,7 @@ import logging
 import os
 import shlex
 from collections.abc import Collection, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -125,6 +125,49 @@ def read_codex_cost_from_stdout(
     if not usage_raw:
         return None, None
     return _price(_normalize_usage(usage_raw), model=model)
+
+
+def read_codex_subagent_costs(
+    path: Path,
+    *,
+    stdout: bytes,
+    model: str | None,
+) -> Iterator[tuple[float, dict[str, Any]]]:
+    """Price each subagent that the call's main thread spawned, at the subagent's own model.
+
+    The wrapper writes up to three lines for each subagent session file: its
+    ``session_meta``, its last ``turn_context`` and its last ``token_count``.
+    The main thread's id comes from the ``thread.started`` event on stdout.
+    """
+    if not path.exists():
+        return
+    thread_id = None
+    for line in stdout.splitlines():
+        if b'"thread.started"' not in line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event["type"] == "thread.started":
+            thread_id = event["thread_id"]
+    is_child = False
+    subagent_model = model
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        payload = event["payload"]
+        if event["type"] == "session_meta":
+            spawn = payload["source"]["subagent"]["thread_spawn"]
+            is_child = spawn["parent_thread_id"] == thread_id
+            subagent_model = model
+        elif event["type"] == "turn_context":
+            subagent_model = payload["model"]
+        elif is_child and payload["info"]:
+            usage = _normalize_usage(payload["info"]["total_token_usage"])
+            yield _price(usage, model=subagent_model)
 
 
 def _price(
@@ -427,6 +470,7 @@ class CodexHarness(Harness):
         in_vm_output = f"{in_vm_run_dir}/output.json"
         in_vm_marker = f"{in_vm_run_dir}/session.marker"
         in_vm_session = f"{in_vm_run_dir}/session.jsonl"
+        in_vm_subagents = f"{in_vm_run_dir}/subagents.jsonl"
         write_hook = ""
         if "after_agent" in hooks:
             command = f"sh {self.after_agent_hook_path(in_vm_run_dir)}"
@@ -468,6 +512,7 @@ class CodexHarness(Harness):
         codex_cmdline = " ".join(shlex.quote(a) for a in codex_argv)
         marker_q = shlex.quote(in_vm_marker)
         session_q = shlex.quote(in_vm_session)
+        subagents_q = shlex.quote(in_vm_subagents)
         # A subscription run writes its login before the command. Drukbox hands
         # the placeholder to the box only, so the box fills the file itself.
         login = ""
@@ -480,8 +525,12 @@ class CodexHarness(Harness):
             )
         # Codex runs against its real ``~/.codex`` because CODEX_HOME re-homes
         # all home-resolved state: auth, skills, and future features. A marker
-        # file plus ``-newer`` identifies the session JSONL. More than one match
-        # warns on stderr and copies nothing rather than mis-attributing cost.
+        # file plus ``-newer`` identifies the session JSONL. A subagent writes
+        # its own session file, so the wrapper sends only its first line, its
+        # last turn_context (the model) and its last token totals; parse keeps
+        # the ones this call spawned.
+        # More than one other match warns on stderr and copies nothing rather
+        # than mis-attributing cost.
         wrapper = (
             f"mkdir -p {shlex.quote(in_vm_run_dir)} && "
             f"printf %s {shlex.quote(schema_body)} > {shlex.quote(in_vm_schema)} && "
@@ -492,10 +541,16 @@ class CodexHarness(Harness):
             "trap : TERM && "
             f"{codex_cmdline}; "
             "ec=$?; "
-            f"sessions=$(find \"$HOME/.codex/sessions\" -type f -name '*.jsonl' "
-            f"-newer {marker_q} 2>/dev/null); "
-            "count=$(printf '%s\\n' \"$sessions\" | grep -c .); "
-            f'if [ "$count" -eq 1 ]; then cp "$sessions" {session_q}; '
+            "count=0; "
+            "for f in $(find \"$HOME/.codex/sessions\" -type f -name '*.jsonl' "
+            f"-newer {marker_q} 2>/dev/null); do "
+            'if head -n 1 "$f" | grep -q \'"thread_spawn":{\'; then '
+            'head -n 1 "$f"; '
+            'grep \'"type":"turn_context"\' "$f" | tail -n 1; '
+            'grep \'"type":"token_count"\' "$f" | tail -n 1; '
+            "else session=$f; count=$((count + 1)); fi; "
+            f"done > {subagents_q}; "
+            f'if [ "$count" -eq 1 ]; then cp "$session" {session_q}; '
             'elif [ "$count" -gt 1 ]; then '
             'echo "codex wrapper: $count session files newer than the marker;'
             ' refusing to guess which belongs to this run" >&2; fi; '
@@ -549,7 +604,7 @@ class CodexHarness(Harness):
             stdin=_with_final_message_note(prompt).encode("utf-8"),
             credentials=self._get_credentials(manifest),
             env=extra_env,
-            extra_artifact_filenames=("output.json", "session.jsonl"),
+            extra_artifact_filenames=("output.json", "session.jsonl", "subagents.jsonl"),
         )
 
     def parse(self, result: HarnessRunResult, *, artifact_dir: Path, run_id: str) -> Any:
@@ -560,6 +615,15 @@ class CodexHarness(Harness):
                 call_dir / "session.jsonl",
                 model=self.model_id,
             )
+        if cost_metadata:
+            for subagent_cost, subagent_metadata in read_codex_subagent_costs(
+                call_dir / "subagents.jsonl",
+                stdout=result.stdout,
+                model=self.model_id,
+            ):
+                cost_usd = round(cost_usd + subagent_cost, 6)
+                for field in fields(_Usage):
+                    cost_metadata[field.name] += subagent_metadata[field.name]
         write_cost(call_dir, cost_usd=cost_usd, metadata=cost_metadata)
         self.check_returncode(result)
 

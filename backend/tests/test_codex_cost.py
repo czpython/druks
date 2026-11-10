@@ -1,7 +1,10 @@
 import json
+import subprocess
 from pathlib import Path
 
+from druks.harnesses import codex
 from druks.harnesses.codex import CodexHarness, read_codex_cost_from_jsonl
+from druks.harnesses.datastructures import Manifest
 from druks.sandbox.datastructures import HarnessRunResult
 
 
@@ -139,3 +142,125 @@ def test_parse_falls_back_to_the_session_file_without_turn_completed(tmp_path: P
     cost = _parse_codex_call(tmp_path, stdout)
 
     assert cost["cost_usd"] == 11.25
+
+
+def _compact(event: dict) -> str:
+    return json.dumps(event, separators=(",", ":"))
+
+
+def _session_meta(thread_id: str, parent_thread_id: str) -> str:
+    spawn = {"parent_thread_id": parent_thread_id, "depth": 1}
+    payload = {"id": thread_id, "source": {"subagent": {"thread_spawn": spawn}}}
+    return _compact({"type": "session_meta", "payload": payload})
+
+
+def _turn_context(model: str) -> str:
+    return _compact({"type": "turn_context", "payload": {"model": model}})
+
+
+def _token_count(tokens: int) -> str:
+    usage = {"input_tokens": tokens, "cached_input_tokens": 0, "output_tokens": tokens}
+    payload = {"type": "token_count", "info": {"total_token_usage": usage}}
+    return _compact({"type": "event_msg", "payload": payload})
+
+
+_MAIN_TURN = (
+    b'{"type":"thread.started","thread_id":"main"}\n'
+    b'{"type":"turn.completed","usage":{"input_tokens":1000000,'
+    b'"cached_input_tokens":0,"output_tokens":1000000}}\n'
+)
+
+
+def test_parse_adds_a_subagent_priced_at_its_own_model(tmp_path: Path) -> None:
+    (tmp_path / "call").mkdir()
+    (tmp_path / "call" / "subagents.jsonl").write_text(
+        "\n".join(
+            [
+                _session_meta("child", parent_thread_id="main"),
+                _turn_context("gpt-5-mini"),
+                _token_count(1_000_000),
+            ]
+        )
+        + "\n"
+    )
+
+    cost = _parse_codex_call(tmp_path, _MAIN_TURN)
+
+    # $11.25 for the main thread at gpt-5.5, plus 1M input at $0.25 and
+    # 1M output at $2.00 for the subagent at gpt-5-mini.
+    assert cost["cost_usd"] == 13.5
+    assert cost["metadata"]["input_tokens"] == 2_000_000
+    assert cost["metadata"]["output_tokens"] == 2_000_000
+
+
+def test_parse_skips_a_subagent_of_another_call(tmp_path: Path) -> None:
+    (tmp_path / "call").mkdir()
+    (tmp_path / "call" / "subagents.jsonl").write_text(
+        "\n".join(
+            [
+                _session_meta("child", parent_thread_id="main"),
+                _turn_context("gpt-5.5"),
+                _token_count(1_000),
+                _session_meta("stranger", parent_thread_id="other"),
+                _turn_context("gpt-5.5"),
+                _token_count(1_000_000),
+            ]
+        )
+        + "\n"
+    )
+
+    cost = _parse_codex_call(tmp_path, _MAIN_TURN)
+
+    # $11.25 for the main thread, plus 1,000 input at $1.25 and 1,000 output
+    # at $10.00 per million for the subagent.
+    assert cost["cost_usd"] == 11.26125
+    assert cost["metadata"]["input_tokens"] == 1_001_000
+
+
+async def test_the_wrapper_sends_subagent_usage_beside_the_session(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(codex, "get_runs_root", lambda _: str(tmp_path / "runs"))
+    sessions = tmp_path / "home" / ".codex" / "sessions" / "2026" / "11" / "10"
+    main = [_compact({"type": "session_meta", "payload": {"id": "main", "source": "exec"}})]
+    child = [
+        _session_meta("child", parent_thread_id="main"),
+        _turn_context("gpt-5.5"),
+        _token_count(1),
+        _compact({"type": "response_item", "payload": {"type": "message"}}),
+        _turn_context("gpt-5-mini"),
+        _token_count(2),
+    ]
+    fake_codex = tmp_path / "bin" / "codex"
+    fake_codex.parent.mkdir()
+    fake_codex.write_text(
+        "#!/bin/sh\n"
+        f"mkdir -p {sessions}\n"
+        f"cat > {sessions}/rollout-main.jsonl <<'EOF'\n" + "\n".join(main) + "\nEOF\n"
+        f"cat > {sessions}/rollout-child.jsonl <<'EOF'\n" + "\n".join(child) + "\nEOF\n"
+    )
+    fake_codex.chmod(0o755)
+    invocation = await CodexHarness(
+        model="openai/gpt-5.5", fast_mode=False, effort=None
+    ).build_invocation(
+        Manifest(model="", harness="", mcp_servers=(), skills=()),
+        prompt="hello",
+        schema={"type": "object"},
+        run_id="call",
+        ssh_username="exedev",
+    )
+
+    subprocess.run(
+        invocation.args,
+        input=b"",
+        env={"HOME": str(tmp_path / "home"), "PATH": f"{fake_codex.parent}:/usr/bin:/bin"},
+        check=True,
+    )
+
+    call_dir = tmp_path / "runs" / "call"
+    assert (call_dir / "session.jsonl").read_text().splitlines() == main
+    assert (call_dir / "subagents.jsonl").read_text().splitlines() == [
+        child[0],
+        child[4],
+        child[5],
+    ]
