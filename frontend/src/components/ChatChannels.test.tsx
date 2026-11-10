@@ -7,7 +7,12 @@ import { Router } from 'wouter'
 import { UserPreferencesProvider } from '../lib/preferences'
 import { SettingsPages } from './SettingsPages'
 
-const account = { id: 'operator', username: 'ana@example.com', isDefault: true }
+const account = {
+  id: 'operator',
+  username: 'ana@example.com',
+  isDefault: true,
+  role: 'admin' as const,
+}
 let channels = ['whatsapp']
 
 function mount(path: string, appName?: string) {

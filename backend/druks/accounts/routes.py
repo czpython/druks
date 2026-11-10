@@ -4,8 +4,11 @@ from druks.accounts.constants import PAT_NAME_LENGTH
 from druks.accounts.dependencies import (
     current_account,
     current_account_or_setup,
+    current_admin_account,
     current_session_account,
 )
+from druks.accounts.enums import AccountKind, Role
+from druks.accounts.exceptions import LastAdminError
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.accounts.schemas import AccountResponse, IdentityResponse, PatResponse
 from druks.api.dependencies import SessionDep
@@ -45,6 +48,27 @@ async def get_identity(
 )
 async def list_accounts(session: SessionDep) -> list[Account]:
     return await Account.list_operators(session)
+
+
+@router.patch(
+    "/accounts/{account_id}",
+    response_model=AccountResponse,
+    response_model_by_alias=True,
+    dependencies=[Depends(current_admin_account)],
+)
+async def set_account_role(
+    account_id: str,
+    session: SessionDep,
+    role: Role = Body(..., embed=True),
+) -> Account:
+    account = await session.get(Account, account_id)
+    if account and account.kind == AccountKind.OPERATOR:
+        try:
+            await account.set_role(role)
+        except LastAdminError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        return account
+    raise HTTPException(status_code=404, detail="No such operator account.")
 
 
 @router.get("/personal-tokens", response_model=list[PatResponse], response_model_by_alias=True)

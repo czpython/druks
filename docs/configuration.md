@@ -214,6 +214,10 @@ Unattended calls use its subscriptions. The flag grants no extra
 permissions. Calls with an explicit account use that account's subscriptions.
 Missing subscriptions fail the call. API keys belong to the installation.
 
+The first account is also an admin. Each later person joins as a member when
+Druks first resolves their identity. An admin changes a person's role in
+**Settings → People**.
+
 The installation timezone controls schedules and operational day boundaries.
 Your personal timezone controls timestamp display. Gate notifications use the
 run account's preferences. Unattended runs record the default account.

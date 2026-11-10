@@ -51,6 +51,7 @@ SESSION_ONLY_API_ROUTES = {
     ("GET", "/api/auth/personal-tokens"),
     ("POST", "/api/auth/personal-tokens"),
     ("DELETE", "/api/auth/personal-tokens/{pat_id}"),
+    ("PATCH", "/api/auth/accounts/{account_id}"),
     ("GET", "/api/providers/catalogs"),
     ("GET", "/api/providers/directory"),
     ("GET", "/api/providers/subscriptions"),
@@ -130,7 +131,10 @@ def api_routes():
 
 
 def _gated_by(route, gate) -> bool:
-    return any(dependency.call is gate for dependency in route.dependant.dependencies)
+    return any(
+        dependency.call is gate or any(nested.call is gate for nested in dependency.dependencies)
+        for dependency in route.dependant.dependencies
+    )
 
 
 def _is_session_only(route) -> bool:

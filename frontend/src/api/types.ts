@@ -630,7 +630,10 @@ export interface Account {
   id: string
   username: string
   isDefault: boolean
+  role: AccountRole
 }
+
+export type AccountRole = 'admin' | 'member'
 
 /** What /api/auth/me answers: how this deployment authenticates, who the
  * request resolved to (null in the none/zero setup state), and whether that

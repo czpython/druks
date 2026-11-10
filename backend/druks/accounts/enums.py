@@ -10,6 +10,13 @@ class AccountKind(StrEnum):
     BOT_ADMIN = "bot_admin"
 
 
+class Role(StrEnum):
+    """Only operator accounts have a role."""
+
+    ADMIN = "admin"
+    MEMBER = "member"
+
+
 class Theme(StrEnum):
     SYSTEM = "system"
     LIGHT = "light"

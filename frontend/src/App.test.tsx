@@ -27,7 +27,12 @@ vi.mock('./lib/useScreenWakeLock', () => ({
   useScreenWakeLock: () => ({ active: true, supported: true, error: null }),
 }))
 
-const account = { id: 'operator', username: 'operator@example.invalid', isDefault: true }
+const account = {
+  id: 'operator',
+  username: 'operator@example.invalid',
+  isDefault: true,
+  role: 'admin' as const,
+}
 const roster: InstalledApp[] = [
   {
     name: 'notes',
