@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, Self
 
 import asyncssh
 from drukbox_sdk import SandboxHost as SandboxHostRecord
-from drukbox_sdk.exceptions import SandboxAPIError, SandboxUnavailableError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.core.models import uuid7_str
@@ -604,7 +603,7 @@ class Host:
                 if first_byte_task:
                     # Done: its answer. Still sleeping: cancelled, so no kill.
                     first_byte_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                    with contextlib.suppress(asyncio.CancelledError):
                         first_byte_killed = await first_byte_task
                 # The tails end with the exit code; this drains their last bytes.
                 await asyncio.gather(tee_out, tee_err, return_exceptions=True)
@@ -918,16 +917,14 @@ async def _first_byte_killer(
     except asyncio.CancelledError:
         return False
 
-    if len(stdout_buf) > 0 or len(stderr_buf) > 0:
+    if stdout_buf or stderr_buf:
         return False
 
     try:
         await run.kill()
-    except (SandboxAPIError, SandboxUnavailableError):
-        # If the kill RPC fails the overall timeout will eventually surface
-        # as HarnessTimeoutError; the killer's "best-effort" contract is
-        # explicit about that fallback.
-        logger.exception("first-byte killer failed to send kill")
+    except (asyncssh.Error, OSError):
+        # If the run survives, its overall timeout ends it.
+        logger.exception("first-byte killer failed to kill run %s", run.run_id)
         return False
     return True
 
