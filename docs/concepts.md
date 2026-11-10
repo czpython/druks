@@ -309,7 +309,8 @@ mode permits account creation at first access.
 
 Each operator account has a role, `admin` or `member`. The first account is an
 admin. Each later account joins as a member. An admin changes a person's role
-in **Settings → People**. Druks refuses to remove the last admin.
+in **Settings → People**. Only admins can change settings and connections that
+the installation shares. Druks refuses to remove the last admin.
 
 In `none` mode, Druks has no authentication and exactly one operator account.
 The first completed provider connection creates this account. Public

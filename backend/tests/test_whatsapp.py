@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
-from conftest import bind_ambient_session, connect_service
+from conftest import IDENTITY_HEADER, bind_ambient_session, connect_service
 from druks.accounts.dependencies import current_account, resolve_single_operator
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
@@ -861,6 +861,22 @@ async def test_the_one_time_code_makes_its_sender_the_number_admin(druks_db, hel
     assert (user_chat.user_id, [message.body for message in user_chat.messages]) == (BEN, [code])
 
 
+async def test_member_cannot_open_a_public_number_code(druks_db, tmp_path, helpdesk):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    connection = await link(druks_db, await bot_account(druks_db))
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    settings = make_settings(tmp_path, identity={"mode": "header", "header": IDENTITY_HEADER})
+    api = configure_app_for_test(settings=settings, authenticated=False)
+
+    async with asgi_client(api) as client:
+        response = await client.post(
+            f"/api/chat/connections/{connection.id}/one-time-code",
+            headers={IDENTITY_HEADER: member.username},
+        )
+
+    assert response.status_code == 403
+
+
 async def test_bot_and_bot_admin_accounts_never_count_as_operators(druks_db):
     operator = await Account.get_or_create(druks_db, "op@example.com")
     await bot_account(druks_db)
@@ -892,8 +908,7 @@ async def test_two_operators_pair_to_one_number_under_their_own_accounts(
             before = await client.get("/api/chat/services/waha/sessions?app=chat", headers=headers)
             assert not before.json()[0]["isPhonePaired"]
             response = await client.post(
-                f"/api/chat/connections/{connection.id}/one-time-code",
-                json={"account_id": connection.account_id},
+                f"/api/chat/connections/{connection.id}/pairing",
                 headers=headers,
             )
             assert response.status_code == 200
@@ -1187,6 +1202,7 @@ async def test_removing_a_number_holds_its_chats_and_relinking_keeps_its_history
     druks_db, druks_client, helpdesk, waha, monkeypatch
 ):
     webhook_base(monkeypatch)
+    await Account.get_or_create(druks_db, "op@example.com")
     owner = await bot_account(druks_db)
     first = await link(druks_db, owner)
     await receive(first, message_event(ANA, "Hello", key="M1"))
@@ -1208,6 +1224,7 @@ async def test_removing_a_number_holds_its_chats_and_relinking_keeps_its_history
 
 
 async def test_disconnecting_waha_removes_its_numbers_first(druks_db, druks_client, waha):
+    await Account.get_or_create(druks_db, "op@example.com")
     connection = await link(druks_db, await bot_account(druks_db))
 
     response = await druks_client.delete("/api/services/waha")
@@ -1223,6 +1240,7 @@ async def test_a_number_that_lost_its_link_takes_a_new_scan_and_keeps_its_chats(
     druks_db, druks_client, helpdesk, waha, monkeypatch
 ):
     webhook_base(monkeypatch)
+    await Account.get_or_create(druks_db, "op@example.com")
     connection = await link(druks_db, await bot_account(druks_db))
     await receive(connection, message_event(ANA, "Hello", key="M1"))
     [chat] = await Conversation.list_for_connection(druks_db, connection.id)

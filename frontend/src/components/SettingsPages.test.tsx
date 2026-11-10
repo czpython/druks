@@ -8,6 +8,7 @@ import { UserPreferencesProvider } from '../lib/preferences'
 import { SETTINGS_FIELDS } from './settings'
 import type {
   AgentSetting,
+  AccountRole,
   AppSettingChoices,
   PersonalSettings,
   AppsSettingsResponse,
@@ -446,7 +447,7 @@ function stubFetch(
   )
 }
 
-function renderSettings(workPath?: string) {
+function renderSettings(workPath?: string, role: AccountRole = 'admin') {
   window.history.replaceState(null, '', workPath ?? '/settings/personal')
   vi.stubGlobal('matchMedia', vi.fn(() => ({
     matches: true,
@@ -462,7 +463,7 @@ function renderSettings(workPath?: string) {
             id: 'operator',
             username: 'operator@example.invalid',
             isDefault: true,
-            role: 'admin',
+            role,
           }}
         />
       </UserPreferencesProvider>
@@ -481,6 +482,43 @@ afterEach(() => {
 })
 
 describe('SettingsPages app fields', () => {
+  it('hides shared settings destinations from a member', async () => {
+    stubFetch()
+    renderSettings('/settings/connections?tab=browser', 'member')
+
+    expect(await screen.findByRole('heading', { name: 'Services' })).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'Agents' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Skills' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Browser' })).toBeNull()
+    fireEvent.change(screen.getByLabelText('Search settings'), {
+      target: { value: 'Field Notes' },
+    })
+    expect(screen.getByText('No matching settings.')).toBeTruthy()
+
+    cleanup()
+    renderSettings('/settings/providers', 'member')
+    await screen.findByRole('heading', { name: 'Providers' })
+    expect(screen.queryByRole('button', { name: 'Add provider' })).toBeNull()
+  })
+
+  it('hides an app settings link from a member', async () => {
+    stubFetch()
+    renderSettings('/field_notes', 'member')
+
+    await screen.findByRole('link', { name: 'Field Notes' })
+    expect(screen.queryByRole('link', { name: 'Field Notes settings' })).toBeNull()
+  })
+
+  it('treats shared and app settings addresses as unknown for a member', async () => {
+    stubFetch()
+    renderSettings('/settings/agents', 'member')
+    expect(await screen.findByText('No settings page matches this address.')).toBeTruthy()
+
+    cleanup()
+    renderSettings('/apps/field_notes/settings', 'member')
+    expect(await screen.findByText('No settings page matches this address.')).toBeTruthy()
+  })
+
   it('opens browser profiles through Connections and settings search', async () => {
     stubFetch()
     renderSettings()

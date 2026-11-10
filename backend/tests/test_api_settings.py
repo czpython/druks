@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from conftest import settings_client
+from druks.accounts.enums import Role
 from druks.accounts.models import Account
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.db import db_session
@@ -76,6 +77,8 @@ def test_patch_settings_judges_the_default_triple_together(tmp_path: Path):
 
 async def test_accounts_report_the_default_without_a_fallback_setting(druks_db, tmp_path: Path):
     account = await Account.get_or_create(druks_db, "ops@example.com")
+    test_operator = await Account.get_or_create(druks_db, "op@example.com")
+    await test_operator.set_role(Role.ADMIN)
     with settings_client(tmp_path) as client:
         expected = {
             "id": account.id,

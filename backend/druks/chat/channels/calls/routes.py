@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import Row
 
-from druks.accounts.dependencies import current_session_account
+from druks.accounts.dependencies import current_admin_account, current_session_account
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
@@ -36,7 +36,11 @@ async def list_unlinked_numbers(session: SessionDep) -> list[dict]:
 
 
 @router.post(
-    "/numbers", status_code=201, response_model=LinkedNumberResponse, response_model_by_alias=True
+    "/numbers",
+    status_code=201,
+    response_model=LinkedNumberResponse,
+    response_model_by_alias=True,
+    dependencies=[Depends(current_admin_account)],
 )
 async def link_number(
     session: SessionDep,
@@ -63,7 +67,9 @@ async def link_number(
     return await Twilio.link(session, owner, app=app, sid=sid, calls_url=calls_url)
 
 
-@router.delete("/numbers/{number_id}", status_code=204)
+@router.delete(
+    "/numbers/{number_id}", status_code=204, dependencies=[Depends(current_admin_account)]
+)
 async def remove_number(session: SessionDep, number_id: str) -> None:
     if connection := await Twilio.get_connection(session, number_id):
         # Removing is idempotent: a second delete finds the number removed.
@@ -77,8 +83,7 @@ async def remove_number(session: SessionDep, number_id: str) -> None:
     "/numbers/{number_id}/calls", response_model=list[CallResponse], response_model_by_alias=True
 )
 async def list_calls(session: SessionDep, number_id: str) -> list[Row]:
-    """A number's calls. The number's bot account owns them, and any operator reads them,
-    as any operator manages an app's numbers."""
+    """A number's calls. Its bot account owns them, and any operator can read them."""
     if await Twilio.get_connection(session, number_id):
         return await CallsChannel.list_calls(session, number_id)
     raise HTTPException(404, "Number not found.")

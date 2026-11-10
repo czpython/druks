@@ -106,10 +106,13 @@ export function SettingsPages({
   active?: boolean
 }) {
   const [location, navigate] = useLocation()
+  const isAdmin = account.role === 'admin'
+  const sections = SECTIONS.filter((entry) => isAdmin || !['agents', 'skills'].includes(entry.id))
+  const connectionTabs = CONNECTION_TABS.filter((tab) => isAdmin || tab.id !== 'browser')
   const searchParams = new URLSearchParams(useSearch())
   const fieldTarget = searchParams.get('field')
   const connectionsTab =
-    CONNECTION_TABS.find((tab) => tab.id === searchParams.get('tab'))?.id ?? 'services'
+    connectionTabs.find((tab) => tab.id === searchParams.get('tab'))?.id ?? 'services'
   const content = useRef<HTMLElement>(null)
   const section = appName ? `apps/${appName}` : location.slice('/settings/'.length) || 'providers'
   const formPath = `${import.meta.env.BASE_URL.replace(/\/$/, '')}${appName ? `/apps/${appName}/settings` : '/settings'}`
@@ -121,7 +124,7 @@ export function SettingsPages({
   const choicesQuery = useQuery({
     queryKey: ['appSettingChoices', appName],
     queryFn: () => api.getAppSettingChoices(appName!),
-    enabled: Boolean(appName),
+    enabled: Boolean(appName && isAdmin),
   })
   const harnessesQuery = useQuery({ queryKey: ['harnesses'], queryFn: api.harnesses })
   const agentsQuery = useQuery({ queryKey: ['agents'], queryFn: api.agents })
@@ -218,10 +221,11 @@ export function SettingsPages({
   const appTab = ['agents', 'bots', 'channels'].find((tab) => location.endsWith(`/${tab}`)) ?? 'options'
   const validAppPage =
     !appName ||
-    location === `/apps/${appName}/settings` ||
-    (hasAgents && location === `/apps/${appName}/settings/agents`) ||
-    Boolean(app?.bot && location === `/apps/${appName}/settings/bots`) ||
-    (hasChannels && location === `/apps/${appName}/settings/channels`)
+    (isAdmin &&
+      (location === `/apps/${appName}/settings` ||
+        (hasAgents && location === `/apps/${appName}/settings/agents`) ||
+        Boolean(app?.bot && location === `/apps/${appName}/settings/bots`) ||
+        (hasChannels && location === `/apps/${appName}/settings/channels`)))
   const hasOptions = Boolean(
     app && (app.settings.length || app.workflows.some((workflow) => workflow.fields.length)),
   )
@@ -230,11 +234,12 @@ export function SettingsPages({
     if (hasAgents) paneSection = 'agents'
     else if (app?.bot) paneSection = 'bots'
   }
-  const executionPage = section === 'agents' || Boolean(appName && ['agents', 'bots'].includes(paneSection))
+  const executionPage = isAdmin && (section === 'agents' || Boolean(appName && ['agents', 'bots'].includes(paneSection)))
   const Content = appName ? 'section' : 'main'
   const title =
-    SECTIONS.find((entry) => entry.id === section)?.label ?? (app ? appLabel(app.name) : 'Settings')
-  const formPage = section === 'agents' || section === 'personal' || Boolean(app && validAppPage)
+    sections.find((entry) => entry.id === section)?.label ??
+    (app && validAppPage ? appLabel(app.name) : 'Settings')
+  const formPage = (isAdmin && section === 'agents') || section === 'personal' || Boolean(app && validAppPage)
   const executionChanged =
     defaults &&
     savedDefaults &&
@@ -424,18 +429,20 @@ export function SettingsPages({
     setAppEdits((current) => ({ ...current, [name]: change(current[name] ?? {}) }))
   }
 
-  const searchResults = SECTIONS.map((entry) => ({
+  const searchResults = sections.map((entry) => ({
     label: entry.label, owner: entry.group, kind: 'Section', terms: '',
     path: `/settings/${entry.id}`,
-  })).concat([{
+  })).concat(isAdmin ? [{
     label: 'Browser profiles', owner: 'Connections', kind: 'Section',
     terms: 'browser sessions sign-ins saved logins',
     path: '/settings/connections?tab=browser',
-  }], Object.values(SETTINGS_FIELDS).map((field) => ({
-    label: field.label, owner: SECTIONS.find((entry) => entry.id === field.section)!.label,
+  }] : [], Object.values(SETTINGS_FIELDS).filter((field) =>
+    sections.some((entry) => entry.id === field.section),
+  ).map((field) => ({
+    label: field.label, owner: sections.find((entry) => entry.id === field.section)!.label,
     kind: 'Field', terms: field.terms,
     path: `/settings/${field.section}?field=${field.field}`,
-  })), apps.flatMap((entry) => [
+  })), isAdmin ? apps.flatMap((entry) => [
     { label: appLabel(entry.name), owner: 'App settings', kind: 'Section', terms: '', path: `/apps/${entry.name}/settings` },
     ...(entry.bot && channels.includes('slack') ? [{
       label: 'Answer only when I tag the bot', owner: appLabel(entry.name), kind: 'Field',
@@ -460,7 +467,7 @@ export function SettingsPages({
       terms: `agent override inheritance ${agent.description}`,
       path: `/apps/${entry.name}/settings/${agent.name === entry.bot ? 'bots' : 'agents'}?field=${encodeURIComponent(`agent.${agent.name}.${field.field}`)}`,
     }))),
-  ])).filter((entry) => `${entry.label} ${entry.owner} ${entry.terms}`.toLowerCase().includes(search.trim().toLowerCase()))
+  ]) : []).filter((entry) => `${entry.label} ${entry.owner} ${entry.terms}`.toLowerCase().includes(search.trim().toLowerCase()))
 
   useEffect(() => {
     if (!active || !fieldTarget) return
@@ -536,7 +543,7 @@ export function SettingsPages({
                 {['AI execution', 'Tools & access', 'Organization', 'Personal'].map((group) => (
                   <div key={group}>
                     <div className="sidebar-group-title">{group}</div>
-                    {SECTIONS.filter((entry) => entry.group === group).map((entry) => (
+                    {sections.filter((entry) => entry.group === group).map((entry) => (
                       <Link
                         key={entry.id}
                         aria-label={entry.label}
@@ -588,7 +595,7 @@ export function SettingsPages({
               </label>
             )}
           </div>
-          {appName && app && (
+          {appName && app && validAppPage && (
             <>
               <p className="app-settings-description">{app.description}</p>
               {(app.bot || (hasOptions && hasAgents)) && (
@@ -709,7 +716,7 @@ export function SettingsPages({
                   busy={saving}
                 />
               )}
-              {page === 'agents' && executionReady && effectiveDefaults && (
+              {isAdmin && page === 'agents' && executionReady && effectiveDefaults && (
                 <AgentsPane
                   defaults={effectiveDefaults}
                   onDefaults={setDefaults}
@@ -748,12 +755,13 @@ export function SettingsPages({
                   onRetry={() => {
                     for (const query of executionQueries) if (query.isError) void query.refetch()
                   }}
+                  isAdmin={isAdmin}
                 />
               )}
               {page === 'connections' && (
                 <>
                   <nav className="settings-tabs" aria-label="Connections">
-                    {CONNECTION_TABS.map((tab) => (
+                    {connectionTabs.map((tab) => (
                       <Link
                         key={tab.id}
                         href={`/settings/connections?tab=${tab.id}`}
@@ -764,21 +772,23 @@ export function SettingsPages({
                     ))}
                   </nav>
                   <div hidden={connectionsTab !== 'services'}>
-                    <ServicesPane />
+                    <ServicesPane isAdmin={isAdmin} />
                   </div>
                   <div hidden={connectionsTab !== 'accounts'}>
                     <ConnectionsPane />
                   </div>
-                  <div hidden={connectionsTab !== 'browser'}>
-                    <BrowserProfilesPane />
-                  </div>
+                  {isAdmin && (
+                    <div hidden={connectionsTab !== 'browser'}>
+                      <BrowserProfilesPane />
+                    </div>
+                  )}
                   <div hidden={connectionsTab !== 'revoked'}>
                     <ConnectionsPane revokedOnly />
                   </div>
                 </>
               )}
-              {page === 'mcp' && <McpServersPane />}
-              {page === 'skills' && <SkillsPane />}
+              {page === 'mcp' && <McpServersPane isAdmin={isAdmin} />}
+              {isAdmin && page === 'skills' && <SkillsPane />}
               {page === 'people' && <PeoplePane account={account} />}
               {page === 'api-tokens' && <AgentAccessPane />}
               {app && hasChannels && validAppPage && paneSection === 'channels' &&
@@ -873,7 +883,7 @@ export function SettingsPages({
             </div>
           ))}
           {appsQuery.isSuccess &&
-            (!validAppPage || (!SECTIONS.some((entry) => entry.id === section) && !app)) && (
+            (!validAppPage || (!sections.some((entry) => entry.id === section) && !app)) && (
               <p>No settings page matches this address.</p>
             )}
         </Page>

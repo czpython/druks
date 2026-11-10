@@ -19,12 +19,14 @@ const save = vi.mocked(api.updateAppSettings)
 const trigger = vi.mocked(api.runSchedule)
 let savedRows: DashboardSchedule[]
 
-function mount(apps = ['notes', 'other']) {
+function mount(apps = ['notes', 'other'], isAdmin = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const unsavedForm: { current: UnsavedForm | null } = { current: null }
   render(
     <QueryClientProvider client={client}>
-      <Router><SchedulesPage apps={apps} unsavedFormRef={unsavedForm} /></Router>
+      <Router>
+        <SchedulesPage apps={apps} unsavedFormRef={unsavedForm} isAdmin={isAdmin} />
+      </Router>
     </QueryClientProvider>,
   )
   return { client, unsavedForm }
@@ -53,6 +55,18 @@ beforeEach(() => {
   trigger.mockResolvedValue({ run: 'scheduled-invocation' })
 })
 afterEach(() => { cleanup(); vi.resetAllMocks() })
+
+it('shows schedules without shared controls to a member', async () => {
+  mount(['notes'], false)
+
+  const form = await screen.findByRole('form', { name: 'Daily Digest' })
+  expect(within(form).getByRole('button', { name: 'Run now' })).toBeTruthy()
+  expect(within(form).queryByRole('switch')).toBeNull()
+  expect(within(form).queryByRole('combobox')).toBeNull()
+  expect(within(form).queryByRole('button', { name: 'Use defaults for Daily Digest' })).toBeNull()
+  expect(screen.queryByRole('link', { name: 'App settings' })).toBeNull()
+  expect(save).not.toHaveBeenCalled()
+})
 
 it('saves preset cadence and pause changes without a save button', async () => {
   mount()

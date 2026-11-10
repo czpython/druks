@@ -148,6 +148,7 @@ async def test_disconnect_removes_only_the_requesting_accounts_login(tmp_path: P
 
 async def test_removing_the_key_leaves_every_subscription(tmp_path: Path, druks_db):
     mine = await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "x"}})
+    await Account.get_or_create(druks_db, "op@example.com")
     await VaultSecret.paste(
         druks_db,
         Audience.provider("anthropic"),

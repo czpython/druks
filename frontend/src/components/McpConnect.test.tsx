@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { api } from '../api/client'
@@ -27,7 +27,7 @@ it.each(['success', 'failure'])('shows pending sign-in and handles %s', async (o
   }
   vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={client}><McpServersPane /></QueryClientProvider>)
+  render(<QueryClientProvider client={client}><McpServersPane isAdmin /></QueryClientProvider>)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Connect' }))
   expect(screen.getByRole('status').textContent).toContain('Preparing sign-in')
@@ -58,9 +58,63 @@ it('offers Connect beside the service login', async () => {
     credential: 'service_login' as const, service: 'jira', scopes: null,
   }])
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={client}><McpServersPane /></QueryClientProvider>)
+  render(<QueryClientProvider client={client}><McpServersPane isAdmin /></QueryClientProvider>)
 
   expect(await screen.findByText('jira login')).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull()
+})
+
+it.each([true, false])('chooses the service sign-in route when admin is %s', async (isAdmin) => {
+  vi.spyOn(api, 'mcpServers').mockResolvedValue([{
+    name: 'github', url: 'https://api.githubcopilot.com/mcp', isEnabled: true,
+    isOauth: true, identityMode: null, builtin: true, hasToken: false,
+    credential: 'service_connection' as const, service: 'github', scopes: null,
+  }])
+  vi.spyOn(api, 'mcpServerDirectory').mockResolvedValue([])
+  const connect = vi.spyOn(api, 'connectMcpServer').mockResolvedValue({ authorizationUrl: 'https://github.test/sign-in' })
+  const connectPersonal = vi.spyOn(api, 'connectPersonalMcpServer').mockResolvedValue({ authorizationUrl: 'https://github.test/sign-in' })
+  const popup = { document: document.implementation.createHTMLDocument(), location: { assign: vi.fn() } }
+  vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window)
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={client}>
+      <McpServersPane isAdmin={isAdmin} />
+    </QueryClientProvider>,
+  )
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect' }))
+
+  if (isAdmin) {
+    await waitFor(() => expect(connect).toHaveBeenCalledWith('github', 'per_user'))
+    expect(connectPersonal).not.toHaveBeenCalled()
+  } else {
+    await waitFor(() => expect(connectPersonal).toHaveBeenCalledWith('github'))
+    expect(connect).not.toHaveBeenCalled()
+  }
+})
+
+it('uses personal routes for a per-account grant', async () => {
+  vi.spyOn(api, 'mcpServers').mockResolvedValue([{
+    name: 'jira', url: 'https://jira.test/mcp', isEnabled: true,
+    isOauth: true, identityMode: 'per_user', builtin: false, hasToken: true,
+    credential: 'grant' as const, service: null, scopes: null,
+  }])
+  vi.spyOn(api, 'mcpServerDirectory').mockResolvedValue([])
+  const connect = vi.spyOn(api, 'connectPersonalMcpServer').mockResolvedValue({ authorizationUrl: 'https://jira.test/sign-in' })
+  const disconnect = vi.spyOn(api, 'disconnectPersonalMcpServer').mockResolvedValue()
+  vi.spyOn(api, 'connectMcpServer')
+  vi.spyOn(api, 'disconnectMcpServer')
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  const popup = { document: document.implementation.createHTMLDocument(), location: { assign: vi.fn() } }
+  vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window)
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={client}><McpServersPane isAdmin /></QueryClientProvider>)
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }))
+  await waitFor(() => expect(connect).toHaveBeenCalledWith('jira'))
+  fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }))
+  await waitFor(() => expect(disconnect).toHaveBeenCalledWith('jira'))
+  expect(api.connectMcpServer).not.toHaveBeenCalled()
+  expect(api.disconnectMcpServer).not.toHaveBeenCalled()
 })

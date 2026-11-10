@@ -157,6 +157,45 @@ async def test_only_an_admin_browser_identity_can_change_roles(tmp_path, druks_d
     assert bearer_response.status_code == 401
 
 
+async def test_shared_settings_require_an_admin_browser_identity(tmp_path, druks_db):
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    _, token = await PersonalAccessToken.create(druks_db, account_id=admin.id, name="admin")
+
+    with header_client(tmp_path) as client:
+        member_response = client.patch(
+            "/api/settings",
+            json={"includeApps": True},
+            headers={IDENTITY_HEADER: member.username},
+        )
+        admin_response = client.patch(
+            "/api/settings",
+            json={"includeApps": True},
+            headers={IDENTITY_HEADER: admin.username},
+        )
+        bearer_response = client.patch(
+            "/api/settings",
+            json={"includeApps": False},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        personal_response = client.patch(
+            "/api/settings/personal",
+            json={"timezone": "Europe/Madrid"},
+            headers={IDENTITY_HEADER: member.username},
+        )
+        install_response = client.get(
+            "/api/oauth/github/install", headers={IDENTITY_HEADER: member.username}
+        )
+
+    assert member_response.status_code == 403
+    assert admin_response.status_code == 200
+    assert admin_response.json()["includeApps"]
+    assert bearer_response.status_code == 401
+    assert personal_response.status_code == 200
+    assert personal_response.json()["timezone"] == "Europe/Madrid"
+    assert install_response.status_code == 403
+
+
 async def test_role_changes_keep_an_admin_and_reject_bot_accounts(tmp_path, druks_db):
     first = await Account.get_or_create(druks_db, "first@example.com")
     second = await Account.get_or_create(druks_db, "second@example.com")
@@ -318,6 +357,9 @@ async def test_a_key_alone_finishes_onboarding(tmp_path, druks_db):
 
 
 async def test_a_second_pasted_key_replaces_the_first(tmp_path, druks_db):
+    await Account.get_or_create(druks_db, "first@example.com")
+    second = await Account.get_or_create(druks_db, "second@example.com")
+    await second.set_role(Role.ADMIN)
     with header_client(tmp_path) as client:
         for who, key in (("first@example.com", "key-one"), ("second@example.com", "key-two")):
             response = client.post(

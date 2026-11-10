@@ -362,6 +362,11 @@ export const api = {
       `/api/chat/connections/${encodeURIComponent(connectionId)}/one-time-code`,
       {},
     ),
+  pair: (connectionId: string) =>
+    postJSON<{ code: string; expiresIn: number }>(
+      `/api/chat/connections/${encodeURIComponent(connectionId)}/pairing`,
+      {},
+    ),
   unpair: (connectionId: string) =>
     deleteRequest(`/api/chat/connections/${encodeURIComponent(connectionId)}/pairing`),
   linkedNumbers: (app: string) =>
@@ -453,16 +458,31 @@ export const api = {
       `/api/mcp-servers/${encodeURIComponent(name)}/connect`,
       { identity_mode: identityMode },
     ),
+  connectPersonalMcpServer: (name: string) =>
+    postJSON<{ authorizationUrl: string }>(
+      `/api/mcp-servers/${encodeURIComponent(name)}/connect/me`,
+      undefined,
+    ),
   disconnectMcpServer: (name: string) =>
     deleteRequest(`/api/mcp-servers/${encodeURIComponent(name)}/grant`),
+  disconnectPersonalMcpServer: (name: string) =>
+    deleteRequest(`/api/mcp-servers/${encodeURIComponent(name)}/grant/me`),
   setMcpServerHeaders: (name: string, secretHeaders: Record<string, string>) =>
     postJSON<McpServer>(
       `/api/mcp-servers/${encodeURIComponent(name)}/headers`,
       { secret_headers: secretHeaders },
       'PUT',
     ),
+  setPersonalMcpServerHeaders: (name: string, secretHeaders: Record<string, string>) =>
+    postJSON<McpServer>(
+      `/api/mcp-servers/${encodeURIComponent(name)}/headers/me`,
+      { secret_headers: secretHeaders },
+      'PUT',
+    ),
   removeMcpServerHeaders: (name: string) =>
     deleteRequest(`/api/mcp-servers/${encodeURIComponent(name)}/headers`),
+  removePersonalMcpServerHeaders: (name: string) =>
+    deleteRequest(`/api/mcp-servers/${encodeURIComponent(name)}/headers/me`),
   mcpServerScopes: (name: string) =>
     getJSON<McpServerScopes>(`/api/mcp-servers/${encodeURIComponent(name)}/scopes`),
   setMcpServerScopes: (name: string, scopes: string[]) =>

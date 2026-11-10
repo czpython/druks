@@ -2,11 +2,13 @@ import pytest
 from druks.accounts.dependencies import (
     current_account,
     current_account_or_setup,
+    current_admin_account,
     current_session_account,
     current_session_or_setup,
 )
 from druks.accounts.models import Account
 from druks.api.server import app
+from druks.apps.loader import iter_apps
 from druks.harnesses.providers import get_providers
 from fastapi.routing import APIRoute, _IncludedRouter
 
@@ -30,45 +32,86 @@ SESSION_ONLY_API_ROUTES = {
     ("POST", "/api/chat/conversations/{conversation_id}/messages/{message_id}/retry"),
     ("POST", "/api/chat/conversations/{conversation_id}/cancel"),
     ("GET", "/api/chat/services/waha/sessions"),
-    ("POST", "/api/chat/services/waha/sessions"),
     ("GET", "/api/chat/services/waha/sessions/{session_id}/qr"),
-    ("POST", "/api/chat/services/waha/sessions/{session_id}/relink"),
-    ("DELETE", "/api/chat/services/waha/sessions/{session_id}"),
     ("GET", "/api/chat/services/twilio/numbers"),
-    ("POST", "/api/chat/services/twilio/numbers"),
-    ("DELETE", "/api/chat/services/twilio/numbers/{number_id}"),
     ("GET", "/api/chat/services/twilio/numbers/{number_id}/calls"),
     ("GET", "/api/chat/services/twilio/numbers/{number_id}/calls/{call_id}"),
     ("GET", "/api/chat/services/twilio/numbers/unlinked"),
-    ("POST", "/api/chat/connections/{connection_id}/one-time-code"),
+    ("POST", "/api/chat/connections/{connection_id}/pairing"),
     ("DELETE", "/api/chat/connections/{connection_id}/pairing"),
     ("GET", "/api/chat/services/slack/link/{token}"),
-    ("PUT", "/api/browser-sessions/{name}/state"),
-    ("POST", "/api/browser-sessions/{name}/login-window"),
-    ("POST", "/api/browser-sessions/{name}/login-window/save"),
-    ("POST", "/api/browser-sessions/{name}/login-window/cancel"),
-    ("DELETE", "/api/browser-sessions/{name}"),
     ("GET", "/api/auth/personal-tokens"),
     ("POST", "/api/auth/personal-tokens"),
     ("DELETE", "/api/auth/personal-tokens/{pat_id}"),
-    ("PATCH", "/api/auth/accounts/{account_id}"),
     ("GET", "/api/providers/catalogs"),
     ("GET", "/api/providers/directory"),
     ("GET", "/api/providers/subscriptions"),
     ("GET", "/api/providers/keys"),
-    ("POST", "/api/providers/{provider_id}/key"),
-    ("DELETE", "/api/providers/{provider_id}/key"),
     ("POST", "/api/providers/{provider_id}/sign-in/token"),
     ("DELETE", "/api/providers/{provider_id}/connection"),
-    ("PATCH", "/api/settings/apps"),
-    ("POST", "/api/services/{slug}"),
-    ("DELETE", "/api/services/{slug}"),
     ("GET", "/api/oauth/{slug}/connect"),
     ("GET", "/api/oauth/callback"),
-    ("GET", "/api/core/services/{slug}/manifest/callback"),
     ("GET", "/api/mcp-servers/oauth/callback"),
     ("GET", "/api/oauth/connections"),
     ("DELETE", "/api/oauth/connections/{connection_id}"),
+}
+
+# Shared settings and connections admit an admin from the browser only.
+ADMIN_API_ROUTES = {
+    ("PATCH", "/api/auth/accounts/{account_id}"),
+    ("DELETE", "/api/browser-sessions/{name}"),
+    ("POST", "/api/browser-sessions/{name}/login-window"),
+    ("POST", "/api/browser-sessions/{name}/login-window/cancel"),
+    ("POST", "/api/browser-sessions/{name}/login-window/save"),
+    ("PUT", "/api/browser-sessions/{name}/state"),
+    ("POST", "/api/chat/services/twilio/numbers"),
+    ("DELETE", "/api/chat/services/twilio/numbers/{number_id}"),
+    ("POST", "/api/chat/services/waha/sessions"),
+    ("DELETE", "/api/chat/services/waha/sessions/{session_id}"),
+    ("POST", "/api/chat/services/waha/sessions/{session_id}/relink"),
+    ("POST", "/api/chat/connections/{connection_id}/one-time-code"),
+    ("GET", "/api/core/services/{slug}/manifest/callback"),
+    ("DELETE", "/api/mcp-servers/{name}"),
+    ("DELETE", "/api/mcp-servers/{name}/grant"),
+    ("DELETE", "/api/mcp-servers/{name}/headers"),
+    ("DELETE", "/api/mcp-servers/{name}/scopes"),
+    ("POST", "/api/mcp-servers/{name}/connect"),
+    ("PUT", "/api/mcp-servers/{name}/headers"),
+    ("PUT", "/api/mcp-servers/{name}/scopes"),
+    ("PATCH", "/api/mcp-servers/{name}"),
+    ("POST", "/api/mcp-servers"),
+    ("POST", "/api/mcp-servers/directory"),
+    ("DELETE", "/api/notifications/destinations/{destination_id}"),
+    ("PATCH", "/api/notifications/destinations/{destination_id}"),
+    ("POST", "/api/notifications/destinations"),
+    ("DELETE", "/api/providers/{provider_id}/key"),
+    ("POST", "/api/providers/{provider_id}/key"),
+    ("DELETE", "/api/services/{slug}"),
+    ("POST", "/api/services/{slug}"),
+    ("GET", "/api/oauth/{slug}/install"),
+    ("DELETE", "/api/skills/{collection_id}"),
+    ("PATCH", "/api/skills/{collection_id}/skills/{name}"),
+    ("POST", "/api/skills/{collection_id}/sync"),
+    ("POST", "/api/skills"),
+    ("PATCH", "/api/settings"),
+    ("PATCH", "/api/settings/apps"),
+}
+
+# These writes also admit a personal token.
+TOKEN_WRITE_API_ROUTES = {
+    ("POST", "/api/browser/action"),
+    ("POST", "/api/browser/evaluate"),
+    ("POST", "/api/browser/navigate"),
+    ("POST", "/api/dashboard/schedules/{kind}/run"),
+    ("POST", "/api/gates/{run}/answer"),
+    ("DELETE", "/api/mcp-servers/{name}/grant/me"),
+    ("DELETE", "/api/mcp-servers/{name}/headers/me"),
+    ("POST", "/api/mcp-servers/{name}/connect/me"),
+    ("PUT", "/api/mcp-servers/{name}/headers/me"),
+    ("POST", "/api/runs/{run}/cancel"),
+    ("POST", "/api/runs/{run}/resume"),
+    ("POST", "/api/runs/{run}/retry"),
+    ("PATCH", "/api/settings/personal"),
 }
 
 # Session-gated routes that also sit behind their router's identity gate —
@@ -81,21 +124,14 @@ DUAL_GATED_API_PATHS = {
     "/api/chat/conversations/{conversation_id}/cancel",
     "/api/chat/services/waha/sessions",
     "/api/chat/services/waha/sessions/{session_id}/qr",
-    "/api/chat/services/waha/sessions/{session_id}/relink",
-    "/api/chat/services/waha/sessions/{session_id}",
     "/api/chat/services/twilio/numbers",
-    "/api/chat/services/twilio/numbers/{number_id}",
     "/api/chat/services/twilio/numbers/{number_id}/calls",
     "/api/chat/services/twilio/numbers/{number_id}/calls/{call_id}",
     "/api/chat/services/twilio/numbers/unlinked",
-    "/api/chat/connections/{connection_id}/one-time-code",
     "/api/chat/connections/{connection_id}/pairing",
     "/api/chat/services/slack/link/{token}",
-    "/api/settings/apps",
-    "/api/services/{slug}",
     "/api/oauth/{slug}/connect",
     "/api/oauth/callback",
-    "/api/core/services/{slug}/manifest/callback",
     "/api/mcp-servers/oauth/callback",
     "/api/oauth/connections",
     "/api/oauth/connections/{connection_id}",
@@ -141,6 +177,10 @@ def _is_session_only(route) -> bool:
     return any((method, route.path) in SESSION_ONLY_API_ROUTES for method in route.methods)
 
 
+def _route_keys(route) -> set[tuple[str, str]]:
+    return {(method, route.path) for method in route.methods if method not in {"HEAD", "OPTIONS"}}
+
+
 def test_every_internal_api_route_sits_behind_the_identity_gate(api_routes):
     unguarded = [
         route.path
@@ -148,6 +188,7 @@ def test_every_internal_api_route_sits_behind_the_identity_gate(api_routes):
         if route.path.startswith("/api/")
         and route.path not in EXEMPT_API_PATHS
         and not _is_session_only(route)
+        and not any(key in ADMIN_API_ROUTES for key in _route_keys(route))
         and not _gated_by(route, current_account)
     ]
     assert unguarded == []
@@ -214,5 +255,47 @@ def test_capability_management_is_session_only(api_routes):
             assert not _gated_by(route, current_account), route.path
     # And nothing else carries the session-only gate.
     for route in api_routes:
-        if not _is_session_only(route):
+        if not _is_session_only(route) and not any(
+            key in ADMIN_API_ROUTES for key in _route_keys(route)
+        ):
             assert not _gated_by(route, current_session_account), route.path
+
+
+def test_admin_routes_use_only_the_admin_gate(api_routes):
+    listed = [
+        route for route in api_routes if any(key in ADMIN_API_ROUTES for key in _route_keys(route))
+    ]
+    assert {key for route in listed for key in _route_keys(route) if key in ADMIN_API_ROUTES} == (
+        ADMIN_API_ROUTES
+    )
+    for route in listed:
+        assert _gated_by(route, current_admin_account), route.path
+        assert not {"agent", "bot"} & set(route.tags), route.path
+    for route in api_routes:
+        if not any(key in ADMIN_API_ROUTES for key in _route_keys(route)):
+            assert not _gated_by(route, current_admin_account), route.path
+
+
+def test_every_platform_write_has_one_access_class(api_routes):
+    known_groups = (ADMIN_API_ROUTES, SESSION_ONLY_API_ROUTES, TOKEN_WRITE_API_ROUTES)
+    assert not any(
+        left & right
+        for index, left in enumerate(known_groups)
+        for right in known_groups[index + 1 :]
+    )
+    known_route_keys = {key for route in api_routes for key in _route_keys(route)}
+    assert set().union(*known_groups) <= known_route_keys
+
+    app_prefixes = tuple(f"/api/{registered_app.name}/" for registered_app in iter_apps())
+    for route in api_routes:
+        if not route.path.startswith("/api/") or route.path.startswith(app_prefixes):
+            continue
+        for key in _route_keys(route):
+            if key[0] == "GET":
+                continue
+            groups = [group for group in known_groups if key in group]
+            if route.path in SETUP_CAPABLE_API_PATHS:
+                groups.append(SETUP_CAPABLE_API_PATHS)
+            elif route.path in EXEMPT_API_PATHS:
+                groups.append(EXEMPT_API_PATHS)
+            assert len(groups) == 1, key

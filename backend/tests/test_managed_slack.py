@@ -221,7 +221,7 @@ async def test_slack_waits_for_its_install_and_keeps_it_across_a_restart(
     async with asgi_client(configure_app_for_test(settings=managed_slack)) as client:
         entry = await _get_entry(client)
         assert not entry["connected"] and entry["managed"]
-        assert entry["installUrl"] == "/api/oauth/slack/connect?install=1"
+        assert entry["installUrl"] == "/api/oauth/slack/install"
 
         query, page = await _install(client)
         assert page.status_code == 200

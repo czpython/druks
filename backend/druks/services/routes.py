@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.context import current_account_id
-from druks.accounts.dependencies import current_session_account
+from druks.accounts.dependencies import current_admin_account, current_session_account
 from druks.api.dependencies import SessionDep
 from druks.apps.registry import services
 from druks.core.templates import render_page
@@ -39,7 +39,7 @@ async def list_services(session: SessionDep) -> list[ServiceResponse]:
         ]
         install_url = ""
         if row and await service.Authentication.get_install_endpoint():
-            install_url = f"/api/oauth/{service.slug}/connect?install=1"
+            install_url = f"/api/oauth/{service.slug}/install"
         entries.append(
             ServiceResponse.from_row(
                 service,
@@ -59,7 +59,7 @@ async def list_services(session: SessionDep) -> list[ServiceResponse]:
     "/{slug}",
     response_model=ServiceResponse,
     response_model_by_alias=True,
-    dependencies=[Depends(current_session_account)],
+    dependencies=[Depends(current_admin_account)],
 )
 async def connect_service(slug: str, payload: dict[str, str]) -> ServiceResponse:
     service = services.get(slug)
@@ -72,7 +72,7 @@ async def connect_service(slug: str, payload: dict[str, str]) -> ServiceResponse
     return ServiceResponse.from_row(service, row, connected=await service.is_connected())
 
 
-@router.delete("/{slug}", status_code=204, dependencies=[Depends(current_session_account)])
+@router.delete("/{slug}", status_code=204, dependencies=[Depends(current_admin_account)])
 async def disconnect_service(session: SessionDep, slug: str) -> None:
     service = services.get(slug)
     if not service:
@@ -82,15 +82,26 @@ async def disconnect_service(session: SessionDep, slug: str) -> None:
     await service.disconnect(session)
 
 
+@oauth_router.get("/{slug}/install", dependencies=[Depends(current_admin_account)])
+async def install_oauth_service(session: SessionDep, slug: str, next: str = "") -> RedirectResponse:
+    """Start an install at the provider."""
+    return await _start_oauth_service(session, slug, next=next, install=True)
+
+
 @oauth_router.get("/{slug}/connect", dependencies=[Depends(current_session_account)])
 async def connect_oauth_service(
     session: SessionDep,
     slug: str,
     connection: str = "",
     next: str = "",
-    install: bool = False,
 ) -> RedirectResponse:
-    """Start a sign-in or an install at the provider."""
+    """Start the caller's sign-in at the provider."""
+    return await _start_oauth_service(session, slug, connection=connection, next=next)
+
+
+async def _start_oauth_service(
+    session: AsyncSession, slug: str, *, connection: str = "", next: str = "", install: bool = False
+) -> RedirectResponse:
     service = services.get(slug)
     if not service or not service.Authentication.get_client():
         raise OauthPageError(f"No OAuth service {slug!r}.", status_code=404)
