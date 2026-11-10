@@ -550,6 +550,15 @@ class GitHubClient:
             body["output"] = {**output, "annotations": list(annotations[start : start + limit])}
             await checks.async_update(owner, repo_name, check_run_id, data=body)
 
+    async def get_permission(self, repo: str, login: str) -> str:
+        """``login``'s base permission on ``repo``: admin, write, read, or none. GitHub
+        reports maintain as write and triage as read."""
+        owner, name = repo.split("/", 1)
+        response = await self._github.rest.repos.async_get_collaborator_permission_level(
+            owner, name, login
+        )
+        return response.parsed_data.permission
+
     async def get_file_content(
         self,
         repo: str,
