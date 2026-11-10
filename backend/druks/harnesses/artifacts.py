@@ -67,6 +67,17 @@ def normalize_token_usage(metadata: dict[str, Any] | None) -> dict[str, int] | N
         # Codex's output_tokens already include its reasoning tokens.
         output = _int(metadata.get("output_tokens"))
         reasoning = _int(metadata.get("reasoning_output_tokens"))
+    elif provider in ("opencode", "pi"):
+        # Both CLIs report input without its cache tokens. opencode also
+        # reports output without its reasoning tokens; pi includes them.
+        cached_input = metadata["cached_input_tokens"]
+        cache_creation = metadata["cache_creation_tokens"]
+        input_total = metadata["input_tokens"] + cached_input + cache_creation
+        output = metadata["output_tokens"]
+        reasoning = 0
+        if provider == "opencode":
+            reasoning = metadata["reasoning_tokens"]
+            output += reasoning
     else:
         # Unknown provider — try the fields generously so a future
         # adapter that writes the canonical names just works.
