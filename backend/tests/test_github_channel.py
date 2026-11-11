@@ -108,7 +108,7 @@ def comment_event(
     login="ana",
     body=f"@{HANDLE} read my runs",
     comment_id=1,
-    association="MEMBER",
+    association="OWNER",
     sender_type="User",
     is_pull_request=False,
     in_reply_to_id=None,

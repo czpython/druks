@@ -27,7 +27,7 @@ def _pull_request(*, action):
             "body": "Closes #7",
             "draft": False,
             "user": {"login": "octocat"},
-            "author_association": "MEMBER",
+            "author_association": "OWNER",
             "head": {
                 "ref": "agent/eng-1",
                 "sha": "0f3a2c1d",
@@ -219,7 +219,7 @@ async def test_a_review_says_whether_it_is_of_the_latest_commit(
         "sender": {"login": "alice", "type": "User"},
         "review": {
             "state": "approved",
-            "author_association": "MEMBER",
+            "author_association": "OWNER",
             "body": None,
             "commit_id": commit_id,
         },
@@ -232,9 +232,10 @@ async def test_a_review_says_whether_it_is_of_the_latest_commit(
     assert published_event["payload"]["is_latest_commit"] is is_latest_commit
 
 
+@pytest.mark.parametrize("association", ["MEMBER", "COLLABORATOR", "CONTRIBUTOR"])
 @pytest.mark.parametrize("can_write", [True, False])
-async def test_a_review_from_a_contributor_asks_github_whether_they_write(
-    tmp_path, monkeypatch, can_write
+async def test_a_review_from_anyone_but_the_owner_asks_github_whether_they_write(
+    tmp_path, monkeypatch, association, can_write
 ):
     published = _capture(monkeypatch)
     _github(monkeypatch, alice=can_write)
@@ -244,7 +245,7 @@ async def test_a_review_from_a_contributor_asks_github_whether_they_write(
         "sender": {"login": "alice", "type": "User"},
         "review": {
             "state": "approved",
-            "author_association": "CONTRIBUTOR",
+            "author_association": association,
             "body": None,
             "commit_id": "0f3a2c1d",
         },
@@ -255,8 +256,8 @@ async def test_a_review_from_a_contributor_asks_github_whether_they_write(
     assert published[0][1]["payload"]["author_can_write"] is can_write
 
 
-@pytest.mark.parametrize(("sender_type", "association"), [("User", "MEMBER"), ("Bot", "NONE")])
-async def test_a_writer_or_a_bot_is_not_looked_up(tmp_path, monkeypatch, sender_type, association):
+@pytest.mark.parametrize(("sender_type", "association"), [("User", "OWNER"), ("Bot", "NONE")])
+async def test_the_owner_or_a_bot_is_not_looked_up(tmp_path, monkeypatch, sender_type, association):
     _capture(monkeypatch)
     asked = _github(monkeypatch)
     payload = _issue(action="created", sender_type=sender_type, association=association)
