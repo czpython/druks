@@ -38,18 +38,23 @@ acceptance criterion — nothing more, nothing less.
 {% include "software_factory/build/_contract.md" %}
 {% include "software_factory/build/_related_repos.md" %}
 {% include "software_factory/build/_skills.md" %}
-{% if build.journal.revision_request %}
+{% if build.journal.red_ci_report %}
+## CI is red
+
+CI on `{{ build.journal.red_ci_report.head_sha }}` is red. Read it with `gh pr checks` and `gh run view --log-failed`, fix what your diff caused, and report the rest in `checks`.
+
+{% elif build.journal.revision_request %}
 ## Revision request
 
 {{ build.journal.revision_request }}
 
 {% endif %}When the checkout has `.druks/software_factory/review.md`, read it before you write: it is the repo's standing rules for code and prose, and the reviewer holds your diff to it.
 
-Implement the approved plan (rendered above as **Current plan**) on the PR branch (see "Delivering your work" below). When a **Revision request** section is rendered above, implement it on top of the plan — it is the reviewer's feedback, already triaged into instructions. Verification is yours: before pushing, run the commands in the **Verification profile** above. Fix a failure your diff causes. A failure you cannot attribute to your own diff is environment noise to report, not a gate to chase. Do not run ad hoc install, build, or smoke commands beyond that unless the plan explicitly requires changing those commands or generated outputs. Never leave dependency lockfile, generated, or cache changes unless they are part of the requested implementation. Return structured evidence for every acceptance criterion, every check you ran or intentionally did not run, changed files, and known risks. If a check was not run, include status not_run and a reason.
+Implement the approved plan (rendered above as **Current plan**) on the PR branch (see "Delivering your work" below). When a **Revision request** section is rendered above, implement it on top of the plan — it is the reviewer's feedback, already triaged into instructions. Verification is yours: before every push, run the lint and typecheck commands in the **Verification profile** above, and its test commands narrowed to the files you changed. Report each result in `checks`. Fix a failure your diff causes. A failure you cannot attribute to your own diff is environment noise to report, not a gate to chase. Do not run ad hoc install, build, or smoke commands beyond that unless the plan explicitly requires changing those commands or generated outputs. Never leave dependency lockfile, generated, or cache changes unless they are part of the requested implementation. Return structured evidence for every acceptance criterion, every check you ran or intentionally did not run, changed files, and known risks. If a check was not run, include status not_run and a reason.
 
 ## Delivering your work
 
-When the implementation is complete you MUST commit and push it to the PR branch — the pushed commit is the deliverable. The repo is checked out on the PR branch `{{ build.branch }}` already. Stay on it: Druks finds the PR by this name. Run, from the repo root:
+When the implementation is complete you MUST commit and push it to the PR branch — the pushed commit is the deliverable. The one exception is a **CI is red** section above whose red checks your diff did not cause: then push nothing, report each red check in `checks` with the reason it is not yours, and report the branch's current head as `base_sha`, `head_sha`, and `commit_sha`. The repo is checked out on the PR branch `{{ build.branch }}` already. Stay on it: Druks finds the PR by this name. Run, from the repo root:
 
 ```
 git status --short                      # review what changed

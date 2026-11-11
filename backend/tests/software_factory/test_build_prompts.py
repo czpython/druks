@@ -4,7 +4,13 @@ from types import SimpleNamespace
 
 import pytest
 from druks.contrib import software_factory
-from druks.contrib.software_factory.contracts import FindingOutput, ReviewReport
+from druks.contrib.software_factory.contracts import (
+    CiReport,
+    FindingOutput,
+    ReviewReport,
+    TriageOutput,
+)
+from druks.contrib.software_factory.enums import HumanFeedbackAction
 from druks.contrib.software_factory.journal import BuildJournal
 from druks.contrib.software_factory.models import Project, ProjectRepo
 from druks.contrib.software_factory.policy import RepoPolicy
@@ -165,6 +171,30 @@ async def test_implement_prompt_renders_the_prior_review():
     assert "### Round 1 — decision: request_changes" in prompt
     assert "Rename the flag." in prompt
     assert "- **high** The flag keeps its old name. (`app/flags.py:12`)" in prompt
+
+
+async def test_implement_prompt_puts_red_ci_ahead_of_older_instructions():
+    build = _build()
+    build.journal.add(
+        TriageOutput(
+            action=HumanFeedbackAction.CHANGE_REQUIRED,
+            body="",
+            question="",
+            implementation_instructions="Rename the flag.",
+        )
+    )
+    build.journal.add(CiReport(head_sha="0f3a2c1d", conclusion="red"))
+
+    prompt = await render_prompt(
+        "software_factory/build/implement.md",
+        build=build,
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+    )
+
+    assert "## CI is red" in prompt
+    assert "CI on `0f3a2c1d` is red." in prompt
+    assert "## Revision request" not in prompt
 
 
 def test_build_prompt_context_covers_template_attrs():

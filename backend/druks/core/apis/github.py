@@ -558,6 +558,27 @@ class GitHubClient:
         )
         return response.parsed_data.permission in ("admin", "write")
 
+    async def list_check_suites(self, repo: str, ref: str) -> list[dict[str, Any]]:
+        """The check suites on ``ref``: one per Actions workflow run, or per other app."""
+        owner, name = repo.split("/", 1)
+        suites = self._github.rest.paginate(
+            self._github.rest.checks.async_list_suites_for_ref,
+            map_func=lambda response: response.parsed_data.check_suites,
+            owner=owner,
+            repo=name,
+            ref=ref,
+            per_page=100,
+        )
+        return [suite.model_dump() async for suite in suites]
+
+    async def list_commit_statuses(self, repo: str, ref: str) -> list[dict[str, Any]]:
+        """The latest status of each context on ``ref``."""
+        owner, name = repo.split("/", 1)
+        response = await self._github.rest.repos.async_get_combined_status_for_ref(
+            owner, name, ref, per_page=100
+        )
+        return [status.model_dump() for status in response.parsed_data.statuses]
+
     async def get_file_content(
         self,
         repo: str,

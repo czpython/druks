@@ -4,6 +4,7 @@ import pytest
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import (
     AcceptanceCriterionOutput,
+    CiReport,
     PlanData,
     PlanOutput,
     QuestionOptionOutput,
@@ -625,7 +626,9 @@ async def test_blocked_redraft_fails_the_run_instead_of_implementing(monkeypatch
 async def test_review_work_ask_renders_a_notification_body(monkeypatch):
     workflow = _flow()
     workflow.subject = SimpleNamespace(repo="org/repo")
-    workflow.journal = SimpleNamespace(implementations=[SimpleNamespace(pr_number=42)])
+    workflow.journal = BuildJournal()
+    workflow.journal.add(CiReport(head_sha="0f3a2c1d", conclusion="green"))
+    monkeypatch.setattr(Build, "pr_number", property(lambda self: 42))
     input_requests: list[dict] = []
 
     async def fake_wait(*, input_request):
@@ -644,6 +647,62 @@ async def test_review_work_ask_renders_a_notification_body(monkeypatch):
     assert (await run.get_rendered_ask())["body"]
     assert input_requests[0]["url"] == "https://github.com/org/repo/pull/42"
     assert input_requests[0]["label"] == "Review implementation on GitHub: PR #42"
+
+
+@pytest.mark.parametrize(
+    ("conclusion", "note"),
+    [
+        ("red", "CI on 0f3a2c1 is red"),
+        ("unfinished", "CI on 0f3a2c1 did not finish within 60 minutes"),
+    ],
+)
+async def test_a_round_without_green_ci_parks_saying_so(monkeypatch, conclusion, note):
+    workflow = _flow()
+    workflow.subject = SimpleNamespace(repo="org/repo")
+    workflow.journal = BuildJournal()
+    workflow.journal.add(CiReport(head_sha="0f3a2c1d", conclusion=conclusion))
+    monkeypatch.setattr(Build, "pr_number", property(lambda self: 42))
+    input_requests: list[dict] = []
+
+    async def fake_wait(*, input_request):
+        input_requests.append(input_request)
+        return ReviewWork(action="merged")
+
+    monkeypatch.setattr(ReviewWork, "wait", fake_wait)
+
+    await workflow._work_gate()
+
+    assert input_requests[0]["label"] == f"Review implementation on GitHub: PR #42. {note}"
+
+
+@pytest.mark.parametrize(
+    ("gate", "calls"), [("human", ["clear_draft", "merge"]), ("none", ["merge"])]
+)
+async def test_only_a_person_s_approval_clears_the_draft_before_a_merge(monkeypatch, gate, calls):
+    flow = Build()
+    flow._policy = RepoPolicy(on_approval="merge", gates={"implementation_approval": gate})
+    flow.subject = SimpleNamespace(repo="org/repo")
+    flow.journal = BuildJournal()
+    flow.journal.add(CiReport(head_sha="0f3a2c1d", conclusion="red"))
+    monkeypatch.setattr(Build, "pr_number", property(lambda self: 42))
+    recorded: list[str] = []
+
+    async def fake_wait(*, input_request):
+        return ReviewWork(action="approve")
+
+    async def clear_draft():
+        recorded.append("clear_draft")
+
+    async def merge():
+        recorded.append("merge")
+        return True
+
+    monkeypatch.setattr(ReviewWork, "wait", fake_wait)
+    monkeypatch.setattr(flow, "_clear_draft", clear_draft)
+    monkeypatch.setattr(flow, "declare_merge_intent", merge)
+
+    assert await flow._work_gate() is True
+    assert recorded == calls
 
 
 async def test_needs_clarification_delivery_stops_the_run(monkeypatch):
@@ -745,24 +804,34 @@ async def test_a_build_hands_its_pull_request_to_the_review(monkeypatch):
     assert flow.journal.reviews == [review]
 
 
-@pytest.mark.parametrize(("max_revisions", "implemented"), [(5, 2), (1, 1)])
-async def test_requested_changes_go_back_to_implement_until_the_cap(
-    monkeypatch, max_revisions, implemented
-):
+def _implementing_build(
+    monkeypatch, *, max_revisions, heads, conclusions, decisions
+) -> tuple[Build, list[str]]:
+    """A build whose implementer delivers ``heads``, whose CI concludes ``conclusions``,
+    and whose review decides ``decisions``, each in turn. It returns the calls made."""
     flow = Build()
     flow._settings = Build.Settings(max_implementation_revisions=max_revisions)
-    flow.journal = SimpleNamespace(implementation_revision=0)
-    decisions = iter(["request_changes", "approve"])
+    flow.journal = SimpleNamespace(implementation_revision=0, last_implementation=None)
+    heads, conclusions, decisions = iter(heads), iter(conclusions), iter(decisions)
     calls: list[str] = []
 
     async def create_branch():
         return None
 
     async def implement():
+        delivery = SimpleNamespace(head_sha=next(heads))
         flow.journal.implementation_revision += 1
+        flow.journal.last_implementation = delivery
         calls.append("implement")
+        return delivery
+
+    async def wait_for_ci(head_sha):
+        conclusion = next(conclusions)
+        calls.append(f"ci:{conclusion}")
+        return CiReport(head_sha=head_sha, conclusion=conclusion)
 
     async def review_work():
+        calls.append("review")
         return ReviewReport(decision=next(decisions), summary="", findings=[], context_repos=[])
 
     async def work_gate():
@@ -771,9 +840,94 @@ async def test_requested_changes_go_back_to_implement_until_the_cap(
 
     monkeypatch.setattr(flow, "_create_branch", create_branch)
     monkeypatch.setattr(flow, "implement", implement)
+    monkeypatch.setattr(flow, "_wait_for_ci", wait_for_ci)
     monkeypatch.setattr(flow, "_review_work", review_work)
     monkeypatch.setattr(flow, "_work_gate", work_gate)
+    return flow, calls
+
+
+@pytest.mark.parametrize(
+    ("max_revisions", "expected"),
+    [
+        (5, ["implement", "ci:green", "review", "implement", "ci:green", "review", "work_gate"]),
+        (1, ["implement", "ci:green", "review", "work_gate"]),
+    ],
+)
+async def test_requested_changes_go_back_to_implement_until_the_cap(
+    monkeypatch, max_revisions, expected
+):
+    flow, calls = _implementing_build(
+        monkeypatch,
+        max_revisions=max_revisions,
+        heads=["a", "b"],
+        conclusions=["green", "green"],
+        decisions=["request_changes", "approve"],
+    )
 
     await flow._implement_phase()
 
-    assert calls == ["implement"] * implemented + ["work_gate"]
+    assert calls == expected
+
+
+@pytest.mark.parametrize(
+    ("max_revisions", "expected"),
+    [
+        (5, ["implement", "ci:red", "implement", "ci:green", "review", "work_gate"]),
+        (1, ["implement", "ci:red", "review", "work_gate"]),
+    ],
+)
+async def test_red_ci_goes_back_to_implement_before_the_review_until_the_cap(
+    monkeypatch, max_revisions, expected
+):
+    flow, calls = _implementing_build(
+        monkeypatch,
+        max_revisions=max_revisions,
+        heads=["a", "b"],
+        conclusions=["red", "green"],
+        decisions=["approve"],
+    )
+
+    await flow._implement_phase()
+
+    assert calls == expected
+
+
+async def test_a_round_that_pushes_nothing_goes_to_the_review_without_a_ci_wait(monkeypatch):
+    flow, calls = _implementing_build(
+        monkeypatch, max_revisions=5, heads=["a", "a"], conclusions=["red"], decisions=["approve"]
+    )
+
+    await flow._implement_phase()
+
+    assert calls == ["implement", "ci:red", "implement", "review", "work_gate"]
+
+
+@pytest.mark.parametrize(
+    ("conclusion", "decision", "leaves_draft"),
+    [
+        ("green", "approve", True),
+        ("green", "comment", True),
+        ("red", "approve", False),
+        ("green", "request_changes", False),
+    ],
+)
+async def test_the_work_park_takes_the_pr_out_of_draft_only_when_ready(
+    monkeypatch, conclusion, decision, leaves_draft
+):
+    flow = Build()
+    flow.journal.add(CiReport(head_sha="0f3a2c1d", conclusion=conclusion))
+    flow.journal.add(ReviewReport(decision=decision, summary="", findings=[], context_repos=[]))
+    drafts: list[bool] = []
+
+    async def set_pr_draft(*, draft):
+        drafts.append(draft)
+
+    async def request_assignee_review():
+        pass
+
+    monkeypatch.setattr(flow, "set_pr_draft", set_pr_draft)
+    monkeypatch.setattr(flow, "request_assignee_review", request_assignee_review)
+
+    await ReviewWork.on_wait(flow)
+
+    assert drafts == ([False] if leaves_draft else [])

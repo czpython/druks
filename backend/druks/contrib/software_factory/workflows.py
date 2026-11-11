@@ -1,10 +1,12 @@
 import logging
+import time
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from druks.accounts import Account
 from druks.contrib.software_factory.contracts import (
+    CiReport,
     ImplementationOutput,
     ReviewReport,
     ReviewWork,
@@ -24,7 +26,14 @@ from druks.workflows import FatalError, Workflow, step
 from druks.workspaces import RepoWorkspace
 
 from .app import SoftwareFactory
-from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, REVIEW_TTL_SECONDS, TICKET_TOOLS
+from .constants import (
+    CI_POLL_SECONDS,
+    CI_TTL_SECONDS,
+    GITHUB_MCP_NAME,
+    GITHUB_MCP_URL,
+    REVIEW_TTL_SECONDS,
+    TICKET_TOOLS,
+)
 from .datastructures import PullRequest
 from .exceptions import TicketAlreadyMerged, TicketNotRoutable
 from .github import get_review_actor
@@ -288,14 +297,48 @@ class Build(Workflow):
     async def _implement_phase(self) -> None:
         await self._create_branch()
         while True:
-            await self.implement()
-            review = await self._review_work()
-            if review.decision == "request_changes" and (
+            previous_delivery = self.journal.last_implementation
+            delivery = await self.implement()
+            can_revise = (
                 self.journal.implementation_revision < self._settings.max_implementation_revisions
-            ):
+            )
+            # The implementer pushes nothing when no red check is its diff's, and CI on
+            # that head has already been read.
+            if not previous_delivery or delivery.head_sha != previous_delivery.head_sha:
+                ci_report = await self._wait_for_ci(delivery.head_sha)
+                if ci_report.conclusion == "red" and can_revise:
+                    continue
+            review = await self._review_work()
+            if review.decision == "request_changes" and can_revise:
                 continue
             if await self._work_gate():
                 return
+
+    async def _wait_for_ci(self, head_sha: str) -> CiReport:
+        """Wait until CI has finished on ``head_sha``, and return its verdict."""
+        started_at = await self._now()
+        while not (ci_report := await self._read_ci(head_sha, started_at)):
+            await self.sleep(CI_POLL_SECONDS, label="Waiting for CI", until="check.completed")
+        self.journal.add(ci_report)
+        return ci_report
+
+    @step
+    async def _now(self) -> float:
+        return time.time()
+
+    # The read runs about once a minute for up to an hour, so it rides out a short
+    # network error.
+    @step(retries=3)
+    async def _read_ci(self, head_sha: str, started_at: float) -> CiReport | None:
+        """CI's verdict on ``head_sha``, or None while it can still change."""
+        repo = (await self.subject).repo
+        github = await Github.get_client(repo)
+        return CiReport.judge(
+            head_sha,
+            await github.list_check_suites(repo, head_sha),
+            await github.list_commit_statuses(repo, head_sha),
+            waited=time.time() - started_at,
+        )
 
     async def _review_work(self) -> ReviewReport:
         """Hand the pull request to the standalone review and wait for its decision."""
@@ -315,16 +358,28 @@ class Build(Workflow):
         goes back to implementation."""
         if self._policy.implementation_approval_gate() == "none":
             return await self._approved_work()
+        label = f"Review implementation on GitHub: PR #{self.pr_number}"
+        ci_report = self.journal.latest(CiReport)
+        if ci_report.conclusion == "red":
+            label = f"{label}. CI on {ci_report.head_sha[:7]} is red"
+        if ci_report.conclusion == "unfinished":
+            label = (
+                f"{label}. CI on {ci_report.head_sha[:7]} did not finish within "
+                f"{CI_TTL_SECONDS // 60} minutes"
+            )
         decision = await ReviewWork.wait(
             input_request={
                 "presentation": "external",
-                "label": f"Review implementation on GitHub: PR #{self.pr_number}",
+                "label": label,
                 "url": f"https://github.com/{(await self.subject).repo}/pull/{self.pr_number}",
             }
         )
         if decision.action == "merged":
             return True
         if decision.action == "approve":
+            # A person's approval stands over CI, and GitHub merges no draft.
+            if self._policy.on_approval == "merge":
+                await self._clear_draft()
             return await self._approved_work()
         if decision.action == "request_changes":
             return await self._triage()

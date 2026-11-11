@@ -566,6 +566,90 @@ async def test_wait_takes_only_the_facts_of_its_topic(runtime):
         workflows._items.pop(WaitFlow.kind)
 
 
+async def test_sleep_releases_the_sandbox_and_ends_on_an_answer(runtime, monkeypatch):
+    reaped: list[str] = []
+
+    async def reap(self) -> None:
+        reaped.append(self.workflow_id)
+
+    monkeypatch.setattr(Workflow, "_reap_run", reap)
+
+    class SleepFlow(Workflow):
+        subject = Widget
+
+        async def run_multistep(self) -> None:
+            await self.sleep(600, label="Waiting for checks", until="checks.finished")
+
+    subject = Widget(id=770772)
+    try:
+        workflow_id = await SleepFlow.start(subject=subject)
+
+        async def showing(label: str) -> None:
+            while await get_run_phase(workflow_id) != label:
+                await asyncio.sleep(0.1)
+
+        await asyncio.wait_for(showing("Waiting for checks"), 15)
+        assert reaped == [workflow_id]
+        async with session_scope(runtime.engine):
+            await SleepFlow.answer(subject, "checks.finished")
+        await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+    finally:
+        workflows._items.pop(SleepFlow.kind)
+
+
+async def test_sleep_takes_an_answer_sent_while_it_releases_the_sandbox(runtime, monkeypatch):
+    releasing: list[str] = []
+    answered: list[bool] = []
+
+    async def slow_reap(self) -> None:
+        releasing.append(self.workflow_id)
+        while not answered:
+            await asyncio.sleep(0.05)
+
+    monkeypatch.setattr(Workflow, "_reap_run", slow_reap)
+
+    class RaceFlow(Workflow):
+        subject = Widget
+
+        async def run_multistep(self) -> None:
+            await self.sleep(600, label="Waiting for checks", until="checks.finished")
+
+    subject = Widget(id=770773)
+    try:
+        workflow_id = await RaceFlow.start(subject=subject)
+
+        async def reaping() -> None:
+            while not releasing:
+                await asyncio.sleep(0.05)
+
+        await asyncio.wait_for(reaping(), 15)
+        async with session_scope(runtime.engine):
+            await RaceFlow.answer(subject, "checks.finished")
+        answered.append(True)
+        await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+    finally:
+        workflows._items.pop(RaceFlow.kind)
+
+
+async def test_sleep_without_a_topic_ends_after_its_seconds(runtime, monkeypatch):
+    async def reap(self) -> None:
+        return None
+
+    monkeypatch.setattr(Workflow, "_reap_run", reap)
+
+    class PauseFlow(Workflow):
+        subject = Widget
+
+        async def run_multistep(self) -> None:
+            await self.sleep(0.5, label="Pausing")
+
+    try:
+        workflow_id = await PauseFlow.start(subject=Widget(id=770774))
+        await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+    finally:
+        workflows._items.pop(PauseFlow.kind)
+
+
 async def test_wait_fails_with_the_failure_it_is_answered(runtime):
     class FailingWaitFlow(Workflow):
         subject = Widget

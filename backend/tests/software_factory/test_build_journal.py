@@ -1,4 +1,5 @@
 from druks.contrib.software_factory.contracts import (
+    CiReport,
     ImplementationOutput,
     PlanData,
     ReviewReport,
@@ -106,3 +107,23 @@ def test_human_feedback_lists_every_reply_and_marks_the_untriaged_one_pending():
         {"reviewer": "alice", "body": "raw review text", "triage": first_triage},
         {"reviewer": "dana", "body": "second review", "triage": None},
     ]
+
+
+def _review(decision: str) -> ReviewReport:
+    return ReviewReport(decision=decision, summary="", findings=[], context_repos=[])
+
+
+def test_red_ci_is_reported_until_a_review_supersedes_it():
+    red = CiReport(head_sha="b", conclusion="red")
+    assert _journal(_implementation(), red).red_ci_report == red
+    assert _journal(_implementation(), red, _review("approve")).red_ci_report is None
+
+
+def test_a_review_after_green_ci_that_requests_no_changes_is_ready_for_review():
+    green = CiReport(head_sha="b", conclusion="green")
+    unfinished = CiReport(head_sha="b", conclusion="unfinished")
+    assert _journal(green, _review("approve")).is_ready_for_review
+    assert _journal(green, _review("comment")).is_ready_for_review
+    assert not _journal(green, _review("request_changes")).is_ready_for_review
+    assert not _journal(unfinished, _review("approve")).is_ready_for_review
+    assert not _journal(_review("approve"), green).is_ready_for_review

@@ -213,8 +213,8 @@ configured Drukbox service determines the sandbox provider. Workflow authors do
 not write provider-specific execution code.
 
 By default, each agent call uses an ephemeral sandbox. A workflow can retain one
-warm sandbox across a segment. Druks releases it before a gate and at workflow
-exit. Workflow sandboxes have a thirty-minute lease. Druks renews the host and
+warm sandbox across a segment. Druks releases it before a gate, during a
+`sleep`, and at workflow exit. Workflow sandboxes have a thirty-minute lease. Druks renews the host and
 its identity when a call starts and every five minutes while the workspace is in
 use. A renewal that fails is tried again at the next tick. An idle or abandoned
 host expires after its last lease. Store durable state in an external system such
