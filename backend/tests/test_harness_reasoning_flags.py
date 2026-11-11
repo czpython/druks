@@ -9,6 +9,7 @@ from drukbox_sdk import Secret
 from druks.harnesses.base import Harness
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
+from druks.harnesses.constants import CLAUDE_STRUCTURED_OUTPUT_INSTRUCTION
 from druks.harnesses.datastructures import Manifest
 from druks.sandbox.datastructures import McpServer
 
@@ -62,6 +63,8 @@ async def test_claude_build_invocation_carries_every_flag():
         "--verbose",
         "--json-schema",
         shlex.quote(json.dumps(schema)),
+        # A structured run says how to submit, so the agent submits once.
+        f"--append-system-prompt {shlex.quote(CLAUDE_STRUCTURED_OUTPUT_INSTRUCTION)}",
         "--permission-mode bypassPermissions",
         "--debug-file",
         "/work/runs/run-1/debug.log",

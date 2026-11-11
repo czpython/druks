@@ -23,7 +23,7 @@ from druks.settings import get_settings
 from . import exceptions
 from .artifacts import call_dir, write_cost
 from .base import Harness
-from .constants import CLAUDE_DISALLOWED_TOOLS
+from .constants import CLAUDE_DISALLOWED_TOOLS, CLAUDE_STRUCTURED_OUTPUT_INSTRUCTION
 from .datastructures import Manifest
 from .providers import AnthropicProvider
 
@@ -160,6 +160,8 @@ class ClaudeHarness(Harness):
             "--verbose",
             "--json-schema",
             json.dumps(schema),
+            "--append-system-prompt",
+            CLAUDE_STRUCTURED_OUTPUT_INSTRUCTION,
             "--permission-mode",
             self.no_ask_mode,
             "--debug-file",
