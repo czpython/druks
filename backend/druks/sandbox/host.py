@@ -882,6 +882,10 @@ async def _tee_stream(
             buffer.extend(chunk)
             if len(buffer) > buffer_limit:
                 excess = len(buffer) - buffer_limit
+                # Cut after a newline, so the kept bytes start with a whole line.
+                newline = buffer.find(b"\n", excess - 1)
+                if newline != -1:
+                    excess = newline + 1
                 del buffer[:excess]
 
 
