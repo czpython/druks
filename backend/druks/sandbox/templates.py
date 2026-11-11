@@ -1,10 +1,12 @@
 import asyncio
 import time
+from collections.abc import Sequence
 
 from drukbox_sdk import SandboxTemplate
 
 from druks.apps import loader
 from druks.durable.activity import set_run_phase
+from druks.exceptions import ObjectNotFound
 
 from .client import sandbox_client
 from .datastructures import Sandbox
@@ -22,9 +24,18 @@ def get_declared_sandboxes(*, extra: tuple[Sandbox, ...] = ()) -> dict[str, Sand
     return declared
 
 
-async def prepare_sandbox_templates(*, extra: tuple[Sandbox, ...] = ()) -> None:
-    for sandbox in get_declared_sandboxes(extra=extra).values():
-        label = f"{sandbox.module}:{sandbox.setup}"
+async def prepare_sandbox_templates(
+    *, extra: tuple[Sandbox, ...] = (), labels: Sequence[str] = ()
+) -> None:
+    """Build the declared templates that ``labels`` names, or all of them."""
+    declared = {
+        f"{sandbox.module}:{sandbox.setup}": sandbox
+        for sandbox in get_declared_sandboxes(extra=extra).values()
+    }
+    if unknown := set(labels) - declared.keys():
+        raise ObjectNotFound("sandbox", {"label": ", ".join(sorted(unknown))})
+    for label in labels or declared:
+        sandbox = declared[label]
         template = await sandbox_client.create_template(
             setup_script=sandbox.read_setup_script().decode("utf-8"),
             provider=sandbox.provider,

@@ -180,6 +180,54 @@ Mintlify builds `docs/` directly. Its GitHub App owns deployments and
 pull-request previews. The repository does not require a documentation-specific
 GitHub Actions workflow.
 
+### Chat end to end
+
+The `On Pull Request E2E` workflow runs Chat end to end with Playwright on every
+pull request. It builds the Druks image from the pull request and installs it
+with `scripts/install.sh` on the docker provider. Only the model is fake: a
+scripted Anthropic API in the Playwright process answers for
+`api.anthropic.com`. The box, the secrets proxy, the sandbox image, and the
+`claude` CLI are real.
+
+Run the lane on Linux or on macOS with Docker Desktop. The stack uses the host
+network and the ports of an installed Druks, so stop any other Druks stack
+first, and the development database of `deploy/compose.dev.yaml`. The mock
+listens on port 443, and the containers reach it at the Docker bridge address,
+`172.17.0.1`.
+
+1. Build the image of your checkout:
+
+   ```bash
+   docker build -t ghcr.io/czpython/druks:e2e .
+   ```
+
+2. Install the stack into `~/druks`. `DRUKS_REF` names a pushed commit whose
+   `deploy/` files match your checkout:
+
+   ```bash
+   DRUKS_REF="$(git rev-parse origin/main)" DRUKS_TAG=e2e DRUKS_SKIP_PULL=1 bash frontend/e2e/install-stack.sh
+   ```
+
+3. On Linux, let Node listen on port 443. Then run the suite:
+
+   ```bash
+   sudo sysctl -w net.ipv4.ip_unprivileged_port_start=443
+   npm --prefix frontend ci
+   npx --prefix frontend playwright install --with-deps chromium
+   npm --prefix frontend run test:e2e
+   ```
+
+On macOS, enable host networking as
+[Docker Desktop](container-runtimes/docker-desktop.md) describes. A container
+reaches the mock at the host address of Docker Desktop, not at the bridge
+address. Before step 2, run `export E2E_MOCK_ADDRESS=192.168.65.254`, and keep
+it set for each `docker compose` command in the install directory. Skip the
+`sysctl` command.
+
+Set `DRUKS_INSTALL_DIR` to install elsewhere, and set it for the suite too. The
+suite needs no cleanup between runs. To start over, run
+`docker compose down --volumes` in the install directory and remove it.
+
 ## Working with sandboxes
 
 Backend tests mock most provider boundaries. For a real local sandbox, run

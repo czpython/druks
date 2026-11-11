@@ -1,0 +1,73 @@
+name: On Pull Request E2E
+
+# Chat end to end on the stack that scripts/install.sh makes from this pull request. Only the
+# model is fake: a scripted Anthropic mock in the Playwright process. A required check must
+# always report, so the workflow has no path filter.
+on:
+  pull_request:
+    branches: [main, "codex/**"]
+
+concurrency:
+  group: on-pull-request-e2e-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  chat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The merge commit and its base, to see what the pull request changes.
+          fetch-depth: 2
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ghcr.io/czpython/druks:e2e
+          cache-from: type=gha,scope=backend
+      - name: Install the stack
+        env:
+          DRUKS_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          DRUKS_REF: ${{ github.event.pull_request.head.sha }}
+          DRUKS_TAG: e2e
+          DRUKS_SKIP_PULL: "1"
+        run: |
+          setup=()
+          # The docker provider pulls a sandbox image first, so the image of this pull
+          # request takes a tag that no registry has.
+          if ! git diff --quiet HEAD^ -- deploy/sandbox; then
+            docker build --load --target sandbox --tag druks-sandbox:e2e deploy/sandbox
+            setup=(--set sandbox.image=druks-sandbox:e2e)
+          fi
+          bash frontend/e2e/install-stack.sh "${setup[@]}"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      # The mock serves api.anthropic.com on port 443.
+      - run: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=443
+      - run: npm run test:e2e
+        working-directory: frontend
+      - if: failure()
+        run: cd ~/druks && docker compose logs --no-color --timestamps > "$RUNNER_TEMP/compose.log"
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-chat
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+            ${{ runner.temp }}/compose.log

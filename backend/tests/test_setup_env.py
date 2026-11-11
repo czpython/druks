@@ -475,9 +475,9 @@ def test_nested_operator_content_is_refused(tmp_path):
 
 
 def test_app_and_service_tables_pass_through_setup(tmp_path):
-    """The runtime reads ``[apps.<name>]`` and ``[services.<slug>]`` from druks.toml
-    itself. Setup renders nothing from them and keeps them, so a platform that
-    writes the file can still render .env with it."""
+    """The runtime reads ``[apps.<name>]``, ``[services.<slug>]``, and
+    ``[providers.<id>]`` from druks.toml itself. Setup renders nothing from them and
+    keeps them, so a platform that writes the file can still render .env with it."""
     env_path = tmp_path / ".env"
     _run(env_path, provider="docker")
     toml_path = tmp_path / "druks.toml"
@@ -486,11 +486,18 @@ def test_app_and_service_tables_pass_through_setup(tmp_path):
         + "\n[apps.software_factory]\nenabled = false\n\n[services.jira]\nenabled = false\n"
     )
 
-    _run(env_path, set_values=("urls.webhook_host=hooks.example.com",))
+    _run(
+        env_path,
+        set_values=(
+            "urls.webhook_host=hooks.example.com",
+            "providers.anthropic.sign_in=setup_token",
+        ),
+    )
 
     config = _read_toml(toml_path)
     assert config["apps"] == {"software_factory": {"enabled": False}}
     assert config["services"] == {"jira": {"enabled": False}}
+    assert config["providers"] == {"anthropic": {"sign_in": "setup_token"}}
     assert not any("JIRA" in key or "SOFTWARE_FACTORY" in key for key in read_env(env_path))
 
 

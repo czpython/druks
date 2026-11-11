@@ -52,12 +52,12 @@ The local shape needs no authored values, so the first run goes all the way:
 - It creates `~/.config/druks/harnesses` for optional harness configuration.
 - It generates the database password and the stored-secret key.
 - It pulls images and applies migrations.
-- It starts Druks, Postgres, Redis, Drukbox, the secrets exchange, and the
-  secrets proxy. Drukbox listens on `127.0.0.1:8780`. The exchange listens on
-  `127.0.0.1:8781`. The proxy listens on `172.17.0.1:8880`, where sandbox
-  containers reach it.
+- It starts Druks, Postgres, Redis, Drukbox, its janitor, the secrets exchange,
+  and the secrets proxy. Drukbox listens on `127.0.0.1:8780`. The exchange
+  listens on `127.0.0.1:8781`. The proxy listens on `172.17.0.1:8880`, where
+  sandbox containers reach it.
 - It uses `COMPOSE_FILE=compose.yaml:compose.override.yaml` and
-  `COMPOSE_PROFILES=proxy`, without Caddy or the janitor.
+  `COMPOSE_PROFILES=proxy`, without Caddy.
 
 Drukbox controls sandboxes through the mounted `/var/run/docker.sock`. The
 installer records the group ID of the socket in `.env`. This value gives the

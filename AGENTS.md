@@ -147,6 +147,14 @@ npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
+Run the Chat end-to-end lane against the stack that
+`frontend/e2e/install-stack.sh` installs. `docs/development.md` describes a
+local run:
+
+```bash
+npm --prefix frontend run test:e2e
+```
+
 Run the calls server's tests from `druks-calls/`:
 
 ```bash

@@ -1,0 +1,23 @@
+# The E2E lane copies this file into the install directory before scripts/install.sh runs,
+# so Compose loads it in every command. api.anthropic.com resolves to the scripted mock in
+# the Playwright process. The mock serves a certificate from the test CA in ./e2e.
+# E2E_MOCK_ADDRESS is the address where a container reaches the host: the Docker bridge
+# address on Linux, and 192.168.65.254 on Docker Desktop.
+services:
+  drukbox-proxy:
+    extra_hosts:
+      - "api.anthropic.com:${E2E_MOCK_ADDRESS:-172.17.0.1}"
+    environment:
+      # The proxy refuses a private destination outside these networks.
+      SECRETS_PROXY_PRIVATE_NETWORKS: "${E2E_MOCK_ADDRESS:-172.17.0.1}/32"
+    volumes:
+      - ./e2e/ca.pem:/e2e/ca.pem:ro
+      # mitmdump loads this file at its start. It names the test CA as the trusted upstream CA.
+      - ./e2e/mitmproxy.yaml:/home/mitmproxy/.mitmproxy/config.yaml:ro
+  web:
+    extra_hosts:
+      - "api.anthropic.com:${E2E_MOCK_ADDRESS:-172.17.0.1}"
+    environment:
+      SSL_CERT_FILE: /e2e/ca.pem
+    volumes:
+      - ./e2e/ca.pem:/e2e/ca.pem:ro

@@ -802,7 +802,7 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
                         }
                     }
                 },
-                "env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"},
+                "env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1", "CLAUDE_CODE_EAGER_FLUSH": "1"},
                 "files": {},
                 "mode": "bypassPermissions",
                 "model": "claude-opus-4-7",
@@ -830,7 +830,7 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
                         }
                     }
                 },
-                "env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"},
+                "env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1", "CLAUDE_CODE_EAGER_FLUSH": "1"},
                 "files": {},
                 "mode": "bypassPermissions",
                 "model": "claude-opus-4-7",
@@ -970,6 +970,7 @@ def test_a_claude_subscription_moves_its_login_for_the_adapter():
     )
     assert session["env"] == {
         "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+        "CLAUDE_CODE_EAGER_FLUSH": "1",
         "CLAUDE_CODE_OAUTH_TOKEN": "${ANTHROPIC_AUTH_TOKEN}",
         "CLAUDE_CODE_OAUTH_SCOPES": "user:inference user:mcp_servers",
         "ANTHROPIC_AUTH_TOKEN": None,
