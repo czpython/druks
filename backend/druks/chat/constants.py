@@ -39,6 +39,12 @@ PARKED_MESSAGE = (
     "[Internal: Run {run} waits for an answer. The request:\n{request}\nTell the person "
     "what it waits for and where to answer it.]"
 )
+# The thread's buttons answer the run, so the agent only points at them.
+PARKED_BUTTONS_MESSAGE = (
+    "[Internal: Run {run} waits for an answer. Its buttons are in this thread. The "
+    "request:\n{request}\nTell the person in one short line that the buttons in this "
+    "thread answer it, or that they can reply here.]"
+)
 QUOTA_RESUMED_MESSAGE = (
     "[Internal: Run {run} continues now that the provider's usage limit reset. Tell the "
     "person in one short line.]"

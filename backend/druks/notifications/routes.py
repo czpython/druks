@@ -49,7 +49,7 @@ async def create_destination(session: SessionDep, body: CreateDestinationRequest
     try:
         # A first post proves the bot can post there, while the operator is still here
         # to fix it. A refusal rolls the row back.
-        await deliver(client, destination, CHANNEL_CHECK_MESSAGE)
+        await deliver(client, destination.channel_id, CHANNEL_CHECK_MESSAGE)
     except DeliveryError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return destination

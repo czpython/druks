@@ -56,6 +56,12 @@ if TYPE_CHECKING:
     from druks.sandbox.datastructures import AgentResult
 
 
+def is_note_required(ask: dict[str, Any], control: str) -> bool:
+    """Whether an answer with ``control`` must carry a note, or an answer to a question.
+    A request for changes needs one to guide the next pass, unless the ask carries context."""
+    return control == "request_changes" and not (ask.get("context") or "").strip()
+
+
 class Run(Base):
     __tablename__ = "durable_runs"
 
@@ -366,23 +372,25 @@ class Run(Base):
         # never touches in-app-only keys.
         ask = await self.get_ask()
         if ask["presentation"] == "in_app":
-            questions = ask["questions"]
-            lines = [ask["label"], *(question["prompt"] for question in questions)]
+            lines = [ask["label"], *(question["prompt"] for question in ask["questions"])]
+            # A click sends only its control.
             actions = [
                 {"id": control, "label": control.replace("_", " ").capitalize()}
                 for control in ask["controls"]
-            ]
-            actions += [
-                {"id": option["id"], "label": option["label"]}
-                for question in questions
-                for option in question["options"]
+                if not is_note_required(ask, control)
             ]
             return {"body": "\n".join(lines), "actions": actions, "deep_link": None}
         # External asks are informational — answered on their source, so no
         # actions; url is an optional gate-author-declared view-link.
         return {"body": ask["label"], "actions": None, "deep_link": ask.get("url")}
 
-    async def create_park_notification(self, destination_id: str, subject: dict[str, Any]) -> str:
+    async def create_park_notification(
+        self,
+        subject: dict[str, Any],
+        *,
+        destination_id: str | None = None,
+        conversation_id: str | None = None,
+    ) -> str:
         # Create the notification for the round this run just parked on — the
         # caller supplies the run's subject and enqueues delivery. run_id +
         # run_parked_at snapshot the round so a click on an old button can be
@@ -391,6 +399,7 @@ class Run(Base):
         notification = await Notification.create(
             self.session,
             destination_id=destination_id,
+            conversation_id=conversation_id,
             reason="gate.parked",
             body=rendered["body"],
             subject=subject,

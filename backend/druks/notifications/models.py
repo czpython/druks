@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import Boolean, ForeignKey, String, select, true, update
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, String, select, true, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -58,6 +58,12 @@ class Destination(Base, Uuid7Pk):
 
 class Notification(Base, Uuid7Pk):
     __tablename__ = "notifications"
+    __table_args__ = (
+        CheckConstraint(
+            "num_nonnulls(destination_id, conversation_id) = 1",
+            name="notifications_one_target_check",
+        ),
+    )
 
     # What the notification is about ({type, id}) — always present: every
     # notification is about a run's subject (subjectless parks never notify).
@@ -78,7 +84,13 @@ class Notification(Base, Uuid7Pk):
     run_parked_at: Mapped[datetime | None] = mapped_column(default=None)
     # A human view-link; the buttons carry the respond capability, this never does.
     deep_link: Mapped[str | None] = mapped_column(default=None)
-    destination_id: Mapped[str] = mapped_column(ForeignKey("notification_destinations.id"))
+    destination_id: Mapped[str | None] = mapped_column(
+        ForeignKey("notification_destinations.id"), default=None
+    )
+    # A run that a Slack conversation started posts its buttons in that conversation.
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("chat_conversations.id", ondelete="CASCADE"), default=None
+    )
     # Minted at flush like the id above — the respond capability handle.
     correlation_token: Mapped[str] = mapped_column(
         String, unique=True, default=mint_correlation_token
@@ -97,7 +109,8 @@ class Notification(Base, Uuid7Pk):
         cls,
         session: AsyncSession,
         *,
-        destination_id: str,
+        destination_id: str | None = None,
+        conversation_id: str | None = None,
         reason: str,
         body: str,
         subject: dict[str, Any],
@@ -111,6 +124,7 @@ class Notification(Base, Uuid7Pk):
         # outbox afterwards.
         notification = cls(
             destination_id=destination_id,
+            conversation_id=conversation_id,
             reason=reason,
             body=body,
             subject=subject,

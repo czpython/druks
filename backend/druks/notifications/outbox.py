@@ -1,11 +1,12 @@
 from dbos import DBOS, StepOptions
 from dbos._error import DBOSMaxStepRetriesExceeded
 
+from druks.chat.models import Conversation
 from druks.core.services import Slack
 from druks.durable.engine import step_session
 from druks.notifications.datastructures import NotificationState
 from druks.notifications.delivery import deliver
-from druks.notifications.exceptions import NotificationError
+from druks.notifications.exceptions import DisabledDestinationError, NotificationError
 from druks.notifications.models import Destination, Notification
 from druks.services.exceptions import ServiceNotConnectedError
 
@@ -28,18 +29,28 @@ async def send_notification(notification_id: str) -> None:
             # side is idempotent, so a duplicate message is the accepted cost.
             if notification.state == NotificationState.DELIVERED:
                 return
-            destination = await session.get(Destination, notification.destination_id)
-            # deliver() runs after this session closes; expunge keeps the
-            # loaded destination readable as a detached row — an attribute
-            # touched past the close can't lazy-load under the async session.
-            session.expunge(destination)
-            client = await Slack.get_client()
-            body = notification.body
-            actions = notification.actions
-            token = notification.correlation_token
-            deep_link = notification.deep_link
             notification.attempts += 1
-        await deliver(client, destination, body, actions=actions, token=token, deep_link=deep_link)
+        # Delivery runs after that session commits, so a refusal still counts the
+        # attempt. The detached rows stay readable: sessions don't expire on commit.
+        if notification.conversation_id:
+            # The conversation's channel posts where it lives, and reads its grant here.
+            async with step_session() as session:
+                conversation = await session.get(Conversation, notification.conversation_id)
+                await conversation.channel.post_buttons(session, conversation, notification)
+        else:
+            async with step_session() as session:
+                destination = await session.get(Destination, notification.destination_id)
+                client = await Slack.get_client()
+            if not destination.is_enabled:
+                raise DisabledDestinationError(destination.name)
+            await deliver(
+                client,
+                destination.channel_id,
+                notification.body,
+                actions=notification.actions,
+                token=notification.correlation_token,
+                deep_link=notification.deep_link,
+            )
         async with step_session() as session:
             await (await session.get(Notification, notification_id)).mark_delivered()
 
