@@ -48,15 +48,15 @@ def _capture(monkeypatch):
     return published
 
 
-def _github(monkeypatch, **permissions):
+def _github(monkeypatch, **answers):
     asked = []
 
-    async def get_permission(repo, login):
-        asked.append(login)
-        return permissions.get(login, "read")
+    async def can_write(repo, username):
+        asked.append(username)
+        return answers.get(username, False)
 
     async def get_client(owner_or_repo):
-        return SimpleNamespace(get_permission=get_permission)
+        return SimpleNamespace(can_write=can_write)
 
     monkeypatch.setattr(github_webhooks.Github, "get_client", get_client)
     return asked
@@ -232,12 +232,12 @@ async def test_a_review_says_whether_it_is_of_the_latest_commit(
     assert published_event["payload"]["is_latest_commit"] is is_latest_commit
 
 
-@pytest.mark.parametrize(("permission", "can_write"), [("write", True), ("read", False)])
+@pytest.mark.parametrize("can_write", [True, False])
 async def test_a_review_from_a_contributor_asks_github_whether_they_write(
-    tmp_path, monkeypatch, permission, can_write
+    tmp_path, monkeypatch, can_write
 ):
     published = _capture(monkeypatch)
-    _github(monkeypatch, alice=permission)
+    _github(monkeypatch, alice=can_write)
 
     payload = {
         **_pull_request(action="submitted"),

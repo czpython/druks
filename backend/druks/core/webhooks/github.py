@@ -16,7 +16,6 @@ _REVIEW_ACTION = {"APPROVED": "approve", "CHANGES_REQUESTED": "request_changes"}
 # reports a private org member as a contributor, so Druks asks GitHub for anyone else's
 # permission.
 _WRITERS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
-_WRITE_PERMISSIONS = frozenset({"admin", "write"})
 
 
 class GitHubEvents(Webhook):
@@ -134,7 +133,7 @@ class GitHubEvents(Webhook):
             return False
         repo = _repo_name(self.data)
         github = await Github.get_client(repo)
-        return await github.get_permission(repo, user["login"]) in _WRITE_PERMISSIONS
+        return await github.can_write(repo, user["login"])
 
     async def on_issues_labeled(self) -> Response:
         """Publish a label that a person or this App put on an issue. Another App's

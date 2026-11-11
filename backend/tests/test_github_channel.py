@@ -69,8 +69,8 @@ def github(monkeypatch):
     async def create_review_comment_reaction(client, repo, comment_id, content):
         posts.append(("create_review_comment_reaction", repo, comment_id, content))
 
-    async def get_permission(client, repo, login):
-        return "read"
+    async def can_write(client, repo, username):
+        return False
 
     monkeypatch.setattr(GitHubClient, "create_comment", create_comment)
     monkeypatch.setattr(GitHubClient, "reply_to_review_comment", reply_to_review_comment)
@@ -78,7 +78,7 @@ def github(monkeypatch):
     monkeypatch.setattr(
         GitHubClient, "create_review_comment_reaction", create_review_comment_reaction
     )
-    monkeypatch.setattr(GitHubClient, "get_permission", get_permission)
+    monkeypatch.setattr(GitHubClient, "can_write", can_write)
     return posts
 
 
