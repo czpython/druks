@@ -185,6 +185,12 @@ describe('project dialogs', () => {
     expect(projectsApi.update).toHaveBeenCalledWith(7, { name: 'Renamed' })
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Project actions for Target')))
   })
+
+  it('keeps focus on the actions menu when an action is pressed', async () => {
+    renderPage([project({ repos: [repo()] })])
+    await openActions()
+    expect(fireEvent.mouseDown(screen.getByRole('button', { name: 'Add repo' }))).toBe(false)
+  })
 })
 
 describe('project deletion', () => {

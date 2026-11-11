@@ -197,7 +197,9 @@ function ProjectSection({ project }: { project: Project }) {
           <summary className="pj-icon-button" aria-label={`Project actions for ${project.name}`}>
             <MoreVertical size={16} aria-hidden="true" />
           </summary>
-          <div className="pj-action-list">
+          {/* Safari does not focus a clicked button, so mousedown would blur the
+              summary with no relatedTarget and close the menu before the click lands. */}
+          <div className="pj-action-list" onMouseDown={(event) => event.preventDefault()}>
             <button type="button" onClick={() => { closeActions(); setDialog('add') }}>
               <Plus size={15} aria-hidden="true" /> Add repo
             </button>
