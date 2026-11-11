@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from conftest import connect_service
 from druks.accounts.context import current_account_id
+from druks.accounts.models import Account
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.constants import (
     GITHUB_MCP_NAME,
@@ -15,12 +16,15 @@ from druks.contrib.software_factory.constants import (
     TICKET_TOOLS,
 )
 from druks.contrib.software_factory.models import Project, ProjectRepo
+from druks.contrib.software_factory.services import GithubReviewer
 from druks.contrib.software_factory.workflows import BuildWorkspace, ReviewWorkspace
-from druks.core.services import Github
+from druks.core.services import Github, GithubApp
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox import SandboxSecret
 from druks.sandbox.host import Host
 from druks.sandbox.layout import get_related_root, get_repo_root
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.settings import Urls
 from druks.workspaces import RepoWorkspace
 
@@ -187,23 +191,34 @@ def _bot_author(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _bot_git_author() -> tuple[str, str]:
         return "app[bot]", "1+app[bot]@users.noreply.github.com"
 
-    monkeypatch.setattr("druks.core.services.Github.get_bot_git_author", _bot_git_author)
+    monkeypatch.setattr(GithubApp, "get_bot_git_author", _bot_git_author)
+
+
+async def _github_sign_in(druks_db, username: str, *, user_id: str, login: str) -> str:
+    account = await Account.get_or_create(druks_db, username)
+    await VaultSecret.connect(
+        druks_db,
+        Audience.service(Github.slug),
+        account_id=account.id,
+        refresh_token="rt",
+        scopes=[],
+        identity={"authority": "https://github.com", "subject": user_id, "login": login},
+    )
+    return account.id
 
 
 async def test_set_git_identity_stamps_the_workspace_repo(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    druks_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo_path = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", str(repo_path)], check=True)
     _bot_author(monkeypatch)
-
-    async def get_or_none(*, id: str) -> SimpleNamespace:
-        return SimpleNamespace(username=id)
-
-    monkeypatch.setattr("druks.workspaces.Account.get_or_none", get_or_none)
+    first = await _github_sign_in(druks_db, "dev@example.com", user_id="42", login="octocat")
+    second = await _github_sign_in(druks_db, "auth0|7", user_id="7", login="hubot")
+    unlinked = await Account.get_or_create(druks_db, "nolink@example.com")
     workspace = RepoWorkspace(SimpleNamespace(repo="o/app"))
     workspace.host = _IdentitySandbox(repo_path)  # type: ignore[assignment]
-    dispatch = current_account_id.set("dev@example.com")
+    dispatch = current_account_id.set(first)
     hook = repo_path / ".git" / "hooks" / "prepare-commit-msg"
     message = repo_path / "COMMIT_EDITMSG"
 
@@ -219,21 +234,36 @@ async def test_set_git_identity_stamps_the_workspace_repo(
         text=True,
     )
     assert email.stdout.strip() == "1+app[bot]@users.noreply.github.com"
-    assert message.read_text().count("Co-Authored-By: dev@example.com <dev@example.com>") == 1
+    trailer = "Co-Authored-By: octocat <42+octocat@users.noreply.github.com>"
+    assert message.read_text().count(trailer) == 1
     # An empty message stays empty, so git still aborts the commit.
     message.write_text("\n# Please enter the commit message.\n")
     subprocess.run([str(hook), str(message)], check=True)
     assert "Co-Authored-By" not in message.read_text()
 
     # A reused warm host follows the next run's dispatcher.
-    current_account_id.set("second@example.com")
+    current_account_id.set(second)
     await workspace.set_git_identity()
     message.write_text("Change\n")
     subprocess.run([str(hook), str(message)], check=True)
-    assert "dev@example.com" not in message.read_text()
-    assert "Co-Authored-By: second@example.com" in message.read_text()
+    assert "octocat" not in message.read_text()
+    assert "Co-Authored-By: hubot <7+hubot@users.noreply.github.com>" in message.read_text()
+
+    # A workspace that acts as another App still credits the dispatcher's GitHub sign-in.
+    workspace.github = GithubReviewer  # type: ignore[assignment]
+    await workspace.set_git_identity()
+    message.write_text("Change\n")
+    subprocess.run([str(hook), str(message)], check=True)
+    assert "Co-Authored-By: hubot <7+hubot@users.noreply.github.com>" in message.read_text()
+
+    # A dispatcher with no GitHub sign-in credits nobody.
+    current_account_id.set(unlinked.id)
+    await workspace.set_git_identity()
+    assert not hook.exists()
 
     # A system dispatch keeps the author but credits nobody.
+    current_account_id.set(second)
+    await workspace.set_git_identity()
     current_account_id.set(None)
     await workspace.set_git_identity()
     assert not hook.exists()

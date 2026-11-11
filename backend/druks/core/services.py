@@ -269,10 +269,14 @@ class Github(GithubApp):
             # The box works without the bot as author, and the next turn asks again.
             logger.warning("Sandbox %s has no bot author: %s", host.id, error)
             return
-        login, user_id = connection.identity["login"], connection.identity["subject"]
-        await checkout.set_box_git_identity(
-            host, author, (login, f"{user_id}+{login}@users.noreply.github.com")
-        )
+        await checkout.set_box_git_identity(host, author, cls.get_user_git_author(connection))
+
+    @staticmethod
+    def get_user_git_author(connection: Connection) -> tuple[str, str]:
+        """Name and email that credit the GitHub user of a sign-in. GitHub links the
+        ``<id>+<login>@users.noreply.github.com`` address to that user."""
+        login = connection.identity["login"]
+        return login, f"{connection.identity['subject']}+{login}@users.noreply.github.com"
 
     # What the created App is: the single operator identity documented in
     # docs/configuration.md — keep the two in step.

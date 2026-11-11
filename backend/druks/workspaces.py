@@ -329,12 +329,14 @@ class RepoWorkspace(Workspace):
 
     async def set_git_identity(self) -> None:
         """Commits in the repo are authored as the operator's bot user, with a
-        prepare-commit-msg hook crediting the account that dispatched the run.
-        Rewritten before every agent call so a reused warm host follows the
-        current run's dispatcher — a system dispatch carries no hook and
-        credits nobody."""
+        prepare-commit-msg hook crediting the GitHub user of the dispatcher's
+        first sign-in. Druks rewrites both before every agent call, so a reused
+        warm host follows the current run's dispatcher. A system dispatch, or a
+        dispatcher with no GitHub sign-in, carries no hook and credits nobody."""
         author = await self.github.get_bot_git_author()
-        account_id = current_account_id.get()
-        account = await Account.get_or_none(id=account_id) if account_id else None
-        dispatcher = (account.username, account.username) if account else None
+        dispatcher = None
+        if account_id := current_account_id.get():
+            sign_ins = await Github.list_for_account(account_id)
+            if sign_ins:
+                dispatcher = Github.get_user_git_author(sign_ins[0])
         await checkout.set_git_identity(self.host, author, dispatcher, repo_path=self.repo_path)
