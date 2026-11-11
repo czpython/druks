@@ -26,6 +26,15 @@ function readState(directory) {
   return { status: "missing", sequence: 0, messageId: "", sessionId: "", harness: "", epoch: randomUUID(), archivePath: "" };
 }
 
+// An adapter can repeat a whole file in rawOutput, content and _meta of a tool call.
+// Postgres and the Chat page need only the start of each string.
+const toolResultLimit = 16384;
+
+function shorten(_, value) {
+  if (typeof value === "string" && value.length > toolResultLimit) return `${value.slice(0, toolResultLimit)}\n[Shortened: ${value.length} characters in total]`;
+  return value;
+}
+
 // Druks never sees a secret. The box holds its placeholder in an environment variable, and a
 // file refers to it as ${NAME}, the way a shell string would.
 function fillPlaceholders(content) {
@@ -61,6 +70,10 @@ class Conversation {
   }
 
   append(notification) {
+    const update = notification.update;
+    if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
+      notification.update = JSON.parse(JSON.stringify(update, shorten));
+    }
     const event = {
       sequence: ++this.state.sequence,
       messageId: this.state.messageId,

@@ -77,6 +77,9 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
     " if (permission.outcome.optionId !== 'yes') throw Error('permission');",
     " const text = p.prompt.map(block => block.text ?? block.type).join(' ');",
     " await client.sessionUpdate({sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:memory+text}}});",
+    " if(text==='large'){ const output='x'.repeat(100000);",
+    "  await client.sessionUpdate({sessionId,update:{sessionUpdate:'tool_call',toolCallId:'read',title:'Read'}});",
+    "  await client.sessionUpdate({sessionId,update:{sessionUpdate:'tool_call_update',toolCallId:'read',status:'completed',rawOutput:[{type:'text',text:output}],content:[{type:'content',content:{type:'text',text:output}}],_meta:{claudeCode:{toolResponse:{type:'text',file:{content:output}}}}}}); }",
     " if(text==='wait') await new Promise(resolve => { release=resolve; });",
     " else await new Promise(resolve => setTimeout(resolve, 100));",
     " memory += text; fs.mkdirSync(path.dirname(transcript()),{recursive:true}); fs.writeFileSync(transcript(),memory);",
@@ -162,6 +165,15 @@ test("The bridge streams detached turns, isolates archives, cancels, and reloads
   assert.deepEqual(reloaded.map(event => event.notification.update.content.text), ["remember-one imageafter-reload"]);
   await request(port, { method: "prompt", conversationId: id(2), messageId: message(2), content: text("private-two") });
   await until(() => status(id(2)), result => result.status === "replied");
+  await request(port, { method: "prompt", conversationId: id(2), messageId: message(10), content: text("large") });
+  await until(() => status(id(2)), result => result.status === "replied");
+  // A large tool result reaches Druks shortened, with its full length.
+  const result = (await request(port, { method: "events", conversationId: id(2), after: 0 })).events
+    .map(event => event.notification.update).find(update => update.sessionUpdate === "tool_call_update");
+  const shortened = `${"x".repeat(16384)}\n[Shortened: 100000 characters in total]`;
+  assert.deepEqual(result.rawOutput, [{ type: "text", text: shortened }]);
+  assert.equal(result.content[0].content.text, shortened);
+  assert.equal(result._meta.claudeCode.toolResponse.file.content, shortened);
   await request(port, { method: "prompt", conversationId: id(2), messageId: message(7), content: text("wait"), timeout: 0.2 });
   await until(() => status(id(2)), result => result.status === "interrupted");
 
