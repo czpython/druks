@@ -410,6 +410,49 @@ def test_normalize_token_usage_openai_keeps_input_and_output_inclusive():
     }
 
 
+def test_normalize_token_usage_opencode_adds_cache_to_input_and_reasoning_to_output():
+    metadata = {
+        "provider": "opencode",
+        "input_tokens": 8_000,
+        "cached_input_tokens": 90_000,
+        "cache_creation_tokens": 2_000,
+        "output_tokens": 900,
+        "reasoning_tokens": 600,
+    }
+
+    canonical = normalize_token_usage(metadata)
+
+    assert canonical == {
+        "input_tokens": 100_000,
+        "output_tokens": 1_500,
+        "cached_input_tokens": 90_000,
+        "cache_creation_tokens": 2_000,
+        "reasoning_tokens": 600,
+        "total_tokens": 101_500,
+    }
+
+
+def test_normalize_token_usage_pi_adds_cache_to_input():
+    metadata = {
+        "provider": "pi",
+        "input_tokens": 8_000,
+        "cached_input_tokens": 90_000,
+        "cache_creation_tokens": 2_000,
+        "output_tokens": 1_500,
+    }
+
+    canonical = normalize_token_usage(metadata)
+
+    assert canonical == {
+        "input_tokens": 100_000,
+        "output_tokens": 1_500,
+        "cached_input_tokens": 90_000,
+        "cache_creation_tokens": 2_000,
+        "reasoning_tokens": 0,
+        "total_tokens": 101_500,
+    }
+
+
 def test_normalize_token_usage_returns_none_for_empty_metadata():
     assert normalize_token_usage({"provider": "anthropic"}) is None
     assert normalize_token_usage({}) is None
