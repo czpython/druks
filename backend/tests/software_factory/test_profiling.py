@@ -9,6 +9,7 @@ from druks.durable.engine import configure_engine
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.skills.datastructures import InstalledSkill
 from druks.skills.models import SkillCollection
+from sqlalchemy import update
 
 
 @pytest.fixture(autouse=True)
@@ -46,7 +47,7 @@ async def _seed_skills(*names: str, disabled: tuple[str, ...] = ()) -> None:
 
 
 def _profiled(**overrides) -> dict:
-    profile = {
+    baseline = {
         "languages": ["python"],
         "frameworks": ["django"],
         "package_managers": ["uv"],
@@ -58,8 +59,8 @@ def _profiled(**overrides) -> dict:
         },
         "recommended_skills": ["django-patterns"],
     }
-    profile.update(overrides)
-    return profile
+    baseline.update(overrides)
+    return {"purpose": "The billing API.", "baseline": baseline}
 
 
 async def _no_policy(repo):
@@ -117,9 +118,31 @@ class TestProfileRun:
         await db_session().refresh(repo)
 
         assert repo.profile["baseline"]["languages"] == ["python"]
+        assert repo.purpose == "The billing API."
         assert repo.effective_profile["verification"]["lint_commands"] == [
             {"command": "ruff check .", "ci_check": "Backend / lint"}
         ]
+
+    async def test_keeps_a_typed_purpose(self, druks_db, monkeypatch):
+        seeded = await _seed_repo()
+
+        async def _profiler(*, repo: str):
+            # The edit route saves from another session, so the loaded row is not updated.
+            await db_session().execute(
+                update(ProjectRepo)
+                .where(ProjectRepo.id == seeded.id)
+                .values(purpose="The web app")
+                .execution_options(synchronize_session=False)
+            )
+            return _profiled()
+
+        monkeypatch.setattr(SoftwareFactory, "repo_profiler", _profiler)
+        monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_no_policy))
+
+        await Profile().run(repo_id=seeded.id)
+        await db_session().refresh(seeded)
+
+        assert seeded.purpose == "The web app"
 
     async def test_drops_skills_that_are_not_enabled(self, druks_db, monkeypatch):
         await _seed_skills("django-patterns", "retired-skill", disabled=("retired-skill",))
@@ -190,7 +213,7 @@ class TestProfileRun:
 class TestRefreshOnly:
     async def test_skips_the_agent_and_reapplies_the_pin(self, druks_db, monkeypatch):
         repo = await _seed_repo()
-        baseline = _profiled()
+        baseline = _profiled()["baseline"]
         await repo.set_profile(baseline=baseline, effective=baseline)
 
         async def _boom(*, repo: str):

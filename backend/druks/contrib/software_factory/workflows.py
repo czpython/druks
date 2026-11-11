@@ -495,7 +495,13 @@ class Profile(Workflow):
         if refresh_only:
             baseline = project_repo.profile.get("baseline") or {}
         else:
-            baseline = await SoftwareFactory.repo_profiler(repo=project_repo.full_name)
+            profile = await SoftwareFactory.repo_profiler(repo=project_repo.full_name)
+            baseline = profile["baseline"]
+            # A purpose someone typed stays. Someone can save one while the profiler runs,
+            # so read it again.
+            await db_session().refresh(project_repo, ["purpose"])
+            if not project_repo.purpose:
+                project_repo.purpose = profile["purpose"]
             # A skill can be disabled after the prompt renders, so read the enabled
             # skills again.
             enabled = {skill.name for skill in await Skill.list_enabled(db_session())}
