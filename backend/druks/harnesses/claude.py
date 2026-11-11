@@ -371,7 +371,7 @@ def collapse_claude_stream(stdout: bytes) -> dict[str, Any]:
             continue
         try:
             event = json.loads(line)
-        except json.JSONDecodeError:
+        except ValueError:
             continue
         if not isinstance(event, dict):
             continue
