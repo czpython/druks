@@ -170,7 +170,7 @@ async def test_codex_build_invocation_carries_every_flag():
     assert "CODEX_HOME" not in wrapper
     assert "druks-after-agent" not in wrapper
     assert inv.env == {"TOK": "secret"}
-    assert inv.extra_artifact_filenames == ("output.json", "session.jsonl")
+    assert inv.extra_artifact_filenames == ("output.json", "session.jsonl", "subagents.jsonl")
 
 
 async def test_codex_blocks_the_first_stop_of_a_hooked_call():
