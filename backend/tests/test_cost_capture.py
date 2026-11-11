@@ -553,3 +553,35 @@ def test_collapse_stream_raises_when_nothing_parses():
         assert "no parseable events" in str(exc)
     else:
         raise AssertionError("expected StreamJsonError")
+
+
+def test_claude_parse_skips_a_first_line_cut_inside_a_character(tmp_path: Path):
+    # The buffer trim kept only the last bytes of a "“" (e2 80 9c).
+    stdout = b'\x9c"}\n{"type": "result", "result": "ok"}\n'
+    harness = ClaudeHarness(model="anthropic/claude-haiku-4-5", fast_mode=False, effort=None)
+
+    output = harness.parse(
+        HarnessRunResult(returncode=0, stdout=stdout, stderr=b""),
+        artifact_dir=tmp_path,
+        run_id="trimmed-call",
+    )
+
+    assert output == "ok"
+
+
+def test_crashed_claude_call_with_a_last_line_cut_inside_a_character_reports_its_exit(
+    tmp_path: Path,
+):
+    # The crash stopped the stream after the first byte of a "…" (e2 80 a6).
+    stdout = (
+        b'{"type": "system", "subtype": "init", "model": "claude-haiku-4-5"}\n'
+        b'{"type": "assistant", "message": {"content": "\xe2'
+    )
+    harness = ClaudeHarness(model="anthropic/claude-haiku-4-5", fast_mode=False, effort=None)
+
+    with pytest.raises(HarnessError, match="claude exited with 1"):
+        harness.parse(
+            HarnessRunResult(returncode=1, stdout=stdout, stderr=b""),
+            artifact_dir=tmp_path,
+            run_id="crashed-call",
+        )
