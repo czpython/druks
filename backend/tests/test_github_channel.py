@@ -69,12 +69,16 @@ def github(monkeypatch):
     async def create_review_comment_reaction(client, repo, comment_id, content):
         posts.append(("create_review_comment_reaction", repo, comment_id, content))
 
+    async def can_write(client, repo, username):
+        return False
+
     monkeypatch.setattr(GitHubClient, "create_comment", create_comment)
     monkeypatch.setattr(GitHubClient, "reply_to_review_comment", reply_to_review_comment)
     monkeypatch.setattr(GitHubClient, "create_reaction", create_reaction)
     monkeypatch.setattr(
         GitHubClient, "create_review_comment_reaction", create_review_comment_reaction
     )
+    monkeypatch.setattr(GitHubClient, "can_write", can_write)
     return posts
 
 
@@ -139,7 +143,7 @@ async def receive(tmp_path, data, *, inline=False):
         await events.on_issue_comment_created()
 
 
-async def test_the_webhook_publishes_each_comment_once(tmp_path, monkeypatch):
+async def test_the_webhook_publishes_each_comment_once(card, github, tmp_path, monkeypatch):
     published = []
 
     async def publish(name, **kwargs):

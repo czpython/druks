@@ -12,8 +12,9 @@ from druks.webhooks import Webhook, verify_hmac_sha256
 
 _REVIEW_ACTION = {"APPROVED": "approve", "CHANGES_REQUESTED": "request_changes"}
 
-# GitHub's standing for the commenter on that repo. These three write to it;
-# everyone else is a passer-by, and on a public repo that is the whole internet.
+# GitHub's standing for the commenter on that repo. These three write to it. GitHub
+# reports a private org member as a contributor, so Druks asks GitHub for anyone else's
+# permission.
 _WRITERS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 
 
@@ -71,7 +72,7 @@ class GitHubEvents(Webhook):
                     "branch": pull_request["head"]["ref"],
                     "action": action,
                     "reviewer": sender["login"],
-                    "author_can_write": review["author_association"] in _WRITERS,
+                    "author_can_write": await self._can_write(sender, review["author_association"]),
                     "body": review["body"] or "",  # body is nullable on an approve
                     "is_latest_commit": review["commit_id"] == pull_request["head"]["sha"],
                 },
@@ -84,7 +85,9 @@ class GitHubEvents(Webhook):
         if "pull_request" in issue:
             await self._publish_pull_request_comment(issue["number"])
         else:
-            await publish("ticket.commented", payload={**self._ticket(issue), **self._comment()})
+            await publish(
+                "ticket.commented", payload={**self._ticket(issue), **await self._comment()}
+            )
         return _accepted()
 
     async def on_pull_request_review_comment_created(self) -> Response:
@@ -105,13 +108,13 @@ class GitHubEvents(Webhook):
             repo=_repo_name(self.data),
             pr_number=pr_number,
             payload={
-                **self._comment(),
+                **await self._comment(),
                 "actor_id": str(self.data["sender"]["id"]),
                 "review_thread_id": review_thread_id,
             },
         )
 
-    def _comment(self) -> dict[str, Any]:
+    async def _comment(self) -> dict[str, Any]:
         """The keys every comment event carries, for the comment in this delivery."""
         sender, comment = self.data["sender"], self.data["comment"]
         return {
@@ -119,8 +122,18 @@ class GitHubEvents(Webhook):
             "body": comment["body"],
             "author": sender["login"],
             "author_is_bot": sender["type"] == "Bot",
-            "author_can_write": comment["author_association"] in _WRITERS,
+            "author_can_write": await self._can_write(sender, comment["author_association"]),
         }
+
+    async def _can_write(self, user: dict[str, Any], association: str) -> bool:
+        """Whether ``user`` can write to the delivery's repo."""
+        if association in _WRITERS:
+            return True
+        if user["type"] == "Bot":
+            return False
+        repo = _repo_name(self.data)
+        github = await Github.get_client(repo)
+        return await github.can_write(repo, user["login"])
 
     async def on_issues_labeled(self) -> Response:
         """Publish a label that a person or this App put on an issue. Another App's
@@ -210,7 +223,9 @@ class GitHubEvents(Webhook):
                 "body": pull_request["body"] or "",
                 "draft": pull_request["draft"],
                 "author": pull_request["user"]["login"],
-                "author_can_write": pull_request["author_association"] in _WRITERS,
+                "author_can_write": await self._can_write(
+                    pull_request["user"], pull_request["author_association"]
+                ),
             },
         )
         return _accepted()

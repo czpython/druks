@@ -48,7 +48,21 @@ def _capture(monkeypatch):
     return published
 
 
-def _issue(*, action, is_pull_request=False, sender_type="User"):
+def _github(monkeypatch, **answers):
+    asked = []
+
+    async def can_write(repo, username):
+        asked.append(username)
+        return answers.get(username, False)
+
+    async def get_client(owner_or_repo):
+        return SimpleNamespace(can_write=can_write)
+
+    monkeypatch.setattr(github_webhooks.Github, "get_client", get_client)
+    return asked
+
+
+def _issue(*, action, is_pull_request=False, sender_type="User", association="NONE"):
     issue = {
         "id": 4242,
         "number": 7,
@@ -64,7 +78,7 @@ def _issue(*, action, is_pull_request=False, sender_type="User"):
         "repository": {"full_name": "acme/widget"},
         "issue": issue,
         "sender": {"type": sender_type, "login": "passerby", "id": 99},
-        "comment": {"id": 501, "body": "Still broken", "author_association": "NONE"},
+        "comment": {"id": 501, "body": "Still broken", "author_association": association},
     }
 
 
@@ -109,6 +123,7 @@ async def test_an_issue_action_publishes_a_tracker_fact(
 
 async def test_an_issue_comment_publishes_ticket_commented(tmp_path, monkeypatch):
     published = _capture(monkeypatch)
+    _github(monkeypatch)
 
     await _events(tmp_path, payload=_issue(action="created")).on_issue_comment_created()
 
@@ -117,6 +132,7 @@ async def test_an_issue_comment_publishes_ticket_commented(tmp_path, monkeypatch
 
 async def test_a_pull_request_comment_publishes_pr_commented(tmp_path, monkeypatch):
     published = _capture(monkeypatch)
+    _github(monkeypatch)
     payload = _issue(action="created", is_pull_request=True)
 
     await _events(tmp_path, payload=payload).on_issue_comment_created()
@@ -214,3 +230,37 @@ async def test_a_review_says_whether_it_is_of_the_latest_commit(
     [(event_type, published_event)] = published
     assert event_type == "pr.review_submitted"
     assert published_event["payload"]["is_latest_commit"] is is_latest_commit
+
+
+@pytest.mark.parametrize("can_write", [True, False])
+async def test_a_review_from_a_contributor_asks_github_whether_they_write(
+    tmp_path, monkeypatch, can_write
+):
+    published = _capture(monkeypatch)
+    _github(monkeypatch, alice=can_write)
+
+    payload = {
+        **_pull_request(action="submitted"),
+        "sender": {"login": "alice", "type": "User"},
+        "review": {
+            "state": "approved",
+            "author_association": "CONTRIBUTOR",
+            "body": None,
+            "commit_id": "0f3a2c1d",
+        },
+    }
+
+    await _events(tmp_path, payload=payload).on_pull_request_review_submitted()
+
+    assert published[0][1]["payload"]["author_can_write"] is can_write
+
+
+@pytest.mark.parametrize(("sender_type", "association"), [("User", "MEMBER"), ("Bot", "NONE")])
+async def test_a_writer_or_a_bot_is_not_looked_up(tmp_path, monkeypatch, sender_type, association):
+    _capture(monkeypatch)
+    asked = _github(monkeypatch)
+    payload = _issue(action="created", sender_type=sender_type, association=association)
+
+    await _events(tmp_path, payload=payload).on_issue_comment_created()
+
+    assert asked == []

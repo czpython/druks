@@ -550,6 +550,14 @@ class GitHubClient:
             body["output"] = {**output, "annotations": list(annotations[start : start + limit])}
             await checks.async_update(owner, repo_name, check_run_id, data=body)
 
+    async def can_write(self, repo: str, username: str) -> bool:
+        """Whether ``username`` can write to ``repo``. GitHub reports maintain as write."""
+        owner, name = repo.split("/", 1)
+        response = await self._github.rest.repos.async_get_collaborator_permission_level(
+            owner, name, username
+        )
+        return response.parsed_data.permission in ("admin", "write")
+
     async def get_file_content(
         self,
         repo: str,
