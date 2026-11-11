@@ -150,16 +150,16 @@ class PiHarness(Harness):
                 metadata={"provider": self.name, "model": self.model, **tokens},
             )
             self.check_returncode(result)
-            for message in messages:
-                # A runtime provider failure exits zero, so the HTTP status in
-                # ``errorMessage`` is what classifies it.
-                if message["stopReason"] == "error":
-                    detail = message["errorMessage"]
-                    status = _PROVIDER_ERROR_STATUS.search(detail)
-                    code = int(status.group(1)) if status else 0
-                    if code >= 500:
-                        raise exceptions.HarnessOverloadedError(detail)
-                    raise _STATUS_ERRORS.get(code, exceptions.HarnessError)(detail)
+            # pi retries a failed attempt itself, so only the last assistant
+            # message is the call's outcome. A runtime provider failure exits
+            # zero, so the HTTP status in ``errorMessage`` is what classifies it.
+            if messages and messages[-1]["stopReason"] == "error":
+                detail = messages[-1]["errorMessage"]
+                status = _PROVIDER_ERROR_STATUS.search(detail)
+                code = int(status.group(1)) if status else 0
+                if code >= 500:
+                    raise exceptions.HarnessOverloadedError(detail)
+                raise _STATUS_ERRORS.get(code, exceptions.HarnessError)(detail)
         except (ValueError, KeyError, TypeError) as error:
             self.check_returncode(result)
             raise exceptions.HarnessInvalidOutputError("pi wrote no usable stream.") from error

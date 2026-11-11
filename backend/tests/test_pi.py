@@ -277,6 +277,29 @@ def test_parse_classifies_a_provider_error_by_status(
     assert str(error.value) == detail
 
 
+def test_parse_passes_a_call_pi_finished_after_retrying_an_error(tmp_path: Path) -> None:
+    (tmp_path / "run-1").mkdir()
+    (tmp_path / "run-1" / "output.json").write_text('{"answer": "done", "count": 3}')
+    usage = {"input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "cost": {"total": 0.25}}
+    stdout = b"\n".join(
+        (
+            _message_end(
+                "assistant",
+                stopReason="error",
+                errorMessage="OpenAI API error (503): busy",
+                usage=usage,
+            ),
+            json.dumps({"type": "auto_retry_start", "attempt": 1}).encode(),
+            _message_end("assistant", stopReason="stop", usage=usage),
+            json.dumps({"type": "auto_retry_end", "success": True, "attempt": 1}).encode(),
+        )
+    )
+
+    output = _parse(stdout, tmp_path)
+
+    assert _Contract.model_validate(output) == _Contract(answer="done", count=3)
+
+
 def test_parse_reports_a_nonzero_exit_before_reading_the_stream(tmp_path: Path) -> None:
     stdout = _message_end(
         "assistant",
