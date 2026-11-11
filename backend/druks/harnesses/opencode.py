@@ -149,19 +149,18 @@ class OpenCodeHarness(Harness):
 
     def parse(self, result: HarnessRunResult, *, artifact_dir: Path, run_id: str) -> Any:
         try:
-            responses = [json.loads(line)["info"] for line in result.stdout.splitlines()]
-            info = responses[-1]
-            tokens = [response["tokens"] for response in responses]
+            info = json.loads(result.stdout)["info"]
+            tokens = info["tokens"]
             metadata = {
                 "provider": self.name,
                 "model": self.model,
-                "input_tokens": sum(entry["input"] for entry in tokens),
-                "output_tokens": sum(entry["output"] for entry in tokens),
-                "reasoning_tokens": sum(entry["reasoning"] for entry in tokens),
-                "cached_input_tokens": sum(entry["cache"]["read"] for entry in tokens),
-                "cache_creation_tokens": sum(entry["cache"]["write"] for entry in tokens),
+                "input_tokens": tokens["input"],
+                "output_tokens": tokens["output"],
+                "reasoning_tokens": tokens["reasoning"],
+                "cached_input_tokens": tokens["cache"]["read"],
+                "cache_creation_tokens": tokens["cache"]["write"],
             }
-            cost_usd = sum(float(response["cost"]) for response in responses)
+            cost_usd = float(info["cost"])
             output_dir = call_dir(artifact_dir, run_id)
             write_cost(output_dir, cost_usd=cost_usd, metadata=metadata)
             # The kill caused whatever opencode reports after it.
@@ -180,7 +179,7 @@ class OpenCodeHarness(Harness):
                 raise _ERROR_TYPES.get(failure["name"], exceptions.HarnessError)(detail)
             structured = info["structured"]
             self.check_returncode(result)
-        except (ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
+        except (ValueError, KeyError, TypeError, AttributeError) as error:
             if result.timed_out:
                 self.check_returncode(result)
             if result.returncode == 124:
