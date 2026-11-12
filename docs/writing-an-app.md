@@ -1225,8 +1225,8 @@ await self.sleep(60, label="Waiting to look again", until="source.changed")
 
 The run stays running and shows the label. The sleep releases the warm sandbox,
 as a gate park does, and the next agent call boots a new one. It ends after the
-given seconds, or earlier when `answer()` arrives on `until`. It returns nothing
-and never fails.
+given seconds, or earlier when `answer()` arrives on `until`. It returns whether
+an answer ended it, and never fails.
 
 ## Give runs a subject read-side
 

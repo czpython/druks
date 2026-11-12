@@ -27,7 +27,6 @@ from druks.secrets.models import VaultSecret
 from druks.services import Resource, Service
 from druks.usage.models import UsageScrape
 from druks.user_settings.models import SettingsOverride
-from druks.workflows import WaitTimeout
 from druks.workspaces import Workspace
 from pydantic import BaseModel, SecretStr
 from sqlalchemy import select
@@ -900,15 +899,15 @@ async def test_body_level_quota_waits_for_the_reset_once(
     post_to_chat = AsyncMock()
     monkeypatch.setattr(agents, "_post_to_chat", post_to_chat)
     current_run.conversation_id = "conversation-1"
-    current_run.wait = AsyncMock(side_effect=WaitTimeout("agents.quota"))
+    current_run.sleep = AsyncMock(return_value=False)
     checkpoints, _sleep = _inline_agent_steps
 
     with pytest.raises(HarnessRateLimitError) as excinfo:
         await DUMMY_AGENT()
 
     assert excinfo.value is failures[-1]
-    current_run.wait.assert_awaited_once_with(
-        "agents.quota", label="waiting_for_quota", ttl_seconds=60 * 60 + 90.0
+    current_run.sleep.assert_awaited_once_with(
+        60 * 60 + 90.0, label="waiting_for_quota", until="agents.quota"
     )
     [wait, resume] = [call.args for call in post_to_chat.await_args_list]
     assert (wait[:2], wait[2].func, wait[2].keywords) == (
@@ -921,7 +920,6 @@ async def test_body_level_quota_waits_for_the_reset_once(
         "waiting_for_quota",
         ends_at=now + timedelta(hours=1, seconds=90),
     )
-    current_run._reap_run.assert_awaited_once()
     assert [options["name"] for options in checkpoints] == [
         "test.agent.dummy",
         "test.agent.dummy.retry_wait",
@@ -941,12 +939,12 @@ async def test_a_quota_wait_woken_without_a_switch_waits_out_its_reset(
     sandbox = _patch_quota(
         monkeypatch, tmp_path, current_run, [HarnessRateLimitError("quota"), None], now=now
     )
-    current_run.wait = AsyncMock(side_effect=[{}, WaitTimeout("agents.quota")])
+    current_run.sleep = AsyncMock(side_effect=[True, False])
 
     assert await DUMMY_AGENT() == DummyOutput(ok=True)
 
-    assert current_run.wait.await_count == 2
-    assert current_run.wait.await_args.kwargs["ttl_seconds"] == 60 * 60 + 90.0
+    assert current_run.sleep.await_count == 2
+    assert current_run.sleep.await_args.args == (60 * 60 + 90.0,)
     assert sandbox.run_agent.await_count == 2
 
 
@@ -959,20 +957,20 @@ async def test_a_switched_account_retries_now_and_waits_out_its_own_limit_once(
     failures = [HarnessRateLimitError(f"quota {attempt}") for attempt in range(3)]
     sandbox = _patch_quota(monkeypatch, tmp_path, current_run, failures, now=now)
 
-    async def switch_on_the_first_wait(*_args, **_kwargs):
-        if current_run.wait.await_count == 1:
+    async def switch_on_the_first_sleep(*_args, **_kwargs):
+        if current_run.sleep.await_count == 1:
             await _switch_claude_account("second@example.com")
-            return {}
-        raise WaitTimeout("agents.quota")
+            return True
+        return False
 
-    current_run.wait = AsyncMock(side_effect=switch_on_the_first_wait)
+    current_run.sleep = AsyncMock(side_effect=switch_on_the_first_sleep)
     checkpoints, _sleep = _inline_agent_steps
 
     with pytest.raises(HarnessRateLimitError) as excinfo:
         await DUMMY_AGENT()
 
     assert excinfo.value is failures[-1]
-    assert current_run.wait.await_count == 2
+    assert current_run.sleep.await_count == 2
     assert sandbox.run_agent.await_count == 3
     assert [options["name"] for options in checkpoints] == [
         "test.agent.dummy",
@@ -1018,13 +1016,13 @@ async def test_body_level_quota_reset_over_six_hours_reraises_without_sleeping(
         ),
     )
     current_run._reap_run = AsyncMock()
-    current_run.wait = AsyncMock()
+    current_run.sleep = AsyncMock()
 
     with pytest.raises(HarnessUsageLimitError) as excinfo:
         await DUMMY_AGENT()
 
     assert excinfo.value is failure
-    current_run.wait.assert_not_awaited()
+    current_run.sleep.assert_not_awaited()
     current_run._reap_run.assert_not_awaited()
     [call] = await AgentCall.list_for_run(db_session(), "wf-9")
     assert call.failure_code == "usage_limit"

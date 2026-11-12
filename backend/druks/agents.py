@@ -25,7 +25,7 @@ from druks.db import db_session
 from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, get_dbos_client, step_session
 from druks.durable.enums import RunState
-from druks.durable.exceptions import WaitTimeout, WorkflowError
+from druks.durable.exceptions import WorkflowError
 from druks.durable.models import AgentCall, Artifact, Run
 from druks.exceptions import ObjectNotFound
 from druks.files.datastructures import File
@@ -276,27 +276,8 @@ class Agent:
                             "chat.report_quota_wait",
                             functools.partial(report_quota_wait, resumes_at=quota["resumes_at"]),
                         )
-                    wait_seconds = quota["wait_seconds"]
-                    if wait_seconds >= _REAP_BEFORE_WAIT_SECONDS:
-                        await workflow._reap_run()
-                    # Each wait's length comes from a step, so replay takes the same turns.
-                    while wait_seconds > 0:
-                        try:
-                            await workflow.wait(
-                                _QUOTA_TOPIC, label="waiting_for_quota", ttl_seconds=wait_seconds
-                            )
-                        except WaitTimeout:
-                            # The window turned. A limit after this fails the call.
-                            quota_retried = True
-                            break
-                        # A changed provider or account woke the wait.
-                        wait_seconds = await DBOS.run_step_async(
-                            StepOptions(name=f"{workflow.kind}.agent.{self.id}.wait_remaining"),
-                            _quota_wait_remaining,
-                            self.id,
-                            workflow.account_id,
-                            quota,
-                        )
+                    # A wait that a switch ends does not use the retry.
+                    quota_retried = await self._wait_out_quota(workflow, quota)
                     if workflow.conversation_id:
                         await _post_to_chat(
                             workflow.workflow_id, "chat.report_quota_resume", report_quota_resume
@@ -318,8 +299,28 @@ class Agent:
                 workflow.journal.add(result)
                 return result
 
+    async def _wait_out_quota(self, workflow, quota: dict) -> bool:
+        """Sleep until the quota resets. Return False early when the agent switches to another
+        account, model, or billing."""
+        wait_seconds = quota["wait_seconds"]
+        while wait_seconds > 0:
+            if not await workflow.sleep(
+                wait_seconds, label="waiting_for_quota", until=_QUOTA_TOPIC
+            ):
+                return True
+            # Every waiting run gets the wake. The step says how long this one still waits,
+            # so replay takes the same turns.
+            wait_seconds = await DBOS.run_step_async(
+                StepOptions(name=f"{workflow.kind}.agent.{self.id}.wait_remaining"),
+                _quota_wait_remaining,
+                self.id,
+                workflow.account_id,
+                quota,
+            )
+        return False
+
     @classmethod
-    async def wake_quota_waits(cls, session: AsyncSession) -> None:
+    async def wake_runs_waiting_for_quota(cls, session: AsyncSession) -> None:
         """Wake every run waiting out a quota window, so it reads its agent's provider and
         account again. The wake commits with the session."""
         running = await session.scalars(select(Run.id).where(Run.state == RunState.RUNNING.value))

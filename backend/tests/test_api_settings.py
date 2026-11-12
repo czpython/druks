@@ -78,7 +78,7 @@ def test_patch_settings_judges_the_default_triple_together(tmp_path: Path):
 
 def test_a_switched_provider_wakes_the_runs_waiting_out_a_quota(tmp_path: Path, monkeypatch):
     wake = AsyncMock()
-    monkeypatch.setattr(Agent, "wake_quota_waits", wake)
+    monkeypatch.setattr(Agent, "wake_runs_waiting_for_quota", wake)
     with settings_client(tmp_path) as client:
         client.patch(
             "/api/settings/apps", json={"agentEfforts": {"software_factory.implement": "low"}}

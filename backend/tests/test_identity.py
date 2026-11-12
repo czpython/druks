@@ -498,11 +498,11 @@ def test_a_connect_reads_the_new_subscription_s_usage_before_it_wakes_quota_wait
     async def poll_usage(provider, session, subscription):
         calls.append(f"poll {subscription.identity['email']}")
 
-    async def wake_quota_waits(session):
+    async def wake_runs_waiting_for_quota(session):
         calls.append("wake")
 
     monkeypatch.setattr(providers.Provider, "poll_usage", poll_usage)
-    monkeypatch.setattr(Agent, "wake_quota_waits", wake_quota_waits)
+    monkeypatch.setattr(Agent, "wake_runs_waiting_for_quota", wake_runs_waiting_for_quota)
     with _client(tmp_path) as client:
         assert _connect(client, monkeypatch, email="second@example.com").status_code == 200
 

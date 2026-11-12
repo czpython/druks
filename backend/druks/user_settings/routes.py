@@ -110,7 +110,7 @@ async def update_settings(session: SessionDep, body: UpdateSettingsRequest) -> I
         if any(field in fields for field in _EXECUTION_DEFAULTS):
             await check_agent_configs(session, settings)
         if "default_model" in fields or "default_billing" in fields:
-            await Agent.wake_quota_waits(session)
+            await Agent.wake_runs_waiting_for_quota(session)
     return settings
 
 
@@ -221,6 +221,6 @@ async def update_app_settings(
         await apply_schedules(session)
 
     if body.agent_models or body.agent_billings:
-        await Agent.wake_quota_waits(session)
+        await Agent.wake_runs_waiting_for_quota(session)
 
     return await get_app_settings(session)
