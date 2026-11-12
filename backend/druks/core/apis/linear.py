@@ -74,6 +74,20 @@ class LinearClient:
         )
         return data["issue"]
 
+    async def get_issue_relations(self, issue_id: str) -> dict[str, Any]:
+        data = await self._execute(
+            """
+            query DruksIssueRelations($issueId: String!) {
+              issue(id: $issueId) {
+                relations { nodes { type relatedIssue { identifier } } }
+                inverseRelations { nodes { type issue { identifier state { type } } } }
+              }
+            }
+            """,
+            {"issueId": issue_id},
+        )
+        return data["issue"]
+
     async def get_issue_status(self, issue_id: str) -> str:
         return (await self.get_issue(issue_id))["state"]["name"]
 

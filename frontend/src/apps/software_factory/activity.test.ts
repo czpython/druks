@@ -16,6 +16,7 @@ describe('Factory Activity', () => {
     ['workflow.finished', 'software_factory.build', 'Build finished'],
     ['workflow.failed', 'software_factory.build', 'Build failed'],
     ['build.rejected', null, 'Build could not start'],
+    ['build.waiting', null, 'Waiting on blockers'],
     ['workflow.cancelled', 'software_factory.build', 'Build cancelled'],
   ])('formats %s through the app registry', (topic, workflow, label) => {
     expect(eventLine({ id: 'event:1', seq: 1, at: '2026-09-09T12:00:00Z',
@@ -42,6 +43,12 @@ it.each([
   expect(line.context).toBe('acme/widgets · #42')
   expect(line.icon).toBe(icon)
   expect(line.key).toBe('DRU-42 Recorded work')
+})
+
+it('names the open blockers a build waits on', () => {
+  const line = eventLine({ id: 'event:1', seq: 1, at: '2026-09-09T12:00:00Z', topic: 'build.waiting',
+    app: 'software_factory', payload: { blockers: ['DRU-40', 'DRU-41'] } })
+  expect(line.context).toBe('DRU-40, DRU-41')
 })
 
 it.each([

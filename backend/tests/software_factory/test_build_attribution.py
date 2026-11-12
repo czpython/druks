@@ -31,7 +31,12 @@ async def started(monkeypatch):
         calls.append(kwargs)
         return "new-build"
 
+    # Dispatch reads the blockers, and the tracker's key is fake, so no request goes out.
+    async def get_blocked_by(self, key):
+        return {}
+
     monkeypatch.setattr(Build, "start", classmethod(start))
+    monkeypatch.setattr(Linear, "get_blocked_by", get_blocked_by)
     return calls
 
 

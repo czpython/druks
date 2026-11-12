@@ -15,6 +15,7 @@ from druks.contrib.software_factory.exceptions import (
     RepoNotFound,
     RepoTakenError,
     TicketAlreadyMerged,
+    TicketBlocked,
     TicketNotFound,
     TicketNotRoutable,
     TrackerNotConfigured,
@@ -289,6 +290,7 @@ async def list_work_items_history(
     responses=agent_error_responses(
         TicketNotFound("ENG-9999", "Linear"),
         TicketNotRoutable("ENG-831"),
+        TicketBlocked("ENG-831", ["ENG-830"]),
         TicketAlreadyMerged("ENG-831"),
         TrackerRefused("GET /rest/api/3/issue/PROJ-7 -> 401: Unauthorized"),
         TrackerNotConfigured(),

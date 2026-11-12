@@ -4,7 +4,11 @@ from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import ReviewWork
 from druks.contrib.software_factory.datastructures import PullRequest
 from druks.contrib.software_factory.enums import Resolution, Status
-from druks.contrib.software_factory.exceptions import TicketAlreadyMerged, TicketNotRoutable
+from druks.contrib.software_factory.exceptions import (
+    TicketAlreadyMerged,
+    TicketBlocked,
+    TicketNotRoutable,
+)
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Build, Profile, PullRequestReview
@@ -163,7 +167,27 @@ async def ticket_transition_drives_the_funnel(*, payload: dict) -> None:
     if payload["source"] == settings.tracker and payload["status"] == trigger:
         try:
             await Build.dispatch(ticket=payload)
-        except (TicketAlreadyMerged, TicketNotRoutable, ServiceNotConnectedError) as error:
+        except (
+            TicketAlreadyMerged,
+            TicketBlocked,
+            TicketNotRoutable,
+            ServiceNotConnectedError,
+        ) as error:
             # The delivery succeeded. A raise would answer 5xx, and the tracker would deliver
             # the same ticket again.
             logger.info("Ticket %s opens no build: %s", payload["identifier"], error)
+
+
+@subscribe("ticket.transitioned")
+async def done_ticket_starts_the_tickets_it_blocks(*, payload: dict) -> None:
+    """Each ticket that a Done ticket blocks goes through the funnel again. One still at
+    the trigger status builds, unless another blocker is open."""
+    settings = await SoftwareFactory.settings()
+    if payload["status"] != settings.done_status:
+        return
+    if tracker := await SoftwareFactory.get_tracker(payload["source"]):
+        async with tracker:
+            keys = await tracker.get_blocking(payload["identifier"])
+            tickets = [await tracker.get_ticket(key) for key in keys]
+        for ticket in tickets:
+            await ticket_transition_drives_the_funnel(payload=ticket)
