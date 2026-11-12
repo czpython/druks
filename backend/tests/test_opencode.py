@@ -106,6 +106,7 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
         "listening on",
         "--hostname 127.0.0.1 --port 0",
         "/session?directory=",
+        '--data \'{"title": "druks"}\'',
         "/message",
         "json_schema",
         '--max-time "$remaining"',
