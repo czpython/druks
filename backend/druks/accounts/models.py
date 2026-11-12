@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 import sqlalchemy
 from sqlalchemy import CheckConstraint, ForeignKey, Index, LargeBinary, String, select, text
@@ -27,6 +28,10 @@ from druks.models import Base, Model
 from druks.secrets.models import VaultSecret
 from druks.settings import get_settings
 from druks.user_settings.models import InstallationSettings
+
+if TYPE_CHECKING:
+    from druks.apps import App
+    from druks.teams.models import Team
 
 
 class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
@@ -59,10 +64,26 @@ class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
     )
     is_tag_required: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
+    # The database refuses to delete an account that is on a team, so a delete loads no team.
+    teams: sqlalchemy.orm.WriteOnlyMapped["Team"] = relationship(
+        secondary="team_members", back_populates="members", passive_deletes=True
+    )
 
     @property
     def is_admin(self) -> bool:
         return self.role == Role.ADMIN
+
+    async def can_use_app(self, app: "type[App]") -> bool:
+        """Whether this account can use the app. An admin can use every app, and
+        every account can use a built-in app or an app that no team lists."""
+        # The teams module imports this one, so this import cannot be at the top.
+        from druks.teams.models import Team  # noqa: PLC0415
+
+        if self.is_admin or self.kind != AccountKind.OPERATOR or app.builtin:
+            return True
+        if await self.session.scalar(self.teams.select().where(Team.apps.contains([app.name]))):
+            return True
+        return not await Team.exists_for_app(self.session, app.name)
 
     @classmethod
     async def get_default(cls, session: AsyncSession) -> "Account | None":

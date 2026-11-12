@@ -20,10 +20,10 @@ from fastmcp.utilities.openapi import HTTPRoute
 from mcp.types import CallToolRequestParams, ToolAnnotations
 
 from druks.accounts.exceptions import InvalidPatError
-from druks.accounts.models import PersonalAccessToken
+from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.exceptions import AgentApiError, InvalidToolArguments, ToolNotAvailable
 from druks.apps.exceptions import AppBotError
-from druks.apps.loader import iter_apps
+from druks.apps.loader import get_app, iter_apps
 from druks.apps.registry import bots
 from druks.database import session_scope
 from druks.mcp.exceptions import InvalidAgentToolError
@@ -270,22 +270,28 @@ def _list_tool_preconditions(api: FastAPI, app_names: set[str]) -> dict[str, lis
     }
 
 
-def _visible_while(preconditions: list[Callable]) -> AuthCheck:
+def _visible_while(preconditions: list[Callable], app: str) -> AuthCheck:
     async def is_visible(context: AuthContext) -> bool:
         # The MCP layer binds no request session.
-        async with session_scope():
+        async with session_scope() as session:
             try:
                 for precondition in preconditions:
                     await precondition()
             except ToolNotAvailable:
                 return False
+            if app:
+                account = await Account.get(session, id=context.token.claims["account_id"])
+                return await account.can_use_app(get_app(app))
         return True
 
     return is_visible
 
 
 def _annotate(
-    tool_preconditions: dict[str, list[Callable]], route: HTTPRoute, tool: OpenAPITool
+    tool_preconditions: dict[str, list[Callable]],
+    app_names: set[str],
+    route: HTTPRoute,
+    tool: OpenAPITool,
 ) -> None:
     is_read = route.method == "GET"
     tool.annotations = ToolAnnotations(
@@ -296,8 +302,11 @@ def _annotate(
     # Claude Code defers every MCP tool until the agent searches for it, and an agent that
     # never searches denies the tool. This key loads the tool upfront; other clients ignore it.
     tool.meta = {"anthropic/alwaysLoad": True}
-    if preconditions := tool_preconditions[route.operation_id]:
-        tool.auth = _visible_while(preconditions)
+    # A tool of an app is listed only for an account that can use the app.
+    app = next((tag for tag in route.tags if tag in app_names), "")
+    preconditions = tool_preconditions[route.operation_id]
+    if preconditions or app:
+        tool.auth = _visible_while(preconditions, app)
 
 
 def _is_visible(context: AuthContext) -> bool:
@@ -331,7 +340,7 @@ def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
             RouteMap(tags={"browser"}, mcp_type=MCPType.TOOL),
             RouteMap(mcp_type=MCPType.EXCLUDE),
         ],
-        mcp_component_fn=partial(_annotate, tool_preconditions),
+        mcp_component_fn=partial(_annotate, tool_preconditions, app_names),
     )
     server = FastMCP(
         name="druks",

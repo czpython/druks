@@ -32,6 +32,7 @@ from druks.mcp.exceptions import InvalidAgentToolError
 from druks.mcp.server import create_mcp_app
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
+from druks.teams.models import Team
 from druks.testing import asgi_client, configure_app_for_test, make_settings
 from druks.usage.models import UsageScrape
 from druks_field_notes.models import Note
@@ -301,6 +302,27 @@ async def test_a_ticket_token_reaches_only_its_tools(druks_db, app, account):
 
     assert names == {"software_factory_get_ticket"}
     assert fetched.structured_content["title"] == "Add an endpoint"
+    assert refused.is_error
+
+
+async def test_a_member_cannot_list_or_call_tools_from_a_teams_app(druks_db, app):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    await Team.create(druks_db, name="Notes", member_ids=[], apps=["field_notes"])
+    _, token = await PersonalAccessToken.create(
+        druks_db,
+        account_id=member.id,
+        name="notes",
+        allowed_tools=["field_notes_jot_note"],
+    )
+
+    async with live(app), _client(app, token) as client:
+        names = {tool.name for tool in await client.list_tools()}
+        refused = await client.call_tool(
+            "field_notes_jot_note", {"body": "Hidden note"}, raise_on_error=False
+        )
+
+    assert "field_notes_jot_note" not in names
     assert refused.is_error
 
 

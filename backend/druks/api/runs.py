@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, Path, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 
 from druks.accounts.context import current_account_id
 from druks.api.dependencies import SessionDep
@@ -19,11 +19,16 @@ from druks.durable.models import Run
 from druks.events.models import Event
 from druks.notifications.exceptions import AnswerNotAllowedError, InvalidChoiceError
 from druks.notifications.services import validate_in_app_answer
+from druks.teams.dependencies import app_access_for_run
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
 
-@router.post("/{run}/resume", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/{run}/resume",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(app_access_for_run)],
+)
 async def resume_run(
     session: SessionDep, run_id: Annotated[str, Path(alias="run")], body: ResumeRequest
 ) -> None:
@@ -59,6 +64,7 @@ async def resume_run(
     "/{run}/cancel",
     operation_id="cancel_run",
     tags=["agent"],
+    dependencies=[Depends(app_access_for_run)],
     openapi_extra={"x-idempotent": True},
     response_model=CancelRunResponse,
     response_model_by_alias=True,
@@ -110,6 +116,7 @@ async def cancel_run(
     "/{run}/retry",
     operation_id="retry_run",
     tags=["agent"],
+    dependencies=[Depends(app_access_for_run)],
     openapi_extra={"x-destructive": False},
     response_model=RetryRunResponse,
     response_model_by_alias=True,

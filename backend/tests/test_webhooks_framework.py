@@ -5,6 +5,7 @@ import pytest
 from druks.apps.registry import webhooks
 from druks.database import configure_session
 from druks.db import db_session
+from druks.exceptions import PermissionDenied
 from druks.settings import Settings, configure_settings
 from druks.testing import TEST_DATABASE_URL
 from druks.webhooks import InvalidWebhookError, Webhook, verify_hmac_sha256
@@ -372,6 +373,35 @@ def test_failed_handler_releases_claim_so_retry_reprocesses(settings):
         assert r2.status_code == 200
         assert r2.json() == {"ok": True}
     assert attempts == [1, 2]  # reprocessed, not swallowed as a duplicate
+
+
+def test_a_refused_delivery_is_acknowledged_and_not_reprocessed(settings):
+    attempts: list[int] = []
+
+    class Hook(Webhook):
+        provider = "refused"
+        category = "events"
+
+        async def request_is_authentic(self):
+            return True
+
+        def get_delivery_key(self):
+            return self.data["key"]
+
+        def get_action(self):
+            return "ping"
+
+        async def on_ping(self):
+            attempts.append(self.data["seq"])
+            raise PermissionDenied("refused")
+
+    with _client_for(Hook, settings=settings) as client:
+        first = client.post("/_external/refused/events/", json={"key": "K", "seq": 1})
+        second = client.post("/_external/refused/events/", json={"key": "K", "seq": 2})
+    assert first.status_code == 200
+    assert first.json() == {"accepted": False, "refused": True}
+    assert second.json() == {"accepted": False, "duplicate": True}
+    assert attempts == [1]
 
 
 def test_failed_commit_releases_claim_so_retry_reprocesses(settings):

@@ -15,6 +15,7 @@ from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
 from druks.durable.reads import read_transcript_chunk
 from druks.mcp.gateway import services
+from druks.teams.models import Team
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
@@ -350,6 +351,38 @@ async def test_agent_errors_share_one_shape(client: TestClient, druks_db):
     body = stale.json()
     assert body["code"] == "GATE_ROUND_STALE"
     assert body["retryable"] is True
+
+
+async def test_a_member_cannot_act_on_a_run_from_a_teams_app(client: TestClient, druks_db):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    await Account.get_or_create(druks_db, "op@example.com")
+    await Team.create(druks_db, name="Notes", member_ids=[], apps=["field_notes"])
+    note = await Note.create(body="restricted run")
+    run = await _park(druks_db, note)
+    answered = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    answered.input_requested_at = datetime.now(UTC)
+    answered.answer_parked_at = answered.input_requested_at
+    await druks_db.flush()
+
+    requests = [
+        client.post(f"/api/runs/{run.id}/resume", json={"control": "approve"}),
+        client.post(f"/api/runs/{run.id}/cancel", json={"reason": "stop"}),
+        client.post(f"/api/runs/{run.id}/retry"),
+        client.get(f"/api/gates/{run.id}"),
+        client.post(
+            f"/api/gates/{run.id}/answer",
+            json={"parkedAt": run.input_requested_at.isoformat(), "control": "approve"},
+        ),
+        client.post(
+            f"/api/gates/{answered.id}/answer",
+            json={
+                "parkedAt": answered.input_requested_at.isoformat(),
+                "control": "approve",
+            },
+        ),
+    ]
+
+    assert [response.status_code for response in requests] == [403] * 6
 
 
 def test_missing_agent_call_uses_the_unified_shape(client: TestClient, druks_db):

@@ -2,6 +2,8 @@ import importlib
 import sys
 
 import pytest
+from druks.accounts.enums import Role
+from druks.accounts.models import Account
 from druks.apps.loader import _workflow_packages, mount, register_workflow_package
 from druks.scaffolding import create_app
 from fastapi import FastAPI
@@ -79,7 +81,7 @@ def test_create_app_scaffolds_a_loadable_package(tmp_path):
         # Scaffolding is under test, not the identity gate.
         from druks.accounts.dependencies import current_account
 
-        api.dependency_overrides[current_account] = lambda: None
+        api.dependency_overrides[current_account] = lambda: Account(role=Role.ADMIN)
         client = TestClient(api)
         assert client.get("/api/daily_quote/status").json() == {"app": "daily_quote"}
         # The landing page is the scaffold's own, and it renders with no

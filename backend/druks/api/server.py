@@ -38,7 +38,7 @@ from druks.database import (
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.durable.exceptions import AgentCallNotFound
 from druks.events.routes import router as events_router
-from druks.exceptions import ObjectNotFound, ValidationError
+from druks.exceptions import ObjectNotFound, PermissionDenied, ValidationError
 from druks.files.routes import router as files_router
 from druks.harnesses.exceptions import AgentConfigError, CatalogError
 from druks.harnesses.routes import router as providers_router
@@ -185,6 +185,11 @@ async def _object_not_found_handler(request: Request, exc: ObjectNotFound) -> JS
 @app.exception_handler(ValidationError)
 async def _validation_error_handler(request: Request, exc: ValidationError) -> JSONResponse:
     return await _http_exception_handler(request, HTTPException(422, str(exc)))
+
+
+@app.exception_handler(PermissionDenied)
+async def _permission_denied_handler(request: Request, exc: PermissionDenied) -> JSONResponse:
+    return await _http_exception_handler(request, HTTPException(403, str(exc)))
 
 
 @app.exception_handler(PageReadError)

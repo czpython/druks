@@ -316,6 +316,11 @@ A team is a named group of people with a list of apps. A person can be on more
 than one team, and more than one team can list the same app. An admin manages
 teams in **Settings → Teams**.
 
+An admin can use every app, and every person can use an app that no team lists.
+A built-in app is always open, also when a team lists it by mistake. A person
+can use a listed app when a team that lists it has that person. Druks refuses
+all other people and starts a run only under an account that can use the app.
+
 In `none` mode, Druks has no authentication and exactly one operator account.
 The first completed provider connection creates this account. Public
 `/_external` routes stay outside the identity gate. These routes include

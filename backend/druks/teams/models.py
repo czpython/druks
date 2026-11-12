@@ -33,12 +33,18 @@ class Team(Model, Uuid7Pk, ordering=("name",)):
         lazy="selectin",
         order_by=(Account.created_at, Account.id),
         passive_deletes=True,
+        back_populates="teams",
     )
     apps: Mapped[list[str]] = mapped_column(JSONB, default=list)
 
     @classmethod
     async def list_all(cls, session: AsyncSession) -> list["Team"]:
         return list(await session.scalars(sqlalchemy.select(cls).order_by(cls.name)))
+
+    @classmethod
+    async def exists_for_app(cls, session: AsyncSession, app: str) -> bool:
+        """Whether a team lists the app."""
+        return bool(await session.scalar(sqlalchemy.select(cls.id).where(cls.apps.contains([app]))))
 
     @classmethod
     async def create(

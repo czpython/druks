@@ -12,6 +12,7 @@ from druks.api.dependencies import SessionDep
 from druks.apps.loader import get_app
 from druks.chat.enums import BotAccess
 from druks.chat.models import Conversation
+from druks.teams.dependencies import app_access_for_pairing
 
 from .constants import ONE_TIME_CODE_TTL_SECONDS
 from .schemas import OneTimeCodeResponse, ResumeConversationResponse
@@ -67,6 +68,7 @@ async def open_one_time_code(
     "/connections/{connection_id}/pairing",
     response_model=OneTimeCodeResponse,
     response_model_by_alias=True,
+    dependencies=[Depends(app_access_for_pairing)],
 )
 async def pair(
     session: SessionDep,
@@ -81,7 +83,11 @@ async def pair(
     raise HTTPException(404, "Connection not found.")
 
 
-@router.delete("/connections/{connection_id}/pairing", status_code=204)
+@router.delete(
+    "/connections/{connection_id}/pairing",
+    status_code=204,
+    dependencies=[Depends(app_access_for_pairing)],
+)
 async def unpair(
     session: SessionDep,
     connection_id: str,
