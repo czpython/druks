@@ -54,7 +54,7 @@ async def validate_in_app_answer(
 
 async def respond_to_notification(
     session: AsyncSession, token: str, choice: dict[str, Any]
-) -> None:
+) -> Notification:
     notification = await Notification.get_for_token(session, token)
     if not notification:
         raise UnknownTokenError()
@@ -89,3 +89,4 @@ async def respond_to_notification(
         # A concurrent responder won the claim; this send already collapsed on
         # the DBOS round key.
         raise AlreadyAcknowledgedError()
+    return notification

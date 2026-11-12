@@ -4,19 +4,24 @@ import json
 import time
 from urllib.parse import parse_qs
 
+from dbos import DBOS
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
 
 from druks.core.services import Slack
 from druks.db import db_session
+from druks.durable.engine import step_session
 from druks.notifications.buttons import decode_button
+from druks.notifications.delivery import deliver
 from druks.notifications.exceptions import (
     AlreadyAcknowledgedError,
+    AnswerNotAllowedError,
     InvalidChoiceError,
     MalformedButtonError,
     StaleRoundError,
     UnknownTokenError,
 )
+from druks.notifications.models import Notification
 from druks.notifications.services import respond_to_notification
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.signals import publish
@@ -24,6 +29,10 @@ from druks.webhooks import Webhook
 
 # Slack signs v0:{ts}:{body}; a timestamp outside the window is a replayed capture.
 _TIMESTAMP_TOLERANCE_SECONDS = 300
+
+# What a clicked message says in place of its buttons.
+ANSWER_MESSAGE = "Answer: {answer}"
+CLOSED_MESSAGE = "This question is closed."
 
 
 def verify_slack_signature(
@@ -105,27 +114,94 @@ class SlackInteractivity(SlackWebhook):
     async def on_block_actions(self) -> Response:
         try:
             action_id = self.data["actions"][0]["action_id"]
+            channel = self.data["channel"]["id"]
+            message = self.data["message"]
+            message_ts = message["ts"]
+            user = self.data["user"]["id"]
         except (TypeError, KeyError, IndexError) as error:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Malformed Slack payload.") from error
         try:
             token, choice_id = decode_button(action_id)
         except MalformedButtonError as error:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown button.") from error
+        # A click that cannot answer still gets a 200: nothing a retry can fix, so
+        # acknowledge instead of feeding Slack's retry loop. Corruption propagates as
+        # the logged 500 it is. What Slack shows after a click starts at once and is
+        # not awaited: a slow or refused post cannot fail the click, and a queue would
+        # add up to a second before the person sees it.
         try:
-            await respond_to_notification(db_session(), token, {"control": choice_id})
+            notification = await respond_to_notification(
+                db_session(), token, {"control": choice_id}
+            )
+        except StaleRoundError as error:
+            # The round is over, so the clicked message loses its buttons.
+            self.log_ignored(event="block_actions", reason=type(error).__name__)
+            notification = await Notification.get_for_token(db_session(), token)
+            await DBOS.start_workflow_async(
+                replace_buttons,
+                notification.id,
+                channel=channel,
+                message_ts=message_ts,
+                outcome=CLOSED_MESSAGE,
+            )
+            return JSONResponse({"accepted": False})
         except (
             UnknownTokenError,
             AlreadyAcknowledgedError,
-            StaleRoundError,
             InvalidChoiceError,
+            AnswerNotAllowedError,
         ) as error:
-            # A click on a dead round (unknown, acknowledged, stale, informational):
-            # nothing a retry can fix, so acknowledge instead of feeding Slack's
-            # retry loop; the app shows the authoritative state. Corruption
-            # propagates as the logged 500 it is.
+            # The question can still be open, so the message stays, and only the
+            # clicker reads why.
             self.log_ignored(event="block_actions", reason=type(error).__name__)
+            await DBOS.start_workflow_async(
+                explain_reason,
+                channel,
+                user=user,
+                reason=str(error),
+                thread_ts=message.get("thread_ts", ""),
+            )
             return JSONResponse({"accepted": False})
+        label = next(
+            action["label"] for action in notification.actions if action["id"] == choice_id
+        )
+        await DBOS.start_workflow_async(
+            replace_buttons,
+            notification.id,
+            channel=channel,
+            message_ts=message_ts,
+            outcome=ANSWER_MESSAGE.format(answer=label),
+        )
         return JSONResponse({"accepted": True})
+
+
+# DBOS runs a lone step as a workflow of its own, so the click handler starts these two
+# and does not wait for them.
+@DBOS.step(name="slack.replace_buttons", retries_allowed=True, max_attempts=5)
+async def replace_buttons(
+    notification_id: str, *, channel: str, message_ts: str, outcome: str
+) -> None:
+    """Edit the notification's message in Slack: ``outcome`` takes the place of its
+    buttons."""
+    async with step_session() as session:
+        notification = await session.get(Notification, notification_id)
+        client = await Slack.get_client()
+    await deliver(
+        client,
+        channel,
+        notification.body,
+        message_ts=message_ts,
+        deep_link=notification.deep_link,
+        outcome=outcome,
+    )
+
+
+@DBOS.step(name="slack.explain_reason", retries_allowed=True, max_attempts=5)
+async def explain_reason(channel: str, *, user: str, reason: str, thread_ts: str) -> None:
+    """Show ``reason`` to the person who clicked, and to nobody else."""
+    async with step_session():
+        client = await Slack.get_client()
+    await deliver(client, channel, reason, user=user, thread_ts=thread_ts)
 
 
 class SlackEvents(SlackWebhook):

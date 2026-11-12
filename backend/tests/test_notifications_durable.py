@@ -13,6 +13,7 @@ from druks.chat.channels.slack import channel as slack_channel
 from druks.chat.enums import ConversationSource
 from druks.chat.models import Conversation, Message
 from druks.core.services import Slack
+from druks.core.webhooks import slack as slack_webhooks
 from druks.database import configure_session, get_session
 from druks.db import db_session
 from druks.durable.constants import NOTIFICATIONS_QUEUE
@@ -216,19 +217,25 @@ class _DeliverSpy:
         body,
         *,
         thread_ts="",
+        message_ts="",
+        user="",
         actions=None,
         token=None,
         deep_link=None,
+        outcome="",
     ):
         self.calls.append(
             {
                 "bot_token": client.token,
                 "channel": channel,
                 "thread_ts": thread_ts,
+                "message_ts": message_ts,
+                "user": user,
                 "body": body,
                 "actions": actions,
                 "token": token,
                 "deep_link": deep_link,
+                "outcome": outcome,
             }
         )
         if self.always_fail:
@@ -243,6 +250,7 @@ async def deliver_spy(monkeypatch):
     spy = _DeliverSpy()
     monkeypatch.setattr(outbox, "deliver", spy)
     monkeypatch.setattr(slack_channel, "deliver_notification", spy)
+    monkeypatch.setattr(slack_webhooks, "deliver", spy)
     return spy
 
 
@@ -345,6 +353,37 @@ async def test_outbox_delivers_with_the_bot_token_actions_and_token(rt, deliver_
     assert call["body"] == "hello"
     assert call["actions"] == [{"id": "ok", "label": "OK"}]
     assert call["token"] == done["token"]
+
+
+async def test_what_a_click_starts_reaches_slack_with_the_bot_token(rt, deliver_spy):
+    await _seed_destination(rt, "clicked")
+    notification_id = await _deliver(rt, to="clicked", body="review the plan")
+    await _wait_for(rt, notification_id, lambda s: s["state"] == "delivered")
+
+    await slack_webhooks.replace_buttons(
+        notification_id,
+        channel="C1",
+        message_ts="1700000000.000200",
+        outcome="Answer: Approve",
+    )
+    await slack_webhooks.explain_reason(
+        "C1",
+        user="U7",
+        reason="This notification was already acknowledged.",
+        thread_ts="",
+    )
+
+    _, edited, explained = deliver_spy.calls
+    assert (edited["bot_token"], explained["bot_token"]) == (_BOT_TOKEN, _BOT_TOKEN)
+    assert (edited["body"], edited["message_ts"], edited["outcome"]) == (
+        "review the plan",
+        "1700000000.000200",
+        "Answer: Approve",
+    )
+    assert (explained["body"], explained["user"]) == (
+        "This notification was already acknowledged.",
+        "U7",
+    )
 
 
 async def test_transient_failure_retries_to_delivered_and_touches_no_run(rt, deliver_spy):
