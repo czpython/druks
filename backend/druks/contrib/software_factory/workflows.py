@@ -35,7 +35,7 @@ from .constants import (
     TICKET_TOOLS,
 )
 from .datastructures import PullRequest
-from .exceptions import TicketAlreadyMerged, TicketNotRoutable
+from .exceptions import TicketAlreadyMerged, TicketBlocked, TicketNotRoutable
 from .github import get_review_actor
 from .journal import BuildJournal
 from .policy import PlanGate, RepoPolicy
@@ -185,6 +185,10 @@ class Build(Workflow):
         account_id = None
         if tracker := await SoftwareFactory.get_tracker():
             async with tracker:
+                blockers = await tracker.get_blocked_by(ticket["identifier"])
+                if open_blockers := [key for key, is_open in blockers.items() if is_open]:
+                    await item.announce("build.waiting", blockers=open_blockers)
+                    raise TicketBlocked(ticket["identifier"], open_blockers)
                 account_id = await tracker.get_account_id(ticket["actor_id"])
                 account_id = account_id or await tracker.get_account_id(ticket["assignee_id"])
         return await cls.start(

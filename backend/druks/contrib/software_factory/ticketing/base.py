@@ -42,6 +42,14 @@ class Tracker(ABC):
     @abstractmethod
     async def set_status(self, key: str, status: TicketStatus) -> None: ...
 
+    async def get_blocked_by(self, key: str) -> dict[str, bool]:
+        """The key of each ticket that blocks this one, and whether it is open."""
+        return {}
+
+    async def get_blocking(self, key: str) -> list[str]:
+        """The keys of the tickets that this one blocks."""
+        return []
+
     async def release(self, key: str) -> None:
         """Put a ticket the build still holds at the resting status.
 

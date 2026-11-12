@@ -60,6 +60,16 @@ class TicketNotRoutable(AgentApiError):
         )
 
 
+class TicketBlocked(AgentApiError):
+    status_code = 409
+    code = "TICKET_BLOCKED"
+
+    def __init__(self, ticket: str, blockers: list[str]) -> None:
+        super().__init__(
+            f"{ticket} is blocked by {', '.join(blockers)}, so no build starts until they are done."
+        )
+
+
 class TicketAlreadyMerged(AgentApiError):
     status_code = 409
     code = "TICKET_ALREADY_MERGED"

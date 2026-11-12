@@ -519,6 +519,52 @@ async def test_linear_reads_the_ticket_as_a_transition_payload():
     }
 
 
+def _linear_relations_handler(*, relations: list[dict], inverse_relations: list[dict]):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["variables"] == {"issueId": "ENG-831"}
+        issue = {
+            "relations": {"nodes": relations},
+            "inverseRelations": {"nodes": inverse_relations},
+        }
+        return httpx.Response(200, json={"data": {"issue": issue}})
+
+    return handler
+
+
+async def test_linear_reads_each_blocker_and_whether_it_is_open():
+    handler = _linear_relations_handler(
+        relations=[],
+        inverse_relations=[
+            {"type": "blocks", "issue": {"identifier": "ENG-1", "state": {"type": "started"}}},
+            {"type": "blocks", "issue": {"identifier": "ENG-2", "state": {"type": "completed"}}},
+            {"type": "blocks", "issue": {"identifier": "ENG-3", "state": {"type": "canceled"}}},
+            {"type": "related", "issue": {"identifier": "ENG-4", "state": {"type": "started"}}},
+        ],
+    )
+    tracker = Linear(client=_linear_client(handler), status_names={})
+
+    assert await tracker.get_blocked_by("ENG-831") == {
+        "ENG-1": True,
+        "ENG-2": False,
+        "ENG-3": False,
+    }
+
+
+async def test_linear_reads_the_tickets_an_issue_blocks():
+    handler = _linear_relations_handler(
+        relations=[
+            {"type": "blocks", "relatedIssue": {"identifier": "ENG-9"}},
+            {"type": "duplicate", "relatedIssue": {"identifier": "ENG-10"}},
+        ],
+        inverse_relations=[
+            {"type": "blocks", "issue": {"identifier": "ENG-1", "state": {"type": "started"}}}
+        ],
+    )
+    tracker = Linear(client=_linear_client(handler), status_names={})
+
+    assert await tracker.get_blocking("ENG-831") == ["ENG-9"]
+
+
 async def test_linear_client_lists_workflow_states_across_pages():
     pages = iter(
         [

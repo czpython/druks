@@ -23,3 +23,5 @@ CI_TTL_SECONDS = 60 * 60
 CI_POLL_SECONDS = 60
 # A suite that passed or did not apply.
 CI_GREEN_CONCLUSIONS = frozenset({"success", "neutral", "skipped"})
+# A Linear issue in a state of these types is finished or dropped, so it blocks nothing.
+LINEAR_CLOSED_STATE_TYPES = frozenset({"completed", "canceled"})

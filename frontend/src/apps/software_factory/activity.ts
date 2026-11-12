@@ -1,4 +1,4 @@
-import { FileCheck2, FilePenLine, FileText, GitMerge, GitPullRequest, GitPullRequestClosed, OctagonX, type LucideIcon } from 'lucide-react'
+import { FileCheck2, FilePenLine, FileText, GitMerge, GitPullRequest, GitPullRequestClosed, Hourglass, OctagonX, type LucideIcon } from 'lucide-react'
 import type { FeedItem } from '../../api/types'
 import type { ActivityEvent, ActivityPresentation } from '../registry'
 
@@ -10,6 +10,7 @@ const TOPICS: Record<string, string> = {
   merged: 'Pull request merged',
   closed: 'Pull request closed',
   'build.rejected': 'Build could not start',
+  'build.waiting': 'Waiting on blockers',
 }
 
 function label(event: ActivityEvent): string | undefined {
@@ -41,6 +42,7 @@ const TOPIC_ICONS: Record<string, LucideIcon> = {
   merged: GitMerge,
   closed: GitPullRequestClosed,
   'build.rejected': OctagonX,
+  'build.waiting': Hourglass,
 }
 
 const REPLY_ACTIONS: Record<string, string> = {
@@ -51,13 +53,15 @@ const REPLY_ACTIONS: Record<string, string> = {
 }
 
 // The shared payload types app facts as unknown; Factory names its own once.
-type FactoryFacts = FeedItem['payload'] & { repo?: string; pr_number?: number; result?: { action?: string } | null }
+type FactoryFacts = FeedItem['payload'] & { repo?: string; pr_number?: number; blockers?: string[]; result?: { action?: string } | null }
 
 export function activity(event: ActivityEvent): ActivityPresentation {
   const facts: FactoryFacts = event.payload ?? {}
   let context: string | undefined
   if (['build.pr_opened', 'merged', 'closed'].includes(event.topic)) {
     context = [facts.repo, facts.pr_number && `#${facts.pr_number}`].filter(Boolean).join(' · ') || undefined
+  } else if (event.topic === 'build.waiting') {
+    context = facts.blockers?.join(', ')
   } else if (event.topic === 'workflow.running' && facts.gate) {
     const gateName = facts.gate === 'review_work' ? 'Implementation review' : facts.gate === 'review' ? 'Plan review' : undefined
     const action = facts.result?.action && REPLY_ACTIONS[facts.result.action]

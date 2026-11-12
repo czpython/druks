@@ -628,6 +628,13 @@ Druks accepts the REST issue JSON under `issue`. Put the shared token in the
 tracker is not selected. It reports pending setup if the selected tracker is
 Linear, Jira, or GitHub and its identity is missing.
 
+On Linear, a ticket at the trigger status opens no build while an issue that
+blocks it is open. A blocker is open until its state is completed or canceled.
+When a blocker moves to the done status, Druks reads each ticket that it
+blocks. A ticket at the trigger status with no other open blocker starts its
+build. No person starts that build, so it uses the account of the ticket
+assignee. Jira, GitHub, and **druks** board tickets do not wait for blockers.
+
 Software Factory starts a Linear, Jira, or GitHub build under the Druks account
 of the person who moved the ticket. If that person has no account, the build
 uses the account of the ticket assignee, and then the default account. Linear

@@ -1,5 +1,6 @@
 import httpx
 
+from druks.contrib.software_factory.constants import LINEAR_CLOSED_STATE_TYPES
 from druks.core.apis.exceptions import LinearAPIError, UnknownTicketError
 from druks.core.apis.linear import LinearClient
 
@@ -46,6 +47,24 @@ class Linear(Tracker):
         # The status mutation resolves the issue by identifier, so the key is
         # the id Linear wants.
         await self._client.update_issue_status(key, name)
+
+    async def get_blocked_by(self, key: str) -> dict[str, bool]:
+        issue = await self._client.get_issue_relations(key)
+        return {
+            relation["issue"]["identifier"]: (
+                relation["issue"]["state"]["type"] not in LINEAR_CLOSED_STATE_TYPES
+            )
+            for relation in issue["inverseRelations"]["nodes"]
+            if relation["type"] == "blocks"
+        }
+
+    async def get_blocking(self, key: str) -> list[str]:
+        issue = await self._client.get_issue_relations(key)
+        return [
+            relation["relatedIssue"]["identifier"]
+            for relation in issue["relations"]["nodes"]
+            if relation["type"] == "blocks"
+        ]
 
     async def list_status_choices(self) -> list[dict[str, str]]:
         choices = {}
