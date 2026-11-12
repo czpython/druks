@@ -12,11 +12,6 @@ from druks.webhooks import Webhook, verify_hmac_sha256
 
 _REVIEW_ACTION = {"APPROVED": "approve", "CHANGES_REQUESTED": "request_changes"}
 
-# GitHub's standing for the commenter on that repo. These three write to it. GitHub
-# reports a private org member as a contributor, so Druks asks GitHub for anyone else's
-# permission.
-_WRITERS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
-
 
 class GitHubEvents(Webhook):
     """Verifies the GitHub HMAC, then publishes each event as a normalized fact.
@@ -127,7 +122,8 @@ class GitHubEvents(Webhook):
 
     async def _can_write(self, user: dict[str, Any], association: str) -> bool:
         """Whether ``user`` can write to the delivery's repo."""
-        if association in _WRITERS:
+        # A member or a collaborator does not always have write access.
+        if association == "OWNER":
             return True
         if user["type"] == "Bot":
             return False
