@@ -56,6 +56,9 @@ def client(tmp_path: Path):
 def _parse(
     stdout: bytes, artifact_dir: Path, *, returncode: int = 0, stderr: bytes = b""
 ) -> object:
+    # _tee_stream writes the whole stream to stdout.jsonl beside the call's files.
+    (artifact_dir / "run-1").mkdir(exist_ok=True)
+    (artifact_dir / "run-1" / "stdout.jsonl").write_bytes(stdout)
     return _harness().parse(
         HarnessRunResult(returncode=returncode, stdout=stdout, stderr=stderr),
         artifact_dir=artifact_dir,
@@ -243,6 +246,25 @@ def test_parse_returns_the_contract_and_sums_spend(tmp_path: Path) -> None:
             "cache_creation_tokens": 3,
         },
     }
+
+
+def test_parse_sums_the_spend_of_the_whole_stream_file(tmp_path: Path) -> None:
+    (tmp_path / "run-1").mkdir()
+    (tmp_path / "run-1" / "output.json").write_text('{"answer": "done", "count": 3}')
+    usage = {"input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "cost": {"total": 0.25}}
+    early = _message_end("assistant", stopReason="toolUse", usage=usage)
+    tail = _message_end("assistant", stopReason="stop", usage=usage)
+    (tmp_path / "run-1" / "stdout.jsonl").write_bytes(early + b"\n" + tail + b"\n")
+
+    _harness().parse(
+        HarnessRunResult(returncode=0, stdout=tail, stderr=b""),
+        artifact_dir=tmp_path,
+        run_id="run-1",
+    )
+
+    cost_usd, metadata = read_cost(tmp_path / "run-1")
+    assert cost_usd == 0.5
+    assert metadata["input_tokens"] == 2
 
 
 @pytest.mark.parametrize(
