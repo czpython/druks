@@ -1,10 +1,11 @@
 # One structured opencode call: start `opencode serve`, open a session, POST
-# the message with the contract schema, and print the POST response. Inputs
-# ride the environment (DRUKS_*, OPENCODE_CONFIG_CONTENT); the prompt rides
-# stdin. The message POSTs carry the deadline — an unsatisfiable schema loops
-# forever server-side, so on expiry the wrapper aborts the session and exits 124.
-# DRUKS_AFTER_AGENT's answer goes to the session as one more message. Each
-# response prints on its own line.
+# the message with the contract schema, and print the newest response with the
+# session's spend. Inputs ride the environment (DRUKS_*, OPENCODE_CONFIG_CONTENT); the
+# prompt rides stdin. The message POSTs carry the deadline — an unsatisfiable
+# schema loops forever server-side, so on expiry the wrapper aborts the session
+# and exits 124. DRUKS_AFTER_AGENT's answer goes to the session as one more
+# message. A POST returns the spend of its last model call only; the session
+# totals count every model call, so they replace it.
 
 run_dir="$DRUKS_RUN_DIR"
 
@@ -60,20 +61,32 @@ send() {
       "$base_url/session/$session_id/abort" \
       -H 'content-type: application/json' --data '{}' > "$run_dir/abort.json" || exit 1
     echo 'opencode hit the agent deadline; session aborted' >&2
-    exit 124
+    finish 124
   fi
 
-  cat "$run_dir/response.json"
-  echo
-  if [ "$message_status" -ne 0 ]; then exit "$message_status"; fi
-  jq -e '.info.error | not' "$run_dir/response.json" > /dev/null || exit $?
+  if [ "$message_status" -ne 0 ]; then
+    cat "$run_dir/response.json"
+    echo
+    exit "$message_status"
+  fi
+  jq -e '.info.error | not' "$run_dir/response.json" > /dev/null || finish $?
+}
+
+finish() {
+  curl --fail --silent --show-error "$base_url/session/$session_id" \
+    > "$run_dir/session.json" || exit $?
+  # The deadline leaves no response, only the spend.
+  jq -cn --slurpfile session "$run_dir/session.json" --slurpfile response "$run_dir/response.json" \
+    '{info: ($response[0].info + ($session[0] | {cost, tokens}))}' || exit $?
+  exit "$1"
 }
 
 send
 if [ -n "$DRUKS_AFTER_AGENT" ]; then
-  sh "$DRUKS_AFTER_AGENT" > "$run_dir/after_agent.txt" || exit $?
+  sh "$DRUKS_AFTER_AGENT" > "$run_dir/after_agent.txt" || finish $?
   if [ -s "$run_dir/after_agent.txt" ]; then
     write_request "$run_dir/after_agent.txt" || exit $?
     send
   fi
 fi
+finish 0

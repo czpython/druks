@@ -190,15 +190,30 @@ async def test_a_hooked_call_writes_the_hook_and_names_it() -> None:
 
 
 _FAKE_CURL = r"""#!/bin/sh
+method=GET
 for argument; do case "$argument" in
+  POST) method=POST ;;
   *"/session?"*) echo '{"id": "ses-1"}'; exit 0 ;;
   @*) cat "${argument#@}" >> "$DRUKS_RUN_DIR/sent.jsonl" ;;
 esac; done
-echo '{"info": {}}'
+if [ "$method" = GET ]; then cat "$DRUKS_RUN_DIR/session.answer"; exit 0; fi
+case "$*" in */message*)
+  cat "$DRUKS_RUN_DIR/message.answer"
+  exit "$(cat "$DRUKS_RUN_DIR/message.status")" ;;
+esac
+echo '{}'
 """
 
+_SESSION = {
+    "id": "ses-1",
+    "cost": 0.75,
+    "tokens": {"input": 240, "output": 60, "reasoning": 8, "cache": {"read": 40, "write": 20}},
+}
 
-async def test_the_wrapper_sends_each_turn_without_node(tmp_path: Path) -> None:
+
+async def _run_wrapper(
+    tmp_path: Path, *, message: bytes, message_status: int
+) -> subprocess.CompletedProcess[bytes]:
     invocation = await _harness().build_invocation(
         _MANIFEST,
         prompt="Run it.",
@@ -220,6 +235,9 @@ async def test_the_wrapper_sends_each_turn_without_node(tmp_path: Path) -> None:
     hook = run_dir / "hook.sh"
     hook.write_text('cat "$(dirname "$0")/after_agent.answer"')
     (run_dir / "after_agent.answer").write_text("Run the tests.")
+    (run_dir / "message.answer").write_bytes(message)
+    (run_dir / "message.status").write_text(str(message_status))
+    (run_dir / "session.answer").write_text(json.dumps(_SESSION))
     env = {
         **invocation.env,
         "DRUKS_RUN_DIR": str(run_dir),
@@ -229,37 +247,52 @@ async def test_the_wrapper_sends_each_turn_without_node(tmp_path: Path) -> None:
     # The harness writes its hook first; this run brings its own.
     wrapper = invocation.args[2].split(" || exit $?\n", 1)[1]
 
-    run = subprocess.run(
+    return subprocess.run(
         ["sh", "-c", wrapper], input=b"Do it.", env=env, capture_output=True, check=False
     )
 
+
+async def test_the_wrapper_sends_each_turn_without_node(tmp_path: Path) -> None:
+    answer = _response(structured={"answer": "done", "count": 3}, cost=0.25)
+
+    run = await _run_wrapper(tmp_path, message=answer, message_status=0)
+
     assert run.returncode == 0, run.stderr
-    turns = [json.loads(line) for line in (run_dir / "sent.jsonl").read_text().splitlines()]
+    turns = [
+        json.loads(line) for line in (tmp_path / "run" / "sent.jsonl").read_text().splitlines()
+    ]
     assert [turn["parts"] for turn in turns] == [
         [{"type": "text", "text": "Do it."}],
         [{"type": "text", "text": "Run the tests."}],
     ]
-    assert turns[0]["model"]["modelID"] == env["DRUKS_MODEL"]
+    assert turns[0]["model"]["modelID"] == _MODEL.split("/", 1)[1]
     assert turns[0]["format"] == {"type": "json_schema", "schema": {"type": "object"}}
-
-
-def test_parse_takes_the_last_turn_and_sums_spend(tmp_path: Path) -> None:
-    turns = [
-        _response(structured={"answer": "first", "count": 1}, cost=0.5),
-        _response(structured={"answer": "done", "count": 3}, cost=0.25),
-    ]
-
     output = _harness().parse(
-        HarnessRunResult(returncode=0, stdout=b"\n".join(turns) + b"\n", stderr=b""),
+        HarnessRunResult(returncode=0, stdout=run.stdout, stderr=b""),
         artifact_dir=tmp_path,
         run_id="run-1",
     )
-
     assert output == {"answer": "done", "count": 3}
     cost = json.loads((tmp_path / "run-1" / "cost.json").read_text())
     assert cost["cost_usd"] == 0.75
     assert cost["metadata"]["input_tokens"] == 240
     assert cost["metadata"]["cache_creation_tokens"] == 20
+
+
+async def test_the_wrapper_records_the_spend_of_a_call_that_hits_the_deadline(
+    tmp_path: Path,
+) -> None:
+    run = await _run_wrapper(tmp_path, message=b"", message_status=28)
+
+    assert run.returncode == 124, run.stderr
+    with pytest.raises(HarnessTimeoutError, match="deadline"):
+        _harness().parse(
+            HarnessRunResult(returncode=124, stdout=run.stdout, stderr=run.stderr),
+            artifact_dir=tmp_path,
+            run_id="run-1",
+        )
+    cost_usd, _ = read_cost(tmp_path / "run-1")
+    assert cost_usd == 0.75
 
 
 def test_parse_returns_contract_and_writes_cost_sidecars(tmp_path: Path) -> None:
