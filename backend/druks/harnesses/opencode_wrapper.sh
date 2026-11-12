@@ -5,7 +5,8 @@
 # schema loops forever server-side, so on expiry the wrapper aborts the session
 # and exits 124. DRUKS_AFTER_AGENT's answer goes to the session as one more
 # message. A POST returns the spend of its last model call only; the session
-# totals count every model call, so they replace it.
+# totals count every model call, so they replace it. A subagent spends in a
+# child session, so the totals of the child sessions add to them.
 
 run_dir="$DRUKS_RUN_DIR"
 
@@ -77,9 +78,21 @@ send() {
 finish() {
   curl --fail --silent --show-error "$base_url/session/$session_id" \
     > "$run_dir/session.json" || exit $?
+  curl --fail --silent --show-error "$base_url/session/$session_id/children" \
+    > "$run_dir/children.json" || exit $?
   # The deadline leaves no response, only the spend.
-  jq -cn --slurpfile session "$run_dir/session.json" --slurpfile response "$run_dir/response.json" \
-    '{info: ($response[0].info + ($session[0] | {cost, tokens}))}' || exit $?
+  jq -cn --slurpfile session "$run_dir/session.json" --slurpfile children "$run_dir/children.json" \
+    --slurpfile response "$run_dir/response.json" '
+    def total(spend): [$session[0], $children[0][]] | map(spend) | add;
+    {info: ($response[0].info + {
+      cost: total(.cost),
+      tokens: {
+        input: total(.tokens.input),
+        output: total(.tokens.output),
+        reasoning: total(.tokens.reasoning),
+        cache: {read: total(.tokens.cache.read), write: total(.tokens.cache.write)}
+      }
+    })}' || exit $?
   exit "$1"
 }
 

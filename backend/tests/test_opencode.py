@@ -195,6 +195,7 @@ method=GET
 for argument; do case "$argument" in
   POST) method=POST ;;
   *"/session?"*) echo '{"id": "ses-1"}'; exit 0 ;;
+  *"/children") cat "$DRUKS_RUN_DIR/children.answer"; exit 0 ;;
   @*) cat "${argument#@}" >> "$DRUKS_RUN_DIR/sent.jsonl" ;;
 esac; done
 if [ "$method" = GET ]; then cat "$DRUKS_RUN_DIR/session.answer"; exit 0; fi
@@ -209,6 +210,11 @@ _SESSION = {
     "id": "ses-1",
     "cost": 0.75,
     "tokens": {"input": 240, "output": 60, "reasoning": 8, "cache": {"read": 40, "write": 20}},
+}
+_CHILD_SESSION = {
+    "id": "ses-2",
+    "cost": 0.5,
+    "tokens": {"input": 100, "output": 20, "reasoning": 3, "cache": {"read": 5, "write": 2}},
 }
 
 
@@ -239,6 +245,7 @@ async def _run_wrapper(
     (run_dir / "message.answer").write_bytes(message)
     (run_dir / "message.status").write_text(str(message_status))
     (run_dir / "session.answer").write_text(json.dumps(_SESSION))
+    (run_dir / "children.answer").write_text(json.dumps([_CHILD_SESSION]))
     env = {
         **invocation.env,
         "DRUKS_RUN_DIR": str(run_dir),
@@ -275,9 +282,18 @@ async def test_the_wrapper_sends_each_turn_without_node(tmp_path: Path) -> None:
     )
     assert output == {"answer": "done", "count": 3}
     cost = json.loads((tmp_path / "run-1" / "cost.json").read_text())
-    assert cost["cost_usd"] == 0.75
-    assert cost["metadata"]["input_tokens"] == 240
-    assert cost["metadata"]["cache_creation_tokens"] == 20
+    assert cost == {
+        "cost_usd": 1.25,
+        "metadata": {
+            "provider": "opencode",
+            "model": _MODEL,
+            "input_tokens": 340,
+            "output_tokens": 80,
+            "reasoning_tokens": 11,
+            "cached_input_tokens": 45,
+            "cache_creation_tokens": 22,
+        },
+    }
 
 
 async def test_the_wrapper_records_the_spend_of_a_call_that_hits_the_deadline(
@@ -293,7 +309,7 @@ async def test_the_wrapper_records_the_spend_of_a_call_that_hits_the_deadline(
             run_id="run-1",
         )
     cost_usd, _ = read_cost(tmp_path / "run-1")
-    assert cost_usd == 0.75
+    assert cost_usd == 1.25
 
 
 def test_parse_returns_contract_and_writes_cost_sidecars(tmp_path: Path) -> None:
