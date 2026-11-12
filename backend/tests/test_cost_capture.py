@@ -229,15 +229,14 @@ def test_failed_pi_call_writes_cost_before_raising(tmp_path: Path):
             },
         },
     }
+    stdout = (json.dumps(message) + "\n").encode()
+    (tmp_path / "failed-call").mkdir()
+    (tmp_path / "failed-call" / "stdout.jsonl").write_bytes(stdout)
     harness = PiHarness(model="openai/gpt-5.5", fast_mode=False, effort=None)
 
     with pytest.raises(HarnessError):
         harness.parse(
-            HarnessRunResult(
-                returncode=0,
-                stdout=(json.dumps(message) + "\n").encode(),
-                stderr=b"",
-            ),
+            HarnessRunResult(returncode=0, stdout=stdout, stderr=b""),
             artifact_dir=tmp_path,
             run_id="failed-call",
         )

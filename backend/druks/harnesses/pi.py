@@ -126,15 +126,18 @@ class PiHarness(Harness):
         )
 
     def parse(self, result: HarnessRunResult, *, artifact_dir: Path, run_id: str) -> Any:
+        call_dir = artifact_dir / run_id
         try:
-            events = [json.loads(line) for line in result.stdout.splitlines()]
-            # pi repeats an assistant message on turn_end and agent_end;
-            # message_end is the one place each appears once.
-            messages = [
-                event["message"]
-                for event in events
-                if event["type"] == "message_end" and event["message"]["role"] == "assistant"
-            ]
+            # result.stdout drops the front of a long stream; the file holds all of
+            # it. Read it line by line, as it can hold hundreds of MiB.
+            with open(call_dir / "stdout.jsonl", "rb") as stream:
+                # pi repeats an assistant message on turn_end and agent_end;
+                # message_end is the one place each appears once.
+                messages = [
+                    event["message"]
+                    for event in map(json.loads, stream)
+                    if event["type"] == "message_end" and event["message"]["role"] == "assistant"
+                ]
             usage = [message["usage"] for message in messages]
             cost_usd = sum(entry["cost"]["total"] for entry in usage)
             tokens = {
@@ -143,7 +146,6 @@ class PiHarness(Harness):
                 "cached_input_tokens": sum(entry["cacheRead"] for entry in usage),
                 "cache_creation_tokens": sum(entry["cacheWrite"] for entry in usage),
             }
-            call_dir = artifact_dir / run_id
             write_cost(
                 call_dir,
                 cost_usd=cost_usd,
