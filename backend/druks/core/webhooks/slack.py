@@ -6,12 +6,15 @@ from urllib.parse import parse_qs
 
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
+from slack_sdk.webhook.async_client import AsyncWebhookClient
+from starlette.background import BackgroundTask
 
 from druks.core.services import Slack
 from druks.db import db_session
 from druks.notifications.buttons import decode_button
 from druks.notifications.exceptions import (
     AlreadyAcknowledgedError,
+    AnswerNotAllowedError,
     InvalidChoiceError,
     MalformedButtonError,
     StaleRoundError,
@@ -104,7 +107,13 @@ class SlackInteractivity(SlackWebhook):
 
     async def on_block_actions(self) -> Response:
         try:
-            action_id = self.data["actions"][0]["action_id"]
+            button = self.data["actions"][0]
+            action_id = button["action_id"]
+            label = button["text"]["text"]
+            message = self.data["message"]
+            text = message["text"]
+            question = [block for block in message["blocks"] if block["type"] != "actions"]
+            clicked_message = AsyncWebhookClient(self.data["response_url"])
         except (TypeError, KeyError, IndexError) as error:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Malformed Slack payload.") from error
         try:
@@ -118,14 +127,42 @@ class SlackInteractivity(SlackWebhook):
             AlreadyAcknowledgedError,
             StaleRoundError,
             InvalidChoiceError,
+            AnswerNotAllowedError,
         ) as error:
-            # A click on a dead round (unknown, acknowledged, stale, informational):
-            # nothing a retry can fix, so acknowledge instead of feeding Slack's
-            # retry loop; the app shows the authoritative state. Corruption
-            # propagates as the logged 500 it is.
+            # A click that cannot answer (unknown, acknowledged, stale, informational,
+            # not the clicker's to answer): nothing a retry can fix, so acknowledge
+            # instead of feeding Slack's retry loop, and tell only the clicker why.
+            # Corruption propagates as the logged 500 it is.
             self.log_ignored(event="block_actions", reason=type(error).__name__)
-            return JSONResponse({"accepted": False})
-        return JSONResponse({"accepted": True})
+            # The other errors carry a user-facing message; InvalidChoiceError
+            # carries developer detail (raw control/question ids), so the clicker
+            # gets a plain explanation instead.
+            clicker_text = (
+                "This button no longer matches the question."
+                if isinstance(error, InvalidChoiceError)
+                else str(error)
+            )
+            return JSONResponse(
+                {"accepted": False},
+                background=BackgroundTask(
+                    clicked_message.send,
+                    text=clicker_text,
+                    response_type="ephemeral",
+                    replace_original=False,
+                ),
+            )
+        # The label came from Slack as plain_text; escape mrkdwn's & < > so a
+        # label like "Tom & Jerry" or "A < B" renders as written.
+        shown = label.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        answer = {"type": "section", "text": {"type": "mrkdwn", "text": f"Answer: {shown}"}}
+        # The post runs after the answer commits and after Slack has its 200, so a
+        # slow or failed post cannot undo the click.
+        return JSONResponse(
+            {"accepted": True},
+            background=BackgroundTask(
+                clicked_message.send, text=text, blocks=[*question, answer], replace_original=True
+            ),
+        )
 
 
 class SlackEvents(SlackWebhook):
