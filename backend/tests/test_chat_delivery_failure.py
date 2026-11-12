@@ -1,4 +1,5 @@
 import inspect
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,6 +17,7 @@ from druks.files.models import FileRecord
 from druks.harnesses.exceptions import HarnessNotConnectedError
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
+from druks.settings import Urls
 from druks.testing import asgi_client, configure_app_for_test, make_settings
 from sqlalchemy import select
 
@@ -70,16 +72,26 @@ async def test_a_failed_delivery_ends_the_pending_messages_and_replies_on_a_live
         assert send_reply.await_args.args[2].id == reply.id
 
 
+NOT_CONNECTED_REPLY = (
+    "The agent cannot run: connect your Anthropic subscription in Settings → Providers."
+)
+
+
 @pytest.mark.parametrize(
-    "kind,body",
+    "kind,endpoint,body",
     [
-        (AccountKind.OPERATOR, "The agent cannot run: connect your Anthropic subscription"),
-        (AccountKind.BOT, DELIVERY_FAILED_MESSAGE),
-        (AccountKind.BOT_ADMIN, DELIVERY_FAILED_MESSAGE),
+        (
+            AccountKind.OPERATOR,
+            "https://druks.example.com/",
+            f"{NOT_CONNECTED_REPLY} Open https://druks.example.com/settings/providers",
+        ),
+        (AccountKind.OPERATOR, "", NOT_CONNECTED_REPLY),
+        (AccountKind.BOT, "https://druks.example.com/", DELIVERY_FAILED_MESSAGE),
+        (AccountKind.BOT_ADMIN, "https://druks.example.com/", DELIVERY_FAILED_MESSAGE),
     ],
 )
 async def test_a_turn_with_no_connected_provider_names_the_fix_to_the_operator_side(
-    druks_db, monkeypatch, kind, body
+    druks_db, monkeypatch, kind, endpoint, body
 ):
     account = await Account.get_or_create(druks_db, "op@example.com")
     if kind != AccountKind.OPERATOR:
@@ -106,12 +118,15 @@ async def test_a_turn_with_no_connected_provider_names_the_fix_to_the_operator_s
         "connect your Anthropic subscription in Settings → Providers."
     )
     monkeypatch.setattr(service, "get_config", AsyncMock(side_effect=not_connected))
+    monkeypatch.setattr(
+        service, "get_settings", lambda: SimpleNamespace(urls=Urls(endpoint=endpoint))
+    )
     monkeypatch.setattr(channels.get("slack"), "send_reply", AsyncMock())
 
     await inspect.unwrap(service.deliver)(conversation.id)
 
     reply = await druks_db.scalar(select(Message).where(Message.role == MessageRole.ASSISTANT))
-    assert reply.body.startswith(body)
+    assert reply.body == body
 
 
 async def test_retry_keeps_the_attachment_and_the_failed_history(druks_db, monkeypatch, tmp_path):
