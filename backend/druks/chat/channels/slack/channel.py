@@ -210,6 +210,62 @@ class SlackChannel(Channel):
             raise
 
     @classmethod
+    def get_block_text(cls, block: dict) -> str:
+        """A link shows its URL so the agent can follow it."""
+        match block["type"]:
+            case "plain_text" | "mrkdwn" | "text":
+                return block["text"]
+            case "link":
+                if block.get("text"):
+                    return f"{block['text']} ({block['url']})"
+                return block["url"]
+            case "user":
+                return f"<@{block['user_id']}>"
+            case "channel":
+                return f"<#{block['channel_id']}>"
+            case "emoji":
+                return f":{block['name']}:"
+            case "header":
+                return cls.get_block_text(block["text"])
+            case "section":
+                pieces = [block.get("text"), *block.get("fields", [])]
+                return "\n".join(cls.get_block_text(piece) for piece in pieces if piece)
+            case "context":
+                return " ".join(cls.get_block_text(element) for element in block["elements"])
+            case "rich_text" | "rich_text_list":
+                return "\n".join(cls.get_block_text(element) for element in block["elements"])
+            case "rich_text_section" | "rich_text_preformatted" | "rich_text_quote":
+                return "".join(cls.get_block_text(element) for element in block["elements"])
+        return ""
+
+    @classmethod
+    def get_message_text(cls, message: dict, *, bot_user_id: str) -> str:
+        """A person's message repeats its text as a rich text block, so rich text counts
+        only when the text is empty. Druks puts its whole message in the text, and its
+        blocks repeat it."""
+        text = message["text"]
+        if message["user"] == bot_user_id:
+            return text
+        pieces = [text]
+        for attachment in message.get("attachments", []):
+            title = attachment.get("title", "")
+            if attachment.get("title_link"):
+                title = f"{title} ({attachment['title_link']})"
+            pieces += [attachment.get("pretext", ""), title, attachment.get("text", "")]
+            pieces += [
+                ": ".join(part for part in (field.get("title"), field.get("value")) if part)
+                for field in attachment.get("fields", [])
+            ]
+            pieces += [cls.get_block_text(block) for block in attachment.get("blocks", [])]
+            pieces.append(attachment.get("footer", ""))
+        pieces += [
+            cls.get_block_text(block)
+            for block in message.get("blocks", [])
+            if not text or block["type"] != "rich_text"
+        ]
+        return "\n".join(piece for piece in pieces if piece)
+
+    @classmethod
     async def read_thread(cls, session: AsyncSession, conversation: Conversation) -> list[dict]:
         """The thread's newest messages, oldest first, with who wrote each one and the
         files on it. Every agent in the thread posts as the one bot, so a reply is this
@@ -221,12 +277,13 @@ class SlackChannel(Channel):
         client = SlackClient(token=await Slack.get_bot_token())
         messages = await client.list_replies(room, thread_ts, limit=THREAD_MESSAGES)
         own_replies = await conversation.list_reply_source_ids(session)
+        bot_user_id = (await Slack.get()).identity["bot_user_id"]
         return [
             {
                 "ts": message["ts"],
                 "user_id": message["user"],
                 "user_name": await client.get_user_name(message["user"]),
-                "text": message["text"],
+                "text": cls.get_message_text(message, bot_user_id=bot_user_id),
                 "files": [
                     {
                         "id": shared["id"],

@@ -535,6 +535,89 @@ async def test_the_agent_reads_its_thread_and_knows_who_wrote_what(card, druks_d
         await SlackChannel.read_thread(druks_db, direct)
 
 
+async def test_the_agent_reads_an_alerts_attachments_and_blocks_as_text(
+    card, druks_db, monkeypatch
+):
+    """An alert bot posts no text, only an attachment and blocks: the agent reads
+    their words, with each link's URL. A person's rich text and Druks's translated
+    markdown repeat their text, so the agent reads it once."""
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    link = {"type": "link", "url": "https://sentry.io/1", "text": "Open"}
+    thread_reads(
+        monkeypatch,
+        [
+            {
+                "ts": "10.0",
+                "user": "U200",
+                "text": "",
+                "attachments": [
+                    {
+                        "pretext": "New alert",
+                        "title": "KeyError: 'user'",
+                        "title_link": "https://sentry.io/1",
+                        "text": "in read_thread",
+                        "fields": [{"title": "Level", "value": "error"}],
+                        "blocks": [
+                            {"type": "header", "text": {"type": "plain_text", "text": "Prod"}}
+                        ],
+                        "footer": "Sentry",
+                    }
+                ],
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": "*Seen* 3 times"},
+                        "fields": [{"type": "mrkdwn", "text": "Release 1.2"}],
+                    },
+                    {"type": "divider"},
+                    {"type": "context", "elements": [{"type": "mrkdwn", "text": "today"}]},
+                    {
+                        "type": "rich_text",
+                        "elements": [
+                            {
+                                "type": "rich_text_section",
+                                "elements": [{"type": "text", "text": "See "}, link],
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "ts": "10.1",
+                "user": ANA,
+                "text": "what is this error?",
+                "blocks": [
+                    {
+                        "type": "rich_text",
+                        "elements": [
+                            {
+                                "type": "rich_text_section",
+                                "elements": [{"type": "text", "text": "what is this error?"}],
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "ts": "10.2",
+                "user": BOT,
+                "text": "A KeyError.",
+                "blocks": [{"type": "section", "text": {"type": "mrkdwn", "text": "A KeyError."}}],
+            },
+        ],
+    )
+    conversation = await thread_conversation(druks_db, card, ana)
+
+    thread = await SlackChannel.read_thread(druks_db, conversation)
+
+    assert [message["text"] for message in thread] == [
+        "New alert\nKeyError: 'user' (https://sentry.io/1)\nin read_thread\nLevel: error\n"
+        "Prod\nSentry\n*Seen* 3 times\nRelease 1.2\ntoday\nSee Open (https://sentry.io/1)",
+        "what is this error?",
+        "A KeyError.",
+    ]
+
+
 async def test_chat_read_thread_reads_the_callers_own_conversation(
     card, druks_db, tmp_path, monkeypatch
 ):
