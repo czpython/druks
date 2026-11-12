@@ -41,9 +41,11 @@ if [ -z "$base_url" ]; then
   exit 1
 fi
 
+# opencode writes a title for an untitled session with one more model call,
+# and records no usage for it.
 curl --fail --silent --show-error -X POST \
   "$base_url/session?directory=$DRUKS_WORKSPACE_QUERY" \
-  -H 'content-type: application/json' --data '{}' > "$run_dir/session.json" || exit $?
+  -H 'content-type: application/json' --data '{"title": "druks"}' > "$run_dir/session.json" || exit $?
 session_id=$(jq -r .id "$run_dir/session.json") || exit $?
 deadline=$(($(date +%s) + DRUKS_DEADLINE_SECONDS))
 
