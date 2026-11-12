@@ -20,6 +20,10 @@ class ChatHarnessError(ChatError):
     is_retryable = False
 
 
+class ChatHarnessNotConnectedError(ChatHarnessError):
+    """The Chat agent's provider is not connected."""
+
+
 class ChatSandboxGone(ChatError):
     """The account has no live Chat sandbox."""
 

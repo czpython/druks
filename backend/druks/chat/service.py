@@ -72,7 +72,13 @@ from .constants import (
     VOICE_NOTE_MARKER,
 )
 from .enums import MessageRole, MessageState
-from .exceptions import ChatBridgeError, ChatHarnessError, ChatSandboxGone, TranscriptionError
+from .exceptions import (
+    ChatBridgeError,
+    ChatHarnessError,
+    ChatHarnessNotConnectedError,
+    ChatSandboxGone,
+    TranscriptionError,
+)
 from .models import Conversation, Message
 from .services import SpeechToText
 
@@ -257,67 +263,11 @@ async def reset_live_stream(conversation_id: str) -> None:
 
 @DBOS.workflow(name="chat.deliver")
 async def deliver(conversation_id: str) -> None:
-    async def acknowledge_messages() -> None:
-        async with step_session() as session:
-            conversation = await session.get(Conversation, conversation_id)
-            await acknowledge_pending(session, conversation)
-
-    async def deliver_turns() -> None:
-        async with step_session() as session:
-            conversation = await session.get(Conversation, conversation_id)
-            await deliver_pending(session, conversation)
-
-    async def end_turns(error_message: str) -> str | None:
-        """Give the pending messages the failed state; a delivered turn runs on. On a
-        live channel, also save a reply that says so, and return its id."""
-        async with step_session() as session:
-            conversation = await session.get(Conversation, conversation_id)
-            messages = await conversation.end_pending_messages(session, MessageState.FAILED)
-            person_messages = [message for message in messages if not message.is_internal]
-            if (
-                person_messages
-                and conversation.connection
-                and not await conversation.is_held(session)
-            ):
-                newest_message = max(
-                    person_messages, key=lambda message: (message.created_at, message.id)
-                )
-                # Only an operator can change a setting or credential.
-                if conversation.account.kind == AccountKind.OPERATOR:
-                    message = error_message
-                else:
-                    message = DELIVERY_FAILED_MESSAGE
-                reply = await conversation.create_message(
-                    session,
-                    body=message,
-                    role=MessageRole.ASSISTANT,
-                    reply_to=newest_message,
-                )
-                return reply.id
-
-    async def send_reply(reply_id: str) -> None:
-        async with step_session() as session:
-            conversation = await session.get(Conversation, conversation_id)
-            reply = await session.get(Message, reply_id)
-            await conversation.channel.send_reply(session, conversation, reply)
-
-    async def record_failed(error_message: str) -> None:
-        reply_id = await DBOS.run_step_async(
-            StepOptions(name="chat.deliver.failed"), end_turns, error_message
-        )
-        await reset_live_stream(conversation_id)
-        await publish(conversation_id, {"type": "error", "detail": error_message})
-        if reply_id:
-            await DBOS.run_step_async(
-                StepOptions(name="chat.deliver.reply", retries_allowed=True, max_attempts=5),
-                send_reply,
-                reply_id,
-            )
-
     # Before the lock, so a message behind a running turn is acknowledged at once.
     await DBOS.run_step_async(
         StepOptions(name="chat.deliver.acknowledge", retries_allowed=True, max_attempts=5),
         acknowledge_messages,
+        conversation_id,
     )
     # The lock covers the retries and the failure. Another delivery cannot take the
     # messages between them.
@@ -331,12 +281,77 @@ async def deliver(conversation_id: str) -> None:
                     should_retry=lambda error: getattr(error, "is_retryable", True),
                 ),
                 deliver_turns,
+                conversation_id,
             )
+        except ChatHarnessNotConnectedError as error:
+            error_message = str(error)
+            if endpoint := get_settings().urls.endpoint.rstrip("/"):
+                error_message += f" Open {endpoint}/settings/providers"
+            await record_failed(conversation_id, error_message)
         except ChatHarnessError as error:
-            await record_failed(f"{error} Send the message again to retry.")
+            await record_failed(conversation_id, f"{error} Send the message again to retry.")
         except Exception:
             logger.exception("Chat delivery failed for conversation %s", conversation_id)
-            await record_failed(DELIVERY_FAILED_MESSAGE)
+            await record_failed(conversation_id, DELIVERY_FAILED_MESSAGE)
+
+
+async def acknowledge_messages(conversation_id: str) -> None:
+    async with step_session() as session:
+        conversation = await session.get(Conversation, conversation_id)
+        await acknowledge_pending(session, conversation)
+
+
+async def deliver_turns(conversation_id: str) -> None:
+    async with step_session() as session:
+        conversation = await session.get(Conversation, conversation_id)
+        await deliver_pending(session, conversation)
+
+
+async def end_turns(conversation_id: str, error_message: str) -> str | None:
+    """Give the pending messages the failed state; a delivered turn runs on. On a
+    live channel, also save a reply that says so, and return its id."""
+    async with step_session() as session:
+        conversation = await session.get(Conversation, conversation_id)
+        messages = await conversation.end_pending_messages(session, MessageState.FAILED)
+        person_messages = [message for message in messages if not message.is_internal]
+        if person_messages and conversation.connection and not await conversation.is_held(session):
+            newest_message = max(
+                person_messages, key=lambda message: (message.created_at, message.id)
+            )
+            # Only an operator can change a setting or credential.
+            if conversation.account.kind == AccountKind.OPERATOR:
+                message = error_message
+            else:
+                message = DELIVERY_FAILED_MESSAGE
+            reply = await conversation.create_message(
+                session,
+                body=message,
+                role=MessageRole.ASSISTANT,
+                reply_to=newest_message,
+            )
+            return reply.id
+
+
+async def send_reply(conversation_id: str, reply_id: str) -> None:
+    async with step_session() as session:
+        conversation = await session.get(Conversation, conversation_id)
+        reply = await session.get(Message, reply_id)
+        await conversation.channel.send_reply(session, conversation, reply)
+
+
+async def record_failed(conversation_id: str, error_message: str) -> None:
+    reply_id = await DBOS.run_step_async(
+        StepOptions(name="chat.deliver.failed"), end_turns, conversation_id, error_message
+    )
+    await reset_live_stream(conversation_id)
+    await publish(conversation_id, {"type": "error", "detail": error_message})
+    if reply_id:
+        await DBOS.run_step_async(
+            StepOptions(name="chat.deliver.reply", retries_allowed=True, max_attempts=5),
+            send_reply,
+            conversation_id,
+            reply_id,
+        )
 
 
 async def acknowledge_pending(session: AsyncSession, conversation: Conversation) -> None:
@@ -381,8 +396,10 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
             bot_id, prompt, tools = await get_agent(session, conversation, sign_ins=sign_ins)
             try:
                 config = await get_config(session, bot_id, conversation.account_id)
-            except (AgentConfigError, HarnessNotConnectedError) as error:
+            except AgentConfigError as error:
                 raise ChatHarnessError(f"The agent cannot run: {error}") from error
+            except HarnessNotConnectedError as error:
+                raise ChatHarnessNotConnectedError(f"The agent cannot run: {error}") from error
             if not config.harness_class.adapter_command:
                 adapters = ", ".join(
                     harness.name for harness in get_harnesses() if harness.adapter_command

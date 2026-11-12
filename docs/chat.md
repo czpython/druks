@@ -91,8 +91,10 @@ A turn that the agent already runs keeps running, and the next delivery saves
 its reply. In a Slack, GitHub, or WhatsApp conversation, Druks also replies in
 the channel that the message failed, unless the conversation is paused or its
 connection was removed. When a person must change a setting or credential, the
-reply names it, except in a Bot's conversation. Send the message again in the
-channel to retry.
+reply names it, except in a Bot's conversation. When the provider is not
+connected, the reply also gives the link to **Settings → Providers**
+when `urls.endpoint` is set. Connect the provider first. For any other failure,
+send the message again in the channel to retry.
 
 A browser connection loss does not send the message again. The page connects
 again and reads the saved messages and available live events.
