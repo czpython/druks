@@ -1,15 +1,18 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { createServer } from 'node:https'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { test as base, expect, type APIRequestContext, type Page } from '@playwright/test'
 
 import type { Conversation } from '../src/chat/state'
-import { startAnthropic, textOf, TOKEN, USER_MARKER, type Anthropic } from './anthropic'
+import { answerAnthropic } from './anthropic'
+import { Model, USER_MARKER } from './model'
+import { answerOpenAi } from './openai'
 
 export { expect }
-export { Gate, TITLE } from './anthropic'
+export { Gate, TITLE } from './model'
 
 /** The compose project that scripts/install.sh made, with the test CA in its e2e folder. */
 export const installDir = process.env.DRUKS_INSTALL_DIR ?? join(homedir(), 'druks')
@@ -20,21 +23,64 @@ declare global {
   }
 }
 
+/** The harness, model and billing of the Chat agent. Null inherits the installation default. */
+interface Agent {
+  harness: string | null
+  model: string | null
+  billing: string | null
+}
+
 // U<n> marks a turn's message and A<n> starts its reply, so a marker gives its place on the page.
 const MARKER = /\b[UA]\d+-[a-z0-9]+\b/g
 
-export const test = base.extend<{ violations: Set<string> }, { anthropic: Anthropic }>({
+export const test = base.extend<
+  { agent: Agent, agentSettings: void, violations: Set<string> },
+  { anthropic: Model, openai: Model, mock: void }
+>({
   // Playwright reads the fixtures that a fixture needs from this pattern, also when it is empty.
   // eslint-disable-next-line no-empty-pattern
-  anthropic: [async ({}, provide) => {
+  anthropic: [async ({}, provide) => provide(new Model()), { scope: 'worker' }],
+  // eslint-disable-next-line no-empty-pattern
+  openai: [async ({}, provide) => provide(new Model()), { scope: 'worker' }],
+  // One HTTPS server answers for both hosts: they resolve to one address, and the proxy dials
+  // port 443 for each.
+  mock: [async ({ anthropic, openai }, provide) => {
     const certificates = join(installDir, 'e2e')
-    const anthropic = await startAnthropic({
-      cert: readFileSync(join(certificates, 'api.anthropic.com.pem'), 'utf8'),
-      key: readFileSync(join(certificates, 'api.anthropic.com.key'), 'utf8'),
+    const server = createServer({
+      cert: readFileSync(join(certificates, 'mock.pem'), 'utf8'),
+      key: readFileSync(join(certificates, 'mock.key'), 'utf8'),
+    }, (request, response) => {
+      const host = request.headers.host
+      console.log(`${host}: ${request.method} ${request.url}`)
+      const answer = host === 'api.openai.com' ? answerOpenAi(openai, request, response) : answerAnthropic(anthropic, request, response)
+      answer.catch((error) => {
+        console.error(`${host}:`, error)
+        response.destroy()
+      })
     })
-    await provide(anthropic)
-    await anthropic.close()
-  }, { scope: 'worker' }],
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      // Every interface: a container reaches this process at the Docker bridge address on Linux,
+      // and through the host address of Docker Desktop on macOS.
+      server.listen(443, '0.0.0.0', resolve)
+    })
+    await provide()
+    server.closeAllConnections()
+    await new Promise((resolve) => server.close(resolve))
+  }, { scope: 'worker', auto: true }],
+  agent: [{ harness: null, model: null, billing: null }, { option: true }],
+  // Each test sets the Chat agent, so no test runs on the harness of the test before it.
+  agentSettings: [async ({ request, agent }, provide) => {
+    const response = await request.patch('/api/settings/apps', {
+      data: {
+        agentHarnesses: { 'chat.bot': agent.harness },
+        agentModels: { 'chat.bot': agent.model },
+        agentBillings: { 'chat.bot': agent.billing },
+      },
+    })
+    expect(response.status(), await response.text()).toBe(200)
+    await provide()
+  }, { auto: true }],
   violations: async ({ page }, provide) => {
     const violations = new Set<string>()
     await page.exposeFunction('reportRenderViolation', (detail: string) => violations.add(detail))
@@ -93,11 +139,12 @@ function watchMessages(pattern: string) {
 
 const normalize = (text: string) => text.replace(/\s+/g, ' ').trim()
 
-/** The page shows each saved message once and in order. Each reply is what the mock streamed for
- * its turn. The second turn's request carries the first turn. Every request carries the real token. */
+/** The page shows each saved message once and in order. Each reply is what the model streamed for
+ * its turn. The second turn's request carries the first turn. Each request that quotes a turn
+ * carries the real credential. */
 export async function expectChatFacts(
-  { page, request, anthropic, violations }: { page: Page, request: APIRequestContext, anthropic: Anthropic, violations: Set<string> },
-  id: string,
+  { page, request, violations }: { page: Page, request: APIRequestContext, violations: Set<string> },
+  { id, model, credential }: { id: string, model: Model, credential: string },
 ) {
   const log = page.getByRole('log', { name: 'Messages' })
   await expect.poll(async () => {
@@ -118,18 +165,21 @@ export async function expectChatFacts(
   const conversation = await getConversation(request, id)
   const turns = conversation.messages.filter((message) => message.role === 'user').map((message) => {
     const marker = message.body.match(USER_MARKER)![0]
-    const requests = anthropic.completions.filter((completion) => completion.marker === marker)
+    const requests = model.completions.filter((completion) => completion.marker === marker)
     expect(requests, `one model request for ${marker}`).toHaveLength(1)
     const reply = conversation.messages.find((saved) => saved.replyTo === message.id)
     expect(reply?.body, `the reply to ${marker} is what the mock streamed`).toBe(requests[0].streamed.join(''))
-    return { message, reply: reply!, request: requests[0] }
+    return { marker, message, reply: reply!, request: requests[0] }
   })
 
   const [first, second] = turns
-  const history = second.request.messages.slice(0, -1).map(textOf).join('\n')
+  const history = second.request.messages.slice(0, -1).join('\n')
   expect(history, 'the second turn carries the first message').toContain(first.message.body)
   expect(history, 'the second turn carries the first reply').toContain(first.reply.body)
 
-  const authorizations = new Set(anthropic.completions.map((completion) => completion.authorization))
-  expect([...authorizations], 'every model request carries the real token').toEqual([`Bearer ${TOKEN}`])
+  // The mock serves every test of the worker. A side request, such as the name of the
+  // conversation, quotes a turn's message, so the markers find this test's requests.
+  const requests = model.completions.filter((completion) => turns.some(({ marker }) => completion.messages.some((text) => text.includes(marker))))
+  const credentials = new Set(requests.map((completion) => completion.credential))
+  expect([...credentials], 'every model request carries the real credential').toEqual([credential])
 }

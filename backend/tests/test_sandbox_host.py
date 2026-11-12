@@ -68,6 +68,7 @@ class _FakeConnection:
         *,
         check: bool,
         timeout: float,
+        stdin: int,
     ) -> _FakeCompletedProcess:
         self.run_calls.append((command, {"check": check, "timeout": timeout}))
         return self.run_result

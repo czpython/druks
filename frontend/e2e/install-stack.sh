@@ -9,18 +9,18 @@ set -euo pipefail
 e2e="$(cd "$(dirname "$0")" && pwd)"
 install_dir="${DRUKS_INSTALL_DIR:-$HOME/druks}"
 
-# The mock serves api.anthropic.com with a certificate from this CA. Each extension is
-# explicit, because OpenSSL and the LibreSSL of macOS add different ones by default.
+# The mock serves api.anthropic.com and api.openai.com with one certificate from this CA.
+# Each extension is explicit, because OpenSSL and the LibreSSL of macOS add different ones
+# by default.
 mkdir -p "$install_dir/e2e"
 cd "$install_dir/e2e"
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=Druks E2E CA" \
   -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign" \
   -addext "subjectKeyIdentifier=hash" -keyout ca.key -out ca.pem
-openssl req -newkey rsa:2048 -nodes -subj "/CN=api.anthropic.com" \
-  -keyout api.anthropic.com.key -out api.anthropic.com.csr
-openssl x509 -req -in api.anthropic.com.csr -days 2 -CA ca.pem -CAkey ca.key -CAcreateserial \
-  -extfile <(printf 'subjectAltName=DNS:api.anthropic.com\nbasicConstraints=CA:FALSE\nauthorityKeyIdentifier=keyid\n') \
-  -out api.anthropic.com.pem
+openssl req -newkey rsa:2048 -nodes -subj "/CN=Druks E2E mock" -keyout mock.key -out mock.csr
+openssl x509 -req -in mock.csr -days 2 -CA ca.pem -CAkey ca.key -CAcreateserial \
+  -extfile <(printf 'subjectAltName=DNS:api.anthropic.com,DNS:api.openai.com\nbasicConstraints=CA:FALSE\nauthorityKeyIdentifier=keyid\n') \
+  -out mock.pem
 echo "ssl_verify_upstream_trusted_ca: /e2e/ca.pem" > mitmproxy.yaml
 
 # The installer keeps an override that exists.

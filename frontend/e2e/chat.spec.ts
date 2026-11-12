@@ -1,3 +1,4 @@
+import { TOKEN } from './anthropic'
 import {
   compose, expect, expectChatFacts, Gate, getConversation, listBoxes, markTurns, send, startConversation, test, TITLE,
 } from './fixtures'
@@ -19,7 +20,7 @@ test('two turns share one box, and a reload shows each message once', async ({ p
   expect(listBoxes()).toEqual(boxes)
 
   await page.reload()
-  await expectChatFacts({ page, request, anthropic, violations }, id)
+  await expectChatFacts({ page, request, violations }, { id, model: anthropic, credential: `Bearer ${TOKEN}` })
 })
 
 test('Stop keeps the streamed text, and the next turn runs', async ({ page, request, anthropic, violations }) => {
@@ -38,7 +39,7 @@ test('Stop keeps the streamed text, and the next turn runs', async ({ page, requ
 
   await send(page, `${second.user} Are you there?`)
   await expect(log).toContainText(`${second.reply} Still here.`)
-  await expectChatFacts({ page, request, anthropic, violations }, id)
+  await expectChatFacts({ page, request, violations }, { id, model: anthropic, credential: `Bearer ${TOKEN}` })
 })
 
 test('a turn that runs through a Druks restart shows its reply once', async ({ page, request, anthropic, violations }) => {
@@ -57,5 +58,5 @@ test('a turn that runs through a Druks restart shows its reply once', async ({ p
 
   await send(page, `${second.user} Still there?`)
   await expect(log).toContainText(`${second.reply} Back again.`)
-  await expectChatFacts({ page, request, anthropic, violations }, id)
+  await expectChatFacts({ page, request, violations }, { id, model: anthropic, credential: `Bearer ${TOKEN}` })
 })

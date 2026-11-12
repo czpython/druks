@@ -653,7 +653,9 @@ class Host:
         joined = " ".join(shlex.quote(part) for part in cmd)
         if cwd:
             joined = f"cd {shlex.quote(cwd)} && {joined}"
-        completed = await conn.run(joined, check=False, timeout=timeout)
+        # Without input, asyncssh keeps stdin open, and a CLI that reads stdin to its end waits
+        # until the timeout.
+        completed = await conn.run(joined, check=False, timeout=timeout, stdin=asyncssh.DEVNULL)
         # asyncssh's returncode is the exit status, or the negative signal number when
         # the command was killed (an OOM'd clone dies on SIGKILL → -9), or None if the
         # channel closed with neither. A signal death must read as failure — coercing it
