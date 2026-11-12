@@ -33,7 +33,7 @@ _ERROR_TYPES = {
 class OpenCodeHarness(Harness):
     name = "opencode"
     billing_options = frozenset({"api_key"})
-    default_model = "anthropic/claude-sonnet-4-5"
+    default_model = "anthropic/claude-sonnet-4-6"
     command = "opencode"
     # The server writes nothing until the message POST completes; the wrapper
     # owns an earlier deadline so it can abort the OpenCode session cleanly.
@@ -54,10 +54,21 @@ class OpenCodeHarness(Harness):
         include_apps: bool = False,
     ) -> dict:
         """The adapter reads no _meta: the config rides OPENCODE_CONFIG_CONTENT, and a mode
-        is an agent. A database under the conversation root keeps its session apart."""
-        config: dict[str, object] = {"$schema": "https://opencode.ai/config.json", "model": model}
+        is an agent. A database under the conversation root keeps its session apart. The model
+        rides the global config file, which the naming call reads too."""
+        config_schema = "https://opencode.ai/config.json"
+        # OpenCode replaces a model that its model list lacks with a model of its own hosted
+        # provider, which needs no key. With one provider enabled, every call stays on the
+        # configured key. OpenCode rewrites a global config file that has no $schema.
+        global_config = {
+            "$schema": config_schema,
+            "enabled_providers": [model.partition("/")[0]],
+            "model": model,
+        }
+        files = {f"{sandbox_home}/.config/opencode/opencode.json": json.dumps(global_config)}
+        config: dict[str, object] = {"$schema": config_schema}
         if account_type == AccountKind.OPERATOR:
-            files = {f"{conversation_root}/instructions.md": prompt}
+            files[f"{conversation_root}/instructions.md"] = prompt
             config |= {
                 "instructions": [f"{conversation_root}/instructions.md"],
                 "permission": "allow",
@@ -67,7 +78,7 @@ class OpenCodeHarness(Harness):
             denied = ("edit", "bash", "read", "glob", "grep", "list", "webfetch", "websearch")
             permission = json.dumps(dict.fromkeys(denied, "deny"))
             agent = f"---\nmode: primary\npermission: {permission}\n---\n{prompt}\n"
-            files = {f"{conversation_root}/.opencode/agents/druks.md": agent}
+            files[f"{conversation_root}/.opencode/agents/druks.md"] = agent
             mode = "druks"
         return {
             "meta": {},
@@ -125,8 +136,13 @@ class OpenCodeHarness(Harness):
         env = {
             **(extra_env or {}),
             "DRUKS_RUN_DIR": run_dir,
+            # One enabled provider, as in get_acp_session.
             "OPENCODE_CONFIG_CONTENT": json.dumps(
-                {"$schema": "https://opencode.ai/config.json", "mcp": mcp},
+                {
+                    "$schema": "https://opencode.ai/config.json",
+                    "enabled_providers": [provider],
+                    "mcp": mcp,
+                },
                 sort_keys=True,
             ),
             "DRUKS_SCHEMA": json.dumps(schema, sort_keys=True),

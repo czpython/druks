@@ -865,7 +865,8 @@ agent call finishes on the subscription. Manual refresh keeps a 60-second
 minimum between polls.
 
 The `claude` and `codex` CLIs run on their own vendor's subscription or key.
-`opencode` and `pi` run on an API key only, for Anthropic or OpenAI. A key for
+`opencode` and `pi` run on an API key only, for Anthropic or OpenAI. OpenCode uses
+only the provider of the agent's model. A key for
 a Models.dev provider stores, but an agent on that provider refuses to run: no
 proven transport carries its placeholder through the secrets proxy. A model ID
 is `provider/model` for each harness, for example `openai/gpt-5.5`.

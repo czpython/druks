@@ -120,13 +120,14 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
     assert "OPENCODE_AUTH_CONTENT" not in env
     assert env["DRUKS_RUN_DIR"].endswith("/run-1")
     assert env["DRUKS_PROVIDER"] == "anthropic"
-    assert env["DRUKS_MODEL"] == "claude-sonnet-4-5"
+    assert env["DRUKS_MODEL"] == "claude-sonnet-4-6"
     assert env["DRUKS_DEADLINE_SECONDS"] == "55"
     assert json.loads(env["DRUKS_SCHEMA"]) == {
         "type": "object",
         "properties": {"answer": {"type": "string"}},
     }
     config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+    assert config["enabled_providers"] == ["anthropic"]
     assert config["mcp"]["github"]["headers"] == {
         "Authorization": "Bearer {env:MCP_GITHUB_TOKEN}",
         "X-Trace-Key": "{env:MCP_TRACE_KEY}",
