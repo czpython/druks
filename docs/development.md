@@ -184,10 +184,11 @@ GitHub Actions workflow.
 
 The `On Pull Request E2E` workflow runs Chat end to end with Playwright on every
 pull request. It builds the Druks image from the pull request and installs it
-with `scripts/install.sh` on the docker provider. Only the model is fake: a
-scripted Anthropic API in the Playwright process answers for
-`api.anthropic.com`. The box, the secrets proxy, the sandbox image, and the
-`claude` CLI are real.
+with `scripts/install.sh` on the docker provider. Only the model is fake:
+scripted Anthropic and OpenAI APIs in the Playwright process answer for
+`api.anthropic.com` and `api.openai.com`. The specs run Chat on Claude, Codex,
+and OpenCode. The box, the secrets proxy, the sandbox image, and the CLIs are
+real.
 
 Run the lane on Linux or on macOS with Docker Desktop. The stack uses the host
 network and the ports of an installed Druks, so stop any other Druks stack

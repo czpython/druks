@@ -1,8 +1,8 @@
 name: On Pull Request E2E
 
 # Chat end to end on the stack that scripts/install.sh makes from this pull request. Only the
-# model is fake: a scripted Anthropic mock in the Playwright process. A required check must
-# always report, so the workflow has no path filter.
+# model is fake: scripted Anthropic and OpenAI APIs in the Playwright process. A required check
+# must always report, so the workflow has no path filter.
 on:
   pull_request:
     branches: [main, "codex/**"]
@@ -57,7 +57,7 @@ jobs:
         working-directory: frontend
       - run: npx playwright install --with-deps chromium
         working-directory: frontend
-      # The mock serves api.anthropic.com on port 443.
+      # The mock serves api.anthropic.com and api.openai.com on port 443.
       - run: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=443
       - run: npm run test:e2e
         working-directory: frontend
