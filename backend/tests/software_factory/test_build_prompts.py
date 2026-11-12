@@ -45,6 +45,7 @@ def _build() -> SimpleNamespace:
         assignee_name=None,
         assignee_email=None,
         related_repos=[],
+        blockers=[],
         skills=[
             SimpleNamespace(
                 name="python-house-rules",
@@ -195,6 +196,40 @@ async def test_implement_prompt_puts_red_ci_ahead_of_older_instructions():
     assert "## CI is red" in prompt
     assert "CI on `0f3a2c1d` is red." in prompt
     assert "## Revision request" not in prompt
+
+
+@pytest.mark.parametrize("template", ["generate_plan.md", "implement.md"])
+async def test_a_prompt_lists_each_blocker(template):
+    build = _build()
+    build.blockers = [
+        {"repo": "acme/api", "pr_number": 12, "title": "Add the endpoint"},
+        {"ticket_key": "ACME-2", "pr_number": None},
+    ]
+
+    prompt = await render_prompt(
+        f"software_factory/build/{template}",
+        build=build,
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+        **_CALL_KWARGS.get(template, {}),
+    )
+
+    assert "- acme/api#12: Add the endpoint" in prompt
+    assert "- ACME-2" in prompt
+
+
+async def test_a_build_without_blockers_renders_no_builds_on_section():
+    build = _build()
+    build.pr_number = None
+
+    prompt = await render_prompt(
+        "software_factory/build/implement.md",
+        build=build,
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+    )
+
+    assert "Builds on" not in prompt
 
 
 def test_build_prompt_context_covers_template_attrs():

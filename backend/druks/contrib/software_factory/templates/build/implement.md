@@ -37,6 +37,7 @@ acceptance criterion — nothing more, nothing less.
 {% include "software_factory/build/_header.md" %}
 {% include "software_factory/build/_contract.md" %}
 {% include "software_factory/build/_related_repos.md" %}
+{% include "software_factory/build/_blockers.md" %}
 {% include "software_factory/build/_skills.md" %}
 {% if build.journal.red_ci_report %}
 ## CI is red
@@ -77,7 +78,7 @@ After a successful push, dismiss the PR's existing reviews (`gh` is authenticate
 
 Then, on every implementation revision, republish the plan block so a later plan revision can never leave it stale. In the current PR body, replace only the text between the two plan block comments with the block regenerated from the current plan and acceptance criteria. Keep everything outside those comments as it is: a person may have filled it in. Like the review dismissal, a body-republish failure must never block your delivery — record it in known_risks and move on, because the successful push is the deliverable.
 {% else %}
-After a successful push, open the draft PR against the default branch (`gh` is authenticated). When the repo has a GitHub pull request template, the body is that template filled in from the plan and your diff, with the plan block where the template asks for a description, or at the end when it has no such section. Tick a template checkbox only when your work proves it; leave unticked any box a person must confirm, such as a contributor agreement. Without a template, the body is the plan block alone.
+After a successful push, open the draft PR against the default branch (`gh` is authenticated). When the repo has a GitHub pull request template, the body is that template filled in from the plan and your diff, with the plan block where the template asks for a description, or at the end when it has no such section. Tick a template checkbox only when your work proves it; leave unticked any box a person must confirm, such as a contributor agreement. Without a template, the body is the plan block.{% if build.blockers | selectattr("pr_number") | list %} With or without a template, the body ends with a `## Builds on` section that lists each pull request from **Builds on** above as `- <repo>#<number>`.{% endif %}
 
 - Title: `<ticket ref> - <ticket title>` for a Linear, Jira, or Druks board ticket (just the ref when the title is empty); the GitHub issue title verbatim when the source is GitHub.
 - When the repo gives a commit message format, the title follows it instead, with the ticket title as its message, because a squash merge makes the title the commit subject.

@@ -25,4 +25,5 @@ class BuildPromptContext:
     assignee_email: str | None
     related_repos: list[ProjectRepo]
     skills: list[Skill]
+    blockers: list[dict]
     journal: BuildJournal

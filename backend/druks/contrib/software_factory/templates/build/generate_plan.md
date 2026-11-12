@@ -64,6 +64,7 @@ request to your acceptance criteria. Wrong shape here compounds into every step 
 {% include "software_factory/build/_header.md" %}
 {% include "software_factory/build/_contract.md" %}
 {% include "software_factory/build/_related_repos.md" %}
+{% include "software_factory/build/_blockers.md" %}
 {% include "software_factory/build/_skills.md" %}
 {% if answered_questions %}
 ## Answered questions

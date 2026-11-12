@@ -183,6 +183,7 @@ class Build(Workflow):
             await item.announce("build.rejected", reason=str(error))
             raise
         account_id = None
+        blockers = {}
         if tracker := await SoftwareFactory.get_tracker():
             async with tracker:
                 blockers = await tracker.get_blocked_by(ticket["identifier"])
@@ -196,18 +197,22 @@ class Build(Workflow):
             account_id=account_id,
             assignee_email=ticket["assignee_email"],
             assignee_name=ticket["assignee_name"],
+            blockers=list(blockers),
         )
 
     async def run_multistep(
         self,
         assignee_email: str | None = None,
         assignee_name: str | None = None,
+        blockers: tuple[str, ...] = (),
     ) -> None:
-        # Steps read the policy, the profile, and the settings, so replay reuses them.
+        # Steps read the policy, the profile, the settings, and the blockers, so replay
+        # reuses them.
         resolved = await self._load_policy_and_profile()
         self._policy = RepoPolicy.model_validate(resolved["policy"])
         self._profile = resolved["profile"]
         self._settings = await self._load_settings()
+        self._blockers = await self._load_blockers()
 
         if await self._plan_phase():
             await self._implement_phase()
@@ -230,6 +235,7 @@ class Build(Workflow):
             skills=await Skill.list_delivered(
                 db_session(), self._profile.get("recommended_skills", [])
             ),
+            blockers=self._blockers,
             journal=self.journal,
         )
         return {
@@ -254,6 +260,21 @@ class Build(Workflow):
     async def _load_settings(self) -> "Build.Settings":
         # Replay reuses the settings that the run started with, not later edits.
         return await self.settings()
+
+    @step
+    async def _load_blockers(self) -> list[dict]:
+        """Each blocker's ticket key, or its merged PR when Druks built it."""
+        source = (await self.subject).source
+        blockers = []
+        for key in self.input.blockers:
+            item = await WorkItem.get_for_ticket_key(source=source, ticket_key=key)
+            if item and item.resolution == Resolution.MERGED:
+                blockers.append(
+                    {"repo": item.repo, "pr_number": item.pr_number, "title": item.title}
+                )
+            else:
+                blockers.append({"ticket_key": key, "pr_number": None})
+        return blockers
 
     async def _plan_phase(self) -> bool:
         """Return True when the plan is approved for implementation."""
