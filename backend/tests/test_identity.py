@@ -2,6 +2,7 @@ import base64
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -9,6 +10,7 @@ from conftest import IDENTITY_HEADER, connect_provider, header_client
 from druks.accounts.dependencies import resolve_single_operator
 from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.models import Account, PersonalAccessToken
+from druks.agents import Agent
 from druks.harnesses import providers
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.secrets.datastructures import Audience
@@ -16,6 +18,12 @@ from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _no_usage_poll(monkeypatch):
+    # A connect polls the new subscription's usage, which would call the provider.
+    monkeypatch.setattr(providers.Provider, "poll_usage", AsyncMock())
 
 
 def _client(tmp_path: Path, **settings_overrides) -> TestClient:
@@ -480,3 +488,22 @@ def test_the_session_era_routes_are_gone(tmp_path, druks_db):
             assert response.status_code == 404
             assert "set-cookie" not in response.headers
         assert "set-cookie" not in client.get("/api/auth/me").headers
+
+
+def test_a_connect_reads_the_new_subscription_s_usage_before_it_wakes_quota_waits(
+    tmp_path, monkeypatch
+):
+    calls: list[str] = []
+
+    async def poll_usage(provider, session, subscription):
+        calls.append(f"poll {subscription.identity['email']}")
+
+    async def wake_runs_waiting_for_quota(session):
+        calls.append("wake")
+
+    monkeypatch.setattr(providers.Provider, "poll_usage", poll_usage)
+    monkeypatch.setattr(Agent, "wake_runs_waiting_for_quota", wake_runs_waiting_for_quota)
+    with _client(tmp_path) as client:
+        assert _connect(client, monkeypatch, email="second@example.com").status_code == 200
+
+    assert calls == ["poll second@example.com", "wake"]

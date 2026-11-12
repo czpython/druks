@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from druks.accounts.dependencies import current_session_account, current_session_or_setup
 from druks.accounts.models import Account
 from druks.accounts.schemas import AccountResponse
+from druks.agents import Agent
 from druks.api.dependencies import SessionDep
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
@@ -169,7 +170,7 @@ async def sign_in_with_token(
         credentials, expires_at = provider.parse_token(token)
     except ConnectError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    return await VaultSecret.store(
+    subscription = await VaultSecret.store(
         session,
         SecretKind.SUBSCRIPTION,
         Audience.provider(provider.id),
@@ -179,6 +180,8 @@ async def sign_in_with_token(
         identity={"email": None},
         expires_at=expires_at,
     )
+    await Agent.wake_runs_waiting_for_quota(session)
+    return subscription
 
 
 async def _store_connection(
@@ -200,7 +203,7 @@ async def _store_connection(
         # An unbound flow attaches to this request's account when one exists.
         # get_or_create is atomic, so concurrent completions of one email converge.
         resolved = account or await Account.get_or_create(session, completed.provider_email)
-    await VaultSecret.store(
+    subscription = await VaultSecret.store(
         session,
         SecretKind.SUBSCRIPTION,
         Audience.provider(provider.id),
@@ -213,6 +216,13 @@ async def _store_connection(
     # Build the reply, then commit before provider I/O. Flushed rows hold their locks
     # across an await, and after the commit the reply would need another read.
     response = AccountResponse.model_validate(resolved)
+    await session.commit()
+    # A woken call reads its reset off the latest scrape, which is keyed by the Druks
+    # account, so the new subscription's own scrape commits with the wake. The catalog
+    # refresh can roll back, so both commit before it.
+    if provider.has_usage(subscription):
+        await provider.poll_usage(session, subscription)
+    await Agent.wake_runs_waiting_for_quota(session)
     await session.commit()
     try:
         # The flow is already spent, so a failed refresh only logs.

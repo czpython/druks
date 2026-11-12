@@ -146,9 +146,9 @@ def _inline_agent_steps(monkeypatch):
     # Run agent attempts and quota lookups inline while retaining their DBOS step boundaries.
     checkpoints = []
 
-    async def run_inline(options, function):
+    async def run_inline(options, function, *args):
         checkpoints.append(options)
-        return await function()
+        return await function(*args)
 
     sleep = AsyncMock()
     monkeypatch.setattr(agents.DBOS, "run_step_async", run_inline)
@@ -831,16 +831,15 @@ def _async_scrape(make):
     return latest_for
 
 
-async def test_body_level_quota_waits_for_the_reset_once(
-    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
-):
-    from druks.harnesses.exceptions import HarnessRateLimitError
-
-    now = datetime(2026, 8, 1, 10, tzinfo=UTC)
-    failures = [HarnessRateLimitError(f"quota {attempt}") for attempt in range(2)]
+def _patch_quota(monkeypatch, tmp_path, current_run, failures, *, now):
+    """An agent whose calls fail with ``failures`` in turn (None succeeds), on a clock stopped
+    at ``now``, with a scrape whose binding window resets an hour later."""
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     sandbox.run_agent = AsyncMock(
-        side_effect=[make_agent_result(None, agent="dummy", error=failure) for failure in failures]
+        side_effect=[
+            make_agent_result(None if failure else {"ok": True}, agent="dummy", error=failure)
+            for failure in failures
+        ]
     )
     _patch_ephemeral(monkeypatch, sandbox)
     clock = MagicMock()
@@ -869,21 +868,47 @@ async def test_body_level_quota_waits_for_the_reset_once(
             )
         ),
     )
-    jitter = MagicMock(return_value=90.0)
-    monkeypatch.setattr(agents.random, "uniform", jitter)
+    monkeypatch.setattr(agents.random, "uniform", MagicMock(return_value=90.0))
+    current_run._reap_run = AsyncMock()
+    return sandbox
+
+
+async def _switch_claude_account(email: str) -> None:
+    # The run's account connects another Claude account in place of the limited one.
+    account = await Account.get_default(db_session())
+    await VaultSecret.store(
+        db_session(),
+        SecretKind.SUBSCRIPTION,
+        Audience.provider("anthropic"),
+        account_id=account.id,
+        secrets={"claudeAiOauth": {"accessToken": email}},
+        identity={"email": email},
+    )
+
+
+async def test_body_level_quota_waits_for_the_reset_once(
+    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+):
+    from druks.harnesses.exceptions import HarnessRateLimitError
+
+    now = datetime(2026, 8, 1, 10, tzinfo=UTC)
+    failures = [HarnessRateLimitError(f"quota {attempt}") for attempt in range(2)]
+    _patch_quota(monkeypatch, tmp_path, current_run, failures, now=now)
     set_run_phase = AsyncMock()
     monkeypatch.setattr(agents, "set_run_phase", set_run_phase)
     post_to_chat = AsyncMock()
     monkeypatch.setattr(agents, "_post_to_chat", post_to_chat)
-    current_run._reap_run = AsyncMock()
     current_run.conversation_id = "conversation-1"
-    checkpoints, sleep = _inline_agent_steps
+    current_run.sleep = AsyncMock(return_value=False)
+    checkpoints, _sleep = _inline_agent_steps
 
     with pytest.raises(HarnessRateLimitError) as excinfo:
         await DUMMY_AGENT()
 
     assert excinfo.value is failures[-1]
-    sleep.assert_awaited_once_with(60 * 60 + 90.0)
+    current_run.sleep.assert_awaited_once_with(
+        60 * 60 + 90.0, label="waiting_for_quota", until="agents.quota"
+    )
     [wait, resume] = [call.args for call in post_to_chat.await_args_list]
     assert (wait[:2], wait[2].func, wait[2].keywords) == (
         ("wf-9", "chat.report_quota_wait"),
@@ -891,12 +916,10 @@ async def test_body_level_quota_waits_for_the_reset_once(
         {"resumes_at": now + timedelta(hours=1, seconds=90)},
     )
     assert resume == ("wf-9", "chat.report_quota_resume", report_quota_resume)
-    jitter.assert_called_once_with(60.0, 120.0)
     set_run_phase.assert_any_await(
         "waiting_for_quota",
         ends_at=now + timedelta(hours=1, seconds=90),
     )
-    current_run._reap_run.assert_awaited_once()
     assert [options["name"] for options in checkpoints] == [
         "test.agent.dummy",
         "test.agent.dummy.retry_wait",
@@ -905,6 +928,58 @@ async def test_body_level_quota_waits_for_the_reset_once(
     calls = await AgentCall.list_for_run(db_session(), "wf-9")
     assert len(calls) == 2
     assert all(call.failure_code == "rate_limited" for call in calls)
+
+
+async def test_a_quota_wait_woken_without_a_switch_waits_out_its_reset(
+    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+):
+    from druks.harnesses.exceptions import HarnessRateLimitError
+
+    now = datetime(2026, 8, 1, 10, tzinfo=UTC)
+    sandbox = _patch_quota(
+        monkeypatch, tmp_path, current_run, [HarnessRateLimitError("quota"), None], now=now
+    )
+    current_run.sleep = AsyncMock(side_effect=[True, False])
+
+    assert await DUMMY_AGENT() == DummyOutput(ok=True)
+
+    assert current_run.sleep.await_count == 2
+    assert current_run.sleep.await_args.args == (60 * 60 + 90.0,)
+    assert sandbox.run_agent.await_count == 2
+
+
+async def test_a_switched_account_retries_now_and_waits_out_its_own_limit_once(
+    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+):
+    from druks.harnesses.exceptions import HarnessRateLimitError
+
+    now = datetime(2026, 8, 1, 10, tzinfo=UTC)
+    failures = [HarnessRateLimitError(f"quota {attempt}") for attempt in range(3)]
+    sandbox = _patch_quota(monkeypatch, tmp_path, current_run, failures, now=now)
+
+    async def switch_on_the_first_sleep(*_args, **_kwargs):
+        if current_run.sleep.await_count == 1:
+            await _switch_claude_account("second@example.com")
+            return True
+        return False
+
+    current_run.sleep = AsyncMock(side_effect=switch_on_the_first_sleep)
+    checkpoints, _sleep = _inline_agent_steps
+
+    with pytest.raises(HarnessRateLimitError) as excinfo:
+        await DUMMY_AGENT()
+
+    assert excinfo.value is failures[-1]
+    assert current_run.sleep.await_count == 2
+    assert sandbox.run_agent.await_count == 3
+    assert [options["name"] for options in checkpoints] == [
+        "test.agent.dummy",
+        "test.agent.dummy.retry_wait",
+        "test.agent.dummy.wait_remaining",
+        "test.agent.dummy",
+        "test.agent.dummy.retry_wait",
+        "test.agent.dummy",
+    ]
 
 
 async def test_body_level_quota_reset_over_six_hours_reraises_without_sleeping(
@@ -940,17 +1015,14 @@ async def test_body_level_quota_reset_over_six_hours_reraises_without_sleeping(
             )
         ),
     )
-    jitter = MagicMock()
-    monkeypatch.setattr(agents.random, "uniform", jitter)
     current_run._reap_run = AsyncMock()
-    _, sleep = _inline_agent_steps
+    current_run.sleep = AsyncMock()
 
     with pytest.raises(HarnessUsageLimitError) as excinfo:
         await DUMMY_AGENT()
 
     assert excinfo.value is failure
-    sleep.assert_not_awaited()
-    jitter.assert_not_called()
+    current_run.sleep.assert_not_awaited()
     current_run._reap_run.assert_not_awaited()
     [call] = await AgentCall.list_for_run(db_session(), "wf-9")
     assert call.failure_code == "usage_limit"

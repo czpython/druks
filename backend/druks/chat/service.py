@@ -764,7 +764,7 @@ async def report_quota_wait(session: AsyncSession, run: Run, *, resumes_at: date
 
 
 async def report_quota_resume(session: AsyncSession, run: Run) -> str | None:
-    """Tell the chat that started a run that it continues after the usage limit reset.
+    """Tell the chat that started a run that it continues after its usage-limit wait.
     Returns the conversation to deliver."""
     return await report_outcome(session, run, QUOTA_RESUMED_MESSAGE.format(run=run.id))
 

@@ -568,6 +568,7 @@ async def test_wait_takes_only_the_facts_of_its_topic(runtime):
 
 async def test_sleep_releases_the_sandbox_and_ends_on_an_answer(runtime, monkeypatch):
     reaped: list[str] = []
+    answered: list[bool] = []
 
     async def reap(self) -> None:
         reaped.append(self.workflow_id)
@@ -578,7 +579,9 @@ async def test_sleep_releases_the_sandbox_and_ends_on_an_answer(runtime, monkeyp
         subject = Widget
 
         async def run_multistep(self) -> None:
-            await self.sleep(600, label="Waiting for checks", until="checks.finished")
+            answered.append(
+                await self.sleep(600, label="Waiting for checks", until="checks.finished")
+            )
 
     subject = Widget(id=770772)
     try:
@@ -593,6 +596,7 @@ async def test_sleep_releases_the_sandbox_and_ends_on_an_answer(runtime, monkeyp
         async with session_scope(runtime.engine):
             await SleepFlow.answer(subject, "checks.finished")
         await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+        assert answered == [True]
     finally:
         workflows._items.pop(SleepFlow.kind)
 
@@ -632,6 +636,8 @@ async def test_sleep_takes_an_answer_sent_while_it_releases_the_sandbox(runtime,
 
 
 async def test_sleep_without_a_topic_ends_after_its_seconds(runtime, monkeypatch):
+    answered: list[bool] = []
+
     async def reap(self) -> None:
         return None
 
@@ -641,11 +647,12 @@ async def test_sleep_without_a_topic_ends_after_its_seconds(runtime, monkeypatch
         subject = Widget
 
         async def run_multistep(self) -> None:
-            await self.sleep(0.5, label="Pausing")
+            answered.append(await self.sleep(0.5, label="Pausing"))
 
     try:
         workflow_id = await PauseFlow.start(subject=Widget(id=770774))
         await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+        assert answered == [False]
     finally:
         workflows._items.pop(PauseFlow.kind)
 
@@ -676,6 +683,41 @@ async def test_wait_fails_with_the_failure_it_is_answered(runtime):
         assert done.failure_code == "wait_failed"
     finally:
         workflows._items.pop(FailingWaitFlow.kind)
+
+
+async def test_a_quota_wake_reaches_only_the_runs_waiting_out_a_quota(runtime):
+    class QuotaWaitFlow(Workflow):
+        subject = Widget
+
+        async def run_multistep(self) -> None:
+            await self.wait("agents.quota", label="waiting_for_quota", ttl_seconds=60)
+
+    class ChecksWaitFlow(Workflow):
+        subject = Widget
+
+        async def run_multistep(self) -> None:
+            await self.wait("checks.finished", label="Waiting for checks", ttl_seconds=60)
+
+    try:
+        quota_id = await QuotaWaitFlow.start(subject=Widget(id=770772))
+        checks_id = await ChecksWaitFlow.start(subject=Widget(id=770773))
+
+        async def waiting() -> None:
+            while await get_run_phase(quota_id) != "waiting_for_quota" or (
+                await get_run_phase(checks_id) != "Waiting for checks"
+            ):
+                await asyncio.sleep(0.1)
+
+        await asyncio.wait_for(waiting(), 15)
+        async with session_scope(runtime.engine) as session:
+            await Agent.wake_runs_waiting_for_quota(session)
+
+        await _wait_for_run(runtime.engine, quota_id, lambda run: run.state == RunState.FINISHED)
+        assert (await _get_run(runtime.engine, checks_id)).state == RunState.RUNNING
+    finally:
+        await DBOS.cancel_workflow_async(checks_id)
+        workflows._items.pop(QuotaWaitFlow.kind)
+        workflows._items.pop(ChecksWaitFlow.kind)
 
 
 async def test_duplicate_replies_to_one_round_collapse(runtime):

@@ -864,6 +864,12 @@ while values stay unchanged. An exhausted window waits for its reset unless an
 agent call finishes on the subscription. Manual refresh keeps a 60-second
 minimum between polls.
 
+An agent call that hits a usage limit waits for the window's reset, up to six
+hours, and then retries once. If you sign in to another account for the agent's
+provider, or change the agent's model or billing during the wait, the call retries
+at once. If the new account is also limited, the call waits once more, for that
+account's reset.
+
 The `claude` and `codex` CLIs run on their own vendor's subscription or key.
 `opencode` and `pi` run on an API key only, for Anthropic or OpenAI. OpenCode uses
 only the provider of the agent's model. A key for

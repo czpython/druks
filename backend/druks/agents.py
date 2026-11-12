@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 from dbos import DBOS, StepOptions
 from pydantic import BaseModel, ConfigDict, ValidationError
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.apps.exceptions import AppBotError
 from druks.apps.loader import resolve_app
@@ -21,9 +23,10 @@ from druks.chat.enums import BotAccess
 from druks.chat.service import report_quota_resume, report_quota_wait
 from druks.db import db_session
 from druks.durable.activity import set_run_phase
-from druks.durable.engine import _step_engine, step_session
+from druks.durable.engine import _step_engine, get_dbos_client, step_session
+from druks.durable.enums import RunState
 from druks.durable.exceptions import WorkflowError
-from druks.durable.models import AgentCall, Artifact
+from druks.durable.models import AgentCall, Artifact, Run
 from druks.exceptions import ObjectNotFound
 from druks.files.datastructures import File
 from druks.files.exceptions import FileUnavailableError
@@ -55,6 +58,8 @@ __all__ = ["Agent", "AgentOutput", "Bot", "BotUser"]
 _QUOTA_FALLBACK_WAIT_SECONDS = 30 * 60
 _QUOTA_MAX_WAIT_SECONDS = 6 * 60 * 60
 _REAP_BEFORE_WAIT_SECONDS = 120
+# The topic a run waiting out a quota window listens on for a changed provider or account.
+_QUOTA_TOPIC = "agents.quota"
 
 _in_after_agent: ContextVar[bool] = ContextVar("_in_after_agent", default=False)
 
@@ -232,24 +237,6 @@ class Agent:
                     # re-runs the whole enclosing step from attempt one anyway.
                     await asyncio.sleep(delay * random.uniform(0.9, 1.1))
 
-        async def _quota_retry_wait() -> float:
-            # Runs as its own step: the body does no IO, and replay reuses the
-            # recorded wait instead of re-reading the scrape.
-            async with step_session() as session:
-                # The scrape belongs to the subscription account.
-                config = await get_config(session, self.id, workflow.account_id)
-                provider_id = config.model.partition("/")[0]
-                scrape = await UsageScrape.latest_for(
-                    session, provider_id, config.charged_account_id
-                )
-                if scrape:
-                    now = datetime.now(UTC)
-                    reset = scrape.soonest_reset_after(now)
-                    if reset:
-                        return (reset - now).total_seconds()
-                # No scrape yet, or nothing ahead of now: a blind half hour.
-                return _QUOTA_FALLBACK_WAIT_SECONDS
-
         transient_retry_index = 0
         quota_retried = False
         while True:
@@ -268,28 +255,34 @@ class Agent:
                     # Jitter, so a provider outage doesn't wake every run at once.
                     wait_seconds = delay * random.uniform(0.9, 1.1)
                 elif error.retry is Retry.QUOTA:
-                    # One shot: sleep until the provider's window turns, read
-                    # off the latest usage scrape.
                     if quota_retried:
                         raise
-                    quota_retried = True
-                    wait_seconds = await DBOS.run_step_async(
+                    # Wait until the provider's window turns, read off the latest
+                    # usage scrape.
+                    quota = await DBOS.run_step_async(
                         StepOptions(name=f"{workflow.kind}.agent.{self.id}.retry_wait"),
                         _quota_retry_wait,
+                        self.id,
+                        workflow.account_id,
                     )
                     # A far-off reset (an exhausted weekly window) isn't worth
                     # sleeping into — fail now.
-                    if wait_seconds > _QUOTA_MAX_WAIT_SECONDS:
+                    if quota["wait_seconds"] > _QUOTA_MAX_WAIT_SECONDS:
                         raise
-                    wait_seconds += random.uniform(60, 120)
-                    resumes_at = datetime.now(UTC) + timedelta(seconds=wait_seconds)
-                    await set_run_phase("waiting_for_quota", ends_at=resumes_at)
+                    await set_run_phase("waiting_for_quota", ends_at=quota["resumes_at"])
                     if workflow.conversation_id:
                         await _post_to_chat(
                             workflow.workflow_id,
                             "chat.report_quota_wait",
-                            functools.partial(report_quota_wait, resumes_at=resumes_at),
+                            functools.partial(report_quota_wait, resumes_at=quota["resumes_at"]),
                         )
+                    # A wait that a switch ends does not use the retry.
+                    quota_retried = await self._wait_out_quota(workflow, quota)
+                    if workflow.conversation_id:
+                        await _post_to_chat(
+                            workflow.workflow_id, "chat.report_quota_resume", report_quota_resume
+                        )
+                    continue
                 else:
                     # Permanent or unclassified — never retried.
                     raise
@@ -300,15 +293,42 @@ class Agent:
                 # Durable: the end time checkpoints now, so a restart resumes
                 # with the remaining wait, and replay skips it entirely.
                 await DBOS.sleep_async(wait_seconds)
-                if error.retry is Retry.QUOTA and workflow.conversation_id:
-                    await _post_to_chat(
-                        workflow.workflow_id, "chat.report_quota_resume", report_quota_resume
-                    )
             else:
                 # Body-level only, on both passes: in-step calls hit the early return
                 # live and are skipped with their step on replay.
                 workflow.journal.add(result)
                 return result
+
+    async def _wait_out_quota(self, workflow, quota: dict) -> bool:
+        """Sleep until the quota resets. Return False early when the agent switches to another
+        account, model, or billing."""
+        wait_seconds = quota["wait_seconds"]
+        while wait_seconds > 0:
+            if not await workflow.sleep(
+                wait_seconds, label="waiting_for_quota", until=_QUOTA_TOPIC
+            ):
+                return True
+            # Every waiting run gets the wake. The step says how long this one still waits,
+            # so replay takes the same turns.
+            wait_seconds = await DBOS.run_step_async(
+                StepOptions(name=f"{workflow.kind}.agent.{self.id}.wait_remaining"),
+                _quota_wait_remaining,
+                self.id,
+                workflow.account_id,
+                quota,
+            )
+        return False
+
+    @classmethod
+    async def wake_runs_waiting_for_quota(cls, session: AsyncSession) -> None:
+        """Wake every run waiting out a quota window, so it reads its agent's provider and
+        account again. The wake commits with the session."""
+        running = await session.scalars(select(Run.id).where(Run.state == RunState.RUNNING.value))
+        for run_id in running:
+            if await DBOS.get_event_async(run_id, "waiting_on", timeout_seconds=0) == _QUOTA_TOPIC:
+                await session.run_sync(
+                    get_dbos_client().send_in_transaction, run_id, {}, _QUOTA_TOPIC
+                )
 
     async def _run(
         self,
@@ -588,6 +608,44 @@ class Agent:
             _in_step.reset(in_step)
             _in_after_agent.reset(in_after_agent)
         return harness.get_after_agent_reply("\n\n".join(text for text in texts if text))
+
+
+async def _quota_retry_wait(agent_id: str, account_id: str | None) -> dict:
+    # Runs as its own step: replay reuses the recorded wait instead of
+    # re-reading the scrape.
+    async with step_session() as session:
+        config = await get_config(session, agent_id, account_id)
+        provider_id = config.model.partition("/")[0]
+        scrape = await UsageScrape.latest_for(session, provider_id, config.charged_account_id)
+    now = datetime.now(UTC)
+    # No scrape yet, or nothing ahead of now: a blind half hour.
+    wait_seconds = _QUOTA_FALLBACK_WAIT_SECONDS
+    if scrape:
+        reset = scrape.soonest_reset_after(now)
+        if reset:
+            wait_seconds = (reset - now).total_seconds()
+    # Jitter, so one window's reset doesn't wake every run at once.
+    wait_seconds += random.uniform(60, 120)
+    return {
+        "model": config.model,
+        "billing": config.billing,
+        "identity": config.identity,
+        "wait_seconds": wait_seconds,
+        "resumes_at": now + timedelta(seconds=wait_seconds),
+    }
+
+
+async def _quota_wait_remaining(agent_id: str, account_id: str | None, quota: dict) -> float:
+    async with step_session() as session:
+        config = await get_config(session, agent_id, account_id)
+    # Another account, model, or billing retries now.
+    if (
+        config.model != quota["model"]
+        or config.billing != quota["billing"]
+        or config.identity != quota["identity"]
+    ):
+        return 0
+    return (quota["resumes_at"] - datetime.now(UTC)).total_seconds()
 
 
 @dataclass(frozen=True)

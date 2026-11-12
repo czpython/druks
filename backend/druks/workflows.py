@@ -977,19 +977,21 @@ class Workflow:
             raise WaitFailed(topic, failure)
         return facts
 
-    async def sleep(self, seconds: float, *, label: str, until: str = "") -> None:
-        """Sleep for ``seconds``, or until ``answer`` arrives on ``until``. The run stays
-        running, shows ``label``, and releases its warm sandbox."""
+    async def sleep(self, seconds: float, *, label: str, until: str = "") -> bool:
+        """Sleep for ``seconds``, or until ``answer`` arrives on ``until``, and return whether
+        it arrived. The run stays running, shows ``label``, and releases its warm sandbox."""
         # ``answer`` drops what arrives before ``waiting_on`` is set, and the release
         # takes time.
         await DBOS.set_event_async("waiting_on", until)
         await self._reap_run()
         await set_run_phase(label)
         if until:
-            await DBOS.recv_async(until, timeout_seconds=seconds)
+            answer = await DBOS.recv_async(until, timeout_seconds=seconds)
             await DBOS.set_event_async("waiting_on", "")
-        else:
-            await DBOS.sleep_async(seconds)
+            # An answer with no facts is an empty dict.
+            return answer is not None
+        await DBOS.sleep_async(seconds)
+        return False
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         # Everything an agent's template renders with, beyond the workflow and
