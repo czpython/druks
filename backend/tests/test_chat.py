@@ -60,6 +60,13 @@ OPENCODE_BOT_AGENT = (
     '{"edit": "deny", "bash": "deny", "read": "deny", "glob": "deny", "grep": "deny", '
     '"list": "deny", "webfetch": "deny", "websearch": "deny"}\n---\nBe kind.\n'
 )
+OPENCODE_GLOBAL_CONFIG = json.dumps(
+    {
+        "$schema": "https://opencode.ai/config.json",
+        "enabled_providers": ["anthropic"],
+        "model": "anthropic/claude-sonnet-4-6",
+    }
+)
 
 
 @pytest.fixture
@@ -898,15 +905,17 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
                         {
                             "$schema": "https://opencode.ai/config.json",
                             "instructions": ["/home/druks/work/chat/one/instructions.md"],
-                            "model": "anthropic/claude-sonnet-4-5",
                             "permission": "allow",
                         }
                     ),
                     "OPENCODE_DB": "/home/druks/work/chat/one/opencode.db",
                 },
-                "files": {"/home/druks/work/chat/one/instructions.md": "Be kind."},
+                "files": {
+                    "/home/druks/.config/opencode/opencode.json": OPENCODE_GLOBAL_CONFIG,
+                    "/home/druks/work/chat/one/instructions.md": "Be kind.",
+                },
                 "mode": "build",
-                "model": "anthropic/claude-sonnet-4-5",
+                "model": "anthropic/claude-sonnet-4-6",
                 "options": {"model": "model"},
                 "sessionFiles": ["/home/druks/work/chat/one/opencode.db*"],
             },
@@ -918,18 +927,16 @@ async def test_only_the_operator_reaches_the_connected_mcp_servers_and_holds_the
                 "meta": {},
                 "env": {
                     "OPENCODE_CONFIG_CONTENT": json.dumps(
-                        {
-                            "$schema": "https://opencode.ai/config.json",
-                            "model": "anthropic/claude-sonnet-4-5",
-                        }
+                        {"$schema": "https://opencode.ai/config.json"}
                     ),
                     "OPENCODE_DB": "/home/druks/work/chat/one/opencode.db",
                 },
                 "files": {
-                    "/home/druks/work/chat/one/.opencode/agents/druks.md": OPENCODE_BOT_AGENT
+                    "/home/druks/.config/opencode/opencode.json": OPENCODE_GLOBAL_CONFIG,
+                    "/home/druks/work/chat/one/.opencode/agents/druks.md": OPENCODE_BOT_AGENT,
                 },
                 "mode": "druks",
-                "model": "anthropic/claude-sonnet-4-5",
+                "model": "anthropic/claude-sonnet-4-6",
                 "options": {"model": "model"},
                 "sessionFiles": ["/home/druks/work/chat/one/opencode.db*"],
             },

@@ -18,7 +18,9 @@ effort come from Chat's row in **Chat → Channels → Bots**. A field that you
 leave unset uses the
 [installation settings](configuration.md#personal-and-installation-settings).
 OpenCode ignores the effort: its effort values are model variants, and Druks's
-levels are not among them.
+levels are not among them. OpenCode uses only the provider of Chat's model, also
+when it names a conversation. If OpenCode's model list does not have the model,
+OpenCode answers with another model of that provider.
 
 ## Start a conversation
 

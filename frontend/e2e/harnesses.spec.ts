@@ -4,7 +4,7 @@ import { API_KEY as OPENAI_KEY } from './openai'
 
 const harnesses = [
   { agent: { harness: 'codex', model: 'openai/gpt-5.5', billing: 'api_key' }, api: 'openai', credential: `Bearer ${OPENAI_KEY}` },
-  { agent: { harness: 'opencode', model: 'anthropic/claude-sonnet-4-5', billing: 'api_key' }, api: 'anthropic', credential: ANTHROPIC_KEY },
+  { agent: { harness: 'opencode', model: 'anthropic/claude-sonnet-4-6', billing: 'api_key' }, api: 'anthropic', credential: ANTHROPIC_KEY },
 ] as const
 
 for (const { agent, api, credential } of harnesses) {
