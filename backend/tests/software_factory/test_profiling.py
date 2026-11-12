@@ -124,13 +124,13 @@ class TestProfileRun:
         ]
 
     async def test_keeps_a_typed_purpose(self, druks_db, monkeypatch):
-        seeded = await _seed_repo()
+        repo = await _seed_repo()
 
         async def _profiler(*, repo: str):
             # The edit route saves from another session, so the loaded row is not updated.
             await db_session().execute(
                 update(ProjectRepo)
-                .where(ProjectRepo.id == seeded.id)
+                .where(ProjectRepo.full_name == repo)
                 .values(purpose="The web app")
                 .execution_options(synchronize_session=False)
             )
@@ -139,10 +139,10 @@ class TestProfileRun:
         monkeypatch.setattr(SoftwareFactory, "repo_profiler", _profiler)
         monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_no_policy))
 
-        await Profile().run(repo_id=seeded.id)
-        await db_session().refresh(seeded)
+        await Profile().run(repo_id=repo.id)
+        await db_session().refresh(repo)
 
-        assert seeded.purpose == "The web app"
+        assert repo.purpose == "The web app"
 
     async def test_drops_skills_that_are_not_enabled(self, druks_db, monkeypatch):
         await _seed_skills("django-patterns", "retired-skill", disabled=("retired-skill",))

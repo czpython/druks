@@ -111,7 +111,7 @@ class ProjectRepo(StoredSubject):
     full_name: Mapped[str] = mapped_column(unique=True)
     # A Profile run clones the default branch.
     ref = None
-    # A free-form role for the dashboard, for example "design", "infra", or "app".
+    # One line on what the repo owns. Build and review prompts list it beside the repo name.
     purpose: Mapped[str | None]
     profile: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 
