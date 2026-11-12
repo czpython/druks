@@ -46,4 +46,8 @@ Skills catalog (name — description):
    what this repo is, its primary language/framework, anything unusual about how it's built
    or tested.
 
-5. Return the structured result. No prose, no preamble.
+5. **Write `purpose`**: one line on what this repo is for, for an agent working in another
+   repo of the same project that decides whether to clone this one. Name what it owns, for
+   example "The public marketing site and its blog", not its stack.
+
+6. Return the structured result. No prose, no preamble.

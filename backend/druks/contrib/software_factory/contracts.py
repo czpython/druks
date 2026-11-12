@@ -44,6 +44,7 @@ class RepoProfilerOutput(AgentOutput):
     frameworks: list[str]
     package_managers: list[str]
     stack_summary: str
+    purpose: str
     test_commands: list[VerificationCommandOutput]
     lint_commands: list[VerificationCommandOutput]
     typecheck_commands: list[VerificationCommandOutput]
@@ -52,28 +53,30 @@ class RepoProfilerOutput(AgentOutput):
     recommended_skills: list[str]
 
     def to_result(self) -> dict[str, Any]:
-        # The stored profile shape — ProjectRepo.profile holds it as plain JSON,
-        # so it stays a dict end to end.
+        # ProjectRepo.profile holds the baseline as plain JSON, so it stays a dict end to end.
         return {
-            "languages": self.languages,
-            "frameworks": self.frameworks,
-            "package_managers": self.package_managers,
-            "stack_summary": self.stack_summary,
-            "verification": {
-                "test_commands": [
-                    {"command": entry.command, "ci_check": entry.ci_check}
-                    for entry in self.test_commands
-                ],
-                "lint_commands": [
-                    {"command": entry.command, "ci_check": entry.ci_check}
-                    for entry in self.lint_commands
-                ],
-                "typecheck_commands": [
-                    {"command": entry.command, "ci_check": entry.ci_check}
-                    for entry in self.typecheck_commands
-                ],
+            "purpose": self.purpose,
+            "baseline": {
+                "languages": self.languages,
+                "frameworks": self.frameworks,
+                "package_managers": self.package_managers,
+                "stack_summary": self.stack_summary,
+                "verification": {
+                    "test_commands": [
+                        {"command": entry.command, "ci_check": entry.ci_check}
+                        for entry in self.test_commands
+                    ],
+                    "lint_commands": [
+                        {"command": entry.command, "ci_check": entry.ci_check}
+                        for entry in self.lint_commands
+                    ],
+                    "typecheck_commands": [
+                        {"command": entry.command, "ci_check": entry.ci_check}
+                        for entry in self.typecheck_commands
+                    ],
+                },
+                "recommended_skills": self.recommended_skills,
             },
-            "recommended_skills": self.recommended_skills,
         }
 
 
