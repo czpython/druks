@@ -50,7 +50,8 @@ from druks.apps.settings import (
 )
 from druks.chat.bots.service import ask_for_answer, request_approval
 from druks.chat.models import Conversation
-from druks.chat.service import deliver, report_failure, report_result
+from druks.chat.service import deliver, report_cancel, report_failure, report_result
+from druks.chat.service import publish as publish_to_chat
 from druks.db import db_session
 from druks.durable.activity import set_run_phase
 from druks.durable.constants import (
@@ -413,6 +414,7 @@ async def _park(
         # Every subjected park notifies the designated destination — no author opt-in.
         await _notify_designated_destination(workflow.workflow_id, workflow._subject)
     if workflow.conversation_id:
+        await _refresh_chat(workflow.conversation_id)
         if workflow._subject and await _notify_conversation(
             workflow.workflow_id, workflow._subject
         ):
@@ -431,6 +433,8 @@ async def _park(
         facts={**_GATE_CLEARED, "answer_parked_at": Run.input_requested_at},
         result=reply,
     )
+    if workflow.conversation_id:
+        await _refresh_chat(workflow.conversation_id)
     return reply
 
 
@@ -483,6 +487,21 @@ async def _post_to_chat(workflow_id: str, name: str, post: Callable) -> None:
     if conversation_id:
         # Body level, like the notification enqueue: a replay never starts it twice.
         await DBOS.start_workflow_async(deliver, conversation_id)
+
+
+async def _refresh_chat(conversation_id: str) -> None:
+    # An open chat page shows the run's state, so it reloads when the state changes. An
+    # end does not call this: DBOS writes the final state after the body returns, and
+    # the delivery of the run's report reloads the page. No step: a second reload on a
+    # replay changes nothing.
+    await publish_to_chat(conversation_id, {"type": "messages"})
+
+
+@DBOS.workflow(name="chat.report_cancel")
+async def post_cancel_to_chat(workflow_id: str, failure: str | None) -> None:
+    """Report a cancelled run to the chat that started it. The canceller starts this
+    workflow, because a cancelled run runs no more steps."""
+    await _post_to_chat(workflow_id, "chat.report_cancel", partial(report_cancel, failure=failure))
 
 
 def step(method: Callable | None = None, *, name: str | None = None, retries: int = 0) -> Callable:
@@ -782,6 +801,8 @@ async def _execute_run(
             conversation_id=conversation_id,
         )
     await _emit_run_event(workflow_id, RunState.RUNNING, subject=subject)
+    if conversation_id:
+        await _refresh_chat(conversation_id)
 
     async def record_failed(exc: BaseException, code: str) -> None:
         facts = {**_GATE_CLEARED, "failure": str(exc), "failure_code": code}
@@ -1260,6 +1281,8 @@ class Workflow:
             )
             if run and run.is_active:
                 await run.cancel(failure=failure)
+                if run.conversation_id:
+                    await DBOS.start_workflow_async(post_cancel_to_chat, run.id, failure)
 
     @classmethod
     async def answer(

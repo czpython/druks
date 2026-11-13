@@ -25,6 +25,8 @@ from .enums import ConversationSource, MessageRole, MessageState
 from .exceptions import ReminderError
 
 if TYPE_CHECKING:
+    from druks.durable.models import Run
+
     from .channels.base import Channel
 
 
@@ -123,6 +125,13 @@ class Conversation(Base, Uuid7Pk):
     messages: Mapped[list[Message]] = relationship(
         order_by=(Message.created_at, Message.id), viewonly=True
     )
+
+    runs: Mapped[list["Run"]] = relationship(order_by="(Run.created_at, Run.id)", viewonly=True)
+
+    @property
+    def active_runs(self) -> list["Run"]:
+        """The runs that the conversation started and that still work or wait."""
+        return [run for run in self.runs if run.is_active]
 
     @property
     def channel(self) -> "type[Channel] | None":

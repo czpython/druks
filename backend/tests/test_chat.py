@@ -1051,6 +1051,30 @@ async def test_conversation_recency_comes_from_messages_not_pins(druks_db):
     assert [conversation.id for conversation in conversations] == [later.id, earlier.id, empty.id]
 
 
+async def test_a_conversation_shows_the_runs_it_started_that_are_still_active(
+    druks_db, conversation, tmp_path
+):
+    runs = {}
+    for state in ("running", "finished"):
+        runs[state] = await seed_run(
+            druks_db, kind="test", state=state, account_id=conversation.account_id
+        )
+        runs[state].conversation_id = conversation.id
+    await druks_db.flush()
+    api = configure_app_for_test(
+        settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-User"}),
+        authenticated=False,
+    )
+    async with asgi_client(api) as client:
+        detail = await client.get(
+            f"/api/chat/conversations/{conversation.id}", headers={"X-User": "owner@example.com"}
+        )
+
+    assert detail.json()["activeRuns"] == [
+        {"id": runs["running"].id, "kind": "test", "state": "running"}
+    ]
+
+
 async def test_owner_can_pin_and_unpin(druks_db, conversation, tmp_path):
     api = configure_app_for_test(
         settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-User"}),
@@ -1398,6 +1422,25 @@ async def test_a_failed_run_reports_to_its_conversation_whether_or_not_it_parked
 
     *_, report = await list_messages(druks_db, conversation)
     assert (report.is_internal, run.id in report.body, "the sandbox died" in report.body) == (
+        True,
+        True,
+        True,
+    )
+
+
+async def test_a_cancelled_run_reports_its_reason_to_its_conversation(druks_db, conversation):
+    run = await seed_run(druks_db, kind="test", account_id=conversation.account_id)
+    run.conversation_id = conversation.id
+
+    reported = await service.report_cancel(druks_db, run, failure="pr closed without merge")
+    assert reported == conversation.id
+
+    *_, report = await list_messages(druks_db, conversation)
+    assert (
+        report.is_internal,
+        run.id in report.body,
+        "pr closed without merge" in report.body,
+    ) == (
         True,
         True,
         True,

@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import ConfigDict, Field
 
+from druks.durable.enums import RunState
 from druks.schemas import Schema
 from druks.ui.blocks import FileSummary
 
@@ -41,8 +42,17 @@ class MessageResponse(Schema):
     delivered_at: datetime | None
 
 
+class ConversationRunResponse(Schema):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    kind: str
+    state: RunState
+
+
 class ConversationDetailResponse(ConversationResponse):
     messages: list[MessageResponse]
+    active_runs: list[ConversationRunResponse]
 
 
 class ReminderResponse(Schema):

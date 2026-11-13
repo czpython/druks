@@ -31,8 +31,16 @@ export interface Message {
   transcript: string
 }
 
+export interface ConversationRun {
+  id: string
+  kind: string
+  state: 'scheduled' | 'running' | 'parked'
+}
+
 export interface Conversation extends ConversationSummary {
   messages: Message[]
+  /** The runs that the conversation started and that still work or wait. */
+  activeRuns: ConversationRun[]
 }
 
 export type ReplyRow =

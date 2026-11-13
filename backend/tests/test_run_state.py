@@ -5,6 +5,7 @@ import pytest
 from conftest import CONFIG_PROBE
 from dbos._error import DBOSWorkflowCancelledError
 from druks.accounts.models import Account
+from druks.chat.models import Conversation
 from druks.db import db_session as ambient_session
 from druks.durable.dbos_state import workflow_status
 from druks.durable.enums import RunState
@@ -249,6 +250,31 @@ async def test_failure_writes_the_reason_and_reraises(druks_db, _inline_steps):
         )
     ).scalar_one()
     assert failed.payload["failure"] == "closed at review"
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_starts_to_work_reloads_the_chat_that_started_it(druks_db, _inline_steps):
+    item, run = await _item_and_run(druks_db, "running")
+    conversation = await Conversation.create(
+        druks_db, account_id=run.account_id, body="Summarize the note"
+    )
+    run.conversation_id = conversation.id
+    await druks_db.flush()
+
+    async def body() -> None:
+        return
+
+    with mock.patch("druks.workflows.publish_to_chat") as publish_to_chat:
+        await _execute_run(
+            run.id,
+            run.kind,
+            {"type": "work_item", "id": item.id},
+            run.account_id,
+            body,
+            conversation_id=conversation.id,
+        )
+
+    publish_to_chat.assert_awaited_once_with(conversation.id, {"type": "messages"})
 
 
 @pytest.mark.asyncio

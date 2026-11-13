@@ -6,7 +6,7 @@ import { compareConversations, conversationReducer, initialConversation, replyRo
 const conversation: Conversation = {
   id: '01995a3c-0000-7000-8000-000000000001', title: 'Read the gate', source: 'web', userId: null, userName: '', createdAt: '2026-09-18T10:00:00Z',
   messageCount: 1, activeMessageId: '2',
-  isPinned: false, lastMessageAt: '2026-09-18T10:00:00Z',
+  activeRuns: [], isPinned: false, lastMessageAt: '2026-09-18T10:00:00Z',
   messages: [{ id: '2', role: 'user', body: 'Read the gate', state: 'delivered', replyTo: null, toolCalls: [], isInternal: false, file: null, transcript: '', createdAt: '2026-09-18T10:00:00Z', deliveredAt: '2026-09-18T10:00:01Z' }],
 }
 

@@ -1,9 +1,13 @@
+from unittest.mock import AsyncMock
+
 import pytest
+from druks.chat.models import Conversation
 from druks.contrib.software_factory.workflows import Build
 from druks.db import db_session
 from druks.durable.enums import WorkflowEvent
 from druks.events.models import Event
 from druks.testing import seed_run
+from druks.workflows import post_cancel_to_chat
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from software_factory.factories import make_test_work_item
@@ -78,3 +82,41 @@ async def test_factory_cleanup_creates_no_operator_stop(druks_db):
     await Build.cancel(item, failure="pr closed without merge")
 
     assert not list(await druks_db.scalars(select(Event).filter_by(type=WorkflowEvent.CANCELLED)))
+
+
+async def test_operator_stop_reports_to_the_chat_that_started_the_run(
+    druks_client, druks_db, monkeypatch
+):
+    start_workflow = AsyncMock()
+    monkeypatch.setattr("dbos.DBOS.start_workflow_async", start_workflow)
+    run = await seed_run(druks_db, kind=Summarize.kind)
+    conversation = await Conversation.create(
+        druks_db, account_id=run.account_id, body="Summarize the note"
+    )
+    run.conversation_id = conversation.id
+    chatless_run = await seed_run(druks_db, kind=Summarize.kind)
+    await druks_db.flush()
+
+    for stopped_run in (run, chatless_run):
+        await druks_client.post(
+            f"/api/runs/{stopped_run.id}/cancel", json={"reason": "Wrong source"}
+        )
+
+    start_workflow.assert_awaited_once_with(post_cancel_to_chat, run.id, "Wrong source")
+
+
+async def test_subject_cancel_reports_to_the_chat_that_started_the_run(druks_db, monkeypatch):
+    start_workflow = AsyncMock()
+    monkeypatch.setattr("dbos.DBOS.start_workflow_async", start_workflow)
+    db_session.registry.set(druks_db)
+    note = await Note.create(body="Cancelled from its subject")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    conversation = await Conversation.create(
+        druks_db, account_id=run.account_id, body="Summarize the note"
+    )
+    run.conversation_id = conversation.id
+    await druks_db.flush()
+
+    await Summarize.cancel(note, failure="note deleted")
+
+    start_workflow.assert_awaited_once_with(post_cancel_to_chat, run.id, "note deleted")

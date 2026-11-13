@@ -10,7 +10,8 @@ import { appLabel } from '../apps/registry'
 import { chatApi } from '../chat/api'
 import {
   compareConversations, conversationReducer, conversationTitle, initialConversation, savedReplyRows,
-  type Conversation, type ConversationAction, type ConversationSummary, type Message, type ReplyRow,
+  type Conversation, type ConversationAction, type ConversationRun, type ConversationSummary, type Message,
+  type ReplyRow,
 } from '../chat/state'
 import { Markdown } from '../components/Markdown'
 import { Page } from '../components/Page'
@@ -358,6 +359,9 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
             </div>
           </article>
         })}
+        {conversation?.activeRuns.map((run) => <p className="chat-waiting" role="status" key={run.id}>
+          <span className="chat-activity-dot" />{appLabel(run.kind.split('.').at(-1)!)} {RUN_STATE_WORDS[run.state]}
+        </p>)}
       </div>
     </div>
     {!isAtBottom && messages.length > 0 && <div className="chat-jump">
@@ -397,6 +401,12 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
       {apps.isSuccess && <p className="chat-apps">{apps.data.length} installed {apps.data.length === 1 ? 'app' : 'apps'}{apps.data.length > 0 && <> · {apps.data.map((app) => appLabel(app.name)).join(', ')}</>}</p>}
     </div>}
   </section>
+}
+
+const RUN_STATE_WORDS: Record<ConversationRun['state'], string> = {
+  scheduled: 'is queued',
+  running: 'is running',
+  parked: 'waits for an answer',
 }
 
 function Reply({ rows }: { rows: ReplyRow[] }) {

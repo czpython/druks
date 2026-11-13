@@ -62,7 +62,7 @@ async def stream_conversation(websocket: WebSocket, conversation_id: str, accoun
                     if not conversation:
                         await websocket.close(code=1008)
                         return
-                    await session.refresh(conversation, ["messages"])
+                    await session.refresh(conversation, ["messages", "runs"])
                     snapshot = ConversationDetailResponse.model_validate(conversation)
                     await session.commit()
                 await websocket.send_json({"type": "snapshot", **jsonable_encoder(snapshot)})

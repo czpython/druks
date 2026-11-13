@@ -1,5 +1,6 @@
 from typing import Annotated
 
+from dbos import DBOS
 from fastapi import APIRouter, Body, HTTPException, Path, status
 
 from druks.accounts.context import current_account_id
@@ -19,6 +20,7 @@ from druks.durable.models import Run
 from druks.events.models import Event
 from druks.notifications.exceptions import AnswerNotAllowedError, InvalidChoiceError
 from druks.notifications.services import validate_in_app_answer
+from druks.workflows import post_cancel_to_chat
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -92,6 +94,8 @@ async def cancel_run(
     # cancel() flushes the run and expires this computed column, so read it first.
     key = run.subject_key
     await run.cancel(failure=reason)
+    if run.conversation_id:
+        await DBOS.start_workflow_async(post_cancel_to_chat, run.id, reason)
     if subject:
         await Event.emit(
             session,
