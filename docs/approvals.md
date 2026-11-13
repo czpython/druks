@@ -32,7 +32,7 @@ You answer in the same places on Druks Cloud and on a self-hosted Druks.
 | Where | How |
 | --- | --- |
 | Dashboard | Open the run. The waiting step shows the question and the buttons. |
-| Slack | Druks posts the question with buttons to the Slack channel you select. See [notifications](configuration.md#notifications). |
+| Slack | Druks posts the question with buttons to the Slack channel you select. See [notifications](configuration.md#notifications). A run that you started from Slack also gets them in that thread or direct message. |
 | Chat | Ask what waits for you, and answer in the [chat](chat.md). |
 | Claude Code or Codex | Connect the Druks MCP server. Your agent lists what waits, reads the question and answers it. See [connect your agent](connect-your-agent.md). |
 

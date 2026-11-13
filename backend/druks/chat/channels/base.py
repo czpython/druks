@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from druks.apps.registry import channels
 from druks.chat.exceptions import ChannelHasNoThreadsError, ChannelStartsNoConversationsError
 from druks.chat.models import Conversation, Message
+from druks.notifications.models import Notification
 from druks.services import Service
 
 
@@ -19,6 +20,8 @@ class Channel:
     has_turns: ClassVar[bool] = True
     # Whether chat_read_thread reads the channel's threads, where other people write too.
     has_readable_threads: ClassVar[bool] = False
+    # Whether the channel shows a parked run's controls as buttons in the conversation.
+    has_buttons: ClassVar[bool] = False
     # The reaction that acknowledges a person's message, as the channel names it.
     reaction_ack: ClassVar[str]
 
@@ -36,6 +39,13 @@ class Channel:
         cls, session: AsyncSession, conversation: Conversation, reply: Message
     ) -> None:
         """Send the agent's reply to where the conversation lives."""
+        raise NotImplementedError
+
+    @classmethod
+    async def post_buttons(
+        cls, session: AsyncSession, conversation: Conversation, notification: Notification
+    ) -> None:
+        """Post the notification with its actions as buttons where the conversation lives."""
         raise NotImplementedError
 
     @classmethod

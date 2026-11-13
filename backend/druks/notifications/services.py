@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.chat.models import Conversation
 from druks.durable.enums import RunState
-from druks.durable.models import Run
+from druks.durable.models import Run, is_note_required
 from druks.notifications.exceptions import (
     AlreadyAcknowledgedError,
     AnswerNotAllowedError,
@@ -36,14 +36,7 @@ async def validate_in_app_answer(
     ask = await run.get_ask()
     if control not in ask.get("controls", []):
         raise InvalidChoiceError(f"unknown control {control!r}")
-    if (
-        control == "request_changes"
-        and not answers
-        and not note.strip()
-        and not (ask.get("context") or "").strip()
-    ):
-        # Context is guidance owned by the parked round, so an empty reply can
-        # still direct another pass when the ask carries it.
+    if is_note_required(ask, control) and not answers and not note.strip():
         raise InvalidChoiceError("request_changes needs an answer or a note to guide the re-plan")
     # Answers may be an offered option id or the operator's own words — free
     # text is content that flows into the next agent prompt, so only the

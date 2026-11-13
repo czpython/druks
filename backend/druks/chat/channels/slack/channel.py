@@ -18,6 +18,8 @@ from druks.core.apis.slack import SLACK_AUTHORITY, SlackClient
 from druks.core.services import Slack
 from druks.files.datastructures import File
 from druks.models import Base
+from druks.notifications.delivery import deliver as deliver_notification
+from druks.notifications.models import Notification
 from druks.prompts import render_prompt
 from druks.redis import get_client
 from druks.secrets.models import VaultSecret
@@ -51,6 +53,7 @@ class SlackChannel(Channel):
     name = ConversationSource.SLACK
     service = Slack
     has_readable_threads = True
+    has_buttons = True
     reaction_ack = "eyes"
 
     @classmethod
@@ -193,6 +196,23 @@ class SlackChannel(Channel):
         ]
         reply.source_id = f"{posted[0]['channel']}:{posted[0]['ts']}"
         await session.commit()
+
+    @classmethod
+    async def post_buttons(
+        cls, session: AsyncSession, conversation: Conversation, notification: Notification
+    ) -> None:
+        """Post the notification in the conversation's thread, or its DM."""
+        client = SlackClient(token=await Slack.get_bot_token())
+        room, _, thread_ts = conversation.thread_id.partition(":")
+        await deliver_notification(
+            client,
+            room or conversation.user_id,
+            notification.body,
+            thread_ts=thread_ts,
+            actions=notification.actions,
+            token=notification.correlation_token,
+            deep_link=notification.deep_link,
+        )
 
     @classmethod
     async def acknowledge(

@@ -48,7 +48,8 @@ from druks.apps.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
-from druks.chat.bots.service import ask_for_answer
+from druks.chat.bots.service import ask_for_answer, request_approval
+from druks.chat.models import Conversation
 from druks.chat.service import deliver, report_failure, report_result
 from druks.db import db_session
 from druks.durable.activity import set_run_phase
@@ -412,8 +413,13 @@ async def _park(
         # Every subjected park notifies the designated destination — no author opt-in.
         await _notify_designated_destination(workflow.workflow_id, workflow._subject)
     if workflow.conversation_id:
-        # The step keeps its recorded name, so a parked run replays it.
-        await _post_to_chat(workflow.workflow_id, "chat.ask_admin", ask_for_answer)
+        if workflow._subject and await _notify_conversation(
+            workflow.workflow_id, workflow._subject
+        ):
+            await _post_to_chat(workflow.workflow_id, "chat.request_approval", request_approval)
+        else:
+            # The step keeps its recorded name, so a parked run replays it.
+            await _post_to_chat(workflow.workflow_id, "chat.ask_admin", ask_for_answer)
     payload = await DBOS.recv_async(gate.name, timeout_seconds=ttl_seconds)
     if payload is None:
         raise GateTimeout(gate.name)
@@ -436,7 +442,7 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
             account = await Account.get_for_run(session, run.account_id)
             destination_id = account.gate_park_destination_id
             if destination_id:
-                return await run.create_park_notification(destination_id, subject)
+                return await run.create_park_notification(subject, destination_id=destination_id)
 
     notification_id = await DBOS.run_step_async(
         StepOptions(name="notifications.gate_park", **_IO_RETRIES), _create
@@ -445,6 +451,25 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
         # The step memoized the row (one per parked round); this body-level enqueue
         # is DBOS's deterministic child-start, so a replayed park never double-sends.
         await DBOS.enqueue_workflow_async(NOTIFICATIONS_QUEUE, send_notification, notification_id)
+
+
+async def _notify_conversation(workflow_id: str, subject: dict[str, Any]) -> bool:
+    # A chat whose channel shows buttons gets an in-app ask's buttons in its thread.
+    async def _create() -> str | None:
+        async with step_session() as session:
+            run = await session.get(Run, workflow_id)
+            conversation = await session.get(Conversation, run.conversation_id)
+            channel = conversation.channel
+            ask = run.input_request or {}
+            if channel and channel.has_buttons and ask.get("presentation") == "in_app":
+                return await run.create_park_notification(subject, conversation_id=conversation.id)
+
+    notification_id = await DBOS.run_step_async(
+        StepOptions(name="notifications.chat_park", **_IO_RETRIES), _create
+    )
+    if notification_id:
+        await DBOS.enqueue_workflow_async(NOTIFICATIONS_QUEUE, send_notification, notification_id)
+    return bool(notification_id)
 
 
 async def _post_to_chat(workflow_id: str, name: str, post: Callable) -> None:

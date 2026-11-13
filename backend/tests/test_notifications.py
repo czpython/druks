@@ -172,6 +172,20 @@ async def _parked_notification(druks_db, *, ask=None, run_state="parked"):
     return run, notification
 
 
+async def test_a_button_offers_a_control_that_a_bare_click_can_answer(druks_db):
+    run, _ = await _parked_notification(druks_db)
+    approve = {"id": "approve", "label": "Approve"}
+
+    assert (await run.get_rendered_ask())["actions"] == [approve]
+
+    # The ask's context guides a re-plan, so request_changes needs no note.
+    run.input_request = {**_IN_APP_ASK, "context": "Keep the scope small."}
+    assert (await run.get_rendered_ask())["actions"] == [
+        approve,
+        {"id": "request_changes", "label": "Request changes"},
+    ]
+
+
 @pytest.fixture
 def resume_spy(monkeypatch):
     calls = []

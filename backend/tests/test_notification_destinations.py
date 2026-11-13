@@ -5,26 +5,12 @@ from conftest import bind_ambient_session, install_service
 from druks.core.apis.slack import SlackClient
 from druks.notifications.buttons import decode_button, encode_button
 from druks.notifications.delivery import deliver
-from druks.notifications.exceptions import (
-    DeliveryError,
-    DisabledDestinationError,
-    MalformedButtonError,
-)
-from druks.notifications.models import Destination, DestinationKind
+from druks.notifications.exceptions import DeliveryError, MalformedButtonError
+from druks.notifications.models import Destination
 from druks.testing import asgi_client, configure_app_for_test, make_settings
 from slack_sdk.errors import SlackApiError
 
 _BOT_TOKEN = "xoxb-destinations"
-
-
-def _slack_destination(*, is_enabled: bool = True) -> Destination:
-    # Delivery never touches the database; an unsaved row is enough.
-    return Destination(
-        name="ops",
-        kind=DestinationKind.SLACK_CHANNEL.value,
-        channel_id="C1",
-        is_enabled=is_enabled,
-    )
 
 
 @pytest.fixture
@@ -188,9 +174,7 @@ async def test_routes_delete(tmp_path, installed_slack, slack):
 async def test_plain_delivery_posts_the_body_and_the_link(slack):
     client = SlackClient(token=_BOT_TOKEN)
 
-    await deliver(
-        client, _slack_destination(), "Review the PR", deep_link="https://github.com/acme/app/7"
-    )
+    await deliver(client, "C1", "Review the PR", deep_link="https://github.com/acme/app/7")
 
     (post,) = slack.posts
     assert (post["bot_token"], post["channel"]) == (_BOT_TOKEN, "C1")
@@ -204,7 +188,7 @@ async def test_button_delivery_posts_one_button_per_action(slack):
 
     await deliver(
         SlackClient(token=_BOT_TOKEN),
-        _slack_destination(),
+        "C1",
         "review the plan",
         actions=actions,
         token="tok_123",
@@ -226,7 +210,7 @@ async def test_delivery_to_a_channel_the_bot_is_not_in_says_to_invite_it(slack):
     slack.error = "not_in_channel"
 
     with pytest.raises(DeliveryError) as excinfo:
-        await deliver(SlackClient(token=_BOT_TOKEN), _slack_destination(), "hello")
+        await deliver(SlackClient(token=_BOT_TOKEN), "C1", "hello")
 
     assert "Invite the bot to the channel" in str(excinfo.value)
     # The Slack error keeps the request headers, and they carry the bot token.
@@ -238,9 +222,9 @@ async def test_a_refused_delivery_names_slack_s_reason(slack):
     slack.error = "is_archived"
 
     with pytest.raises(DeliveryError) as excinfo:
-        await deliver(SlackClient(token=_BOT_TOKEN), _slack_destination(), "hello")
+        await deliver(SlackClient(token=_BOT_TOKEN), "C1", "hello")
 
-    assert str(excinfo.value) == "Delivery to destination 'ops' failed: is_archived."
+    assert str(excinfo.value) == "Delivery failed: is_archived."
     assert excinfo.value.__cause__ is None
 
 
@@ -251,19 +235,17 @@ async def test_a_delivery_slack_does_not_answer_names_the_failure(monkeypatch):
     monkeypatch.setattr(SlackClient, "api_call", api_call)
 
     with pytest.raises(DeliveryError) as excinfo:
-        await deliver(SlackClient(token=_BOT_TOKEN), _slack_destination(), "hello")
+        await deliver(SlackClient(token=_BOT_TOKEN), "C1", "hello")
 
-    assert str(excinfo.value) == "Delivery to destination 'ops' failed: TimeoutError."
+    assert str(excinfo.value) == "Delivery failed: TimeoutError."
     assert excinfo.value.__cause__ is None
 
 
-async def test_disabled_destination_never_sends(slack):
-    disabled = _slack_destination(is_enabled=False)
+async def test_delivery_in_a_thread_replies_there(slack):
+    await deliver(SlackClient(token=_BOT_TOKEN), "C1", "hello", thread_ts="1700000000.000100")
 
-    with pytest.raises(DisabledDestinationError):
-        await deliver(SlackClient(token=_BOT_TOKEN), disabled, "hello")
-
-    assert slack.posts == []
+    (post,) = slack.posts
+    assert (post["channel"], post["thread_ts"]) == ("C1", "1700000000.000100")
 
 
 def test_button_encoding_round_trips():

@@ -6,8 +6,12 @@ import psycopg
 import pytest
 from conftest import install_service
 from dbos import DBOS
+from druks.accounts.context import current_conversation_id
 from druks.accounts.models import Account
 from druks.apps.registry import workflows
+from druks.chat.channels.slack import channel as slack_channel
+from druks.chat.enums import ConversationSource
+from druks.chat.models import Conversation, Message
 from druks.core.services import Slack
 from druks.database import configure_session, get_session
 from druks.db import db_session
@@ -140,7 +144,20 @@ async def rt():
         session.add(Account(username="op@example.com", is_default=True))
         session.add_all(
             NotificationProbe(id=subject_id)
-            for subject_id in (9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008, 9009, 9010, 9014)
+            for subject_id in (
+                9001,
+                9002,
+                9003,
+                9004,
+                9005,
+                9006,
+                9007,
+                9008,
+                9009,
+                9010,
+                9014,
+                9015,
+            )
         )
         session.commit()
     # NullPool: the TestClient below runs requests on its own loop, and a pooled
@@ -190,15 +207,24 @@ class _DeliverSpy:
         self.calls: list[dict] = []
         self.failures_remaining = 0
         self.always_fail = False
-        self.error: Exception = DeliveryError("spy", "is_archived")
+        self.error: Exception = DeliveryError("is_archived")
 
     async def __call__(
-        self, client, destination, body, *, actions=None, token=None, deep_link=None
+        self,
+        client,
+        channel,
+        body,
+        *,
+        thread_ts="",
+        actions=None,
+        token=None,
+        deep_link=None,
     ):
         self.calls.append(
             {
                 "bot_token": client.token,
-                "destination": destination.name,
+                "channel": channel,
+                "thread_ts": thread_ts,
                 "body": body,
                 "actions": actions,
                 "token": token,
@@ -216,6 +242,7 @@ class _DeliverSpy:
 async def deliver_spy(monkeypatch):
     spy = _DeliverSpy()
     monkeypatch.setattr(outbox, "deliver", spy)
+    monkeypatch.setattr(slack_channel, "deliver_notification", spy)
     return spy
 
 
@@ -236,16 +263,20 @@ async def _seed(rt, seeder):
         await session.close()
 
 
+async def _install_slack():
+    # The module shares one database, and a service holds one live grant.
+    if not await Slack.get_grant():
+        await install_service(
+            "slack",
+            access_token=_BOT_TOKEN,
+            identity={"client_id": "slack-client"},
+            secrets={"client_secret": "slack-secret"},
+        )
+
+
 async def _seed_destination(rt, name):
     async def create():
-        # The module shares one database, and a service holds one live grant.
-        if not await Slack.get_grant():
-            await install_service(
-                "slack",
-                access_token=_BOT_TOKEN,
-                identity={"client_id": "slack-client"},
-                secrets={"client_secret": "slack-secret"},
-            )
+        await _install_slack()
         return await Destination.create(
             db_session(), name=name, kind="slack_channel", channel_id="C1"
         )
@@ -310,7 +341,7 @@ async def test_outbox_delivers_with_the_bot_token_actions_and_token(rt, deliver_
     assert done["delivered_at"] is not None
     (call,) = deliver_spy.calls
     assert call["bot_token"] == _BOT_TOKEN
-    assert call["destination"] == "happy"
+    assert (call["channel"], call["thread_ts"]) == ("C1", "")
     assert call["body"] == "hello"
     assert call["actions"] == [{"id": "ok", "label": "OK"}]
     assert call["token"] == done["token"]
@@ -334,7 +365,7 @@ async def test_terminal_failure_marks_failed_sanitized_and_reads_back(
     rt, deliver_spy, monkeypatch, tmp_path
 ):
     deliver_spy.always_fail = True
-    deliver_spy.error = DeliveryError("doomed", "is_archived")
+    deliver_spy.error = DeliveryError("is_archived")
     # Two attempts instead of five: same terminal path, fraction of the backoff.
     monkeypatch.setattr(outbox, "_SEND_RETRIES", {"retries_allowed": True, "max_attempts": 2})
     await _seed_destination(rt, "doomed")
@@ -344,7 +375,7 @@ async def test_terminal_failure_marks_failed_sanitized_and_reads_back(
     done = await _wait_for(rt, notification_id, lambda s: s["state"] == "failed")
     assert done["attempts"] == 2
     assert len(deliver_spy.calls) == 2
-    assert "doomed" in done["last_error"]
+    assert done["last_error"] == "Delivery failed: is_archived."
 
     client = TestClient(configure_app_for_test(settings=make_settings(tmp_path), engine=rt.engine))
     shown = client.get(f"/api/notifications/{notification_id}")
@@ -384,6 +415,23 @@ async def test_a_send_without_slack_records_that_slack_is_not_connected(
 
     done = await _wait_for(rt, notification_id, lambda s: s["state"] == "failed")
     assert "slack is not connected" in done["last_error"]
+    assert deliver_spy.calls == []
+
+
+async def test_a_disabled_destination_sends_nothing(rt, deliver_spy, monkeypatch):
+    monkeypatch.setattr(outbox, "_SEND_RETRIES", {"retries_allowed": True, "max_attempts": 2})
+    destination = await _seed_destination(rt, "muted")
+
+    async def disable():
+        (await db_session().get(Destination, destination.id)).is_enabled = False
+
+    await _seed(rt, disable)
+
+    notification_id = await _deliver(rt, to="muted")
+
+    done = await _wait_for(rt, notification_id, lambda s: s["state"] == "failed")
+    assert "'muted' is disabled" in done["last_error"]
+    assert done["attempts"] == 2
     assert deliver_spy.calls == []
 
 
@@ -491,11 +539,8 @@ async def test_in_app_park_notifies_with_actions(rt, deliver_spy):
     assert notification.reason == "gate.parked"
     assert notification.body.startswith("Review")
     assert "Which database?" in notification.body
-    assert notification.actions == [
-        {"id": "approve", "label": "Approve"},
-        {"id": "request_changes", "label": "Request changes"},
-        {"id": "postgres", "label": "Postgres"},
-    ]
+    # A click sends only its control: a bare request_changes or an option is refused.
+    assert notification.actions == [{"id": "approve", "label": "Approve"}]
     assert notification.deep_link is None
     assert notification.subject == {"type": "notification_probe", "id": 9001}
     assert notification.run_id == workflow_id
@@ -740,6 +785,55 @@ async def test_respond_round_trip_finishes_the_run(rt, deliver_spy):
     second = await _respond_in_own_session(rt, token, {"control": "approve"})
     assert second == "AlreadyAcknowledgedError"
     assert _dbos_replies(rt, workflow_id) == 1
+
+
+async def test_a_slack_chat_s_review_offers_approve_in_its_thread(rt, deliver_spy):
+    async def create():
+        await _install_slack()
+        account = await Account.get_default(db_session())
+        conversation = Conversation(
+            account_id=account.id,
+            source=ConversationSource.SLACK,
+            user_id="U1",
+            thread_id="C9:1700000000.000100",
+        )
+        db_session().add(conversation)
+        await db_session().flush()
+        return conversation.id
+
+    conversation_id = await _seed(rt, create)
+    reset = current_conversation_id.set(conversation_id)
+    try:
+        workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9015))
+    finally:
+        current_conversation_id.reset(reset)
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
+
+    deadline = asyncio.get_event_loop().time() + 30
+    while asyncio.get_event_loop().time() < deadline:
+        rows = await _notifications_for_run(rt, workflow_id)
+        (in_thread,) = [row for row in rows if row.conversation_id == conversation_id] or [None]
+        if in_thread and in_thread.state == "delivered":
+            break
+        await asyncio.sleep(0.1)
+    else:
+        raise AssertionError(f"the thread was never notified; {deliver_spy.calls=}")
+    assert in_thread.actions == [{"id": "approve", "label": "Approve"}]
+    (call,) = [call for call in deliver_spy.calls if call["token"] == in_thread.correlation_token]
+    assert (call["channel"], call["thread_ts"]) == ("C9", "1700000000.000100")
+
+    session = get_session(rt.engine)
+    try:
+        bodies = await session.scalars(
+            select(Message.body).where(Message.conversation_id == conversation_id)
+        )
+        assert any("Its buttons are in this thread" in body for body in bodies)
+    finally:
+        await session.close()
+
+    clicked = await _respond_in_own_session(rt, in_thread.correlation_token, {"control": "approve"})
+    assert clicked == "ok"
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FINISHED)
 
 
 async def test_concurrent_responds_resolve_to_one_answer(rt, deliver_spy):

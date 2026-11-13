@@ -37,11 +37,10 @@ class DisabledDestinationError(NotificationError):
 
 
 class DeliveryError(NotificationError):
-    # The message lands in logs and stored failure reasons, so it carries only
-    # the destination name and a short reason.
-    def __init__(self, name: str, reason: str):
-        super().__init__(f"Delivery to destination {name!r} failed: {reason}.")
-        self.name = name
+    # The message lands in logs and stored failure reasons, so it carries only a
+    # short reason.
+    def __init__(self, reason: str):
+        super().__init__(f"Delivery failed: {reason}.")
 
 
 class MalformedButtonError(NotificationError):

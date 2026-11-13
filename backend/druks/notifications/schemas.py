@@ -33,7 +33,7 @@ class NotificationResponse(Schema):
     reason: str
     body: str
     actions: list[dict[str, Any]] | None
-    destination_id: str
+    destination_id: str | None
     state: str
     attempts: int
     last_error: str | None
