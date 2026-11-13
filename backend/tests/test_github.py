@@ -293,12 +293,18 @@ async def test_installation_lookup_404_names_the_repo() -> None:
 
 async def test_list_repos_paginates() -> None:
     first_page = [
-        SimpleNamespace(full_name=f"czpython/repo-{number}", description=None)
+        SimpleNamespace(
+            full_name=f"czpython/repo-{number}", description=None, archived=False, fork=False
+        )
         for number in range(100)
     ]
     second_page = [
-        SimpleNamespace(full_name="czpython/repo-100", description="first"),
-        SimpleNamespace(full_name="czpython/repo-101", description="second"),
+        SimpleNamespace(
+            full_name="czpython/repo-100", description="first", archived=True, fork=False
+        ),
+        SimpleNamespace(
+            full_name="czpython/repo-101", description="second", archived=False, fork=True
+        ),
     ]
     apps = SimpleNamespace(
         async_list_repos_accessible_to_installation=AsyncMock(
@@ -313,8 +319,21 @@ async def test_list_repos_paginates() -> None:
     repos = await client.list_repos()
 
     assert len(repos) == 102
-    assert repos[0] == {"full_name": "czpython/repo-0", "description": None}
-    assert repos[-1] == {"full_name": "czpython/repo-101", "description": "second"}
+    assert repos[0] == {
+        "full_name": "czpython/repo-0",
+        "description": None,
+        "archived": False,
+        "fork": False,
+    }
+    assert repos[-2:] == [
+        {"full_name": "czpython/repo-100", "description": "first", "archived": True, "fork": False},
+        {
+            "full_name": "czpython/repo-101",
+            "description": "second",
+            "archived": False,
+            "fork": True,
+        },
+    ]
     apps.async_list_repos_accessible_to_installation.assert_has_awaits(
         [call(per_page=100, page=1), call(per_page=100, page=2)]
     )

@@ -180,8 +180,8 @@ class GitHubClient:
         )
 
     async def list_repos(self) -> list[dict[str, Any]]:
-        """The repositories the installation can see, as
-        ``[{"full_name": "<owner>/<name>", "description": ...}, ...]``."""
+        """The repositories the installation can see, as ``[{"full_name":
+        "<owner>/<name>", "description": ..., "archived": ..., "fork": ...}, ...]``."""
         repos: list[dict[str, Any]] = []
         page = 1
         while True:
@@ -191,7 +191,12 @@ class GitHubClient:
             )
             items = response.parsed_data.repositories
             repos.extend(
-                {"full_name": repository.full_name, "description": repository.description}
+                {
+                    "full_name": repository.full_name,
+                    "description": repository.description,
+                    "archived": repository.archived,
+                    "fork": repository.fork,
+                }
                 for repository in items
             )
             if len(items) < 100:
