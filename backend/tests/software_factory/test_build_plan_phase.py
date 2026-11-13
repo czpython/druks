@@ -12,12 +12,15 @@ from druks.contrib.software_factory.contracts import (
     ReviewOutput,
     ReviewReport,
     ReviewWork,
+    TicketOutput,
 )
 from druks.contrib.software_factory.enums import ReviewDecision
 from druks.contrib.software_factory.journal import BuildJournal
 from druks.contrib.software_factory.policy import PlanGate, RepoPolicy
 from druks.contrib.software_factory.workflows import Build, PullRequestReview
 from druks.workflows import FatalError, OperatorReply, Run
+
+from software_factory.factories import make_test_work_item
 
 
 def _flow(*, plan_gate: PlanGate = "human") -> Build:
@@ -76,6 +79,7 @@ def _blocked_plan(reason: str) -> PlanData:
         confidence="low",
         status="blocked",
         assignee_github_login=None,
+        tickets=[],
     ).to_result()
 
 
@@ -584,6 +588,140 @@ async def test_operator_rounds_after_the_critique_never_rerun_the_reviewer(monke
     assert parks == 2
     assert [passing["reviewer_notes"] for passing in passes] == ["", "wrong layer", ""]
     assert [passing["operator_note"] for passing in passes] == ["", "", "steer left"]
+
+
+def _split_plan() -> PlanData:
+    return PlanData(
+        plan_markdown="Split into the API and the web client.",
+        tickets=[
+            TicketOutput(repo="acme/api", title="Add the endpoint", description="d", blocked_by=[]),
+            TicketOutput(
+                repo="acme/web", title="Call the endpoint", description="d", blocked_by=["acme/api"]
+            ),
+        ],
+    )
+
+
+async def test_a_split_parks_for_a_person_under_the_machine_gate(monkeypatch):
+    flow = _flow(plan_gate="machine")
+    _fake_plans(monkeypatch, _split_plan())
+    _no_review_agent(monkeypatch)
+    asked = []
+
+    async def fake_review(*, questions=None, context=""):
+        asked.append(questions)
+        return OperatorReply(action="approve")
+
+    flow.review = fake_review
+
+    assert await flow._plan_phase() is True
+    assert asked == [[]]
+
+
+async def test_an_approved_split_creates_tickets_instead_of_implementing():
+    flow = Build()
+    flow.journal = BuildJournal()
+    flow.journal.add(_split_plan())
+    splits = []
+
+    async def load_policy_and_profile():
+        return {"policy": RepoPolicy().model_dump(mode="json"), "profile": {}}
+
+    async def load_settings():
+        return Build.Settings()
+
+    async def load_blockers():
+        return []
+
+    async def plan_phase():
+        return True
+
+    async def split():
+        splits.append(True)
+
+    async def implement_phase():
+        raise AssertionError("a split opens no pull request")
+
+    flow._load_policy_and_profile = load_policy_and_profile
+    flow._load_settings = load_settings
+    flow._load_blockers = load_blockers
+    flow._plan_phase = plan_phase
+    flow._split = split
+    flow._implement_phase = implement_phase
+
+    await flow.run_multistep()
+
+    assert splits == [True]
+
+
+async def test_a_split_creates_the_tickets_then_their_links_then_releases_the_spike():
+    flow = Build()
+    flow.journal = BuildJournal()
+    flow.journal.add(_split_plan())
+    keys = {"acme/api": "ENG-2", "acme/web": "ENG-3"}
+    calls = []
+
+    async def create_ticket(repo, title, description):
+        calls.append(("create", repo))
+        return keys[repo]
+
+    async def add_blocker(key, blocker):
+        calls.append(("link", key, blocker))
+
+    async def release_ticket():
+        calls.append(("release",))
+
+    flow._create_ticket = create_ticket
+    flow._add_blocker = add_blocker
+    flow._release_ticket = release_ticket
+
+    await flow._split()
+
+    assert calls == [
+        ("create", "acme/api"),
+        ("create", "acme/web"),
+        ("link", "ENG-3", "ENG-2"),
+        ("release",),
+    ]
+
+
+async def test_each_split_ticket_takes_its_key_from_the_spike_and_its_repo(druks_db, monkeypatch):
+    created = []
+
+    class _Tracker:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return
+
+        async def get_ticket(self, key):
+            return {"team": "team-1"}
+
+        async def create_ticket(self, key, **kwargs):
+            created.append({"key": key, **kwargs})
+            return "ENG-2"
+
+    async def get_tracker(cls, source=None):
+        return _Tracker()
+
+    monkeypatch.setattr(SoftwareFactory, "get_tracker", classmethod(get_tracker))
+    flow = Build()
+    spike = await make_test_work_item(repo="acme/api", title="t", ticket_key="ENG-1")
+    flow.subject = spike
+
+    key = await Build._create_ticket.__wrapped__(flow, "acme/web", "Call the endpoint", "d")
+
+    assert key == "ENG-2"
+    assert created == [
+        {
+            "key": f"{spike.source}:ENG-1:acme/web",
+            "team": "team-1",
+            "label": "web",
+            "title": "Call the endpoint",
+            "description": "d",
+        }
+    ]
 
 
 @pytest.mark.parametrize("plan_gate", ["human", "machine", "machine_then_human", "adaptive"])

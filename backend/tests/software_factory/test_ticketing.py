@@ -11,6 +11,7 @@ from druks.contrib.software_factory.app import (
     list_tracker_status_choices,
 )
 from druks.contrib.software_factory.enums import Resolution, Status
+from druks.contrib.software_factory.exceptions import TeamSetupMissing, TicketDeleted
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket
 from druks.contrib.software_factory.ticketing.base import Tracker
 from druks.contrib.software_factory.ticketing.druks import DruksTracker
@@ -563,6 +564,142 @@ async def test_linear_reads_the_tickets_an_issue_blocks():
     tracker = Linear(client=_linear_client(handler), status_names={})
 
     assert await tracker.get_blocking("ENG-831") == ["ENG-9"]
+
+
+def _linear_create_handler(*, existing: dict | None, labels: list[dict], created: list[dict]):
+    """Linear as the create path sees it: the issue with the derived id, the team, the
+    labels named like the repo, and each create."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        query = body["query"]
+        if "DruksIssueCreate" in query:
+            created.append(body["variables"]["issue"])
+            return httpx.Response(
+                200,
+                json={
+                    "data": {"issueCreate": {"issue": {"identifier": "ENG-50", "trashed": None}}}
+                },
+            )
+        if "DruksIssueLabels" in query:
+            return httpx.Response(200, json={"data": {"issueLabels": {"nodes": labels}}})
+        if "DruksTeam" in query:
+            states = [
+                {"id": "state-backlog", "name": "Backlog"},
+                {"id": "state-ready", "name": "Ready"},
+            ]
+            team = {"key": "ENG", "states": {"nodes": states}}
+            return httpx.Response(200, json={"data": {"team": team}})
+        if existing:
+            return httpx.Response(200, json={"data": {"issue": existing}})
+        return httpx.Response(200, json={"errors": [{"message": "Entity not found: Issue"}]})
+
+    return handler
+
+
+def _linear_for_create(handler) -> Linear:
+    return Linear(
+        client=_linear_client(handler),
+        status_names={TicketStatus.BACKLOG: "Backlog", TicketStatus.TRIGGER: "Ready"},
+    )
+
+
+async def test_linear_creates_a_ticket_at_the_resting_status_with_its_label():
+    created = []
+    labels = [{"id": "label-other", "team": {"id": "team-9"}}, {"id": "label-api", "team": None}]
+    handler = _linear_create_handler(existing=None, labels=labels, created=created)
+
+    key = await _linear_for_create(handler).create_ticket(
+        "linear:ENG-1:acme/api",
+        team="team-1",
+        label="api",
+        title="Add the endpoint",
+        description="d",
+    )
+
+    assert key == "ENG-50"
+    assert created == [
+        {
+            "id": "429a911d-e954-4714-8b34-a9b8ba1e94dc",
+            "teamId": "team-1",
+            "stateId": "state-backlog",
+            "labelIds": ["label-api"],
+            "title": "Add the endpoint",
+            "description": "d",
+        }
+    ]
+
+
+async def test_linear_finds_the_ticket_that_an_earlier_call_created():
+    created = []
+    existing = {"identifier": "ENG-50", "trashed": None}
+    handler = _linear_create_handler(existing=existing, labels=[], created=created)
+
+    key = await _linear_for_create(handler).create_ticket(
+        "linear:ENG-1:acme/api", team="team-1", label="api", title="t", description="d"
+    )
+
+    assert key == "ENG-50"
+    assert created == []
+
+
+async def test_linear_refuses_a_ticket_that_a_person_deleted():
+    existing = {"identifier": "ENG-50", "trashed": True}
+    handler = _linear_create_handler(existing=existing, labels=[], created=[])
+
+    with pytest.raises(TicketDeleted, match="ENG-50"):
+        await _linear_for_create(handler).create_ticket(
+            "linear:ENG-1:acme/api", team="team-1", label="api", title="t", description="d"
+        )
+
+
+async def test_linear_names_the_team_and_the_label_that_it_lacks():
+    labels = [{"id": "label-other", "team": {"id": "team-9"}}]
+    handler = _linear_create_handler(existing=None, labels=labels, created=[])
+
+    with pytest.raises(TeamSetupMissing, match="Linear team ENG has no label 'api'"):
+        await _linear_for_create(handler).create_ticket(
+            "linear:ENG-1:acme/api", team="team-1", label="api", title="t", description="d"
+        )
+
+
+async def test_linear_names_the_resting_status_that_the_team_lacks():
+    handler = _linear_create_handler(existing=None, labels=[], created=[])
+    tracker = Linear(client=_linear_client(handler), status_names={TicketStatus.BACKLOG: "Icebox"})
+
+    with pytest.raises(TeamSetupMissing, match="Linear team ENG has no status 'Icebox'"):
+        await tracker.create_ticket(
+            "linear:ENG-1:acme/api", team="team-1", label="api", title="t", description="d"
+        )
+
+
+async def test_linear_adds_a_blocker_only_once():
+    relations = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if "DruksIssueRelationCreate" in body["query"]:
+            relations.append(body["variables"])
+            return httpx.Response(200, json={"data": {"issueRelationCreate": {"success": True}}})
+        issue = {
+            "relations": {"nodes": []},
+            "inverseRelations": {
+                "nodes": [
+                    {
+                        "type": "blocks",
+                        "issue": {"identifier": "ENG-1", "state": {"type": "started"}},
+                    }
+                ]
+            },
+        }
+        return httpx.Response(200, json={"data": {"issue": issue}})
+
+    tracker = Linear(client=_linear_client(handler), status_names={})
+
+    await tracker.add_blocker("ENG-3", "ENG-1")
+    await tracker.add_blocker("ENG-3", "ENG-2")
+
+    assert relations == [{"issueId": "ENG-2", "relatedIssueId": "ENG-3"}]
 
 
 async def test_linear_client_lists_workflow_states_across_pages():
