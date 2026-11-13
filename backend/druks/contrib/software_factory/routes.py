@@ -467,7 +467,7 @@ async def get_ticket(identifier: str) -> Ticket:
     ),
 )
 async def update_ticket(identifier: str, edit: TicketEdit) -> Ticket:
-    """Edit a ticket's title, description, priority, assignee, or repo."""
+    """Edit a ticket's title, description, priority, assignee, repo, or blockers."""
     ticket = await require_ticket(identifier)
     if edit.repo_id:
         ticket.project_repo = await require_repo(edit.repo_id)
@@ -480,6 +480,8 @@ async def update_ticket(identifier: str, edit: TicketEdit) -> Ticket:
         ticket.priority = edit.priority
     if "assignee_id" in edit.model_fields_set:
         ticket.assignee_id = await require_assignee(edit.assignee_id)
+    if edit.blocked_by is not None:
+        ticket.blocked_by = [await require_ticket(key) for key in sorted(edit.blocked_by)]
     await ticket.save()
     return ticket
 

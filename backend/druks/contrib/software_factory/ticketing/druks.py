@@ -37,6 +37,18 @@ class DruksTracker(Tracker):
             return
         raise UnknownTicketError(key, "druks")
 
+    async def get_blocked_by(self, key: str) -> dict[str, bool]:
+        if ticket := await Ticket.get_for_identifier(key):
+            return {
+                blocker.identifier: blocker.status != Status.DONE for blocker in ticket.blocked_by
+            }
+        raise UnknownTicketError(key, "druks")
+
+    async def get_blocking(self, key: str) -> list[dict]:
+        if ticket := await Ticket.get_for_identifier(key):
+            return [await blocked_ticket.to_tracker_ticket() for blocked_ticket in ticket.blocking]
+        raise UnknownTicketError(key, "druks")
+
     async def get_account_id(self, user_id: str | None) -> str | None:
         # A board ticket's assignee is a Druks account.
         return user_id

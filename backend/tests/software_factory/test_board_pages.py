@@ -126,6 +126,11 @@ async def test_the_ticket_page_saves_in_place_and_opens_its_build(druks_client):
         title="Follow me",
     )
 
+    blocker = await _open_ticket(druks_client, repo["id"], title="Go first")
+    await druks_client.patch(
+        f"{_TICKETS}/{created['identifier']}", json={"blocked_by": [blocker["identifier"]]}
+    )
+
     page = (await druks_client.get(f"{_PAGES}/tickets/{created['identifier']}")).json()
 
     assert page["title"] == created["identifier"]
@@ -151,8 +156,13 @@ async def test_the_ticket_page_saves_in_place_and_opens_its_build(druks_client):
         "priority",
         "assignee_id",
         "repo_id",
+        "blocked_by",
     ]
     assert all(form["submit"] == "change" for form in sidebar[:-1])
+    blockers_field = sidebar[4]["fields"][0]
+    assert [option["value"] for option in blockers_field["options"]] == [blocker["identifier"]]
+    assert blockers_field["value"] == [blocker["identifier"]]
+    assert blockers_field["isSearchable"]
     assert [fact["label"] for fact in sidebar[-1]["facts"]] == [
         "Identifier",
         "Created by",
