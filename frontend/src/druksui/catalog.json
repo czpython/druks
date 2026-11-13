@@ -477,7 +477,8 @@
           ],
           "value": [],
           "helpText": "",
-          "isRequired": false
+          "isRequired": false,
+          "isSearchable": true
         },
         {
           "field": "radio",

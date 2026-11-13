@@ -61,6 +61,8 @@ class MultiSelectField(PageField):
     field: Literal["multi_select"] = "multi_select"
     options: list[Option] = []
     value: list[str] = []
+    # A search box over the options, for a list too long to scan.
+    is_searchable: bool = False
 
 
 class RadioField(PageField):

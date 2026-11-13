@@ -1653,6 +1653,7 @@ class MultiSelectField:
     value: list[str] = []
     help_text: str = ""
     is_required: bool = False
+    is_searchable: bool = False
 ```
 
 ```json
@@ -1663,9 +1664,15 @@ class MultiSelectField:
   "options": [{"value": "rack", "label": "Rack", "group": ""}],
   "value": ["rack"],
   "helpText": "",
-  "isRequired": false
+  "isRequired": false,
+  "isSearchable": false
 }
 ```
+
+`is_searchable` puts a search box above a long list of options. The shell
+filters the options in the browser by their label, ignoring case, and does not
+reread the page. A hidden option keeps its check, and the form sends every
+checked option, shown or not.
 
 ### RadioField
 
