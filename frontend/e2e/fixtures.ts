@@ -157,9 +157,11 @@ export async function expectChatFacts(
       if (count !== 1) return [`${message.role} "${body}" shows ${count} times`]
       if (text.indexOf(body) < position) return [`${message.role} "${body}" shows above an older message`]
       position = text.indexOf(body)
+      // The page shows a streamed reply before Druks saves it.
+      if (message.role === 'user' && !messages.some((saved) => saved.replyTo === message.id)) return [`user "${body}" has no saved reply`]
       return []
     })
-  }, { message: 'each saved message shows once, in order' }).toEqual([])
+  }, { message: 'each saved message shows once, in order, and each turn has its reply' }).toEqual([])
   expect([...violations], 'no marker showed twice or out of order').toEqual([])
 
   const conversation = await getConversation(request, id)

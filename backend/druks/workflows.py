@@ -5,7 +5,7 @@ import subprocess
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, nullcontext, suppress
 from contextvars import ContextVar
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial, wraps
 from typing import (
     TYPE_CHECKING,
@@ -937,6 +937,16 @@ class Workflow:
                 return await AgentCall.get_cost_for_run(session, self.workflow_id)
 
         return await DBOS.run_step_async(StepOptions(name="get_cost", **_IO_RETRIES), read)
+
+    async def get_duration(self) -> timedelta:
+        """How long this run's steps and agent calls have taken so far. A checkpoint: a
+        replay reads what the run read the first time."""
+        return await DBOS.run_step_async(
+            StepOptions(name="get_duration", **_IO_RETRIES),
+            Run.get_duration,
+            self.workflow_id,
+            self.kind,
+        )
 
     async def review(
         self, *, questions: list[BaseModel] | None = None, context: str = ""

@@ -373,6 +373,21 @@ call that recorded no cost counts as zero. The read is a checkpoint, so a replay
 returns the cost the run read the first time. Inside a `@step` or `run()`, the
 read shares that checkpoint.
 
+### Read how long the run's steps have taken
+
+Read how long the run's own steps and agent calls have taken so far, for example to
+report the time its work took:
+
+```python
+duration = await self.get_duration()
+```
+
+It is a `timedelta`: the sum of the time that each step took, as DBOS timed it. A wait
+at a gate, answered or timed out, a `sleep`, and a restart count nothing. A retried run
+counts the steps it reused from the run it retries. A step that is still running counts
+nothing, so read it from `run_multistep()`, not from inside a `@step` or `run()`. Like
+`get_cost()`, the read is a checkpoint.
+
 ### Schedules and settings
 
 Set `every` to declare a cron:
