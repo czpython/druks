@@ -67,6 +67,17 @@ http://:8000 {
 		reverse_proxy {$DRUKS_UPSTREAM}
 	}
 
+	# An API call without the identity header gets a 401, not the redirect
+	# below: fetch would follow that into the login flow, and the dashboard
+	# would never learn that the session ended.
+	@api_fetch {
+		path /api/*
+		not header Sec-Fetch-Mode navigate
+	}
+	handle @api_fetch {
+		respond 401
+	}
+
 	# No identity header at all. exe.dev passes unauthenticated traffic
 	# through and relies on this redirect to its SSO; proxies like Teleport
 	# intercept upstream and never reach here, so this stays exe-shaped.

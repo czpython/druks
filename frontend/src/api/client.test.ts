@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   IDENTITY_INVALIDATED_EVENT,
+  SESSION_EXPIRED_EVENT,
   UnauthorizedError,
   api,
   getJSON,
@@ -108,6 +109,23 @@ describe('request identity', () => {
       await expect(getJSON('/api/x')).rejects.toBeInstanceOf(UnauthorizedError)
       expect(invalidated).toHaveBeenCalledTimes(1)
     } finally {
+      window.removeEventListener(IDENTITY_INVALIDATED_EVENT, invalidated)
+    }
+  })
+
+  it.each([401, 403])('reads a %i without a druks body as an expired edge session', async (status) => {
+    failWith(status, '', '<html>Access denied</html>')
+    const expired = vi.fn()
+    const invalidated = vi.fn()
+    window.addEventListener(SESSION_EXPIRED_EVENT, expired)
+    window.addEventListener(IDENTITY_INVALIDATED_EVENT, invalidated)
+    try {
+      await expect(postJSON('/api/x', {})).rejects.toBeInstanceOf(UnauthorizedError)
+      expect(expired).toHaveBeenCalledTimes(1)
+      // No recheck: it would meet the same refusal and take the page down.
+      expect(invalidated).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener(SESSION_EXPIRED_EVENT, expired)
       window.removeEventListener(IDENTITY_INVALIDATED_EVENT, invalidated)
     }
   })

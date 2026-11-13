@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 
 import { AuthedApp } from './components/AuthedApp'
 import { IdentityBootstrap } from './components/IdentityBootstrap'
+import { SessionExpired } from './components/SessionExpired'
 import './foundation/druks-base.css'
 import './styles.css'
 import './command-center.css'
@@ -13,6 +14,13 @@ if (!rootElement) throw new Error('Root element #root not found')
 
 createRoot(rootElement).render(
   <StrictMode>
-    <IdentityBootstrap>{(account) => <AuthedApp account={account} />}</IdentityBootstrap>
+    <IdentityBootstrap>
+      {(account) => (
+        <>
+          <SessionExpired />
+          <AuthedApp account={account} />
+        </>
+      )}
+    </IdentityBootstrap>
   </StrictMode>,
 )
