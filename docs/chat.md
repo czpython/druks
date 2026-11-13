@@ -117,6 +117,12 @@ An agent plan shows the latest complete plan. A plan update replaces the
 previous list. Tool updates instead change only the fields that the adapter
 sends. Completed replies retain text and tool calls, not the live plan.
 
+While a run that the conversation started is active, the page shows one line
+for it below the messages: the workflow's name and whether the run is queued,
+is running, or waits for an answer. The line changes when the run starts to
+work, parks, or continues. It goes when the run's report reaches the
+conversation. Only the Chat page shows it.
+
 The page stays at the bottom while text arrives. Scroll up to read earlier
 messages. **Latest message** returns to the bottom.
 
@@ -441,8 +447,8 @@ everyone else, operators included.
 
 When a run that a chat on the number started ends, Druks reports it to that
 chat, as for every [run that a chat starts](#agent-access). The Bot then tells
-the person: a failure in one short line, with no error details and no retry. A
-cancelled run adds nothing.
+the person: a failure in one short line, with no error details and no retry,
+and a cancel in one short line.
 
 ### Taking over
 

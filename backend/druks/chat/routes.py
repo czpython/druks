@@ -68,7 +68,7 @@ async def create_conversation(
     await DBOS.start_workflow_async(deliver, conversation.id)
     await session.refresh(
         conversation,
-        ["messages", "message_count", "active_message_id", "last_message_at"],
+        ["messages", "runs", "message_count", "active_message_id", "last_message_at"],
     )
     return conversation
 
@@ -84,7 +84,7 @@ async def get_conversation(
     conversation = await Conversation.get_for_account(session, conversation_id, account)
     if not conversation:
         raise HTTPException(404, "Conversation not found.")
-    await session.refresh(conversation, ["messages"])
+    await session.refresh(conversation, ["messages", "runs"])
     return conversation
 
 

@@ -27,7 +27,7 @@ const message: Message = { id: '10', role: 'user', body: 'Check the active runs'
 const conversation: Conversation = {
   id: '01995a3c-0000-7000-8000-000000000001', title: message.body, source: 'web', userId: null, userName: '', createdAt: message.createdAt,
   messageCount: 1, activeMessageId: '10', messages: [message],
-  isPinned: false, lastMessageAt: message.createdAt,
+  activeRuns: [], isPinned: false, lastMessageAt: message.createdAt,
 }
 
 function mount(path = `/chat/${conversation.id}`, timezone?: string) {
@@ -85,6 +85,18 @@ describe('Chat page', () => {
     expect(within(turns[0]!).getByText('You')).toBeTruthy()
     expect(within(turns[0]!).getByText('Agent')).toBeTruthy()
     expect(within(turns[1]!).getByText('Druks')).toBeTruthy()
+  })
+
+  it('shows the state of each active run that the conversation started', async () => {
+    const run = { id: '01995a3c-0000-7000-8000-000000000002', kind: 'software_factory.build', state: 'running' as const }
+    vi.mocked(chatApi.get).mockResolvedValue({ ...conversation, activeRuns: [run] })
+    mount()
+    const socket = await connected()
+    expect(await screen.findByText('Build is running')).toBeTruthy()
+    socket.receive({ type: 'snapshot', ...conversation, activeRuns: [{ ...run, state: 'parked' }] })
+    expect(screen.getByText('Build waits for an answer')).toBeTruthy()
+    socket.receive({ type: 'snapshot', ...conversation, activeRuns: [] })
+    expect(screen.queryByText(/^Build /)).toBeNull()
   })
 
   it.each([
