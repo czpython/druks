@@ -2,24 +2,34 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import timedelta
 from types import SimpleNamespace
 from urllib.parse import urlencode
 
 import pytest
 from conftest import bind_ambient_session, install_service
+from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
+from druks.chat.channels.whatsapp.constants import WAHA_AUDIENCE
+from druks.chat.enums import ConversationSource
+from druks.chat.models import Conversation
 from druks.core.webhooks.slack import SlackInteractivity, verify_slack_signature
 from druks.db import db_session as ambient_db_session
 from druks.durable import Run
 from druks.models import Base
 from druks.notifications.buttons import encode_button
 from druks.notifications.models import Destination, Notification
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.testing import configure_app_for_test, make_settings, seed_dbos_status
 from druks.webhooks.router import match_webhook
 from fastapi.testclient import TestClient
+from slack_sdk.webhook.async_client import AsyncWebhookClient
 from uuid_utils import uuid7
 
 _SIGNING_SECRET = "slack-test-signing-secret"
+_RESPONSE_URL = "https://hooks.slack.com/actions/T1/1/click"
+_QUESTION = {"type": "section", "text": {"type": "mrkdwn", "text": "review the plan"}}
 
 _IN_APP_ASK = {
     "presentation": "in_app",
@@ -65,9 +75,22 @@ def _signed_headers(body: bytes, *, timestamp=None, secret=_SIGNING_SECRET):
     }
 
 
+def _interactivity_payload(action_id: str) -> dict:
+    button = {"type": "button", "text": {"type": "plain_text", "text": "Approve"}}
+    return {
+        "type": "block_actions",
+        "team": {"id": "T1"},
+        "actions": [{**button, "action_id": action_id}],
+        "message": {
+            "text": "review the plan",
+            "blocks": [_QUESTION, {"type": "actions", "elements": [button]}],
+        },
+        "response_url": _RESPONSE_URL,
+    }
+
+
 def _interactivity_body(action_id: str) -> bytes:
-    payload = {"type": "block_actions", "team": {"id": "T1"}, "actions": [{"action_id": action_id}]}
-    return urlencode({"payload": json.dumps(payload)}).encode()
+    return urlencode({"payload": json.dumps(_interactivity_payload(action_id))}).encode()
 
 
 def _client(tmp_path) -> TestClient:
@@ -85,6 +108,17 @@ async def slack_card(druks_db):
         secrets={"client_secret": "cs", "signing_secret": _SIGNING_SECRET},
     )
     await druks_db.commit()
+
+
+@pytest.fixture
+def slack_replies(monkeypatch):
+    replies = []
+
+    async def _send(self, **reply):
+        replies.append({"url": self.url, **reply})
+
+    monkeypatch.setattr(AsyncWebhookClient, "send", _send)
+    return replies
 
 
 @pytest.fixture
@@ -158,7 +192,9 @@ async def test_unsigned_or_stale_requests_401_and_never_resume(
         assert notification.correlation_token not in response.text
 
 
-async def test_signed_click_routes_through_respond(tmp_path, druks_db, resume_spy, slack_card):
+async def test_signed_click_routes_through_respond(
+    tmp_path, druks_db, resume_spy, slack_card, slack_replies
+):
     run, notification = await _parked_notification(druks_db)
     body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
     with _client(tmp_path) as client:
@@ -169,6 +205,17 @@ async def test_signed_click_routes_through_respond(tmp_path, druks_db, resume_sp
     assert response.status_code == 200
     assert response.json() == {"accepted": True}
     assert resume_spy == [{"id": run.id, "action": "approve", "answers": {}, "note": ""}]
+    assert slack_replies == [
+        {
+            "url": _RESPONSE_URL,
+            "text": "review the plan",
+            "blocks": [
+                _QUESTION,
+                {"type": "section", "text": {"type": "mrkdwn", "text": "Answer: Approve"}},
+            ],
+            "replace_original": True,
+        }
+    ]
     # The request's own session committed the transition; drop the ambient
     # (task-scoped) session's cached instance to read it.
     ambient_db_session().expunge_all()
@@ -177,8 +224,52 @@ async def test_signed_click_routes_through_respond(tmp_path, druks_db, resume_sp
     assert _SIGNING_SECRET not in response.text
 
 
+async def test_answer_line_escapes_mrkdwn_in_the_button_label(
+    tmp_path, druks_db, resume_spy, slack_card, slack_replies
+):
+    run, notification = await _parked_notification(druks_db)
+    payload = _interactivity_payload(encode_button(notification.correlation_token, "approve"))
+    payload["actions"][0]["text"]["text"] = "Tom & Jerry <A>"
+    body = urlencode({"payload": json.dumps(payload)}).encode()
+    with _client(tmp_path) as client:
+        response = client.post(
+            "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
+        )
+
+    assert response.json() == {"accepted": True}
+    answer = slack_replies[0]["blocks"][-1]
+    assert answer == {
+        "type": "section",
+        "text": {"type": "mrkdwn", "text": "Answer: Tom &amp; Jerry &lt;A&gt;"},
+    }
+
+
+async def test_click_with_a_control_outside_the_ask_tells_the_clicker_plainly(
+    tmp_path, druks_db, resume_spy, slack_card, slack_replies
+):
+    run, notification = await _parked_notification(druks_db)
+    body = _interactivity_body(encode_button(notification.correlation_token, "delete"))
+    with _client(tmp_path) as client:
+        response = client.post(
+            "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
+        )
+
+    assert response.json() == {"accepted": False}
+    assert resume_spy == []
+    assert slack_replies == [
+        {
+            "url": _RESPONSE_URL,
+            "text": "This button no longer matches the question.",
+            "response_type": "ephemeral",
+            "replace_original": False,
+        }
+    ]
+    # The raw control id never reaches the clicker.
+    assert "delete" not in slack_replies[0]["text"]
+
+
 async def test_dead_round_click_is_acknowledged_without_resume(
-    tmp_path, druks_db, resume_spy, slack_card
+    tmp_path, druks_db, resume_spy, slack_card, slack_replies
 ):
     run, notification = await _parked_notification(druks_db)
     await notification.mark_acknowledged()
@@ -196,9 +287,86 @@ async def test_dead_round_click_is_acknowledged_without_resume(
         )
         assert unknown.status_code == 200
     assert unknown.json() == {"accepted": False}
+    assert slack_replies == [
+        {
+            "url": _RESPONSE_URL,
+            "text": text,
+            "response_type": "ephemeral",
+            "replace_original": False,
+        }
+        for text in ("This notification was already acknowledged.", "Unknown respond token.")
+    ]
     assert "ghost-token" not in unknown.text
 
     assert resume_spy == []
+
+
+async def test_click_after_the_run_parked_again_tells_the_clicker(
+    tmp_path, druks_db, resume_spy, slack_card, slack_replies
+):
+    run, notification = await _parked_notification(druks_db)
+    notification.run_parked_at = run.input_requested_at - timedelta(minutes=1)
+    await druks_db.flush()
+    body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
+    with _client(tmp_path) as client:
+        response = client.post(
+            "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
+        )
+
+    assert response.json() == {"accepted": False}
+    assert resume_spy == []
+    assert slack_replies == [
+        {
+            "url": _RESPONSE_URL,
+            "text": "The run has moved past the round this notification was sent for.",
+            "response_type": "ephemeral",
+            "replace_original": False,
+        }
+    ]
+
+
+async def test_click_on_a_number_admins_question_tells_the_clicker(
+    tmp_path, druks_db, resume_spy, slack_card, slack_replies
+):
+    run, notification = await _parked_notification(druks_db)
+    admin = await Account.create_for_bot(druks_db, AccountKind.BOT_ADMIN)
+    connection = await VaultSecret.store(
+        druks_db,
+        SecretKind.SESSION,
+        WAHA_AUDIENCE,
+        secrets={},
+        identity={"app": "helpdesk", "admin": {"account_id": admin.id}},
+        account_id=run.account_id,
+    )
+    conversation = await Conversation.get_or_create_for_user(
+        druks_db,
+        connection,
+        run.account_id,
+        source=ConversationSource.WHATSAPP,
+        user_id="41000000001@c.us",
+        user_name="",
+        user_phone="",
+        thread_id="",
+    )
+    run.conversation_id = conversation.id
+    await druks_db.commit()
+    body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
+    with _client(tmp_path) as client:
+        response = client.post(
+            "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"accepted": False}
+    assert resume_spy == []
+    assert slack_replies == [
+        {
+            "url": _RESPONSE_URL,
+            "text": "Only the admin of the number that started this run can answer it.",
+            "response_type": "ephemeral",
+            "replace_original": False,
+        }
+    ]
 
 
 async def test_malformed_payloads_400_never_500_never_resume(
@@ -213,6 +381,16 @@ async def test_malformed_payloads_400_never_500_never_resume(
         urlencode({"payload": json.dumps({"type": "block_actions", "actions": []})}).encode(),
         _interactivity_body("not-an-encoded-button!!"),
     ]
+    # A real button for the parked round, each time without one field the reply needs.
+    for drop in (
+        lambda payload: payload.pop("response_url"),
+        lambda payload: payload.pop("message"),
+        lambda payload: payload["message"].pop("text"),
+        lambda payload: payload["actions"][0].pop("text"),
+    ):
+        payload = _interactivity_payload(encode_button(notification.correlation_token, "approve"))
+        drop(payload)
+        malformed.append(urlencode({"payload": json.dumps(payload)}).encode())
 
     with _client(tmp_path) as client:
         for body in malformed:

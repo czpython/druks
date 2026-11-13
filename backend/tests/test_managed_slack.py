@@ -23,6 +23,7 @@ from druks.secrets.models import VaultSecret
 from druks.services import Service
 from druks.settings import configure_settings
 from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_dbos_status
+from slack_sdk.webhook.async_client import AsyncWebhookClient
 from uuid_utils import uuid7
 
 INSTANCE_ID = "6f2c1c1e-9b8e-4b65-9d3c-7a2b1f4e8d10"
@@ -192,7 +193,9 @@ def _click(button: str, action_ts: str) -> bytes:
     payload = {
         "type": "block_actions",
         "team": {"id": "T1"},
-        "actions": [{"action_id": button, "action_ts": action_ts}],
+        "actions": [{"action_id": button, "action_ts": action_ts, "text": {"text": "Approve"}}],
+        "message": {"text": "review the plan", "blocks": []},
+        "response_url": "https://hooks.slack.com/actions/T1/1/click",
     }
     return urlencode({"payload": json.dumps(payload)}).encode()
 
@@ -377,8 +380,9 @@ async def test_forwarded_messages_reach_the_bot_once_and_only_from_its_workspace
 
 
 async def test_a_forwarded_click_answers_its_notification_once(
-    slack_after_install, managed_slack, manager_keys, druks_db, resume_spy
+    slack_after_install, managed_slack, manager_keys, druks_db, resume_spy, monkeypatch
 ):
+    monkeypatch.setattr(AsyncWebhookClient, "send", AsyncMock())
     run = Run(
         account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         id=str(uuid7()),
