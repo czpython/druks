@@ -641,6 +641,17 @@ ticket at the trigger status with no other open blocker starts its build. No
 person starts that build, so it uses the account of the ticket assignee.
 **druks** board tickets do not wait for blockers.
 
+On Linear, the planner can split a ticket whose work needs more than one pull
+request. It proposes one ticket for each repository, with the "blocked by" links
+between them, and a person approves the proposal whatever the plan gate. Druks
+then creates each ticket as a sub-issue of the split ticket, at the resting
+status with the label of its repository, and adds the links. The split ticket
+opens no pull request and goes back to the resting status. When the same ticket
+splits again, Druks reuses the tickets that it created for it and adds the links
+that are missing. Druks removes no ticket and no link. A ticket that the new
+proposal leaves out still blocks the tickets that it blocked, until you cancel
+it.
+
 Software Factory starts a Linear, Jira, or GitHub build under the Druks account
 of the person who moved the ticket. If that person has no account, the build
 uses the account of the ticket assignee, and then the default account. Linear

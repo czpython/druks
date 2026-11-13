@@ -232,6 +232,23 @@ async def test_a_build_without_blockers_renders_no_builds_on_section():
     assert "Builds on" not in prompt
 
 
+async def test_only_a_linear_planner_proposes_a_split():
+    prompts = {}
+    for source in ("linear", "github"):
+        build = _build()
+        build.source = source
+        prompts[source] = await render_prompt(
+            "software_factory/build/generate_plan.md",
+            build=build,
+            verification="VERIFICATION-BLOCK",
+            workspace=_workspace(),
+            **_CALL_KWARGS["generate_plan.md"],
+        )
+
+    assert "`blocked_by`" in prompts["linear"]
+    assert "`blocked_by`" not in prompts["github"]
+
+
 def test_build_prompt_context_covers_template_attrs():
     # Every build prompt reads build.<attr>; assert BuildPromptContext carries them
     # all, so a template ref can never outrun the context contract.

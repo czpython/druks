@@ -104,6 +104,14 @@ class AcceptanceCriterionOutput(AgentOutput):
     verification: str
 
 
+class TicketOutput(AgentOutput):
+    repo: str
+    title: str
+    description: str
+    # The repos of the proposed tickets that must merge before this one.
+    blocked_by: list[str]
+
+
 class PlanData(BaseModel):
     # The workflow's current plan, normalized from either producer — the
     # generate_plan agent (questions and all) or a contract revision (questions
@@ -123,14 +131,17 @@ class PlanData(BaseModel):
     status: Literal["planned", "blocked"] = "planned"
     # Resolved by the planner; a revision carries None.
     assignee_github_login: str | None = None
+    # The tickets a split proposes, one per repo. A plan for one pull request has none.
+    tickets: list[TicketOutput] = Field(default_factory=list)
 
     def uses_recommended_answers(self, picks: dict[str, str]) -> bool:
         return all(question.is_recommended(picks.get(question.id)) for question in self.questions)
 
     def is_confirmed_by(self, reply: OperatorReply) -> bool:
-        """A plan carrying acceptance criteria that the operator approved as it stands."""
+        """A plan carrying acceptance criteria or a split that the operator approved as it
+        stands."""
         return bool(
-            self.acceptance_criteria
+            (self.acceptance_criteria or self.tickets)
             and reply.action == "approve"
             and not reply.note
             and self.uses_recommended_answers(reply.answers)
@@ -163,6 +174,25 @@ class PlanOutput(AgentOutput):
     # Required but nullable: the planner always reports the field, null when it
     # resolved no assignee login convincingly.
     assignee_github_login: str | None
+    tickets: list[TicketOutput]
+
+    @model_validator(mode="after")
+    def _split_gives_one_ticket_for_each_repo(self) -> "PlanOutput":
+        # Druks creates and links the tickets by repo after the approval. A split that it
+        # cannot write must fail here, before a person approves it.
+        repos = [ticket.repo for ticket in self.tickets]
+        if len(repos) == 1 or len(set(repos)) < len(repos):
+            raise ValueError(
+                "tickets needs at least two tickets, each for another repo; leave it empty "
+                "for work that one pull request delivers"
+            )
+        for ticket in self.tickets:
+            if ticket.repo in ticket.blocked_by or not set(ticket.blocked_by) <= set(repos):
+                raise ValueError(
+                    f"blocked_by of the {ticket.repo} ticket must name the repos of other "
+                    "tickets in tickets"
+                )
+        return self
 
     def to_artifact(self) -> dict[str, str]:
         return {"kind": "markdown", "title": "Implementation plan", "content": self.plan_markdown}
@@ -179,6 +209,7 @@ class PlanOutput(AgentOutput):
             confidence=self.confidence,
             status=self.status,
             assignee_github_login=self.assignee_github_login,
+            tickets=self.tickets,
         )
 
 

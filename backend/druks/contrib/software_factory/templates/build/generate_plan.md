@@ -38,11 +38,18 @@ request to your acceptance criteria. Wrong shape here compounds into every step 
   is the implementer's, judged in the diff.
 - **A confident answer is a decision, not a question.** Make it, plan with it, and note it in
   the plan. Ask only when the plan cannot proceed without the operator's decision.
+{% if build.source == "linear" %}
+- **One ticket gives one PR.** When the work needs more than one pull request, propose the split
+  in `tickets`, as SPLIT below says, instead of asking about it. Do not split a single feature
+  spanning many files, a pure refactor/bugfix/docs change, or the smallest useful endpoint-and-UI
+  vertical slice. When in doubt, plan it as one.
+{% else %}
 - **One PR, one coherent change.** If the work bundles independent surfaces that could ship
   separately, a refactor with a feature, or independently shippable AC groups, ask one question
   naming the split seam and let the operator decide. Do not ask for a single feature spanning
   many files, a pure refactor/bugfix/docs change, or the smallest useful endpoint-and-UI vertical
   slice. When in doubt, plan it as one.
+{% endif %}
 
 ## Boundaries
 
@@ -147,6 +154,17 @@ settled, so an approach you rejected silently is one they will propose again. A 
 reason must name the concrete behavior or cost it protects — what breaks, what regresses,
 what it would strand — never a restatement of the ticket's design slogan. If the only reason
 you can write is "the ticket says so", the approach is not ruled out; leave it off the list.
+
+SPLIT — the `tickets` schema field. {% if build.source == "linear" %}Leave it empty for work that
+one pull request delivers. Split only when each part can merge and be checked alone, touches
+another repository, or needs another owner. Never split a feature by layer. A split gives one
+ticket for each repository, from this repo and the related repos above: `repo` is its full name,
+`title` and `description` brief the agent that will plan it, and `blocked_by` names the repos of
+the tickets that must merge first. The ticket that defines a contract blocks the tickets that use
+it. Describe the split in `plan_markdown`, so the person who approves it sees each ticket and its
+blockers, and leave `acceptance_criteria` empty: each ticket gets its own plan when it builds.
+Druks creates the tickets after the approval, so do not create them yourself.{% else %}Leave it
+empty.{% endif %}
 
 ASSIGNEE RESOLUTION — the `assignee_github_login` schema field. Resolve the ticket
 assignee's GitHub login via the github MCP from their name

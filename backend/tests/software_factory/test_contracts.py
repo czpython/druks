@@ -207,6 +207,35 @@ def test_ask_contracts_cap_identity_and_cardinality():
             confidence="medium",
             status="planned",
             assignee_github_login=None,
+            tickets=[],
+        )
+
+
+def _ticket(repo: str, *, blocked_by: list[str]) -> O.TicketOutput:
+    return O.TicketOutput(repo=repo, title="t", description="d", blocked_by=blocked_by)
+
+
+@pytest.mark.parametrize(
+    "tickets",
+    [
+        [_ticket("acme/api", blocked_by=[])],
+        [_ticket("acme/api", blocked_by=[]), _ticket("acme/api", blocked_by=[])],
+        [_ticket("acme/api", blocked_by=[]), _ticket("acme/web", blocked_by=["acme/docs"])],
+        [_ticket("acme/api", blocked_by=[]), _ticket("acme/web", blocked_by=["acme/web"])],
+    ],
+    ids=["one ticket", "a repo twice", "an unknown blocker", "its own blocker"],
+)
+def test_a_split_that_druks_cannot_write_is_refused(tickets):
+    with pytest.raises(ValidationError):
+        O.PlanOutput(
+            plan_markdown="m",
+            acceptance_criteria=[],
+            questions=[],
+            rejected_approaches=[],
+            confidence="medium",
+            status="planned",
+            assignee_github_login=None,
+            tickets=tickets,
         )
 
 
