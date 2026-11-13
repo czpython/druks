@@ -119,6 +119,32 @@ async def test_an_edit_takes_what_it_is_given_and_leaves_the_rest(
     assert events == []
 
 
+async def test_an_edit_sets_and_clears_the_tickets_that_block_a_ticket(druks_client):
+    repo = await _open_repo(druks_client)
+    blocker = await _open_ticket(druks_client, repo["id"], title="Define the contract")
+    ticket = await _open_ticket(druks_client, repo["id"], title="Use the contract")
+    url = f"{_TICKETS}/{ticket['identifier']}"
+
+    blocked = await druks_client.patch(url, json={"blocked_by": [blocker["identifier"]]})
+    cleared = await druks_client.patch(url, json={"blocked_by": []})
+
+    assert blocked.json()["blockedBy"] == [blocker["identifier"]]
+    assert cleared.json()["blockedBy"] == []
+
+
+async def test_a_ticket_blocked_by_itself_or_an_unknown_ticket_is_refused(druks_client):
+    repo = await _open_repo(druks_client)
+    ticket = await _open_ticket(druks_client, repo["id"])
+    url = f"{_TICKETS}/{ticket['identifier']}"
+
+    itself = await druks_client.patch(url, json={"blocked_by": [ticket["identifier"]]})
+    unknown = await druks_client.patch(url, json={"blocked_by": ["ACM-99"]})
+
+    assert itself.status_code == 422
+    assert itself.json()["code"] == "TICKET_BLOCKS_ITSELF"
+    assert unknown.status_code == 404
+
+
 async def test_a_title_over_200_characters_is_refused_on_create_and_edit(druks_client):
     repo = await _open_repo(druks_client)
     ticket = await _open_ticket(druks_client, repo["id"], title="x" * 200)

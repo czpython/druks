@@ -242,6 +242,7 @@ async def ticket(identifier: str):
     repos = await ProjectRepo.list_all()
     accounts = await Account.filter(kind=AccountKind.OPERATOR)
     account_names = {account.id: account.username for account in accounts}
+    tickets = await Ticket.list_matching()
     thread = [
         ui.Card(
             title=comment.author.username,
@@ -358,6 +359,23 @@ async def ticket(identifier: str):
                                     label="Repo",
                                     options=_repo_options(repos),
                                     value=str(found.repo_id),
+                                ),
+                                operation="update_ticket",
+                            ),
+                            _live_form(
+                                found,
+                                ui.MultiSelectField(
+                                    name="blocked_by",
+                                    label="Blocked by",
+                                    options=[
+                                        ui.Option(
+                                            f"{ticket.identifier} {ticket.title}",
+                                            value=ticket.identifier,
+                                        )
+                                        for ticket in tickets
+                                        if ticket.id != found.id
+                                    ],
+                                    value=[blocker.identifier for blocker in found.blocked_by],
                                 ),
                                 operation="update_ticket",
                             ),

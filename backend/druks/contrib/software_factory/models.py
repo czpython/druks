@@ -433,6 +433,15 @@ class Comment(Base):
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
 
+# Each row says that the blocker must be done before the ticket can build.
+ticket_blockers = sa.Table(
+    "ticket_blockers",
+    Base.metadata,
+    sa.Column("ticket_id", ForeignKey("tickets.id", ondelete="CASCADE"), primary_key=True),
+    sa.Column("blocker_id", ForeignKey("tickets.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
 class Ticket(Base):
     __tablename__ = "tickets"
 
@@ -452,6 +461,22 @@ class Ticket(Base):
     comments: Mapped[list[Comment]] = relationship(
         order_by=[Comment.created_at, Comment.id], lazy="raise"
     )
+    blocked_by: Mapped[list["Ticket"]] = relationship(
+        secondary=ticket_blockers,
+        primaryjoin=id == ticket_blockers.c.ticket_id,
+        secondaryjoin=id == ticket_blockers.c.blocker_id,
+        back_populates="blocking",
+        order_by=identifier,
+        lazy="raise",
+    )
+    blocking: Mapped[list["Ticket"]] = relationship(
+        secondary=ticket_blockers,
+        primaryjoin=id == ticket_blockers.c.blocker_id,
+        secondaryjoin=id == ticket_blockers.c.ticket_id,
+        back_populates="blocked_by",
+        order_by=identifier,
+        lazy="raise",
+    )
 
     @classmethod
     async def create(
@@ -466,7 +491,7 @@ class Ticket(Base):
         creator_id: str | None = None,
     ) -> "Ticket":
         async with atomic():
-            # comments=[] loads the collection empty. A read after flush needs no query.
+            # Empty collections load empty. A read after flush needs no query.
             ticket = cls(
                 identifier=await Project.mint_identifier(project_repo.project_id),
                 project_repo=project_repo,
@@ -477,6 +502,8 @@ class Ticket(Base):
                 assignee_id=assignee_id,
                 creator_id=creator_id,
                 comments=[],
+                blocked_by=[],
+                blocking=[],
             )
             session = db_session()
             session.add(ticket)
@@ -489,7 +516,13 @@ class Ticket(Base):
     @classmethod
     async def get_for_identifier(cls, identifier: str) -> "Ticket | None":
         statement = (
-            select(cls).where(cls.identifier == identifier).options(selectinload(cls.comments))
+            select(cls)
+            .where(cls.identifier == identifier)
+            .options(
+                selectinload(cls.comments),
+                selectinload(cls.blocked_by),
+                selectinload(cls.blocking),
+            )
         )
         return (await db_session().scalars(statement)).first()
 

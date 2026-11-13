@@ -183,7 +183,11 @@ async def done_ticket_starts_the_tickets_it_blocks(*, payload: dict) -> None:
     """Each ticket that a Done ticket blocks goes through the funnel again. One still at
     the trigger status builds, unless another blocker is open."""
     settings = await SoftwareFactory.settings()
-    if payload["status"] != settings.done_status:
+    done_status = settings.done_status
+    # The board has a fixed done status. The hidden setting can keep a value of another tracker.
+    if settings.tracker == "druks":
+        done_status = Status.DONE.label
+    if payload["status"] != done_status:
         return
     if tracker := await SoftwareFactory.get_tracker(payload["source"]):
         async with tracker:

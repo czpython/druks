@@ -70,6 +70,14 @@ class TicketBlocked(AgentApiError):
         )
 
 
+class TicketBlocksItself(AgentApiError):
+    status_code = 422
+    code = "TICKET_BLOCKS_ITSELF"
+
+    def __init__(self, ticket: str) -> None:
+        super().__init__(f"{ticket} cannot block itself, because it would never start.")
+
+
 class TicketAlreadyMerged(AgentApiError):
     status_code = 409
     code = "TICKET_ALREADY_MERGED"

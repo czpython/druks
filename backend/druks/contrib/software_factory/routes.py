@@ -16,6 +16,7 @@ from druks.contrib.software_factory.exceptions import (
     RepoTakenError,
     TicketAlreadyMerged,
     TicketBlocked,
+    TicketBlocksItself,
     TicketNotFound,
     TicketNotRoutable,
     TrackerNotConfigured,
@@ -463,11 +464,14 @@ async def get_ticket(identifier: str) -> Ticket:
     operation_id="update_ticket",
     tags=["agent"],
     responses=agent_error_responses(
-        TicketNotFound("ACM-1", "druks"), RepoNotFound(7), AssigneeNotFound("ops@example.com")
+        TicketNotFound("ACM-1", "druks"),
+        RepoNotFound(7),
+        AssigneeNotFound("ops@example.com"),
+        TicketBlocksItself("ACM-1"),
     ),
 )
 async def update_ticket(identifier: str, edit: TicketEdit) -> Ticket:
-    """Edit a ticket's title, description, priority, assignee, or repo."""
+    """Edit a ticket's title, description, priority, assignee, repo, or blockers."""
     ticket = await require_ticket(identifier)
     if edit.repo_id:
         ticket.project_repo = await require_repo(edit.repo_id)
@@ -480,6 +484,10 @@ async def update_ticket(identifier: str, edit: TicketEdit) -> Ticket:
         ticket.priority = edit.priority
     if "assignee_id" in edit.model_fields_set:
         ticket.assignee_id = await require_assignee(edit.assignee_id)
+    if edit.blocked_by is not None:
+        if identifier in edit.blocked_by:
+            raise TicketBlocksItself(identifier)
+        ticket.blocked_by = [await require_ticket(key) for key in edit.blocked_by]
     await ticket.save()
     return ticket
 

@@ -152,15 +152,21 @@ class TicketDetail(Schema):
     priority: Priority
     repo_id: int
     assignee_id: str | None
+    # The identifiers of the tickets that must be done before this one builds.
+    blocked_by: Annotated[
+        list[str], BeforeValidator(lambda tickets: [ticket.identifier for ticket in tickets])
+    ]
     comments: list[CommentRead]
 
 
 class TicketEdit(BaseModel):
     """A partial edit. An omitted field keeps its value, an empty assignee clears it,
-    and ``set_status`` moves a ticket."""
+    ``blocked_by`` replaces the tickets that block this one, and ``set_status`` moves a
+    ticket."""
 
     title: TicketTitle | None = None
     description: str | None = None
     priority: Priority | None = None
     assignee_id: AssigneeId = None
     repo_id: int | None = None
+    blocked_by: list[str] | None = None

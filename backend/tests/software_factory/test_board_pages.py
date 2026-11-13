@@ -151,6 +151,7 @@ async def test_the_ticket_page_saves_in_place_and_opens_its_build(druks_client):
         "priority",
         "assignee_id",
         "repo_id",
+        "blocked_by",
     ]
     assert all(form["submit"] == "change" for form in sidebar[:-1])
     assert [fact["label"] for fact in sidebar[-1]["facts"]] == [
