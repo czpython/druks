@@ -20,6 +20,11 @@ class GitHub(Tracker):
         repo, number = self._parse_key(key)
         client = await services.Github.get_client(repo)
         issue = await client.get_issue(repo, number)
+        return self._to_ticket(issue)
+
+    def _to_ticket(self, issue: dict) -> dict:
+        key = self._to_key(issue)
+        repo, _ = self._parse_key(key)
         status = None
         # A closed issue has left every status, whatever labels it keeps.
         if issue["state"] == "open":
@@ -57,6 +62,32 @@ class GitHub(Tracker):
         if status is TicketStatus.DONE:
             # Finished work on GitHub is a closed issue, not only a label.
             await client.close_issue(repo, number)
+
+    async def get_blocked_by(self, key: str) -> dict[str, bool]:
+        repo, number = self._parse_key(key)
+        client = await services.Github.get_client(repo)
+        issues = await client.list_blocked_by(repo, number)
+        done_label = self._status_names.get(TicketStatus.DONE)
+        # The done label's event starts the blocked tickets, and Druks adds the label
+        # before it closes the issue.
+        return {
+            self._to_key(issue): (
+                issue["state"] == "open"
+                and done_label not in {label["name"] for label in issue["labels"]}
+            )
+            for issue in issues
+        }
+
+    async def get_blocking(self, key: str) -> list[dict]:
+        repo, number = self._parse_key(key)
+        client = await services.Github.get_client(repo)
+        return [self._to_ticket(issue) for issue in await client.list_blocking(repo, number)]
+
+    @staticmethod
+    def _to_key(issue: dict) -> str:
+        # A dependency can be in another repo. Its API URL ends in ``<owner>/<repo>``.
+        repo = "/".join(issue["repository_url"].split("/")[-2:])
+        return f"{repo}#{issue['number']}"
 
     @staticmethod
     def _parse_key(key: str) -> tuple[str, int]:

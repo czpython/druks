@@ -46,8 +46,8 @@ class Tracker(ABC):
         """The key of each ticket that blocks this one, and whether it is open."""
         return {}
 
-    async def get_blocking(self, key: str) -> list[str]:
-        """The keys of the tickets that this one blocks."""
+    async def get_blocking(self, key: str) -> list[dict]:
+        """The tickets that this one blocks, each in the shape of ``get_ticket``."""
         return []
 
     async def release(self, key: str) -> None:

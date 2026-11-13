@@ -79,7 +79,22 @@ class LinearClient:
             """
             query DruksIssueRelations($issueId: String!) {
               issue(id: $issueId) {
-                relations { nodes { type relatedIssue { identifier } } }
+                relations {
+                  nodes {
+                    type
+                    relatedIssue {
+                      id
+                      identifier
+                      title
+                      url
+                      state { name }
+                      project { name }
+                      labels { nodes { name } }
+                      team { id }
+                      assignee { id email name }
+                    }
+                  }
+                }
                 inverseRelations { nodes { type issue { identifier state { type } } } }
               }
             }

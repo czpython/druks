@@ -57,6 +57,26 @@ class Jira(Tracker):
         if await self._client.get_issue_status(key) != name:
             await self._client.transition_issue(key, name)
 
+    async def get_blocked_by(self, key: str) -> dict[str, bool]:
+        links = await self._client.list_issue_links(key)
+        # A link holds only the other issue. An inward issue of a Blocks link blocks this one.
+        return {
+            link["inwardIssue"]["key"]: (
+                link["inwardIssue"]["fields"]["status"]["statusCategory"]["key"] != "done"
+            )
+            for link in links
+            if link["type"]["name"] == "Blocks" and "inwardIssue" in link
+        }
+
+    async def get_blocking(self, key: str) -> list[dict]:
+        links = await self._client.list_issue_links(key)
+        # A link lacks the project, labels, and assignee, so each ticket is read whole.
+        return [
+            await self.get_ticket(link["outwardIssue"]["key"])
+            for link in links
+            if link["type"]["name"] == "Blocks" and "outwardIssue" in link
+        ]
+
     async def list_status_choices(self) -> list[dict[str, str]]:
         statuses = await self._client.list_statuses()
         category_order = {"new": 0, "indeterminate": 1, "done": 2}

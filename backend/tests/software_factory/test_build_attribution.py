@@ -37,6 +37,7 @@ async def started(monkeypatch):
 
     monkeypatch.setattr(Build, "start", classmethod(start))
     monkeypatch.setattr(Linear, "get_blocked_by", get_blocked_by)
+    monkeypatch.setattr(Jira, "get_blocked_by", get_blocked_by)
     return calls
 
 

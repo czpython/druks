@@ -187,7 +187,6 @@ async def done_ticket_starts_the_tickets_it_blocks(*, payload: dict) -> None:
         return
     if tracker := await SoftwareFactory.get_tracker(payload["source"]):
         async with tracker:
-            keys = await tracker.get_blocking(payload["identifier"])
-            tickets = [await tracker.get_ticket(key) for key in keys]
+            tickets = await tracker.get_blocking(payload["identifier"])
         for ticket in tickets:
             await ticket_transition_drives_the_funnel(payload=ticket)
