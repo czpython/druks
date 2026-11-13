@@ -134,7 +134,7 @@ def read_codex_cost_from_stdout(
 def read_codex_subagent_costs(
     path: Path,
     *,
-    stdout: bytes,
+    stdout_path: Path,
     model: str | None,
 ) -> Iterator[tuple[float, dict[str, Any]]]:
     """Price each subagent that the call's main thread spawned, at the subagent's own model.
@@ -142,19 +142,23 @@ def read_codex_subagent_costs(
     The wrapper writes up to three lines for each subagent session file: its
     ``session_meta``, its last ``turn_context`` and its last ``token_count``.
     The main thread's id comes from the ``thread.started`` event on stdout.
+    Codex writes that event first, and ``HarnessRunResult.stdout`` drops the
+    front of a long stream, so the reader takes it from the stdout file.
     """
     if not path.exists():
         return
     thread_id = None
-    for line in stdout.splitlines():
-        if b'"thread.started"' not in line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if event["type"] == "thread.started":
-            thread_id = event["thread_id"]
+    with open(stdout_path, "rb") as stream:
+        for line in stream:
+            if b'"thread.started"' not in line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event["type"] == "thread.started":
+                thread_id = event["thread_id"]
+                break
     is_child = False
     subagent_model = model
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -622,7 +626,7 @@ class CodexHarness(Harness):
         if cost_metadata:
             for subagent_cost, subagent_metadata in read_codex_subagent_costs(
                 call_dir / "subagents.jsonl",
-                stdout=result.stdout,
+                stdout_path=call_dir / "stdout.jsonl",
                 model=self.model_id,
             ):
                 cost_usd = round(cost_usd + subagent_cost, 6)

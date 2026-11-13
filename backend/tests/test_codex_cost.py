@@ -105,6 +105,8 @@ def _parse_codex_call(tmp_path: Path, stdout: bytes) -> dict:
     call_dir = tmp_path / "call"
     call_dir.mkdir(exist_ok=True)
     (call_dir / "output.json").write_text("{}")
+    # _tee_stream writes the whole stream to stdout.jsonl beside the call's files.
+    (call_dir / "stdout.jsonl").write_bytes(stdout)
     harness = CodexHarness(model="openai/gpt-5.5", fast_mode=False, effort=None)
     harness.parse(
         HarnessRunResult(returncode=0, stdout=stdout, stderr=b""),
@@ -215,6 +217,34 @@ def test_parse_skips_a_subagent_of_another_call(tmp_path: Path) -> None:
     # at $10.00 per million for the subagent.
     assert cost["cost_usd"] == 11.26125
     assert cost["metadata"]["input_tokens"] == 1_001_000
+
+
+def test_parse_adds_a_subagent_when_stdout_lost_its_first_event(tmp_path: Path) -> None:
+    call_dir = tmp_path / "call"
+    call_dir.mkdir()
+    (call_dir / "output.json").write_text("{}")
+    (call_dir / "subagents.jsonl").write_text(
+        "\n".join(
+            [
+                _session_meta("child", parent_thread_id="main"),
+                _turn_context("gpt-5-mini"),
+                _token_count(1_000_000),
+            ]
+        )
+        + "\n"
+    )
+    (call_dir / "stdout.jsonl").write_bytes(_MAIN_TURN)
+    turn_completed = _MAIN_TURN.splitlines(keepends=True)[1]
+
+    CodexHarness(model="openai/gpt-5.5", fast_mode=False, effort=None).parse(
+        HarnessRunResult(returncode=0, stdout=turn_completed, stderr=b""),
+        artifact_dir=tmp_path,
+        run_id="call",
+    )
+
+    cost = json.loads((call_dir / "cost.json").read_text())
+    assert cost["cost_usd"] == 13.5
+    assert cost["metadata"]["input_tokens"] == 2_000_000
 
 
 async def test_the_wrapper_sends_subagent_usage_beside_the_session(
