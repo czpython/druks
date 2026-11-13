@@ -1635,6 +1635,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .landing-err { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.55; color: var(--druks-color-text-secondary); background: color-mix(in oklch, var(--druks-color-status-danger) 7%, transparent); border: 1px solid color-mix(in oklch, var(--druks-color-status-danger) 28%, transparent); border-radius: 10px; padding: 12px 14px; animation: landing-shake 400ms ease; }
 .landing-err-x { flex: none; font-family: var(--font-mono); font-weight: 700; color: var(--druks-color-status-danger); }
 .landing-panel .landing-err { margin-top: 14px; }
+.session-expired { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 100; width: max-content; max-width: calc(100vw - 32px); display: flex; gap: 12px; align-items: center; font-size: 13px; color: var(--druks-color-text-primary); background: var(--druks-color-surface-raised); border: 1px solid var(--druks-color-border-default); border-radius: 10px; padding: 8px 8px 8px 14px; }
 @keyframes landing-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-2px); } 80% { transform: translateX(2px); } }
 
 .subject-facts { margin-bottom: 14px; }

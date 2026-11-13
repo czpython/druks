@@ -51,9 +51,9 @@ import type {
   WahaSession,
 } from './types'
 
-// A 401 means the request's identity did not resolve: typed to branch on,
-// broadcast so the IdentityBootstrap rechecks /api/auth/me — never converted
-// into onboarding.
+// The request's identity did not resolve: typed to branch on, never converted
+// into onboarding. A 401 from druks broadcasts so the IdentityBootstrap
+// rechecks /api/auth/me.
 export class UnauthorizedError extends Error {}
 
 export class ApiError extends Error {
@@ -69,13 +69,18 @@ export class ApiError extends Error {
 
 export const IDENTITY_INVALIDATED_EVENT = 'druks:identity-invalidated'
 
+// The edge refused the request before it reached druks.
+export const SESSION_EXPIRED_EVENT = 'druks:session-expired'
+
 // The API has FastAPI and gateway error envelopes. Both carry operator-facing prose.
 async function throwApiError(response: Response, path: string): Promise<never> {
   const body = await response.text().catch(() => '')
   let detail: unknown
+  let isFromDruks = false
   try {
     const error = JSON.parse(body)
     detail = error.detail ?? error.message
+    isFromDruks = typeof error.error === 'string' || typeof error.code === 'string'
   } catch {
     // not JSON — fall through to the status line
   }
@@ -83,6 +88,12 @@ async function throwApiError(response: Response, path: string): Promise<never> {
     typeof detail === 'string' && detail
       ? detail
       : `${response.status} ${response.statusText}: ${body || path}`
+  // Druks names every refusal it makes in its envelope. A 401 or 403 without
+  // one is the edge's.
+  if ((response.status === 401 || response.status === 403) && !isFromDruks) {
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
+    throw new UnauthorizedError(message)
+  }
   if (response.status === 401) {
     window.dispatchEvent(new Event(IDENTITY_INVALIDATED_EVENT))
     throw new UnauthorizedError(message)
