@@ -11,6 +11,8 @@ from druks.accounts.context import current_conversation_id
 from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
+from druks.durable.reads import list_active_runs_for_conversation
+from druks.durable.schemas import ActiveRunResponse
 from druks.sandbox.exceptions import SandboxUploadError
 
 from .channels.whatsapp.exceptions import NumberNotOnWhatsAppError, WahaError
@@ -86,6 +88,20 @@ async def get_conversation(
         raise HTTPException(404, "Conversation not found.")
     await session.refresh(conversation, ["messages"])
     return conversation
+
+
+@router.get(
+    "/conversations/{conversation_id}/active-runs",
+    response_model=list[ActiveRunResponse],
+    response_model_by_alias=True,
+)
+async def list_active_runs(
+    conversation_id: str, session: SessionDep, account: Account = Depends(current_session_account)
+) -> list[ActiveRunResponse]:
+    conversation = await Conversation.get_for_account(session, conversation_id, account)
+    if not conversation:
+        raise HTTPException(404, "Conversation not found.")
+    return await list_active_runs_for_conversation(session, conversation.id)
 
 
 @router.patch(

@@ -55,6 +55,7 @@ from .bots.constants import ADMIN_PROMPT, ADMIN_TOOLS, THREAD_PROMPT, THREAD_TOO
 from .bridge import Bridge
 from .constants import (
     BRIDGE_SETTLED_STATUSES,
+    CANCELLED_MESSAGE,
     CHAT_KEY_NAME,
     CONVERSATION_HEADER,
     DELIVERY_FAILED_MESSAGE,
@@ -64,6 +65,7 @@ from .constants import (
     NO_ANSWER_MESSAGE,
     NO_RESULT_MESSAGE,
     NO_RESULT_ON_SUBJECT_MESSAGE,
+    POST_CANCEL_WORKFLOW,
     QUOTA_RESUMED_MESSAGE,
     QUOTA_WAIT_MESSAGE,
     RESULT_MESSAGE,
@@ -749,6 +751,28 @@ async def report_failure(session: AsyncSession, run: Run, *, failure: str) -> st
     """Report a run's failure to the chat that started it, whether or not the run waited
     for an answer. Returns the conversation to deliver."""
     return await report_outcome(session, run, FAILURE_MESSAGE.format(run=run.id, failure=failure))
+
+
+@DBOS.workflow(name=POST_CANCEL_WORKFLOW)
+async def post_cancel(run_id: str) -> None:
+    """Post a cancelled run's report to the chat that started it. `Run.cancel` queues it
+    by name."""
+    conversation_id = await DBOS.run_step_async(
+        StepOptions(name="chat.post_cancel.report", retries_allowed=True, max_attempts=5),
+        report_cancel,
+        run_id,
+    )
+    if conversation_id:
+        await DBOS.start_workflow_async(deliver, conversation_id)
+
+
+async def report_cancel(run_id: str) -> str | None:
+    """Report a run's cancel and its reason to the chat that started it. Returns the
+    conversation to deliver."""
+    async with step_session() as session:
+        run = await session.get(Run, run_id)
+        body = CANCELLED_MESSAGE.format(run=run.id, reason=run.failure or "none given")
+        return await report_outcome(session, run, body)
 
 
 async def report_quota_wait(session: AsyncSession, run: Run, *, resumes_at: datetime) -> None:

@@ -129,6 +129,36 @@ class RunResponse(Schema):
         )
 
 
+class ActiveRunResponse(Schema):
+    # A run that still works or waits, with what it does now.
+    id: str
+    label: str
+    state: RunState
+    subject_key: str | None
+    # A running run names its step: the agent call that runs, and the phase it pushed.
+    agent_label: str | None
+    phase: str | None
+    phase_ends_at: datetime | None
+
+    @classmethod
+    def from_run(
+        cls, run: "Run", *, phase: str | None, phase_ends_at: datetime | None
+    ) -> "ActiveRunResponse":
+        running_calls = [call for call in run.agent_calls if not call.finished_at]
+        agent_label = None
+        if running_calls:
+            agent_label = get_display_label(running_calls[-1].agent)
+        return cls(
+            id=run.id,
+            label=get_display_label(run.kind),
+            state=RunState(run.state),
+            subject_key=run.subject_key,
+            agent_label=agent_label,
+            phase=phase,
+            phase_ends_at=phase_ends_at,
+        )
+
+
 # A subject id is a string wherever it is read — the URL segment, the DBOS
 # attribute, the dedup key — while the row behind one is keyed by an integer. So it
 # takes either and is always a string.

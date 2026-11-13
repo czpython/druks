@@ -78,6 +78,8 @@
 .chat-reply .markdown-content img { max-width: 100%; }
 .chat-reply .markdown-content a { color: var(--druks-color-accent); text-underline-offset: 3px; }
 .chat-waiting { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 13px; color: var(--druks-color-text-secondary); }
+.chat-runs { display: flex; flex-direction: column; gap: 8px; margin-top: 28px; }
+.chat-runs:empty { display: none; }
 .chat-activity-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--druks-color-status-info); flex-shrink: 0; animation: chat-pulse 1.8s ease-in-out infinite; }
 @keyframes chat-pulse { 50% { opacity: .35; } }
 .chat-notice { color: var(--druks-color-text-secondary); padding: 16px 12px; font-size: 14px; }

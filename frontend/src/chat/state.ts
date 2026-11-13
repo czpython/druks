@@ -31,6 +31,17 @@ export interface Message {
   transcript: string
 }
 
+/** A run that the conversation started and that still works or waits. */
+export interface ActiveRun {
+  id: string
+  label: string
+  state: 'scheduled' | 'running' | 'parked'
+  subjectKey: string | null
+  agentLabel: string | null
+  phase: string | null
+  phaseEndsAt: string | null
+}
+
 export interface Conversation extends ConversationSummary {
   messages: Message[]
 }

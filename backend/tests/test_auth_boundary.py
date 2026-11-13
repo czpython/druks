@@ -25,6 +25,7 @@ EXEMPT_API_PATHS = {
 SESSION_ONLY_API_ROUTES = {
     ("POST", "/api/chat/conversations"),
     ("GET", "/api/chat/conversations/{conversation_id}"),
+    ("GET", "/api/chat/conversations/{conversation_id}/active-runs"),
     ("PATCH", "/api/chat/conversations/{conversation_id}"),
     ("POST", "/api/chat/conversations/{conversation_id}/messages"),
     ("POST", "/api/chat/conversations/{conversation_id}/messages/{message_id}/retry"),
@@ -75,6 +76,7 @@ SESSION_ONLY_API_ROUTES = {
 DUAL_GATED_API_PATHS = {
     "/api/chat/conversations",
     "/api/chat/conversations/{conversation_id}",
+    "/api/chat/conversations/{conversation_id}/active-runs",
     "/api/chat/conversations/{conversation_id}/messages",
     "/api/chat/conversations/{conversation_id}/messages/{message_id}/retry",
     "/api/chat/conversations/{conversation_id}/cancel",

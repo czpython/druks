@@ -663,7 +663,7 @@ async def test_every_tool_failure_answers_the_agent_route_shape(app, pat_token):
 async def test_cancel_run_is_destructive_but_repeatable(app, pat_token, druks_db, monkeypatch):
     cancels = []
 
-    async def _spy(self, *, failure):
+    async def _spy(self, *, failure, from_conversation_id):
         cancels.append({"id": self.id, "failure": failure})
 
     monkeypatch.setattr(Run, "cancel", _spy)
