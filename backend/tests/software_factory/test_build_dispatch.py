@@ -351,3 +351,38 @@ async def test_a_blocker_at_another_status_starts_nothing(druks_db, monkeypatch,
     )
 
     assert started == []
+
+
+async def test_dispatch_passes_the_done_blockers_to_the_build(druks_db, monkeypatch) -> None:
+    await _connect_github()
+    item = await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-32")
+    _use_tracker(monkeypatch, _FakeTracker(blocked_by={"ACME-30": False, "ACME-31": False}))
+    started = []
+
+    async def fake_start(cls, **kwargs):
+        started.append(kwargs)
+        return "run-x"
+
+    monkeypatch.setattr(Build, "start", classmethod(fake_start))
+
+    await Build.dispatch(ticket=_ticket(item))
+
+    assert started[0]["blockers"] == ["ACME-30", "ACME-31"]
+
+
+async def test_each_blocker_gives_its_merged_pr_or_its_key(druks_db) -> None:
+    blocker_item = await make_test_work_item(
+        repo="o/api", title="Add the endpoint", ticket_key="ACME-33"
+    )
+    await blocker_item.update(pr_number=12)
+    await blocker_item.resolve(Resolution.MERGED, at=datetime.now(UTC))
+    build = Build()
+    build.input = Build._run_input_model(blockers=("ACME-33", "ACME-34"))
+    build.subject = await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-35")
+
+    blockers = await Build._load_blockers.__wrapped__(build)
+
+    assert blockers == [
+        {"repo": "o/api", "pr_number": 12, "title": "Add the endpoint"},
+        {"ticket_key": "ACME-34", "pr_number": None},
+    ]
