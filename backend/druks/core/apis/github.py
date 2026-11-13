@@ -303,6 +303,28 @@ class GitHubClient:
                 if error.response.status_code != 404:
                     raise
 
+    async def list_blocked_by(self, repo: str, issue_number: int) -> list[dict[str, Any]]:
+        owner, name = repo.split("/", 1)
+        issues = self._github.rest.paginate(
+            self._github.rest.issues.async_list_dependencies_blocked_by,
+            owner=owner,
+            repo=name,
+            issue_number=issue_number,
+            per_page=100,
+        )
+        return [issue.model_dump() async for issue in issues]
+
+    async def list_blocking(self, repo: str, issue_number: int) -> list[dict[str, Any]]:
+        owner, name = repo.split("/", 1)
+        issues = self._github.rest.paginate(
+            self._github.rest.issues.async_list_dependencies_blocking,
+            owner=owner,
+            repo=name,
+            issue_number=issue_number,
+            per_page=100,
+        )
+        return [issue.model_dump() async for issue in issues]
+
     async def close_issue(self, repo: str, issue_number: int) -> None:
         owner, name = repo.split("/", 1)
         await self._github.rest.issues.async_update(

@@ -17,7 +17,10 @@ class Linear(Tracker):
         self._client = client
 
     async def get_ticket(self, key: str) -> dict:
-        issue = await self._client.get_issue(key)
+        return self._to_ticket(await self._client.get_issue(key))
+
+    @staticmethod
+    def _to_ticket(issue: dict) -> dict:
         # An issue outside a project has no project, and an unassigned one no assignee.
         project = issue["project"] or {}
         assignee = issue["assignee"] or {}
@@ -58,10 +61,10 @@ class Linear(Tracker):
             if relation["type"] == "blocks"
         }
 
-    async def get_blocking(self, key: str) -> list[str]:
+    async def get_blocking(self, key: str) -> list[dict]:
         issue = await self._client.get_issue_relations(key)
         return [
-            relation["relatedIssue"]["identifier"]
+            self._to_ticket(relation["relatedIssue"])
             for relation in issue["relations"]["nodes"]
             if relation["type"] == "blocks"
         ]

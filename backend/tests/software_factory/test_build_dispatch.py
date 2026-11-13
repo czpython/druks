@@ -233,13 +233,14 @@ class _FakeTracker(Tracker):
         self.blocking = blocking or {}
 
     async def get_ticket(self, key):
-        return self.blocking[key]
+        # The Done subscriber takes the blocked tickets from get_blocking, whole.
+        raise AssertionError(f"read {key} again")
 
     async def get_blocked_by(self, key):
         return self.blocked_by
 
     async def get_blocking(self, key):
-        return list(self.blocking)
+        return list(self.blocking.values())
 
     async def get_status_name(self, key):
         return self.blocking[key]["status"]

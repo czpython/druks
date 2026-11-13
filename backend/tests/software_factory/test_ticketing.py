@@ -519,6 +519,20 @@ async def test_linear_reads_the_ticket_as_a_transition_payload():
     }
 
 
+def _linear_issue(identifier: str) -> dict:
+    return {
+        "id": f"id-{identifier}",
+        "identifier": identifier,
+        "title": "Use the endpoint",
+        "url": f"https://linear.app/acme/issue/{identifier}",
+        "state": {"name": "Todo"},
+        "project": None,
+        "labels": {"nodes": [{"name": "widget"}]},
+        "team": {"id": "team-1"},
+        "assignee": None,
+    }
+
+
 def _linear_relations_handler(*, relations: list[dict], inverse_relations: list[dict]):
     def handler(request: httpx.Request) -> httpx.Response:
         assert json.loads(request.content)["variables"] == {"issueId": "ENG-831"}
@@ -553,8 +567,8 @@ async def test_linear_reads_each_blocker_and_whether_it_is_open():
 async def test_linear_reads_the_tickets_an_issue_blocks():
     handler = _linear_relations_handler(
         relations=[
-            {"type": "blocks", "relatedIssue": {"identifier": "ENG-9"}},
-            {"type": "duplicate", "relatedIssue": {"identifier": "ENG-10"}},
+            {"type": "blocks", "relatedIssue": _linear_issue("ENG-9")},
+            {"type": "duplicate", "relatedIssue": _linear_issue("ENG-10")},
         ],
         inverse_relations=[
             {"type": "blocks", "issue": {"identifier": "ENG-1", "state": {"type": "started"}}}
@@ -562,7 +576,23 @@ async def test_linear_reads_the_tickets_an_issue_blocks():
     )
     tracker = Linear(client=_linear_client(handler), status_names={})
 
-    assert await tracker.get_blocking("ENG-831") == ["ENG-9"]
+    assert await tracker.get_blocking("ENG-831") == [
+        {
+            "source": "linear",
+            "ticket_id": "id-ENG-9",
+            "identifier": "ENG-9",
+            "status": "Todo",
+            "title": "Use the endpoint",
+            "url": "https://linear.app/acme/issue/ENG-9",
+            "project_name": None,
+            "labels": ["widget"],
+            "team": "team-1",
+            "actor_id": None,
+            "assignee_id": None,
+            "assignee_email": None,
+            "assignee_name": None,
+        }
+    ]
 
 
 async def test_linear_client_lists_workflow_states_across_pages():
@@ -880,6 +910,63 @@ async def test_jira_reads_the_ticket_as_a_transition_payload():
     }
 
 
+def _jira_links_handler(request: httpx.Request) -> httpx.Response:
+    if request.url.path == "/rest/api/3/issue/PROJ-9":
+        fields = {
+            "status": {"name": "To Agent"},
+            "summary": "Use the endpoint",
+            "project": {"name": "Widget"},
+            "labels": ["backend"],
+            "assignee": None,
+        }
+        return httpx.Response(200, json={"id": "10009", "key": "PROJ-9", "fields": fields})
+    assert request.url.path == "/rest/api/3/issue/PROJ-7"
+    assert request.url.params["fields"] == "issuelinks"
+    blocks = {"name": "Blocks", "inward": "is blocked by", "outward": "blocks"}
+    relates = {"name": "Relates", "inward": "relates to", "outward": "relates to"}
+    links = [
+        {"type": blocks, "inwardIssue": _jira_linked_issue("PROJ-1", "indeterminate")},
+        {"type": blocks, "inwardIssue": _jira_linked_issue("PROJ-2", "done")},
+        {"type": blocks, "outwardIssue": _jira_linked_issue("PROJ-9", "new")},
+        {"type": relates, "inwardIssue": _jira_linked_issue("PROJ-4", "new")},
+        {"type": relates, "outwardIssue": _jira_linked_issue("PROJ-10", "new")},
+    ]
+    return httpx.Response(200, json={"fields": {"issuelinks": links}})
+
+
+def _jira_linked_issue(key: str, category: str) -> dict:
+    return {"key": key, "fields": {"status": {"statusCategory": {"key": category}}}}
+
+
+async def test_jira_reads_each_blocker_and_whether_it_is_open():
+    tracker = _jira(_FakeJiraClient())
+    tracker._client = _jira_client(_jira_links_handler)
+
+    assert await tracker.get_blocked_by("PROJ-7") == {"PROJ-1": True, "PROJ-2": False}
+
+
+async def test_jira_reads_the_issues_an_issue_blocks():
+    tracker = _jira(_FakeJiraClient())
+    tracker._client = _jira_client(_jira_links_handler)
+
+    assert await tracker.get_blocking("PROJ-7") == [
+        {
+            "source": "jira",
+            "ticket_id": "10009",
+            "identifier": "PROJ-9",
+            "status": "To Agent",
+            "title": "Use the endpoint",
+            "url": "https://jira.test/browse/PROJ-9",
+            "project_name": "Widget",
+            "labels": ["backend"],
+            "actor_id": None,
+            "assignee_id": None,
+            "assignee_email": None,
+            "assignee_name": None,
+        }
+    ]
+
+
 _JIRA_ISSUE_CALLS = [
     lambda client: client.get_issue_status("PROJ-9"),
     lambda client: client.transition_issue("PROJ-9", "Ready for Agent"),
@@ -956,6 +1043,8 @@ async def test_jira_client_lists_the_statuses_of_active_workflows():
 class _FakeGitHubClient:
     issue = {
         "id": 99,
+        "number": 7,
+        "repository_url": "https://api.github.com/repos/acme/widget",
         "state": "open",
         "title": "Build the agent route",
         "html_url": "https://github.com/acme/widget/issues/7",
@@ -974,6 +1063,44 @@ class _FakeGitHubClient:
 
     async def close_issue(self, repo, issue_number):
         self.calls.append(("close_issue", repo, issue_number))
+
+    async def list_blocked_by(self, repo, issue_number):
+        self.calls.append(("list_blocked_by", repo, issue_number))
+        return [
+            {
+                "number": 3,
+                "state": "open",
+                "labels": [{"name": "agent:in-progress"}],
+                "repository_url": "https://api.github.com/repos/acme/widget",
+            },
+            {
+                "number": 4,
+                "state": "closed",
+                "labels": [],
+                "repository_url": "https://api.github.com/repos/acme/api",
+            },
+            {
+                "number": 5,
+                "state": "open",
+                "labels": [{"name": "agent:done"}],
+                "repository_url": "https://api.github.com/repos/acme/api",
+            },
+        ]
+
+    async def list_blocking(self, repo, issue_number):
+        self.calls.append(("list_blocking", repo, issue_number))
+        return [
+            {
+                "id": 109,
+                "number": 9,
+                "state": "open",
+                "title": "Use the endpoint",
+                "html_url": "https://github.com/acme/api/issues/9",
+                "labels": [{"name": "ready-for-agent"}],
+                "assignees": [],
+                "repository_url": "https://api.github.com/repos/acme/api",
+            }
+        ]
 
 
 def _github(monkeypatch, fake) -> GitHub:
@@ -1072,6 +1199,39 @@ async def test_github_rejects_a_key_without_its_repo(monkeypatch):
         await tracker.set_status("widget#7", TicketStatus.DONE)
     with pytest.raises(UnknownTicketError):
         await tracker.set_status("acme/widget#seven", TicketStatus.DONE)
+
+
+async def test_github_reads_each_blocked_by_issue_and_whether_it_is_open(monkeypatch):
+    fake = _FakeGitHubClient()
+
+    blockers = await _github(monkeypatch, fake).get_blocked_by("acme/widget#7")
+
+    assert blockers == {"acme/widget#3": True, "acme/api#4": False, "acme/api#5": False}
+    assert fake.calls == [("list_blocked_by", "acme/widget", 7)]
+
+
+async def test_github_reads_the_issues_an_issue_blocks(monkeypatch):
+    fake = _FakeGitHubClient()
+
+    tickets = await _github(monkeypatch, fake).get_blocking("acme/widget#7")
+
+    assert tickets == [
+        {
+            "source": "github",
+            "ticket_id": "109",
+            "identifier": "acme/api#9",
+            "status": "ready-for-agent",
+            "title": "Use the endpoint",
+            "url": "https://github.com/acme/api/issues/9",
+            "project_name": "acme/api",
+            "labels": [],
+            "actor_id": None,
+            "assignee_id": None,
+            "assignee_email": None,
+            "assignee_name": None,
+        }
+    ]
+    assert fake.calls == [("list_blocking", "acme/widget", 7)]
 
 
 def test_github_declares_known_exceptions():

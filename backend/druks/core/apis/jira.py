@@ -67,6 +67,10 @@ class JiraClient:
                 raise UnknownTicketError(key, "Jira") from error
             raise
 
+    async def list_issue_links(self, key: str) -> list[dict[str, Any]]:
+        issue = await self._request("GET", f"/rest/api/3/issue/{key}?fields=issuelinks")
+        return issue["fields"]["issuelinks"]
+
     async def get_issue_status(self, key: str) -> str:
         return (await self.get_issue(key))["fields"]["status"]["name"]
 
