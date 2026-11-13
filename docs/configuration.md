@@ -584,7 +584,7 @@ start a new build.
 
 Select **druks** to use the ticket board on this appliance. That choice needs no
 credentials. The status settings stay hidden. The trigger status is
-Ready for Agent, and it is not a setting.
+Ready for Agent and the done status is Done. Neither is a setting.
 
 Select **GitHub** to take work from GitHub Issues in the repositories the
 operator GitHub App is already installed on. That choice needs no second
@@ -628,12 +628,14 @@ Druks accepts the REST issue JSON under `issue`. Put the shared token in the
 tracker is not selected. It reports pending setup if the selected tracker is
 Linear, Jira, or GitHub and its identity is missing.
 
-On Linear, a ticket at the trigger status opens no build while an issue that
-blocks it is open. A blocker is open until its state is completed or canceled.
-When a blocker moves to the done status, Druks reads each ticket that it
-blocks. A ticket at the trigger status with no other open blocker starts its
-build. No person starts that build, so it uses the account of the ticket
-assignee. Jira, GitHub, and **druks** board tickets do not wait for blockers.
+On Linear and on the **druks** board, a ticket at the trigger status opens no
+build while a ticket that blocks it is open. On Linear, a blocker is open until
+its state is completed or canceled. On the board, a blocker is a ticket in the
+**Blocked by** field of the ticket page or of `update_ticket`, and it is open
+until it is Done. When a blocker moves to the done status, Druks reads each
+ticket that it blocks. A ticket at the trigger status with no other open
+blocker starts its build. No person starts that build, so it uses the account
+of the ticket assignee. Jira and GitHub tickets do not wait for blockers.
 
 Software Factory starts a Linear, Jira, or GitHub build under the Druks account
 of the person who moved the ticket. If that person has no account, the build

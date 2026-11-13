@@ -6,12 +6,13 @@ from conftest import connect_service
 from druks.contrib.software_factory import subscribers  # noqa: F401 (the import registers them)
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import ReviewWork
-from druks.contrib.software_factory.enums import Resolution
+from druks.contrib.software_factory.enums import Resolution, Status
 from druks.contrib.software_factory.exceptions import (
     TicketAlreadyMerged,
     TicketBlocked,
     TicketNotRoutable,
 )
+from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket
 from druks.contrib.software_factory.ticketing.base import Tracker
 from druks.contrib.software_factory.workflows import Build
 from druks.events.models import Event
@@ -351,6 +352,28 @@ async def test_a_blocker_at_another_status_starts_nothing(druks_db, monkeypatch,
     )
 
     assert started == []
+
+
+async def test_a_board_ticket_waits_for_its_blocker_and_starts_when_it_is_done(
+    druks_db, started
+) -> None:
+    await _connect_github()
+    await SoftwareFactory.override_setting("tracker", "druks")
+    # A value kept from another tracker. The board's done status is fixed.
+    await SoftwareFactory.override_setting("done_status", "Completed")
+    project = await Project.create(name="Acme")
+    project_repo = await ProjectRepo.create(project_id=project.id, full_name="acme/api")
+    blocker = await Ticket.create(project_repo=project_repo, title="Define the contract")
+    ticket = await Ticket.create(project_repo=project_repo, title="Use the contract")
+    ticket.blocked_by = [blocker]
+
+    await ticket.transition(Status.READY_FOR_AGENT)
+
+    assert started == []
+
+    await blocker.transition(Status.DONE)
+
+    assert started == [ticket.identifier]
 
 
 async def test_dispatch_passes_the_done_blockers_to_the_build(druks_db, monkeypatch) -> None:
