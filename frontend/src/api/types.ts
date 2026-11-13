@@ -416,7 +416,12 @@ export type Field =
       step: number | null
     })
   | (FieldBase & { field: 'select'; options: Option[]; value: string })
-  | (FieldBase & { field: 'multi_select'; options: Option[]; value: string[] })
+  | (FieldBase & {
+      field: 'multi_select'
+      options: Option[]
+      value: string[]
+      isSearchable?: boolean
+    })
   | (FieldBase & { field: 'radio'; options: Option[]; value: string })
   | (FieldBase & { field: 'checkbox'; value: boolean })
   | (FieldBase & { field: 'upload'; accept: string })

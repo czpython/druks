@@ -1,4 +1,4 @@
-import { useId, useRef, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
 
 import type { Field, Option } from '../api/types'
 import { MarkdownEditor } from './MarkdownEditor'
@@ -213,30 +213,14 @@ function Input({
       )
     case 'multi_select':
       return (
-        <div className="dui-choices" role="group" {...group}>
-          {field.options.map((option) => {
-            const chosen = Array.isArray(value) ? (value as string[]) : []
-            return (
-              <label key={option.value} className="dui-choice">
-                <input
-                  type="checkbox"
-                  name={id}
-                  value={option.value}
-                  checked={chosen.includes(option.value)}
-                  onChange={(event) =>
-                    onChange(
-                      field.name,
-                      event.target.checked
-                        ? [...chosen, option.value]
-                        : chosen.filter((one) => one !== option.value),
-                    )
-                  }
-                />
-                {option.label}
-              </label>
-            )
-          })}
-        </div>
+        <MultiSelect
+          key={resets}
+          field={field}
+          id={id}
+          chosen={Array.isArray(value) ? (value as string[]) : []}
+          onChange={onChange}
+          group={group}
+        />
       )
     case 'radio':
       return (
@@ -350,4 +334,74 @@ function Input({
         </div>
       )
   }
+}
+
+/** The checkboxes of a multi-select. A searchable one hides the options whose
+ * label does not hold the search, in the browser: a hidden option keeps its
+ * check, and the form still sends it. */
+function MultiSelect({
+  field,
+  id,
+  chosen,
+  onChange,
+  group,
+}: {
+  field: Extract<Field, { field: 'multi_select' }>
+  id: string
+  chosen: string[]
+  onChange: (name: string, value: unknown) => void
+  group: Record<string, string | undefined>
+}) {
+  const [search, setSearch] = useState('')
+  const needle = search.trim().toLowerCase()
+  const shown = needle
+    ? field.options.filter((option) => option.label.toLowerCase().includes(needle))
+    : field.options
+  const choices = (
+    <div
+      className={field.isSearchable ? 'dui-choices dui-choices-list' : 'dui-choices'}
+      role="group"
+      {...group}
+    >
+      {shown.map((option) => (
+        <label key={option.value} className="dui-choice">
+          <input
+            type="checkbox"
+            name={id}
+            value={option.value}
+            checked={chosen.includes(option.value)}
+            onChange={(event) =>
+              onChange(
+                field.name,
+                event.target.checked
+                  ? [...chosen, option.value]
+                  : chosen.filter((one) => one !== option.value),
+              )
+            }
+          />
+          {option.label}
+        </label>
+      ))}
+      {needle && shown.length === 0 ? <span className="dui-choices-none">No match.</span> : null}
+    </div>
+  )
+  if (!field.isSearchable) return choices
+  return (
+    <div className="dui-choices-search">
+      <input
+        className="dui-input"
+        type="search"
+        aria-label={`Search ${field.label}`}
+        placeholder="Search"
+        autoComplete="off"
+        value={search}
+        // Enter in the search narrows the list; it must not submit the form.
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.preventDefault()
+        }}
+        onChange={(event) => setSearch(event.target.value)}
+      />
+      {choices}
+    </div>
+  )
 }

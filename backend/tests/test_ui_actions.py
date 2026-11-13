@@ -9,6 +9,7 @@ from druks.ui import (
     EmptyState,
     Form,
     Link,
+    MultiSelectField,
     MultiUploadField,
     Option,
     Page,
@@ -107,6 +108,24 @@ def test_a_markdown_text_area_stays_source_on_the_wire():
             "markdown": True,
         }
     ]
+
+
+def test_a_searchable_multi_select_says_so_on_the_wire():
+    (block,) = wire(
+        Form(
+            action=Action(label="Save", operation="choose_repos"),
+            fields=[
+                MultiSelectField(
+                    name="repos",
+                    label="Repositories",
+                    options=[Option("acme/api", value="acme/api")],
+                    is_searchable=True,
+                )
+            ],
+        )
+    )
+
+    assert block["fields"][0]["isSearchable"] is True
 
 
 def test_an_action_can_collect_fields_before_it_runs():

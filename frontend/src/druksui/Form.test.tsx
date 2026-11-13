@@ -184,6 +184,21 @@ const SECRET: Field = {
   isRequired: false,
 }
 
+const REPOS: Field = {
+  field: 'multi_select',
+  name: 'repos',
+  label: 'Repositories',
+  options: [
+    { value: 'acme/api', label: 'acme/api' },
+    { value: 'acme/web', label: 'acme/web' },
+    { value: 'beta/docs', label: 'beta/docs' },
+  ],
+  value: [],
+  helpText: '',
+  isRequired: false,
+  isSearchable: true,
+}
+
 describe('fields', () => {
   it('renders every V1 field', () => {
     renderBlocks([
@@ -598,6 +613,44 @@ describe('submitting a form', () => {
     expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
       repo_id: '12',
     })
+  })
+
+  it('narrows a searchable multi-select in place and sends a hidden choice too', async () => {
+    renderBlocks([form([{ ...REPOS, value: ['beta/docs'] }], action({ refresh: 'none' }))])
+
+    fireEvent.change(screen.getByLabelText('Search Repositories'), { target: { value: 'WEB' } })
+    const shown = within(screen.getByRole('group', { name: 'Repositories' }))
+    expect(shown.getAllByRole('checkbox').map((box) => (box as HTMLInputElement).value)).toEqual([
+      'acme/web',
+    ])
+    fireEvent.click(shown.getByLabelText('acme/web'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+      repos: ['beta/docs', 'acme/web'],
+    })
+  })
+
+  it('says no match only once a search hides every option', () => {
+    renderBlocks([form([{ ...REPOS, options: [] }])])
+
+    expect(screen.queryByText('No match.')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Search Repositories'), { target: { value: 'zzz' } })
+    expect(screen.getByText('No match.')).toBeTruthy()
+  })
+
+  it('clears a multi-select search when its dialog is cancelled', () => {
+    renderBlocks([action({ label: 'Choose', fields: [REPOS] })])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Choose' }))
+    fireEvent.change(screen.getByLabelText('Search Repositories'), { target: { value: 'web' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose' }))
+
+    expect((screen.getByLabelText('Search Repositories') as HTMLInputElement).value).toBe('')
+    const shown = within(screen.getByRole('group', { name: 'Repositories' }))
+    expect(shown.getAllByRole('checkbox')).toHaveLength(3)
   })
 
   it('renders a markdown text area as formatted text and submits markdown source', async () => {

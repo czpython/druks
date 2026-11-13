@@ -2090,6 +2090,9 @@ a.dui-status:hover { text-decoration: underline; }
 .dui-form-error { font-size: 13px; line-height: 18px; color: var(--druks-color-status-danger); margin: 10px 0; }
 .dui-choices { display: flex; flex-wrap: wrap; gap: 12px 16px; }
 .dui-choice { display: inline-flex; min-height: 32px; align-items: center; gap: 8px; font-size: 14px; line-height: 20px; }
+.dui-choices-search { display: flex; flex-direction: column; gap: 8px; }
+.dui-choices-list { flex-direction: column; flex-wrap: nowrap; gap: 0; max-height: 320px; overflow-y: auto; }
+.dui-choices-none { font-size: 14px; line-height: 32px; color: var(--druks-color-text-secondary); }
 .dui-form-submit { margin-top: 20px; }
 .dui-form-submit { display: flex; flex-wrap: wrap; gap: 8px; }
 
