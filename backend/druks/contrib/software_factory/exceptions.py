@@ -70,6 +70,22 @@ class TicketBlocked(AgentApiError):
         )
 
 
+class TeamSetupMissing(DruksError):
+    def __init__(self, team: str, missing: str) -> None:
+        super().__init__(
+            f"Linear team {team} has no {missing}, so Druks cannot create the split's tickets. "
+            "Add it in Linear, then move the spike to the trigger status again."
+        )
+
+
+class TicketDeleted(DruksError):
+    def __init__(self, ticket: str) -> None:
+        super().__init__(
+            f"{ticket}, which this split created, is in Linear's trash. Restore it, then "
+            "move the spike to the trigger status again."
+        )
+
+
 class TicketAlreadyMerged(AgentApiError):
     status_code = 409
     code = "TICKET_ALREADY_MERGED"

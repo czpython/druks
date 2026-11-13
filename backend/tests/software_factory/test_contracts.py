@@ -207,6 +207,7 @@ def test_ask_contracts_cap_identity_and_cardinality():
             confidence="medium",
             status="planned",
             assignee_github_login=None,
+            tickets=[],
         )
 
 

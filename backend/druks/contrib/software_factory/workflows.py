@@ -215,7 +215,10 @@ class Build(Workflow):
         self._blockers = await self._load_blockers()
 
         if await self._plan_phase():
-            await self._implement_phase()
+            if self.journal.plan.tickets:
+                await self._split()
+            else:
+                await self._implement_phase()
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         work_item = await self.subject
@@ -294,7 +297,8 @@ class Build(Workflow):
             if plan.status == "blocked":
                 raise FatalError(plan.plan_markdown)
             critique = ""
-            if not plan.questions:
+            # A split writes tickets to the tracker, so only a person approves it.
+            if not plan.questions and not plan.tickets:
                 if plan_gate != "human" and not reviewed:
                     # The machine reviewer gets one pass per run. A critique goes into
                     # one redraft, which continues without a second review.
@@ -318,6 +322,42 @@ class Build(Workflow):
                 return True
             answered_questions = plan.get_answered_questions(operator_reply.answers)
             operator_note = operator_reply.note
+
+    async def _split(self) -> None:
+        """Create the approved tickets and their "blocked by" links, then put the spike at
+        rest: the tickets carry the work now."""
+        tickets = self.journal.plan.tickets
+        keys = {
+            ticket.repo: await self._create_ticket(ticket.repo, ticket.title, ticket.description)
+            for ticket in tickets
+        }
+        for ticket in tickets:
+            for blocker in ticket.blocked_by:
+                await self._add_blocker(keys[ticket.repo], keys[blocker])
+        await self._release_ticket()
+
+    @step
+    async def _create_ticket(self, repo: str, title: str, description: str) -> str:
+        spike = await self.subject
+        async with await SoftwareFactory.get_tracker() as tracker:
+            team = (await tracker.get_ticket(spike.ticket_key))["team"]
+            # A repo's name routes a ticket to it, so the label is the name after the owner.
+            return await tracker.create_ticket(
+                f"{spike.source}:{spike.ticket_key}:{repo}",
+                team=team,
+                label=repo.rsplit("/", 1)[-1],
+                title=title,
+                description=description,
+            )
+
+    @step
+    async def _add_blocker(self, key: str, blocker: str) -> None:
+        async with await SoftwareFactory.get_tracker() as tracker:
+            await tracker.add_blocker(key, blocker)
+
+    @step
+    async def _release_ticket(self) -> None:
+        await (await self.subject).release_ticket()
 
     async def _implement_phase(self) -> None:
         await self._create_branch()

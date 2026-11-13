@@ -62,6 +62,7 @@ class LinearClient:
                 identifier
                 title
                 url
+                trashed
                 state { name }
                 project { name }
                 labels { nodes { name } }
@@ -73,6 +74,60 @@ class LinearClient:
             {"issueId": issue_id},
         )
         return data["issue"]
+
+    async def get_team(self, team_id: str) -> dict[str, Any]:
+        data = await self._execute(
+            """
+            query DruksTeam($teamId: String!) {
+              team(id: $teamId) {
+                key
+                states { nodes { id name } }
+              }
+            }
+            """,
+            {"teamId": team_id},
+        )
+        return data["team"]
+
+    async def list_issue_labels(self, name: str) -> list[dict[str, Any]]:
+        data = await self._execute(
+            """
+            query DruksIssueLabels($name: String!) {
+              issueLabels(filter: { name: { eq: $name } }) {
+                nodes { id team { id } }
+              }
+            }
+            """,
+            {"name": name},
+        )
+        return data["issueLabels"]["nodes"]
+
+    async def create_issue(self, issue: dict[str, Any]) -> dict[str, Any]:
+        data = await self._execute(
+            """
+            mutation DruksIssueCreate($issue: IssueCreateInput!) {
+              issueCreate(input: $issue) {
+                issue { identifier trashed }
+              }
+            }
+            """,
+            {"issue": issue},
+        )
+        return data["issueCreate"]["issue"]
+
+    async def create_blocks_relation(self, issue_id: str, related_issue_id: str) -> None:
+        await self._execute(
+            """
+            mutation DruksIssueRelationCreate($issueId: String!, $relatedIssueId: String!) {
+              issueRelationCreate(
+                input: { type: blocks, issueId: $issueId, relatedIssueId: $relatedIssueId }
+              ) {
+                success
+              }
+            }
+            """,
+            {"issueId": issue_id, "relatedIssueId": related_issue_id},
+        )
 
     async def get_issue_relations(self, issue_id: str) -> dict[str, Any]:
         data = await self._execute(
