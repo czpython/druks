@@ -321,6 +321,19 @@ async def runtime():
             await Approve.wait()
             SINK.append(f"acct-after:{self.account_id}")
 
+    class TimedFlow(Workflow):
+        subject = Widget
+
+        @step
+        async def work(self, seconds: float) -> None:
+            await asyncio.sleep(seconds)
+
+        async def run_multistep(self) -> None:
+            await self.work(0.3)
+            await Approve.wait()
+            await self.work(0.2)
+            SINK.append(f"duration:{(await self.get_duration()).total_seconds()}")
+
     class AnnounceFlow(Workflow):
         subject = Widget
 
@@ -351,6 +364,7 @@ async def runtime():
             ReviewFlow=ReviewFlow,
             AttributedFlow=AttributedFlow,
             AnnounceFlow=AnnounceFlow,
+            TimedFlow=TimedFlow,
             ScheduledDispatch=ScheduledDispatch,
             RetryingStepFlow=RetryingStepFlow,
             EnqueueInStepFlow=EnqueueInStepFlow,
@@ -380,6 +394,7 @@ async def runtime():
         workflows._items.pop("review_flow", None)
         workflows._items.pop("attributed_flow", None)
         workflows._items.pop("announce_flow", None)
+        workflows._items.pop("timed_flow", None)
         workflows._items.pop("scheduled_dispatch", None)
         workflows._items.pop("retrying_step_flow", None)
         workflows._items.pop("enqueue_in_step_flow", None)
@@ -527,6 +542,21 @@ async def test_step_gate_resume_finish(runtime):
     )
     assert done.input_gate is None
     assert done.failure is None
+
+
+async def test_a_run_reads_how_long_its_steps_took_not_its_wait_at_a_gate(runtime):
+    workflow_id = await runtime.TimedFlow.start(subject=Widget(id=727272))
+
+    parked = await _wait_for_run(
+        runtime.engine, workflow_id, lambda run: run.state == RunState.PARKED
+    )
+    await asyncio.sleep(1.0)
+    await parked.resume(action="go")
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+
+    [duration] = [float(line.split(":")[1]) for line in SINK if line.startswith("duration:")]
+    # The two steps' 0.5 s, not the second the run stood parked.
+    assert 0.5 <= duration < 0.9
 
 
 async def test_wait_takes_only_the_facts_of_its_topic(runtime):

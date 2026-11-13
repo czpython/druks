@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -340,6 +340,21 @@ class Run(Base):
                 driving.c.state.in_([run_state.value for run_state in states]),
             )
             .order_by(driving.c.created_at.desc(), driving.c.run_id.desc())
+        )
+
+    @classmethod
+    async def get_duration(cls, run_id: str, kind: str) -> timedelta:
+        """How long the workflow's own steps and agent calls have taken, as DBOS timed
+        them. A wait for an answer, a sleep and a restart count nothing, and a step still
+        running counts nothing yet. A fork keeps the steps it reused, with their times."""
+        steps = await DBOS.list_workflow_steps_async(run_id, load_output=False)
+        return timedelta(
+            milliseconds=sum(
+                step["completed_at_epoch_ms"] - step["started_at_epoch_ms"]
+                for step in steps
+                # The workflow's own steps, as ``retry`` picks them.
+                if step["function_name"].startswith(f"{kind}.")
+            )
         )
 
     async def get_ask(self) -> dict[str, Any]:
