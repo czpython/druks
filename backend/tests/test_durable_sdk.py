@@ -10,7 +10,7 @@ import psycopg
 import pytest
 from dbos import DBOS, DBOSClient
 from dbos._error import DBOSQueueDeduplicatedError
-from druks.accounts.context import current_account_id
+from druks.accounts.context import Actor, current_account_id, current_actor
 from druks.accounts.models import Account
 from druks.agents import Agent, AgentOutput
 from druks.apps.loader import register_workflow_package
@@ -39,10 +39,11 @@ from druks.exceptions import PermissionDenied, SessionNotBoundError
 from druks.models import StoredSubject
 from druks.sandbox.datastructures import AgentResult
 from druks.secrets.datastructures import Audience
-from druks.secrets.enums import SecretKind
+from druks.secrets.enums import IdentityStatus, SecretKind
 from druks.secrets.models import VaultSecret
 from druks.settings import Settings, configure_settings, get_settings
 from druks.signals import subscribe
+from druks.teams.models import Team
 from druks.testing import init_db
 from druks.user_settings.models import InstallationSettings, SettingsOverride
 from druks.workflows import Gate, OperatorReply, Subject, Workflow, step, task
@@ -1048,6 +1049,63 @@ async def test_a_run_starts_only_as_an_account_that_can_use_the_app(runtime, mon
         await tick(datetime.now(UTC), None)
 
     assert SINK.count("swept") == swept
+
+
+async def test_an_event_actor_account_wins_over_the_supplied_account(runtime):
+    actor_id = await _account_id(runtime.engine, "event-actor@example.com")
+    supplied_id = await _account_id(runtime.engine, "event-assignee@example.com")
+    async with session_scope(runtime.engine) as session:
+        await VaultSecret.connect(
+            session,
+            "mcp:event-provider",
+            account_id=actor_id,
+            refresh_token="actor-token",
+            scopes=[],
+            identity={"authority": "https://provider.example", "subject": "person-1"},
+            identity_status=IdentityStatus.RESOLVED,
+        )
+    token = current_actor.set(Actor(authority="https://provider.example", user_id="person-1"))
+    try:
+        workflow_id = await runtime.RecordFeedback.start(
+            subject=None, account_id=supplied_id, repo="owner/event-actor"
+        )
+    finally:
+        current_actor.reset(token)
+
+    assert (await _get_run(runtime.engine, workflow_id)).account_id == actor_id
+
+
+async def test_an_unknown_event_actor_cannot_use_a_listed_app(runtime, monkeypatch):
+    async def exists_for_app(cls, session, app):
+        return True
+
+    supplied_id = await _account_id(runtime.engine, "listed-assignee@example.com")
+    monkeypatch.setattr(Team, "exists_for_app", classmethod(exists_for_app))
+    monkeypatch.setattr(runtime.RecordFeedback, "app", "field_notes")
+    token = current_actor.set(Actor(authority="https://provider.example", user_id="nobody"))
+    try:
+        with pytest.raises(PermissionDenied):
+            await runtime.RecordFeedback.start(
+                subject=None, account_id=supplied_id, repo="owner/unknown-listed"
+            )
+    finally:
+        current_actor.reset(token)
+
+
+async def test_an_unknown_event_actor_uses_the_supplied_account_for_an_open_app(
+    runtime, monkeypatch
+):
+    supplied_id = await _account_id(runtime.engine, "open-assignee@example.com")
+    monkeypatch.setattr(runtime.RecordFeedback, "app", "field_notes")
+    token = current_actor.set(Actor(authority="https://provider.example", user_id="nobody"))
+    try:
+        workflow_id = await runtime.RecordFeedback.start(
+            subject=None, account_id=supplied_id, repo="owner/unknown-open"
+        )
+    finally:
+        current_actor.reset(token)
+
+    assert (await _get_run(runtime.engine, workflow_id)).account_id == supplied_id
 
 
 async def test_scheduled_dispatch_must_be_nullary(runtime):

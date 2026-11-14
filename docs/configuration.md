@@ -526,7 +526,10 @@ reviewer approves the pull request:
 | `merge` | Druks squash-merges the pull request, or arms auto-merge when checks are still running. |
 
 When Druks receives a push to the default branch that changes `config.yml`, the
-next build uses the new file.
+next build uses the new file. When a team lists Software Factory, this happens
+only for a push by a person who can use Software Factory. Druks refuses a push by
+anyone else, a merge by the operator App included, and the next build keeps the
+old file.
 
 The same folder holds `review.md`, the repository's rules for the implementer
 and the reviewer. The build and review prompts read it when the checkout has
@@ -629,24 +632,34 @@ Druks accepts the REST issue JSON under `issue`. Put the shared token in the
 `x-druks-webhook-token` header. Put `{{initiator.accountId}}` in the
 `x-jira-initiator` header, so Druks knows who moved the ticket. See
 [Jira's user smart values](https://support.atlassian.com/cloud-automation/docs/jira-smart-values-users/).
+Druks refuses a delivery without that header with a 400, which the audit log of
+the rule shows.
 `druks doctor` treats a disconnected tracker identity as optional when that
 tracker is not selected. It reports pending setup if the selected tracker is
 Linear, Jira, or GitHub and its identity is missing.
 
 Software Factory starts a Linear, Jira, or GitHub build under the Druks account
-of the person who moved the ticket. If that person has no account, the build
-uses the account of the ticket assignee, and then the default account. Linear
-sends that person in its webhook. Jira sends that person in the
-`x-jira-initiator` header. GitHub sends the person who added the label. A Linear
-or Jira person has an account when their tracker ID matches the
-[provider account](#oauth-grant-identity) of an MCP connection that they made
-with **Connect your account**. A connection for everyone has no account, so it
-does not match. A GitHub person has the account that their
-[GitHub sign-in](#github) links. Two matching accounts do not match. A **druks**
-ticket build uses the account of the ticket assignee.
+of the person who moved the ticket. If that person has no account and no team
+lists Software Factory, the build uses the account of the ticket assignee, and
+then the default account. If a team lists Software Factory, a move by a person
+with no Druks account opens no build.
 
-When a team lists Software Factory, a build that would start under an account
-that cannot use it does not start, and the work item says why.
+Linear sends that person in its webhook. If Linear names no person, which its
+documentation says happens only for a deleted person or integration, the build
+uses the account of the ticket assignee, and then the default account. Jira
+sends that person in the `x-jira-initiator` header. GitHub sends the person who
+added the label. A label that the operator App adds counts as a person with no
+Druks account. A Linear
+person has the account of their Linear sign-in. A Jira person has an account
+when their Jira ID matches the [provider account](#oauth-grant-identity) of an
+MCP connection that they made with **Connect your account**. A connection for
+everyone has no account, so it does not match. A GitHub person has the account
+that their [GitHub sign-in](#github) links. Two matching accounts do not match.
+A **druks** ticket build uses the account of the ticket assignee.
+
+When a team lists Software Factory, a move by a person who cannot use it opens no
+build. Druks logs the refusal and acknowledges the delivery, so the tracker does
+not send it again. The work item records nothing.
 
 ### GitHub Issues as the tracker
 
@@ -1069,8 +1082,9 @@ A service can own the host of an OAuth server: GitHub owns
 - Jira and Linear hold a pasted login. When the service is connected, the runs
   of the default account send that login. A run that no person starts uses the
   default account, so scheduled runs act as the service's login. Every other
-  account connects its own OAuth grant. Atlassian accepts the Jira login only
-  after an organization admin turns on API token authentication for its MCP
+  Jira account connects its own OAuth grant. Every other Linear account uses its
+  own Linear sign-in, and **Connect** opens it. Atlassian accepts the Jira login
+  only after an organization admin turns on API token authentication for its MCP
   server.
 
 Druks gives OAuth discovery and client registration 30 seconds in total.
@@ -1116,8 +1130,9 @@ next reconnect.
 Druks stores the `scope` field of the token response as the granted scopes.
 If the field is missing, the provider granted the requested scopes. If the
 field is missing and Druks requested no scopes, the value is `null`. These
-facts do not change account ownership or login. Software Factory uses them to
-select the account for a Linear or Jira build. See
+facts do not change account ownership or login. Druks uses them to find the
+account of a Jira person who moves a ticket, and Software Factory uses them for
+a Jira assignee. See
 [ticketing integrations](#ticketing-integrations).
 
 ## Skills

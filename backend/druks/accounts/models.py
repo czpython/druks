@@ -79,11 +79,13 @@ class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
         # The teams module imports this one, so this import cannot be at the top.
         from druks.teams.models import Team  # noqa: PLC0415
 
-        if self.is_admin or self.kind != AccountKind.OPERATOR or app.builtin:
+        if self.is_admin or self.kind != AccountKind.OPERATOR:
             return True
-        if await self.session.scalar(self.teams.select().where(Team.apps.contains([app.name]))):
+        if not await Team.exists_for_app(self.session, app):
             return True
-        return not await Team.exists_for_app(self.session, app_name=app.name)
+        return bool(
+            await self.session.scalar(self.teams.select().where(Team.apps.contains([app.name])))
+        )
 
     @classmethod
     async def get_default(cls, session: AsyncSession) -> "Account | None":

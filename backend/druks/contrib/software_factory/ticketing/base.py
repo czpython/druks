@@ -9,7 +9,7 @@ from .enums import TicketStatus
 class Tracker(ABC):
     # The errors a caller handles, so it can catch them without importing provider types.
     known_exceptions = ()
-    # The MCP grant issuer whose subjects are this tracker's user ids.
+    # Where this tracker's people sign in: the authority whose subjects are their user ids.
     authority: str
 
     def __init__(self, *, status_names: dict[TicketStatus, str]) -> None:

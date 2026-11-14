@@ -1,5 +1,6 @@
 import httpx
 
+from druks.core import services
 from druks.core.apis.exceptions import LinearAPIError, UnknownTicketError
 from druks.core.apis.linear import LinearClient
 
@@ -9,7 +10,7 @@ from .enums import TicketStatus
 
 class Linear(Tracker):
     known_exceptions = (LinearAPIError, UnknownTicketError, httpx.HTTPError)
-    authority = "https://mcp.linear.app"
+    authority = services.Linear.Authentication.get_authority()
 
     def __init__(self, *, client: LinearClient, status_names: dict[TicketStatus, str]) -> None:
         super().__init__(status_names=status_names)

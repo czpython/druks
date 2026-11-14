@@ -314,7 +314,8 @@ the installation shares. Druks refuses to remove the last admin.
 
 A team is a named group of people with a list of apps. A person can be on more
 than one team, and more than one team can list the same app. An admin manages
-teams in **Settings → Teams**.
+teams in **Settings → Teams**. A person with no Druks account counts as a member
+of no team.
 
 An admin can use every app, and every person can use an app that no team lists.
 A built-in app is always open, also when a team lists it by mistake. A person

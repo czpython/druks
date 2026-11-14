@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.models import Account
 from druks.core.apis import exceptions, github
-from druks.core.apis.jira import SERVICE_ACCOUNT_DOMAIN, JiraClient
+from druks.core.apis.jira import JIRA_AUTHORITY, SERVICE_ACCOUNT_DOMAIN, JiraClient
 from druks.core.apis.linear import LINEAR_AUTHORITY, LINEAR_GRAPHQL_URL, LinearClient
 from druks.core.apis.slack import SLACK_AUTHORITY, SLACK_BOT_SCOPES, SlackClient
 from druks.core.apis.twilio import TwilioClient
@@ -220,6 +220,10 @@ class Github(GithubApp):
         sign_in = replace(GithubApp.Authentication.sign_in, identity_key="subject")
 
         @classmethod
+        def get_authority(cls) -> str:
+            return github.GITHUB_AUTHORITY
+
+        @classmethod
         async def get_identity(cls, access_token: str) -> dict[str, Any]:
             """The person behind a user token, keyed the way ``Account.lookup`` finds them."""
             async with GitHub(
@@ -230,7 +234,7 @@ class Github(GithubApp):
             ) as client:
                 person = (await client.rest.users.async_get_authenticated()).parsed_data
             return {
-                "authority": github.GITHUB_AUTHORITY,
+                "authority": cls.get_authority(),
                 "subject": str(person.id),
                 "login": person.login,
             }
@@ -336,6 +340,10 @@ class Linear(Service):
             return {"scope": ",".join(scopes)}
 
         @classmethod
+        def get_authority(cls) -> str:
+            return LINEAR_AUTHORITY
+
+        @classmethod
         async def get_identity(cls, access_token: str) -> dict[str, Any]:
             """The person behind a user token, keyed the way ``Account.lookup`` finds them."""
             async with httpx.AsyncClient(timeout=_VERIFY_TIMEOUT) as client:
@@ -347,7 +355,7 @@ class Linear(Service):
             response.raise_for_status()
             viewer = response.json()["data"]["viewer"]
             return {
-                "authority": LINEAR_AUTHORITY,
+                "authority": cls.get_authority(),
                 "subject": viewer["id"],
                 "name": viewer["name"],
                 "email": viewer["email"],
@@ -409,6 +417,11 @@ class Jira(Service):
 
     class Authentication(auth.Authentication):
         api_key = auth.ApiKey()
+
+        @classmethod
+        def get_authority(cls) -> str:
+            # Each person connects a grant at Atlassian's MCP server, under this issuer.
+            return JIRA_AUTHORITY
 
         @classmethod
         def get_authorization(cls, login: VaultSecret) -> str:

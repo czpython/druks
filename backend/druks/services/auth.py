@@ -132,6 +132,11 @@ class Authentication:
         return bool(client and client.identity_key)
 
     @classmethod
+    def get_authority(cls) -> str:
+        """Where this service's people sign in: the authority that their sign-ins record."""
+        raise NotImplementedError
+
+    @classmethod
     def get_authorization(cls, login: VaultSecret) -> str:
         """The ``Authorization`` value of the connected row, which the default account
         sends to the server at ``mcp_host``: the API key as a bearer token."""

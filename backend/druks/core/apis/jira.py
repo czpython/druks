@@ -8,6 +8,9 @@ _DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=5.0, write=10.0, pool=5.0)
 _DEFAULT_LIMITS = httpx.Limits(max_connections=20, max_keepalive_connections=10)
 # The site URL refuses a scoped token, such as a service account's.
 _GATEWAY = "https://api.atlassian.com/ex/jira"
+# The authority of a Jira person: the issuer of Atlassian's MCP server, where each person
+# connects their own grant.
+JIRA_AUTHORITY = "https://auth.atlassian.com"
 SERVICE_ACCOUNT_DOMAIN = "serviceaccount.atlassian.com"
 
 

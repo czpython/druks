@@ -35,6 +35,16 @@ class JiraEvents(Webhook):
         # the dedup key. A new transition changes the body.
         return hashlib.sha256(self.raw_body).hexdigest()[:16]
 
+    def get_actor_id(self) -> str:
+        # The Automation rule of the operator names the person who moved the ticket. A rule
+        # without the header is set up wrong, and the audit log of the rule shows the 400.
+        if actor_id := self.request.headers.get("x-jira-initiator"):
+            return actor_id
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Put {{initiator.accountId}} in the x-jira-initiator header.",
+        )
+
     async def on_issue_event(self) -> Response:
         # The Automation rule of the operator writes this body, not Jira. Druks accepts
         # one shape: the "Issue data" payload, with the REST issue JSON under ``issue``.
@@ -62,14 +72,10 @@ class JiraEvents(Webhook):
                 "url": f"{base_url.rstrip('/')}/browse/{key}",
                 "project_name": fields["project"]["name"],
                 "labels": fields["labels"],
-                "actor_id": self.request.headers.get("x-jira-initiator"),
+                "actor_id": self.get_actor_id(),
                 "assignee_id": assignee.get("accountId"),
                 "assignee_email": assignee.get("emailAddress"),
                 "assignee_name": assignee.get("displayName"),
             },
         )
-        return _accepted()
-
-
-def _accepted() -> Response:
-    return JSONResponse({"accepted": True})
+        return JSONResponse({"accepted": True})

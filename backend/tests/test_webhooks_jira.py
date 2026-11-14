@@ -88,6 +88,12 @@ async def test_body_without_the_issue_envelope_is_rejected(tmp_path):
     assert error.value.status_code == 400
 
 
+def test_a_delivery_without_the_initiator_header_is_rejected(tmp_path):
+    with pytest.raises(HTTPException) as error:
+        _provider(tmp_path, payload=_issue()).get_actor_id()
+    assert error.value.status_code == 400
+
+
 async def test_emits_normalized_ticket_transition(tmp_path, druks_db, monkeypatch):
     captured = {}
 

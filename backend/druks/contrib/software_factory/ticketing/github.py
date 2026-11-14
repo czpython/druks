@@ -2,7 +2,6 @@ from githubkit.exception import GitHubException
 
 from druks.core import services
 from druks.core.apis.exceptions import GitHubAppNotInstalledError, UnknownTicketError
-from druks.core.apis.github import GITHUB_AUTHORITY
 
 from .base import Tracker
 from .enums import TicketStatus
@@ -14,7 +13,7 @@ class GitHub(Tracker):
     so adding the trigger label again is a new event."""
 
     known_exceptions = (GitHubException, GitHubAppNotInstalledError, UnknownTicketError)
-    authority = GITHUB_AUTHORITY
+    authority = services.Github.Authentication.get_authority()
 
     async def get_ticket(self, key: str) -> dict:
         repo, number = self._parse_key(key)

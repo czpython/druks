@@ -58,6 +58,11 @@ class GitHubEvents(Webhook):
         action = self.data.get("action")
         return f"{event}_{action}" if action else event
 
+    def get_actor_id(self) -> str | None:
+        # Most deliveries carry the sender, not all of them.
+        if sender := self.data.get("sender"):
+            return str(sender["id"])
+
     async def on_pull_request_review_submitted(self) -> Response:
         sender = self.data["sender"]
         review, pull_request = self.data["review"], self.data["pull_request"]
