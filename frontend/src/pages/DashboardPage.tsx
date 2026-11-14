@@ -5,7 +5,11 @@ import { Link, useLocation, useSearch } from 'wouter'
 import { api } from '../api/client'
 import type { DashboardRun, DashboardSection } from '../api/types'
 import { appLabel, getAppUI } from '../apps/registry'
+import { Select } from '../components/Control'
 import { Page } from '../components/Page'
+import { PageHeading } from '../components/PageHeading'
+import { ConnectionCards } from '../components/ConnectionCards'
+import { CurrentMilestoneCard } from '../components/OnboardingHelper'
 import { httpUrl, relTimeFromIso } from '../lib/format'
 import { useFormatters } from '../lib/preferences'
 import '../dashboard.css'
@@ -31,36 +35,39 @@ export function DashboardPage({ apps }: { apps: string[] }) {
   const section = data && primary ? data[primary] : null
   const heading = primary === 'needsYou' ? 'Needs you' : primary === 'failed' ? 'Failed work' : 'Running work'
   const overflow = primary === 'needsYou' ? 'waiting' : primary === 'failed' ? 'failed' : 'running'
+  const description = data ? (data.needsYou.total
+    ? `${data.needsYou.total} ${data.needsYou.total === 1 ? 'thing is' : 'things are'} waiting on you.`
+    : data.failed.total
+      ? `${data.failed.total} ${data.failed.total === 1 ? 'run failed' : 'runs failed'}.`
+      : data.running.total
+        ? `${data.running.total} ${data.running.total === 1 ? 'run is' : 'runs are'} running.`
+        : app ? 'No current work for this app.' : 'Nothing needs you right now.') : undefined
 
   return (
     <Page inset className="dashboard">
-      <header className="dashboard-head">
-        <div>
-          <h1>{greeting}</h1>
-          {data && <p>{data.needsYou.total
-            ? `${data.needsYou.total} ${data.needsYou.total === 1 ? 'thing is' : 'things are'} waiting on you.`
-            : data.failed.total
-              ? `${data.failed.total} ${data.failed.total === 1 ? 'run failed' : 'runs failed'}.`
-              : data.running.total
-                ? `${data.running.total} ${data.running.total === 1 ? 'run is' : 'runs are'} running.`
-                : app ? 'No current work for this app.' : 'Nothing needs you right now.'}</p>}
-        </div>
-        <select
-          className="dashboard-filter"
-          aria-label="Filter by app"
-          value={app}
-          onChange={(event) => navigate(event.target.value ? `/?app=${encodeURIComponent(event.target.value)}` : '/')}
-        >
-          <option value="">All apps</option>
-          {apps.map((name) => <option key={name} value={name}>{appLabel(name)}</option>)}
-          {app && !apps.includes(app) && <option value={app}>{appLabel(app)}</option>}
-        </select>
-      </header>
+      <PageHeading
+        className="dashboard-heading"
+        title={greeting}
+        description={description}
+        actions={
+          <Select
+            wrapperClassName="dashboard-filter"
+            className="druks-select--compact"
+            aria-label="Filter by app"
+            value={app}
+            onChange={(event) => navigate(event.target.value ? `/?app=${encodeURIComponent(event.target.value)}` : '/')}
+          >
+            <option value="">All apps</option>
+            {apps.map((name) => <option key={name} value={name}>{appLabel(name)}</option>)}
+            {app && !apps.includes(app) && <option value={app}>{appLabel(app)}</option>}
+          </Select>
+        }
+      />
       {overview.isError && (
         <p className="dashboard-alert" role="alert">
           Could not refresh Dashboard. {overview.error.message}{' '}
           {data ? 'This data is stale.' : 'No data is available.'}
-          <button disabled={overview.isFetching} onClick={() => { void overview.refetch() }}>
+          <button disabled={overview.isFetching} onClick={() => { void overview.refetch() }} className="druks-button">
             <RefreshCw size={14} aria-hidden="true" /> Retry
           </button>
         </p>
@@ -76,7 +83,13 @@ export function DashboardPage({ apps }: { apps: string[] }) {
               <p className="dashboard-more">{section.total - section.rows.length} more {overflow}</p>
             )}
           </section>
-        ) : <p className="dashboard-quiet">Your apps will put anything they need right here.</p>}
+        ) : <ConnectionCards
+          title="Let's start by connecting your accounts"
+          description="Connect the tools Druks can work with, then complete the first steps to get started."
+          emptyMessage="Your apps will put anything they need right here."
+        >
+          <CurrentMilestoneCard />
+        </ConnectionCards>}
         <section className="dashboard-status" aria-label="Current status">
           <ul>
             {primary !== 'failed' && <StatusRow name="failed" section={data.failed} lastAt={data.lastFailedAt} />}
@@ -106,7 +119,7 @@ function WorkCard({ row, isPending, isFirst }: { row: DashboardRun; isPending: b
     ? (row.artifactTitle ? `Review: ${row.artifactTitle}` : 'Review')
     : 'Input requested')
   const isFailed = row.state === 'failed' || row.state === 'orphaned'
-  const actionClass = `dashboard-action${isPending && isFirst ? ' primary' : ''}`
+  const actionClass = `dashboard-action druks-action-link${isPending && isFirst ? ' druks-action-link--primary' : ''}`
 
   return (
     <article className={`dashboard-card${isFailed ? ' dashboard-card-failed' : ''}`} aria-label={label}>

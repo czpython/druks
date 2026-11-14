@@ -17,6 +17,7 @@ vi.mock('./pages/DashboardPage', () => ({ DashboardPage: () => <h1>Dashboard pag
 vi.mock('./pages/EventsPage', () => ({ EventsPage: () => <h1>Activity feed</h1> }))
 vi.mock('./pages/UsagePage', () => ({ UsagePage: () => <h1>Usage report</h1> }))
 vi.mock('./pages/SchedulesPage', () => ({ SchedulesPage: () => <h1>Schedule list</h1> }))
+vi.mock('./pages/ChatPage', () => ({ ChatPage: () => <h1>Chat page</h1> }))
 vi.mock('./druksui/AppPage', () => ({
   AppPage: ({ app }: { app: string }) => <h1>{app} home</h1>,
 }))
@@ -107,6 +108,36 @@ beforeEach(() => {
 })
 
 describe('command center navigation', () => {
+  it('places the screen status before UTC and gives each a tooltip', async () => {
+    renderApp('/chat')
+    await screen.findByRole('heading', { name: 'Chat page' })
+
+    const tools = document.querySelector('.sidebar-footer-tools')!
+    const tooltipTriggers = tools.querySelectorAll('.druks-tooltip')
+    const screenStatus = within(tools as HTMLElement).getByRole('img', { name: 'Screen wake lock status' })
+    const utc = within(tools as HTMLElement).getByText('UTC')
+    expect(screenStatus.compareDocumentPosition(utc) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screenStatus.getAttribute('aria-describedby')).toBeTruthy()
+    expect(utc.getAttribute('aria-describedby')).toBeTruthy()
+    expect(tooltipTriggers).toHaveLength(2)
+    expect(document.getElementById(utc.getAttribute('aria-describedby')!)?.textContent).toBe('Times are shown in UTC.')
+  })
+
+  it('hides the breadcrumb header row on shell and app pages while retaining app navigation', async () => {
+    renderApp('/chat')
+    await screen.findByRole('heading', { name: 'Chat page' })
+    expect(document.querySelector('.command-header--chat')).toBeTruthy()
+    expect(screen.queryByText('Command center /')).toBeNull()
+
+    cleanup()
+    renderApp('/notes')
+    await screen.findByRole('heading', { name: 'Notes home' })
+    expect(screen.queryByText('Command center /')).toBeNull()
+    expect(document.querySelector('.command-header--app')).toBeTruthy()
+    expect(screen.getByRole('navigation', { name: 'Notes pages' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Settings' })).toBeTruthy()
+  })
+
   it('puts Schedules below Usage in the shared navigation and phone drawer', async () => {
     renderApp('/schedules?app=notes')
     await screen.findByRole('heading', { name: 'Schedule list' })
@@ -191,16 +222,36 @@ describe('command center navigation', () => {
   it('filters the roster without removing shared destinations', async () => {
     renderApp()
     await screen.findByRole('link', { name: 'External' })
-    fireEvent.change(screen.getByRole('textbox', { name: 'Find an app' }), {
+    fireEvent.click(screen.getByRole('button', { name: 'Show app search' }))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Find an app' }), {
       target: { value: 'EXTERNAL' },
     })
     const apps = screen.getByRole('navigation', { name: 'Apps' })
     expect(within(apps).getAllByRole('link')).toHaveLength(1)
     expect(screen.getByRole('link', { name: 'Activity' })).toBeTruthy()
-    fireEvent.change(screen.getByRole('textbox', { name: 'Find an app' }), {
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Find an app' }), {
       target: { value: 'missing' },
     })
     expect(within(apps).getByText('No matching apps.')).toBeTruthy()
+  })
+
+  it('toggles the compact app search and clears a hidden filter', async () => {
+    renderApp()
+    const externalApp = await screen.findByRole('link', { name: 'External' })
+    const apps = screen.getByRole('navigation', { name: 'Apps' })
+    expect(screen.getAllByText(/^Apps \(\d+\)$/).length).toBeGreaterThan(0)
+    expect(within(apps).getByRole('link', { name: 'External' })).toBe(externalApp)
+    expect(screen.queryByRole('searchbox', { name: 'Find an app' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show app search' }))
+    const search = screen.getByRole('searchbox', { name: 'Find an app' })
+    fireEvent.change(search, { target: { value: 'external' } })
+    expect(within(apps).getAllByRole('link')).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide app search' }))
+    expect(screen.queryByRole('searchbox', { name: 'Find an app' })).toBeNull()
+    expect(within(apps).getAllByRole('link').length).toBeGreaterThan(1)
+    expect(screen.getByRole('button', { name: 'Show app search' }).getAttribute('aria-expanded')).toBe('false')
   })
 
   it('closes phone navigation before it opens the settings route', async () => {
@@ -295,7 +346,8 @@ describe('command center navigation', () => {
     vi.mocked(api.listApps).mockResolvedValueOnce([...roster, ...apps])
     renderApp()
     await screen.findByRole('link', { name: 'Department 39 With A Long App Name' })
-    fireEvent.change(screen.getByRole('textbox', { name: 'Find an app' }), {
+    fireEvent.click(screen.getByRole('button', { name: 'Show app search' }))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Find an app' }), {
       target: { value: 'department 39' },
     })
     expect(

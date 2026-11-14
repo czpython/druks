@@ -54,7 +54,7 @@ export function GitHubPane() {
             <span className="svc-actions">
               {account ? (
                 <button
-                  className="set-btn danger"
+                  className="druks-button druks-button--danger"
                   onClick={() => disconnect(account.id)}
                   disabled={isBusy}
                 >
@@ -62,7 +62,7 @@ export function GitHubPane() {
                 </button>
               ) : (
                 <a
-                  className="set-btn primary"
+                  className="druks-action-link druks-action-link--primary"
                   href={`/api/oauth/github/connect?next=${encodeURIComponent(window.location.pathname)}`}
                 >
                   Connect GitHub

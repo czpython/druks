@@ -104,7 +104,7 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
       {query.isError && (
         <p className="mcp-error" role="alert">
           Could not load numbers.{' '}
-          <button className="set-btn ghost" onClick={() => void query.refetch()}>
+          <button className="druks-button" onClick={() => void query.refetch()}>
             Try again
           </button>
         </p>
@@ -117,7 +117,7 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
       {query.isSuccess && (
         <div>
           <button
-            className="set-btn primary"
+            className="druks-button druks-button--primary"
             onClick={() => void changeNumbers(() => api.linkWahaSession(app.name))}
             disabled={isBusy}
           >
@@ -176,7 +176,7 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
                   <div className="svc-actions">
                     {isPrivate && number.isPhonePaired && (
                       <button
-                        className="set-btn ghost"
+                        className="druks-button"
                         onClick={() => void changeNumbers(() => api.unpair(number.id))}
                         disabled={isBusy}
                       >
@@ -185,7 +185,7 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
                     )}
                     {isWaiting(number) && number.number && (
                       <button
-                        className="set-btn ghost"
+                        className="druks-button"
                         onClick={() => void changeNumbers(() => api.relinkWahaSession(number.id))}
                         disabled={isBusy}
                       >
@@ -194,7 +194,7 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
                     )}
                     {isLinked && !(isPrivate && number.isPhonePaired) && (
                       <button
-                        className="set-btn ghost"
+                        className="druks-button"
                         onClick={() => addAdmin(number)}
                         disabled={isBusy}
                       >
@@ -202,7 +202,7 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
                       </button>
                     )}
                     <button
-                      className="set-btn danger"
+                      className="druks-button druks-button--danger"
                       onClick={() => remove(number)}
                       disabled={isBusy}
                     >

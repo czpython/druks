@@ -80,7 +80,7 @@ function IdentityError({ message, onRetry }: { message: string; onRetry: () => v
           <span className="landing-err-x">!</span>
           <span>{message}</span>
         </div>
-        <button className="landing-cancel" onClick={onRetry}>
+        <button className="landing-cancel druks-button" onClick={onRetry}>
           Retry
         </button>
       </div>

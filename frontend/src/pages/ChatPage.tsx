@@ -1,7 +1,9 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import type { ToolCall } from '@agentclientprotocol/sdk'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, Pin, Plus, Search, X } from 'lucide-react'
+import {
+  ArrowDown, ArrowLeft, ArrowUp, Check, ChevronRight, MessageSquare, Pin, Plus, Search, Settings, X,
+} from 'lucide-react'
 import { useStickToBottom } from 'use-stick-to-bottom'
 import { Link, useLocation } from 'wouter'
 
@@ -14,6 +16,9 @@ import {
 } from '../chat/state'
 import { Markdown } from '../components/Markdown'
 import { Page } from '../components/Page'
+import { PageHeading } from '../components/PageHeading'
+import { ConnectionCards } from '../components/ConnectionCards'
+import { Button } from '../components/Control'
 import { useFormatters } from '../lib/preferences'
 import { zonedParts } from '../lib/format'
 import '../chat.css'
@@ -78,19 +83,40 @@ export function ChatPage({ id }: { id?: string }) {
   }
 
   return (
-    <Page className={`page-chat${id ? ' has-conversation' : ''}`} scroll="internal">
+    <Page
+      className={`page-chat${id ? ' has-conversation' : ''}`}
+      scroll="internal"
+      inset
+      header={
+        <PageHeading
+          title="Chat"
+          icon={<MessageSquare aria-hidden="true" />}
+          actions={
+            <Link
+              href="/apps/chat/settings"
+              className="druks-action-link druks-action-link--secondary druks-action-link--compact"
+              aria-label="Chat Settings"
+              title="Chat Settings"
+            >
+              <Settings size={16} aria-hidden="true" />
+              Chat Settings
+            </Link>
+          }
+        />
+      }
+    >
       {pin.isError && <div className="chat-pin-error" role="alert">
         <span>Could not save the pin.</span>
-        <button className="chat-button" onClick={() => pin.mutate(pin.variables)}>Try again</button>
-        <button className="chat-icon-button" aria-label="Dismiss pin error" onClick={() => pin.reset()}><X size={16} /></button>
+        <button className="chat-button druks-button druks-button--compact" onClick={() => pin.mutate(pin.variables)}>Try again</button>
+        <button className="chat-icon-button druks-button druks-button--compact druks-button--icon-only" aria-label="Dismiss pin error" onClick={() => pin.reset()}><X size={16} /></button>
       </div>}
-      <aside className="chat-list" aria-label="Conversations">
+      <aside className="chat-list druks-panel" aria-label="Conversations">
         <header className="chat-list-head">
-          <label className="chat-search">
+          <label className="chat-search druks-field druks-field--compact">
             <Search size={15} aria-hidden="true" />
             <input type="search" aria-label="Search conversations" placeholder="Search conversations" value={search} onChange={(event) => setSearch(event.target.value)} />
           </label>
-          <Link href="/chat/new" className="chat-icon-button chat-new" aria-label="New conversation" title="New conversation">
+          <Link href="/chat/new" className="druks-action-link druks-action-link--primary druks-action-link--compact druks-action-link--icon-only" aria-label="New conversation" title="New conversation">
             <Plus size={19} aria-hidden="true" />
           </Link>
         </header>
@@ -98,12 +124,12 @@ export function ChatPage({ id }: { id?: string }) {
           {list.isPending && <p className="chat-notice" role="status">Loading conversations…</p>}
           {list.isError && <div className="chat-notice" role="alert">
             <p>Could not load conversations.</p>
-            <button className="chat-button" onClick={() => void list.refetch()}>Try again</button>
+            <button className="chat-button druks-button druks-button--compact" onClick={() => void list.refetch()}>Try again</button>
           </div>}
           {list.isSuccess && list.data.length === 0 && <p className="chat-notice">Your conversations will appear here.</p>}
           {list.isSuccess && list.data.length > 0 && matches.length === 0 && <div className="chat-notice" role="status">
             <p>No matching conversations.</p>
-            <button className="chat-button" onClick={() => setSearch('')}>Clear search</button>
+            <button className="chat-button druks-button druks-button--compact" onClick={() => setSearch('')}>Clear search</button>
           </div>}
           {Array.from(groups, ([day, conversations]) => conversations.length > 0 && <section key={day} aria-label={day}>
             <h2 className="chat-day">{day}</h2>
@@ -148,9 +174,9 @@ function PinButton({ conversation, onPin, disabled }: {
   disabled: boolean
 }) {
   const label = `Pin ${conversationTitle(conversation)}`
-  return <button className="chat-icon-button chat-pin" aria-label={label} title={label} aria-pressed={conversation.isPinned} disabled={disabled} onClick={() => onPin(conversation)}>
-    <Pin size={16} aria-hidden="true" />
-  </button>
+  return <Button className="chat-pin" variant="quiet-icon-toggle" size="compact" iconOnly aria-label={label} title={label} aria-pressed={conversation.isPinned} disabled={disabled} onClick={() => onPin(conversation)}>
+    <Pin size={16} fill={conversation.isPinned ? 'currentColor' : 'none'} aria-hidden="true" />
+  </Button>
 }
 
 function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, onCreated }: {
@@ -298,21 +324,29 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
   const unansweredMessage = userMessages.findLast((message) => message.state === 'delivered')
     ?? userMessages.find((message) => message.state === 'pending')
 
-  return <section className={`chat-thread${id ? '' : ' is-new'}`} aria-label="Conversation">
-    <header className="chat-thread-head">
-      <Link href="/chat" className="chat-back chat-button" aria-label="Back to conversations"><ArrowLeft size={18} /></Link>
+  return <section className={`chat-thread${id ? ' is-conversation' : ' is-new'}`} aria-label="Conversation">
+    {id && <header className="chat-thread-head">
+      <Link href="/chat" className="chat-back druks-action-link druks-action-link--secondary druks-action-link--compact druks-action-link--icon-only" aria-label="Back to conversations"><ArrowLeft size={16} /></Link>
       <div className="chat-thread-title">
-        {id && <h1>{conversation ? conversationTitle(conversation) : 'Conversation'}</h1>}
+        {id && <h3>{conversation ? conversationTitle(conversation) : 'Conversation'}</h3>}
         {conversation && <p>{conversation.messageCount} {conversation.messageCount === 1 ? 'message' : 'messages'}
           {lastReply && <> <span aria-hidden="true">/</span> last reply <time dateTime={lastReply.createdAt} title={format.absTime(lastReply.createdAt)}>{format.absTimeCompact(lastReply.createdAt)}</time></>}
         </p>}
       </div>
       {id && connection === 'reconnecting' && <span className="chat-connection" role="status">Reconnecting…</span>}
       {conversation && <PinButton conversation={summary ?? conversation} onPin={onPin} disabled={pinPending} />}
-    </header>
+    </header>}
     {!id && <div className="chat-intro">
-      <h1>What should Druks do?</h1>
-      <p>Ask about activity, usage, or schedules. Tell Druks what to do next.</p>
+      <header className="chat-intro-heading">
+        <h2>What should Druks do?</h2>
+        <p>Ask about activity, usage, or schedules. Tell Druks what to do next.</p>
+      </header>
+    </div>}
+    {!id && <ConnectionCards />}
+    {!id && <div className="chat-starters" role="group" aria-label="Suggested messages">
+      {['What needs my attention?', 'What failed in the last 24 hours?', 'Compare usage this week with last week.'].map((prompt) => <Button key={prompt} variant="quiet" onClick={() => { onDraft(prompt); composer.current?.focus() }}>
+        {prompt}
+      </Button>)}
     </div>}
     <div className="chat-messages" ref={scrollRef} role="log" aria-label="Messages" aria-live="polite" hidden={!id}>
       <div className="chat-messages-content" ref={contentRef}>
@@ -352,7 +386,7 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
               {stoppedTurn && <div className="chat-interrupted" role="status">
                 <strong>{stoppedTurn.title}</strong>
                 <p>{stoppedTurn.detail}</p>
-                <button className="chat-button" onClick={() => void send(message.body, message)} disabled={sending}>Send again</button>
+                <button className="chat-button druks-button druks-button--compact" onClick={() => void send(message.body, message)} disabled={sending}>Send again</button>
                 <span>Druks never resends by itself.</span>
               </div>}
             </div>
@@ -361,7 +395,7 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
       </div>
     </div>
     {!isAtBottom && messages.length > 0 && <div className="chat-jump">
-      <button className="chat-button" onClick={() => void scrollToBottom()}><ArrowDown size={16} aria-hidden="true" /> Latest message</button>
+      <button className="chat-button druks-button druks-button--compact" onClick={() => void scrollToBottom()}><ArrowDown size={16} aria-hidden="true" /> Latest message</button>
     </div>}
     {(error || state.error) && <div className="chat-error" role="alert">
       <p>{error || state.error?.detail}</p>
@@ -384,18 +418,15 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
           }}
         />
         <div className="chat-composer-actions">
-          {unansweredMessage && !state.error && <button type="button" className="chat-button" onClick={() => void stop(unansweredMessage.id)} disabled={stopping}>{stopping ? 'Stopping…' : 'Stop'}</button>}
-          <button type="submit" className="chat-icon-button chat-send" aria-label={sending ? 'Sending…' : 'Send'} title="Send" disabled={!draft.trim() || sending || (Boolean(id) && !conversation)}><ArrowUp size={18} aria-hidden="true" /></button>
+          {unansweredMessage && !state.error && <button type="button" className="chat-button druks-button druks-button--compact" onClick={() => void stop(unansweredMessage.id)} disabled={stopping}>{stopping ? 'Stopping…' : 'Stop'}</button>}
+          <button type="submit" className="chat-icon-button chat-send druks-button druks-button--primary druks-button--compact druks-button--icon-only" aria-label={sending ? 'Sending…' : 'Send'} title="Send" disabled={!draft.trim() || sending || (Boolean(id) && !conversation)}><ArrowUp size={18} aria-hidden="true" /></button>
         </div>
       </div>
-      <p id="chat-send-help">Enter to send · Shift + Enter for a new line</p>
+      <div className="chat-composer-meta">
+        {!id && apps.isSuccess && <p className="chat-apps">{apps.data.length} installed {apps.data.length === 1 ? 'app' : 'apps'}{apps.data.length > 0 && <> · {apps.data.map((app) => appLabel(app.name)).join(', ')}</>}</p>}
+        <p id="chat-send-help">Enter to send · Shift + Enter for a new line</p>
+      </div>
     </form>
-    {!id && <div className="chat-starters">
-      {['What needs my attention?', 'What failed in the last 24 hours?', 'Compare usage this week with last week.'].map((prompt) => <button key={prompt} onClick={() => { onDraft(prompt); composer.current?.focus() }}>
-        <span>{prompt}</span><ArrowRight size={16} aria-hidden="true" />
-      </button>)}
-      {apps.isSuccess && <p className="chat-apps">{apps.data.length} installed {apps.data.length === 1 ? 'app' : 'apps'}{apps.data.length > 0 && <> · {apps.data.map((app) => appLabel(app.name)).join(', ')}</>}</p>}
-    </div>}
   </section>
 }
 
@@ -415,13 +446,13 @@ function ToolRow({ call }: { call: ToolCall }) {
   const status = call.status ?? 'pending'
   const labels = { pending: 'Pending', in_progress: 'Running', completed: 'Complete', failed: 'Failed' }
   const output = 'rawOutput' in call ? call.rawOutput : call.content
-  return <details className="chat-tool">
+  return <details className="druks-disclosure druks-panel chat-tool">
     <summary>
-      <ChevronRight size={16} className="chat-tool-chevron" aria-hidden="true" />
+      <ChevronRight size={16} className="druks-disclosure__indicator chat-tool-chevron" aria-hidden="true" />
       <span className="chat-tool-label">{call.title}</span>
       <span className={`chat-tool-status is-${status}`}>{status === 'completed' && <Check size={15} aria-hidden="true" />}{labels[status]}</span>
     </summary>
-    <div className="chat-tool-details">
+    <div className="druks-disclosure__content chat-tool-details">
       <h3>Input</h3>
       {call.rawInput === undefined ? <p>No input.</p> : <pre>{JSON.stringify(call.rawInput, null, 2)}</pre>}
       <h3>Output</h3>

@@ -16,6 +16,7 @@ import { BubbleMenu } from '@tiptap/react/menus'
 import StarterKit from '@tiptap/starter-kit'
 
 import type { Field } from '../api/types'
+import { Select } from '../components/Control'
 
 function MarkButton({
   pressed,
@@ -33,7 +34,7 @@ function MarkButton({
       type="button"
       aria-label={label}
       aria-pressed={pressed}
-      className="dui-markdown-mark"
+      className="dui-markdown-mark druks-button druks-button--quiet druks-button--compact druks-button--icon-only"
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
     >
@@ -193,9 +194,10 @@ export function MarkdownEditor({
             <LinkIcon size={15} strokeWidth={1.8} />
           </MarkButton>
           <span className="dui-markdown-bubble-rule" />
-          <select
+          <Select
             aria-label="Text style"
-            className="dui-markdown-block"
+            className="dui-markdown-block druks-select--compact"
+            wrapperClassName="dui-markdown-select-wrap"
             value={marks.block}
             onChange={(event) => {
               const next = event.target.value
@@ -208,7 +210,7 @@ export function MarkdownEditor({
             <option value="1">Heading 1</option>
             <option value="2">Heading 2</option>
             <option value="3">Heading 3</option>
-          </select>
+          </Select>
           <span className="dui-markdown-bubble-rule" />
           <MarkButton
             pressed={marks.bullet}

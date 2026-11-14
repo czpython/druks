@@ -8,7 +8,7 @@ import {
   type RefObject,
 } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, CalendarDays, ChartNoAxesCombined, LayoutGrid, MessageSquare, Search, Settings } from 'lucide-react'
+import { Activity, ArrowLeft, CalendarDays, ChartNoAxesCombined, LayoutGrid, MessageSquare, Monitor, MonitorCheck, MonitorOff, Search, Settings } from 'lucide-react'
 import { Link, Route, Router, Switch, useLocation, type RouterProps } from 'wouter'
 import { navigate as browserNavigate, useLocationProperty } from 'wouter/use-browser-location'
 
@@ -18,9 +18,12 @@ import type { UnsavedForm } from './components/settings'
 import { useScreenWakeLock } from './lib/useScreenWakeLock'
 import { useTimezone } from './lib/preferences'
 import { EmptyState } from './components/EmptyState'
+import { Button } from './components/Control'
 import { AppGlyph } from './components/AppGlyph'
 import { Page } from './components/Page'
 import { SettingsPages } from './components/SettingsPages'
+import { FoundationTooltip } from './components/FoundationTooltip'
+import { OnboardingHelper, OnboardingNavigationItem } from './components/OnboardingHelper'
 import { Sidebar } from './components/Sidebar'
 import { EventsPage } from './pages/EventsPage'
 import { DashboardPage } from './pages/DashboardPage'
@@ -236,7 +239,14 @@ function AppShell({
   const app = urlApp ?? lastApp ?? defaultApp
   const ui = app ? getAppUI(app) : undefined
   const [search, setSearch] = useState('')
+  const [appSearchOpen, setAppSearchOpen] = useState(false)
+  const [onboardingOpen, setOnboardingOpen] = useState(true)
+  const [onboardingTab, setOnboardingTab] = useState<'onboarding' | 'chat'>('onboarding')
+  const appSearchInput = useRef<HTMLInputElement>(null)
   const navCount = useRef(-1)
+  useEffect(() => {
+    if (appSearchOpen) appSearchInput.current?.focus()
+  }, [appSearchOpen])
   useEffect(() => {
     navCount.current += 1
   }, [location])
@@ -278,7 +288,9 @@ function AppShell({
     urlApp && settingsQuery.data?.apps.some((entry) => entry.name === urlApp)
       ? `/apps/${urlApp}/settings`
       : undefined
+  const isAppSettings = Boolean(appSettingsPath && (location === appSettingsPath || location.startsWith(`${appSettingsPath}/`)))
   const navigation = urlApp ? (declaredNavigation ?? []) : []
+  const appEntry = urlApp ? rosterQuery.data?.find((entry) => entry.name === urlApp) : undefined
   const activeTab = navigation
     .map(([url]) => url)
     .filter((url) => location === url || location.startsWith(`${url}/`))
@@ -287,14 +299,15 @@ function AppShell({
     appLabel(name).toLowerCase().includes(search.toLowerCase().trim()),
   )
   const isChat = location === '/chat' || location.startsWith('/chat/')
-  const title = isChat ? 'Chat' : SHELL_PAGES[location] ?? (app ? appLabel(app) : 'Druks')
+  const isChatSettings = location === '/apps/chat/settings' || location.startsWith('/apps/chat/settings/')
+  const isMainPage = isChat || isChatSettings || Object.hasOwn(SHELL_PAGES, location)
 
   return (
     <div className="command-center" hidden={hidden}>
       <a className="skip-navigation" href="#main-content">
         Skip to content
       </a>
-      <header className="command-header">
+      <header className={`command-header${isMainPage ? (isChat ? ' command-header--chat' : ' command-header--main') : urlApp ? ' command-header--app' : ''}`}>
         <Sidebar account={account} home="/">
           <nav className="sidebar-work" aria-label="Work">
             <Link
@@ -336,18 +349,41 @@ function AppShell({
           </nav>
           <div className="sidebar-apps">
             <div className="sidebar-group-title">
-              <span>Apps</span>
-              <span className="mono">{registered.length}</span>
+              <span>Apps ({registered.length})</span>
+              <Button
+                className="sidebar-app-search-toggle"
+                variant="quiet"
+                size="compact"
+                iconOnly
+                aria-label={appSearchOpen ? 'Hide app search' : 'Show app search'}
+                title={appSearchOpen ? 'Hide app search' : 'Show app search'}
+                aria-expanded={appSearchOpen}
+                aria-controls="sidebar-app-search"
+                onClick={() => {
+                  if (appSearchOpen) setSearch('')
+                  setAppSearchOpen((open) => !open)
+                }}
+              >
+                <Search size={16} aria-hidden="true" />
+              </Button>
             </div>
-            <label className="sidebar-search">
-              <Search size={16} aria-hidden="true" />
-              <input
-                aria-label="Find an app"
-                placeholder="Find an app"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </label>
+            <div
+              className={`sidebar-search-reveal${appSearchOpen ? ' is-open' : ''}`}
+              aria-hidden={!appSearchOpen}
+            >
+              <label id="sidebar-app-search" className="sidebar-search druks-field druks-field--compact">
+                <Search size={16} aria-hidden="true" />
+                <input
+                  ref={appSearchInput}
+                  type="search"
+                  tabIndex={appSearchOpen ? 0 : -1}
+                  aria-label="Find an app"
+                  placeholder="Find an app"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </label>
+            </div>
             <nav className="sidebar-app-list" aria-label="Apps">
               {visibleApps.map((name) => (
                 <Link
@@ -379,7 +415,7 @@ function AppShell({
                   <p>Could not load installed apps.</p>
                   <button
                     type="button"
-                    className="sidebar-retry"
+                    className="sidebar-retry druks-button"
                     onClick={() => void rosterQuery.refetch()}
                   >
                     Try again
@@ -389,37 +425,42 @@ function AppShell({
             </nav>
           </div>
           <div className="sidebar-footer">
+            <OnboardingNavigationItem
+              active={onboardingOpen}
+              onClick={() => {
+                setOnboardingOpen(true)
+                setOnboardingTab('onboarding')
+              }}
+            />
             <Link href="/settings/providers" className="sidebar-link">
               <Settings size={17} aria-hidden="true" />
               Settings
             </Link>
+            <div className="sidebar-footer-tools">
+              <WakeLockIndicator />
+              <FoundationTooltip label={`Times are shown in ${timezone}.`} placement="top">
+                <span className="mono command-timezone" tabIndex={0}>{timezone}</span>
+              </FoundationTooltip>
+            </div>
           </div>
         </Sidebar>
-        <div className="command-breadcrumb">
-          <span>Command center /</span>
-          <strong className="app-name">{title}</strong>
-          {appSettingsPath && (
-            <Link
-              href={appSettingsPath}
-              className="command-app-settings"
-              aria-label={`${title} settings`}
-              title={`${title} settings`}
-              aria-current={
-                location === appSettingsPath || location.startsWith(`${appSettingsPath}/`)
-                  ? 'page'
-                  : undefined
-              }
-            >
-              <Settings size={17} aria-hidden="true" />
-            </Link>
-          )}
-        </div>
-        <div className="command-utilities">
-          <WakeLockIndicator />
-          <span className="mono command-timezone">{timezone}</span>
-        </div>
+        {urlApp && !isMainPage && <>
+          <div className="command-app-title">
+            <span aria-hidden="true"><AppGlyph name={appEntry?.icon ?? 'box'} size={20} /></span>
+            <span>{appLabel(urlApp)}</span>
+          </div>
+          {appSettingsPath && <Link
+            href={isAppSettings ? appHome(urlApp) : appSettingsPath}
+            className="command-app-settings druks-action-link druks-action-link--quiet druks-action-link--compact"
+            aria-label={isAppSettings ? `Back to ${appLabel(urlApp)}` : `${appLabel(urlApp)} app settings`}
+            title={isAppSettings ? `Back to ${appLabel(urlApp)}` : `${appLabel(urlApp)} app settings`}
+          >
+            {isAppSettings ? <ArrowLeft size={16} aria-hidden="true" /> : <Settings size={16} aria-hidden="true" />}
+            {isAppSettings ? `Back to ${appLabel(urlApp)}` : 'App Settings'}
+          </Link>}
+        </>}
       </header>
-      {urlApp && navigation.length > 0 && (
+      {urlApp && !isMainPage && !isAppSettings && navigation.length > 1 && (
         <nav className="command-app-navigation" aria-label={`${appLabel(urlApp)} pages`}>
           {navigation.map(([url, name]) => (
             <Link
@@ -449,6 +490,15 @@ function AppShell({
                 returnTo={appHome(params.name)}
                 unsavedFormRef={unsavedFormRef}
                 appName={params.name}
+                headingActions={isChatSettings ? (
+                  <Link
+                    href="/chat"
+                    className="druks-action-link druks-action-link--secondary druks-action-link--compact"
+                  >
+                    <ArrowLeft size={16} aria-hidden="true" />
+                    Back to Chat
+                  </Link>
+                ) : undefined}
                 active={!hidden}
               />
             )}
@@ -498,6 +548,12 @@ function AppShell({
           </Route>
         </Switch>
       </main>
+      <OnboardingHelper
+        open={onboardingOpen}
+        onOpenChange={setOnboardingOpen}
+        tab={onboardingTab}
+        onTabChange={setOnboardingTab}
+      />
     </div>
   )
 }
@@ -508,15 +564,18 @@ function WakeLockIndicator() {
   const title = error
     ? `Screen wake lock failed: ${error}`
     : active
-      ? 'Screen wake lock active. This tab keeps the screen awake.'
-      : 'Screen wake lock idle. This tab is hidden.'
+      ? 'Keeps the screen awake.'
+      : 'Screen wake lock is inactive while this tab is hidden.'
   return (
-    <span
-      className={`wake-lock${active ? ' wake-lock-active' : ''}`}
-      title={title}
-      aria-label={title}
-    >
-      <span className="wake-lock-dot" />
-    </span>
+    <FoundationTooltip label={title} placement="inline-end">
+      <span
+        className={`wake-lock${active ? ' wake-lock-active' : ''}`}
+        aria-label="Screen wake lock status"
+        role="img"
+        tabIndex={0}
+      >
+        {error ? <MonitorOff size={18} aria-hidden="true" /> : active ? <MonitorCheck size={18} aria-hidden="true" /> : <Monitor size={18} aria-hidden="true" />}
+      </span>
+    </FoundationTooltip>
   )
 }

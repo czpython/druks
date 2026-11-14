@@ -145,7 +145,7 @@ function ConnectPanel({ entry }: { entry: OnboardingEntry }) {
         <>
           <ConnectSteps flow={flow} />
           {flow.error && <OnboardingError message={flow.error} />}
-          <button className="landing-cancel" onClick={flow.cancel} disabled={flow.busy}>
+          <button className="landing-cancel druks-button" onClick={flow.cancel} disabled={flow.busy}>
             Cancel
           </button>
         </>

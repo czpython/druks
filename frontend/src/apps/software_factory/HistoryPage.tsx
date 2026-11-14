@@ -63,13 +63,15 @@ export function HistoryPage() {
       }
       right={
         <div className="active-filters mono">
-          <input
-            type="text"
-            className="history-search mono"
-            placeholder="filter by ticket or title…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <label className="history-search mono druks-field druks-field--compact">
+            <input
+              type="search"
+              aria-label="Filter history"
+              placeholder="filter by ticket or title…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
           <span className="filter-sep mono dim">·</span>
           <FilterChip<ResolutionFilter>
             value="all"

@@ -97,7 +97,7 @@ describe('Dashboard', () => {
     }
     if (waiting) {
       expect(screen.getByText(`${waiting} ${waiting === 1 ? 'thing is' : 'things are'} waiting on you.`)).toBeTruthy()
-      expect(screen.getAllByRole('link', { name: 'Review' }).filter((link) => link.classList.contains('primary'))).toHaveLength(1)
+      expect(screen.getAllByRole('link', { name: 'Review' }).filter((link) => link.classList.contains('druks-action-link--primary'))).toHaveLength(1)
     }
     if (!failed) expect(screen.getByText('No current failures')).toBeTruthy()
     if (failed && waiting) expect(within(status).getByText(`${failed} failed`)).toBeTruthy()

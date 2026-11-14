@@ -1088,7 +1088,7 @@ describe('what an action does next', () => {
       },
     ])
 
-    expect(container.querySelector('.dui-action-danger')).toBeTruthy()
+    expect(container.querySelector('.druks-button--danger')).toBeTruthy()
   })
 
   it('shows an action naming no known operation as broken', () => {

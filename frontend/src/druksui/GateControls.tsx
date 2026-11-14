@@ -27,7 +27,7 @@ export function GateControls({ run, expected, onAnswer }: { run: string; expecte
     return (
       <div role="alert">
         <EmptyState glyph="·" msg="The input request is unavailable." sub={gate.error?.message} />
-        <button className="set-btn ghost" onClick={() => void gate.refetch()}>
+        <button className="druks-button" onClick={() => void gate.refetch()}>
           Retry
         </button>
       </div>
@@ -46,7 +46,7 @@ export function GateControls({ run, expected, onAnswer }: { run: string; expecte
       {gate.isError && (
         <p role="alert">
           Could not refresh this request. Your draft is retained.{' '}
-          <button onClick={() => void gate.refetch()}>Retry</button>
+          <button onClick={() => void gate.refetch()} className="druks-button">Retry</button>
         </p>
       )}
       <InAppReview
