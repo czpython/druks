@@ -2,7 +2,6 @@ import base64
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest import mock
 
 import jwt as pyjwt
 import pytest
@@ -32,6 +31,8 @@ from druks.testing import (
     seed_run,
 )
 from druks.workflows import Workflow
+from druks_field_notes.models import Note
+from druks_field_notes.workflows import Summarize
 from fastapi.testclient import TestClient
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from sqlalchemy import update
@@ -143,12 +144,11 @@ async def _redis(druks_redis):
 
 
 @pytest.fixture(autouse=True)
-def _no_durable_dispatch(request):
+def _no_durable_dispatch(request, monkeypatch):
     # Routes start durable work and agent runs push/read a DBOS phase event;
     # tests that don't stand up DBOS get a no-op so those calls don't reach an
     # engine that isn't there. The *_durable tests run the real engine.
     if "durable" in request.module.__name__:
-        yield
         return
 
     async def _noop(*args, **kwargs):
@@ -166,15 +166,14 @@ def _no_durable_dispatch(request):
             .values(status="CANCELLED")
         )
 
-    with (
-        mock.patch.object(Workflow, "start", classmethod(_noop)),
-        mock.patch("druks.agents.set_run_phase", _phase_noop),
-        mock.patch("druks.durable.reads.get_run_phase", _phase_noop),
-        mock.patch("druks.durable.reads.get_run_phase_ends_at", _phase_noop),
-        mock.patch("dbos.DBOS.cancel_workflow_async", _dbos_cancel),
-        mock.patch("dbos.DBOS.start_workflow_async", _noop),
-    ):
-        yield
+    # monkeypatch, not mock.patch: when a test patches one of these too, monkeypatch
+    # undoes both in reverse order and puts the real attribute back.
+    monkeypatch.setattr(Workflow, "start", classmethod(_noop))
+    monkeypatch.setattr("druks.agents.set_run_phase", _phase_noop)
+    monkeypatch.setattr("druks.durable.reads.get_run_phase", _phase_noop)
+    monkeypatch.setattr("druks.durable.reads.get_run_phase_ends_at", _phase_noop)
+    monkeypatch.setattr("dbos.DBOS.cancel_workflow_async", _dbos_cancel)
+    monkeypatch.setattr("dbos.DBOS.start_workflow_async", _noop)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -330,15 +329,11 @@ async def finish_agent_run(call, *, status=None, last_error=None):
 async def make_test_note(body: str = "a note"):
     """The platform suite's subject. It belongs to the proof app, not to software_factory —
     platform behavior must hold for any app's rows."""
-    from druks_field_notes.models import Note
-
     return await Note.create(body=body)
 
 
 async def seed_note_run(session, *, note=None, state: str = "running", **kwargs):
     """A run on a note, seeding one if the caller has none."""
-    from druks_field_notes.workflows import Summarize
-
     subject = note or await make_test_note()
     return await seed_run(session, kind=Summarize.kind, subject=subject, state=state, **kwargs)
 
