@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, Path, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 from sqlalchemy.orm import selectinload
 
 from druks.accounts.context import current_account_id, current_conversation_id
@@ -26,6 +26,7 @@ from druks.durable.reads import get_run_response
 from druks.events.models import Event
 from druks.notifications.exceptions import AnswerNotAllowedError, InvalidChoiceError
 from druks.notifications.services import validate_in_app_answer
+from druks.teams.dependencies import require_run_access
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -44,7 +45,11 @@ async def get_run(
     )
 
 
-@router.post("/{run}/resume", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/{run}/resume",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_run_access)],
+)
 async def resume_run(
     session: SessionDep, run_id: Annotated[str, Path(alias="run")], body: ResumeRequest
 ) -> None:
@@ -80,6 +85,7 @@ async def resume_run(
     "/{run}/cancel",
     operation_id="cancel_run",
     tags=["agent"],
+    dependencies=[Depends(require_run_access)],
     openapi_extra={"x-idempotent": True},
     response_model=CancelRunResponse,
     response_model_by_alias=True,
@@ -131,6 +137,7 @@ async def cancel_run(
     "/{run}/retry",
     operation_id="retry_run",
     tags=["agent"],
+    dependencies=[Depends(require_run_access)],
     openapi_extra={"x-destructive": False},
     response_model=RetryRunResponse,
     response_model_by_alias=True,
