@@ -136,7 +136,9 @@ async def retry_run(
 
     subject = await run.get_subject()
     if subject:
-        latest = await Run.get_latest_for_subject(session, subject["type"], subject["id"])
+        latest = await Run.get_latest_for_subject(
+            session, subject["type"], subject["id"], kind=run.kind
+        )
         if latest.is_active:
             raise SubjectBusy(latest.id)
         if latest.id != run.id:

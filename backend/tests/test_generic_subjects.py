@@ -5,6 +5,9 @@ from conftest import installation_key
 from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
 from druks.apps.base import App
+from druks.contrib.software_factory.app import SoftwareFactory
+from druks.contrib.software_factory.datastructures import PullRequest
+from druks.contrib.software_factory.workflows import PullRequestReview
 from druks.db import db_session
 from druks.durable import AgentCall, Run
 from druks.durable.datastructures import Subject
@@ -12,6 +15,7 @@ from druks.durable.reads import get_statuses_for_subjects, get_subject_statuses
 from druks.durable.schemas import SubjectSummary
 from druks.models import StoredSubject
 from druks.testing import asgi_client, seed_dbos_status
+from druks.workflows import Workflow
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import event, select
@@ -68,6 +72,18 @@ class Inbox(Subject):
 
 class _ThingApp(App):
     name = "faketest"
+    # Its subjects are declared in this module, so the app owns them.
+    package = __name__
+
+    @classmethod
+    def workflows(cls) -> list:
+        # The base method reads the modules under the package. Flow is in the package.
+        return [Flow]
+
+
+class Flow(Workflow):
+    async def run(self) -> None:
+        pass
 
 
 async def _seed_run(
@@ -75,7 +91,7 @@ async def _seed_run(
     *,
     subject_id,
     subject_type="thing",
-    kind="faketest.flow",
+    kind=Flow.kind,
     state="running",
     input_request=None,
     input_gate=None,
@@ -271,7 +287,7 @@ async def test_the_board_status_read_answers_for_every_id_it_is_given(druks_db):
     # a subject with no run at all included.
     live = await _seed_run(druks_db, subject_id="1", state="running")
 
-    statuses = await get_subject_statuses(druks_db, "thing", ["1", "2"])
+    statuses = await get_subject_statuses(druks_db, "thing", ["1", "2"], workflows=[Flow])
 
     assert set(statuses) == {"1", "2"}
     assert statuses["1"].run == live.id
@@ -284,7 +300,7 @@ async def test_one_status_read_answers_for_subjects_of_every_type(druks_db):
     ticket = await _seed_run(druks_db, subject_type="ticket", subject_id="1", state="parked")
 
     statuses = await get_statuses_for_subjects(
-        druks_db, [("ticket", "1"), ("thing", "1"), ("thing", "2")]
+        druks_db, [("ticket", "1"), ("thing", "1"), ("thing", "2")], workflows=[Flow]
     )
 
     assert statuses[("ticket", "1")].run == ticket.id
@@ -321,6 +337,71 @@ async def test_list_returns_every_subject_with_status(client: TestClient, druks_
     assert rows["1"]["status"]["state"] == "running"
     # "2" has no runs yet — it still lists, and carries no state.
     assert rows["2"]["status"]["state"] is None
+
+
+async def _board_rows(app: type[App], session) -> list[tuple[str, str | None]]:
+    endpoints = {
+        route.path: route.endpoint for route in app._get_subject_routes(PullRequest).routes
+    }
+    board = await endpoints["/pull_request"](session)
+    return [(row.summary.id, row.status.state) for row in board.rows]
+
+
+async def test_a_board_on_a_shared_subject_type_shows_only_its_own_apps_runs(druks_db):
+    # PullRequest belongs to software_factory. Its reviews keep "o/r#2" open and fail
+    # on "o/r#1", where _ThingApp's own run is still running. Only _ThingApp works on
+    # "o/r#3".
+    await _seed_run(druks_db, subject_type="pull_request", subject_id="o/r#1", state="running")
+    await _seed_run(druks_db, subject_type="pull_request", subject_id="o/r#3", state="running")
+    await _seed_run(
+        druks_db,
+        subject_type="pull_request",
+        subject_id="o/r#1",
+        kind=PullRequestReview.kind,
+        state="failed",
+    )
+    await _seed_run(
+        druks_db,
+        subject_type="pull_request",
+        subject_id="o/r#2",
+        kind=PullRequestReview.kind,
+        state="failed",
+    )
+
+    assert sorted(await _board_rows(_ThingApp, druks_db)) == [
+        ("o/r#1", "running"),
+        ("o/r#3", "running"),
+    ]
+    assert sorted(await _board_rows(SoftwareFactory, druks_db)) == [
+        ("o/r#1", "failed"),
+        ("o/r#2", "failed"),
+    ]
+
+
+async def test_a_subject_class_reads_only_its_own_apps_runs(druks_db, monkeypatch):
+    # What an app's own page code reads. Software Factory's review failed on "o/r#1",
+    # and another app's newer run works on it and on "o/r#3".
+    review = await _seed_run(
+        druks_db,
+        subject_type="pull_request",
+        subject_id="o/r#1",
+        kind=PullRequestReview.kind,
+        state="failed",
+    )
+    await _seed_run(druks_db, subject_type="pull_request", subject_id="o/r#1", state="running")
+    await _seed_run(druks_db, subject_type="pull_request", subject_id="o/r#3", state="running")
+
+    async def get_run_phase(run_id):
+        return "agent_running"
+
+    monkeypatch.setattr("druks.durable.reads.get_run_phase", get_run_phase)
+
+    statuses = await PullRequest.get_statuses(["o/r#1", "o/r#3"])
+
+    assert (await PullRequest(id="o/r#1").get_status()).run == review.id
+    assert (statuses["o/r#1"].run, statuses["o/r#3"].run) == (review.id, None)
+    assert [pull_request.id for pull_request in await PullRequest.list_open()] == ["o/r#1"]
+    assert await PullRequest(id="o/r#1").get_phase() is None
 
 
 async def test_the_board_and_its_stream_hand_the_caller_to_list_summaries(druks_db):

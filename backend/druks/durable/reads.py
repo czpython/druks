@@ -1,7 +1,7 @@
 # The durable read side: every query that composes rows into response shapes.
 # Schemas stay pure projections; routes call in here.
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -81,38 +81,53 @@ async def get_subject_status(
     subject_type: str,
     subject_id: str,
     *,
-    workflow: "type[Workflow] | None" = None,
+    workflows: "Sequence[type[Workflow]]",
 ) -> SubjectStatus:
-    kind = workflow.kind if workflow else None
-    latest = await Run.get_latest_for_subject(session, subject_type, subject_id, kind=kind)
-    return await _status(latest)
+    statuses = await get_statuses_for_subjects(
+        session, [(subject_type, subject_id)], workflows=workflows
+    )
+    return statuses[(subject_type, subject_id)]
 
 
 async def get_subject_statuses(
-    session: AsyncSession, subject_type: str, subject_ids: list[str]
+    session: AsyncSession,
+    subject_type: str,
+    subject_ids: list[str],
+    *,
+    workflows: "Sequence[type[Workflow]]",
 ) -> dict[str, SubjectStatus]:
     """The status of every subject on a board, keyed by subject id — one driving-run
     read for the whole page."""
     statuses = await get_statuses_for_subjects(
-        session, [(subject_type, subject_id) for subject_id in subject_ids]
+        session, [(subject_type, subject_id) for subject_id in subject_ids], workflows=workflows
     )
     return {subject_id: statuses[(subject_type, subject_id)] for subject_id in subject_ids}
 
 
 async def get_statuses_for_subjects(
-    session: AsyncSession, identities: list[tuple[str, str]]
+    session: AsyncSession,
+    identities: list[tuple[str, str]],
+    *,
+    workflows: "Sequence[type[Workflow]]",
 ) -> dict[tuple[str, str], SubjectStatus]:
-    """The status of each ``(subject_type, subject_id)``, keyed by it — one
-    driving-run read for subjects of any type."""
-    driving_runs = await Run.get_latest_for_subjects(session, identities)
+    """The status of each ``(subject_type, subject_id)`` from the runs of
+    ``workflows``, keyed by it — one driving-run read for subjects of any type."""
+    driving_runs = await Run.get_latest_for_subjects(
+        session, identities, kinds=[workflow.kind for workflow in workflows]
+    )
     return {identity: await _status(driving_runs.get(identity)) for identity in identities}
 
 
 async def get_subject_phase(
-    session: AsyncSession, subject_type: str, subject_id: str
+    session: AsyncSession,
+    subject_type: str,
+    subject_id: str,
+    *,
+    workflows: "Sequence[type[Workflow]]",
 ) -> str | None:
+    kinds = {workflow.kind for workflow in workflows}
     runs = await Run.list_for_subject(session, subject_type, subject_id)
-    active_run = next((run for run in runs if run.is_active), None)
+    active_run = next((run for run in runs if run.kind in kinds and run.is_active), None)
     if active_run and active_run.is_running:
         return await get_run_phase(active_run.id)
     return
