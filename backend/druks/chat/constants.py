@@ -31,9 +31,13 @@ NAMING_PROMPT = (
 # Druks tells a run's conversation how the run ended with one of these templates.
 RESULT_MESSAGE = "[Internal: Run {run} ended. Its result:\n{result}]"
 NO_RESULT_MESSAGE = "[Internal: Run {run} ended with no result. Tell the person it is done.]"
+# No tool of the agent reads a finished run's subject, so the agent names it and never
+# guesses what the run did.
 NO_RESULT_ON_SUBJECT_MESSAGE = (
-    "[Internal: Run {run} ended with no result. Its output is on its subject, {subject}. "
-    "Read it there and tell the person what the run did.]"
+    "[Internal: Run {run} finished. It returned nothing, because its output is on its "
+    "subject, the {type} {id} ({key}). Tell the person that the run finished and that its "
+    "output is on {key}. Say what the run did only when one of your tools shows it. Do not "
+    "guess.]"
 )
 PARKED_MESSAGE = (
     "[Internal: Run {run} waits for an answer. The request:\n{request}\nTell the person "

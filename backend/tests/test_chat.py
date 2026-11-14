@@ -1345,23 +1345,18 @@ async def test_a_run_that_never_parked_reports_its_result_or_that_it_had_none(
     assert (report.is_internal, '"url":"https://bingo.test"' in report.body) == (True, True)
 
 
-async def test_a_run_with_no_result_names_its_subject_so_the_agent_reads_it_there(
-    druks_db, conversation
-):
+async def test_a_run_with_no_result_names_its_subject_by_type_and_id(druks_db, conversation):
     class Widget(Subject):
         pass
 
-    run = await seed_run(
-        druks_db,
-        kind="test",
-        subject=Widget(id="acme/widget#7"),
-        account_id=conversation.account_id,
-    )
+    subject = Widget(id="acme/widget#7")
+    run = await seed_run(druks_db, kind="test", subject=subject, account_id=conversation.account_id)
     run.conversation_id = conversation.id
 
     assert await service.report_result(druks_db, run, result=None) == conversation.id
     *_, report = await list_messages(druks_db, conversation)
-    assert (report.is_internal, "acme/widget#7" in report.body) == (True, True)
+    named = f"{subject.identity['type']} acme/widget#7" in report.body
+    assert (report.is_internal, named) == (True, True)
 
 
 async def test_a_quota_wait_tells_the_person_when_the_run_continues_without_a_turn(
