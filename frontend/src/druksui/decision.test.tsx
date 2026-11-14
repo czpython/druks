@@ -35,7 +35,7 @@ const gate: Gate = {
   run,
   gate: 'review',
   parkedAt,
-  ask: { presentation: 'in_app', controls: ['approve'], questions: [] },
+  ask: { presentation: 'in_app', controls: [{ id: 'approve', note_required: false }], questions: [] },
   artifact: null,
 }
 

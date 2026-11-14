@@ -350,7 +350,11 @@ async def test_an_operator_answers_a_run_that_a_call_parked(druks_db, twilio):
         kind="test",
         state="parked",
         input_gate="review",
-        input_request={"presentation": "in_app", "controls": ["approve"], "questions": []},
+        input_request={
+            "presentation": "in_app",
+            "controls": [{"id": "approve", "note_required": False}],
+            "questions": [],
+        },
     )
     run.conversation_id = conversation.id
     operator = await Account.get_or_create(druks_db, "op@example.com")

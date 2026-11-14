@@ -29,16 +29,16 @@ describe('InAppReview', () => {
       kind: 'markdown', title: 'Reply with the date',
       content: '## Proposed action\n\nReply with the date\n\n## Draft reply\n\nTuesday works.',
     })))
-    renderReview({ presentation: 'in_app', controls: ['approve'], artifact_id: 'artifact' })
+    renderReview({ presentation: 'in_app', controls: [{ id: 'approve', note_required: false }], artifact_id: 'artifact' })
     expect(await screen.findAllByText('Reply with the date')).toHaveLength(2)
     expect(screen.getByText('Tuesday works.')).toBeTruthy()
   })
 
-  it('submits empty request changes when the ask carries critique context', async () => {
+  it('submits empty request changes when the ask needs no note for it', async () => {
     const fetchMock = stubFetch()
     const ask: InputRequest = {
       presentation: 'in_app',
-      controls: ['approve', 'request_changes'],
+      controls: [{ id: 'approve', note_required: false }, { id: 'request_changes', note_required: false }],
       questions: [],
       context: '  name the rollback boundary  ',
     }
@@ -58,14 +58,11 @@ describe('InAppReview', () => {
     })
   })
 
-  it.each([
-    ['absent context with an answer', undefined, 'answer'],
-    ['blank context with a note', '   ', 'note'],
-  ] as const)('requires guidance for %s', (_label, context, guidance) => {
+  it.each(['answer', 'note'] as const)('takes an %s for a control that needs a note', (guidance) => {
     stubFetch()
     const ask: InputRequest = {
       presentation: 'in_app',
-      controls: ['request_changes'],
+      controls: [{ id: 'request_changes', note_required: true }],
       questions: [
         {
           id: 'q1',
@@ -73,7 +70,6 @@ describe('InAppReview', () => {
           options: [{ id: 'yes', label: 'Use a flag', recommended: true }],
         },
       ],
-      context,
       reply_fields: ['action', 'answers', 'note'],
     }
     renderReview(ask)
@@ -97,7 +93,7 @@ describe('InAppReview', () => {
     renderReview({
       presentation: 'in_app',
       label: 'Keep this quote?',
-      controls: ['keep', 'skip'],
+      controls: [{ id: 'keep', note_required: false }, { id: 'skip', note_required: false }],
     })
 
     expect(screen.getByText('Keep this quote?')).toBeTruthy()
@@ -110,7 +106,7 @@ describe('InAppReview', () => {
     stubFetch()
     renderReview({
       presentation: 'in_app',
-      controls: ['approve'],
+      controls: [{ id: 'approve', note_required: false }],
       questions: [],
       reply_fields: ['action', 'answers', 'note'],
     })
@@ -126,7 +122,7 @@ describe('the lent run controls', () => {
       <>
         <CancelRun runId="run-123" />
         <RetryRun runId="run-123" />
-        <InAppReview runId="run-123" ask={{ presentation: 'in_app', controls: ['approve'] }} />
+        <InAppReview runId="run-123" ask={{ presentation: 'in_app', controls: [{ id: 'approve', note_required: false }] }} />
       </>,
     )
     expect(screen.getByText('cancel run')).toBeTruthy()
@@ -147,7 +143,7 @@ describe('the lent run controls', () => {
     render(
       <InAppReview
         runId="run-123"
-        ask={{ presentation: 'in_app', controls: ['approve'], artifact_id: 'art-1' }}
+        ask={{ presentation: 'in_app', controls: [{ id: 'approve', note_required: false }], artifact_id: 'art-1' }}
       />,
     )
 
@@ -164,7 +160,7 @@ describe('the lent run controls', () => {
     render(
       <InAppReview
         runId="run-123"
-        ask={{ presentation: 'in_app', controls: ['approve'], artifact_id: 'gone' }}
+        ask={{ presentation: 'in_app', controls: [{ id: 'approve', note_required: false }], artifact_id: 'gone' }}
       />,
     )
     expect((await screen.findByRole('alert')).textContent).toContain(

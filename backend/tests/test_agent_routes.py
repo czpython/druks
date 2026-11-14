@@ -22,7 +22,10 @@ from fastapi.testclient import TestClient
 
 _IN_APP_ASK = {
     "presentation": "in_app",
-    "controls": ["approve", "request_changes"],
+    "controls": [
+        {"id": "approve", "note_required": False},
+        {"id": "request_changes", "note_required": True},
+    ],
     "questions": [],
 }
 
@@ -70,10 +73,10 @@ def resume_spy(monkeypatch):
     return calls
 
 
-async def _park(druks_db, note, *, context: str = ""):
+async def _park(druks_db, note, *, controls: list[dict] | None = None):
     ask = dict(_IN_APP_ASK)
-    if context:
-        ask["context"] = context
+    if controls:
+        ask["controls"] = controls
     run = await seed_run(
         druks_db,
         kind=Summarize.kind,
@@ -530,18 +533,25 @@ async def test_get_gate_then_answer_roundtrip(client: TestClient, druks_db, resu
     assert resume_spy == [{"id": run.id, "action": "approve", "answers": {}, "note": "ship it"}]
 
 
-async def test_answer_gate_keys_empty_request_changes_on_ask_context(
+async def test_answer_gate_keys_empty_request_changes_on_note_required(
     client: TestClient, druks_db, resume_spy
 ):
-    critique_note = await Note.create(body="critique-backed gate")
-    critique_run = await _park(druks_db, critique_note, context="name the rollback boundary")
-    critique_gate = await services.get_gate(db_session(), critique_run.id)
-    critique_parked_at = critique_gate.model_dump(mode="json", by_alias=True)["parkedAt"]
+    relaxed_note = await Note.create(body="gate that needs no note")
+    relaxed_run = await _park(
+        druks_db,
+        relaxed_note,
+        controls=[
+            {"id": "approve", "note_required": False},
+            {"id": "request_changes", "note_required": False},
+        ],
+    )
+    relaxed_gate = await services.get_gate(db_session(), relaxed_run.id)
+    relaxed_parked_at = relaxed_gate.model_dump(mode="json", by_alias=True)["parkedAt"]
 
     answered = client.post(
-        f"/api/gates/{critique_run.id}/answer",
+        f"/api/gates/{relaxed_run.id}/answer",
         json={
-            "parkedAt": critique_parked_at,
+            "parkedAt": relaxed_parked_at,
             "control": "request_changes",
             "answers": {},
             "note": "",
@@ -550,29 +560,29 @@ async def test_answer_gate_keys_empty_request_changes_on_ask_context(
 
     assert answered.status_code == 200
     assert answered.json() == {
-        "run": critique_run.id,
-        "parkedAt": critique_parked_at,
+        "run": relaxed_run.id,
+        "parkedAt": relaxed_parked_at,
         "result": "answered",
     }
     assert resume_spy == [
         {
-            "id": critique_run.id,
+            "id": relaxed_run.id,
             "action": "request_changes",
             "answers": {},
             "note": "",
         }
     ]
 
-    contextless_note = await Note.create(body="contextless gate")
-    contextless_run = await _park(druks_db, contextless_note)
-    contextless_parked_at = (await services.get_gate(db_session(), contextless_run.id)).model_dump(
+    strict_note = await Note.create(body="gate that needs a note")
+    strict_run = await _park(druks_db, strict_note)
+    strict_parked_at = (await services.get_gate(db_session(), strict_run.id)).model_dump(
         mode="json", by_alias=True
     )["parkedAt"]
 
     rejected = client.post(
-        f"/api/gates/{contextless_run.id}/answer",
+        f"/api/gates/{strict_run.id}/answer",
         json={
-            "parkedAt": contextless_parked_at,
+            "parkedAt": strict_parked_at,
             "control": "request_changes",
             "answers": {},
             "note": "",

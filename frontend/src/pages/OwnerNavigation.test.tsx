@@ -39,7 +39,7 @@ const run = (id: string): RunSummary => ({
   retryFrom: null,
   state: 'parked',
   gate: 'review',
-  inputRequest: { presentation: 'in_app', controls: ['approve'] },
+  inputRequest: { presentation: 'in_app', controls: [{ id: 'approve', note_required: false }] },
   createdAt: '2026-09-01T00:00:00Z',
   updatedAt: '2026-09-01T00:00:00Z',
   accountUsername: 'operator',

@@ -7,7 +7,7 @@ from druks.chat.constants import CLICK_ANSWER_MESSAGE
 from druks.chat.models import Conversation
 from druks.chat.service import deliver
 from druks.durable.enums import RunState
-from druks.durable.models import Run, is_note_required
+from druks.durable.models import Run
 from druks.notifications.exceptions import (
     AlreadyAcknowledgedError,
     AnswerNotAllowedError,
@@ -16,6 +16,14 @@ from druks.notifications.exceptions import (
     UnknownTokenError,
 )
 from druks.notifications.models import Notification
+
+
+async def get_offered_control(ask: dict[str, Any], control: str) -> dict[str, Any]:
+    """The control that the ask offers under the id ``control``."""
+    for offered in ask.get("controls", []):
+        if offered["id"] == control:
+            return offered
+    raise InvalidChoiceError(f"unknown control {control!r}")
 
 
 async def validate_in_app_answer(
@@ -39,10 +47,9 @@ async def validate_in_app_answer(
                 "Only the admin of the number that started this run can answer it."
             )
     ask = await run.get_ask()
-    if control not in ask.get("controls", []):
-        raise InvalidChoiceError(f"unknown control {control!r}")
-    if is_note_required(ask, control) and not answers and not note.strip():
-        raise InvalidChoiceError("request_changes needs an answer or a note to guide the re-plan")
+    offered = await get_offered_control(ask, control)
+    if offered["note_required"] and not answers and not note.strip():
+        raise InvalidChoiceError(f"{control} needs an answer or a note to guide the re-plan")
     # Answers may be an offered option id or the operator's own words — free
     # text is content that flows into the next agent prompt, so only the
     # question ids are held to the ask; a blank answer is a client bug.
@@ -88,7 +95,7 @@ async def respond_to_notification(
         if user_id != conversation.user_id:
             raise AnswerNotAllowedError("Only the person who started this run can answer it.")
         label = notification.get_action(control)["label"]
-        if is_note_required(ask, control) or ask["questions"]:
+        if (await get_offered_control(ask, control))["note_required"] or ask["questions"]:
             # A click carries only its control, so the chat's agent asks for the rest and
             # answers the run.
             if not await notification.mark_acknowledged():

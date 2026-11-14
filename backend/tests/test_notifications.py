@@ -148,7 +148,10 @@ async def test_deleting_designated_destination_unsets_the_pointer(tmp_path, druk
 
 _IN_APP_ASK = {
     "presentation": "in_app",
-    "controls": ["approve", "request_changes"],
+    "controls": [
+        {"id": "approve", "note_required": False},
+        {"id": "request_changes", "note_required": True},
+    ],
     "questions": [{"id": "q1", "prompt": "which?", "options": [{"id": "a", "label": "A"}]}],
 }
 
@@ -187,8 +190,13 @@ async def test_a_control_that_needs_a_note_gets_a_button_only_in_a_chat(druks_db
     assert (await run.get_rendered_ask(has_chat=False))["actions"] == [approve]
     assert (await run.get_rendered_ask(has_chat=True))["actions"] == [approve, request_changes]
 
-    # The ask's context guides a re-plan, so request_changes needs no note.
-    run.input_request = {**_IN_APP_ASK, "context": "Keep the scope small."}
+    run.input_request = {
+        **_IN_APP_ASK,
+        "controls": [
+            {"id": "approve", "note_required": False},
+            {"id": "request_changes", "note_required": False},
+        ],
+    }
     assert (await run.get_rendered_ask(has_chat=False))["actions"] == [approve, request_changes]
 
 

@@ -10,15 +10,18 @@ from fastapi import HTTPException
 # answer service echoes.
 _ASK = {
     "presentation": "in_app",
-    "controls": ["approve", "request_changes"],
+    "controls": [
+        {"id": "approve", "note_required": False},
+        {"id": "request_changes", "note_required": True},
+    ],
     "questions": [{"id": "q1", "prompt": "which?", "options": [{"id": "a", "label": "A"}]}],
 }
 
 
-async def _park(druks_db, *, context: str | None = None) -> None:
+async def _park(druks_db, *, controls: list[dict] | None = None) -> None:
     ask = dict(_ASK)
-    if context is not None:
-        ask["context"] = context
+    if controls:
+        ask["controls"] = controls
     druks_db.add(
         Run(
             account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
@@ -104,15 +107,14 @@ async def test_resume_rejects_an_answer_to_a_question_that_was_not_asked(druks_d
     assert exc.value.status_code == 422
 
 
-@pytest.mark.parametrize("context", [None, "", "   "])
-async def test_resume_rejects_request_changes_without_guidance(druks_db, monkeypatch, context):
+async def test_resume_rejects_request_changes_without_guidance(druks_db, monkeypatch):
     # request_changes exists to redirect the next pass; with no answer and a blank
     # note it would only re-run the same plan blind, so the reply is rejected.
     async def fake_resume(self, **fields):
         raise AssertionError("must not resume a guidance-free request_changes")
 
     monkeypatch.setattr(Run, "resume", fake_resume)
-    await _park(druks_db, context=context)
+    await _park(druks_db)
 
     with pytest.raises(HTTPException) as exc:
         await resume_run(druks_db, "r1", ResumeRequest(control="request_changes", note="   "))
@@ -120,14 +122,20 @@ async def test_resume_rejects_request_changes_without_guidance(druks_db, monkeyp
     assert exc.value.detail == "request_changes needs an answer or a note to guide the re-plan"
 
 
-async def test_resume_accepts_empty_request_changes_with_ask_context(druks_db, monkeypatch):
+async def test_resume_accepts_empty_request_changes_when_it_needs_no_note(druks_db, monkeypatch):
     captured: dict = {}
 
     async def fake_resume(self, **fields):
         captured.update(id=self.id, **fields)
 
     monkeypatch.setattr(Run, "resume", fake_resume)
-    await _park(druks_db, context="name the rollback boundary")
+    await _park(
+        druks_db,
+        controls=[
+            {"id": "approve", "note_required": False},
+            {"id": "request_changes", "note_required": False},
+        ],
+    )
 
     await resume_run(druks_db, "r1", ResumeRequest(control="request_changes", answers={}, note=""))
 

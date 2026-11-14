@@ -53,7 +53,10 @@ def resume_spy(monkeypatch):
 def _in_app_ask(questions=()):
     return {
         "presentation": "in_app",
-        "controls": ["approve", "request_changes"],
+        "controls": [
+            {"id": "approve", "note_required": False},
+            {"id": "request_changes", "note_required": True},
+        ],
         "questions": list(questions),
     }
 
@@ -120,7 +123,7 @@ async def test_get_gate_returns_the_ask_and_parked_at(druks_db):
     assert view.run == run.id
     assert view.gate == "review"
     assert view.parked_at == run.input_requested_at
-    assert view.ask["controls"] == ["approve", "request_changes"]
+    assert view.ask["controls"] == _in_app_ask()["controls"]
     assert view.ask["questions"][0]["prompt"] == "Which db?"
 
 

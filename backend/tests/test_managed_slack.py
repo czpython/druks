@@ -387,7 +387,11 @@ async def test_a_forwarded_click_answers_its_notification_once(
         id=str(uuid7()),
         kind="notifications.test",
         input_gate="review",
-        input_request={"presentation": "in_app", "controls": ["approve"], "questions": []},
+        input_request={
+            "presentation": "in_app",
+            "controls": [{"id": "approve", "note_required": False}],
+            "questions": [],
+        },
         input_requested_at=Base.utc_now(),
     )
     druks_db.add(run)

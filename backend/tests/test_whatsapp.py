@@ -1099,7 +1099,11 @@ async def test_an_operator_on_a_private_number_keeps_normal_gate_access(druks_db
         kind="test",
         state="parked",
         input_gate="review",
-        input_request={"presentation": "in_app", "controls": ["approve"], "questions": []},
+        input_request={
+            "presentation": "in_app",
+            "controls": [{"id": "approve", "note_required": False}],
+            "questions": [],
+        },
     )
     run.conversation_id = conversation.id
 
@@ -1128,7 +1132,11 @@ async def test_only_the_number_admin_answers_its_questions_or_resumes_its_chats(
         kind="test",
         state="parked",
         input_gate="review",
-        input_request={"presentation": "in_app", "controls": ["approve"], "questions": []},
+        input_request={
+            "presentation": "in_app",
+            "controls": [{"id": "approve", "note_required": False}],
+            "questions": [],
+        },
     )
     run.conversation_id = conversation.id
 
@@ -1250,7 +1258,11 @@ async def test_a_waiting_run_asks_the_admin_and_its_end_reaches_the_chat(druks_d
         kind="test",
         state="parked",
         input_gate="review",
-        input_request={"presentation": "in_app", "controls": ["approve"], "questions": []},
+        input_request={
+            "presentation": "in_app",
+            "controls": [{"id": "approve", "note_required": False}],
+            "questions": [],
+        },
     )
     run.conversation_id = chat.id
     run.input_requested_at = Base.utc_now()

@@ -398,7 +398,13 @@ async def _park(
         # include note.
         input_request = {"questions": [], **input_request, "reply_fields": list(gate.model_fields)}
         if action := gate.model_fields.get("action"):
-            input_request.setdefault("controls", list(get_args(action.annotation)))
+            # A request for changes needs a note to guide the next pass, unless the ask
+            # carries its own context. Every place that takes an answer reads this.
+            is_guided = bool((input_request.get("context") or "").strip())
+            input_request["controls"] = [
+                {"id": control, "note_required": control == "request_changes" and not is_guided}
+                for control in input_request.get("controls", get_args(action.annotation))
+            ]
     requested_at = datetime.now(UTC)
     await _emit_run_event(
         workflow.workflow_id,

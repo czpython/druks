@@ -25,7 +25,7 @@ const GATE: Gate = {
   parkedAt: '2026-08-29T09:14:02Z',
   ask: {
     presentation: 'in_app',
-    controls: ['approve', 'request_changes'],
+    controls: [{ id: 'approve', note_required: false }, { id: 'request_changes', note_required: false }],
     questions: [
       {
         id: 'scope',

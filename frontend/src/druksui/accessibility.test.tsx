@@ -58,7 +58,7 @@ vi.mocked(api.getGate).mockImplementation(async (run) => ({
   parkedAt: '2026-08-29T09:14:02Z',
   ask: {
     presentation: 'in_app',
-    controls: ['approve'],
+    controls: [{ id: 'approve', note_required: false }],
     questions: [
       { id: 'scope', prompt: 'Is the scope right?', options: [{ id: 'yes', label: 'Yes', recommended: true }] },
     ],
