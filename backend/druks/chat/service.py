@@ -732,10 +732,12 @@ async def finish_turn(
 async def report_result(session: AsyncSession, run: Run, *, result) -> str | None:
     """Report a run's result to the chat that started it, whether or not the run waited
     for an answer. A run that returns nothing put its output where it belongs, such as a
-    review that it posted; the chat still hears that it ended, so the agent keeps its
-    promise to report back. Returns the conversation to deliver."""
-    if result is None and run.subject_key:
-        body = NO_RESULT_ON_SUBJECT_MESSAGE.format(run=run.id, subject=run.subject_key)
+    pull request that it opened; the chat still hears that it ended, so the agent keeps
+    its promise to report back. Returns the conversation to deliver."""
+    if result is None and (key := run.subject_key):
+        # The query can flush the run, and a flush expires subject_key's SQL expression.
+        subject = await run.get_subject()
+        body = NO_RESULT_ON_SUBJECT_MESSAGE.format(run=run.id, key=key, **subject)
     elif result is None:
         body = NO_RESULT_MESSAGE.format(run=run.id)
     else:
