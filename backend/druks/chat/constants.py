@@ -39,12 +39,16 @@ PARKED_MESSAGE = (
     "[Internal: Run {run} waits for an answer. The request:\n{request}\nTell the person "
     "what it waits for and where to answer it.]"
 )
-# The thread's buttons answer the run, so the agent only points at them.
+# The thread's buttons answer the run. A click that cannot carry the whole answer reaches
+# the agent as the person's message, so the agent asks for the rest.
 PARKED_BUTTONS_MESSAGE = (
     "[Internal: Run {run} waits for an answer. Its buttons are in this thread. The "
-    "request:\n{request}\nTell the person in one short line that the buttons in this "
-    "thread answer it, or that they can reply here.]"
+    "request:\n{request}\nA click on a button that needs a note or answers to the "
+    "questions reaches you as the person's message with the button's name. Then ask them "
+    "for what is missing, and answer the run with answer_gate. Now tell the person in one "
+    "short line that the buttons in this thread answer it, or that they can reply here.]"
 )
+CLICK_ANSWER_MESSAGE = "[Internal: The person answered run {run} with its {answer} button.]"
 QUOTA_RESUMED_MESSAGE = (
     "[Internal: Run {run} continues after its usage-limit wait. Tell the person in one short line.]"
 )

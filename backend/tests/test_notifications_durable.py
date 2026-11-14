@@ -10,7 +10,7 @@ from druks.accounts.context import current_conversation_id
 from druks.accounts.models import Account
 from druks.apps.registry import workflows
 from druks.chat.channels.slack import channel as slack_channel
-from druks.chat.enums import ConversationSource
+from druks.chat.enums import ConversationSource, MessageRole
 from druks.chat.models import Conversation, Message
 from druks.core.services import Slack
 from druks.core.webhooks import slack as slack_webhooks
@@ -772,7 +772,7 @@ async def test_each_park_round_gets_its_own_notification(rt, deliver_spy):
     assert len(deliver_spy.calls) == 2
 
 
-async def _respond_in_own_session(rt, token, choice):
+async def _respond_in_own_session(rt, token, choice, *, user_id=None):
     # Each caller is its own task, so the scoped registry gives each its own
     # session — a real request-shaped transaction. (The HTTP layer itself is
     # pinned by the unit route tests; driving DBOS's send through a TestClient
@@ -780,7 +780,7 @@ async def _respond_in_own_session(rt, token, choice):
     session = get_session(rt.engine)
     db_session.registry.set(session)
     try:
-        await respond_to_notification(session, token, choice)
+        await respond_to_notification(session, token, choice, user_id=user_id)
         await session.commit()
         return "ok"
     except NotificationError as error:
@@ -826,7 +826,7 @@ async def test_respond_round_trip_finishes_the_run(rt, deliver_spy):
     assert _dbos_replies(rt, workflow_id) == 1
 
 
-async def test_a_slack_chat_s_review_offers_approve_in_its_thread(rt, deliver_spy):
+async def test_a_slack_chat_s_review_offers_its_buttons_in_its_thread(rt, deliver_spy):
     async def create():
         await _install_slack()
         account = await Account.get_default(db_session())
@@ -857,7 +857,10 @@ async def test_a_slack_chat_s_review_offers_approve_in_its_thread(rt, deliver_sp
         await asyncio.sleep(0.1)
     else:
         raise AssertionError(f"the thread was never notified; {deliver_spy.calls=}")
-    assert in_thread.actions == [{"id": "approve", "label": "Approve"}]
+    assert in_thread.actions == [
+        {"id": "approve", "label": "Approve"},
+        {"id": "request_changes", "label": "Request changes"},
+    ]
     (call,) = [call for call in deliver_spy.calls if call["token"] == in_thread.correlation_token]
     assert (call["channel"], call["thread_ts"]) == ("C9", "1700000000.000100")
 
@@ -870,8 +873,27 @@ async def test_a_slack_chat_s_review_offers_approve_in_its_thread(rt, deliver_sp
     finally:
         await session.close()
 
-    clicked = await _respond_in_own_session(rt, in_thread.correlation_token, {"control": "approve"})
+    # The review asks a question, so the click goes to the chat, and the run waits for
+    # the agent's answer.
+    clicked = await _respond_in_own_session(
+        rt, in_thread.correlation_token, {"control": "approve"}, user_id="U1"
+    )
     assert clicked == "ok"
+    parked = await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
+    session = get_session(rt.engine)
+    try:
+        bodies = await session.scalars(
+            select(Message.body).where(
+                Message.conversation_id == conversation_id,
+                Message.role == MessageRole.USER,
+                ~Message.is_internal,
+            )
+        )
+        assert list(bodies) == ["Approve"]
+    finally:
+        await session.close()
+
+    await parked.resume(action="approve", answers={"q1": "postgres"}, note="")
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FINISHED)
 
 

@@ -644,7 +644,7 @@ async def test_review_work_ask_renders_a_notification_body(monkeypatch):
     await workflow._work_gate()
 
     run = Run(input_request=input_requests[0])
-    assert (await run.get_rendered_ask())["body"]
+    assert (await run.get_rendered_ask(has_chat=False))["body"]
     assert input_requests[0]["url"] == "https://github.com/org/repo/pull/42"
     assert input_requests[0]["label"] == "Review implementation on GitHub: PR #42"
 

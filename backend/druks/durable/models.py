@@ -395,7 +395,7 @@ class Run(Base):
             **ask,
         }
 
-    async def get_rendered_ask(self) -> dict[str, Any]:
+    async def get_rendered_ask(self, *, has_chat: bool) -> dict[str, Any]:
         # The parked ask as notification content. The body is the ask's own
         # prose (plain text, never a template); actions are data — deliver()
         # renders the buttons and encodes the token. Shape-dispatch on
@@ -404,11 +404,11 @@ class Run(Base):
         ask = await self.get_ask()
         if ask["presentation"] == "in_app":
             lines = [ask["label"], *(question["prompt"] for question in ask["questions"])]
-            # A click sends only its control.
+            # A click sends only its control. In a chat, the chat's agent asks for the note.
             actions = [
                 {"id": control, "label": control.replace("_", " ").capitalize()}
                 for control in ask["controls"]
-                if not is_note_required(ask, control)
+                if has_chat or not is_note_required(ask, control)
             ]
             return {"body": "\n".join(lines), "actions": actions, "deep_link": None}
         # External asks are informational — answered on their source, so no
@@ -426,7 +426,7 @@ class Run(Base):
         # caller supplies the run's subject and enqueues delivery. run_id +
         # run_parked_at snapshot the round so a click on an old button can be
         # refused once the run re-parks.
-        rendered = await self.get_rendered_ask()
+        rendered = await self.get_rendered_ask(has_chat=bool(conversation_id))
         notification = await Notification.create(
             self.session,
             destination_id=destination_id,
