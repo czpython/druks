@@ -35,7 +35,7 @@ from druks.durable.engine import (
 from druks.durable.enums import AgentCallStatus, WorkflowEvent
 from druks.durable.models import AgentCall, Artifact
 from druks.events.models import Event
-from druks.exceptions import SessionNotBoundError
+from druks.exceptions import PermissionDenied, SessionNotBoundError
 from druks.models import StoredSubject
 from druks.sandbox.datastructures import AgentResult
 from druks.secrets.datastructures import Audience
@@ -1029,6 +1029,25 @@ async def test_scheduled_tick_fires_dispatch_not_run(runtime):
         await asyncio.sleep(0.1)
     assert run.state == RunState.FINISHED
     assert run.subject_key == "W-313131"
+
+
+async def test_a_run_starts_only_as_an_account_that_can_use_the_app(runtime, monkeypatch):
+    async def can_use_app(self, app):
+        return False
+
+    monkeypatch.setattr(Account, "can_use_app", can_use_app)
+    daily_sweep, tick = next(row for row in _workflow_schedules if row[0].kind == "daily_sweep")
+    # The workflows of this module belong to no app, and only an app can keep an account out.
+    monkeypatch.setattr(runtime.SubjectFlow, "app", "field_notes")
+    monkeypatch.setattr(daily_sweep, "app", "field_notes")
+    swept = SINK.count("swept")
+
+    with pytest.raises(PermissionDenied):
+        await runtime.SubjectFlow.start(subject=Widget(id=7))
+    with pytest.raises(PermissionDenied):
+        await tick(datetime.now(UTC), None)
+
+    assert SINK.count("swept") == swept
 
 
 async def test_scheduled_dispatch_must_be_nullary(runtime):

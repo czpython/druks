@@ -15,6 +15,10 @@ class ValidationError(DruksError):
     """A person's input is refused. The message says why."""
 
 
+class PermissionDenied(DruksError):
+    """An account may not do this. The message says why."""
+
+
 class DetachedRowError(DruksError):
     """A row was used outside the session that loaded it."""
 

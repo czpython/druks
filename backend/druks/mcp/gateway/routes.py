@@ -9,6 +9,7 @@ from druks.api.dependencies import SessionDep
 from druks.api.exceptions import RunNotFound, agent_error_responses
 from druks.mcp.gateway import exceptions as gate_errors
 from druks.mcp.gateway import schemas, services
+from druks.teams.dependencies import require_run_access
 
 # Docstrings here are the derived tool descriptions and operation_id is the
 # tool name — renaming one is a break, never a refactor side effect.
@@ -18,6 +19,7 @@ router = APIRouter(prefix="/api", tags=["agent"])
 @router.get(
     "/gates/{run}",
     operation_id="get_gate",
+    dependencies=[Depends(require_run_access)],
     response_model=schemas.GateResponse,
     response_model_by_alias=True,
     responses=agent_error_responses(
@@ -40,6 +42,7 @@ async def get_gate(
 @router.post(
     "/gates/{run}/answer",
     operation_id="answer_gate",
+    dependencies=[Depends(require_run_access)],
     openapi_extra={"x-destructive": False, "x-idempotent": True},
     response_model=schemas.GateAnswerResponse,
     response_model_by_alias=True,
