@@ -123,9 +123,9 @@ async def respond_to_notification(
         answers=choice.get("answers", {}),
         note=choice.get("note", ""),
     )
-    await run.resume(**resume_payload)
+    # Claim first: once the run resumes, close_notifications takes each message of the
+    # question that is still open, and this one must show the click instead.
     if not await notification.mark_acknowledged():
-        # A concurrent responder won the claim; this send already collapsed on
-        # the DBOS round key.
         raise AlreadyAcknowledgedError()
+    await run.resume(**resume_payload)
     return notification

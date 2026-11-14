@@ -18,6 +18,7 @@ from druks.core.apis.slack import SLACK_AUTHORITY, SlackClient
 from druks.core.services import Slack
 from druks.files.datastructures import File
 from druks.models import Base
+from druks.notifications.constants import CLOSED_MESSAGE
 from druks.notifications.delivery import deliver as deliver_notification
 from druks.notifications.models import Notification
 from druks.prompts import render_prompt
@@ -200,11 +201,11 @@ class SlackChannel(Channel):
     @classmethod
     async def post_buttons(
         cls, session: AsyncSession, conversation: Conversation, notification: Notification
-    ) -> None:
+    ) -> str:
         """Post the notification in the conversation's thread, or its DM."""
         client = SlackClient(token=await Slack.get_bot_token())
         room, _, thread_ts = conversation.thread_id.partition(":")
-        await deliver_notification(
+        posted = await deliver_notification(
             client,
             room or conversation.user_id,
             notification.body,
@@ -212,6 +213,23 @@ class SlackChannel(Channel):
             actions=notification.actions,
             token=notification.correlation_token,
             deep_link=notification.deep_link,
+        )
+        return f"{posted['channel']}:{posted['ts']}"
+
+    @classmethod
+    async def remove_buttons(
+        cls, session: AsyncSession, conversation: Conversation, notification: Notification
+    ) -> None:
+        """Edit the notification's message to say that its question is closed."""
+        client = SlackClient(token=await Slack.get_bot_token())
+        room, message_ts = notification.message_id.split(":")
+        await deliver_notification(
+            client,
+            room,
+            notification.body,
+            message_ts=message_ts,
+            deep_link=notification.deep_link,
+            outcome=CLOSED_MESSAGE,
         )
 
     @classmethod

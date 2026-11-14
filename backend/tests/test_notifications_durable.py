@@ -21,6 +21,7 @@ from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.durable.enums import RunState
 from druks.models import StoredSubject
 from druks.notifications import outbox
+from druks.notifications.constants import CLOSED_MESSAGE
 from druks.notifications.exceptions import DeliveryError, NotificationError
 from druks.notifications.models import Destination, Notification
 from druks.notifications.outbox import send_notification
@@ -243,6 +244,7 @@ class _DeliverSpy:
         if self.failures_remaining:
             self.failures_remaining -= 1
             raise self.error
+        return {"ok": True, "channel": channel, "ts": f"1700000000.{len(self.calls):06d}"}
 
 
 @pytest.fixture
@@ -322,6 +324,7 @@ async def _snapshot(rt, notification_id) -> dict:
             "last_error": notification.last_error,
             "delivered_at": notification.delivered_at,
             "token": notification.correlation_token,
+            "message_id": notification.message_id,
         }
     finally:
         await session.close()
@@ -347,6 +350,7 @@ async def test_outbox_delivers_with_the_bot_token_actions_and_token(rt, deliver_
     done = await _wait_for(rt, notification_id, lambda s: s["state"] == "delivered")
     assert done["attempts"] == 1
     assert done["delivered_at"] is not None
+    assert done["message_id"] == "C1:1700000000.000001"
     (call,) = deliver_spy.calls
     assert call["bot_token"] == _BOT_TOKEN
     assert (call["channel"], call["thread_ts"]) == ("C1", "")
@@ -770,6 +774,45 @@ async def test_each_park_round_gets_its_own_notification(rt, deliver_spy):
     assert [row.body for row in rows] == ["Round one", "Round two"]
     assert rows[0].run_parked_at != rows[1].run_parked_at
     assert len(deliver_spy.calls) == 2
+
+
+async def test_an_answer_from_elsewhere_closes_the_question_s_message(rt, deliver_spy):
+    destination = await _seed_destination(rt, "inbox-answered")
+    await _set_gate_park_pointer(rt, destination.id)
+
+    workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9020))
+    parked = await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
+    posted = await _wait_notification(rt, workflow_id, "delivered")
+
+    await parked.resume(action="approve", answers={"q1": "postgres"}, note="")
+    await _wait_notification(rt, workflow_id, "acknowledged")
+
+    (edit,) = [call for call in deliver_spy.calls if call["outcome"]]
+    assert f"{edit['channel']}:{edit['message_ts']}" == posted.message_id
+    assert edit["outcome"] == CLOSED_MESSAGE
+
+
+async def test_a_cancelled_run_closes_the_question_s_message(rt, deliver_spy):
+    destination = await _seed_destination(rt, "inbox-cancelled")
+    await _set_gate_park_pointer(rt, destination.id)
+
+    workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9021))
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
+    posted = await _wait_notification(rt, workflow_id, "delivered")
+
+    session = get_session(rt.engine)
+    db_session.registry.set(session)
+    try:
+        await (await session.get(Run, workflow_id)).cancel()
+        await session.commit()
+    finally:
+        await db_session.remove()
+        await session.close()
+    await _wait_notification(rt, workflow_id, "acknowledged")
+
+    (edit,) = [call for call in deliver_spy.calls if call["outcome"]]
+    assert f"{edit['channel']}:{edit['message_ts']}" == posted.message_id
+    assert edit["outcome"] == CLOSED_MESSAGE
 
 
 async def _respond_in_own_session(rt, token, choice, *, user_id=None):

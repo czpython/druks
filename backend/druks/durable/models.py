@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from dbos import DBOS
+from dbos import DBOS, EnqueueOptions
 from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
@@ -25,7 +25,7 @@ from druks.accounts.models import Account
 from druks.apps.registry import workflows
 from druks.core.models import Uuid7Pk
 from druks.database import get_session
-from druks.durable.constants import RUN_QUEUE
+from druks.durable.constants import NOTIFICATIONS_QUEUE, RUN_QUEUE
 from druks.durable.dbos_state import (
     retry_chain,
     retry_from_expression,
@@ -35,7 +35,7 @@ from druks.durable.dbos_state import (
     updated_at_expression,
     workflow_status,
 )
-from druks.durable.engine import _step_engine
+from druks.durable.engine import _step_engine, enqueue_in_transaction
 from druks.durable.enums import (
     ACTIVE_STATES,
     OPEN_STATES,
@@ -47,6 +47,7 @@ from druks.durable.exceptions import AgentCallNotFound
 from druks.events.models import Event
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
+from druks.notifications.constants import CLOSE_WORKFLOW
 from druks.notifications.models import Notification
 from druks.secrets.models import VaultSecret
 from druks.settings import get_settings
@@ -435,6 +436,18 @@ class Run(Base):
         )
         return notification.id
 
+    async def close_park_notifications(self) -> None:
+        """Queue the close of the messages that ask the question this run is parked on, in
+        the session's transaction. The fixed id makes a repeat a no-op, so a step that runs
+        again queues nothing new."""
+        parked_at = self.input_requested_at.isoformat()
+        options: EnqueueOptions = {
+            "workflow_name": CLOSE_WORKFLOW,
+            "queue_name": NOTIFICATIONS_QUEUE,
+            "workflow_id": f"{CLOSE_WORKFLOW}:{self.id}:{parked_at}",
+        }
+        await enqueue_in_transaction(self.session, options, self.id, parked_at)
+
     async def resume(self, **fields: Any) -> None:
         # Answer the gate this run is parked on: send the reply to its recv topic
         # so the workflow's Gate.wait() wakes and validates it. The run binds
@@ -464,6 +477,9 @@ class Run(Base):
         return
 
     async def cancel(self, *, failure: str | None = None) -> None:
+        # A parked run's question ends with it, so the question's messages close.
+        if self.input_gate:
+            await self.close_park_notifications()
         # Clear the ask (so nothing tries to answer it) and keep the operator's
         # reason, then cancel the DBOS workflow — that writes the CANCELLED
         # status state derives from, dequeues it, and frees the subject's dedup

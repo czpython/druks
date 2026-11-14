@@ -97,6 +97,8 @@ class Notification(Base, Uuid7Pk):
         String, unique=True, default=mint_correlation_token
     )
     state: Mapped[str] = mapped_column(default=NotificationState.PENDING.value)
+    # The posted message's id, as the service that posted it names it.
+    message_id: Mapped[str | None] = mapped_column(default=None)
     # How many times deliver() ran for this row, across outbox retries.
     attempts: Mapped[int] = mapped_column(default=0)
     # Sanitized only — this lands on API responses.
@@ -150,6 +152,22 @@ class Notification(Base, Uuid7Pk):
             await session.execute(select(cls).where(cls.correlation_token == token))
         ).scalar_one_or_none()
 
+    @classmethod
+    async def list_open(
+        cls, session: AsyncSession, run_id: str, parked_at: datetime
+    ) -> list["Notification"]:
+        """The posted messages that still show buttons for the question the run parked on
+        at ``parked_at``."""
+        stmt = select(cls).where(
+            cls.run_id == run_id,
+            cls.run_parked_at == parked_at,
+            cls.state == NotificationState.DELIVERED.value,
+            cls.message_id.is_not(None),
+            # A message without buttons stores JSON null, which is not SQL NULL.
+            cls.actions != JSONB.NULL,
+        )
+        return list(await session.scalars(stmt))
+
     @property
     def is_acknowledged(self) -> bool:
         return self.state == NotificationState.ACKNOWLEDGED
@@ -161,7 +179,8 @@ class Notification(Base, Uuid7Pk):
                 return action
         raise InvalidChoiceError(f"unknown control {action_id!r}")
 
-    async def mark_delivered(self) -> None:
+    async def mark_delivered(self, message_id: str) -> None:
+        self.message_id = message_id
         self.state = NotificationState.DELIVERED.value
         self.delivered_at = Base.utc_now()
         self.updated_at = Base.utc_now()
