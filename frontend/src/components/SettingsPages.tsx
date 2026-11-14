@@ -6,10 +6,11 @@ import {
   useRef,
   useState,
   type ComponentType,
+  type ReactNode,
   type RefObject,
 } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowUpRight, Search } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, Search, Settings } from 'lucide-react'
 import { Link, useLocation, useSearch } from 'wouter'
 
 import { ApiError, api } from '../api/client'
@@ -27,6 +28,7 @@ import { absTime } from '../lib/format'
 import { harnessColors } from '../lib/harnessColors'
 import { useThemePreference } from '../lib/preferences'
 import { Page } from './Page'
+import { PageHeading } from './PageHeading'
 import { Sidebar } from './Sidebar'
 import { BrowserProfilesPane } from './BrowserProfilesPane'
 import { CallsPane } from './CallsPane'
@@ -95,12 +97,14 @@ export function SettingsPages({
   returnTo,
   unsavedFormRef,
   appName,
+  headingActions,
   active = true,
 }: {
   account: Account
   returnTo: string
   unsavedFormRef: RefObject<UnsavedForm | null>
   appName?: string
+  headingActions?: ReactNode
   active?: boolean
 }) {
   const [location, navigate] = useLocation()
@@ -567,14 +571,15 @@ export function SettingsPages({
         tabIndex={-1}
       >
         <Page inset>
-          <div className="settings-page-head">
-            <div>
-              <h1 tabIndex={-1} ref={heading}>
-                {title}
-              </h1>
-            </div>
-            {!appName && (
-              <label className="settings-search">
+          <PageHeading
+            className="settings-page-heading"
+            title={title}
+            description={appName && app ? app.description : undefined}
+            icon={appName ? undefined : <Settings aria-hidden="true" />}
+            headingRef={heading}
+            titleTabIndex={-1}
+            actions={appName ? headingActions : (
+              <label className="settings-search druks-field druks-field--compact">
                 <Search size={17} aria-hidden="true" />
                 <input
                   type="search"
@@ -585,10 +590,9 @@ export function SettingsPages({
                 />
               </label>
             )}
-          </div>
+          />
           {appName && app && (
             <>
-              <p className="app-settings-description">{app.description}</p>
               {(app.bot || (hasOptions && hasAgents)) && (
                 <nav className="settings-tabs" aria-label="App settings sections">
                   {hasOptions && (
@@ -657,7 +661,7 @@ export function SettingsPages({
           {section === 'personal' && personalQuery.isError && (
             <p role="alert" className="settings-error">
               Could not load preferences.{' '}
-              <button onClick={() => void personalQuery.refetch()}>Try again</button>
+              <button onClick={() => void personalQuery.refetch()} className="druks-button">Try again</button>
             </p>
           )}
           {executionPage && !executionReady &&
@@ -668,7 +672,7 @@ export function SettingsPages({
                   onClick={() => {
                     for (const query of executionQueries) if (query.isError) void query.refetch()
                   }}
-                >
+                 className="druks-button">
                   Try again
                 </button>
               </p>
@@ -686,7 +690,7 @@ export function SettingsPages({
                     void settingsQuery.refetch()
                     void appsQuery.refetch()
                   }}
-                >
+                 className="druks-button">
                   Try again
                 </button>
               </p>
@@ -880,14 +884,14 @@ export function SettingsPages({
           <span role="status">{saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved'}</span>
           <div>
             <button
-              className="set-btn ghost"
+              className="druks-button"
               onClick={() => discard(section)}
               disabled={saving || !dirty}
             >
               Discard
             </button>
             <button
-              className="set-btn primary"
+              className="druks-button druks-button--primary"
               onClick={() => void save([section])}
               disabled={
                 saving ||
@@ -922,7 +926,7 @@ export function SettingsPages({
         </p>
         <div>
           <button
-            className="set-btn ghost"
+            className="druks-button"
             disabled={saving}
             onClick={() => {
               pending.current = null
@@ -932,7 +936,7 @@ export function SettingsPages({
             Stay
           </button>
           <button
-            className="set-btn ghost"
+            className="druks-button"
             disabled={saving}
             onClick={() => {
               dirtyPages.forEach(discard)
@@ -942,7 +946,7 @@ export function SettingsPages({
             Discard
           </button>
           <button
-            className="set-btn primary"
+            className="druks-button druks-button--primary"
             disabled={saving}
             onClick={() => void save(dirtyPages, finishLeaving)}
           >

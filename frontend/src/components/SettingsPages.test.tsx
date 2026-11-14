@@ -500,12 +500,12 @@ describe('SettingsPages app fields', () => {
     stubFetch()
     renderSettings('/field_notes')
 
-    const settings = await screen.findByRole('link', { name: 'Field Notes settings' })
+    const settings = await screen.findByRole('link', { name: 'Field Notes app settings' })
     expect(settings.getAttribute('href')).toBe('/apps/field_notes/settings')
     fireEvent.click(settings)
 
     expect(await screen.findByText('Field Notes options')).toBeTruthy()
-    expect(settings.getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('link', { name: 'Back to Field Notes' })).toBeTruthy()
   })
 
   it('renders every 422 message under the field named by the backend', async () => {
@@ -1367,8 +1367,7 @@ describe('canonical app settings', () => {
   it('restores app settings from shared settings and guards new edits after return', async () => {
     stubFetch(false)
     renderSettings('/apps/software_factory/settings/agents')
-    const settings = await screen.findByRole('link', { name: 'Software Factory settings' })
-    expect(settings.getAttribute('aria-current')).toBe('page')
+    await screen.findByRole('link', { name: 'Back to Software Factory' })
     fireEvent.click(screen.getByRole('link', { name: 'Shared agents' }))
     await screen.findByRole('heading', { name: 'Agents' })
     fireEvent.click(screen.getByRole('link', { name: 'Back to Druks' }))

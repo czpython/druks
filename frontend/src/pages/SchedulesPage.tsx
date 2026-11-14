@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Box, Play, RotateCcw } from 'lucide-react'
+import { CalendarDays, Box, Play, RotateCcw } from 'lucide-react'
 import { Link, useLocation, useSearch } from 'wouter'
 
 import { api } from '../api/client'
@@ -9,6 +9,7 @@ import { appLabel } from '../apps/registry'
 import { Button, Select } from '../components/Control'
 import { CronField } from '../components/CronField'
 import { Page } from '../components/Page'
+import { PageHeading } from '../components/PageHeading'
 import type { UnsavedForm } from '../components/settings'
 import { absTime, absTimeCompact, dur, timeAway } from '../lib/format'
 import '../schedules.css'
@@ -68,22 +69,30 @@ export function SchedulesPage({ apps, unsavedFormRef }: {
   const next = rows.filter((row) => row.nextRunAt).sort((a, b) => Date.parse(a.nextRunAt!) - Date.parse(b.nextRunAt!))[0]
 
   return (
-    <Page inset className="schedules-page">
-      <header className="schedules-head">
-        <div>
-          <h1>Schedules</h1>
-          <p>Change cadence, pause a declared schedule, or trigger a run outside it. Changes save automatically.</p>
-        </div>
-        <Select
-          aria-label="Filter by app"
-          value={app}
-          onChange={(event) => navigate(event.target.value ? `/schedules?app=${encodeURIComponent(event.target.value)}` : '/schedules')}
-        >
-          <option value="">All apps</option>
-          {apps.map((name) => <option key={name} value={name}>{appLabel(name)}</option>)}
-          {app && !apps.includes(app) && <option value={app}>{appLabel(app)}</option>}
-        </Select>
-      </header>
+    <Page
+      inset
+      className="schedules-page"
+      header={
+        <PageHeading
+          className="schedules-heading"
+          title="Schedules"
+          description="Change cadence, pause a declared schedule, or trigger a run outside it. Changes save automatically."
+          icon={<CalendarDays aria-hidden="true" />}
+          actions={
+            <Select
+              className="druks-select--compact"
+              aria-label="Filter by app"
+              value={app}
+              onChange={(event) => navigate(event.target.value ? `/schedules?app=${encodeURIComponent(event.target.value)}` : '/schedules')}
+            >
+              <option value="">All apps</option>
+              {apps.map((name) => <option key={name} value={name}>{appLabel(name)}</option>)}
+              {app && !apps.includes(app) && <option value={app}>{appLabel(app)}</option>}
+            </Select>
+          }
+        />
+      }
+    >
       {schedules.isError && (
         <div className="schedules-alert" role="alert">
           <p>Cannot refresh schedules. {schedules.data ? 'The last successful read remains visible.' : 'No schedule data is available.'}</p>
@@ -265,7 +274,7 @@ function ScheduleRow({ schedule, edits, onEdit, onSaving }: {
         </div> : <span className="schedule-no-history">—</span>}
       </div>
       <div className="schedule-actions">
-        <button type="button" className="schedule-reset" aria-label={`Use defaults for ${label}`} title="Use defaults" disabled={Boolean(pending)} onClick={() => void save({ schedule: null, schedule_enabled: null })}>
+        <button type="button" className="schedule-reset druks-button druks-button--compact druks-button--icon-only" aria-label={`Use defaults for ${label}`} title="Use defaults" disabled={Boolean(pending)} onClick={() => void save({ schedule: null, schedule_enabled: null })}>
           <RotateCcw size={14} aria-hidden="true" />
         </button>
         <Button disabled={Boolean(pending) || hasEdits} onClick={() => void runNow()}><Play size={12} aria-hidden="true" />{pending === 'run' ? 'Queuing…' : 'Run now'}</Button>

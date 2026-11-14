@@ -105,7 +105,7 @@ function ProjectDialog({
     >
       <header className="pj-dialog-head">
         <h2 id={titleId}>{title}</h2>
-        <button type="button" className="pj-icon-button" aria-label="Close" disabled={pending} onClick={onClose}>
+        <button type="button" className="pj-icon-button druks-button druks-button--compact druks-button--icon-only" aria-label="Close" disabled={pending} onClick={onClose}>
           <X size={16} aria-hidden="true" />
         </button>
       </header>
@@ -200,13 +200,13 @@ function ProjectSection({ project }: { project: Project }) {
           {/* Safari does not focus a clicked button, so mousedown would blur the
               summary with no relatedTarget and close the menu before the click lands. */}
           <div className="pj-action-list" onMouseDown={(event) => event.preventDefault()}>
-            <button type="button" onClick={() => { closeActions(); setDialog('add') }}>
+            <button type="button" onClick={() => { closeActions(); setDialog('add') }} className="druks-button druks-button--primary druks-button--compact">
               <Plus size={15} aria-hidden="true" /> Add repo
             </button>
-            <button type="button" onClick={() => { closeActions(); setDialog('rename') }}>
+            <button type="button" onClick={() => { closeActions(); setDialog('rename') }} className="druks-button druks-button--quiet druks-button--compact">
               <Pencil size={15} aria-hidden="true" /> Rename project
             </button>
-            <button type="button" className="pj-danger" disabled={remove.isPending} onClick={() => {
+            <button type="button" className="pj-danger druks-button druks-button--danger druks-button--quiet druks-button--compact" disabled={remove.isPending} onClick={() => {
               closeActions()
               if (confirm(`Delete project "${project.name}"? This permanently deletes the project and every work item it owns.`)) {
                 remove.mutate()
@@ -363,7 +363,7 @@ function RepoRow({ projectId, repo }: { projectId: number; repo: ProjectRepo }) 
                 <p id={summaryId} className="pj-profile-summary">
                   {isLongSummary && !showFullSummary ? `${summary.slice(0, 280).replace(/\s+\S*$/, '')}…` : summary}
                 </p>
-                {isLongSummary && <button type="button" className="pj-text-button" aria-controls={summaryId} aria-expanded={showFullSummary} onClick={() => setShowFullSummary(!showFullSummary)}>
+                {isLongSummary && <button type="button" className="pj-text-button druks-button druks-button--quiet druks-button--compact" aria-controls={summaryId} aria-expanded={showFullSummary} onClick={() => setShowFullSummary(!showFullSummary)}>
                   {showFullSummary ? 'Less' : 'More'} <ChevronDown size={12} aria-hidden="true" />
                 </button>}
               </div>
@@ -376,7 +376,7 @@ function RepoRow({ projectId, repo }: { projectId: number; repo: ProjectRepo }) 
                   <ul id={commandsId} className="pj-profile-commands">
                     {(showAllCommands ? commands : commands.slice(0, 3)).map((command) => <li key={command}><code>{command}</code></li>)}
                   </ul>
-                  {commands.length > 3 && <button type="button" className="pj-text-button" aria-controls={commandsId} aria-expanded={showAllCommands} onClick={() => setShowAllCommands(!showAllCommands)}>
+                  {commands.length > 3 && <button type="button" className="pj-text-button druks-button druks-button--quiet druks-button--compact" aria-controls={commandsId} aria-expanded={showAllCommands} onClick={() => setShowAllCommands(!showAllCommands)}>
                     {showAllCommands ? 'Fewer commands' : `+${commands.length - 3} more`} <ChevronDown size={12} aria-hidden="true" />
                   </button>}
                 </div>

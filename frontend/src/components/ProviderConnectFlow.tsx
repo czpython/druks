@@ -95,7 +95,7 @@ export function ConnectSteps({
           <span className="hr-conn-num">1</span>
           <span>Your code: <strong>{challenge.userCode}</strong></span>
           <button
-            className="hr-conn-btn"
+            className="hr-conn-btn druks-button"
             onClick={() => void navigator.clipboard.writeText(challenge.userCode)}
           >
             Copy code
@@ -111,7 +111,7 @@ export function ConnectSteps({
           </span>
         </div>
         {flow.error ? (
-          <button className="hr-conn-btn" onClick={() => void flow.start()} disabled={flow.busy}>
+          <button className="hr-conn-btn druks-button" onClick={() => void flow.start()} disabled={flow.busy}>
             Try again
           </button>
         ) : (
@@ -142,7 +142,7 @@ export function ConnectSteps({
           }}
         />
         <button
-          className="hr-conn-btn"
+          className="hr-conn-btn druks-button"
           onClick={() => void flow.finish()}
           disabled={flow.busy || !flow.code.trim()}
         >

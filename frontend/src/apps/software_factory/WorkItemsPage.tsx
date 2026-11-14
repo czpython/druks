@@ -144,14 +144,15 @@ export function WorkItemsPage() {
       }
       right={
         <div className="active-filters mono">
-          <input
-            type="text"
-            className="history-search"
-            aria-label="Filter work items"
-            placeholder="filter by ticket, title, or repo…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <label className="history-search druks-field druks-field--compact">
+            <input
+              type="search"
+              aria-label="Filter work items"
+              placeholder="filter by ticket, title, or repo…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
         </div>
       }
     />

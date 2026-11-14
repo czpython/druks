@@ -1,6 +1,8 @@
 import { useEffect, useState, type CSSProperties } from 'react'
+import { ChartNoAxesCombined } from 'lucide-react'
 
 import { harnessColors } from '../lib/harnessColors'
+import { PageHeading } from './PageHeading'
 import { usageTone, type UsageTone } from '../lib/usageHealth'
 import { useUsage, useUsageHistory, useUsageToday } from '../lib/useUsage'
 import type {
@@ -25,10 +27,7 @@ export function UsagePanel() {
   if (isLoading) {
     return (
       <section className="us-col">
-        <header className="us-head mono dim">
-          <h1 className="us-head-title">Usage</h1>
-          <span>loading…</span>
-        </header>
+        <PageHeading title="Usage" icon={<ChartNoAxesCombined aria-hidden="true" />} actions={<span className="us-head-updated" role="status">Loading…</span>} />
       </section>
     )
   }
@@ -58,26 +57,30 @@ export function UsagePanel() {
 
   return (
     <section className="us-col">
-      <header className="us-head">
-        <h1 className="us-head-title">Usage</h1>
-        <span className="us-head-spacer" />
-        <span className="us-head-updated mono">{updatedLabel}</span>
-        <button
-          type="button"
-          className="us-refresh mono"
-          onClick={() => void handleRefresh()}
-          disabled={refreshing || isFetching}
-          title="run a scrape now"
-        >
-          <span className="us-refresh-glyph">↻</span>
-          {refreshing ? 'scraping…' : 'refresh'}
-        </button>
-      </header>
+      <PageHeading
+        title="Usage"
+        icon={<ChartNoAxesCombined aria-hidden="true" />}
+        actions={
+          <>
+            <span className="us-head-updated mono">{updatedLabel}</span>
+            <button
+              type="button"
+              className="us-refresh mono druks-button druks-button--compact"
+              onClick={() => void handleRefresh()}
+              disabled={refreshing || isFetching}
+              title="run a scrape now"
+            >
+              <span className="us-refresh-glyph">↻</span>
+              {refreshing ? 'scraping…' : 'refresh'}
+            </button>
+          </>
+        }
+      />
 
       {(isError || refreshError) && (
         <div className="us-read-error" role="alert">
           <p>Could not refresh Usage. {data ? 'The last successful read remains visible.' : 'No usage data is available.'}</p>
-          <button className="us-refresh" disabled={isFetching || refreshing} onClick={() => {
+          <button className="us-refresh druks-button" disabled={isFetching || refreshing} onClick={() => {
             if (refreshError) void handleRefresh()
             else void refetch()
           }}>Retry</button>
@@ -336,7 +339,7 @@ function WeeklyCarousel({
         <div className="us-week-pages">
           <button
             type="button"
-            className="us-week-arrow"
+            className="us-week-arrow druks-button druks-button--compact druks-button--icon-only"
             aria-label="Previous weekly window"
             onClick={() => setSelectedIndex(previousIndex)}
           >
@@ -356,7 +359,7 @@ function WeeklyCarousel({
           </div>
           <button
             type="button"
-            className="us-week-arrow"
+            className="us-week-arrow druks-button druks-button--compact druks-button--icon-only"
             aria-label="Next weekly window"
             onClick={() => setSelectedIndex(nextIndex)}
           >

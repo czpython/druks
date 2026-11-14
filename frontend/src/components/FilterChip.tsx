@@ -1,7 +1,5 @@
-/**
- * FilterChip — toggle-style chip used in active-filters rows (history,
- * research history, etc). Active when ``current === value``.
- */
+import { Button } from './Control'
+
 interface FilterChipProps<T extends string> {
   value: T
   current: T
@@ -17,14 +15,16 @@ export function FilterChip<T extends string>({
   label,
   disabled = false,
 }: FilterChipProps<T>) {
+  const isPressed = current === value
   return (
-    <button
-      type="button"
-      className={`filter-chip ${current === value ? 'active' : ''}`}
+    <Button
+      variant="quiet"
+      size="compact"
+      aria-pressed={isPressed}
       onClick={() => onSelect(value)}
       disabled={disabled}
     >
       {label}
-    </button>
+    </Button>
   )
 }

@@ -48,7 +48,7 @@ export function Sidebar({
       <button
         ref={opener}
         type="button"
-        className="navigation-toggle"
+        className="navigation-toggle druks-button druks-button--icon-only"
         aria-label="Open navigation"
         aria-haspopup="dialog"
         onClick={() => {
@@ -82,7 +82,7 @@ export function Sidebar({
         >
           <button
             type="button"
-            className="navigation-close"
+            className="navigation-close druks-button druks-button--icon-only"
             aria-label="Close navigation"
             onClick={() => drawer.current?.close()}
           >

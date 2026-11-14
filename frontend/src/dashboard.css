@@ -1,11 +1,10 @@
-.dashboard .page-shell-body { width: min(100%, 1040px); margin-inline: auto; padding-block: 12px 40px; }
-.dashboard-head { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
-.dashboard h1 { margin: 0 0 10px; font-size: 32px; font-weight: 500; letter-spacing: -.02em; }
-.dashboard-head p { margin: 0; color: var(--druks-color-text-secondary); font-size: 17px; }
-.dashboard-filter { min-height: 44px; max-width: 240px; padding: 0 12px; border: 1px solid var(--druks-color-border-control); border-radius: 8px; background: var(--druks-color-field-background); color: var(--druks-color-text-primary); font: inherit; }
+.dashboard .page-shell-body, .dashboard-heading { width: min(100%, 1040px); margin-inline: auto; }
+.dashboard .page-shell-body { padding-block: 0 40px; }
+.dashboard-heading { align-items: center; }
+.dashboard-heading h1 { font-size: 32px; }
+.dashboard-heading p { margin-top: 0; font-size: 17px; }
+.dashboard-filter { max-width: 240px; }
 .dashboard-alert { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 24px 0 0; color: var(--druks-color-status-danger); }
-.dashboard-alert button { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--druks-color-text-primary); text-decoration: underline; }
-.dashboard-alert button:disabled { cursor: wait; opacity: .6; }
 .dashboard-primary { display: flex; flex-direction: column; gap: 12px; margin-top: 36px; }
 .dashboard-card { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 24px; align-items: center; min-height: 124px; padding: 24px; border: 1px solid var(--druks-color-border-default); border-radius: 14px; background: var(--druks-color-surface); }
 .dashboard-app-mark { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 12px; background: var(--druks-color-surface-subtle); color: var(--druks-color-text-secondary); font-size: 16px; font-weight: 500; }
@@ -15,11 +14,6 @@
 .dashboard-identity p { margin: 6px 0 0; color: var(--druks-color-text-secondary); }
 .dashboard-identity .dashboard-meta { margin-top: 10px; color: var(--druks-color-text-tertiary); font-size: 14px; }
 .dashboard-failure { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; white-space: pre-wrap; }
-.dashboard-action { display: inline-flex; align-items: center; justify-content: center; min-width: 106px; min-height: 44px; padding: 0 20px; color: var(--druks-color-text-primary); text-decoration: none; border: 1px solid var(--druks-color-border-control); border-radius: 999px; background: var(--druks-color-surface-subtle); }
-.dashboard-action:hover { background: var(--druks-color-surface-raised); }
-.dashboard-action.primary { color: var(--druks-color-accent); background: color-mix(in oklch, var(--druks-color-accent) 12%, var(--druks-color-surface)); border-color: color-mix(in oklch, var(--druks-color-accent) 40%, var(--druks-color-border-default)); }
-.dashboard-action.primary:hover { background: color-mix(in oklch, var(--druks-color-accent) 20%, var(--druks-color-surface)); }
-.dashboard :is(a, button, select):focus-visible { outline: 2px solid var(--druks-color-accent); outline-offset: 4px; }
 .dashboard-unavailable { max-width: 130px; color: var(--druks-color-text-tertiary); font-size: 13px; }
 .dashboard-more { margin: 12px 0 0; color: var(--druks-color-text-secondary); }
 .dashboard-quiet { margin: 36px 0 0; color: var(--druks-color-text-secondary); }
@@ -34,10 +28,8 @@
 .dashboard-status-failed .dashboard-status-dot { background: var(--druks-color-status-danger); }
 .dashboard-status-running .dashboard-status-dot { background: var(--druks-color-status-info); }
 @media (max-width: 649px) {
-  .dashboard .page-shell-body { padding-top: 4px; }
-  .dashboard-head { flex-wrap: wrap; gap: 20px; }
-  .dashboard h1 { font-size: 28px; }
-  .dashboard-filter { width: 100%; max-width: none; font-size: 16px; }
+  .dashboard-heading { align-items: stretch; flex-direction: column; gap: 16px; }
+  .dashboard-filter { width: 100%; max-width: none; }
   .dashboard-primary { margin-top: 28px; }
   .dashboard-card { grid-template-columns: 40px minmax(0, 1fr); gap: 16px; padding: 20px 16px; }
   .dashboard-app-mark { width: 40px; height: 40px; font-size: 14px; }

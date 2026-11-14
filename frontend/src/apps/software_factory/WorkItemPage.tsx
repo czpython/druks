@@ -709,7 +709,7 @@ function RunHeader({
         {call && (
           <button
             type="button"
-            className="ins-run-link"
+            className="ins-run-link druks-button druks-button--quiet druks-button--compact"
             onClick={() =>
               navigate(agentCallPath(workItem.id, workItem.ticketKey, workItem.title, call.id))
             }

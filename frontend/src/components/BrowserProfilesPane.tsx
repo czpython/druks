@@ -67,7 +67,7 @@ export function BrowserProfilesPane() {
       {query.isError && (
         <p className="mcp-error" role="alert">
           Could not load browser profiles.{' '}
-          <button className="set-btn ghost" onClick={() => void query.refetch()}>
+          <button className="druks-button" onClick={() => void query.refetch()}>
             Try again
           </button>
         </p>
@@ -113,7 +113,7 @@ export function BrowserProfilesPane() {
                   {session.isDeclared ? (
                     session.status !== 'anonymous' && (
                       <a
-                        className="set-btn primary"
+                        className="druks-action-link druks-action-link--primary"
                         href={`${import.meta.env.BASE_URL}browser-sessions/${encodeURIComponent(session.name)}/login`}
                       >
                         {LOGIN_ACTION_LABELS[session.status]}
@@ -124,7 +124,7 @@ export function BrowserProfilesPane() {
                   )}
                   {session.createdAt && (
                     <button
-                      className="set-btn danger quiet"
+                      className="druks-button druks-button--danger druks-button--quiet"
                       onClick={() => void deleteSession(session)}
                       disabled={busy}
                     >

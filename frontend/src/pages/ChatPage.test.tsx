@@ -62,6 +62,8 @@ beforeEach(() => {
   vi.mocked(chatApi.stop).mockResolvedValue(undefined)
   vi.mocked(chatApi.setPinned).mockImplementation(async (_id, isPinned) => ({ ...conversation, isPinned }))
   vi.spyOn(api, 'listApps').mockResolvedValue([])
+  vi.spyOn(api, 'listConnections').mockResolvedValue([])
+  vi.spyOn(api, 'wahaSessions').mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -73,6 +75,47 @@ afterEach(() => {
 })
 
 describe('Chat page', () => {
+  it('keeps the Chat title and settings action above the unwrapped new-chat content', async () => {
+    mount('/chat')
+
+    expect(screen.getByRole('heading', { name: 'Chat', level: 1 })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'What should Druks do?' })).toBeTruthy()
+    expect(screen.getByText('Ask about activity, usage, or schedules. Tell Druks what to do next.')).toBeTruthy()
+    const settings = screen.getByRole('link', { name: 'Chat Settings' })
+    expect(settings.getAttribute('href')).toBe('/apps/chat/settings')
+    expect(settings.classList.contains('druks-action-link')).toBe(true)
+    expect(settings.classList.contains('druks-action-link--secondary')).toBe(true)
+    expect(settings.classList.contains('druks-action-link--compact')).toBe(true)
+    expect(settings.classList.contains('druks-action-link--icon-only')).toBe(false)
+    expect(settings.textContent).toContain('Chat Settings')
+    expect(document.querySelector('.page-shell-header')).not.toBeNull()
+    expect(document.querySelector('.page-chat')?.getAttribute('data-inset')).toBe('true')
+    const connections = await screen.findByRole('region', { name: 'Connect your tools' })
+    expect(connections.classList.contains('druks-panel')).toBe(false)
+    expect(connections.querySelectorAll(':scope > .connection-card').length).toBe(3)
+  })
+
+  it('keeps New conversation as a Foundation primary ActionLink', async () => {
+    mount()
+    await connected()
+    const link = screen.getByRole('link', { name: 'New conversation' })
+    expect(link.getAttribute('href')).toBe('/chat/new')
+    expect(link.classList.contains('druks-action-link')).toBe(true)
+    expect(link.classList.contains('druks-action-link--primary')).toBe(true)
+    expect(link.classList.contains('druks-action-link--compact')).toBe(true)
+    expect(link.classList.contains('druks-action-link--icon-only')).toBe(true)
+    expect(link.classList.contains('druks-button')).toBe(false)
+  })
+
+  it('uses the compact secondary ActionLink for Back to conversations', async () => {
+    mount()
+    const link = screen.getByRole('link', { name: 'Back to conversations' })
+    expect(link.getAttribute('href')).toBe('/chat')
+    expect(link.classList.contains('druks-action-link--secondary')).toBe(true)
+    expect(link.classList.contains('druks-action-link--compact')).toBe(true)
+    expect(link.classList.contains('druks-action-link--icon-only')).toBe(true)
+  })
+
   it('distinguishes your messages, the agent, and Druks', async () => {
     vi.mocked(chatApi.get).mockResolvedValue({ ...conversation, messages: [
       { ...message, state: 'replied' },
@@ -143,6 +186,7 @@ describe('Chat page', () => {
     const thread = within(screen.getByRole('region', { name: 'Conversation' }))
     fireEvent.click(thread.getByRole('button', { name: `Pin ${conversation.title}` }))
     await waitFor(() => expect(thread.getByRole('button', { name: `Pin ${conversation.title}` }).getAttribute('aria-pressed')).toBe('true'))
+    expect(thread.getByRole('button', { name: `Pin ${conversation.title}` }).querySelector('svg')?.getAttribute('fill')).toBe('currentColor')
     socket.receive({ type: 'snapshot', ...conversation, isPinned: true, lastMessageAt: '2026-09-18T11:00:00Z' })
     expect(client.getQueryData<Conversation[]>(['chat', 'conversations'])?.[0]?.isPinned).toBe(true)
     expect(screen.getByText('Pinned', { selector: 'h2' })).toBeTruthy()
@@ -315,7 +359,12 @@ describe('Chat page', () => {
     const first = screen.getByText('I will check the gates.').closest('.markdown-content')
     const last = screen.getByText('One run needs approval.').closest('.markdown-content')
     expect(first?.className).toBe(last?.className)
+    expect(first?.classList.contains('druks-prose')).toBe(true)
     const tool = screen.getByText('Read the approval gate').closest('details')!
+    expect(tool.classList.contains('druks-disclosure')).toBe(true)
+    expect(tool.classList.contains('druks-panel')).toBe(true)
+    expect(tool.querySelector('.druks-disclosure__indicator')).toBeTruthy()
+    expect(tool.querySelector('.druks-disclosure__content')).toBeTruthy()
     fireEvent.click(tool.querySelector('summary')!)
     expect(tool.hasAttribute('open')).toBe(true)
     expect(within(tool).getByText(/"run": "example"/)).toBeTruthy()

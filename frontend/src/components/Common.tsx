@@ -99,7 +99,8 @@ export function TokenBreakdown({ tokens }: TokenBreakdownProps) {
 export function Kebab() {
   return (
     <button
-      className="kebab"
+      className="kebab druks-button druks-button--compact druks-button--icon-only"
+      aria-label="Actions (reserved)"
       title="actions (reserved)"
       onClick={(event) => event.stopPropagation()}
       type="button"

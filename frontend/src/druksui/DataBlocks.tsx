@@ -466,7 +466,7 @@ function Row({
               {row.detail && (
                 <button
                   type="button"
-                  className="dui-row-more"
+                  className="dui-row-more druks-button druks-button--quiet druks-button--compact"
                   aria-expanded={open}
                   onClick={() => setOpen(!open)}
                 >

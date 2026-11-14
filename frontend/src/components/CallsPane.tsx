@@ -54,7 +54,7 @@ export function CallsPane({ app }: { app: AppSettings }) {
       {linkedNumbers.isError && (
         <p className="mcp-error" role="alert">
           Could not load numbers.{' '}
-          <button className="set-btn ghost" onClick={() => void linkedNumbers.refetch()}>
+          <button className="druks-button" onClick={() => void linkedNumbers.refetch()}>
             Try again
           </button>
         </p>
@@ -90,7 +90,7 @@ export function CallsPane({ app }: { app: AppSettings }) {
           ))}
         </Select>
         <button
-          className="set-btn primary"
+          className="druks-button druks-button--primary"
           onClick={() => void changeNumbers(() => api.linkNumber(app.name, sid))}
           disabled={!sid || isBusy}
         >
@@ -111,7 +111,7 @@ export function CallsPane({ app }: { app: AppSettings }) {
               {!number.revokedAt && (
                 <div className="svc-actions">
                   <button
-                    className="set-btn danger"
+                    className="druks-button druks-button--danger"
                     onClick={() => remove(number)}
                     disabled={isBusy}
                   >
@@ -138,7 +138,7 @@ function NumberCalls({ numberId }: { numberId: string }) {
     return (
       <p className="mcp-error" role="alert">
         Could not load calls.{' '}
-        <button className="set-btn ghost" onClick={() => void calls.refetch()}>
+        <button className="druks-button" onClick={() => void calls.refetch()}>
           Try again
         </button>
       </p>
@@ -181,7 +181,7 @@ function CallTranscript({ numberId, callId }: { numberId: string; callId: string
     return (
       <p className="mcp-error" role="alert">
         Could not load the transcript.{' '}
-        <button className="set-btn ghost" onClick={() => void lines.refetch()}>
+        <button className="druks-button" onClick={() => void lines.refetch()}>
           Try again
         </button>
       </p>

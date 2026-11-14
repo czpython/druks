@@ -8,13 +8,12 @@
 .work-item-updated { font: 13px var(--font-mono); text-align: right; color: var(--druks-color-text-tertiary); }
 .page-work-items .wi-group-head { font: 14px var(--font-sans); letter-spacing: 0; text-transform: none; }
 .page-work-items .active-filters { min-width: 0; max-width: 100%; }
-.page-work-items .history-search { width: min(320px, 100%); min-width: 0; min-height: 40px; font: 15px var(--font-sans); }
+.page-work-items .history-search { width: min(320px, 100%); min-width: 0; }
 .us-head-title, .us-prov-name { margin: 0; }
 .us-prov-identity { min-width: 0; flex: 1 1 160px; }
 .page-usage .us-prov-spacer { display: none; }
 .page-usage .us-prov-scraped { flex-basis: 100%; padding-left: 18px; }
 .us-prov-identity > span { display: block; margin-top: 5px; color: var(--druks-color-text-secondary); font-size: 13px; overflow-wrap: anywhere; }
-.page-usage .us-refresh { height: auto; min-height: 40px; font: 15px var(--font-sans); }
 .page-usage :is(.us-head-updated, .us-prov-plan, .us-prov-warn, .us-win-label, .us-win-pct-unit, .us-burn, .us-reset, .us-unmetered-used, .us-unmetered-used-label, .us-spark-cap, .us-split-row, .us-hours-axis, .us-alert-tag, .us-alert-count-label) { font-size: 13px; letter-spacing: 0; }
 .page-usage .us-spark-cap { color: var(--druks-color-text-tertiary); text-transform: none; }
 .page-usage .us-win-meta { flex-wrap: wrap; gap: 8px; }
@@ -56,11 +55,8 @@
   .work-item-references a { display: inline-flex; align-items: center; min-height: 44px; }
   .work-item-title { min-height: 44px; }
   .work-item-updated { text-align: left; }
-  .page-work-items .history-search { min-height: 44px; font-size: 16px; }
-  .page-usage .us-head { flex-wrap: wrap; }
   .page-usage .us-head-updated { order: 1; width: 100%; }
-  .page-usage .us-refresh { min-height: 44px; }
-  .page-usage :is(.us-week-arrow, .us-week-dot) { width: 44px; height: 44px; }
+  .page-usage .us-week-dot { width: 44px; height: 44px; }
   .page-usage .us-week-dots { gap: 0; flex-wrap: wrap; }
   .page-usage .us-spark-cap { flex-wrap: wrap; white-space: normal; }
   .page-usage .us-alert { display: grid; grid-template-columns: 24px minmax(0, 1fr); }

@@ -1,7 +1,5 @@
-.schedules-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
-.schedules-head h1 { margin: 0 0 10px; font-size: 26px; font-weight: 500; }
-.schedules-head p { max-width: 56ch; margin: 0; color: var(--druks-color-text-secondary); line-height: 1.6; }
-.schedules-head > select { width: 200px; flex-shrink: 0; }
+.schedules-heading { align-items: center; }
+.schedules-heading .druks-select-wrap { width: 200px; flex-shrink: 0; }
 .schedules-page .set-select { min-height: 40px; font-family: var(--font-sans); font-size: 14px; }
 .schedules-summary { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 24px 0 28px; color: var(--druks-color-text-tertiary); font-size: 13px; }
 .schedules-summary a { color: var(--druks-color-accent); text-decoration: none; }
@@ -47,15 +45,12 @@
 .schedule-bars > span { flex: 0 1 6px; min-width: 4px; border-radius: 1px 1px 0 0; }
 .schedule-no-history { color: var(--druks-color-text-tertiary); }
 .schedule-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
-.schedule-actions .set-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 104px; min-height: 36px; padding: 5px 10px; white-space: nowrap; }
-.schedule-reset { display: inline-flex; align-items: center; justify-content: center; min-width: 34px; min-height: 36px; color: var(--druks-color-text-tertiary); border-radius: 5px; }
-.schedule-reset:hover { background: var(--druks-color-surface-raised); color: var(--druks-color-text-primary); }
+.schedule-reset { display: inline-flex; align-items: center; justify-content: center; }
 .schedule-feedback { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; margin-top: 8px; color: var(--druks-color-text-secondary); font-size: 13px; overflow-wrap: anywhere; }
 .schedule-feedback [role='alert'], .schedules-alert { color: var(--druks-color-status-danger); }
-.schedule-feedback .set-btn { min-height: 36px; }
 .schedule-row[data-paused='true'] h3, .schedule-paused { color: var(--druks-color-text-tertiary); }
-.schedules-page :is(button, a, select, input, [tabindex]):focus-visible { outline: 2px solid var(--druks-color-accent); outline-offset: 3px; }
-.schedules-page button:disabled { cursor: not-allowed; opacity: .5; }
+.schedules-page :is(button:not(.druks-button), a:not(.druks-action-link), select:not(.druks-select), input:not(.druks-field), [tabindex]:not(.druks-button):not(.druks-action-link):not(.druks-select):not(.druks-field)):focus-visible { outline: 2px solid var(--druks-color-accent); outline-offset: 3px; }
+.schedules-page button:disabled { cursor: not-allowed; }
 .schedules-note { margin: 28px 0 0; color: var(--druks-color-text-tertiary); font-size: 12px; line-height: 1.6; }
 .schedules-alert, .schedules-empty { margin-top: 24px; }
 .schedules-empty { color: var(--druks-color-text-secondary); }
@@ -63,7 +58,6 @@
 @media (max-width: 1340px) and (min-width: 1100px) {
   .schedule-columns, .schedule-row { grid-template-columns: minmax(140px, 1.2fr) minmax(150px, 1fr) minmax(110px, .8fr) minmax(105px, .8fr) 68px 136px; column-gap: 12px; padding-inline: 12px; }
   .schedule-identity { gap: 10px; }
-  .schedule-actions .set-btn { min-width: 94px; }
   .schedule-next time > span { display: block; }
 }
 @media (max-width: 1099px) {
@@ -80,8 +74,8 @@
   .schedule-bars { max-width: 86px; }
 }
 @media (max-width: 649px) {
-  .schedules-head { align-items: stretch; flex-direction: column; gap: 18px; }
-  .schedules-head > select { width: 100%; }
+  .schedules-heading { align-items: stretch; flex-direction: column; gap: 16px; }
+  .schedules-heading .druks-select-wrap { width: 100%; }
   .schedules-page .set-select { min-height: 44px; font-size: 16px; }
   .schedules-summary { gap: 8px 16px; margin-bottom: 20px; }
   .schedules-timezone { width: 100%; margin: 0; }
@@ -95,11 +89,7 @@
   .schedule-last { grid-column: 2; grid-row: 3; }
   .schedule-history { grid-column: 1; grid-row: 4; }
   .schedule-actions { grid-column: 2; grid-row: 4; align-self: end; }
-  .schedule-actions .set-btn, .schedule-reset { min-height: 44px; }
-  .schedule-actions .set-btn { min-width: 94px; padding-inline: 8px; }
-  .schedule-reset { min-width: 32px; }
   .schedule-feedback { grid-row: 5; flex-wrap: wrap; margin-top: 0; }
-  .schedule-feedback .set-btn { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .schedule-switch > span::after { transition: none; }

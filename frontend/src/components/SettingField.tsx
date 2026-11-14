@@ -61,14 +61,16 @@ function FieldControl({
     return (
       <>
         {type === 'choices' && (
-          <TextInput
-            type="search"
-            aria-label={`Search ${label}`}
-            placeholder="Search choices"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            disabled={disabled}
-          />
+          <label className="druks-field druks-field--compact">
+            <input
+              type="search"
+              aria-label={`Search ${label}`}
+              placeholder="Search choices"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              disabled={disabled}
+            />
+          </label>
         )}
         <Select
           aria-label={label}

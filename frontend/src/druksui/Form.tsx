@@ -14,6 +14,15 @@ import { fillPath, mergeRegion, pageFilterSearch, pageQueryKey, PagesContext, Re
 // the values the operator gave.
 type Payload = Record<string, unknown>
 
+function actionButtonClass(action: Action, extra = '') {
+  const variant = action.tone === 'primary'
+    ? ' druks-button--primary'
+    : action.tone === 'danger'
+      ? ' druks-button--danger'
+      : ''
+  return `druks-button${variant}${extra ? ` ${extra}` : ''}`
+}
+
 /** Inputs and the action that sends them. */
 export function Form({
   title,
@@ -90,7 +99,7 @@ export function Form({
             <>
               <button
                 type="submit"
-                className={`dui-action dui-action-${action.tone}`}
+                className={actionButtonClass(action)}
                 disabled={run.blocked}
                 aria-busy={run.pending}
               >
@@ -100,7 +109,7 @@ export function Form({
                 <button
                   key={`${extra.operation}:${extra.label}`}
                   type="button"
-                  className={`dui-action dui-action-${extra.tone}`}
+                  className={actionButtonClass(extra)}
                   disabled={run.blocked}
                   aria-busy={run.pending}
                   onClick={() => void run.call(extra, fieldState.values)}
@@ -166,7 +175,7 @@ function ImmediateAction({
       ) : (
         <button
           type="button"
-          className={`dui-action dui-action-${action.tone}`}
+          className={actionButtonClass(action)}
           disabled={run.blocked || disabled}
           aria-busy={run.pending}
           onClick={() => void run.call(action, values)}
@@ -233,7 +242,7 @@ function FieldAction({ action }: { action: Action }) {
       <button
         ref={trigger}
         type="button"
-        className={`dui-action dui-action-${action.tone} dui-dialog-trigger`}
+        className={actionButtonClass(action, 'dui-dialog-trigger')}
         onClick={() => setOpen(true)}
       >
         {action.label}
@@ -265,7 +274,7 @@ function FieldAction({ action }: { action: Action }) {
           </h2>
           <button
             type="button"
-            className="dui-dialog-close"
+            className="dui-dialog-close druks-button druks-button--compact druks-button--icon-only"
             aria-label={`Close ${action.label}`}
             disabled={run.pending}
             onClick={dismiss}
@@ -295,13 +304,13 @@ function FieldAction({ action }: { action: Action }) {
           <div className="dui-form-submit">
             <button
               type="submit"
-              className={`dui-action dui-action-${action.tone}`}
+              className={actionButtonClass(action)}
               disabled={run.blocked}
               aria-busy={run.pending}
             >
               {action.label}
             </button>
-            <button type="button" className="dui-action" disabled={run.pending} onClick={dismiss}>
+            <button type="button" className="druks-button" disabled={run.pending} onClick={dismiss}>
               Cancel
             </button>
           </div>
@@ -347,14 +356,14 @@ function Confirm({ action, run }: { action: Action; run: ReturnType<typeof useAc
       <span className="dui-confirm-ask">{action.confirm}</span>
       <button
         type="button"
-        className={`dui-action dui-action-${action.tone}`}
+        className={actionButtonClass(action)}
         disabled={run.blocked}
         aria-busy={run.pending}
         onClick={() => void run.confirm()}
       >
         {action.label}
       </button>
-      <button type="button" className="dui-action" disabled={run.blocked} onClick={run.back}>
+      <button type="button" className="druks-button" disabled={run.blocked} onClick={run.back}>
         Back
       </button>
     </span>

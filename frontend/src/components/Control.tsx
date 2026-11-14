@@ -6,8 +6,8 @@ import type {
   TextareaHTMLAttributes,
 } from 'react'
 
-// Dropping ``className`` is the point: the class name stops being a contract
-// callers type by hand. Position a control from the parent's own rules.
+// Components keep the Foundation control contract centralized; caller classes
+// are only retained where an App renderer needs its existing layout hook.
 type Bare<P> = Omit<P, 'className'>
 
 export function TextInput(props: Bare<InputHTMLAttributes<HTMLInputElement>>) {
@@ -18,16 +18,50 @@ export function Textarea(props: Bare<TextareaHTMLAttributes<HTMLTextAreaElement>
   return <textarea {...props} className="set-select set-textarea" />
 }
 
-export function Select(props: Bare<SelectHTMLAttributes<HTMLSelectElement>>) {
-  return <select {...props} className="set-select" />
+type SelectProps = SelectHTMLAttributes<HTMLSelectElement>
+
+interface SharedSelectProps extends SelectProps {
+  wrapperClassName?: string
 }
 
-interface ButtonProps extends Bare<ButtonHTMLAttributes<HTMLButtonElement>> {
-  variant?: 'ghost' | 'primary' | 'danger'
+export function Select({ className, wrapperClassName, ...props }: SharedSelectProps) {
+  const classes = [...new Set(['druks-select', ...(className?.split(/\s+/) ?? [])].filter(Boolean))].join(' ')
+  return (
+    <span className={['druks-select-wrap', wrapperClassName].filter(Boolean).join(' ')}>
+      <select {...props} className={classes} />
+      <svg className="druks-select-indicator" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="m6 9 6 6 6-6" />
+      </svg>
+    </span>
+  )
 }
 
-export function Button({ variant = 'ghost', ...props }: ButtonProps) {
-  return <button type="button" {...props} className={`set-btn ${variant}`} />
+interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'> {
+  variant?: 'secondary' | 'primary' | 'quiet' | 'danger' | 'quiet-danger' | 'quiet-icon-toggle'
+  size?: 'standard' | 'compact'
+  iconOnly?: boolean
+  className?: string
+}
+
+export function Button({
+  variant = 'secondary',
+  size = 'standard',
+  iconOnly = false,
+  className,
+  type = 'button',
+  ...props
+}: ButtonProps) {
+  const classes = [
+    'druks-button',
+    variant === 'primary' ? 'druks-button--primary' : '',
+    variant === 'danger' || variant === 'quiet-danger' ? 'druks-button--danger' : '',
+    variant === 'quiet' || variant === 'quiet-danger' || variant === 'quiet-icon-toggle' ? 'druks-button--quiet' : '',
+    variant === 'quiet-icon-toggle' ? 'druks-button--quiet-icon-toggle' : '',
+    size === 'compact' ? 'druks-button--compact' : '',
+    iconOnly ? 'druks-button--icon-only' : '',
+    className,
+  ].filter(Boolean).join(' ')
+  return <button type={type} {...props} className={classes} />
 }
 
 interface FieldProps {
