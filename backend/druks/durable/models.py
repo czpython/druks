@@ -77,6 +77,9 @@ class Run(Base):
     # When the run last asked for input — a historical fact (input_gate says
     # whether it's still waiting), and the one transition DBOS doesn't stamp.
     input_requested_at: Mapped[datetime | None] = mapped_column(default=None)
+    # When that ask expires. Then a worker that runs the workflow fails the run
+    # with GateTimeout.
+    input_expires_at: Mapped[datetime | None] = mapped_column(default=None)
     # The receipt: the input_requested_at stamp an answer last resumed.
     answer_parked_at: Mapped[datetime | None] = mapped_column(default=None)
     failure: Mapped[str | None] = mapped_column(default=None)
@@ -191,6 +194,19 @@ class Run(Base):
         if include_calls:
             stmt = stmt.options(selectinload(cls.agent_calls))
         return list(await session.scalars(stmt))
+
+    @classmethod
+    async def list_stale_parked(cls, session: AsyncSession) -> list["Run"]:
+        """The runs that are still parked one hour after their ask expired. A worker
+        fails a run when its ask expires, so no worker runs these runs."""
+        an_hour_ago = Base.utc_now() - timedelta(hours=1)
+        return list(
+            await session.scalars(
+                select(cls).where(
+                    cls.state == RunState.PARKED.value, cls.input_expires_at < an_hour_ago
+                )
+            )
+        )
 
     @classmethod
     async def get_latest_for_subject(

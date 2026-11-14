@@ -399,6 +399,7 @@ async def _park(
         input_request = {"questions": [], **input_request, "reply_fields": list(gate.model_fields)}
         if action := gate.model_fields.get("action"):
             input_request.setdefault("controls", list(get_args(action.annotation)))
+    requested_at = datetime.now(UTC)
     await _emit_run_event(
         workflow.workflow_id,
         RunState.PARKED,
@@ -406,7 +407,8 @@ async def _park(
         facts={
             "input_gate": gate.name,
             "input_request": input_request,
-            "input_requested_at": datetime.now(UTC),
+            "input_requested_at": requested_at,
+            "input_expires_at": requested_at + timedelta(seconds=ttl_seconds),
         },
     )
     if workflow._subject:
