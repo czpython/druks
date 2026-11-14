@@ -128,6 +128,13 @@ export interface AskQuestion {
   options: { id: string; label: string; recommended: boolean }[]
 }
 
+// A choice the ask offers. An answer with a control that requires a note must carry a
+// note or an answer to a question.
+export interface AskControl {
+  id: string
+  note_required: boolean
+}
+
 // The ask a parked run declares (input_request, snake_case keys). presentation
 // drives how the operator answers: "in_app" renders the controls, questions, and
 // artifact right here; "external" points at the PR/ticket.
@@ -135,7 +142,7 @@ export interface InputRequest {
   presentation: 'in_app' | 'external'
   label?: string
   url?: string
-  controls?: string[]
+  controls?: AskControl[]
   questions?: AskQuestion[]
   artifact_id?: string | null
   /** Workflow-declared prose rendered beside the reviewed document. */

@@ -33,7 +33,10 @@ _THREAD_TS = "1700000000.000100"
 
 _IN_APP_ASK = {
     "presentation": "in_app",
-    "controls": ["approve", "request_changes"],
+    "controls": [
+        {"id": "approve", "note_required": False},
+        {"id": "request_changes", "note_required": True},
+    ],
     "questions": [],
 }
 

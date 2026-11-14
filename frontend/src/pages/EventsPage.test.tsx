@@ -249,7 +249,7 @@ it('shows past request facts and preserves filters and selection after returning
   history.mockResolvedValue({ items: [{ ...result, topic: 'workflow.parked',
     payload: { ...result.payload, artifact_id: null, gate: 'review',
       input_requested_at: '2026-09-09T15:00:00.123456Z', input_request: {
-      presentation: 'in_app', controls: ['approve'], context: 'Recorded context',
+      presentation: 'in_app', controls: [{ id: 'approve', note_required: false }], context: 'Recorded context',
     } } }], cursor: '10:20:10', nextCursor: null })
   mount()
   fireEvent.click(await screen.findByRole('button', { name: /Pump A.*Input requested/ }))

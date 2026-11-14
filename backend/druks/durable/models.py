@@ -56,12 +56,6 @@ if TYPE_CHECKING:
     from druks.sandbox.datastructures import AgentResult
 
 
-def is_note_required(ask: dict[str, Any], control: str) -> bool:
-    """Whether an answer with ``control`` must carry a note, or an answer to a question.
-    A request for changes needs one to guide the next pass, unless the ask carries context."""
-    return control == "request_changes" and not (ask.get("context") or "").strip()
-
-
 class Run(Base):
     __tablename__ = "durable_runs"
 
@@ -406,9 +400,9 @@ class Run(Base):
             lines = [ask["label"], *(question["prompt"] for question in ask["questions"])]
             # A click sends only its control. In a chat, the chat's agent asks for the note.
             actions = [
-                {"id": control, "label": control.replace("_", " ").capitalize()}
+                {"id": control["id"], "label": control["id"].replace("_", " ").capitalize()}
                 for control in ask["controls"]
-                if has_chat or not is_note_required(ask, control)
+                if has_chat or not control["note_required"]
             ]
             return {"body": "\n".join(lines), "actions": actions, "deep_link": None}
         # External asks are informational — answered on their source, so no

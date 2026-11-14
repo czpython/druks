@@ -42,7 +42,10 @@ from starlette.routing import Route
 
 _IN_APP_ASK = {
     "presentation": "in_app",
-    "controls": ["approve", "request_changes"],
+    "controls": [
+        {"id": "approve", "note_required": False},
+        {"id": "request_changes", "note_required": True},
+    ],
     "questions": [],
 }
 
@@ -540,7 +543,7 @@ async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
     async with live(app), _client(app, pat_token) as client:
         gate = (await client.call_tool("get_gate", {"run": run.id})).structured_content
         assert gate["run"] == run.id
-        assert gate["ask"]["controls"] == ["approve", "request_changes"]
+        assert gate["ask"]["controls"] == _IN_APP_ASK["controls"]
 
         stale = await _call_error(
             client,

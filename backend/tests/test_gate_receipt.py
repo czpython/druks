@@ -14,7 +14,14 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 _ASK = {"presentation": "in_app", "controls": ["approve", "request_changes"], "questions": []}
-_STORED_ASK = {**_ASK, "reply_fields": ["action", "answers", "note"]}
+_STORED_ASK = {
+    **_ASK,
+    "controls": [
+        {"id": "approve", "note_required": False},
+        {"id": "request_changes", "note_required": True},
+    ],
+    "reply_fields": ["action", "answers", "note"],
+}
 
 
 @pytest.fixture
@@ -88,9 +95,33 @@ async def test_yes_no_parks_with_its_own_controls(druks_db, direct_steps, monkey
         "presentation": "in_app",
         "label": "Keep it?",
         "questions": [],
-        "controls": ["yes", "no"],
+        "controls": [
+            {"id": "yes", "note_required": False},
+            {"id": "no", "note_required": False},
+        ],
         "reply_fields": ["action", "note"],
     }
+
+
+async def test_context_spares_request_changes_a_note(druks_db, direct_steps, monkeypatch):
+    note = await Note.create(body="A plan")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    workflow = Summarize()
+    workflow._workflow_id = run.id
+    workflow._subject = note.identity
+    token = current_workflow.set(workflow)
+    monkeypatch.setattr(DBOS, "recv_async", AsyncMock(return_value={"action": "approve"}))
+    try:
+        await OperatorReply.wait(input_request={**_ASK, "context": "Keep the scope small."})
+    finally:
+        current_workflow.reset(token)
+
+    druks_db.expunge_all()
+    parked = await druks_db.scalar(select(Event).where(Event.type == "workflow.parked"))
+    assert parked.payload["input_request"]["controls"] == [
+        {"id": "approve", "note_required": False},
+        {"id": "request_changes", "note_required": False},
+    ]
 
 
 @pytest.mark.parametrize("payload", [{"action": "merge"}, {}, None])

@@ -214,19 +214,16 @@ export function InAppReview({
       <div className="review-controls">
         {ask.controls?.map((control) => {
           const needsGuidance =
-            control === 'request_changes' &&
-            !critique &&
-            note.trim() === '' &&
-            Object.keys(answers).length === 0
+            control.note_required && note.trim() === '' && Object.keys(answers).length === 0
           return (
             <button
-              key={control}
-              className={`review-btn review-btn-${control}`}
+              key={control.id}
+              className={`review-btn review-btn-${control.id}`}
               disabled={disabled || pending !== null || needsGuidance}
               title={needsGuidance ? 'add an answer or a note first' : undefined}
-              onClick={() => choose(control)}
+              onClick={() => choose(control.id)}
             >
-              {CONTROL_LABEL[control] ?? control}
+              {CONTROL_LABEL[control.id] ?? control.id}
             </button>
           )
         })}
