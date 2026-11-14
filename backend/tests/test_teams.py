@@ -4,6 +4,29 @@ import pytest
 from conftest import IDENTITY_HEADER, header_client
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
+from druks.apps.loader import get_app
+from druks.teams.models import Team
+
+
+async def test_an_account_can_use_an_app_that_its_team_lists_or_that_no_team_lists(druks_db):
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    first = await Account.get_or_create(druks_db, "first@example.com")
+    second = await Account.get_or_create(druks_db, "second@example.com")
+    outsider = await Account.get_or_create(druks_db, "outsider@example.com")
+    bot = await Account.create_for_bot(druks_db, AccountKind.BOT)
+    await Team.create(druks_db, name="First", member_ids=[first.id], apps=["field_notes"])
+    await Team.create(druks_db, name="Second", member_ids=[second.id], apps=["field_notes"])
+    druks_db.add(Team(name="Stored mistake", members=[], apps=["core"]))
+    await druks_db.flush()
+    field_notes = get_app("field_notes")
+
+    assert await admin.can_use_app(field_notes)
+    assert await first.can_use_app(field_notes)
+    assert await second.can_use_app(field_notes)
+    assert await bot.can_use_app(field_notes)
+    assert not await outsider.can_use_app(field_notes)
+    assert await outsider.can_use_app(get_app("software_factory"))
+    assert await outsider.can_use_app(get_app("core"))
 
 
 async def test_admin_creates_lists_and_replaces_a_team(tmp_path: Path, druks_db):
