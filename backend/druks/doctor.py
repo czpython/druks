@@ -7,7 +7,7 @@ import socket
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from urllib.parse import urlparse
@@ -27,8 +27,6 @@ from .chat.bridge import Bridge
 from .chat.channels.base import Channel
 from .core.services import Github
 from .database import create_async_engine_from_url, create_engine_from_url, session_scope
-from .durable.enums import RunState
-from .durable.models import Run
 from .harnesses.providers import get_providers
 from .harnesses.registry import get_harnesses
 from .sandbox.client import sandbox_client
@@ -41,7 +39,7 @@ from .services import Service, ServiceNotConnectedError
 from .settings import Settings, configure_settings, load_settings
 from .user_settings.reads import list_live_choices
 from .webhooks.base import Webhook
-from .workflows import GATE_TTL_SECONDS, Workflow, _Task
+from .workflows import Workflow, _Task
 
 
 @dataclass(frozen=True)
@@ -567,43 +565,6 @@ async def check_apps(settings: Settings) -> list[CheckResult]:
         return results
 
 
-async def check_stale_parked_runs(settings: Settings) -> CheckResult:
-    """Each run parked longer than the gate timeout. DBOS records a gate's
-    deadline durably, so a worker that runs the workflow fails it at the
-    timeout. A run still parked after that has no worker, for example a run
-    that an older application version started. It holds its subject's slot
-    until an operator cancels it."""
-    cutoff = datetime.now(UTC) - timedelta(seconds=GATE_TTL_SECONDS)
-    try:
-        async with _check_engine(settings) as engine, session_scope(engine) as session:
-            stale_runs = list(
-                await session.scalars(
-                    select(Run).where(
-                        Run.state == RunState.PARKED.value, Run.input_requested_at < cutoff
-                    )
-                )
-            )
-    except Exception as error:  # noqa: BLE001 — a DB-read failure is a fail, not a crash
-        return CheckResult(
-            name="stale_parked_runs", ok=False, detail=f"cannot read the parked runs: {error}"
-        )
-    if stale_runs:
-        listing = "; ".join(
-            f"run {run.id} ({run.kind}, subject {run.subject_key}) parked since "
-            f"{run.input_requested_at:%Y-%m-%d}"
-            for run in stale_runs
-        )
-        return CheckResult(
-            name="stale_parked_runs",
-            ok=False,
-            detail=f"{listing}. Each run is parked longer than the gate timeout, and no "
-            "worker runs it. Cancel each run to free its subject.",
-        )
-    return CheckResult(
-        name="stale_parked_runs", ok=True, detail="no run is parked longer than the gate timeout"
-    )
-
-
 async def _run_app_check(app_name: str, check) -> CheckResult:
     """A check that raises, or returns no ``CheckResult``, becomes a failing
     result."""
@@ -636,7 +597,6 @@ CHECKS = (
     check_drukbox,
     check_capability_modules,
     check_apps,
-    check_stale_parked_runs,
     check_declared_sandboxes,
 )
 

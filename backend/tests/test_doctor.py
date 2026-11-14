@@ -11,10 +11,7 @@ from druks import doctor
 from druks.db import db_session
 from druks.sandbox.exceptions import TemplateNotFound
 from druks.secrets.models import VaultSecret
-from druks.testing import make_settings, seed_run
-from druks.workflows import GATE_TTL_SECONDS, YesNo
-from druks_field_notes.models import Note
-from druks_field_notes.workflows import Summarize
+from druks.testing import make_settings
 
 
 @asynccontextmanager
@@ -325,34 +322,7 @@ async def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
         "redis",
         "drukbox",
         "capability_modules",
-        "stale_parked_runs",
     }
-
-
-async def test_stale_parked_runs_names_a_run_parked_past_the_gate_timeout(
-    tmp_path: Path, doctor_db
-) -> None:
-    stale_note = await Note.create(body="parked before the version change")
-    stale_run = await seed_run(
-        doctor_db, kind=Summarize.kind, subject=stale_note, state="parked", input_gate=YesNo.name
-    )
-    stale_run.input_requested_at = datetime.now(UTC) - timedelta(seconds=GATE_TTL_SECONDS, days=1)
-    fresh_run = await seed_run(
-        doctor_db,
-        kind=Summarize.kind,
-        subject=await Note.create(body="parked within the gate timeout"),
-        state="parked",
-        input_gate=YesNo.name,
-    )
-    fresh_run.input_requested_at = datetime.now(UTC)
-    await doctor_db.flush()
-
-    result = await doctor.check_stale_parked_runs(make_settings(tmp_path))
-
-    assert not result.ok
-    assert stale_run.id in result.detail
-    assert stale_note.key in result.detail
-    assert fresh_run.id not in result.detail
 
 
 def test_logins_pending_when_not_connected(tmp_path: Path) -> None:

@@ -8,3 +8,5 @@ PAUSE_QUEUE = "druks_chat_pauses"
 NOTIFICATIONS_QUEUE = "druks_notifications"
 # The failure a run records when a newer run replaces it.
 REPLACED_FAILURE = "A newer run replaced this run."
+# The failure a run records when Druks cancels it, still parked after its ask expired.
+STALE_PARKED_FAILURE = "No worker ran this run after its ask expired."

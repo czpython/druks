@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 import inspect
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -45,7 +45,7 @@ from druks.settings import Settings, configure_settings, get_settings
 from druks.signals import subscribe
 from druks.testing import init_db
 from druks.user_settings.models import InstallationSettings, SettingsOverride
-from druks.workflows import Gate, OperatorReply, Subject, Workflow, step, task
+from druks.workflows import GATE_TTL_SECONDS, Gate, OperatorReply, Subject, Workflow, step, task
 from druks.workspaces import Workspace
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
@@ -534,7 +534,9 @@ async def test_step_gate_resume_finish(runtime):
         runtime.engine, workflow_id, lambda run: run.state == RunState.PARKED
     )
     assert parked.input_gate == "approve"
-    assert parked.input_requested_at is not None
+    assert parked.input_expires_at == parked.input_requested_at + timedelta(
+        seconds=GATE_TTL_SECONDS
+    )
 
     await parked.resume(action="merge")
     done = await _wait_for_run(

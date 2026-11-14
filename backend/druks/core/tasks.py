@@ -1,6 +1,8 @@
 import logging
 
 from druks.db import db_session
+from druks.durable.constants import STALE_PARKED_FAILURE
+from druks.durable.models import Run
 from druks.files.storage import reap_deleted_file_bytes
 from druks.harnesses.datastructures import RotationResult
 from druks.harnesses.directory import refresh_added_catalogs
@@ -50,6 +52,19 @@ async def _release_orphan_boxes() -> None:
     for identity in await SandboxIdentity.list_orphans(db_session()):
         logger.info("releasing the orphan box %s of run %s", identity.host_id, identity.run_id)
         await sandbox_client.release(host_id=identity.host_id)
+
+
+@task(every="0 * * * *")
+async def cancel_stale_parked_runs() -> None:
+    # A stale run holds its subject's slot, and no reply can answer it.
+    for run in await Run.list_stale_parked(db_session()):
+        logger.info(
+            "cancelling run %s: its ask on gate %s expired at %s",
+            run.id,
+            run.input_gate,
+            run.input_expires_at,
+        )
+        await run.cancel(failure=STALE_PARKED_FAILURE)
 
 
 @task(every="0 6 * * *")

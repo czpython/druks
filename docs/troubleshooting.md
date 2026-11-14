@@ -15,8 +15,8 @@ docker compose logs --tail=200 web
 
 `druks doctor` examines the full platform. It covers settings, secrets, service
 credentials, data-directory writes, Postgres, Redis, Drukbox, harnesses, app
-imports, capability modules, parked runs, and app-owned checks. A failed check
-exits with a nonzero status.
+imports, capability modules, and app-owned checks. A failed check exits with a
+nonzero status.
 
 If the normal Drukbox check passes but real execution fails, use the opt-in
 sandbox check:
@@ -209,9 +209,10 @@ code. Cancelling a parked run clears the ask and frees its subject slot.
 
 A run that is still parked after this timeout has no worker, for example a run
 that an older application version started. No reply can answer it, and it holds
-its subject slot.
-`druks doctor` fails the `stale_parked_runs` check and names each such run with
-its subject. Cancel each named run. The next start on its subject opens a new run.
+its subject slot. The `cancel_stale_parked_runs` task runs every hour and cancels
+each run that is still parked one hour after this timeout. The run's failure is
+"No worker ran this run after its ask expired." The next start on its subject
+opens a new run.
 
 ## A run is `failed`, `cancelled`, or `orphaned`
 
