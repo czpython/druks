@@ -3,8 +3,13 @@ from types import SimpleNamespace
 import pytest
 from druks.apps.config import resolve_app_config
 from druks.apps.exceptions import AppConfigError
+from druks.apps.fetcher import fetch_file
+from druks.contrib.software_factory.models import Project, ProjectRepo
 from druks.contrib.software_factory.policy import RepoPolicy
+from druks.contrib.software_factory.workflows import Build
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
+from druks.durable.engine import configure_engine
+from druks.prompts.resolver import _resolve_override
 from druks.testing import make_settings
 
 REPO = "acme/widget"
@@ -57,7 +62,7 @@ class TestResolveAppConfig:
 class TestFetchFile:
     """The shared ``.druks`` fetcher: 404-as-empty caching, errors propagate."""
 
-    def _wire(self, monkeypatch, tmp_path, github):
+    def _connect_github(self, monkeypatch, tmp_path, github):
         settings = make_settings(tmp_path)
         monkeypatch.setattr("druks.apps.fetcher.get_settings", lambda: settings)
 
@@ -67,8 +72,6 @@ class TestFetchFile:
         monkeypatch.setattr("druks.core.services.Github.get_client", _client)
 
     async def test_404_is_cached_as_empty(self, monkeypatch, tmp_path):
-        from druks.apps.fetcher import fetch_file
-
         fetches = []
 
         class _GitHub:
@@ -76,26 +79,22 @@ class TestFetchFile:
                 fetches.append((repo, path))
                 return None
 
-        self._wire(monkeypatch, tmp_path, _GitHub())
+        self._connect_github(monkeypatch, tmp_path, _GitHub())
         assert await fetch_file(repo=REPO, path=".druks/software_factory/config.yml") is None
         assert await fetch_file(repo=REPO, path=".druks/software_factory/config.yml") is None
         assert len(fetches) == 1
 
     async def test_fetch_error_propagates(self, monkeypatch, tmp_path):
-        from druks.apps.fetcher import fetch_file
-
         class _GitHub:
             async def get_file_content(self, repo, path):
                 raise RuntimeError("github down")
 
-        self._wire(monkeypatch, tmp_path, _GitHub())
+        self._connect_github(monkeypatch, tmp_path, _GitHub())
         with pytest.raises(RuntimeError, match="github down"):
             await fetch_file(repo=REPO, path=".druks/software_factory/config.yml")
 
     async def test_a_repo_the_app_cannot_reach_has_no_file(self, monkeypatch, tmp_path):
         # The prompt-override lookup probes ``<owner>/.druks``, which may not exist.
-        from druks.apps.fetcher import fetch_file
-
         settings = make_settings(tmp_path)
         monkeypatch.setattr("druks.apps.fetcher.get_settings", lambda: settings)
 
@@ -113,8 +112,6 @@ class TestAppPromptOverridePaths:
     async def test_repo_app_dir_checked_before_org(self, monkeypatch):
         """``software_factory/build/*`` resolves via the repo's
         ``.druks/software_factory/prompts/...`` first, then the org's app dir."""
-        from druks.prompts.resolver import _resolve_override
-
         calls: list[tuple[str, str]] = []
 
         async def fetch(*, repo: str, path: str) -> str | None:
@@ -130,8 +127,6 @@ class TestAppPromptOverridePaths:
         ]
 
     async def test_repo_app_dir_wins(self, monkeypatch):
-        from druks.prompts.resolver import _resolve_override
-
         async def fetch(*, repo: str, path: str) -> str | None:
             if (repo, path) == (REPO, ".druks/software_factory/prompts/build/implement.md"):
                 return "tuned"
@@ -149,28 +144,16 @@ class TestLoadPolicyAndProfile:
 
     @pytest.fixture(autouse=True)
     async def _passthrough_step(self, monkeypatch, druks_db):
-        from druks.durable.engine import configure_engine
-
         configure_engine(await druks_db.connection())
 
-        async def _run_step(_options, fn):
-            return await fn()
+        async def _run_step(_options, function, *args):
+            return await function(*args)
 
         monkeypatch.setattr("druks.workflows.DBOS.run_step_async", _run_step)
         yield
         configure_engine(None)
 
-    def _flow(self, *, repo):
-        from druks.contrib.software_factory.workflows import Build
-
-        flow = Build()
-        flow.input = Build._run_input_model()
-        flow.subject = SimpleNamespace(repo=repo)
-        return flow
-
     async def test_resolves_live(self, druks_db, monkeypatch):
-        from druks.contrib.software_factory.models import Project, ProjectRepo
-
         async def _live(cls, repo):
             return RepoPolicy.model_validate({"sandbox": {"image": "live"}})
 
@@ -180,8 +163,11 @@ class TestLoadPolicyAndProfile:
         # reads its (as-yet-empty) profile.
         project = await Project.create(name="Acme")
         await ProjectRepo.create(project_id=project.id, full_name=REPO)
+        build = Build()
+        build.input = Build._run_input_model()
+        build.subject = SimpleNamespace(repo=REPO)
 
-        resolved = await self._flow(repo=REPO)._load_policy_and_profile()
+        resolved = await build._load_policy_and_profile()
         assert RepoPolicy.model_validate(resolved["policy"]).sandbox.image == "live"
         assert resolved["profile"] == {}  # registered but not yet profiled
 

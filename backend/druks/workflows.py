@@ -147,7 +147,7 @@ current_workflow: ContextVar["Workflow"] = ContextVar("current_workflow")
 # step, so it skips wrapping itself; outside, it wraps itself in its own step.
 _in_step: ContextVar[bool] = ContextVar("_in_step", default=False)
 
-# Reserved so _entry's arity and old checkpoints stay untouched; a body
+# Reserved so _entry's arity and recorded checkpoints stay untouched; a body
 # parameter may not claim either.
 _ACCOUNT_INPUT_KEY = "__account_id__"
 _CONVERSATION_INPUT_KEY = "__conversation_id__"
@@ -221,16 +221,15 @@ def _declare_subject(cls: type["Workflow"]) -> None:
     # The author writes a plain class attribute; it becomes the descriptor above.
     # Presence in ``cls.__dict__``, not the value: an explicit ``subject = None`` is a
     # declaration of nothing, which the error below names rather than passing over.
-    if "subject" not in cls.__dict__:
-        return
-    declared = cls.__dict__["subject"]
-    if not (isinstance(declared, type) and issubclass(declared, Subject | StoredSubject)):
-        raise WorkflowError(
-            f"{cls.__name__}.subject must be a Subject or StoredSubject subclass — a run "
-            f"is about a kind of thing, not {declared!r}. A workflow about nothing "
-            "declares no subject at all."
-        )
-    cls.subject = _DeclaredSubject(declared)
+    if "subject" in cls.__dict__:
+        declared = cls.__dict__["subject"]
+        if not (isinstance(declared, type) and issubclass(declared, Subject | StoredSubject)):
+            raise WorkflowError(
+                f"{cls.__name__}.subject must be a Subject or StoredSubject subclass — a run "
+                f"is about a kind of thing, not {declared!r}. A workflow about nothing "
+                "declares no subject at all."
+            )
+        cls.subject = _DeclaredSubject(declared)
 
 
 def _input_model_from_signature(
@@ -242,19 +241,22 @@ def _input_model_from_signature(
     # JSONB row and a DBOS checkpoint; never a live or pickled object), and the
     # entry re-validates. A parameter without a default is required; a
     # cron-scheduled body must default every parameter.
-    parameters = [p for name, p in inspect.signature(function).parameters.items() if name != "self"]
-    if not parameters:
-        return
-    hints = get_type_hints(function)
-    fields: dict[str, Any] = {}
-    for p in parameters:
-        if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-            raise WorkflowError(f"{owner} cannot take *args/**kwargs")
-        if p.name not in hints:
-            raise WorkflowError(f"{owner} parameter {p.name!r} needs a type")
-        default = ... if p.default is inspect.Parameter.empty else p.default
-        fields[p.name] = (hints[p.name], default)
-    return create_model(model_name, **fields)
+    parameters = [
+        parameter
+        for name, parameter in inspect.signature(function).parameters.items()
+        if name != "self"
+    ]
+    if parameters:
+        hints = get_type_hints(function)
+        fields: dict[str, Any] = {}
+        for parameter in parameters:
+            if parameter.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                raise WorkflowError(f"{owner} cannot take *args/**kwargs")
+            if parameter.name not in hints:
+                raise WorkflowError(f"{owner} parameter {parameter.name!r} needs a type")
+            default = ... if parameter.default is inspect.Parameter.empty else parameter.default
+            fields[parameter.name] = (hints[parameter.name], default)
+        return create_model(model_name, **fields)
 
 
 class Journal:
@@ -272,7 +274,7 @@ class Journal:
         # ``after`` anchors by identity: only entries recorded after that exact entry.
         entries = self._entries
         if after:
-            if positions := [i for i, entry in enumerate(entries) if entry is after]:
+            if positions := [index for index, entry in enumerate(entries) if entry is after]:
                 entries = entries[positions[0] + 1 :]
             else:
                 raise WorkflowError("after= must be an entry of this journal")
@@ -352,17 +354,17 @@ class Gate(BaseModel):
             # either, nobody would ever see this park — fail loudly instead
             # of parking invisibly for the whole TTL.
             raise SubjectlessGate(cls.name)
-
-        async def _on_wait() -> None:
-            # on_wait is real IO (it tells a human), so it gets its own checkpointed
-            # step with a DB session.
-            async with step_session():
-                await cls.on_wait(workflow)
-
-        await DBOS.run_step_async(StepOptions(name=f"{cls.name}._on_wait"), _on_wait)
+        await DBOS.run_step_async(StepOptions(name=f"{cls.name}._on_wait"), cls._on_wait, workflow)
         reply = await _park(workflow, cls, input_request, ttl_seconds)
         workflow.journal.add(reply)
         return reply
+
+    @classmethod
+    async def _on_wait(cls, workflow: "Workflow") -> None:
+        # on_wait is real IO (it tells a human), so it gets its own checkpointed
+        # step with a DB session.
+        async with step_session():
+            await cls.on_wait(workflow)
 
 
 class OperatorReply(Gate):
@@ -443,17 +445,11 @@ async def _park(
 
 
 async def _notify_designated_destination(workflow_id: str, subject: dict[str, Any]) -> None:
-    # The operator's settings select the destination for the recorded request.
-    async def _create() -> str | None:
-        async with step_session() as session:
-            run = await session.get(Run, workflow_id)
-            account = await Account.get_for_run(session, run.account_id)
-            destination_id = account.gate_park_destination_id
-            if destination_id:
-                return await run.create_park_notification(subject, destination_id=destination_id)
-
     notification_id = await DBOS.run_step_async(
-        StepOptions(name="notifications.gate_park", **_IO_RETRIES), _create
+        StepOptions(name="notifications.gate_park", **_IO_RETRIES),
+        _create_destination_notification,
+        workflow_id,
+        subject,
     )
     if notification_id:
         # The step memoized the row (one per parked round); this body-level enqueue
@@ -461,36 +457,55 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
         await DBOS.enqueue_workflow_async(NOTIFICATIONS_QUEUE, send_notification, notification_id)
 
 
-async def _notify_conversation(workflow_id: str, subject: dict[str, Any]) -> bool:
-    # A chat whose channel shows buttons gets an in-app ask's buttons in its thread.
-    async def _create() -> str | None:
-        async with step_session() as session:
-            run = await session.get(Run, workflow_id)
-            conversation = await session.get(Conversation, run.conversation_id)
-            channel = conversation.channel
-            ask = run.input_request or {}
-            if channel and channel.has_buttons and ask.get("presentation") == "in_app":
-                return await run.create_park_notification(subject, conversation_id=conversation.id)
+async def _create_destination_notification(workflow_id: str, subject: dict[str, Any]) -> str | None:
+    # The operator's settings select the destination for the recorded request.
+    async with step_session() as session:
+        run = await session.get(Run, workflow_id)
+        account = await Account.get_for_run(session, run.account_id)
+        destination_id = account.gate_park_destination_id
+        if destination_id:
+            return await run.create_park_notification(subject, destination_id=destination_id)
 
+
+async def _notify_conversation(workflow_id: str, subject: dict[str, Any]) -> bool:
     notification_id = await DBOS.run_step_async(
-        StepOptions(name="notifications.chat_park", **_IO_RETRIES), _create
+        StepOptions(name="notifications.chat_park", **_IO_RETRIES),
+        _create_conversation_notification,
+        workflow_id,
+        subject,
     )
     if notification_id:
         await DBOS.enqueue_workflow_async(NOTIFICATIONS_QUEUE, send_notification, notification_id)
     return bool(notification_id)
 
 
+async def _create_conversation_notification(
+    workflow_id: str, subject: dict[str, Any]
+) -> str | None:
+    # A chat whose channel shows buttons gets an in-app ask's buttons in its thread.
+    async with step_session() as session:
+        run = await session.get(Run, workflow_id)
+        conversation = await session.get(Conversation, run.conversation_id)
+        channel = conversation.channel
+        ask = run.input_request or {}
+        if channel and channel.has_buttons and ask.get("presentation") == "in_app":
+            return await run.create_park_notification(subject, conversation_id=conversation.id)
+
+
 async def _post_to_chat(workflow_id: str, name: str, post: Callable) -> None:
     # A run that a chat's tool call started talks back through chat. When post() returns
     # the conversation, the conversation's agent takes its message from there.
-    async def _post() -> str | None:
-        async with step_session() as session:
-            return await post(session, await session.get(Run, workflow_id))
-
-    conversation_id = await DBOS.run_step_async(StepOptions(name=name, **_IO_RETRIES), _post)
+    conversation_id = await DBOS.run_step_async(
+        StepOptions(name=name, **_IO_RETRIES), _post, workflow_id, post
+    )
     if conversation_id:
-        # Body level, like the notification enqueue: a replay never starts it twice.
+        # At body level, DBOS records the start, so a replay never starts it twice.
         await DBOS.start_workflow_async(deliver, conversation_id)
+
+
+async def _post(workflow_id: str, post: Callable) -> str | None:
+    async with step_session() as session:
+        return await post(session, await session.get(Run, workflow_id))
 
 
 def step(method: Callable | None = None, *, name: str | None = None, retries: int = 0) -> Callable:
@@ -499,11 +514,11 @@ def step(method: Callable | None = None, *, name: str | None = None, retries: in
     durable step name independent of the method name. `retries=` sets retries
     after the first attempt. A leading `_` is only Python privacy."""
 
-    def stamp(m: Callable) -> Callable:
-        m._durable_step = True  # type: ignore[attr-defined]
-        m._step_name = name  # type: ignore[attr-defined]
-        m._step_retries = retries  # type: ignore[attr-defined]
-        return m
+    def stamp(declared: Callable) -> Callable:
+        declared._durable_step = True  # type: ignore[attr-defined]
+        declared._step_name = name  # type: ignore[attr-defined]
+        declared._step_retries = retries  # type: ignore[attr-defined]
+        return declared
 
     return stamp(method) if method else stamp
 
@@ -600,19 +615,19 @@ class _Task:
         if self._input_model:
             validated = self._input_model.model_validate(input)
             kwargs = {name: getattr(validated, name) for name in type(validated).model_fields}
-
-        async def _do() -> None:
-            async with step_session():
-                await self._function(**kwargs)
-
         await DBOS.run_step_async(
             StepOptions(
                 name=self.name,
                 retries_allowed=self._retries > 0,
                 max_attempts=self._retries + 1,
             ),
-            _do,
+            self._call_function,
+            kwargs,
         )
+
+    async def _call_function(self, kwargs: dict[str, Any]) -> None:
+        async with step_session():
+            await self._function(**kwargs)
 
 
 @overload
@@ -668,47 +683,62 @@ async def _emit_run_event(
     # DBOS commits the terminal status — subscribers stay idempotent and read
     # the payload, never derived Run.state. subject comes from the workflow's
     # own arguments, so a replay stamps the same routing every time.
-    async def _transition() -> dict[str, Any] | None:
-        async with step_session() as session:
-            run = await session.get(Run, workflow_id)
-            # Read before the flush: flushing the update unloads the row's
-            # computed columns, and reading one back would be implicit IO.
-            key = run.subject_key
-            gate = run.input_gate if state == RunState.RUNNING and result else None
-            # A run that leaves its question closes the question's messages. A park whose
-            # step runs again already sees its own gate, so a park never closes one.
-            if run.input_gate and state != RunState.PARKED:
-                await run.close_park_notifications()
-            if facts:
-                for field, value in facts.items():
-                    setattr(run, field, value)
-                await session.flush()
-            # Subjectless framework crons are plumbing: no feed entry. A routine
-            # start records none either; its signal still publishes.
-            if subject:
-                payload = {"run": run.id, "kind": run.kind}
-                if result or state != RunState.RUNNING:
-                    payload = await _log_run_event(session, run, state, subject, key, result, gate)
-                return {"kind": run.kind, "subject": subject, "payload": payload}
-
     transition = await DBOS.run_step_async(
-        StepOptions(name=f"run.{state.value}", **_IO_RETRIES), _transition
+        StepOptions(name=f"run.{state.value}", **_IO_RETRIES),
+        _transition,
+        workflow_id,
+        state,
+        subject,
+        facts,
+        result,
     )
-    if not transition:
-        return
+    if transition:
+        await DBOS.run_step_async(
+            StepOptions(name=f"run.{state.value}:propagate", **_IO_RETRIES),
+            _propagate,
+            state,
+            transition,
+        )
 
-    async def _propagate() -> None:
-        async with step_session():
-            await publish(
-                WorkflowEvent.for_state(state),
-                subject=transition["subject"],
-                kind=transition["kind"],
-                **{k: v for k, v in transition["payload"].items() if k != "kind"},
-            )
 
-    await DBOS.run_step_async(
-        StepOptions(name=f"run.{state.value}:propagate", **_IO_RETRIES), _propagate
-    )
+async def _transition(
+    workflow_id: str,
+    state: RunState,
+    subject: dict[str, Any] | None,
+    facts: dict[str, Any] | None,
+    result: Any,
+) -> dict[str, Any] | None:
+    async with step_session() as session:
+        run = await session.get(Run, workflow_id)
+        # Read before the flush: flushing the update unloads the row's
+        # computed columns, and reading one back would be implicit IO.
+        key = run.subject_key
+        gate = run.input_gate if state == RunState.RUNNING and result else None
+        # A run that leaves its question closes the question's messages. A park whose
+        # step runs again already sees its own gate, so a park never closes one.
+        if run.input_gate and state != RunState.PARKED:
+            await run.close_park_notifications()
+        if facts:
+            for field, value in facts.items():
+                setattr(run, field, value)
+            await session.flush()
+        # Subjectless framework crons are plumbing: no feed entry. A routine
+        # start records none either; its signal still publishes.
+        if subject:
+            payload = {"run": run.id, "kind": run.kind}
+            if result or state != RunState.RUNNING:
+                payload = await _log_run_event(session, run, state, subject, key, result, gate)
+            return {"kind": run.kind, "subject": subject, "payload": payload}
+
+
+async def _propagate(state: RunState, transition: dict[str, Any]) -> None:
+    async with step_session():
+        await publish(
+            WorkflowEvent.for_state(state),
+            subject=transition["subject"],
+            kind=transition["kind"],
+            **{name: value for name, value in transition["payload"].items() if name != "kind"},
+        )
 
 
 async def _log_run_event(
@@ -752,18 +782,21 @@ async def _log_run_event(
     return {"run": run.id, "kind": run.kind, **facts}
 
 
-async def _broadcast_fatal(exc: FatalError) -> None:
+async def _broadcast_fatal(error: FatalError) -> None:
     # A fatal that names a topic announces itself once the run is recorded
     # failed, so a subscriber can settle state the rolled-back body couldn't.
-    # Its own retrying checkpoint, like the run-lifecycle publishes.
-    if not exc.broadcast_topic:
-        return
+    if error.broadcast_topic:
+        await DBOS.run_step_async(
+            StepOptions(name=error.broadcast_topic, **_IO_RETRIES),
+            _fan_out,
+            error.broadcast_topic,
+            error.broadcast_facts,
+        )
 
-    async def _fan_out() -> None:
-        async with step_session():
-            await publish(exc.broadcast_topic, **exc.broadcast_facts)
 
-    await DBOS.run_step_async(StepOptions(name=exc.broadcast_topic, **_IO_RETRIES), _fan_out)
+async def _fan_out(topic: str, facts: dict[str, Any]) -> None:
+    async with step_session():
+        await publish(topic, **facts)
 
 
 # Park sets the gate pair together; resume and a failure clear it together, so
@@ -795,26 +828,26 @@ async def _execute_run(
         )
     await _emit_run_event(workflow_id, RunState.RUNNING, subject=subject)
 
-    async def record_failed(exc: BaseException, code: str) -> None:
-        facts = {**_GATE_CLEARED, "failure": str(exc), "failure_code": code}
+    async def record_failed(error: BaseException, code: str) -> None:
+        facts = {**_GATE_CLEARED, "failure": str(error), "failure_code": code}
         await _emit_run_event(workflow_id, RunState.FAILED, subject=subject, facts=facts)
         if conversation_id:
-            post = partial(report_failure, failure=str(exc))
+            post = partial(report_failure, failure=str(error))
             await _post_to_chat(workflow_id, "chat.report_failure", post)
 
     try:
         result = await body()
     except (DBOSAwaitedWorkflowCancelledError, DBOSWorkflowCancelledError):
         raise
-    except FatalError as exc:
-        await record_failed(exc, exc.code)
-        await _broadcast_fatal(exc)
+    except FatalError as error:
+        await record_failed(error, error.code)
+        await _broadcast_fatal(error)
         raise
-    except HarnessError as exc:
-        await record_failed(exc, exc.code)
+    except HarnessError as error:
+        await record_failed(error, error.code)
         raise
-    except Exception as exc:
-        await record_failed(exc, "")
+    except Exception as error:
+        await record_failed(error, "")
         raise
     await _emit_run_event(workflow_id, RunState.FINISHED, subject=subject, result=result)
     if conversation_id:
@@ -905,9 +938,14 @@ class Workflow:
         if cls.every and getattr(cls, "dispatch", None):
             required = [
                 name
-                for name, p in inspect.signature(cls.dispatch).parameters.items()
-                if p.default is inspect.Parameter.empty
-                and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+                for name, parameter in inspect.signature(cls.dispatch).parameters.items()
+                if parameter.default is inspect.Parameter.empty
+                and parameter.kind
+                in (
+                    parameter.POSITIONAL_ONLY,
+                    parameter.POSITIONAL_OR_KEYWORD,
+                    parameter.KEYWORD_ONLY,
+                )
             ]
             if required:
                 raise WorkflowError(
@@ -942,38 +980,44 @@ class Workflow:
         """Record a domain fact, then notify subscribers in a separate checkpoint."""
         if _in_step.get():
             raise WorkflowError("announce() runs in the workflow body, not inside a @step")
+        await DBOS.run_step_async(
+            StepOptions(name=topic, **_IO_RETRIES), self._record_announcement, topic, facts
+        )
+        await DBOS.run_step_async(
+            StepOptions(name=f"{topic}:propagate", **_IO_RETRIES),
+            self._publish_announcement,
+            topic,
+            facts,
+        )
 
-        async def record() -> None:
-            async with step_session() as session:
-                run = await session.get(Run, self.workflow_id)
-                await Event.emit(
-                    session,
-                    type=topic,
-                    subject=self._subject,
-                    key=run.subject_key,
-                    run=self.workflow_id,
-                    kind=self.kind,
-                    facts=facts,
-                    app=self.app,
-                )
+    async def _record_announcement(self, topic: str, facts: dict[str, Any]) -> None:
+        async with step_session() as session:
+            run = await session.get(Run, self.workflow_id)
+            await Event.emit(
+                session,
+                type=topic,
+                subject=self._subject,
+                key=run.subject_key,
+                run=self.workflow_id,
+                kind=self.kind,
+                facts=facts,
+                app=self.app,
+            )
 
-        await DBOS.run_step_async(StepOptions(name=topic, **_IO_RETRIES), record)
-
-        async def notify() -> None:
-            async with step_session():
-                await publish(topic, subject=self._subject, kind=self.kind, **facts)
-
-        await DBOS.run_step_async(StepOptions(name=f"{topic}:propagate", **_IO_RETRIES), notify)
+    async def _publish_announcement(self, topic: str, facts: dict[str, Any]) -> None:
+        async with step_session():
+            await publish(topic, subject=self._subject, kind=self.kind, **facts)
 
     async def get_cost(self) -> float:
         """What this run's agent calls have cost so far, in US dollars, as recorded. A
         checkpoint: a replay reads the cost the run read the first time."""
+        return await DBOS.run_step_async(
+            StepOptions(name="get_cost", **_IO_RETRIES), self._get_cost
+        )
 
-        async def read() -> float:
-            async with step_session() as session:
-                return await AgentCall.get_cost_for_run(session, self.workflow_id)
-
-        return await DBOS.run_step_async(StepOptions(name="get_cost", **_IO_RETRIES), read)
+    async def _get_cost(self) -> float:
+        async with step_session() as session:
+            return await AgentCall.get_cost_for_run(session, self.workflow_id)
 
     async def get_duration(self) -> timedelta:
         """How long this run's steps and agent calls have taken so far. A checkpoint: a
@@ -1001,7 +1045,7 @@ class Workflow:
             raise SubjectlessGate(OperatorReply.name)
         request = {
             "presentation": "in_app",
-            "questions": [q.model_dump(mode="json") for q in questions or ()],
+            "questions": [question.model_dump(mode="json") for question in questions or ()],
         }
         if context:
             request["context"] = context
@@ -1136,60 +1180,71 @@ class Workflow:
     async def _lease_host(self, config: "AgentConfig", refs: list[SecretRef]) -> str | None:
         # The warm VM, provisioned once per segment; state is carried in git, so
         # only the host-id matters across steps — held-across-steps never fights replay.
-        if not self.steps_reuse_sandbox:
-            return
-        # The identity row stays in the session that read it, which binds it to
-        # the box; that session's unit of work closes before the boot.
-        async with step_session() as session:
-            # A crashed process left its box behind. Its identity finds it again.
-            if not self._host and refs:
-                identity = await SandboxIdentity.lookup(
-                    session,
-                    account_id=self.account_id,
-                    run_id=self._workflow_id,
-                    scoped_to="workflow",
-                    secret_refs=refs,
-                )
-                if identity:
-                    self._host = await sandbox_client.reattach(host_id=identity.host_id)
-                    self._host_secrets_hash = config.secrets_hash
-            if self._host and self._host_secrets_hash != config.secrets_hash:
-                # Drukbox binds entries at creation.
-                await self._reap_run()
-            if not self._host:
-                template = None
-                if self.sandbox:
-                    template = await get_template_id(self.sandbox)
-                    await set_run_phase("provisioning_vm")
-                # The key names the pasted key the VM holds, so a replay finds its VM.
-                # A box that fetches gets its own identity, and the key names that
-                # instead. A replay finds the box through the identity, above.
-                identity, entries, key = None, {}, config.secrets_hash
-                if refs:
-                    identity, entries = await SandboxIdentity.create(
+        if self.steps_reuse_sandbox:
+            # The identity row stays in the session that read it, which binds it to
+            # the box; that session's unit of work closes before the boot.
+            async with step_session() as session:
+                # A crashed process left its box behind. Its identity finds it again.
+                if not self._host and refs:
+                    identity = await SandboxIdentity.lookup(
                         session,
                         account_id=self.account_id,
                         run_id=self._workflow_id,
                         scoped_to="workflow",
                         secret_refs=refs,
-                        secrets_hash=config.secrets_hash,
                     )
-                    key = identity.id
-                await session.commit()
-                self._host = await sandbox_client.provision(
-                    idempotency_key=provisioning_key(self._workflow_id, "workflow", key),
-                    secrets={**config.secrets, **entries},
-                    template=template,
-                    identity=identity,
-                    lease_seconds=WORKFLOW_HOST_LEASE_SECONDS,
-                )
-                self._host_secrets_hash = config.secrets_hash
-        return self._host.id
+                    if identity:
+                        self._host = await sandbox_client.reattach(host_id=identity.host_id)
+                        self._host_secrets_hash = config.secrets_hash
+                if self._host and self._host_secrets_hash != config.secrets_hash:
+                    # Drukbox binds entries at creation.
+                    await self._reap_run()
+                if not self._host:
+                    template = None
+                    if self.sandbox:
+                        template = await get_template_id(self.sandbox)
+                        await set_run_phase("provisioning_vm")
+                    # The key names the pasted key the VM holds, so a replay finds its VM.
+                    # A box that fetches gets its own identity, and the key names that
+                    # instead. A replay finds the box through the identity, above.
+                    identity, entries, key = None, {}, config.secrets_hash
+                    if refs:
+                        identity, entries = await SandboxIdentity.create(
+                            session,
+                            account_id=self.account_id,
+                            run_id=self._workflow_id,
+                            scoped_to="workflow",
+                            secret_refs=refs,
+                            secrets_hash=config.secrets_hash,
+                        )
+                        key = identity.id
+                    await session.commit()
+                    self._host = await sandbox_client.provision(
+                        idempotency_key=provisioning_key(self._workflow_id, "workflow", key),
+                        secrets={**config.secrets, **entries},
+                        template=template,
+                        identity=identity,
+                        lease_seconds=WORKFLOW_HOST_LEASE_SECONDS,
+                    )
+                    self._host_secrets_hash = config.secrets_hash
+            return self._host.id
 
     async def _reap_run(self) -> None:
         if self._host:
             host, self._host = self._host, None
             await sandbox_client.release(host_id=host.id)
+
+    async def _call_step(
+        self, method: Callable, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> Any:
+        token = _in_step.set(True)
+        try:
+            # Each operation commits on its own, so the step holds no connection
+            # through a call that leaves the database.
+            async with autocommit_session():
+                return await method(self, *args, **kwargs)
+        finally:
+            _in_step.reset(token)
 
     @property
     def workflow_id(self) -> str:
@@ -1211,11 +1266,11 @@ class Workflow:
         cls, session: AsyncSession, *, overrides: dict[str, SettingsOverride] | None = None
     ) -> bool:
         # There is a schedule and it's on — False for unscheduled workflows too.
-        if not cls.every:
-            return False
-        return await SettingsOverride.workflow_setting(
-            session, cls.kind, "schedule_enabled", True, overrides=overrides
-        )
+        if cls.every:
+            return await SettingsOverride.workflow_setting(
+                session, cls.kind, "schedule_enabled", True, overrides=overrides
+            )
+        return False
 
     @classmethod
     async def settings(cls) -> BaseModel:
@@ -1431,23 +1486,12 @@ def _wrap_steps(cls: type[Workflow]) -> None:
 
 
 def _make_step(kind: str, name: str, method: Callable, retries: int) -> Callable:
-    # Run the method inside its own session via a zero-arg closure, so `self` is
-    # never serialized into the DBOS checkpoint. Each operation commits on its own,
-    # so the step holds no connection through a call that leaves the database.
     async def _step(self: Workflow, *args: Any, **kwargs: Any) -> Any:
-        async def _do() -> Any:
-            token = _in_step.set(True)
-            try:
-                async with autocommit_session():
-                    return await method(self, *args, **kwargs)
-            finally:
-                _in_step.reset(token)
-
         options = StepOptions(name=f"{kind}.{name}")
         if retries > 0:
             options["retries_allowed"] = True
             options["max_attempts"] = retries + 1
-        return await DBOS.run_step_async(options, _do)
+        return await DBOS.run_step_async(options, self._call_step, method, args, kwargs)
 
     _step.__name__ = name
     _step.__wrapped__ = method  # lets a test call run() without DBOS

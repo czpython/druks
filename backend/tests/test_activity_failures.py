@@ -44,8 +44,8 @@ def test_codex_spend_limit_preserves_the_terminal_message(stream):
 
 @pytest.fixture
 def inline_checkpoints(monkeypatch):
-    async def run_step(options, operation):
-        return await operation()
+    async def run_step(options, operation, *args):
+        return await operation(*args)
 
     sleep = AsyncMock()
     monkeypatch.setattr(DBOS, "run_step_async", run_step)

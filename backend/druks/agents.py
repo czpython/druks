@@ -158,10 +158,10 @@ class Agent:
         if self.id:  # an explicit id means a standalone agent — it registers itself now
             agents.register(self)
 
-    def __set_name__(self, owner: type, attr: str) -> None:
+    def __set_name__(self, owner: type, attribute: str) -> None:
         if self.id:  # explicit id: already registered in __post_init__
             return
-        object.__setattr__(self, "id", f"{owner.name}.{attr}")
+        object.__setattr__(self, "id", f"{owner.name}.{attribute}")
         object.__setattr__(self, "app", owner.name)
         agents.register(self)
 
@@ -213,16 +213,15 @@ class Agent:
                 f"agent {self.id!r} can only run inside a workflow; standalone agent "
                 "runs aren't supported yet"
             )
-
-        async def _invoke() -> Any:
-            return await self._run(workflow_id=workflow.workflow_id, contract=contract, **context)
-
+        invoke = functools.partial(
+            self._run, workflow_id=workflow.workflow_id, contract=contract, **context
+        )
         if _in_step.get():
             transient_retry_index = 0
             while True:
                 try:
                     # The enclosing @step memoizes the call.
-                    return await _invoke()
+                    return await invoke()
                 except HarnessError as error:
                     # Transient only, on the error's own schedule. Quota waits
                     # are hours; nothing that long belongs inside a held step,
@@ -242,7 +241,7 @@ class Agent:
         while True:
             try:
                 result = await DBOS.run_step_async(
-                    StepOptions(name=f"{workflow.kind}.agent.{self.id}"), _invoke
+                    StepOptions(name=f"{workflow.kind}.agent.{self.id}"), invoke
                 )
             except HarnessError as error:
                 if error.retry is Retry.TRANSIENT:
@@ -287,7 +286,7 @@ class Agent:
                     # Permanent or unclassified — never retried.
                     raise
                 # A long sleep shouldn't hold a VM; the next attempt rebuilds
-                # its workspace from git, like a gate park.
+                # its workspace from git.
                 if wait_seconds >= _REAP_BEFORE_WAIT_SECONDS:
                     await workflow._reap_run()
                 # Durable: the end time checkpoints now, so a restart resumes

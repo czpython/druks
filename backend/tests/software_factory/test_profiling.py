@@ -18,8 +18,8 @@ async def _passthrough_step(monkeypatch, druks_db):
     # straight through so the test needs no live DBOS runtime.
     configure_engine(await druks_db.connection())
 
-    async def _run_step(_options, fn):
-        return await fn()
+    async def _run_step(_options, function, *args):
+        return await function(*args)
 
     monkeypatch.setattr("druks.workflows.DBOS.run_step_async", _run_step)
     yield
