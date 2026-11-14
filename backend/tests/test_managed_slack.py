@@ -192,6 +192,9 @@ def _click(button: str, action_ts: str) -> bytes:
     payload = {
         "type": "block_actions",
         "team": {"id": "T1"},
+        "user": {"id": "U7"},
+        "channel": {"id": "C1"},
+        "message": {"ts": "1700000000.000200"},
         "actions": [{"action_id": button, "action_ts": action_ts}],
     }
     return urlencode({"payload": json.dumps(payload)}).encode()
@@ -399,6 +402,7 @@ async def test_a_forwarded_click_answers_its_notification_once(
         reason="gate.parked",
         body="review the plan",
         subject={"type": "notification_probe", "id": 1},
+        actions=[{"id": "approve", "label": "Approve"}],
         run_id=run.id,
         run_parked_at=run.input_requested_at,
     )

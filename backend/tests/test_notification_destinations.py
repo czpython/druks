@@ -274,3 +274,42 @@ def test_button_decode_rejects_non_string_input():
     for malformed in (None, 123, ["a.b"], {"action_id": "a.b"}):
         with pytest.raises(MalformedButtonError):
             decode_button(malformed)
+
+
+async def test_delivery_with_a_message_ts_edits_that_message_and_shows_the_outcome(slack):
+    await deliver(
+        SlackClient(token=_BOT_TOKEN),
+        "C1",
+        "review the plan",
+        message_ts="1700000000.000200",
+        outcome="Answer: Approve",
+    )
+
+    (post,) = slack.posts
+    assert (post["method"], post["channel"], post["ts"]) == (
+        "chat.update",
+        "C1",
+        "1700000000.000200",
+    )
+    assert [block["text"]["text"] for block in post["blocks"]] == [
+        "review the plan",
+        "Answer: Approve",
+    ]
+
+
+async def test_delivery_to_a_user_shows_the_message_to_that_person_only(slack):
+    await deliver(
+        SlackClient(token=_BOT_TOKEN),
+        "C1",
+        "This notification was already acknowledged.",
+        user="U7",
+        thread_ts="1700000000.000100",
+    )
+
+    (post,) = slack.posts
+    assert (post["method"], post["channel"], post["user"], post["thread_ts"]) == (
+        "chat.postEphemeral",
+        "C1",
+        "U7",
+        "1700000000.000100",
+    )
