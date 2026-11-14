@@ -35,7 +35,8 @@ def slack(monkeypatch):
         fake.posts.append({"bot_token": client.token, "method": api_method, **(json or {})})
         if fake.error:
             raise SlackApiError("refused", {"ok": False, "error": fake.error})
-        return {"ok": True, "channel": "C1", "ts": "1.0"}
+        # The SDK answers with a response object whose data is the parsed body.
+        return SimpleNamespace(data={"ok": True, "channel": "C1", "ts": "1.0"})
 
     monkeypatch.setattr(SlackClient, "api_call", api_call)
     return fake

@@ -675,6 +675,10 @@ async def _emit_run_event(
             # computed columns, and reading one back would be implicit IO.
             key = run.subject_key
             gate = run.input_gate if state == RunState.RUNNING and result else None
+            # A run that leaves its question closes the question's messages. A park whose
+            # step runs again already sees its own gate, so a park never closes one.
+            if run.input_gate and state != RunState.PARKED:
+                await run.close_park_notifications()
             if facts:
                 for field, value in facts.items():
                     setattr(run, field, value)

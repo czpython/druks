@@ -44,8 +44,17 @@ class Channel:
     @classmethod
     async def post_buttons(
         cls, session: AsyncSession, conversation: Conversation, notification: Notification
+    ) -> str:
+        """Post the notification with its actions as buttons where the conversation lives.
+        Returns the posted message's id, as the channel names it."""
+        raise NotImplementedError
+
+    @classmethod
+    async def remove_buttons(
+        cls, session: AsyncSession, conversation: Conversation, notification: Notification
     ) -> None:
-        """Post the notification with its actions as buttons where the conversation lives."""
+        """Take the buttons off the notification's posted message, and say that its
+        question is closed."""
         raise NotImplementedError
 
     @classmethod

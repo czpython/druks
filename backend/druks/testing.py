@@ -394,6 +394,8 @@ async def seed_run(
         kind=kind,
         input_gate=input_gate,
         input_request=input_request,
+        # A park stamps its time with its gate.
+        input_requested_at=Base.utc_now() if input_gate else None,
         failure=failure,
         account_id=account_id,
     )

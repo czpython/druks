@@ -12,6 +12,7 @@ from druks.core.services import Slack
 from druks.db import db_session
 from druks.durable.engine import step_session
 from druks.notifications.buttons import decode_button
+from druks.notifications.constants import CLOSED_MESSAGE
 from druks.notifications.delivery import deliver
 from druks.notifications.exceptions import (
     AlreadyAcknowledgedError,
@@ -32,7 +33,6 @@ _TIMESTAMP_TOLERANCE_SECONDS = 300
 
 # What a clicked message says in place of its buttons.
 CHOICE_MESSAGE = "<@{user}> chose {choice}."
-CLOSED_MESSAGE = "This question is closed."
 
 
 def verify_slack_signature(
