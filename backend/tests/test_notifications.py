@@ -1,15 +1,22 @@
 from datetime import timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from druks.accounts.models import Account
+from druks.chat.constants import CLICK_ANSWER_MESSAGE
+from druks.chat.enums import ConversationSource
+from druks.chat.models import Conversation, Message
+from druks.chat.service import deliver
 from druks.db import db_session
 from druks.durable import Run
 from druks.models import Base
-from druks.notifications.exceptions import InvalidChoiceError
+from druks.notifications.exceptions import AnswerNotAllowedError, InvalidChoiceError
 from druks.notifications.models import Destination, Notification
 from druks.notifications.services import respond_to_notification
 from druks.testing import configure_app_for_test, make_settings, seed_dbos_status
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from uuid_utils import uuid7
 
@@ -172,18 +179,45 @@ async def _parked_notification(druks_db, *, ask=None, run_state="parked"):
     return run, notification
 
 
-async def test_a_button_offers_a_control_that_a_bare_click_can_answer(druks_db):
+async def test_a_control_that_needs_a_note_gets_a_button_only_in_a_chat(druks_db):
     run, _ = await _parked_notification(druks_db)
     approve = {"id": "approve", "label": "Approve"}
+    request_changes = {"id": "request_changes", "label": "Request changes"}
 
-    assert (await run.get_rendered_ask())["actions"] == [approve]
+    assert (await run.get_rendered_ask(has_chat=False))["actions"] == [approve]
+    assert (await run.get_rendered_ask(has_chat=True))["actions"] == [approve, request_changes]
 
     # The ask's context guides a re-plan, so request_changes needs no note.
     run.input_request = {**_IN_APP_ASK, "context": "Keep the scope small."}
-    assert (await run.get_rendered_ask())["actions"] == [
-        approve,
-        {"id": "request_changes", "label": "Request changes"},
-    ]
+    assert (await run.get_rendered_ask(has_chat=False))["actions"] == [approve, request_changes]
+
+
+async def _thread_notification(druks_db, *, ask):
+    account = await Account.get_or_create(druks_db, "op@example.com")
+    conversation = Conversation(
+        account_id=account.id,
+        source=ConversationSource.SLACK,
+        user_id="U1",
+        thread_id="C9:1700000000.000100",
+    )
+    druks_db.add(conversation)
+    await druks_db.flush()
+    run = Run(
+        account_id=account.id,
+        id=str(uuid7()),
+        kind="notifications.test",
+        input_gate="review",
+        input_request=ask,
+        input_requested_at=Base.utc_now(),
+        conversation_id=conversation.id,
+    )
+    druks_db.add(run)
+    await druks_db.flush()
+    await seed_dbos_status(druks_db, run.id, "parked")
+    notification_id = await run.create_park_notification(
+        {"type": "notification_probe", "id": 1}, conversation_id=conversation.id
+    )
+    return run, await druks_db.get(Notification, notification_id)
 
 
 @pytest.fixture
@@ -204,11 +238,71 @@ async def test_respond_resumes_and_marks_acknowledged(druks_db, resume_spy):
         druks_db,
         notification.correlation_token,
         {"control": "approve", "answers": {"q1": "a"}, "note": ""},
+        user_id=None,
     )
 
     assert resume_spy == [{"id": run.id, "action": "approve", "answers": {"q1": "a"}, "note": ""}]
     assert (await druks_db.get(Notification, notification.id)).state == "acknowledged"
     assert (await druks_db.get(Notification, notification.id)).is_acknowledged
+
+
+async def test_only_the_chat_s_person_answers_in_its_thread(druks_db, resume_spy):
+    _, notification = await _thread_notification(druks_db, ask={**_IN_APP_ASK, "questions": []})
+
+    with pytest.raises(AnswerNotAllowedError):
+        await respond_to_notification(
+            druks_db, notification.correlation_token, {"control": "approve"}, user_id="U2"
+        )
+
+    assert resume_spy == []
+    assert not notification.is_acknowledged
+
+
+async def test_a_click_that_answers_in_a_thread_tells_the_chat(druks_db, resume_spy):
+    run, notification = await _thread_notification(druks_db, ask={**_IN_APP_ASK, "questions": []})
+
+    await respond_to_notification(
+        druks_db, notification.correlation_token, {"control": "approve"}, user_id="U1"
+    )
+
+    assert resume_spy == [{"id": run.id, "action": "approve", "answers": {}, "note": ""}]
+    internal = await druks_db.scalars(
+        select(Message.body).where(
+            Message.conversation_id == run.conversation_id, Message.is_internal
+        )
+    )
+    assert list(internal) == [CLICK_ANSWER_MESSAGE.format(run=run.id, answer="Approve")]
+
+
+@pytest.mark.parametrize(
+    ("ask", "control", "label"),
+    [
+        ({**_IN_APP_ASK, "questions": []}, "request_changes", "Request changes"),
+        (_IN_APP_ASK, "approve", "Approve"),
+    ],
+)
+async def test_a_click_that_needs_more_goes_to_the_chat(
+    druks_db, resume_spy, monkeypatch, ask, control, label
+):
+    started = AsyncMock()
+    monkeypatch.setattr(
+        "druks.notifications.services.DBOS", SimpleNamespace(start_workflow_async=started)
+    )
+    run, notification = await _thread_notification(druks_db, ask=ask)
+
+    await respond_to_notification(
+        druks_db, notification.correlation_token, {"control": control}, user_id="U1"
+    )
+
+    assert resume_spy == []
+    assert notification.is_acknowledged
+    messages = await druks_db.execute(
+        select(Message.body, Message.is_internal).where(
+            Message.conversation_id == run.conversation_id
+        )
+    )
+    assert messages.all() == [(label, False)]
+    started.assert_awaited_once_with(deliver, run.conversation_id)
 
 
 async def test_respond_route_codes_and_secret_hygiene(tmp_path, druks_db, resume_spy):
@@ -344,12 +438,14 @@ async def test_respond_direct_call_rejects_whitespace_only_content(druks_db, res
             druks_db,
             notification.correlation_token,
             {"control": "approve", "answers": {"q1": "   "}},
+            user_id=None,
         )
     with pytest.raises(InvalidChoiceError):
         await respond_to_notification(
             druks_db,
             notification.correlation_token,
             {"control": "request_changes", "note": "   "},
+            user_id=None,
         )
     assert resume_spy == []
     assert (await druks_db.get(Notification, notification.id)).state == "pending"

@@ -161,8 +161,10 @@ parks with a question, Druks adds an internal message with the request to that
 conversation, except on a WhatsApp number with an admin, where the admin answers
 instead (see [Confirmation](#confirmation)). In a Slack conversation, a run
 that waits for an answer in the dashboard also gets the question in the thread or direct
-message, with a button for each choice that needs no note, such as Approve. The
-agent then says in one line where the buttons are. To request changes, reply with what to change. When the run
+message, with a button for each choice. The agent says in one line where the buttons
+are. Only the person who started the run can click them. When a choice needs more from
+you, such as Request changes or the answers to the question's own questions, the agent
+asks for it in the thread and then answers the run. When the run
 waits for the provider's usage limit to reset, Druks itself posts a line with the
 time the run continues, in the installation's timezone. The agent shares the
 run's login, so its own turn would fail on the same limit. When the run

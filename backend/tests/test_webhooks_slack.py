@@ -205,7 +205,7 @@ async def test_signed_click_routes_through_respond(
         notification.id,
         channel="C1",
         message_ts=_MESSAGE_TS,
-        outcome="Answer: Approve",
+        outcome="<@U7> chose Approve.",
     )
     # The request's own session committed the transition; drop the ambient
     # (task-scoped) session's cached instance to read it.
@@ -271,7 +271,7 @@ async def test_click_that_is_not_the_clickers_to_answer_explains_it_to_the_click
 ):
     monkeypatch.setattr(
         "druks.core.webhooks.slack.respond_to_notification",
-        AsyncMock(side_effect=AnswerNotAllowedError()),
+        AsyncMock(side_effect=AnswerNotAllowedError("Only the person who started it answers.")),
     )
     body = _interactivity_body(encode_button("token", "approve"))
     with _client(tmp_path) as client:
@@ -285,7 +285,7 @@ async def test_click_that_is_not_the_clickers_to_answer_explains_it_to_the_click
         explain_reason,
         "C1",
         user="U7",
-        reason="Only the admin of the number that started this run can answer it.",
+        reason="Only the person who started it answers.",
         thread_ts=_THREAD_TS,
     )
 

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from druks.core.models import Uuid7Pk
 from druks.models import Base
 from druks.notifications.datastructures import NotificationState
+from druks.notifications.exceptions import InvalidChoiceError
 
 
 def mint_correlation_token() -> str:
@@ -152,6 +153,13 @@ class Notification(Base, Uuid7Pk):
     @property
     def is_acknowledged(self) -> bool:
         return self.state == NotificationState.ACKNOWLEDGED
+
+    def get_action(self, action_id: str) -> dict[str, Any]:
+        """The offered choice that a click on ``action_id`` picks."""
+        for action in self.actions:
+            if action["id"] == action_id:
+                return action
+        raise InvalidChoiceError(f"unknown control {action_id!r}")
 
     async def mark_delivered(self) -> None:
         self.state = NotificationState.DELIVERED.value

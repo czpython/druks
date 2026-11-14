@@ -1,8 +1,11 @@
 from typing import Any
 
+from dbos import DBOS
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from druks.chat.constants import CLICK_ANSWER_MESSAGE
 from druks.chat.models import Conversation
+from druks.chat.service import deliver
 from druks.durable.enums import RunState
 from druks.durable.models import Run, is_note_required
 from druks.notifications.exceptions import (
@@ -32,7 +35,9 @@ async def validate_in_app_answer(
     if run.conversation_id:
         conversation = await session.get(Conversation, run.conversation_id)
         if not conversation.is_answerable_by(account_id):
-            raise AnswerNotAllowedError()
+            raise AnswerNotAllowedError(
+                "Only the admin of the number that started this run can answer it."
+            )
     ask = await run.get_ask()
     if control not in ask.get("controls", []):
         raise InvalidChoiceError(f"unknown control {control!r}")
@@ -53,8 +58,10 @@ async def validate_in_app_answer(
 
 
 async def respond_to_notification(
-    session: AsyncSession, token: str, choice: dict[str, Any]
+    session: AsyncSession, token: str, choice: dict[str, Any], *, user_id: str | None
 ) -> Notification:
+    """Answer the run with a click by ``user_id``, or with a link, which names nobody. In
+    a chat, only its person answers, and a click that needs more goes to its agent."""
     notification = await Notification.get_for_token(session, token)
     if not notification:
         raise UnknownTokenError()
@@ -75,12 +82,37 @@ async def respond_to_notification(
         # and an ask that doesn't declare in_app isn't answerable either
         # (the same declared-key read get_ask itself dispatches on).
         raise InvalidChoiceError("this notification is informational; answer on its source")
+    control = choice["control"]
+    if notification.conversation_id:
+        conversation = await session.get(Conversation, notification.conversation_id)
+        if user_id != conversation.user_id:
+            raise AnswerNotAllowedError("Only the person who started this run can answer it.")
+        label = notification.get_action(control)["label"]
+        if is_note_required(ask, control) or ask["questions"]:
+            # A click carries only its control, so the chat's agent asks for the rest and
+            # answers the run.
+            if not await notification.mark_acknowledged():
+                raise AlreadyAcknowledgedError()
+            await conversation.create_message(session, label)
+            await session.commit()
+            await DBOS.start_workflow_async(deliver, conversation.id)
+            return notification
+        resume_payload = await validate_in_app_answer(
+            session, run, account_id=conversation.account_id, control=control, answers={}, note=""
+        )
+        if not await notification.mark_acknowledged():
+            raise AlreadyAcknowledgedError()
+        await run.resume(**resume_payload)
+        await conversation.create_message(
+            session, CLICK_ANSWER_MESSAGE.format(run=run.id, answer=label), is_internal=True
+        )
+        return notification
     # A notification button names no account.
     resume_payload = await validate_in_app_answer(
         session,
         run,
         account_id=None,
-        control=choice["control"],
+        control=control,
         answers=choice.get("answers", {}),
         note=choice.get("note", ""),
     )

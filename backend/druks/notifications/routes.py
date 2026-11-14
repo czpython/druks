@@ -7,6 +7,7 @@ from druks.core.services import Slack
 from druks.notifications.delivery import deliver
 from druks.notifications.exceptions import (
     AlreadyAcknowledgedError,
+    AnswerNotAllowedError,
     DeliveryError,
     InvalidChoiceError,
     StaleRoundError,
@@ -96,11 +97,16 @@ async def get_notification(session: SessionDep, notification_id: str) -> Notific
 async def respond(session: SessionDep, token: str, body: RespondRequest) -> None:
     try:
         await respond_to_notification(
-            session, token, {"control": body.control, "answers": body.answers, "note": body.note}
+            session,
+            token,
+            {"control": body.control, "answers": body.answers, "note": body.note},
+            user_id=None,
         )
     except UnknownTokenError as error:
         # 404 without echoing: the token is the capability.
         raise HTTPException(status_code=404, detail="unknown token") from error
+    except AnswerNotAllowedError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
     except (AlreadyAcknowledgedError, StaleRoundError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except InvalidChoiceError as error:

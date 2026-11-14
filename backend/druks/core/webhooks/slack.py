@@ -31,7 +31,7 @@ from druks.webhooks import Webhook
 _TIMESTAMP_TOLERANCE_SECONDS = 300
 
 # What a clicked message says in place of its buttons.
-ANSWER_MESSAGE = "Answer: {answer}"
+CHOICE_MESSAGE = "<@{user}> chose {choice}."
 CLOSED_MESSAGE = "This question is closed."
 
 
@@ -131,7 +131,7 @@ class SlackInteractivity(SlackWebhook):
         # add up to a second before the person sees it.
         try:
             notification = await respond_to_notification(
-                db_session(), token, {"control": choice_id}
+                db_session(), token, {"control": choice_id}, user_id=user
             )
         except StaleRoundError as error:
             # The round is over, so the clicked message loses its buttons.
@@ -162,15 +162,14 @@ class SlackInteractivity(SlackWebhook):
                 thread_ts=message.get("thread_ts", ""),
             )
             return JSONResponse({"accepted": False})
-        label = next(
-            action["label"] for action in notification.actions if action["id"] == choice_id
-        )
         await DBOS.start_workflow_async(
             replace_buttons,
             notification.id,
             channel=channel,
             message_ts=message_ts,
-            outcome=ANSWER_MESSAGE.format(answer=label),
+            outcome=CHOICE_MESSAGE.format(
+                user=user, choice=notification.get_action(choice_id)["label"]
+            ),
         )
         return JSONResponse({"accepted": True})
 
