@@ -2,6 +2,7 @@ from typing import Any
 
 import httpx
 
+from druks.core import services
 from druks.core.apis.exceptions import JiraAPIError, TicketNotMovableError, UnknownTicketError
 from druks.core.apis.jira import JiraClient
 
@@ -11,7 +12,7 @@ from .enums import TicketStatus
 
 class Jira(Tracker):
     known_exceptions = (JiraAPIError, TicketNotMovableError, UnknownTicketError, httpx.HTTPError)
-    authority = "https://auth.atlassian.com"
+    authority = services.Jira.Authentication.get_authority()
 
     def __init__(
         self,

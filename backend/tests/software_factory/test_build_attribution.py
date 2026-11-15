@@ -9,6 +9,8 @@ from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket
 from druks.contrib.software_factory.ticketing.jira import Jira
 from druks.contrib.software_factory.ticketing.linear import Linear
 from druks.contrib.software_factory.workflows import Build
+from druks.core.apis.jira import JIRA_AUTHORITY
+from druks.core.apis.linear import LINEAR_AUTHORITY
 from druks.core.webhooks.jira import JiraEvents
 from druks.core.webhooks.linear import LinearEvents
 from druks.secrets.enums import IdentityStatus
@@ -41,23 +43,23 @@ async def started(monkeypatch):
     return calls
 
 
-@pytest.mark.parametrize(("source", "tracker"), [("jira", Jira), ("linear", Linear)])
-@pytest.mark.parametrize("actor_is_connected", [True, False])
-async def test_tracker_webhook_starts_under_the_connected_account(
-    druks_db, tmp_path, monkeypatch, started, source, tracker, actor_is_connected
+@pytest.mark.parametrize(
+    ("source", "authority"), [("jira", JIRA_AUTHORITY), ("linear", LINEAR_AUTHORITY)]
+)
+async def test_tracker_webhook_passes_the_assignees_account_to_start(
+    druks_db, tmp_path, monkeypatch, started, source, authority
 ):
     owner = await Account.get_or_create(druks_db, "github-boss")
     actor = await Account.get_or_create(druks_db, "github-actor")
-    if actor_is_connected:
-        await VaultSecret.connect(
-            druks_db,
-            "mcp:renamed_company_tracker",
-            account_id=actor.id,
-            refresh_token="actor-token",
-            scopes=[],
-            identity={"authority": tracker.authority, "subject": "provider-actor-1"},
-            identity_status=IdentityStatus.RESOLVED,
-        )
+    await VaultSecret.connect(
+        druks_db,
+        "mcp:renamed_company_tracker",
+        account_id=actor.id,
+        refresh_token="actor-token",
+        scopes=[],
+        identity={"authority": authority, "subject": "provider-actor-1"},
+        identity_status=IdentityStatus.RESOLVED,
+    )
     await VaultSecret.connect(
         druks_db,
         "mcp:renamed_company_tracker",
@@ -65,7 +67,7 @@ async def test_tracker_webhook_starts_under_the_connected_account(
         refresh_token="rt",
         scopes=["openid", "email"],
         identity={
-            "authority": tracker.authority,
+            "authority": authority,
             "subject": "provider-user-1",
             "email": "boss@company.test",
             "source": "id_token",
@@ -135,10 +137,10 @@ async def test_tracker_webhook_starts_under_the_connected_account(
         await events.on_state_transition()
 
     assert len(started) == 1
-    assert started[0]["account_id"] == (actor.id if actor_is_connected else owner.id)
+    assert started[0]["account_id"] == owner.id
 
 
-async def test_unconnected_actor_and_assignee_use_the_default_account(druks_db, started):
+async def test_an_assignee_with_no_account_passes_no_account(druks_db, started):
     await Account.get_or_create(druks_db, "boss@company.test")
     await connect_service(
         "linear",

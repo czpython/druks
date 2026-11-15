@@ -8,6 +8,7 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.routing import compile_path
 
+from druks.accounts.context import Actor, current_actor
 from druks.accounts.exceptions import InvalidAssertionError
 from druks.accounts.jwt import verify_claims
 from druks.apps.registry import services, webhooks
@@ -119,6 +120,16 @@ class Webhook:
         """
         return None
 
+    def get_actor_id(self) -> str | None:
+        """The provider's id for the person whose request this delivery is, or None when
+        the delivery is no person's request.
+
+        A run that the delivery starts runs as that person's account. Druks finds the
+        account under the authority that the provider's ``Authentication.get_authority()``
+        names.
+        """
+        return
+
     async def on_duplicate(self) -> Response:
         """Response for a re-delivery of a key we've already stored.
 
@@ -190,10 +201,17 @@ class Webhook:
         try:
             action = self.get_action()
             handler = getattr(self, f"on_{action}", None)
-            if handler:
-                response = await handler()
-            else:
-                response = await self.on_unhandled(action)
+            actor = None
+            if actor_id := self.get_actor_id():
+                actor = Actor(authority=service.Authentication.get_authority(), user_id=actor_id)
+            token = current_actor.set(actor)
+            try:
+                if handler:
+                    response = await handler()
+                else:
+                    response = await self.on_unhandled(action)
+            finally:
+                current_actor.reset(token)
             await session.commit()
             return response
         except PermissionDenied as error:

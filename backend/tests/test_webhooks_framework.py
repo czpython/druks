@@ -2,7 +2,9 @@ import hashlib
 import hmac
 
 import pytest
+from druks.accounts.context import Actor, current_actor
 from druks.apps.registry import webhooks
+from druks.core.apis.linear import LINEAR_AUTHORITY
 from druks.database import configure_session
 from druks.db import db_session
 from druks.exceptions import PermissionDenied
@@ -402,6 +404,32 @@ def test_a_refused_delivery_is_acknowledged_and_not_reprocessed(settings):
     assert first.json() == {"accepted": False, "refused": True}
     assert second.json() == {"accepted": False, "duplicate": True}
     assert attempts == [1]
+
+
+def test_a_delivery_names_its_person_while_the_handler_runs(settings):
+    seen = []
+
+    class Hook(Webhook):
+        provider = "linear"
+        category = "person"
+
+        async def request_is_authentic(self):
+            return True
+
+        def get_action(self):
+            return "ping"
+
+        def get_actor_id(self):
+            return "person-1"
+
+        async def on_ping(self):
+            seen.append(current_actor.get())
+            return JSONResponse({"ok": True})
+
+    with _client_for(Hook, settings=settings) as client:
+        response = client.post("/_external/linear/person/", json={})
+    assert response.status_code == 200
+    assert seen == [Actor(authority=LINEAR_AUTHORITY, user_id="person-1")]
 
 
 def test_failed_commit_releases_claim_so_retry_reprocesses(settings):
