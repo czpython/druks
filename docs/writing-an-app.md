@@ -262,7 +262,9 @@ call it.
 A browser start attributes itself. The request identity gate records the
 resolved account, and `start()` inherits it. A route does not require more
 attribution code. If the dispatcher has a better account, pass `account_id`.
-For example, a webhook can resolve the ticket assignee.
+For example, a webhook can resolve the ticket assignee. During a webhook delivery
+that names a person, the run starts as that person's account, also when the
+dispatcher passes `account_id`. See [Receive webhooks](#receive-webhooks).
 
 The run carries its account. A body reads `self.account`, the `Account` row,
 and `self.account_id`. A route takes the caller's row with
@@ -1478,6 +1480,16 @@ class NightWatchWebhook(Webhook):
         return JSONResponse({"accepted": True})
 ```
 
+A delivery that is a person's request, such as a ticket's status change, names
+that person. Override `get_actor_id()` to return the provider's id for the person.
+The default returns `None`: the delivery is no person's request. Druks finds the
+account under the authority that `Authentication.get_authority()` of the
+webhook's service returns: where that service's people sign in. While the handler
+runs, a run that a subscriber starts runs as that person's account. A person with no Druks
+account counts as a member of no team. A run of an app that a team lists then
+does not start. A run of an open app starts as `account_id`, or else as the
+default account. The app makes no lookup of the person and no access check.
+
 The public path is `/_external/night_watch/events/`. Druks deduplicates a
 delivery when the class supplies a delivery key. A failing handler releases the
 claim so the provider can retry.
@@ -1726,7 +1738,8 @@ def list_reviews() -> list[ReviewResponse]:
 `Account.get_or_none(id=...)` and `Account.filter(kind=AccountKind.OPERATOR)`
 read other accounts, such as an assignee a form submitted.
 `Account.lookup(authority, subject)` is the account that signed in as a provider
-user, for a webhook that names its actor.
+user, such as an assignee that an event names. Druks itself finds the account of
+the person who asks.
 
 Druks prefixes every operation id of an app with the app name, so write the
 bare verb. For example, `operation_id="write_note"` in `field_notes` becomes

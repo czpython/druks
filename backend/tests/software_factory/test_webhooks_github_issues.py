@@ -80,6 +80,11 @@ async def test_a_persons_label_publishes_the_label_and_who_put_it(druks_db, tmp_
     ]
 
 
+def test_a_delivery_names_its_sender_when_it_has_one(tmp_path):
+    assert _events(tmp_path, payload=_labeled()).get_actor_id() == "583231"
+    assert not _events(tmp_path, payload={"zen": "Keep it logically awesome."}).get_actor_id()
+
+
 async def test_another_apps_label_publishes_nothing(druks_db, tmp_path, monkeypatch):
     await _connect_github()
     published = _capture(monkeypatch)
@@ -91,7 +96,6 @@ async def test_another_apps_label_publishes_nothing(druks_db, tmp_path, monkeypa
 
 
 async def test_the_apps_own_label_publishes(druks_db, tmp_path, monkeypatch):
-    # The start route asks for a build by setting the trigger label through the App.
     await _connect_github()
     published = _capture(monkeypatch)
 

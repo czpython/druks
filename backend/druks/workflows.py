@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field, create_model
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_utils import uuid7
 
-from druks.accounts.context import current_account_id, current_conversation_id
+from druks.accounts.context import current_account_id, current_actor, current_conversation_id
 from druks.accounts.models import Account
 from druks.apps.loader import get_app, resolve_workflow_app
 from druks.apps.registry import workflows
@@ -97,8 +97,10 @@ from druks.sandbox.datastructures import Sandbox
 from druks.sandbox.exceptions import HostGone
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
+from druks.secrets.models import VaultSecret
 from druks.settings import get_settings
 from druks.signals import publish
+from druks.teams.models import Team
 from druks.user_settings.models import SettingsOverride
 from druks.workspaces import Workspace
 
@@ -1338,12 +1340,20 @@ class Workflow:
 
     @classmethod
     async def _get_run_account(cls, session: AsyncSession, account_id: str | None) -> Account:
-        """The account that a new run starts as. It must be able to use the workflow's app."""
+        """The account that a new run starts as. It must be able to use the workflow's app.
+        During a webhook delivery that names a person, the run starts as that person's account,
+        also when the caller passes another ``account_id``."""
+        app = get_app(cls.app) if cls.app else None
+        if actor := current_actor.get():
+            if owner_id := await VaultSecret.get_owner_id(session, actor.authority, actor.user_id):
+                account_id = owner_id
+            elif app and await Team.exists_for_app(session, app):
+                # A person with no account is on no team.
+                raise PermissionDenied(f"A person with no account cannot use the app {app.name}.")
         account = await Account.get_for_run(session, account_id)
         # A workflow in a package that no app declares has no app to keep an account out of.
-        if not cls.app:
+        if not app:
             return account
-        app = get_app(cls.app)
         if DBOS.workflow_id:
             # A replay runs the caller's body again. The step keeps the first answer, so a
             # later change to a team cannot refuse a run that started.

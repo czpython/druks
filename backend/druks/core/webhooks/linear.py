@@ -89,7 +89,7 @@ class LinearEvents(Webhook):
                     "project_name": None,
                     "labels": None,
                     "team": issue["teamId"],
-                    "actor_id": self._actor_id(),
+                    "actor_id": self.get_actor_id(),
                     "comment_id": comment["id"],
                     "body": comment["body"],
                     # Top-level comments have no parent.
@@ -113,10 +113,10 @@ class LinearEvents(Webhook):
             "project_name": project.get("name"),
             "labels": [label["name"] for label in issue["labels"]],
             "team": issue["teamId"],
-            "actor_id": self._actor_id(),
+            "actor_id": self.get_actor_id(),
         }
 
-    def _actor_id(self) -> str | None:
+    def get_actor_id(self) -> str | None:
         return (self.data.get("actor") or {}).get("id")
 
 
