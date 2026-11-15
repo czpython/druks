@@ -61,6 +61,11 @@ export function CronField({
           placeholder="cron, e.g. */15 * * * *"
           onChange={(event) => onChange(event.target.value)}
           onBlur={(event) => {
+            // The field can blur because it stopped being focusable — it was
+            // removed, or an ancestor was hidden (e.g. the row was filtered
+            // out) — rather than because the user moved focus away. Don't
+            // commit a draft the user never left the field to save.
+            if (!event.target.isConnected || event.target.closest('[hidden]')) return
             const nextControl = event.relatedTarget
             const movesToFormAction = event.target.form &&
               (nextControl instanceof HTMLButtonElement || nextControl instanceof HTMLSelectElement) &&

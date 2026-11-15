@@ -930,7 +930,7 @@ describe('settings drafts and navigation', () => {
     expect(screen.getByRole('textbox', { name: 'Work draft' })).toBe(workDraft)
     expect((workDraft as HTMLInputElement).value).toBe('unfinished work')
     expect(main.scrollTop).toBe(250)
-    expect(document.activeElement).toBe(main)
+    await waitFor(() => expect(document.activeElement).toBe(main))
     expect(patched).toEqual([])
   })
 
@@ -1061,7 +1061,7 @@ describe('settings resource and keyboard behavior', () => {
     const drawer = screen.getByRole('dialog', { name: 'Druks navigation' })
     fireEvent.click(within(drawer).getByRole('link', { name: 'Agents' }))
     const heading = await screen.findByRole('heading', { name: 'Agents' })
-    expect(document.activeElement).toBe(heading)
+    await waitFor(() => expect(document.activeElement).toBe(heading))
     expect(drawer.hasAttribute('open')).toBe(false)
   })
 })
@@ -1678,7 +1678,7 @@ it('keeps focus on another field after saving defaults reached through search', 
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
   await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([path, init]) => String(path) === '/api/settings' && init?.method === 'PATCH')).toBe(true))
   await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Saved'))
-  expect(document.activeElement).toBe(effort)
+  await waitFor(() => expect(document.activeElement).toBe(effort))
   expect(scroll).not.toHaveBeenCalled()
 })
 
@@ -1711,7 +1711,7 @@ it('keeps focus on another agent field after saving an app reached through searc
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
   await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([path, init]) => String(path) === '/api/settings/apps' && init?.method === 'PATCH')).toBe(true))
   await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Saved'))
-  expect(document.activeElement).toBe(harness)
+  await waitFor(() => expect(document.activeElement).toBe(harness))
   expect(scroll).not.toHaveBeenCalled()
 })
 

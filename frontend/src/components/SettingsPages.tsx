@@ -173,6 +173,7 @@ export function SettingsPages({
   const leaving = useRef(false)
   const heading = useRef<HTMLHeadingElement>(null)
   const errorNotice = useRef<HTMLParagraphElement>(null)
+  const refocusAfterSave = useRef<HTMLElement | null>(null)
   const effectiveDefaults = defaults ?? savedDefaults
   const personalTimezone = personalEdits.timezone ?? personalQuery.data?.timezone ?? 'UTC'
   const { theme, previewTheme } = useThemePreference()
@@ -276,6 +277,17 @@ export function SettingsPages({
   }, [dirtyPages.length, unsavedFormRef, formPath, active])
 
   useEffect(() => {
+    // Once saving settles and the controls are enabled again, hand focus back
+    // to the field the user was on before the save disabled it.
+    if (saving) return
+    const target = refocusAfterSave.current
+    refocusAfterSave.current = null
+    if (target?.isConnected && !target.closest('[hidden]')) {
+      target.focus({ preventScroll: true })
+    }
+  }, [saving])
+
+  useEffect(() => {
     function beforeUnload(event: BeforeUnloadEvent) {
       if (dirtyPages.length > 0 && !leaving.current) {
         event.preventDefault()
@@ -319,6 +331,11 @@ export function SettingsPages({
 
   async function save(pages: string[], proceed?: () => void) {
     if (saving || (pages.some((page) => page !== 'personal') && !settingsQuery.data)) return
+    // Saving disables the controls, which blurs the field the user is on. Hold
+    // on to it so a successful save can hand focus back where it was.
+    const focused = document.activeElement
+    const restoreFocus =
+      focused instanceof HTMLElement && content.current?.contains(focused) ? focused : null
     setSaving(true)
     let page = pages[0] ?? section
     try {
@@ -389,6 +406,7 @@ export function SettingsPages({
         }
         discard(page)
       }
+      refocusAfterSave.current = restoreFocus
       proceed?.()
     } catch (caught) {
       let message = caught instanceof Error ? caught.message : 'Could not save settings. Try again.'
