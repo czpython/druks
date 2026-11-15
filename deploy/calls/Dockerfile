@@ -1,7 +1,7 @@
 # The calls server: Druks's program on Pipecat that carries phone calls. It runs
 # beside Druks as its own Compose service. The build context is the repository's
 # druks-calls/ directory.
-FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
+FROM python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535
 
 COPY --from=docker.io/astral/uv:0.10.9@sha256:10902f58a1606787602f303954cea099626a4adb02acbac4c69920fe9d278f82 /uv /usr/local/bin/
 
