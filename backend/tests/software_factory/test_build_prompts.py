@@ -196,6 +196,7 @@ async def test_implement_prompt_puts_red_ci_ahead_of_older_instructions():
     assert "## CI is red" in prompt
     assert "CI on `0f3a2c1d` is red." in prompt
     assert "## Revision request" not in prompt
+    assert "Implement the approved plan" not in prompt
 
 
 @pytest.mark.parametrize("template", ["generate_plan.md", "implement.md"])
