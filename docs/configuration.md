@@ -214,7 +214,8 @@ Druks first resolves their identity. An admin changes a person's role in
 **Settings → People**. Only an admin can change shared settings, app settings,
 installation connections, provider keys, browser profiles, MCP servers, and
 notification destinations. A member can change personal preferences,
-subscriptions, API tokens, and per-person connections and keys.
+subscriptions, API tokens, and per-person connections and keys, and can pair
+a phone with a private Bot's number in **Settings → Phones**.
 
 The installation timezone controls schedules and operational day boundaries.
 Your personal timezone controls timestamp display. Gate notifications use the

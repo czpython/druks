@@ -9,6 +9,7 @@ from druks.api.dependencies import SessionDep
 from druks.apps.loader import get_app
 from druks.chat.enums import BotAccess
 from druks.secrets.models import VaultSecret
+from druks.teams.dependencies import require_named_app_access
 
 from .schemas import QrResponse, SessionResponse
 from .services import Waha
@@ -16,7 +17,12 @@ from .services import Waha
 router = APIRouter(prefix="/services/waha", dependencies=[Depends(current_session_account)])
 
 
-@router.get("/sessions", response_model=list[SessionResponse], response_model_by_alias=True)
+@router.get(
+    "/sessions",
+    response_model=list[SessionResponse],
+    response_model_by_alias=True,
+    dependencies=[Depends(require_named_app_access)],
+)
 async def list_sessions(
     session: SessionDep, app: str, account: Account = Depends(current_session_account)
 ) -> list[SessionResponse]:
@@ -57,7 +63,12 @@ async def link_session(session: SessionDep, app: Annotated[str, Body(embed=True)
     return await Waha.link(session, owner, identity=identity)
 
 
-@router.get("/sessions/{session_id}/qr", response_model=QrResponse, response_model_by_alias=True)
+@router.get(
+    "/sessions/{session_id}/qr",
+    response_model=QrResponse,
+    response_model_by_alias=True,
+    dependencies=[Depends(current_admin_account)],
+)
 async def get_qr(session: SessionDep, session_id: str) -> dict[str, str]:
     connection = await Waha.get_session(session, session_id)
     if connection and connection.is_live:

@@ -28,6 +28,7 @@ import { harnessColors } from '../lib/harnessColors'
 import { useThemePreference } from '../lib/preferences'
 import { Page } from './Page'
 import { PeoplePane } from './PeoplePane'
+import { PhonesPane } from './PhonesPane'
 import { TeamsPane } from './TeamsPane'
 import { Sidebar } from './Sidebar'
 import { BrowserProfilesPane } from './BrowserProfilesPane'
@@ -66,6 +67,7 @@ const SECTIONS = [
   { id: 'teams', label: 'Teams', group: 'Organization' },
   { id: 'personal', label: 'Preferences', group: 'Personal' },
   { id: 'api-tokens', label: 'API tokens', group: 'Personal' },
+  { id: 'phones', label: 'Phones', group: 'Personal' },
 ]
 
 const CONNECTION_TABS = [
@@ -812,6 +814,7 @@ export function SettingsPages({
               {page === 'people' && <PeoplePane account={account} />}
               {isAdmin && page === 'teams' && <TeamsPane />}
               {page === 'api-tokens' && <AgentAccessPane />}
+              {page === 'phones' && <PhonesPane />}
               {app && hasChannels && validAppPage && paneSection === 'channels' &&
                 page === `apps/${app.name}` &&
                 channels.map((channel) => {
