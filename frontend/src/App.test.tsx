@@ -286,10 +286,17 @@ describe('command center navigation', () => {
       }),
     )
     renderApp('/new_app')
-    expect(screen.queryByText('No page matches this address.')).toBeNull()
+    expect(screen.queryByText("No page matches this address, or you can't use its app. Ask an admin if you need it.")).toBeNull()
     expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe('Loading apps…')
     await act(async () => resolveRoster([...roster, { ...roster[2]!, name: 'new_app' }]))
     await screen.findByRole('heading', { name: 'new_app home' })
+  })
+
+  it('shows no page of an app the roster leaves out', async () => {
+    vi.mocked(api.listApps).mockResolvedValueOnce(roster.slice(1))
+    renderApp('/notes/one')
+    await screen.findByText("No page matches this address, or you can't use its app. Ask an admin if you need it.")
+    expect(screen.queryByRole('heading', { name: 'Note detail' })).toBeNull()
   })
 
   it('keeps a large roster searchable with complete long names', async () => {

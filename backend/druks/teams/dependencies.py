@@ -7,10 +7,11 @@ from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.apps import App
 from druks.apps.loader import get_app
-from druks.apps.registry import workflows
+from druks.apps.registry import apps, workflows
 from druks.chat.bots.service import get_bot_connection
 from druks.durable.models import Run
-from druks.exceptions import PermissionDenied
+from druks.exceptions import ObjectNotFound, PermissionDenied
+from druks.notifications.models import Notification
 
 
 def require_app_access(app: type[App]) -> Callable[..., Awaitable[None]]:
@@ -21,6 +22,17 @@ def require_app_access(app: type[App]) -> Callable[..., Awaitable[None]]:
             raise PermissionDenied(f"{account.username} cannot use the app {app.name}.")
 
     return require_access
+
+
+async def require_named_app_access(app: str, account: Account = Depends(current_account)) -> None:
+    """The caller must be able to use the app that the ``app`` query parameter names. An
+    app that is not installed answers 404."""
+    try:
+        named = get_app(app)
+    except KeyError as error:
+        raise ObjectNotFound("app", {"name": app}) from error
+    if not await account.can_use_app(named):
+        raise PermissionDenied(f"{account.username} cannot use the app {app}.")
 
 
 # Each dependency below finds the app in the request path. A path parameter in its own
@@ -34,6 +46,23 @@ async def require_run_access(
     run = await session.get(Run, request.path_params["run"])
     if run:
         app = get_app(workflows.get(run.kind).app)
+        if not await account.can_use_app(app):
+            raise PermissionDenied(f"{account.username} cannot use the app {app.name}.")
+
+
+async def require_notification_access(
+    request: Request, session: SessionDep, account: Account = Depends(current_account)
+) -> None:
+    """The caller must be able to use the app of the notification's run. An unknown
+    notification is the route's to answer, and one with no run passes. A run of an app
+    that is not installed answers as an unknown notification."""
+    notification = await session.get(Notification, request.path_params["notification_id"])
+    if notification and notification.run_id:
+        run = await session.get(Run, notification.run_id)
+        workflow = workflows.get(run.kind)
+        app = apps.get(workflow.app) if workflow else None
+        if not app:
+            raise ObjectNotFound("notification", {"id": notification.id})
         if not await account.can_use_app(app):
             raise PermissionDenied(f"{account.username} cannot use the app {app.name}.")
 

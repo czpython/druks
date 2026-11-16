@@ -127,7 +127,8 @@ or to the default account through `Run.account_id`. A run that starts without an
 operator, such as a scheduled run, takes the default account. That account can
 be a service account that nobody signs in as, so every operator sees its runs.
 The Dashboard does not show the runs of other operators. This choice does not
-change access permissions. Only the workflows of installed apps count.
+change access permissions. Only the workflows of installed apps that the viewer
+can use count. See [Process and access topology](#process-and-access-topology).
 
 For each workflow kind and subject, the newest run counts. As a result, a newer
 successful run removes an older failure. A run without a subject counts on its
@@ -321,6 +322,14 @@ An admin can use every app, and every person can use an app that no team lists.
 A built-in app is always open, also when a team lists it by mistake. A person
 can use a listed app when a team that lists it has that person. Druks refuses
 all other people and starts a run only under an account that can use the app.
+
+The app list in the sidebar, the Dashboard, the Schedules page, Activity and
+its live stream, notifications, open subjects, app settings, Chat's list of
+apps, and a phone number's calls show a person only the apps that person can
+use. A subject that two apps work on shows the runs of the app that the person
+can use, and no run of the other app. These reads list the runs of installed
+apps only. When an admin disables an app, its runs leave them for everyone,
+admins too.
 
 In `none` mode, Druks has no authentication and exactly one operator account.
 The first completed provider connection creates this account. Public

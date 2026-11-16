@@ -19,7 +19,6 @@ from druks.api.schemas import (
     DashboardSection,
     ScheduledRun,
 )
-from druks.apps.loader import iter_apps
 from druks.apps.registry import workflows
 from druks.durable.dbos_state import latest_invocations
 from druks.durable.engine import trigger_schedule
@@ -42,7 +41,7 @@ async def get_overview(
     account: Account = Depends(current_account),
 ) -> DashboardOverview:
     response.headers["Cache-Control"] = "no-store"
-    apps = {owner.name: owner for owner in iter_apps()}
+    apps = {owner.name: owner for owner in await account.list_usable_apps()}
     if app is not None:
         if app not in apps:
             raise HTTPException(
@@ -152,13 +151,15 @@ async def get_overview(
 
 
 @router.get("/schedules", response_model=DashboardSchedules)
-async def list_current_schedules(session: SessionDep, response: Response) -> DashboardSchedules:
+async def list_current_schedules(
+    session: SessionDep, response: Response, account: Account = Depends(current_account)
+) -> DashboardSchedules:
     """Configured cadence and recorded invocations, not scheduler health."""
     response.headers["Cache-Control"] = "no-store"
     timezone = get_settings().timezone
     declared = [
         (owner.name, workflow)
-        for owner in iter_apps()
+        for owner in await account.list_usable_apps()
         for workflow in owner.workflows()
         if workflow.every
     ]

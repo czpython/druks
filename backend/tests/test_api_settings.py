@@ -7,6 +7,7 @@ from druks.accounts.models import Account
 from druks.agents import Agent
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.db import db_session
+from druks.teams.models import Team
 from druks.user_settings.models import SettingsOverride
 from druks_field_notes.app import FieldNotes
 from druks_field_notes.workflows import Summarize
@@ -410,8 +411,8 @@ async def test_app_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
 def test_live_choices_load_only_through_the_app_choices_read(tmp_path: Path):
     with settings_client(tmp_path) as client:
         notebook = _field_notes_settings_fields(client)["notebook"]
-        choices = client.get("/api/settings/apps/field_notes/choices")
-        unknown = client.get("/api/settings/apps/ghost/choices")
+        choices = client.get("/api/settings/apps/choices?app=field_notes")
+        unknown = client.get("/api/settings/apps/choices?app=ghost")
 
     assert (notebook["type"], notebook["choices"]) == ("str", None)
     assert choices.json() == {
@@ -764,3 +765,18 @@ def test_settings_lists_read_the_overrides_in_one_query(tmp_path: Path, monkeypa
             event.remove(Engine, "before_cursor_execute", record)
 
     assert reads == {"/api/settings/apps": 1, "/api/agents": 1}
+
+
+async def test_a_member_reads_no_settings_of_an_app_they_cannot_use(tmp_path: Path, druks_db):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    await Account.get_or_create(druks_db, "op@example.com")
+    await Team.create(druks_db, name="Notes", member_ids=[], apps=["field_notes"])
+
+    with settings_client(tmp_path) as client:
+        settings = client.get("/api/settings/apps").json()["apps"]
+        agents = client.get("/api/agents").json()["apps"]
+        choices = client.get("/api/settings/apps/choices?app=field_notes")
+
+    assert "field_notes" not in {app["name"] for app in settings + agents}
+    assert "software_factory" in {app["name"] for app in agents}
+    assert choices.status_code == 403

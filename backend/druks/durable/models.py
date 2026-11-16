@@ -179,6 +179,7 @@ class Run(Base):
         subject_id: str,
         kind: str | None = None,
         *,
+        kinds: Sequence[str] | None = None,
         include_calls: bool = False,
     ) -> list["Run"]:
         # Every run about this subject (stamped at start), newest first — a
@@ -187,7 +188,7 @@ class Run(Base):
         # recently is fixed, where updated_at moves and could lift an older run
         # over a newer one. created_at holds whole seconds, so the uuid7 id
         # settles runs that started within the same one. ``kind`` narrows to one
-        # workflow's runs.
+        # workflow's runs, and ``kinds`` to the runs of those workflows.
         stmt = (
             select(cls)
             .where(subject_filter(cls.id, subject_type, subject_id))
@@ -195,6 +196,8 @@ class Run(Base):
         )
         if kind:
             stmt = stmt.where(cls.kind == kind)
+        if kinds is not None:
+            stmt = stmt.where(cls.kind.in_(kinds))
         if include_calls:
             stmt = stmt.options(selectinload(cls.agent_calls))
         return list(await session.scalars(stmt))

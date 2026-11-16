@@ -10,8 +10,8 @@ gate, or park. Chat does not add entries to Activity.
 
 Only the creator can read a conversation or receive its live events. Operators
 do not see the chats of an app's WhatsApp numbers: the people who hold the
-number's phone read them there. There is one exception: any operator can read
-the calls of an app's phone numbers. See [Read a call](#read-a-call).
+number's phone read them there. There is one exception: an operator who can use
+an app can read the calls of its phone numbers. See [Read a call](#read-a-call).
 
 Chat runs on Claude, Codex, or OpenCode. Its harness, model, billing, and
 effort come from Chat's row in **Chat → Channels → Bots**. A field that you
@@ -644,7 +644,7 @@ seconds of silence, or after 5 minutes.
 
 ### Read a call
 
-Any operator can read a number's calls:
+An operator who can use the number's app can read its calls:
 
 1. Open the app's settings and select **Channels**.
 2. Find the number. Its calls are below it, newest first. Each one shows the
@@ -652,6 +652,7 @@ Any operator can read a number's calls:
 3. Select a call to read its transcript.
 
 A call belongs to the number's bot account, and nobody signs in as that
-account. That is why every operator can read calls, although only the creator
-can read any other conversation. A removed number keeps its calls. An access
-token cannot read calls, and the Chat page does not show them.
+account. That is why every operator who can use the app can read calls,
+although only the creator can read any other conversation. A removed number
+keeps its calls. An access token cannot read calls, and the Chat page does not
+show them.

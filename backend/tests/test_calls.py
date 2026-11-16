@@ -24,6 +24,7 @@ from druks.core.apis.twilio import TwilioClient
 from druks.core.services import Twilio
 from druks.notifications.services import validate_in_app_answer
 from druks.secrets.models import VaultSecret
+from druks.teams.models import Team
 from druks.testing import seed_run
 from sqlalchemy import func, select
 
@@ -91,11 +92,11 @@ def twilio_signature(url, fields):
     return base64.b64encode(hmac.new(b"t", payload.encode(), hashlib.sha1).digest()).decode()
 
 
-async def link(session):
+async def link(session, app="helpdesk"):
     bind_ambient_session(session)
     await connect_service("twilio", identity={"account_sid": "AC1"}, secrets={"api_key": "t"})
     owner = await Account.create_for_bot(session, AccountKind.BOT)
-    connection = await Twilio.link(session, owner, app="helpdesk", sid="PN1", calls_url=CALLS_URL)
+    connection = await Twilio.link(session, owner, app=app, sid="PN1", calls_url=CALLS_URL)
     await session.refresh(connection, ["account"])
     return connection
 
@@ -300,7 +301,7 @@ async def test_the_lines_of_a_call_land_in_the_order_they_were_said(druks_db, dr
 
 
 async def test_an_operator_reads_a_numbers_calls_and_a_calls_transcript(
-    druks_db, druks_client, twilio
+    druks_db, druks_client, helpdesk, twilio
 ):
     connection = await link(druks_db)
     earlier_call = await call(druks_db, connection, "CA0")
@@ -323,6 +324,35 @@ async def test_an_operator_reads_a_numbers_calls_and_a_calls_transcript(
         ("user", "Is my ticket open?"),
         ("assistant", "It is."),
     ]
+
+
+async def test_a_member_outside_the_apps_team_cannot_read_its_numbers_calls(
+    druks_db, druks_client, twilio
+):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    await Account.get_or_create(druks_db, "op@example.com")
+    await Team.create(druks_db, name="Notes", member_ids=[], apps=["field_notes"])
+    connection = await link(druks_db, app="field_notes")
+    conversation = await call(druks_db, connection)
+    number = f"/api/chat/services/twilio/numbers/{connection.id}"
+
+    numbers = await druks_client.get("/api/chat/services/twilio/numbers?app=field_notes")
+    calls = await druks_client.get(f"{number}/calls")
+    lines = await druks_client.get(f"{number}/calls/{conversation.id}")
+
+    assert [numbers.status_code, calls.status_code, lines.status_code] == [403, 403, 403]
+
+
+async def test_the_numbers_of_an_app_that_is_not_installed_are_not_found(
+    druks_db, druks_client, twilio
+):
+    connection = await link(druks_db)
+    number = f"/api/chat/services/twilio/numbers/{connection.id}"
+
+    numbers = await druks_client.get("/api/chat/services/twilio/numbers?app=helpdesk")
+    calls = await druks_client.get(f"{number}/calls")
+
+    assert [numbers.status_code, calls.status_code] == [404, 404]
 
 
 async def test_a_failed_run_from_a_call_waits_for_the_callers_next_call(

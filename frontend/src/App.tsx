@@ -497,7 +497,7 @@ function AppShell({
                   msg={
                     rosterQuery.isError
                       ? 'Could not load this app. Use Try again in the sidebar.'
-                      : 'No page matches this address.'
+                      : "No page matches this address, or you can't use its app. Ask an admin if you need it."
                   }
                 />
               )}

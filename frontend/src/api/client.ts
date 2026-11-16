@@ -422,7 +422,7 @@ export const api = {
     ),
   getAppSettings: () => getJSON<AppsSettingsResponse>('/api/settings/apps'),
   getAppSettingChoices: (name: string) =>
-    getJSON<AppSettingChoices>(`/api/settings/apps/${encodeURIComponent(name)}/choices`),
+    getJSON<AppSettingChoices>(`/api/settings/apps/choices?app=${encodeURIComponent(name)}`),
   updateAppSettings: (body: UpdateAppsSettingsRequest) =>
     patchJSON<AppsSettingsResponse>('/api/settings/apps', body),
   listNotifications: () => getJSON<NotificationResponse[]>('/api/notifications'),
