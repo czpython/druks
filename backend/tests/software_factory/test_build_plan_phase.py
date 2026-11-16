@@ -12,12 +12,16 @@ from druks.contrib.software_factory.contracts import (
     ReviewOutput,
     ReviewReport,
     ReviewWork,
+    TicketOutput,
 )
 from druks.contrib.software_factory.enums import ReviewDecision
 from druks.contrib.software_factory.journal import BuildJournal
 from druks.contrib.software_factory.policy import PlanGate, RepoPolicy
+from druks.contrib.software_factory.ticketing.base import Tracker
 from druks.contrib.software_factory.workflows import Build, PullRequestReview
 from druks.workflows import FatalError, OperatorReply, Run
+
+from software_factory.factories import make_test_work_item
 
 
 def _flow(*, plan_gate: PlanGate = "human") -> Build:
@@ -76,6 +80,7 @@ def _blocked_plan(reason: str) -> PlanData:
         confidence="low",
         status="blocked",
         assignee_github_login=None,
+        tickets=[],
     ).to_result()
 
 
@@ -584,6 +589,153 @@ async def test_operator_rounds_after_the_critique_never_rerun_the_reviewer(monke
     assert parks == 2
     assert [passing["reviewer_notes"] for passing in passes] == ["", "wrong layer", ""]
     assert [passing["operator_note"] for passing in passes] == ["", "", "steer left"]
+
+
+def _split_plan() -> PlanData:
+    return PlanData(
+        plan_markdown="Split into the API and the web client.",
+        tickets=[
+            TicketOutput(repo="acme/api", title="Add the endpoint", description="d", blocked_by=[]),
+            TicketOutput(
+                repo="acme/web", title="Call the endpoint", description="d", blocked_by=["acme/api"]
+            ),
+        ],
+    )
+
+
+async def test_a_split_parks_for_a_person_under_the_machine_gate(monkeypatch):
+    flow = _flow(plan_gate="machine")
+    flow.subject = SimpleNamespace(source="linear")
+    _fake_plans(monkeypatch, _split_plan())
+    _no_review_agent(monkeypatch)
+    asked = []
+
+    async def fake_review(*, questions=None, context=""):
+        asked.append(questions)
+        return OperatorReply(action="approve")
+
+    flow.review = fake_review
+
+    assert await flow._plan_phase() is True
+    assert asked == [[]]
+
+
+async def test_a_split_outside_linear_fails_the_run_before_any_review(monkeypatch):
+    flow = _flow()
+    flow.subject = SimpleNamespace(source="github")
+    _fake_plans(monkeypatch, _split_plan())
+
+    async def fail_park(*, questions=None, context=""):
+        raise AssertionError("a split outside Linear must not park")
+
+    flow.review = fail_park
+
+    with pytest.raises(FatalError, match="only a Linear ticket can split"):
+        await flow._plan_phase()
+
+
+async def test_an_approved_split_creates_tickets_instead_of_implementing():
+    flow = Build()
+    flow.journal = BuildJournal()
+    flow.journal.add(_split_plan())
+    splits = []
+
+    async def load_policy_and_profile():
+        return {"policy": RepoPolicy().model_dump(mode="json"), "profile": {}}
+
+    async def load_settings():
+        return Build.Settings()
+
+    async def load_blockers():
+        return []
+
+    async def plan_phase():
+        return True
+
+    async def split():
+        splits.append(True)
+
+    async def implement_phase():
+        raise AssertionError("a split opens no pull request")
+
+    flow._load_policy_and_profile = load_policy_and_profile
+    flow._load_settings = load_settings
+    flow._load_blockers = load_blockers
+    flow._plan_phase = plan_phase
+    flow._split = split
+    flow._implement_phase = implement_phase
+
+    await flow.run_multistep()
+
+    assert splits == [True]
+
+
+async def test_a_split_creates_the_tickets_and_links_then_releases_the_spike(druks_db, monkeypatch):
+    keys = {"acme/api": "ENG-2", "acme/web": "ENG-3"}
+    calls = []
+
+    class _FakeTracker(Tracker):
+        async def get_ticket(self, key):
+            return {"team": "team-1", "ticket_id": "issue-1"}
+
+        async def create_ticket(self, key, **kwargs):
+            calls.append(("create", key, kwargs))
+            return keys[key.rsplit(":", 1)[-1]]
+
+        async def add_blockers(self, key, blockers):
+            calls.append(("link", key, blockers))
+
+        async def release(self, key):
+            calls.append(("release", key))
+
+        async def get_status_name(self, key):
+            return
+
+        async def set_status(self, key, status):
+            return
+
+        async def aclose(self):
+            return
+
+    async def get_tracker(cls, source=None):
+        return _FakeTracker(status_names={})
+
+    monkeypatch.setattr(SoftwareFactory, "get_tracker", classmethod(get_tracker))
+    flow = Build()
+    flow.journal = BuildJournal()
+    flow.journal.add(_split_plan())
+    spike = await make_test_work_item(repo="acme/api", title="t", ticket_key="ENG-1")
+    flow.subject = spike
+
+    await Build._split.__wrapped__(flow)
+
+    assert calls == [
+        (
+            "create",
+            f"{spike.source}:ENG-1:acme/api",
+            {
+                "team": "team-1",
+                "parent": "issue-1",
+                "label": "api",
+                "title": "Add the endpoint",
+                "description": "d",
+            },
+        ),
+        (
+            "create",
+            f"{spike.source}:ENG-1:acme/web",
+            {
+                "team": "team-1",
+                "parent": "issue-1",
+                "label": "web",
+                "title": "Call the endpoint",
+                "description": "d",
+            },
+        ),
+        ("link", "ENG-2", []),
+        ("link", "ENG-3", ["ENG-2"]),
+        ("release", "ENG-1"),
+    ]
 
 
 @pytest.mark.parametrize("plan_gate", ["human", "machine", "machine_then_human", "adaptive"])

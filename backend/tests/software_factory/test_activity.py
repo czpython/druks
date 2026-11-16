@@ -33,6 +33,7 @@ def test_plan_outputs_declare_their_saved_results():
         confidence="high",
         status="planned",
         assignee_github_login=None,
+        tickets=[],
     )
     revision = ContractRevisionOutput(
         plan_markdown="# Revised plan",
