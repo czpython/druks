@@ -21,7 +21,7 @@ export function RunPage({ id }: { id: string }) {
   })
   const data = query.data
   const subjectPath = data?.subject
-    ? getAppUI(data.app)?.subjectPath?.(data.subject, { run: data.run.id })
+    ? getAppUI(data.run.app)?.subjectPath?.(data.subject, { run: data.run.id })
     : undefined
   useEffect(() => {
     if (subjectPath) navigate(subjectPath, { replace: true })
@@ -38,7 +38,6 @@ export function RunPage({ id }: { id: string }) {
   return (
     <Page scroll="internal" className="ins page-subject">
       <RunBlock
-        app={data!.app}
         run={data!.run}
         newest
         selected={false}

@@ -29,7 +29,6 @@ class RetryRunResponse(Schema):
 
 
 class RunDetailResponse(Schema):
-    app: str
     # The run's work item; None for a run about no work item.
     subject: dict[str, str] | None
     run: RunResponse

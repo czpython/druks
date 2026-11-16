@@ -1,15 +1,16 @@
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse
 
 from druks.api.dependencies import SessionDep
 from druks.files.constants import INLINE_CONTENT_TYPES
 from druks.files.models import FileRecord
 from druks.files.storage import get_file_storage
+from druks.teams.dependencies import require_file_access
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
 
-@router.get("/{file_id}")
+@router.get("/{file_id}", dependencies=[Depends(require_file_access)])
 async def get_file(session: SessionDep, file_id: str, request: Request) -> Response:
     record = await session.get(FileRecord, file_id)
     if not record or record.deleted_at:

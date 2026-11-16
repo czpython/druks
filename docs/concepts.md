@@ -331,6 +331,9 @@ can use, and no run of the other app. These reads list the runs of installed
 apps only. When an admin disables an app, its runs leave them for everyone,
 admins too.
 
+A run belongs to the app that declares its kind. Only a person who can use that
+app reads the transcripts, files, and artifact of the run's agent calls.
+
 In `none` mode, Druks has no authentication and exactly one operator account.
 The first completed provider connection creates this account. Public
 `/_external` routes stay outside the identity gate. These routes include

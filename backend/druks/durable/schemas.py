@@ -11,6 +11,7 @@ from pydantic import (
     computed_field,
 )
 
+from druks.apps.registry import workflows as workflow_registry
 from druks.schemas import Schema
 
 from .enums import ACTIVE_STATES, AgentCallStatus, RunState
@@ -91,6 +92,8 @@ class AgentCallFiles(Schema):
 
 class RunResponse(Schema):
     id: str
+    # The app that declares the run's kind: a subject's timeline lists the runs of every app.
+    app: str
     # The durable kind ("software_factory.build"); ``label`` is its display name ("Build").
     kind: str
     label: str
@@ -115,6 +118,7 @@ class RunResponse(Schema):
     ) -> "RunResponse":
         return cls(
             id=run.id,
+            app=workflow_registry.get(run.kind).app,
             kind=run.kind,
             label=get_display_label(run.kind),
             retry_from=run.retry_from,

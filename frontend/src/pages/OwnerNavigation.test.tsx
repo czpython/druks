@@ -34,6 +34,7 @@ vi.mock('../components/RunTranscript', () => ({ RunTranscript: () => <div>Transc
 
 const run = (id: string): RunSummary => ({
   id,
+  app: 'notes',
   kind: 'notes.summarize',
   label: id,
   retryFrom: null,

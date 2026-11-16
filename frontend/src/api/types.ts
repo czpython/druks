@@ -161,6 +161,8 @@ export interface ArtifactContent {
 // One run on the subject's timeline, with its agent calls in execution order.
 export interface RunSummary {
   id: string
+  // The app that declares the run's kind; it serves the run's transcripts.
+  app: string
   // The durable kind ("field_notes.summarize"); label is its backend display name ("Summarize").
   kind: string
   label: string
@@ -179,7 +181,6 @@ export interface RunSummary {
 
 // One run with its app and work item; subject is null for a run about no work item.
 export interface RunDetail {
-  app: string
   subject: { type: string; id: string } | null
   run: RunSummary
 }

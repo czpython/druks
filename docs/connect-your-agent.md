@@ -20,7 +20,8 @@ Each request uses a personal access token in
 `Authorization: Bearer <token>`. Mint and revoke tokens in
 **Settings → API tokens**. See
 [personal access tokens](configuration.md#personal-access-tokens) for token
-lifecycle and incident steps.
+lifecycle and incident steps. A tool about a run or an agent call answers only
+when the token's account can use the run's app.
 
 ## Which URL
 
