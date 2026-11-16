@@ -73,6 +73,7 @@ async def respond(session: SessionDep, token: str, body: RespondRequest) -> None
             token,
             {"control": body.control, "answers": body.answers, "note": body.note},
             user_id=None,
+            account_id=None,
         )
     except UnknownTokenError as error:
         # 404 without echoing: the token is the capability.

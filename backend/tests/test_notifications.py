@@ -171,7 +171,7 @@ async def _parked_notification(druks_db, *, ask=None, run_state="parked"):
     run = Run(
         account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         id=str(uuid7()),
-        kind="notifications.test",
+        kind=Summarize.kind,
         input_gate="review",
         input_request=ask,
         input_requested_at=Base.utc_now(),
@@ -222,7 +222,7 @@ async def _thread_notification(druks_db, *, ask):
     run = Run(
         account_id=account.id,
         id=str(uuid7()),
-        kind="notifications.test",
+        kind=Summarize.kind,
         input_gate="review",
         input_request=ask,
         input_requested_at=Base.utc_now(),
@@ -256,6 +256,7 @@ async def test_respond_resumes_and_marks_acknowledged(druks_db, resume_spy):
         notification.correlation_token,
         {"control": "approve", "answers": {"q1": "a"}, "note": ""},
         user_id=None,
+        account_id=None,
     )
 
     assert resume_spy == [{"id": run.id, "action": "approve", "answers": {"q1": "a"}, "note": ""}]
@@ -268,7 +269,11 @@ async def test_only_the_chat_s_person_answers_in_its_thread(druks_db, resume_spy
 
     with pytest.raises(AnswerNotAllowedError):
         await respond_to_notification(
-            druks_db, notification.correlation_token, {"control": "approve"}, user_id="U2"
+            druks_db,
+            notification.correlation_token,
+            {"control": "approve"},
+            user_id="U2",
+            account_id=None,
         )
 
     assert resume_spy == []
@@ -279,7 +284,11 @@ async def test_a_click_that_answers_in_a_thread_tells_the_chat(druks_db, resume_
     run, notification = await _thread_notification(druks_db, ask={**_IN_APP_ASK, "questions": []})
 
     await respond_to_notification(
-        druks_db, notification.correlation_token, {"control": "approve"}, user_id="U1"
+        druks_db,
+        notification.correlation_token,
+        {"control": "approve"},
+        user_id="U1",
+        account_id=None,
     )
 
     assert resume_spy == [{"id": run.id, "action": "approve", "answers": {}, "note": ""}]
@@ -308,7 +317,11 @@ async def test_a_click_that_needs_more_goes_to_the_chat(
     run, notification = await _thread_notification(druks_db, ask=ask)
 
     await respond_to_notification(
-        druks_db, notification.correlation_token, {"control": control}, user_id="U1"
+        druks_db,
+        notification.correlation_token,
+        {"control": control},
+        user_id="U1",
+        account_id=None,
     )
 
     assert resume_spy == []
@@ -403,7 +416,7 @@ async def test_respond_stale_round_409(tmp_path, druks_db, resume_spy):
     run = Run(
         account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         id=str(uuid7()),
-        kind="notifications.test",
+        kind=Summarize.kind,
         input_gate="review",
         input_request=_IN_APP_ASK,
         input_requested_at=Base.utc_now(),
@@ -455,6 +468,7 @@ async def test_respond_direct_call_rejects_whitespace_only_content(druks_db, res
             notification.correlation_token,
             {"control": "approve", "answers": {"q1": "   "}},
             user_id=None,
+            account_id=None,
         )
     with pytest.raises(InvalidChoiceError):
         await respond_to_notification(
@@ -462,6 +476,7 @@ async def test_respond_direct_call_rejects_whitespace_only_content(druks_db, res
             notification.correlation_token,
             {"control": "request_changes", "note": "   "},
             user_id=None,
+            account_id=None,
         )
     assert resume_spy == []
     assert (await druks_db.get(Notification, notification.id)).state == "pending"
@@ -481,4 +496,43 @@ async def test_respond_ask_without_presentation_not_answerable(tmp_path, druks_d
     )
 
     assert response.status_code == 422
+    assert resume_spy == []
+
+
+async def test_a_link_answers_only_a_run_of_an_app_that_no_team_lists(
+    tmp_path, druks_db, resume_spy
+):
+    open_run, open_notification = await _parked_notification(druks_db)
+    client = TestClient(configure_app_for_test(settings=make_settings(tmp_path)))
+    opened = client.post(
+        f"/_external/notifications/{open_notification.correlation_token}/respond",
+        json={"control": "approve"},
+    )
+    await Team.create(druks_db, name="Notes", member_ids=[], apps=["field_notes"])
+    _, listed_notification = await _parked_notification(druks_db)
+    refused = client.post(
+        f"/_external/notifications/{listed_notification.correlation_token}/respond",
+        json={"control": "approve"},
+    )
+
+    assert opened.status_code == 204
+    assert refused.status_code == 403
+    assert [call["id"] for call in resume_spy] == [open_run.id]
+    assert not (await druks_db.get(Notification, listed_notification.id)).is_acknowledged
+
+
+async def test_a_run_of_an_app_that_is_not_installed_takes_no_answer(
+    tmp_path, druks_db, resume_spy
+):
+    run, notification = await _parked_notification(druks_db)
+    run.kind = "removed_app.work"
+    await druks_db.flush()
+    client = TestClient(configure_app_for_test(settings=make_settings(tmp_path)))
+
+    response = client.post(
+        f"/_external/notifications/{notification.correlation_token}/respond",
+        json={"control": "approve"},
+    )
+
+    assert response.status_code == 404
     assert resume_spy == []

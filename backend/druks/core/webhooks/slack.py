@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, Response
 from druks.core.services import Slack
 from druks.db import db_session
 from druks.durable.engine import step_session
+from druks.exceptions import ObjectNotFound
 from druks.notifications.buttons import decode_button
 from druks.notifications.constants import CLOSED_MESSAGE
 from druks.notifications.delivery import deliver
@@ -24,6 +25,7 @@ from druks.notifications.exceptions import (
 )
 from druks.notifications.models import Notification
 from druks.notifications.services import respond_to_notification
+from druks.secrets.models import VaultSecret
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.signals import publish
 from druks.webhooks import Webhook
@@ -124,6 +126,12 @@ class SlackInteractivity(SlackWebhook):
             token, choice_id = decode_button(action_id)
         except MalformedButtonError as error:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown button.") from error
+        # The clicker's account, found in the workspace that Druks answers in, as in chat.
+        account_id = await VaultSecret.get_owner_id(
+            db_session(),
+            Slack.Authentication.get_authority((await Slack.get()).identity["team_id"]),
+            user,
+        )
         # A click that cannot answer still gets a 200: nothing a retry can fix, so
         # acknowledge instead of feeding Slack's retry loop. Corruption propagates as
         # the logged 500 it is. What Slack shows after a click starts at once and is
@@ -131,7 +139,7 @@ class SlackInteractivity(SlackWebhook):
         # add up to a second before the person sees it.
         try:
             notification = await respond_to_notification(
-                db_session(), token, {"control": choice_id}, user_id=user
+                db_session(), token, {"control": choice_id}, user_id=user, account_id=account_id
             )
         except StaleRoundError as error:
             # The round is over, so the clicked message loses its buttons.
@@ -150,6 +158,7 @@ class SlackInteractivity(SlackWebhook):
             AlreadyAcknowledgedError,
             InvalidChoiceError,
             AnswerNotAllowedError,
+            ObjectNotFound,
         ) as error:
             # The question can still be open, so the message stays, and only the
             # clicker reads why.

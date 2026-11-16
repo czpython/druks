@@ -14,7 +14,7 @@ from druks.chat.enums import ConversationSource
 from druks.chat.exceptions import ChannelHasNoThreadsError, FileNotInThreadError
 from druks.chat.models import Conversation, Message
 from druks.chat.service import deliver
-from druks.core.apis.slack import SLACK_AUTHORITY, SlackClient
+from druks.core.apis.slack import SlackClient
 from druks.core.services import Slack
 from druks.files.datastructures import File
 from druks.models import Base
@@ -62,7 +62,7 @@ class SlackChannel(Channel):
         cls, session: AsyncSession, row: VaultSecret, message: dict
     ) -> Account | None:
         """The account with a live Slack grant for the Slack user who wrote the message."""
-        authority = SLACK_AUTHORITY.format(team_id=row.identity["team_id"])
+        authority = Slack.Authentication.get_authority(row.identity["team_id"])
         owner_id = await VaultSecret.get_owner_id(session, authority, message["user"])
         return await session.get(Account, owner_id) if owner_id else None
 

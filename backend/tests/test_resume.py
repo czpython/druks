@@ -4,6 +4,7 @@ from druks.api.runs import resume_run
 from druks.api.schemas import ResumeRequest
 from druks.durable import Run
 from druks.testing import seed_dbos_status
+from druks_field_notes.workflows import Summarize
 from fastapi import HTTPException
 
 # The shape review() parks with: an in-app ask plus the parked_at stamp the
@@ -26,7 +27,7 @@ async def _park(druks_db, *, controls: list[dict] | None = None) -> None:
         Run(
             account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
             id="r1",
-            kind="build",
+            kind=Summarize.kind,
             input_gate="review_plan",
             input_request=ask,
             input_requested_at=Run.utc_now(),
