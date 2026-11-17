@@ -142,7 +142,7 @@ function SubjectDetail({
   )
 }
 
-function RunBlock({
+export function RunBlock({
   app,
   run,
   newest,

@@ -184,6 +184,17 @@ async def test_plain_delivery_posts_the_body_and_the_link(slack):
     assert section["text"]["text"] == post["text"]
 
 
+async def test_a_long_body_is_cut_to_fit_slack_and_keeps_its_link(slack):
+    link = "https://druks.example/runs/run-1"
+
+    await deliver(SlackClient(token=_BOT_TOKEN), "C1", "x" * 5000, deep_link=link)
+
+    (post,) = slack.posts
+    (section,) = post["blocks"]
+    assert len(section["text"]["text"]) == 3000
+    assert section["text"]["text"].endswith(f"…\n{link}")
+
+
 async def test_button_delivery_posts_one_button_per_action(slack):
     actions = [{"id": "approve", "label": "Approve"}, {"id": "reject", "label": "Reject"}]
 

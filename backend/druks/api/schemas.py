@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from druks.durable.enums import RunState
+from druks.durable.schemas import RunResponse
 from druks.schemas import Schema
 
 
@@ -25,6 +26,13 @@ class CancelRunResponse(Schema):
 
 class RetryRunResponse(Schema):
     run: str
+
+
+class RunDetailResponse(Schema):
+    app: str
+    # The run's work item; None for a run about no work item.
+    subject: dict[str, str] | None
+    run: RunResponse
 
 
 class OpenWorkflowResponse(Schema):
