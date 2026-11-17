@@ -177,6 +177,13 @@ export interface RunSummary {
   agentCalls: AgentCallSummary[]
 }
 
+// One run with its app and work item; subject is null for a run about no work item.
+export interface RunDetail {
+  app: string
+  subject: { type: string; id: string } | null
+  run: RunSummary
+}
+
 // One row of the active board: the domain summary + the generic lifecycle status.
 export interface SubjectRow<S extends SubjectSummary = SubjectSummary> {
   summary: S

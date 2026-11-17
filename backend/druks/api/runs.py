@@ -1,8 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, Path, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from druks.accounts.context import current_account_id, current_conversation_id
+from druks.accounts.dependencies import current_account
+from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.api.exceptions import (
     RunNotActive,
@@ -12,15 +16,45 @@ from druks.api.exceptions import (
     SubjectBusy,
     agent_error_responses,
 )
-from druks.api.schemas import CancelRunResponse, ResumeRequest, RetryRunResponse
+from druks.api.schemas import (
+    CancelRunResponse,
+    ResumeRequest,
+    RetryRunResponse,
+    RunDetailResponse,
+)
 from druks.apps.registry import workflows
 from druks.durable.enums import RunState, WorkflowEvent
 from druks.durable.models import Run
+from druks.durable.schemas import RunResponse
 from druks.events.models import Event
 from druks.notifications.exceptions import AnswerNotAllowedError, InvalidChoiceError
 from druks.notifications.services import validate_in_app_answer
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
+
+
+@router.get("/{run}", response_model=RunDetailResponse)
+async def get_run(
+    session: SessionDep,
+    run_id: Annotated[str, Path(alias="run")],
+    account: Account = Depends(current_account),
+) -> RunDetailResponse:
+    # As on the dashboard, a person sees their own runs and the default account's.
+    run = await session.scalar(
+        select(Run)
+        .join(Run.account)
+        .where(Run.id == run_id, (Account.id == account.id) | Account.is_default)
+        .options(selectinload(Run.agent_calls))
+    )
+    if not run:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found")
+    return RunDetailResponse(
+        app=workflows.get(run.kind).app,
+        subject=await run.get_subject(),
+        run=RunResponse.from_run(
+            run, input_request=await run.get_ask() if run.input_request else None
+        ),
+    )
 
 
 @router.post("/{run}/resume", status_code=status.HTTP_204_NO_CONTENT)

@@ -36,6 +36,7 @@ import type {
   McpServerConnection,
   McpServerDirectoryEntry,
   McpServerScopes,
+  RunDetail,
   Service,
   Provider,
   ProviderCatalog,
@@ -294,6 +295,7 @@ export const api = {
     runId: string,
     body: { control: string; answers: Record<string, string>; note: string },
   ) => postNoContent(`/api/runs/${runId}/resume`, body),
+  getRun: (runId: string) => getJSON<RunDetail>(`/api/runs/${runId}`),
   // Cancel is a run-level action, not a review verdict — it ends any active run.
   cancelRun: (runId: string, reason: string) =>
     postJSON<{ run: string; result: string }>(`/api/runs/${runId}/cancel`, { reason }),

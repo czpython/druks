@@ -816,8 +816,7 @@ async def _execute_run(
                         body=f"Your run {run.subject_key or run.kind} failed: {exc}",
                         subject=subject,
                         run_id=run.id,
-                        # The dashboard lists failed runs; Druks has no page for one run.
-                        deep_link=f"{endpoint}/" if endpoint else None,
+                        deep_link=f"{endpoint}/runs/{run.id}" if endpoint else None,
                     )
                     return notification.id
 

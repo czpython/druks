@@ -24,6 +24,7 @@ import { Page } from './components/Page'
 import { SettingsPages } from './components/SettingsPages'
 import { Sidebar } from './components/Sidebar'
 import { EventsPage } from './pages/EventsPage'
+import { RunPage } from './pages/RunPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ChatPage } from './pages/ChatPage'
 import { LoginWindowPage } from './pages/LoginWindowPage'
@@ -471,6 +472,9 @@ function AppShell({
           </Route>
           <Route path="/events">
             <EventsPage />
+          </Route>
+          <Route path="/runs/:id">
+            {(params) => <RunPage id={params.id} />}
           </Route>
           <Route path="/browser-sessions/:name/login">
             {(params) => <LoginWindowPage name={params.name} />}
