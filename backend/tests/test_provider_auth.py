@@ -4,6 +4,7 @@ import json
 import logging
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import druks.redis
 import httpx
@@ -20,6 +21,7 @@ from druks.harnesses import providers as pbase
 from druks.harnesses.datastructures import ParsedUsage
 from druks.harnesses.exceptions import HarnessNotConnectedError, OAuthTokenError
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
+from druks.models import Base
 from druks.notifications.models import Notification
 from druks.sandbox import gate
 from druks.sandbox.models import SandboxIdentity, SecretRef
@@ -50,9 +52,14 @@ def _claude_payload(*, access="A0", refresh="R0", expires_at=None, extra=None) -
     return {"claudeAiOauth": block}
 
 
-async def _seed_claude(*, provider_email="op@example.com", **kwargs) -> VaultSecret:
+async def _seed_claude(
+    *, provider_email="op@example.com", refresh_token_expires_at=None, **kwargs
+) -> VaultSecret:
     return await connect_provider(
-        AnthropicProvider, _claude_payload(**kwargs), provider_email=provider_email
+        AnthropicProvider,
+        _claude_payload(**kwargs),
+        provider_email=provider_email,
+        refresh_token_expires_at=refresh_token_expires_at,
     )
 
 
@@ -220,6 +227,68 @@ async def test_invalid_grant_queues_a_notice_to_the_subscription_s_account(monke
         )
     )
     assert queued == NOTIFICATIONS_QUEUE
+
+
+async def _sign_in_notices(account_id: str) -> list[Notification]:
+    return list(
+        await db_session().scalars(
+            select(Notification).where(
+                Notification.account_id == account_id,
+                Notification.reason == "subscription.sign_in_ending",
+            )
+        )
+    )
+
+
+async def test_a_sign_in_ending_within_three_days_is_warned_once(druks_db):
+    ends_at = Base.utc_now() + timedelta(days=2)
+    connection = await _seed_claude(refresh_token_expires_at=ends_at)
+    account_id = connection.account_id
+    account = await druks_db.get(Account, account_id)
+    await account.update_preferences(timezone="Europe/Madrid")
+
+    await tasks.warn_ending_sign_ins._function()
+    await tasks.warn_ending_sign_ins._function()
+
+    [notification] = await _sign_in_notices(account_id)
+    madrid_end = ends_at.astimezone(ZoneInfo("Europe/Madrid"))
+    assert f"{madrid_end:%d %b %Y at %H:%M %Z}" in notification.body
+    queued = await druks_db.scalar(
+        select(workflow_status.c.queue_name).where(
+            workflow_status.c.workflow_uuid == f"notifications.send:{notification.id}"
+        )
+    )
+    assert queued == NOTIFICATIONS_QUEUE
+
+
+async def test_a_reconnect_is_warned_again_when_its_own_end_nears(druks_db):
+    connection = await _seed_claude(refresh_token_expires_at=Base.utc_now() + timedelta(days=2))
+    account_id = connection.account_id
+    await tasks.warn_ending_sign_ins._function()
+
+    await _seed_claude(refresh_token_expires_at=Base.utc_now() + timedelta(days=1))
+    await tasks.warn_ending_sign_ins._function()
+
+    assert len(await _sign_in_notices(account_id)) == 2
+
+
+async def test_no_warning_without_an_end_inside_the_next_three_days(druks_db):
+    now = Base.utc_now()
+    connections = [
+        await _seed_claude(provider_email="none@example.com"),
+        await _seed_claude(
+            provider_email="far@example.com", refresh_token_expires_at=now + timedelta(days=4)
+        ),
+        await _seed_claude(
+            provider_email="past@example.com", refresh_token_expires_at=now - timedelta(hours=1)
+        ),
+    ]
+    account_ids = [connection.account_id for connection in connections]
+
+    await tasks.warn_ending_sign_ins._function()
+
+    for account_id in account_ids:
+        assert not await _sign_in_notices(account_id)
 
 
 async def test_the_refresh_time_survives_revocation_until_a_reconnect(monkeypatch, druks_db):
