@@ -815,8 +815,9 @@ the `user:inference` scope only: Druks does not refresh it, shows no quota for
 it, and asks for a new token when it expires. An `oauth` login ends on a date
 that Anthropic sets at each sign-in, about four weeks later. A token refresh
 does not move it. The Providers page shows the date: reconnect before it to
-start a new login. The `[providers.anthropic]` table
-in `druks.toml` selects the method, `oauth` by default. An installation on
+start a new login. Three days before the date, Druks sends the account a
+notice. The `[providers.anthropic]` table in `druks.toml` selects the method,
+`oauth` by default. An installation on
 `setup_token` in `none` identity mode gets its first account from another
 provider's login, because the paste needs a signed-in account.
 
