@@ -8,11 +8,12 @@ from druks.apps import loader
 from druks.durable import engine as durable_engine
 from druks.exceptions import SessionNotBoundError
 from druks.harnesses.exceptions import HarnessNotConnectedError
-from druks.settings import Settings, ensure_data_dirs
+from druks.settings import Settings, ensure_data_dirs, secret_variable
 from druks.testing import TEST_DATABASE_URL, make_settings
 from pydantic import ValidationError
 
 _SECRETS_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+_ERRORS_DSN = "https://public-key@errors.example.com/7"
 
 
 async def test_a_request_reads_what_startup_learned(druks_client, monkeypatch):
@@ -82,7 +83,12 @@ def _write_secrets(tmp_path, monkeypatch, secrets):
     for name, value in {"secrets_key": _SECRETS_KEY, **secrets}.items():
         (secrets_dir / name).write_text(value)
     monkeypatch.setenv("DRUKS_SECRETS_DIR", str(secrets_dir))
-    for variable in ("DRUKS_SECRETS_KEY", "DRUKS_DATABASE_URL", "DRUKS_REDIS_URL"):
+    for variable in (
+        "DRUKS_SECRETS_KEY",
+        "DRUKS_DATABASE_URL",
+        "DRUKS_REDIS_URL",
+        "DRUKS_ERRORS_DSN",
+    ):
         monkeypatch.delenv(variable)
 
 
@@ -139,6 +145,7 @@ timeout = 180
     [
         ('secrets_key = "key"', "secrets_key is a secret"),
         ('[sandbox]\nservice_token = "token"', "sandbox.service_token is a secret"),
+        (f'[errors]\ndsn = "{_ERRORS_DSN}"', "errors.dsn is a secret"),
         ('data_dir = "/home/op/druks-data"', "data_dir is not a druks.toml key"),
     ],
 )
@@ -168,12 +175,57 @@ def test_the_environment_sets_a_secret_under_its_prefixed_name(tmp_path, monkeyp
     assert settings.timezone == "UTC"
 
 
-def test_a_secret_in_the_environment_and_in_a_file_refuses_construction(tmp_path, monkeypatch):
-    _write_secrets(tmp_path, monkeypatch, {})
-    monkeypatch.setenv("DRUKS_SECRETS_KEY", _SECRETS_KEY)
+@pytest.mark.parametrize(
+    ("key", "value"), [("secrets_key", _SECRETS_KEY), ("errors.dsn", _ERRORS_DSN)]
+)
+def test_a_secret_in_the_environment_and_in_a_file_refuses_construction(
+    tmp_path, monkeypatch, key, value
+):
+    _write_secrets(tmp_path, monkeypatch, {key: value})
+    monkeypatch.setenv(secret_variable(key), value)
 
-    with pytest.raises(ValueError, match="secrets_key is set in the environment and in a secret"):
+    with pytest.raises(ValueError, match=f"{key} is set in the environment and in a secret"):
         Settings()
+
+
+def test_the_errors_dsn_is_empty_by_default(tmp_path):
+    assert not make_settings(tmp_path).errors.dsn.get_secret_value()
+
+
+def test_under_pytest_a_dsn_in_dotenv_leaves_the_errors_dsn_empty(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(f"DRUKS_ERRORS_DSN={_ERRORS_DSN}\n")
+
+    assert not Settings().errors.dsn.get_secret_value()
+
+
+def _dsn_in_the_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRUKS_ERRORS_DSN", _ERRORS_DSN)
+
+
+def _dsn_in_dotenv(tmp_path, monkeypatch):
+    # druks.testing sets the variable empty, and the environment ranks above .env.
+    monkeypatch.delenv("DRUKS_ERRORS_DSN")
+    (tmp_path / ".env").write_text(f"DRUKS_ERRORS_DSN={_ERRORS_DSN}\n")
+
+
+def _dsn_in_a_secret_file(tmp_path, monkeypatch):
+    _write_secrets(tmp_path, monkeypatch, {"errors.dsn": _ERRORS_DSN})
+
+
+@pytest.mark.parametrize(
+    "set_dsn", [_dsn_in_the_environment, _dsn_in_dotenv, _dsn_in_a_secret_file]
+)
+def test_each_secret_source_sets_the_errors_dsn_and_no_output_shows_it(
+    tmp_path, monkeypatch, set_dsn
+):
+    monkeypatch.chdir(tmp_path)
+    set_dsn(tmp_path, monkeypatch)
+
+    settings = Settings()
+
+    assert settings.errors.dsn.get_secret_value() == _ERRORS_DSN
+    assert _ERRORS_DSN not in repr(settings)
 
 
 def test_only_an_explicit_issuer_url_changes_the_mint_base(tmp_path):

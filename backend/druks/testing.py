@@ -19,11 +19,12 @@ from uuid_utils import uuid7
 
 # Under pytest, druks IS the test instance. Settings and app discovery run before
 # collection, so the file and key come first. The empty file keeps the working
-# directory's druks.toml out, and the key avoids an operator's environment.
+# directory's druks.toml out, and the key and the empty DSN avoid an operator's environment.
 with tempfile.NamedTemporaryFile(suffix=".toml", delete=False) as _settings_file:
     _settings_path = Path(_settings_file.name)
 os.environ.setdefault("DRUKS_CONFIG", str(_settings_path))
 os.environ.setdefault("DRUKS_SECRETS_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
+os.environ["DRUKS_ERRORS_DSN"] = ""
 
 import druks.browser.models  # noqa: F401
 import druks.durable.models  # noqa: F401
