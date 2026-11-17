@@ -70,8 +70,8 @@ scripted writes.
 ## Secrets
 
 `druks.toml` holds no secret. The secrets of Druks are `secrets_key`,
-`database_url`, `redis_url`, `sandbox.service_token`, and
-`browser.proxy`.
+`database_url`, `redis_url`, `sandbox.service_token`, `browser.proxy`, and
+`errors.dsn`.
 Druks takes each one from an environment variable. The name is `DRUKS_` and the
 key path, with `_` for each dot: `DRUKS_SECRETS_KEY`,
 `DRUKS_SANDBOX_SERVICE_TOKEN`. Druks does not start when `druks.toml` holds a
@@ -89,6 +89,7 @@ The installer keeps the secrets in the last section of `~/druks/.env`:
 | `SECRETS_KEY` | Drukbox | The installer. The Drukbox key |
 | `REGISTRY_PASSWORD` | Drukbox | You, for private sandbox images |
 | `DRUKS_BROWSER_PROXY` | Druks | You, for a browser egress proxy |
+| `DRUKS_ERRORS_DSN` | Druks | You, to send errors to an [error tracker](#error-reporting) |
 | `DRUKS_DATABASE_URL`, `DRUKS_REDIS_URL` | Druks | You, only for a database or a Redis that Compose does not run |
 | A provider secret, for example `EXE_API_TOKEN` | Drukbox | You |
 
@@ -267,6 +268,52 @@ is 71 of the 100 connections that Postgres allows by default.
 Postgres stores durable state. Redis does not store workflow state. It supports
 short-lived concerns including webhook delivery claims, OAuth state and token
 caches, and the sandbox provisioning gate.
+
+## Error reporting
+
+Druks can send its unhandled errors to an error tracker that accepts events from
+the Sentry SDK. Set the secret `errors.dsn` to the DSN that the tracker shows for
+your project: the variable `DRUKS_ERRORS_DSN`, or the file `errors.dsn` in
+`DRUKS_SECRETS_DIR`. See [Secrets](#secrets). The value is empty by default, and
+an empty value sends nothing. Druks then does not start the SDK, so
+`SENTRY_DSN` cannot turn reporting on. Druks does not start when `errors.dsn` is
+not a DSN. The message names `errors.dsn` and does not show the value.
+
+Each event names its server by the host of `urls.webhook_host`, else by the host
+of `urls.endpoint`. When both are empty, the SDK uses the host name of the
+machine. To name the release of each event, set `SENTRY_RELEASE` in the
+environment of Druks, for example in `[env]`.
+
+Druks reports these errors:
+
+- An exception of a web request that no exception handler for its type answers.
+  Druks answers that request with a 500 and `INTERNAL_ERROR`. An exception that a
+  handler for its type answers sends nothing, also when the response is a 5xx.
+- An exception that ends the process or a thread.
+- A task that fails on its last attempt. A failed attempt that a retry follows
+  sends nothing. A scheduled task reports in the same way.
+- A failed scheduled tick of a workflow that declares `dispatch()`. The tick
+  starts no run, so no run shows its failure.
+
+A failed run sends no event. The run shows its failure in the dashboard. Druks
+sends no log line, trace, profile, metric, or session either. A log line can go
+with a later event, as a breadcrumb. The log lines of uvicorn never go, because
+they name the address of each client.
+
+Before an event or a breadcrumb leaves the process, Druks removes:
+
+- Bearer tokens, `Authorization` values, JWTs, and GitHub, Slack, OpenAI, and
+  Anthropic keys.
+- The value of each request header other than `Accept`, `Content-Length`,
+  `Content-Type`, `Host`, and `User-Agent`. The header names stay. Any other
+  header can carry a credential or a person, for example
+  `x-druks-webhook-token` or the trusted identity header.
+- The value of each query parameter in a URL. The parameter names stay, because
+  Druks cannot know which parameter is sensitive on your installation. Druks
+  reads the query of a request as the client sent it. A name stays encoded, and
+  an encoded `&` or `=` stays part of its value.
+
+Druks sends no request body, no local variable, no cookie, and no client address.
 
 ## Public URLs and access control
 
