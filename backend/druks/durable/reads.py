@@ -17,6 +17,7 @@ from druks.durable.live import keepalive_comment, serialize_model_event
 from .enums import RunState
 from .models import AgentCall, Artifact, Run
 from .schemas import (
+    ActiveRunResponse,
     AgentCallFiles,
     AgentCallResponse,
     ArtifactDescriptor,
@@ -150,6 +151,21 @@ async def get_subject_response(
         phase=phase,
         phase_ends_at=ends_at if ends_at and ends_at > datetime.now(UTC) else None,
     )
+
+
+async def list_active_runs_for_conversation(
+    session: AsyncSession, conversation_id: str
+) -> list[ActiveRunResponse]:
+    """The runs that the conversation started and that still work or wait, each with
+    what it does now."""
+    active_runs = []
+    for run in await Run.list_active_for_conversation(session, conversation_id):
+        phase = await get_run_phase(run.id) if run.is_running else None
+        ends_at = await get_run_phase_ends_at(run.id) if phase else None
+        if ends_at and ends_at <= datetime.now(UTC):
+            ends_at = None
+        active_runs.append(ActiveRunResponse.from_run(run, phase=phase, phase_ends_at=ends_at))
+    return active_runs
 
 
 async def _timeline(runs: list[Run]) -> list[RunResponse]:

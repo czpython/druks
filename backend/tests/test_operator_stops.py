@@ -1,6 +1,10 @@
 import pytest
+from druks.chat.constants import POST_CANCEL_WORKFLOW
+from druks.chat.models import Conversation
 from druks.contrib.software_factory.workflows import Build
 from druks.db import db_session
+from druks.durable.constants import TASK_QUEUE
+from druks.durable.dbos_state import workflow_status
 from druks.durable.enums import WorkflowEvent
 from druks.events.models import Event
 from druks.testing import seed_run
@@ -78,3 +82,23 @@ async def test_factory_cleanup_creates_no_operator_stop(druks_db):
     await Build.cancel(item, failure="pr closed without merge")
 
     assert not list(await druks_db.scalars(select(Event).filter_by(type=WorkflowEvent.CANCELLED)))
+
+
+async def test_operator_stop_reports_to_the_chat_that_started_the_run(druks_client, druks_db):
+    run = await seed_run(druks_db, kind=Summarize.kind)
+    conversation = await Conversation.create(
+        druks_db, account_id=run.account_id, body="Summarize the note"
+    )
+    run.conversation_id = conversation.id
+    chatless_run = await seed_run(druks_db, kind=Summarize.kind)
+    await druks_db.flush()
+
+    for stopped_run in (run, chatless_run):
+        await druks_client.post(
+            f"/api/runs/{stopped_run.id}/cancel", json={"reason": "Wrong source"}
+        )
+
+    reports = await druks_db.scalars(
+        select(workflow_status.c.workflow_uuid).where(workflow_status.c.queue_name == TASK_QUEUE)
+    )
+    assert list(reports) == [f"{POST_CANCEL_WORKFLOW}:{run.id}"]

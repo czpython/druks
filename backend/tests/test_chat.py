@@ -32,6 +32,8 @@ from druks.chat.exceptions import (
 )
 from druks.chat.models import Conversation, Message
 from druks.database import get_session
+from druks.durable.constants import TASK_QUEUE
+from druks.durable.dbos_state import workflow_status
 from druks.files.datastructures import File
 from druks.files.models import FileRecord
 from druks.harnesses.claude import ClaudeHarness
@@ -48,11 +50,17 @@ from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.settings import Urls
-from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_run
+from druks.testing import (
+    asgi_client,
+    configure_app_for_test,
+    make_settings,
+    seed_call,
+    seed_run,
+)
 from druks.user_settings.models import SettingsOverride
 from druks.workflows import Subject
 from fastapi import WebSocket, WebSocketDisconnect
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 CODEX_KEY_LOGIN = json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": "${CODEX_API_KEY}"})
 OPENCODE_BOT_AGENT = (
@@ -1049,6 +1057,64 @@ async def test_conversation_recency_comes_from_messages_not_pins(druks_db):
     await druks_db.flush()
     conversations = await Conversation.list_for_account(druks_db, owner)
     assert [conversation.id for conversation in conversations] == [later.id, earlier.id, empty.id]
+
+
+async def test_a_conversation_lists_the_runs_it_started_that_are_still_active(
+    druks_db, conversation, tmp_path
+):
+    runs = {}
+    for state in ("running", "finished"):
+        runs[state] = await seed_run(
+            druks_db, kind="test", state=state, account_id=conversation.account_id
+        )
+        runs[state].conversation_id = conversation.id
+    await seed_call(druks_db, runs["running"], "implement", status="running")
+    await druks_db.flush()
+    api = configure_app_for_test(
+        settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-User"}),
+        authenticated=False,
+    )
+    async with asgi_client(api) as client:
+        active_runs = await client.get(
+            f"/api/chat/conversations/{conversation.id}/active-runs",
+            headers={"X-User": "owner@example.com"},
+        )
+
+    assert active_runs.json() == [
+        {
+            "id": runs["running"].id,
+            "label": "Test",
+            "state": "running",
+            "subjectKey": None,
+            "agentLabel": "Implement",
+            "phase": None,
+            "phaseEndsAt": None,
+        }
+    ]
+
+
+async def test_a_cancel_from_the_chat_that_started_the_run_queues_no_report(
+    druks_db, conversation, tmp_path
+):
+    run = await seed_run(druks_db, kind="test", account_id=conversation.account_id)
+    run.conversation_id = conversation.id
+    await druks_db.flush()
+    api = configure_app_for_test(
+        settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-User"}),
+        authenticated=False,
+    )
+    async with asgi_client(api) as client:
+        cancelled = await client.post(
+            f"/api/runs/{run.id}/cancel",
+            json={"reason": "Wrong ticket"},
+            headers={"X-User": "owner@example.com", CONVERSATION_HEADER: conversation.id},
+        )
+
+    assert cancelled.json() == {"run": run.id, "result": "cancelled"}
+    reports = await druks_db.scalars(
+        select(workflow_status.c.workflow_uuid).where(workflow_status.c.queue_name == TASK_QUEUE)
+    )
+    assert not list(reports)
 
 
 async def test_owner_can_pin_and_unpin(druks_db, conversation, tmp_path):

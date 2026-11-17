@@ -18,6 +18,8 @@ from druks.apps.registry import Registry, agents, workflows
 from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
 from druks.browser.exceptions import BrowserSessionSignedOutError
 from druks.browser.models import StoredBrowserSession
+from druks.chat.constants import CANCELLED_MESSAGE
+from druks.chat.models import Conversation, Message
 from druks.database import configure_session, get_session, session_scope
 from druks.db import atomic, db_session
 from druks.durable import FatalError, Run, RunState, WorkflowError, engine, get_run_phase
@@ -1530,6 +1532,37 @@ async def test_replace_starts_a_new_run_in_place_of_the_active_run(runtime):
     await replay.get_result()
     assert SINK[-1] == f"replaced:{second}"
     assert (await _get_run(runtime.engine, second)).state == RunState.PARKED
+    await runtime.DoubleGateFlow.cancel(subject)
+
+
+async def test_replace_reports_the_cancel_to_the_chat_that_started_the_old_run(runtime):
+    subject = Widget(id=818181)
+    first = await runtime.DoubleGateFlow.start(subject=subject)
+    await _wait_for_run(runtime.engine, first, lambda run: run.state == RunState.PARKED)
+    account_id = await _account_id(runtime.engine, "op@example.com")
+    async with get_session(runtime.engine) as session:
+        conversation = await Conversation.create(
+            session, account_id=account_id, body="Check the widget"
+        )
+        (await session.get(Run, first)).conversation_id = conversation.id
+        await session.commit()
+
+    parent = await runtime.ReplacingFlow.start(subject=None)
+
+    await _wait_for_run(runtime.engine, parent, lambda run: run.state == RunState.FINISHED)
+    deadline = asyncio.get_event_loop().time() + 15
+    while asyncio.get_event_loop().time() < deadline:
+        async with get_session(runtime.engine) as session:
+            reports = await session.scalars(
+                select(Message.body).where(
+                    Message.conversation_id == conversation.id, Message.is_internal
+                )
+            )
+            report = reports.first()
+        if report:
+            break
+        await asyncio.sleep(0.1)
+    assert report == CANCELLED_MESSAGE.format(run=first, reason=REPLACED_FAILURE)
     await runtime.DoubleGateFlow.cancel(subject)
 
 

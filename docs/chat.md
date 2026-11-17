@@ -117,6 +117,13 @@ An agent plan shows the latest complete plan. A plan update replaces the
 previous list. Tool updates instead change only the fields that the adapter
 sends. Completed replies retain text and tool calls, not the live plan.
 
+While a run that the conversation started is active, the page shows one line
+for it below the messages. The line names the workflow and its subject, and
+says what the run does now: it is queued, it waits for an answer, or it runs a
+step, such as an agent call or a wait for CI. The page reads the runs again
+every two seconds, so the line follows the run and goes when the run ends.
+Only the Chat page shows it.
+
 The page stays at the bottom while text arrives. Scroll up to read earlier
 messages. **Latest message** returns to the bottom.
 
@@ -170,6 +177,9 @@ time the run continues, in the installation's timezone. The agent shares the
 run's login, so its own turn would fail on the same limit. When the run
 continues, Druks adds an internal message that says so. When the run
 fails, Druks adds an internal message with the failure to that conversation.
+When the run is cancelled, Druks adds an internal message with the reason. A
+cancel that the agent of the same conversation made adds none, because the
+agent already told you.
 When the run ends, Druks adds an internal message with its result, whether or
 not the run waited for an answer. A run that returns nothing, such as a review
 that posts itself, adds a message that says it ended. The agent then tells you
@@ -443,8 +453,8 @@ everyone else, operators included.
 
 When a run that a chat on the number started ends, Druks reports it to that
 chat, as for every [run that a chat starts](#agent-access). The Bot then tells
-the person: a failure in one short line, with no error details and no retry. A
-cancelled run adds nothing.
+the person: a failure in one short line, with no error details and no retry,
+and a cancel in one short line.
 
 ### Taking over
 

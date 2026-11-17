@@ -10,12 +10,13 @@ import { appLabel } from '../apps/registry'
 import { chatApi } from '../chat/api'
 import {
   compareConversations, conversationReducer, conversationTitle, initialConversation, savedReplyRows,
-  type Conversation, type ConversationAction, type ConversationSummary, type Message, type ReplyRow,
+  type ActiveRun, type Conversation, type ConversationAction, type ConversationSummary, type Message, type ReplyRow,
 } from '../chat/state'
 import { Markdown } from '../components/Markdown'
 import { Page } from '../components/Page'
 import { useFormatters } from '../lib/preferences'
 import { zonedParts } from '../lib/format'
+import { phaseLine } from '../lib/phase'
 import '../chat.css'
 
 const conversationListKey = ['chat', 'conversations']
@@ -173,6 +174,8 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
   const composer = useRef<HTMLTextAreaElement>(null)
   const format = useFormatters()
   const apps = useQuery({ queryKey: ['apps'], queryFn: api.listApps, enabled: !id, staleTime: 60_000 })
+  // A run's state sends no events, so the page reads its active runs again.
+  const activeRuns = useQuery({ queryKey: ['chat', 'active-runs', id], queryFn: () => chatApi.listActiveRuns(id!), enabled: Boolean(id), refetchInterval: 2_000 })
   const { scrollRef, contentRef, isAtBottom, scrollToBottom } = useStickToBottom({ initial: 'instant', resize: 'instant' })
 
   useEffect(() => {
@@ -358,6 +361,11 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
             </div>
           </article>
         })}
+        <div className="chat-runs" role="status">
+          {activeRuns.data?.map((run) => <p className="chat-waiting" key={run.id}>
+            <span className="chat-activity-dot" />{runLine(run, format.timezone)}
+          </p>)}
+        </div>
       </div>
     </div>
     {!isAtBottom && messages.length > 0 && <div className="chat-jump">
@@ -397,6 +405,15 @@ function ConversationThread({ id, summary, onPin, pinPending, draft, onDraft, on
       {apps.isSuccess && <p className="chat-apps">{apps.data.length} installed {apps.data.length === 1 ? 'app' : 'apps'}{apps.data.length > 0 && <> · {apps.data.map((app) => appLabel(app.name)).join(', ')}</>}</p>}
     </div>}
   </section>
+}
+
+// A running run names its step: the phase it pushed, else the agent call that runs.
+function runLine(run: ActiveRun, timezone: string): string {
+  const name = run.subjectKey ? `${run.label} ${run.subjectKey}` : run.label
+  if (run.state === 'scheduled') return `${name} is queued`
+  if (run.state === 'parked') return `${name} waits for an answer`
+  const step = phaseLine(run.phase, run.phaseEndsAt, timezone) ?? run.agentLabel
+  return step ? `${name}: ${step}` : `${name} is running`
 }
 
 function Reply({ rows }: { rows: ReplyRow[] }) {

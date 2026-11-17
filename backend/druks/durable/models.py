@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+import sqlalchemy
 from dbos import DBOS, EnqueueOptions
 from sqlalchemy import (
     CheckConstraint,
@@ -23,9 +24,10 @@ from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship,
 
 from druks.accounts.models import Account
 from druks.apps.registry import workflows
+from druks.chat.constants import POST_CANCEL_WORKFLOW
 from druks.core.models import Uuid7Pk
 from druks.database import get_session
-from druks.durable.constants import NOTIFICATIONS_QUEUE, RUN_QUEUE
+from druks.durable.constants import NOTIFICATIONS_QUEUE, RUN_QUEUE, TASK_QUEUE
 from druks.durable.dbos_state import (
     retry_chain,
     retry_from_expression,
@@ -59,6 +61,13 @@ if TYPE_CHECKING:
 
 class Run(Base):
     __tablename__ = "durable_runs"
+    __table_args__ = (
+        Index(
+            "durable_runs_conversation_idx",
+            "conversation_id",
+            postgresql_where=sqlalchemy.text("conversation_id IS NOT NULL"),
+        ),
+    )
 
     # The DBOS workflow id, minted at start() so row and run share one identity.
     id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -200,6 +209,24 @@ class Run(Base):
                 select(cls).where(
                     cls.state == RunState.PARKED.value, cls.input_expires_at < an_hour_ago
                 )
+            )
+        )
+
+    @classmethod
+    async def list_active_for_conversation(
+        cls, session: AsyncSession, conversation_id: str
+    ) -> list["Run"]:
+        """The runs that the conversation started and that still work or wait, oldest
+        first, each with its agent calls."""
+        return list(
+            await session.scalars(
+                select(cls)
+                .where(
+                    cls.conversation_id == conversation_id,
+                    cls.state.in_([state.value for state in ACTIVE_STATES]),
+                )
+                .order_by(cls.created_at, cls.id)
+                .options(selectinload(cls.agent_calls))
             )
         )
 
@@ -484,7 +511,9 @@ class Run(Base):
             return {"type": attributes["subject_type"], "id": attributes["subject_id"]}
         return
 
-    async def cancel(self, *, failure: str | None = None) -> None:
+    async def cancel(
+        self, *, failure: str | None = None, from_conversation_id: str | None = None
+    ) -> None:
         # A parked run's question ends with it, so the question's messages close.
         if self.input_gate:
             await self.close_park_notifications()
@@ -499,6 +528,15 @@ class Run(Base):
         self.failure = failure
         await self.session.flush()
         await DBOS.cancel_workflow_async(self.id)
+        # A cancelled run runs no more steps, so a workflow of its own reports it. A
+        # cancel from the run's own chat gets no report: that turn tells the person.
+        if self.conversation_id and self.conversation_id != from_conversation_id:
+            options: EnqueueOptions = {
+                "workflow_name": POST_CANCEL_WORKFLOW,
+                "queue_name": TASK_QUEUE,
+                "workflow_id": f"{POST_CANCEL_WORKFLOW}:{self.id}",
+            }
+            await enqueue_in_transaction(self.session, options, self.id)
         # The body raises DBOSWorkflowCancelledError and re-raises without
         # emitting, so the canceller announces the terminal state itself.
         subject = await self.get_subject()

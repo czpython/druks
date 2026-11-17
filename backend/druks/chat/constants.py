@@ -60,6 +60,12 @@ FAILURE_MESSAGE = (
     "[Internal: Run {run} failed: {failure}. Tell the person in one short line, with no "
     "error details, and offer what they can do next. Do not retry it.]"
 )
+CANCELLED_MESSAGE = (
+    "[Internal: Run {run} was cancelled. The reason: {reason}. Tell the person in one short "
+    "line. Do not start it again.]"
+)
+# The workflow that posts a cancelled run's report to its chat, by the name a run queues it.
+POST_CANCEL_WORKFLOW = "chat.post_cancel"
 # A channel turn that ends with no answer gets this once; the next empty turn fails.
 NO_ANSWER_MESSAGE = (
     "[Internal: Your turn ended with no answer for the person. Write the answer now from "

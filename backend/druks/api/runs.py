@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, HTTPException, Path, status
 
-from druks.accounts.context import current_account_id
+from druks.accounts.context import current_account_id, current_conversation_id
 from druks.api.dependencies import SessionDep
 from druks.api.exceptions import (
     RunNotActive,
@@ -91,7 +91,7 @@ async def cancel_run(
     subject = await run.get_subject()
     # cancel() flushes the run and expires this computed column, so read it first.
     key = run.subject_key
-    await run.cancel(failure=reason)
+    await run.cancel(failure=reason, from_conversation_id=current_conversation_id.get())
     if subject:
         await Event.emit(
             session,

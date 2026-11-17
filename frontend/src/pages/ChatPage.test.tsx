@@ -10,7 +10,7 @@ import type { Conversation, ConversationAction, Message } from '../chat/state'
 import { UserPreferencesProvider } from '../lib/preferences'
 import { ChatPage } from './ChatPage'
 
-vi.mock('../chat/api', () => ({ chatApi: { list: vi.fn(), get: vi.fn(), create: vi.fn(), send: vi.fn(), retry: vi.fn(), stop: vi.fn(), setPinned: vi.fn() } }))
+vi.mock('../chat/api', () => ({ chatApi: { list: vi.fn(), get: vi.fn(), listActiveRuns: vi.fn(), create: vi.fn(), send: vi.fn(), retry: vi.fn(), stop: vi.fn(), setPinned: vi.fn() } }))
 
 class Socket {
   static instances: Socket[] = []
@@ -56,6 +56,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.mocked(chatApi.list).mockResolvedValue([conversation])
   vi.mocked(chatApi.get).mockResolvedValue(conversation)
+  vi.mocked(chatApi.listActiveRuns).mockResolvedValue([])
   vi.mocked(chatApi.send).mockResolvedValue({ ...message, id: '11', body: 'Then check failures', state: 'pending' })
   vi.mocked(chatApi.retry).mockResolvedValue({ ...message, id: '11', state: 'pending' })
   vi.mocked(chatApi.create).mockResolvedValue(conversation)
@@ -85,6 +86,19 @@ describe('Chat page', () => {
     expect(within(turns[0]!).getByText('You')).toBeTruthy()
     expect(within(turns[0]!).getByText('Agent')).toBeTruthy()
     expect(within(turns[1]!).getByText('Druks')).toBeTruthy()
+  })
+
+  it('shows what each active run of the conversation does now', async () => {
+    const run = { id: '01995a3c-0000-7000-8000-000000000002', label: 'Summarize', state: 'running' as const, subjectKey: 'note 7', agentLabel: 'Identify', phase: 'agent_running', phaseEndsAt: null }
+    vi.mocked(chatApi.listActiveRuns).mockResolvedValue([run])
+    const client = mount()
+    expect(await screen.findByText('Summarize note 7: Identify')).toBeTruthy()
+    vi.mocked(chatApi.listActiveRuns).mockResolvedValue([{ ...run, state: 'parked', agentLabel: null }])
+    void client.refetchQueries({ queryKey: ['chat', 'active-runs'] })
+    expect(await screen.findByText('Summarize note 7 waits for an answer')).toBeTruthy()
+    vi.mocked(chatApi.listActiveRuns).mockResolvedValue([])
+    void client.refetchQueries({ queryKey: ['chat', 'active-runs'] })
+    await waitFor(() => expect(screen.queryByText(/^Summarize /)).toBeNull())
   })
 
   it.each([
