@@ -4,6 +4,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import sentry_sdk
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -37,6 +38,7 @@ from druks.database import (
 )
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.durable.exceptions import AgentCallNotFound
+from druks.errors import RawQuery, setup_error_reporting
 from druks.events.routes import router as events_router
 from druks.exceptions import ObjectNotFound
 from druks.files.routes import router as files_router
@@ -126,6 +128,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         shutdown()
+        # After DBOS stops, so that the reports of its last tasks leave too.
+        sentry_sdk.flush()
         if created_engine:
             await created_engine.dispose()
         await close_client()
@@ -140,6 +144,8 @@ def _mcp_lifespan(app: FastAPI) -> AbstractAsyncContextManager[Mapping[str, Any]
 
 settings = load_settings()
 configure_settings(settings)
+# Before the app is built, so that the SDK's integrations wrap its routes.
+setup_error_reporting(settings)
 register_apps()
 
 app = FastAPI(
@@ -431,3 +437,5 @@ class SpaCacheControl:
 
 serve_spa(app)
 app.add_middleware(SpaCacheControl)
+if sentry_sdk.get_client().is_active():
+    app.add_middleware(RawQuery)

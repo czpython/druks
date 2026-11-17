@@ -49,6 +49,16 @@ class SettingsNotConfiguredError(DruksError):
         super().__init__("Settings are not configured. Configure them when the process starts.")
 
 
+class MalformedDsnError(DruksError):
+    """``errors.dsn`` holds a value that the error tracker's SDK cannot read as a DSN."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "errors.dsn is not a DSN. Set the DSN that your error tracker shows for the "
+            "project, or leave errors.dsn empty to send no error."
+        )
+
+
 class ObjectNotFound(DruksError):
     """Nothing matches the values a read asked for."""
 

@@ -279,6 +279,11 @@ class Browser(BaseModel):
     timezone: str = ""
 
 
+class Errors(BaseModel):
+    # The DSN of a Sentry-compatible error tracker. Empty sends no error anywhere.
+    dsn: SecretStr = SecretStr("")
+
+
 class Anthropic(BaseModel):
     # How a person signs in with a subscription: the OAuth login on the Connect page, or
     # a pasted ``claude setup-token``.
@@ -311,6 +316,7 @@ class Settings(BaseSettings):
     urls: Urls = Urls()
     sandbox: Sandbox = Sandbox()
     browser: Browser = Browser()
+    errors: Errors = Errors()
     providers: Providers = Providers()
     # An [apps.<name>] table with enabled = false leaves that app out of this installation.
     apps: dict[str, dict] = {}

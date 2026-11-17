@@ -8,8 +8,9 @@ from unittest.mock import AsyncMock
 
 import psycopg
 import pytest
+import sentry_sdk
 from dbos import DBOS, DBOSClient
-from dbos._error import DBOSQueueDeduplicatedError
+from dbos._error import DBOSMaxStepRetriesExceeded, DBOSQueueDeduplicatedError
 from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
 from druks.agents import Agent, AgentOutput
@@ -50,6 +51,7 @@ from druks.workspaces import Workspace
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from pydantic import ValidationError
+from sentry_sdk.transport import Transport
 from sqlalchemy import NullPool, column, create_engine, delete, func, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -110,6 +112,24 @@ def sandbox_lease(monkeypatch):
     )
 
 
+@pytest.fixture
+def error_events():
+    """The error events that reach the SDK's transport during the test, from a client
+    with no integration."""
+    events: list[dict] = []
+
+    class Recorder(Transport):
+        def capture_envelope(self, envelope):
+            events.extend(item.payload.json for item in envelope.items if item.type == "event")
+
+    sentry_sdk.init(
+        "https://public-key@errors.example.com/7", default_integrations=False, transport=Recorder
+    )
+    yield events
+    sentry_sdk.get_client().close()
+    sentry_sdk.get_global_scope().set_client(None)
+
+
 @pytest.fixture(scope="module", autouse=True)
 async def runtime():
     original_settings = get_settings()
@@ -158,6 +178,10 @@ async def runtime():
         if TASK_RETRY_ATTEMPTS == 1:
             raise RuntimeError("retry task")
         SINK.append("task:retried")
+
+    @task(retries=1)
+    async def failing_task() -> None:
+        raise RuntimeError("the task failed")
 
     @task(every="0 6 * * *")
     async def scheduled_task() -> None:
@@ -374,6 +398,7 @@ async def runtime():
             DispatchingFlow=DispatchingFlow,
             record_task=record_task,
             retry_task=retry_task,
+            failing_task=failing_task,
             scheduled_task=scheduled_task,
         )
     finally:
@@ -1044,7 +1069,7 @@ async def test_a_task_enqueued_in_a_transaction_that_rolls_back_queues_nothing(r
         assert connection.scalar(queued) == before
 
 
-async def test_durable_task_retries(runtime):
+async def test_durable_task_retries(runtime, error_events):
     global TASK_RETRY_ATTEMPTS
     TASK_RETRY_ATTEMPTS = 0
     SINK.clear()
@@ -1054,6 +1079,86 @@ async def test_durable_task_retries(runtime):
         await asyncio.sleep(0.1)
     assert "task:retried" in SINK
     assert TASK_RETRY_ATTEMPTS > 1
+    # The failed first attempt was not the task's last.
+    assert not error_events
+
+
+async def test_a_task_reports_only_the_failure_of_its_last_attempt(runtime, error_events):
+    handle = await DBOS.start_workflow_async(runtime.failing_task._entry, {})
+    with pytest.raises(DBOSMaxStepRetriesExceeded):
+        await handle.get_result()
+
+    [event] = error_events
+    [exception] = event["exception"]["values"]
+    assert (exception["type"], exception["value"]) == ("RuntimeError", "the task failed")
+
+
+async def test_a_scheduled_task_reports_its_failure(runtime, error_events, monkeypatch):
+    async def fail() -> None:
+        raise RuntimeError("the scheduled task failed")
+
+    monkeypatch.setattr(runtime.scheduled_task, "_function", fail)
+    with pytest.raises(RuntimeError):
+        await runtime.scheduled_task._scheduled_entry(datetime.now(UTC), None)
+
+    [event] = error_events
+    assert event["exception"]["values"][-1]["value"] == "the scheduled task failed"
+
+
+async def test_a_failed_dispatch_tick_reports_once(runtime, error_events, monkeypatch):
+    async def refuse(cls) -> str:
+        raise RuntimeError("the dispatch failed")
+
+    monkeypatch.setattr(runtime.ScheduledDispatch, "dispatch", classmethod(refuse))
+    _, entry = next(row for row in _workflow_schedules if row[0].kind == "scheduled_dispatch")
+    with pytest.raises(RuntimeError):
+        await entry(datetime.now(UTC), None)
+
+    [event] = error_events
+    assert event["exception"]["values"][-1]["value"] == "the dispatch failed"
+
+
+async def test_a_failed_run_reports_no_error(runtime, error_events, monkeypatch):
+    class CrashFlow(Workflow):
+        subject = Widget
+
+        async def run(self) -> None:
+            raise RuntimeError("the run failed")
+
+    async def crash(self) -> None:
+        raise RuntimeError("the scheduled run failed")
+
+    try:
+        workflow_id = await CrashFlow.start(subject=Widget(id=929292))
+        failed = await _wait_for_run(
+            runtime.engine, workflow_id, lambda run: run.state == RunState.FAILED
+        )
+    finally:
+        workflows._items.pop(CrashFlow.kind, None)
+    sweep, entry = next(row for row in _workflow_schedules if row[0].kind == "daily_sweep")
+    monkeypatch.setattr(sweep, "run", crash)
+    with pytest.raises(RuntimeError):
+        await entry(datetime.now(UTC), None)
+    # A failing task in the same test shows that the transport records a report.
+    handle = await DBOS.start_workflow_async(runtime.failing_task._entry, {})
+    with pytest.raises(DBOSMaxStepRetriesExceeded):
+        await handle.get_result()
+
+    async with get_session(runtime.engine) as session:
+        lifecycle = (
+            await session.scalars(
+                select(Event.type).where(Event.payload["run"].astext == workflow_id)
+            )
+        ).all()
+        scheduled = await session.scalar(
+            select(Run).where(Run.kind == "daily_sweep", Run.failure == "the scheduled run failed")
+        )
+    assert failed.failure == "the run failed"
+    assert WorkflowEvent.FAILED in lifecycle
+    assert scheduled.state == RunState.FAILED
+    assert [event["exception"]["values"][-1]["value"] for event in error_events] == [
+        "the task failed"
+    ]
 
 
 async def test_step_retries(runtime):

@@ -19,6 +19,7 @@ from typing import (
     overload,
 )
 
+import sentry_sdk
 from croniter import croniter
 from dbos import (
     DBOS,
@@ -31,6 +32,7 @@ from dbos import (
 from dbos._dbos import _get_or_create_dbos_registry
 from dbos._error import (
     DBOSAwaitedWorkflowCancelledError,
+    DBOSMaxStepRetriesExceeded,
     DBOSWorkflowCancelledError,
 )
 from drukbox_sdk import Secret
@@ -605,14 +607,23 @@ class _Task:
             async with step_session():
                 await self._function(**kwargs)
 
-        await DBOS.run_step_async(
-            StepOptions(
-                name=self.name,
-                retries_allowed=self._retries > 0,
-                max_attempts=self._retries + 1,
-            ),
-            _do,
-        )
+        # DBOS records a failed task itself, so no process hook reports it.
+        try:
+            await DBOS.run_step_async(
+                StepOptions(
+                    name=self.name,
+                    retries_allowed=self._retries > 0,
+                    max_attempts=self._retries + 1,
+                ),
+                _do,
+            )
+        except DBOSMaxStepRetriesExceeded as error:
+            # DBOS's error says only that the retries ran out; the last attempt's says why.
+            sentry_sdk.capture_exception(error.errors[-1])
+            raise
+        except Exception as error:
+            sentry_sdk.capture_exception(error)
+            raise
 
 
 @overload
@@ -1513,7 +1524,12 @@ async def _dispatch_instance(cls: type[Workflow], _context: dict[str, Any] | Non
     # The cron tick runs no workflow of its own kind — no Run row — it just calls
     # dispatch(), which start()s the real subject-backed run. Body level, not a
     # step: DBOS only allows the child-start inside start() from a workflow body.
-    return await cls.dispatch()
+    try:
+        return await cls.dispatch()
+    except Exception as error:
+        # A failed tick starts no run, so no run shows the failure.
+        sentry_sdk.capture_exception(error)
+        raise
 
 
 def _register_entry(cls: type[Workflow]) -> None:
