@@ -285,7 +285,13 @@ def make_jwt(claims: dict) -> str:
     return f"{header}.{payload}.sig"
 
 
-async def connect_provider(provider_cls, payload: dict, *, provider_email: str = "op@example.com"):
+async def connect_provider(
+    provider_cls,
+    payload: dict,
+    *,
+    provider_email: str = "op@example.com",
+    refresh_token_expires_at: datetime | None = None,
+):
     """Seed the vault row a finished OAuth connect flow would leave for a subscription."""
     account = await Account.get_or_create(db_session(), provider_email)
     _, expires_at = provider_cls._refresh_state(payload)
@@ -297,6 +303,7 @@ async def connect_provider(provider_cls, payload: dict, *, provider_email: str =
         secrets=payload,
         identity={"email": provider_email},
         expires_at=expires_at,
+        refresh_token_expires_at=refresh_token_expires_at,
     )
 
 
