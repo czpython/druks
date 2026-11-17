@@ -77,6 +77,8 @@ class VaultSecret(Base, Uuid7Pk):
     expires_at: Mapped[datetime | None]
     # A refresh moves expires_at. Only a new sign-in moves this.
     refresh_token_expires_at: Mapped[datetime | None]
+    # When the account was told that refresh_token_expires_at is near; a new sign-in clears it.
+    sign_in_end_warned_at: Mapped[datetime | None]
     # Only a subscription rotation sets it.
     last_refreshed_at: Mapped[datetime | None]
     # Revoking is a state, never a deletion: the facts stay, the secrets go.
@@ -210,6 +212,7 @@ class VaultSecret(Base, Uuid7Pk):
         row.scopes = scopes or []
         row.expires_at = expires_at
         row.refresh_token_expires_at = refresh_token_expires_at
+        row.sign_in_end_warned_at = None
         row.last_refreshed_at = None
         row.revoked_at = None
         row.revoked_reason = ""
