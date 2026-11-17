@@ -1016,8 +1016,8 @@ container default timezone.
 
 ## Notifications
 
-The dashboard has no notifications page yet. Manage destinations through the
-API. A destination is a Slack channel. Druks posts to it as the bot of the
+The dashboard has no page for destinations yet. Manage them through the API.
+A destination is a Slack channel. Druks posts to it as the bot of the
 [Slack card](#slack), so connect Slack first. A message that asks for an answer
 has buttons. The card's signing secret authenticates the button clicks that
 Slack sends back. Under a manager, the manager's signature authenticates them.
@@ -1031,6 +1031,27 @@ that message, Druks refuses the destination and shows the reason.
 Select one enabled destination as the gate-notification destination through
 the API. A parked subjected run then produces a durable notification. Failure
 to deliver the notification does not unpark or fail the run.
+
+### Your notices
+
+Some notices are for one person. Druks sends them to that person's account:
+
+- **Subscription disconnected.** The provider ended a subscription's sign-in,
+  so Druks disconnected it. Reconnect it in **Settings → Providers**.
+- **Sign-in ends soon.** An Anthropic sign-in ends in three days or less. The
+  notice gives the end time in your timezone.
+- **Run failed.** A run that no chat started failed. The notice links to the
+  run's page. A run that a chat started reports its failure in that chat.
+
+If you linked your Slack account, the bot sends you the notice as a direct
+message. See [Link your account](chat.md#link-your-account). The bell in the
+dashboard header keeps every notice, with or without Slack. It shows how many
+notices are unread. Opening it marks them read. A notice links to the dashboard
+only when `urls.endpoint` is set.
+
+Each run has its own page at `/runs/<id>`. A run whose app shows it on a work
+item's page opens there. You see your own runs and the runs of the default
+account.
 
 ## MCP servers
 
