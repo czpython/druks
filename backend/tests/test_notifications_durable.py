@@ -70,6 +70,8 @@ class NotificationProbe(StoredSubject):
 # What the in-app reviews resumed with — the respond round-trip asserts the
 # payload arrived in the workflow verbatim.
 _REVIEW_REPLIES: list[OperatorReply] = []
+# The run ids of every FailingFlow execution, so a test sees a replay happen.
+_FAILED_EXECUTIONS: list[str] = []
 
 
 def _build_park_flows():
@@ -130,7 +132,14 @@ def _build_park_flows():
             await ParkNote.wait(input_request={"presentation": "external", "label": "Round one"})
             await ParkNote.wait(input_request={"presentation": "external", "label": "Round two"})
 
-    return InAppFlow, ExternalFlow, SubjectlessFlow, ExternalUrlFlow, DoubleParkFlow
+    class FailingFlow(Workflow):
+        subject = NotificationProbe
+
+        async def run_multistep(self) -> None:
+            _FAILED_EXECUTIONS.append(self.workflow_id)
+            raise RuntimeError("the disk is full")
+
+    return InAppFlow, ExternalFlow, SubjectlessFlow, ExternalUrlFlow, DoubleParkFlow, FailingFlow
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -161,6 +170,9 @@ async def rt():
                 9010,
                 9014,
                 9015,
+                9016,
+                9017,
+                9018,
             )
         )
         session.commit()
@@ -175,6 +187,7 @@ async def rt():
         subjectless_flow,
         external_url_flow,
         double_park_flow,
+        failing_flow,
     ) = _build_park_flows()
     configure_settings(Settings(database_url=URL))  # pyright: ignore[reportCallIssue]
     # The outbox module was imported above — its queue + workflow register
@@ -190,6 +203,7 @@ async def rt():
             SubjectlessFlow=subjectless_flow,
             ExternalUrlFlow=external_url_flow,
             DoubleParkFlow=double_park_flow,
+            FailingFlow=failing_flow,
         )
     finally:
         shutdown()
@@ -201,6 +215,7 @@ async def rt():
             "subjectless_flow",
             "external_url_flow",
             "double_park_flow",
+            "failing_flow",
         ):
             workflows._items.pop(kind, None)
         configure_settings(original_settings)
@@ -822,6 +837,65 @@ async def test_each_park_round_gets_its_own_notification(rt, deliver_spy):
     assert [row.body for row in rows] == ["Round one", "Round two"]
     assert rows[0].run_parked_at != rows[1].run_parked_at
     assert len(deliver_spy.calls) == 2
+
+
+async def test_a_failed_run_with_no_chat_tells_its_owner(rt, deliver_spy):
+    workflow_id = await rt.FailingFlow.start(subject=NotificationProbe(id=9016))
+    run = await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FAILED)
+
+    (notice,) = await _notifications_for_run(rt, workflow_id)
+    assert notice.account_id == run.account_id
+    assert notice.reason == "run.failed"
+    assert "the disk is full" in notice.body
+    # The unattended account has no Slack sign-in, so its notice stays stored.
+    done = await _wait_for(rt, notice.id, lambda s: s["attempts"] == 1)
+    assert done["state"] == "pending"
+
+
+async def test_a_failed_run_a_chat_started_sends_no_notice(rt, deliver_spy):
+    async def create():
+        account = await Account.get_default(db_session())
+        conversation = Conversation(
+            account_id=account.id,
+            source=ConversationSource.SLACK,
+            user_id="U1",
+            thread_id="C9:1700000000.000200",
+        )
+        db_session().add(conversation)
+        await db_session().flush()
+        return conversation.id
+
+    reset = current_conversation_id.set(await _seed(rt, create))
+    try:
+        workflow_id = await rt.FailingFlow.start(subject=NotificationProbe(id=9017))
+    finally:
+        current_conversation_id.reset(reset)
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FAILED)
+
+    assert await _notifications_for_run(rt, workflow_id) == []
+
+
+async def test_a_replayed_failure_tells_the_owner_once(rt, deliver_spy):
+    workflow_id = await rt.FailingFlow.start(subject=NotificationProbe(id=9018))
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FAILED)
+
+    # A crash after the notice's checkpoints, before DBOS recorded the ERROR, leaves
+    # the workflow PENDING. DBOS never resumes an ERROR workflow, so put it back there.
+    with rt.schema_engine.begin() as connection:
+        connection.execute(
+            text("UPDATE dbos.workflow_status SET status = 'PENDING' WHERE workflow_uuid = :id"),
+            {"id": workflow_id},
+        )
+    await DBOS.resume_workflow_async(workflow_id)
+    deadline = asyncio.get_event_loop().time() + 15
+    while _FAILED_EXECUTIONS.count(workflow_id) < 2:
+        if asyncio.get_event_loop().time() > deadline:
+            raise AssertionError("workflow was never re-executed after resume")
+        await asyncio.sleep(0.1)
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FAILED)
+    await asyncio.sleep(1.0)  # room for a wrong duplicate enqueue to land
+
+    assert len(await _notifications_for_run(rt, workflow_id)) == 1
 
 
 async def test_an_answer_from_elsewhere_closes_the_question_s_message(rt, deliver_spy):

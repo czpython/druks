@@ -121,7 +121,11 @@ def _inline_steps():
     async def run_inline(_options, fn):
         return await fn()
 
-    with mock.patch("druks.workflows.DBOS.run_step_async", side_effect=run_inline):
+    # A failed run with no chat queues its owner's notice.
+    with (
+        mock.patch("druks.workflows.DBOS.run_step_async", side_effect=run_inline),
+        mock.patch("druks.workflows.DBOS.enqueue_workflow_async"),
+    ):
         yield
 
 
