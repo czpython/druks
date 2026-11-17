@@ -39,6 +39,16 @@
 .command-app-settings:hover, .command-app-settings[aria-current="page"] { color: var(--druks-color-text-primary); background: var(--druks-color-surface-raised); }
 .command-utilities { display: flex; align-items: center; gap: 20px; margin-left: auto; flex-shrink: 0; }
 .command-timezone { color: var(--druks-color-text-secondary); }
+.notice-bell { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--druks-color-text-secondary); cursor: pointer; }
+.notice-bell:hover, .notice-bell[aria-expanded="true"] { color: var(--druks-color-text-primary); background: var(--druks-color-surface-raised); }
+.notice-count { position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--druks-color-accent); color: var(--druks-color-on-accent); font-size: 11px; line-height: 16px; text-align: center; }
+.set-menu.notice-inbox { width: 360px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 120px); padding: 4px; }
+.notice-inbox ul { margin: 0; padding: 0; list-style: none; }
+.notice-inbox li { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 5px; color: var(--druks-color-text-secondary); }
+.notice-inbox li.notice-unread { color: var(--druks-color-text-primary); background: var(--druks-color-surface-subtle); }
+.notice-inbox li a { color: inherit; }
+.notice-inbox time { color: var(--druks-color-text-tertiary); font-size: 12px; }
+.notice-empty { margin: 0; padding: 10px 12px; color: var(--druks-color-text-tertiary); }
 .app-main { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 
 .sidebar {
@@ -105,7 +115,7 @@
   .command-header { padding: 6px 12px; gap: 6px; }
   .command-breadcrumb > span, .command-timezone { display: none; }
   .command-breadcrumb { font-size: 15px; }
-  .command-app-settings { width: 44px; height: 44px; }
+  .command-app-settings, .notice-bell { width: 44px; height: 44px; }
   .command-utilities { padding-inline: 8px; }
   .navigation-toggle, .navigation-close { display: inline-flex; }
   .navigation-close { position: absolute; top: 16px; right: 12px; }

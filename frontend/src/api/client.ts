@@ -18,6 +18,7 @@ import type {
   AppsSettingsResponse,
   Harness,
   Identity,
+  NotificationResponse,
   Pat,
   PersonalSettings,
   SubjectResponse,
@@ -406,6 +407,8 @@ export const api = {
     getJSON<AppSettingChoices>(`/api/settings/apps/${encodeURIComponent(name)}/choices`),
   updateAppSettings: (body: UpdateAppsSettingsRequest) =>
     patchJSON<AppsSettingsResponse>('/api/settings/apps', body),
+  inbox: () => getJSON<NotificationResponse[]>('/api/notifications/inbox'),
+  markInboxRead: () => postNoContent('/api/notifications/inbox/read', undefined),
   usage: () => getJSON<UsageResponse>('/api/usage'),
   refreshUsage: () => postJSON<void>('/api/usage/refresh', {}),
   usageHistory: () => getJSON<UsageHistoryResponse>('/api/usage/history'),

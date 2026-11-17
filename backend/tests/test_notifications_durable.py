@@ -26,6 +26,8 @@ from druks.notifications.exceptions import DeliveryError, NotificationError
 from druks.notifications.models import Destination, Notification
 from druks.notifications.outbox import send_notification
 from druks.notifications.services import respond_to_notification
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.settings import Settings, configure_settings, get_settings
 from druks.testing import configure_app_for_test, init_db, make_settings
 from druks.workflows import Gate, OperatorReply, Run, Workflow
@@ -475,6 +477,52 @@ async def test_a_disabled_destination_sends_nothing(rt, deliver_spy, monkeypatch
     done = await _wait_for(rt, notification_id, lambda s: s["state"] == "failed")
     assert "'muted' is disabled" in done["last_error"]
     assert done["attempts"] == 2
+    assert deliver_spy.calls == []
+
+
+async def _notify_person(rt, email, *, slack_user=""):
+    # The module shares one database, so each test names its own person.
+    async def create():
+        await _install_slack()
+        account = await Account.get_or_create(db_session(), email)
+        if slack_user:
+            await VaultSecret.connect(
+                db_session(),
+                Audience.service("slack"),
+                account_id=account.id,
+                refresh_token="",
+                scopes=["users:read"],
+                identity={"authority": "https://slack.com/T1", "subject": slack_user},
+            )
+        notification = await Notification.create(
+            db_session(),
+            account_id=account.id,
+            reason="subscription.disconnected",
+            body="Your Anthropic subscription is disconnected.",
+            deep_link="https://druks.test/settings/providers",
+        )
+        return notification.id
+
+    notification_id = await _seed(rt, create)
+    await DBOS.enqueue_workflow_async(NOTIFICATIONS_QUEUE, send_notification, notification_id)
+    return notification_id
+
+
+async def test_a_person_s_notice_goes_to_their_slack_user(rt, deliver_spy):
+    notification_id = await _notify_person(rt, "dm@example.com", slack_user="U42")
+
+    done = await _wait_for(rt, notification_id, lambda s: s["state"] == "delivered")
+    (call,) = deliver_spy.calls
+    assert call["channel"] == "U42"
+    assert call["deep_link"] == "https://druks.test/settings/providers"
+    assert done["message_id"] == "U42:1700000000.000001"
+
+
+async def test_a_person_without_a_slack_sign_in_keeps_the_notice_stored(rt, deliver_spy):
+    notification_id = await _notify_person(rt, "no-slack@example.com")
+
+    done = await _wait_for(rt, notification_id, lambda s: s["attempts"] == 1)
+    assert done["state"] == "pending"
     assert deliver_spy.calls == []
 
 

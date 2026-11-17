@@ -14,10 +14,13 @@ from drukbox_sdk.exceptions import SandboxUnavailableError
 from druks.accounts.models import Account
 from druks.core import tasks
 from druks.db import db_session
+from druks.durable.constants import NOTIFICATIONS_QUEUE
+from druks.durable.dbos_state import workflow_status
 from druks.harnesses import providers as pbase
 from druks.harnesses.datastructures import ParsedUsage
 from druks.harnesses.exceptions import HarnessNotConnectedError, OAuthTokenError
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
+from druks.notifications.models import Notification
 from druks.sandbox import gate
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.secrets.datastructures import Audience
@@ -25,7 +28,7 @@ from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.testing import seed_run
 from druks_field_notes.workflows import Summarize
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 _NOW = datetime(2026, 6, 4, 20, 0, tzinfo=UTC)
 
@@ -197,6 +200,26 @@ async def test_claude_invalid_grant_revokes_the_subscription(monkeypatch, druks_
     assert not await VaultSecret.list_subscriptions(db_session())
     with pytest.raises(HarnessNotConnectedError):
         await AnthropicProvider.get_subscription(druks_db, account_id)
+
+
+async def test_invalid_grant_queues_a_notice_to_the_subscription_s_account(monkeypatch, druks_db):
+    connection = await _seed_claude(expires_at=_NOW - timedelta(minutes=1))
+    account_id = connection.account_id
+    _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
+
+    await AnthropicProvider.rotate_token(druks_db, connection.id, now=_NOW)
+
+    [notification] = await druks_db.scalars(
+        select(Notification).where(Notification.account_id == account_id)
+    )
+    assert notification.reason == "subscription.disconnected"
+    assert "Anthropic" in notification.body
+    queued = await druks_db.scalar(
+        select(workflow_status.c.queue_name).where(
+            workflow_status.c.workflow_uuid == f"notifications.send:{notification.id}"
+        )
+    )
+    assert queued == NOTIFICATIONS_QUEUE
 
 
 async def test_the_refresh_time_survives_revocation_until_a_reconnect(monkeypatch, druks_db):

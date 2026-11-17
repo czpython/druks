@@ -29,7 +29,7 @@ class NotificationResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    subject: dict[str, Any]
+    subject: dict[str, Any] | None
     reason: str
     body: str
     actions: list[dict[str, Any]] | None
@@ -38,6 +38,7 @@ class NotificationResponse(Schema):
     attempts: int
     last_error: str | None
     delivered_at: datetime | None
+    read_at: datetime | None
     created_at: datetime
     run_id: str | None
     run_parked_at: datetime | None
