@@ -840,6 +840,9 @@ async def test_each_park_round_gets_its_own_notification(rt, deliver_spy):
 
 
 async def test_a_failed_run_with_no_chat_tells_its_owner(rt, deliver_spy):
+    settings = get_settings()
+    urls = settings.urls.model_copy(update={"endpoint": "https://druks.example"})
+    configure_settings(settings.model_copy(update={"urls": urls}))
     workflow_id = await rt.FailingFlow.start(subject=NotificationProbe(id=9016))
     run = await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FAILED)
 
@@ -847,6 +850,7 @@ async def test_a_failed_run_with_no_chat_tells_its_owner(rt, deliver_spy):
     assert notice.account_id == run.account_id
     assert notice.reason == "run.failed"
     assert "the disk is full" in notice.body
+    assert notice.deep_link == f"https://druks.example/runs/{workflow_id}"
     # The unattended account has no Slack sign-in, so its notice stays stored.
     done = await _wait_for(rt, notice.id, lambda s: s["attempts"] == 1)
     assert done["state"] == "pending"

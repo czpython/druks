@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from druks.accounts.models import Account
 from druks.durable.exceptions import AgentCallNotFound
 from druks.durable.reads import get_agent_call_files
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
@@ -292,3 +293,36 @@ async def test_agent_call_artifact_layout(druks_db, tmp_path):
     assert call.artifact_layout.transcript == sub / "stdout.jsonl"
     assert call.artifact_layout.stderr == sub / "stderr.log"
     assert call.artifact_layout.output == sub / "output.json"
+
+
+async def test_a_run_reads_with_its_app_and_work_item(druks_client, druks_db):
+    note = await Note.create(body="Summarize this")
+    run = await seed_run(
+        druks_db, kind=Summarize.kind, subject=note, state="failed", failure="the disk is full"
+    )
+
+    response = await druks_client.get(f"/api/runs/{run.id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["app"] == "field_notes"
+    assert body["subject"] == {"type": "note", "id": str(note.id)}
+    assert body["run"]["id"] == run.id
+    assert body["run"]["state"] == "failed"
+    assert body["run"]["failure"] == "the disk is full"
+
+
+async def test_a_person_reads_their_own_runs_and_the_default_accounts(druks_client, druks_db):
+    service = await Account.get_or_create(druks_db, "service@example.invalid")
+    other = await Account.get_or_create(druks_db, "another@example.invalid")
+    scheduled = await seed_run(druks_db, kind=Summarize.kind, account_id=service.id)
+    private = await seed_run(druks_db, kind=Summarize.kind, account_id=other.id)
+    # The operator's account comes after the default one, so it is not the default.
+    own = await seed_run(druks_db, kind=Summarize.kind)
+
+    response = await druks_client.get(f"/api/runs/{scheduled.id}")
+    assert response.status_code == 200
+    assert response.json()["subject"] is None
+    assert (await druks_client.get(f"/api/runs/{own.id}")).status_code == 200
+    assert (await druks_client.get(f"/api/runs/{private.id}")).status_code == 404
+    assert (await druks_client.get("/api/runs/no-such-run")).status_code == 404
