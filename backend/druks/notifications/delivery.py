@@ -3,9 +3,8 @@ from slack_sdk.errors import SlackApiError
 
 from druks.core.apis.slack import SlackClient
 from druks.notifications.buttons import encode_button
+from druks.notifications.constants import SECTION_TEXT_LIMIT
 from druks.notifications.exceptions import ChannelUnavailableError, DeliveryError
-
-SECTION_LIMIT = 3000
 
 # What Slack's answer means when the bot cannot post to the channel, and the fix.
 _CHANNEL_REASONS = {
@@ -37,9 +36,9 @@ async def deliver(
     Returns Slack's answer, which names the message's channel and ts."""
     link = f"\n{deep_link}" if deep_link else ""
     # Slack refuses a section longer than this, so a long body loses its end and
-    # keeps the link, which leads to the whole story.
-    if len(body) + len(link) > SECTION_LIMIT:
-        body = body[: SECTION_LIMIT - len(link) - 1] + "…"
+    # keeps the link, which opens the full text.
+    if len(body) + len(link) > SECTION_TEXT_LIMIT:
+        body = body[: SECTION_TEXT_LIMIT - len(link) - 1] + "…"
     text = body + link
     blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": text}}]
     if actions:

@@ -8,11 +8,10 @@ from druks.chat.constants import CLICK_ANSWER_MESSAGE
 from druks.chat.enums import ConversationSource
 from druks.chat.models import Conversation, Message
 from druks.chat.service import deliver
-from druks.db import db_session
 from druks.durable import Run
 from druks.models import Base
 from druks.notifications.exceptions import AnswerNotAllowedError, InvalidChoiceError
-from druks.notifications.models import Destination, Notification
+from druks.notifications.models import Notification
 from druks.notifications.services import respond_to_notification
 from druks.testing import configure_app_for_test, make_settings, seed_dbos_status
 from fastapi.testclient import TestClient
@@ -23,18 +22,14 @@ from uuid_utils import uuid7
 _SUBJECT = {"type": "work_item", "id": 1}
 
 
-async def _destination(name: str = "ops") -> Destination:
-    return await Destination.create(db_session(), name=name, kind="slack_channel", channel_id="C1")
-
-
 async def test_unique_token_collision_raises(druks_db):
-    destination = await _destination()
+    account = await Account.get_or_create(druks_db, "op@example.com")
     first = await Notification.create(
-        druks_db, destination_id=destination.id, reason="r", body="b", subject=_SUBJECT
+        druks_db, account_id=account.id, reason="r", body="b", subject=_SUBJECT
     )
 
     duplicate = Notification(
-        destination_id=destination.id,
+        account_id=account.id,
         reason="r",
         body="b",
         subject=_SUBJECT,
@@ -45,38 +40,7 @@ async def test_unique_token_collision_raises(druks_db):
         await druks_db.flush()
 
 
-async def test_list_recent_newest_first_with_limit(druks_db):
-    destination = await _destination()
-    ids = [
-        (
-            await Notification.create(
-                druks_db,
-                destination_id=destination.id,
-                reason="r",
-                body=f"note {i}",
-                subject=_SUBJECT,
-            )
-        ).id
-        for i in range(3)
-    ]
-
-    listed = await Notification.list_recent(druks_db, limit=2)
-    assert [notification.id for notification in listed] == [ids[2], ids[1]]
-
-
-async def test_list_recent_leaves_out_a_person_s_notice(druks_db):
-    destination = await _destination()
-    account = await Account.get_or_create(druks_db, "op@example.com")
-    shared = await Notification.create(
-        druks_db, destination_id=destination.id, reason="r", body="b", subject=_SUBJECT
-    )
-    await Notification.create(druks_db, account_id=account.id, reason="r", body="b")
-
-    listed = await Notification.list_recent(druks_db)
-    assert [notification.id for notification in listed] == [shared.id]
-
-
-async def test_only_its_person_reads_a_person_s_notice(tmp_path, druks_db):
+async def test_only_its_person_reads_a_person_s_notification(tmp_path, druks_db):
     owner = await Account.get_or_create(druks_db, "owner@example.com")
     await Account.get_or_create(druks_db, "other@example.com")
     notification = await Notification.create(druks_db, account_id=owner.id, reason="r", body="b")
@@ -92,27 +56,21 @@ async def test_only_its_person_reads_a_person_s_notice(tmp_path, druks_db):
     assert as_other.status_code == 404
 
 
-async def test_the_inbox_lists_only_the_person_s_own_notices(tmp_path, druks_db):
+async def test_the_list_holds_only_the_person_s_own_notifications(tmp_path, druks_db):
     owner = await Account.get_or_create(druks_db, "owner@example.com")
     other = await Account.get_or_create(druks_db, "other@example.com")
-    destination = await _destination()
     mine = await Notification.create(druks_db, account_id=owner.id, reason="r", body="b")
     await Notification.create(druks_db, account_id=other.id, reason="r", body="b")
-    await Notification.create(
-        druks_db, destination_id=destination.id, reason="r", body="b", subject=_SUBJECT
-    )
     await druks_db.commit()
     settings = make_settings(tmp_path, identity={"mode": "header", "header": "X-ExeDev-Email"})
     app = configure_app_for_test(settings=settings, authenticated=False)
 
     with TestClient(app) as client:
-        response = client.get(
-            "/api/notifications/inbox", headers={"X-ExeDev-Email": "owner@example.com"}
-        )
+        response = client.get("/api/notifications", headers={"X-ExeDev-Email": "owner@example.com"})
     assert [notification["id"] for notification in response.json()] == [mine.id]
 
 
-async def test_opening_the_inbox_marks_only_the_person_s_notices_read(tmp_path, druks_db):
+async def test_a_person_marks_only_their_own_notifications_read(tmp_path, druks_db):
     owner = await Account.get_or_create(druks_db, "owner@example.com")
     other = await Account.get_or_create(druks_db, "other@example.com")
     mine = await Notification.create(druks_db, account_id=owner.id, reason="r", body="b")
@@ -123,7 +81,7 @@ async def test_opening_the_inbox_marks_only_the_person_s_notices_read(tmp_path, 
 
     with TestClient(app) as client:
         response = client.post(
-            "/api/notifications/inbox/read", headers={"X-ExeDev-Email": "owner@example.com"}
+            "/api/notifications/read", headers={"X-ExeDev-Email": "owner@example.com"}
         )
     assert response.status_code == 204
     await druks_db.refresh(mine)
@@ -133,24 +91,23 @@ async def test_opening_the_inbox_marks_only_the_person_s_notices_read(tmp_path, 
 
 
 async def test_endpoints_list_and_get_omit_the_token(tmp_path, druks_db):
-    destination = await _destination()
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
     tokens = []
     for index in range(3):
         notification = await Notification.create(
-            druks_db,
-            destination_id=destination.id,
-            reason="gate.parked",
-            body=f"note {index}",
-            subject=_SUBJECT,
+            druks_db, account_id=owner.id, reason="gate.parked", body=f"note {index}"
         )
         tokens.append(notification.correlation_token)
     failed = await Notification.create(
-        druks_db, destination_id=destination.id, reason="gate.parked", body="bad", subject=_SUBJECT
+        druks_db, account_id=owner.id, reason="gate.parked", body="bad"
     )
     await failed.mark_failed("DeliveryError: HTTPStatusError")
     tokens.append(failed.correlation_token)
+    await druks_db.commit()
+    settings = make_settings(tmp_path, identity={"mode": "header", "header": "X-ExeDev-Email"})
+    app = configure_app_for_test(settings=settings, authenticated=False)
 
-    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+    with TestClient(app, headers={"X-ExeDev-Email": "owner@example.com"}) as client:
         listed = client.get("/api/notifications", params={"limit": 2})
         assert listed.status_code == 200
         items = listed.json()
@@ -170,18 +127,6 @@ async def test_endpoints_list_and_get_omit_the_token(tmp_path, druks_db):
         assert failed.correlation_token not in one.text
 
         assert client.get("/api/notifications/no-such-id").status_code == 404
-
-
-async def test_destinations_route_still_resolves_after_notifications_mount(tmp_path, druks_db):
-    # The route-order pin: the notifications /{notification_id} match must not
-    # swallow /api/notifications/destinations.
-    await _destination(name="alpha")
-
-    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        listed = client.get("/api/notifications/destinations")
-        assert listed.status_code == 200
-        assert [destination["name"] for destination in listed.json()] == ["alpha"]
-        assert listed.json()[0]["channelId"] == "C1"
 
 
 _IN_APP_ASK = {
@@ -207,10 +152,9 @@ async def _parked_notification(druks_db, *, ask=None, run_state="parked"):
     druks_db.add(run)
     await druks_db.flush()
     await seed_dbos_status(druks_db, run.id, run_state)
-    destination = await _destination(name=f"dest-{run.id[-8:]}")
     notification = await Notification.create(
         druks_db,
-        destination_id=destination.id,
+        account_id=run.account_id,
         reason="gate.parked",
         body="review the plan",
         subject={"type": "notification_probe", "id": 1},
@@ -413,9 +357,9 @@ async def test_respond_external_notification_not_answerable(tmp_path, druks_db, 
 
 
 async def test_respond_runless_notification_not_answerable(tmp_path, druks_db, resume_spy):
-    destination = await _destination(name="runless-dest")
+    account = await Account.get_or_create(druks_db, "op@example.com")
     notification = await Notification.create(
-        druks_db, destination_id=destination.id, reason="r", body="b", subject=_SUBJECT
+        druks_db, account_id=account.id, reason="r", body="b", subject=_SUBJECT
     )
     client = TestClient(configure_app_for_test(settings=make_settings(tmp_path)))
 
@@ -440,10 +384,9 @@ async def test_respond_stale_round_409(tmp_path, druks_db, resume_spy):
     druks_db.add(run)
     await druks_db.flush()
     await seed_dbos_status(druks_db, run.id, "parked")
-    destination = await _destination(name="stale-dest")
     notification = await Notification.create(
         druks_db,
-        destination_id=destination.id,
+        account_id=run.account_id,
         reason="gate.parked",
         body="review",
         subject=_SUBJECT,

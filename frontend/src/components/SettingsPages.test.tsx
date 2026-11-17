@@ -344,7 +344,7 @@ function stubFetch(
         const preferences = savedPersonal ?? {
           timezone: 'UTC',
           theme: 'system',
-          noticeChannelId: null,
+          notificationChannelId: null,
           isTagRequired: false,
         }
         if (init?.method === 'PATCH') {
@@ -435,7 +435,7 @@ function stubFetch(
       if (path === '/api/settings') {
         return new Response(JSON.stringify(savedSettings), { status: 200 })
       }
-      if (path === '/api/settings/personal/channels') {
+      if (path === '/api/notifications/channels') {
         return new Response(JSON.stringify([{ id: 'C1', name: 'alerts' }]), { status: 200 })
       }
       return new Response('{}', { status: 404 })
@@ -1036,7 +1036,7 @@ describe('settings resource and keyboard behavior', () => {
     expect(update).toHaveBeenCalledTimes(1)
     expect(update).toHaveBeenCalledWith({ timezone: 'Europe/Madrid' })
     await act(async () => {
-      finish({ timezone: 'Europe/Madrid', theme: 'system', noticeChannelId: null, isTagRequired: false } as PersonalSettings)
+      finish({ timezone: 'Europe/Madrid', theme: 'system', notificationChannelId: null, isTagRequired: false } as PersonalSettings)
     })
     expect(
       (screen.getByRole('button', { name: 'Save changes' }) as HTMLButtonElement).disabled,
@@ -1740,15 +1740,15 @@ it('saves a personal timezone and keeps execution controls in Agents', async () 
 })
 
 
-it('saves a Slack channel as where the notices go', async () => {
+it('saves a Slack channel as where the notifications go', async () => {
   stubFetch()
   renderSettings('/settings/personal')
-  const notices = await screen.findByRole('combobox', { name: 'Notices' })
-  expect((notices as HTMLSelectElement).value).toBe('')
+  const notifications = await screen.findByRole('combobox', { name: 'Notifications' })
+  expect((notifications as HTMLSelectElement).value).toBe('')
   await screen.findByRole('option', { name: '#alerts' })
-  fireEvent.change(notices, { target: { value: 'C1' } })
+  fireEvent.change(notifications, { target: { value: 'C1' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
-  await waitFor(() => expect(personalPatched).toEqual([{ noticeChannelId: 'C1' }]))
+  await waitFor(() => expect(personalPatched).toEqual([{ notificationChannelId: 'C1' }]))
 })
 
 it('focuses a personal field after preferences finish loading', async () => {
@@ -1759,7 +1759,7 @@ it('focuses a personal field after preferences finish loading', async () => {
   renderSettings('/settings/personal?field=timezone')
   await screen.findByRole('heading', { name: 'Preferences' })
   expect(screen.queryByRole('combobox', { name: 'Timezone' })).toBeNull()
-  await act(async () => { finish({ timezone: 'UTC', theme: 'system', noticeChannelId: null, isTagRequired: false }) })
+  await act(async () => { finish({ timezone: 'UTC', theme: 'system', notificationChannelId: null, isTagRequired: false }) })
   await waitFor(() => expect(document.activeElement?.id).toBe('personal-timezone'))
 })
 

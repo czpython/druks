@@ -118,10 +118,10 @@ async def test_updated_at_folds_in_the_dbos_write(druks_db):
 def _inline_steps():
     # Run each durable step inline — these tests exercise _emit_run_event's step
     # split and _execute_run's exception routing, not DBOS's checkpointing.
-    async def run_inline(_options, fn):
-        return await fn()
+    async def run_inline(_options, fn, *args):
+        return await fn(*args)
 
-    # A failed run with no chat queues its owner's notice.
+    # A failed run with no chat queues its owner's notification.
     with (
         mock.patch("druks.workflows.DBOS.run_step_async", side_effect=run_inline),
         mock.patch("druks.workflows.DBOS.enqueue_workflow_async"),

@@ -18,7 +18,7 @@ import type {
   AppsSettingsResponse,
   Harness,
   Identity,
-  NoticeChannel,
+  NotificationChannel,
   NotificationResponse,
   Pat,
   PersonalSettings,
@@ -316,7 +316,6 @@ export const api = {
   getPersonalSettings: () => getJSON<PersonalSettings>('/api/settings/personal'),
   updatePersonalSettings: (body: UpdatePersonalSettingsRequest) =>
     patchJSON<PersonalSettings>('/api/settings/personal', body),
-  noticeChannels: () => getJSON<NoticeChannel[]>('/api/settings/personal/channels'),
   harnesses: () => getJSON<Harness[]>('/api/settings/harnesses'),
   agents: () => getJSON<AgentsResponse>('/api/agents'),
   accounts: () => getJSON<Account[]>('/api/auth/accounts'),
@@ -411,8 +410,10 @@ export const api = {
     getJSON<AppSettingChoices>(`/api/settings/apps/${encodeURIComponent(name)}/choices`),
   updateAppSettings: (body: UpdateAppsSettingsRequest) =>
     patchJSON<AppsSettingsResponse>('/api/settings/apps', body),
-  inbox: () => getJSON<NotificationResponse[]>('/api/notifications/inbox'),
-  markInboxRead: () => postNoContent('/api/notifications/inbox/read', undefined),
+  listNotifications: () => getJSON<NotificationResponse[]>('/api/notifications'),
+  listNotificationChannels: () =>
+    getJSON<NotificationChannel[]>('/api/notifications/channels'),
+  markNotificationsRead: () => postNoContent('/api/notifications/read', undefined),
   usage: () => getJSON<UsageResponse>('/api/usage'),
   refreshUsage: () => postJSON<void>('/api/usage/refresh', {}),
   usageHistory: () => getJSON<UsageHistoryResponse>('/api/usage/history'),

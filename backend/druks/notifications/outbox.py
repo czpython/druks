@@ -2,22 +2,24 @@ import logging
 from datetime import datetime
 from functools import partial
 
-from dbos import DBOS, StepOptions
+from dbos import DBOS, EnqueueOptions, StepOptions
 from dbos._error import DBOSMaxStepRetriesExceeded
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.models import Account
 from druks.chat.models import Conversation
 from druks.core.services import Slack
-from druks.durable.engine import step_session
+from druks.durable.constants import NOTIFICATIONS_QUEUE
+from druks.durable.engine import enqueue_in_transaction, step_session
 from druks.notifications import exceptions
 from druks.notifications.constants import CLOSE_WORKFLOW, CLOSED_MESSAGE, SEND_WORKFLOW
 from druks.notifications.datastructures import NotificationState
 from druks.notifications.delivery import deliver
-from druks.notifications.models import Destination, Notification
+from druks.notifications.models import Notification
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.services.exceptions import ServiceNotConnectedError
+from druks.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -52,27 +54,11 @@ async def send_notification(notification_id: str) -> None:
                 )
         else:
             async with step_session() as session:
-                fallback = ""
-                if notification.account_id:
-                    # A person's notice goes to the channel they chose. Without one, it goes
-                    # to their Slack user, which opens the bot's DM. The DM also takes a
-                    # notice that the chosen channel refuses. A person with neither keeps
-                    # the notice stored.
-                    account = await session.get(Account, notification.account_id)
-                    sign_ins = await VaultSecret.list_account_connections(
-                        session, Audience.service(Slack.slug), notification.account_id
-                    )
-                    direct_message = sign_ins[0].identity["subject"] if sign_ins else ""
-                    channel = account.notice_channel_id or direct_message
-                    if not channel:
-                        return
-                    if channel != direct_message:
-                        fallback = direct_message
-                else:
-                    destination = await session.get(Destination, notification.destination_id)
-                    if not destination.is_enabled:
-                        raise exceptions.DisabledDestinationError(destination.name)
-                    channel = destination.channel_id
+                channels = await list_account_channels(session, notification.account_id)
+                if not channels:
+                    # The bell has the notification, so it is delivered with no Slack message.
+                    await (await session.get(Notification, notification_id)).mark_delivered()
+                    return
                 client = await Slack.get_client()
             post = partial(
                 deliver,
@@ -83,11 +69,12 @@ async def send_notification(notification_id: str) -> None:
                 deep_link=notification.deep_link,
             )
             try:
-                posted = await post(channel)
+                posted = await post(channels[0])
             except exceptions.ChannelUnavailableError:
-                if not fallback:
+                # The next channel takes a notification that the first one refuses.
+                if not channels[1:]:
                     raise
-                posted = await post(fallback)
+                posted = await post(channels[1])
             message_id = f"{posted['channel']}:{posted['ts']}"
         # Kept so that Druks can close the message when its question ends without a click.
         async with step_session() as session:
@@ -117,6 +104,42 @@ async def send_notification(notification_id: str) -> None:
         await DBOS.run_step_async(StepOptions(name="notifications.send.mark_failed"), _mark_failed)
 
 
+async def notify_account(
+    session: AsyncSession, account_id: str, *, reason: str, body: str, path: str
+) -> None:
+    """Make a notification for the account and queue its send, in the session's
+    transaction. The notification links to the dashboard page at ``path``."""
+    endpoint = get_settings().urls.endpoint.rstrip("/")
+    notification = await Notification.create(
+        session,
+        account_id=account_id,
+        reason=reason,
+        body=body,
+        deep_link=f"{endpoint}{path}" if endpoint else None,
+    )
+    options: EnqueueOptions = {
+        "workflow_name": SEND_WORKFLOW,
+        "queue_name": NOTIFICATIONS_QUEUE,
+        "workflow_id": f"{SEND_WORKFLOW}:{notification.id}",
+    }
+    await enqueue_in_transaction(session, options, notification.id)
+
+
+async def list_account_channels(session: AsyncSession, account_id: str) -> list[str]:
+    """Where the bot posts an account's notification, in order: the channel that the
+    person chose, then their Slack user, which opens the bot's DM."""
+    account = await session.get(Account, account_id)
+    sign_ins = await VaultSecret.list_account_connections(
+        session, Audience.service(Slack.slug), account_id
+    )
+    channels = []
+    if account.notification_channel_id:
+        channels.append(account.notification_channel_id)
+    if sign_ins:
+        channels.append(sign_ins[0].identity["subject"])
+    return channels
+
+
 @DBOS.workflow(name=CLOSE_WORKFLOW)
 async def close_notifications(run_id: str, parked_at: str) -> None:
     # The claims make a rerun redo only the messages still open, so the body needs no step.
@@ -134,7 +157,7 @@ async def close_notifications(run_id: str, parked_at: str) -> None:
 
 async def remove_buttons(session: AsyncSession, notification: Notification) -> None:
     """Take the buttons off the notification's posted message, and say that its question
-    is closed. A conversation's channel edits its own message. A destination's message
+    is closed. A conversation's channel edits its own message. An account's message
     goes through Slack, as its post did."""
     if notification.conversation_id:
         conversation = await session.get(Conversation, notification.conversation_id)

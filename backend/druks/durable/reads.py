@@ -170,13 +170,13 @@ async def list_active_runs_for_conversation(
 
 async def _timeline(runs: list[Run]) -> list[RunResponse]:
     ordered = sorted(runs, key=lambda run: (run.created_at, run.id))
-    return [
-        RunResponse.from_run(
-            run,
-            input_request=await run.get_ask() if run.input_request else None,
-        )
-        for run in ordered
-    ]
+    return [await get_run_response(run) for run in ordered]
+
+
+async def get_run_response(run: Run) -> RunResponse:
+    return RunResponse.from_run(
+        run, input_request=await run.get_ask() if run.input_request else None
+    )
 
 
 async def _status(driving_run: Run | None) -> SubjectStatus:

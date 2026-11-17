@@ -54,6 +54,15 @@ class SlackClient(AsyncWebClient):
             messages.extend(page["messages"])
         return list(messages)
 
+    async def list_member_channels(self) -> list[dict]:
+        """The public and private channels that this token's user is a member of."""
+        channels = []
+        async for page in await self.users_conversations(
+            types="public_channel,private_channel", exclude_archived=True, limit=1000
+        ):
+            channels.extend(page["channels"])
+        return channels
+
     async def get_user_name(self, user_id: str) -> str:
         """A user's name, kept in Redis for a day."""
         key = f"slack:user:{user_id}:name"

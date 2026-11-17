@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 
 import pytest
-from conftest import bind_ambient_session, install_service
 from druks.core.apis.slack import SlackClient
 from druks.notifications.buttons import decode_button, encode_button
 from druks.notifications.delivery import deliver
@@ -10,24 +9,9 @@ from druks.notifications.exceptions import (
     DeliveryError,
     MalformedButtonError,
 )
-from druks.notifications.models import Destination
-from druks.testing import asgi_client, configure_app_for_test, make_settings
 from slack_sdk.errors import SlackApiError
 
-_BOT_TOKEN = "xoxb-destinations"
-
-
-@pytest.fixture
-async def installed_slack(druks_db):
-    bind_ambient_session(druks_db)
-    row = await install_service(
-        "slack",
-        access_token=_BOT_TOKEN,
-        identity={"client_id": "slack-client"},
-        secrets={"client_secret": "slack-secret"},
-    )
-    await druks_db.commit()
-    return row
+_BOT_TOKEN = "xoxb-delivery"
 
 
 @pytest.fixture
@@ -44,136 +28,6 @@ def slack(monkeypatch):
 
     monkeypatch.setattr(SlackClient, "api_call", api_call)
     return fake
-
-
-async def test_create_get_list_delete_round_trip(druks_db):
-    beta = await Destination.create(druks_db, name="beta", kind="slack_channel", channel_id="C1")
-    await Destination.create(druks_db, name="alpha", kind="slack_channel", channel_id="C2")
-
-    assert (await druks_db.get(Destination, beta.id)).id == beta.id
-    assert (await Destination.get_for_name(druks_db, "alpha")).channel_id == "C2"
-    assert await druks_db.get(Destination, "no-such-id") is None
-    assert await Destination.get_for_name(druks_db, "no-such-name") is None
-    assert [destination.name for destination in await Destination.list_all(druks_db)] == [
-        "alpha",
-        "beta",
-    ]
-    assert beta.is_enabled is True
-
-    await beta.delete()
-    assert await Destination.get_for_name(druks_db, "beta") is None
-    assert [destination.name for destination in await Destination.list_all(druks_db)] == ["alpha"]
-
-
-def _create_body(**overrides) -> dict:
-    body = {"name": "ops", "kind": "slack_channel", "channelId": "C1"}
-    body.update(overrides)
-    return body
-
-
-async def test_routes_create_posts_a_first_message_with_the_bot_token(
-    tmp_path, installed_slack, slack
-):
-    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        created = await client.post("/api/notifications/destinations", json=_create_body())
-
-    assert created.status_code == 200
-    assert created.json() == {
-        "id": created.json()["id"],
-        "name": "ops",
-        "kind": "slack_channel",
-        "channelId": "C1",
-        "isEnabled": True,
-    }
-    (post,) = slack.posts
-    assert (post["bot_token"], post["method"], post["channel"]) == (
-        _BOT_TOKEN,
-        "chat.postMessage",
-        "C1",
-    )
-
-
-async def test_routes_refuse_a_channel_the_bot_cannot_post_to(tmp_path, installed_slack, slack):
-    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        for error, fix in (
-            ("not_in_channel", "Invite the bot to the channel"),
-            ("channel_not_found", "Check the channel ID"),
-        ):
-            slack.error = error
-            created = await client.post("/api/notifications/destinations", json=_create_body())
-            assert created.status_code == 422
-            assert fix in created.json()["detail"]
-        assert not (await client.get("/api/notifications/destinations")).json()
-
-
-async def test_routes_refuse_a_destination_without_the_slack_card(tmp_path, druks_db, slack):
-    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        created = await client.post("/api/notifications/destinations", json=_create_body())
-
-        assert created.status_code == 409
-        assert "slack is not connected" in created.json()["detail"]
-        assert not (await client.get("/api/notifications/destinations")).json()
-    assert slack.posts == []
-
-
-async def test_routes_reject_duplicate_name(tmp_path, installed_slack, slack):
-    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        first = await client.post("/api/notifications/destinations", json=_create_body())
-        assert first.status_code == 200
-
-        duplicate = await client.post("/api/notifications/destinations", json=_create_body())
-        assert duplicate.status_code == 409
-
-
-async def test_routes_reject_blank_name(tmp_path, druks_db):
-    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        for blank in ("", "   "):
-            created = await client.post(
-                "/api/notifications/destinations", json=_create_body(name=blank)
-            )
-            assert created.status_code == 422
-        assert not (await client.get("/api/notifications/destinations")).json()
-
-
-async def test_routes_toggle_enabled(tmp_path, installed_slack, slack):
-    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        destination_id = (
-            await client.post("/api/notifications/destinations", json=_create_body())
-        ).json()["id"]
-
-        toggled = await client.patch(
-            f"/api/notifications/destinations/{destination_id}", json={"is_enabled": False}
-        )
-        assert toggled.status_code == 200
-        assert toggled.json()["isEnabled"] is False
-
-        listed = (await client.get("/api/notifications/destinations")).json()
-        assert listed[0]["isEnabled"] is False
-
-        back_on = await client.patch(
-            f"/api/notifications/destinations/{destination_id}", json={"is_enabled": True}
-        )
-        assert back_on.json()["isEnabled"] is True
-
-        missing = await client.patch(
-            "/api/notifications/destinations/no-such-id", json={"is_enabled": False}
-        )
-        assert missing.status_code == 404
-
-
-async def test_routes_delete(tmp_path, installed_slack, slack):
-    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        destination_id = (
-            await client.post("/api/notifications/destinations", json=_create_body())
-        ).json()["id"]
-
-        assert (
-            await client.delete(f"/api/notifications/destinations/{destination_id}")
-        ).status_code == 204
-        assert not (await client.get("/api/notifications/destinations")).json()
-        assert (
-            await client.delete(f"/api/notifications/destinations/{destination_id}")
-        ).status_code == 404
 
 
 async def test_plain_delivery_posts_the_body_and_the_link(slack):

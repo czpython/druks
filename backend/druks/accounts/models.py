@@ -48,8 +48,8 @@ class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
     theme: Mapped[str] = mapped_column(
         String, default=Theme.SYSTEM, server_default=text("'system'")
     )
-    # The Slack channel that gets this account's notices. None sends them by DM.
-    notice_channel_id: Mapped[str | None] = mapped_column(String, default=None)
+    # The channel that gets this account's notifications. None sends them by direct message.
+    notification_channel_id: Mapped[str | None] = mapped_column(String, default=None)
     is_tag_required: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 

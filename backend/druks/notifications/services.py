@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from druks.chat.constants import CLICK_ANSWER_MESSAGE
 from druks.chat.models import Conversation
 from druks.chat.service import deliver
+from druks.core.services import Slack
 from druks.durable.enums import RunState
 from druks.durable.models import Run
 from druks.notifications.exceptions import (
@@ -16,6 +17,13 @@ from druks.notifications.exceptions import (
     UnknownTokenError,
 )
 from druks.notifications.models import Notification
+
+
+async def list_notification_channels() -> list[dict]:
+    """The channels a person can choose for their notifications, by name. The bot posts only
+    in a channel that it is a member of."""
+    client = await Slack.get_client()
+    return sorted(await client.list_member_channels(), key=lambda channel: channel["name"])
 
 
 async def get_offered_control(ask: dict[str, Any], control: str) -> dict[str, Any]:

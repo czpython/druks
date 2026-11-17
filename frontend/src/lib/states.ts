@@ -1,4 +1,7 @@
-import type { RunState } from '../api/types'
+import type { RunState, RunSummary } from '../api/types'
+
+export const isActiveRun = (run: RunSummary) =>
+  run.state === 'running' || run.state === 'parked' || run.state === 'scheduled'
 
 interface StateStyle {
   color: string

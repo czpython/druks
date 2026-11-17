@@ -115,9 +115,9 @@ export function SettingsPages({
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: api.getSettings })
   const personalQuery = useQuery({ queryKey: ['personalSettings'], queryFn: api.getPersonalSettings })
   // Without a Slack connection the list fails, and the choice offers the direct message only.
-  const noticeChannelsQuery = useQuery({
-    queryKey: ['noticeChannels'],
-    queryFn: api.noticeChannels,
+  const notificationChannelsQuery = useQuery({
+    queryKey: ['notificationChannels'],
+    queryFn: api.listNotificationChannels,
     enabled: section === 'personal',
     retry: false,
   })
@@ -184,10 +184,10 @@ export function SettingsPages({
   const personalTimezone = personalEdits.timezone ?? personalQuery.data?.timezone ?? 'UTC'
   const { theme, previewTheme } = useThemePreference()
   const personalTheme = personalEdits.theme ?? theme
-  const personalNoticeChannelId =
-    'noticeChannelId' in personalEdits
-      ? (personalEdits.noticeChannelId ?? null)
-      : (personalQuery.data?.noticeChannelId ?? null)
+  const personalNotificationChannelId =
+    'notificationChannelId' in personalEdits
+      ? (personalEdits.notificationChannelId ?? null)
+      : (personalQuery.data?.notificationChannelId ?? null)
   const personalChanges = Object.fromEntries(
     Object.entries(personalEdits).filter(([field, value]) =>
       value !== personalQuery.data?.[field as keyof UpdatePersonalSettingsRequest],
@@ -713,11 +713,11 @@ export function SettingsPages({
                     setPersonalEdits((current) => ({ ...current, theme: value }))
                     previewTheme(value)
                   }}
-                  noticeChannelId={personalNoticeChannelId}
-                  setNoticeChannelId={(value) =>
-                    setPersonalEdits((current) => ({ ...current, noticeChannelId: value }))
+                  notificationChannelId={personalNotificationChannelId}
+                  setNotificationChannelId={(value) =>
+                    setPersonalEdits((current) => ({ ...current, notificationChannelId: value }))
                   }
-                  noticeChannels={noticeChannelsQuery.data ?? []}
+                  notificationChannels={notificationChannelsQuery.data ?? []}
                   timezones={timezones}
                   clock={clock}
                   busy={saving}

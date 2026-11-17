@@ -451,6 +451,7 @@ class Run(Base):
         *,
         account_id: str | None = None,
         conversation_id: str | None = None,
+        deep_link: str | None = None,
     ) -> str:
         # Create the notification for the round this run just parked on — the
         # caller supplies the run's subject and enqueues delivery. run_id +
@@ -467,7 +468,7 @@ class Run(Base):
             actions=rendered["actions"],
             run_id=self.id,
             run_parked_at=self.input_requested_at,
-            deep_link=rendered["deep_link"],
+            deep_link=rendered["deep_link"] or deep_link,
         )
         return notification.id
 

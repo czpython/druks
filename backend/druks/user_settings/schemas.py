@@ -35,13 +35,8 @@ class PersonalSettingsResponse(Schema):
 
     timezone: str
     theme: Theme
-    notice_channel_id: str | None
+    notification_channel_id: str | None
     is_tag_required: bool
-
-
-class NoticeChannelResponse(Schema):
-    id: str
-    name: str
 
 
 class SettingsResponse(Schema):
@@ -62,8 +57,10 @@ class UpdatePersonalSettingsRequest(BaseModel):
 
     timezone: Annotated[str, AfterValidator(validate_timezone)] | None = None
     theme: Theme | None = None
-    # Absent leaves the channel unchanged. Null sends notices by DM.
-    notice_channel_id: str | None = Field(default=None, validation_alias="noticeChannelId")
+    # Absent leaves the channel unchanged. Null sends notifications by direct message.
+    notification_channel_id: str | None = Field(
+        default=None, validation_alias="notificationChannelId"
+    )
     is_tag_required: bool | None = Field(default=None, validation_alias="isTagRequired")
 
 

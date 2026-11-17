@@ -13,18 +13,14 @@ from typing import ClassVar
 from urllib.parse import urlencode
 
 import httpx
-from dbos import EnqueueOptions
 from drukbox_sdk import Secret
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.core.utils.time import ensure_utc
-from druks.durable.constants import NOTIFICATIONS_QUEUE
-from druks.durable.engine import enqueue_in_transaction
 from druks.exceptions import LockHeldError
 from druks.locks import lock
-from druks.notifications.constants import SEND_WORKFLOW
-from druks.notifications.models import Notification
+from druks.notifications.outbox import notify_account
 from druks.redis import get_client
 from druks.sandbox import gate
 from druks.sandbox.client import sandbox_client
@@ -37,7 +33,11 @@ from druks.settings import get_settings
 from druks.usage.models import UsageScrape
 
 from . import exceptions
-from .constants import CONNECT_PENDING_PREFIX, REFRESH_LOCK_PREFIX
+from .constants import (
+    CONNECT_PENDING_PREFIX,
+    REFRESH_LOCK_PREFIX,
+    SUBSCRIPTION_DISCONNECTED_MESSAGE,
+)
 from .datastructures import (
     CodexToken,
     CompletedConnect,
@@ -354,24 +354,14 @@ class Provider:
                     # subscription so the provider reads as disconnected — the
                     # UI shows Reconnect and the next tick has no row to hammer.
                     await row.revoke("invalid_grant")
-                    # The notice commits with the revoke, so a rollback cannot lose it.
-                    endpoint = get_settings().urls.endpoint.rstrip("/")
-                    notification = await Notification.create(
+                    # The notification commits with the revoke, so neither goes alone.
+                    await notify_account(
                         session,
-                        account_id=row.account_id,
+                        row.account_id,
                         reason="subscription.disconnected",
-                        body=(
-                            f"Your {cls.label} subscription is disconnected. "
-                            "Reconnect it in Settings → Providers."
-                        ),
-                        deep_link=f"{endpoint}/settings/providers" if endpoint else None,
+                        body=SUBSCRIPTION_DISCONNECTED_MESSAGE.format(provider=cls.label),
+                        path="/settings/providers",
                     )
-                    options: EnqueueOptions = {
-                        "workflow_name": SEND_WORKFLOW,
-                        "queue_name": NOTIFICATIONS_QUEUE,
-                        "workflow_id": f"{SEND_WORKFLOW}:{notification.id}",
-                    }
-                    await enqueue_in_transaction(session, options, notification.id)
                     await session.commit()
                     logger.warning(
                         "%s subscription %s auto-disconnected after invalid_grant; "

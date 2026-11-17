@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
@@ -11,7 +11,7 @@ import { RunPage } from './RunPage'
 
 vi.mock('../api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/client')>()),
-  api: { getRun: vi.fn() },
+  api: { getRun: vi.fn(), retryRun: vi.fn() },
 }))
 
 registerAppUI({
@@ -56,6 +56,14 @@ it('shows a run about no work item with why it failed', async () => {
   mount()
   expect(await screen.findByText('the disk is full')).toBeTruthy()
   expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy()
+})
+
+it('opens the new run after a retry', async () => {
+  getRun.mockResolvedValue(failed)
+  vi.mocked(api.retryRun).mockResolvedValue({ run: 'run-2' })
+  const location = mount()
+  fireEvent.click(await screen.findByRole('button', { name: /retry/i }))
+  await waitFor(() => expect(location.history.at(-1)).toBe('/runs/run-2'))
 })
 
 it('says so when the run does not exist', async () => {

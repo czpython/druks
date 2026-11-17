@@ -29,12 +29,6 @@ class StaleRoundError(NotificationError):
         super().__init__("The run has moved past the round this notification was sent for.")
 
 
-class DisabledDestinationError(NotificationError):
-    def __init__(self, name: str):
-        super().__init__(f"Destination {name!r} is disabled; nothing was sent.")
-        self.name = name
-
-
 class DeliveryError(NotificationError):
     # The message lands in logs and stored failure reasons, so it carries only a
     # short reason.
@@ -43,8 +37,8 @@ class DeliveryError(NotificationError):
 
 
 class ChannelUnavailableError(DeliveryError):
-    """Slack refuses every post to the channel until someone fixes it in Slack: the bot is
-    not in the channel, or the channel is archived or gone."""
+    """The channel takes no post until a person fixes it: the bot is not in the channel,
+    or the channel is archived or gone."""
 
 
 class MalformedButtonError(NotificationError):

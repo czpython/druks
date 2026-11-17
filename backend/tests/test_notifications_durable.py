@@ -27,7 +27,7 @@ from druks.notifications.exceptions import (
     DeliveryError,
     NotificationError,
 )
-from druks.notifications.models import Destination, Notification
+from druks.notifications.models import Notification
 from druks.notifications.outbox import send_notification
 from druks.notifications.services import respond_to_notification
 from druks.secrets.datastructures import Audience
@@ -305,12 +305,13 @@ async def _install_slack():
         )
 
 
-async def _seed_destination(rt, name):
+async def _seed_person(rt, name):
+    # The module shares one database, so each test names its own person.
     async def create():
         await _install_slack()
-        return await Destination.create(
-            db_session(), name=name, kind="slack_channel", channel_id="C1"
-        )
+        account = await Account.get_or_create(db_session(), f"{name}@example.com")
+        await account.update_preferences(notification_channel_id="C1")
+        return account
 
     return await _seed(rt, create)
 
@@ -319,10 +320,10 @@ async def _deliver(rt, *, to, subject=None, reason="r", body="b", actions=None):
     # The create-seam path a producer uses (the gate-park producer's shape):
     # persist the row committed, then enqueue the outbox — no notify() hatch.
     async def create():
-        destination = await Destination.get_for_name(db_session(), to)
+        account = await Account.get_or_create(db_session(), f"{to}@example.com")
         notification = await Notification.create(
             db_session(),
-            destination_id=destination.id,
+            account_id=account.id,
             reason=reason,
             body=body,
             subject=subject or {"type": "notification_probe", "id": 1},
@@ -362,7 +363,7 @@ async def _wait_for(rt, notification_id, predicate, timeout=30.0):
 
 
 async def test_outbox_delivers_with_the_bot_token_actions_and_token(rt, deliver_spy):
-    await _seed_destination(rt, "happy")
+    await _seed_person(rt, "happy")
 
     notification_id = await _deliver(
         rt, to="happy", reason="ops.alert", body="hello", actions=[{"id": "ok", "label": "OK"}]
@@ -381,7 +382,7 @@ async def test_outbox_delivers_with_the_bot_token_actions_and_token(rt, deliver_
 
 
 async def test_what_a_click_starts_reaches_slack_with_the_bot_token(rt, deliver_spy):
-    await _seed_destination(rt, "clicked")
+    await _seed_person(rt, "clicked")
     notification_id = await _deliver(rt, to="clicked", body="review the plan")
     await _wait_for(rt, notification_id, lambda s: s["state"] == "delivered")
 
@@ -413,7 +414,7 @@ async def test_what_a_click_starts_reaches_slack_with_the_bot_token(rt, deliver_
 
 async def test_transient_failure_retries_to_delivered_and_touches_no_run(rt, deliver_spy):
     deliver_spy.failures_remaining = 2
-    await _seed_destination(rt, "flaky")
+    await _seed_person(rt, "flaky")
 
     notification_id = await _deliver(rt, to="flaky")
 
@@ -432,7 +433,7 @@ async def test_terminal_failure_marks_failed_sanitized_and_reads_back(
     deliver_spy.error = DeliveryError("is_archived")
     # Two attempts instead of five: same terminal path, fraction of the backoff.
     monkeypatch.setattr(outbox, "_SEND_RETRIES", {"retries_allowed": True, "max_attempts": 2})
-    await _seed_destination(rt, "doomed")
+    await _seed_person(rt, "doomed")
 
     notification_id = await _deliver(rt, to="doomed")
 
@@ -441,8 +442,11 @@ async def test_terminal_failure_marks_failed_sanitized_and_reads_back(
     assert len(deliver_spy.calls) == 2
     assert done["last_error"] == "Delivery failed: is_archived."
 
-    client = TestClient(configure_app_for_test(settings=make_settings(tmp_path), engine=rt.engine))
-    shown = client.get(f"/api/notifications/{notification_id}")
+    settings = make_settings(tmp_path, identity={"mode": "header", "header": "X-ExeDev-Email"})
+    app = configure_app_for_test(settings=settings, engine=rt.engine, authenticated=False)
+    shown = TestClient(app).get(
+        f"/api/notifications/{notification_id}", headers={"X-ExeDev-Email": "doomed@example.com"}
+    )
     assert shown.status_code == 200
     assert shown.json()["state"] == "failed"
     assert shown.json()["attempts"] == 2
@@ -455,7 +459,7 @@ async def test_unexpected_error_reduces_to_class_name(rt, deliver_spy, monkeypat
     deliver_spy.always_fail = True
     deliver_spy.error = RuntimeError(f"boom at {_BOT_TOKEN}")
     monkeypatch.setattr(outbox, "_SEND_RETRIES", {"retries_allowed": True, "max_attempts": 2})
-    await _seed_destination(rt, "leaky")
+    await _seed_person(rt, "leaky")
 
     notification_id = await _deliver(rt, to="leaky")
 
@@ -467,7 +471,7 @@ async def test_a_send_without_slack_records_that_slack_is_not_connected(
     rt, deliver_spy, monkeypatch
 ):
     monkeypatch.setattr(outbox, "_SEND_RETRIES", {"retries_allowed": True, "max_attempts": 2})
-    await _seed_destination(rt, "unplugged")
+    await _seed_person(rt, "unplugged")
 
     async def revoke_grant():
         grant = await Slack.get_grant()
@@ -482,24 +486,7 @@ async def test_a_send_without_slack_records_that_slack_is_not_connected(
     assert deliver_spy.calls == []
 
 
-async def test_a_disabled_destination_sends_nothing(rt, deliver_spy, monkeypatch):
-    monkeypatch.setattr(outbox, "_SEND_RETRIES", {"retries_allowed": True, "max_attempts": 2})
-    destination = await _seed_destination(rt, "muted")
-
-    async def disable():
-        (await db_session().get(Destination, destination.id)).is_enabled = False
-
-    await _seed(rt, disable)
-
-    notification_id = await _deliver(rt, to="muted")
-
-    done = await _wait_for(rt, notification_id, lambda s: s["state"] == "failed")
-    assert "'muted' is disabled" in done["last_error"]
-    assert done["attempts"] == 2
-    assert deliver_spy.calls == []
-
-
-async def _notify_person(rt, email, *, slack_user="", notice_channel=""):
+async def _notify_person(rt, email, *, slack_user="", notification_channel=""):
     # The module shares one database, so each test names its own person.
     async def create():
         await _install_slack()
@@ -513,8 +500,8 @@ async def _notify_person(rt, email, *, slack_user="", notice_channel=""):
                 scopes=["users:read"],
                 identity={"authority": "https://slack.com/T1", "subject": slack_user},
             )
-        if notice_channel:
-            await account.update_preferences(notice_channel_id=notice_channel)
+        if notification_channel:
+            await account.update_preferences(notification_channel_id=notification_channel)
         notification = await Notification.create(
             db_session(),
             account_id=account.id,
@@ -529,7 +516,7 @@ async def _notify_person(rt, email, *, slack_user="", notice_channel=""):
     return notification_id
 
 
-async def test_a_person_s_notice_goes_to_their_slack_user(rt, deliver_spy):
+async def test_a_person_s_notification_goes_to_their_slack_user(rt, deliver_spy):
     notification_id = await _notify_person(rt, "dm@example.com", slack_user="U42")
 
     done = await _wait_for(rt, notification_id, lambda s: s["state"] == "delivered")
@@ -539,9 +526,9 @@ async def test_a_person_s_notice_goes_to_their_slack_user(rt, deliver_spy):
     assert done["message_id"] == "U42:1700000000.000001"
 
 
-async def test_a_person_s_notice_goes_to_the_channel_they_chose(rt, deliver_spy):
+async def test_a_person_s_notification_goes_to_the_channel_they_chose(rt, deliver_spy):
     notification_id = await _notify_person(
-        rt, "channel@example.com", slack_user="U43", notice_channel="C7"
+        rt, "channel@example.com", slack_user="U43", notification_channel="C7"
     )
 
     await _wait_for(rt, notification_id, lambda s: s["state"] == "delivered")
@@ -549,11 +536,11 @@ async def test_a_person_s_notice_goes_to_the_channel_they_chose(rt, deliver_spy)
     assert call["channel"] == "C7"
 
 
-async def test_a_channel_that_refuses_the_bot_sends_the_notice_by_dm(rt, deliver_spy):
+async def test_a_channel_that_refuses_the_bot_sends_the_notification_by_dm(rt, deliver_spy):
     deliver_spy.failures_remaining = 1
     deliver_spy.error = ChannelUnavailableError("the bot is not in channel C8")
     notification_id = await _notify_person(
-        rt, "removed@example.com", slack_user="U44", notice_channel="C8"
+        rt, "removed@example.com", slack_user="U44", notification_channel="C8"
     )
 
     done = await _wait_for(rt, notification_id, lambda s: s["state"] == "delivered")
@@ -561,16 +548,16 @@ async def test_a_channel_that_refuses_the_bot_sends_the_notice_by_dm(rt, deliver
     assert done["message_id"].startswith("U44:")
 
 
-async def test_a_person_without_a_slack_sign_in_keeps_the_notice_stored(rt, deliver_spy):
+async def test_a_notification_with_no_channel_is_delivered_with_no_message(rt, deliver_spy):
     notification_id = await _notify_person(rt, "no-slack@example.com")
 
-    done = await _wait_for(rt, notification_id, lambda s: s["attempts"] == 1)
-    assert done["state"] == "pending"
+    done = await _wait_for(rt, notification_id, lambda s: s["state"] == "delivered")
+    assert done["attempts"] == 1
     assert deliver_spy.calls == []
 
 
 async def test_rerun_on_delivered_notification_skips_the_send(rt, deliver_spy):
-    await _seed_destination(rt, "once")
+    await _seed_person(rt, "once")
     notification_id = await _deliver(rt, to="once")
     await _wait_for(rt, notification_id, lambda s: s["state"] == "delivered")
     assert len(deliver_spy.calls) == 1
@@ -584,12 +571,12 @@ async def test_rerun_on_delivered_notification_skips_the_send(rt, deliver_spy):
 
 
 async def test_create_seam_plus_direct_enqueue_delivers(rt, deliver_spy):
-    destination = await _seed_destination(rt, "seam")
+    account = await _seed_person(rt, "seam")
 
     async def create():
         return await Notification.create(
             db_session(),
-            destination_id=destination.id,
+            account_id=account.id,
             reason="r",
             body="b",
             subject={"type": "probe", "id": 1},
@@ -609,11 +596,11 @@ async def test_create_seam_plus_direct_enqueue_delivers(rt, deliver_spy):
     assert len(deliver_spy.calls) == 1
 
 
-async def _set_notice_channel(rt, channel_id):
+async def _set_notification_channel(rt, channel_id):
     async def update():
         await _install_slack()
         account = await Account.get_default(db_session())
-        await account.update_preferences(notice_channel_id=channel_id)
+        await account.update_preferences(notification_channel_id=channel_id)
 
     await _seed(rt, update)
 
@@ -659,7 +646,10 @@ async def _wait_notification(rt, workflow_id, state, timeout=30.0) -> Notificati
 
 
 async def test_in_app_park_notifies_with_actions(rt, deliver_spy):
-    await _set_notice_channel(rt, "C-inbox-inapp")
+    await _set_notification_channel(rt, "C-inbox-inapp")
+    settings = get_settings()
+    urls = settings.urls.model_copy(update={"endpoint": "https://druks.example"})
+    configure_settings(settings.model_copy(update={"urls": urls}))
 
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9001))
     parked = await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -671,7 +661,7 @@ async def test_in_app_park_notifies_with_actions(rt, deliver_spy):
     assert "Which database?" in notification.body
     # A click sends only its control: a bare request_changes or an option is refused.
     assert notification.actions == [{"id": "approve", "label": "Approve"}]
-    assert notification.deep_link is None
+    assert notification.deep_link == f"https://druks.example/runs/{workflow_id}"
     assert notification.subject == {"type": "notification_probe", "id": 9001}
     assert notification.run_id == workflow_id
     assert notification.run_parked_at == parked.input_requested_at
@@ -682,7 +672,7 @@ async def test_in_app_park_notifies_with_actions(rt, deliver_spy):
 
 
 async def test_external_park_notifies_without_actions(rt, deliver_spy):
-    await _set_notice_channel(rt, "C-inbox-ext")
+    await _set_notification_channel(rt, "C-inbox-ext")
 
     workflow_id = await rt.ExternalFlow.start(subject=NotificationProbe(id=9002))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -696,7 +686,7 @@ async def test_external_park_notifies_without_actions(rt, deliver_spy):
 
 
 async def test_external_park_with_declared_url_sets_deep_link(rt, deliver_spy):
-    await _set_notice_channel(rt, "C-inbox-url")
+    await _set_notification_channel(rt, "C-inbox-url")
 
     workflow_id = await rt.ExternalUrlFlow.start(subject=NotificationProbe(id=9003))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -708,21 +698,19 @@ async def test_external_park_with_declared_url_sets_deep_link(rt, deliver_spy):
     assert call["deep_link"] == notification.deep_link
 
 
-async def test_a_park_with_no_route_keeps_the_notice_stored(rt, deliver_spy):
-    await _set_notice_channel(rt, None)
+async def test_a_park_with_no_channel_is_delivered_with_no_message(rt, deliver_spy):
+    await _set_notification_channel(rt, None)
 
     workflow_id = await rt.ExternalFlow.start(subject=NotificationProbe(id=9004))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
 
     # The unattended account has no channel and no Slack sign-in.
-    notice = await _wait_notification(rt, workflow_id, "pending")
-    done = await _wait_for(rt, notice.id, lambda s: s["attempts"] == 1)
-    assert done["state"] == "pending"
+    await _wait_notification(rt, workflow_id, "delivered")
     assert deliver_spy.calls == []
 
 
 async def test_subjectless_park_notifies_nothing(rt, deliver_spy):
-    await _set_notice_channel(rt, "C-inbox-nosubj")
+    await _set_notification_channel(rt, "C-inbox-nosubj")
 
     workflow_id = await rt.SubjectlessFlow.start(subject=None)
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -735,7 +723,7 @@ async def test_subjectless_park_notifies_nothing(rt, deliver_spy):
 async def test_failed_delivery_leaves_run_parked_and_resumable(rt, deliver_spy, monkeypatch):
     deliver_spy.always_fail = True
     monkeypatch.setattr(outbox, "_SEND_RETRIES", {"retries_allowed": True, "max_attempts": 2})
-    await _set_notice_channel(rt, "C-inbox-flaky")
+    await _set_notification_channel(rt, "C-inbox-flaky")
 
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9006))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -749,7 +737,7 @@ async def test_failed_delivery_leaves_run_parked_and_resumable(rt, deliver_spy, 
 
 
 async def test_replayed_park_notifies_once(rt, deliver_spy):
-    await _set_notice_channel(rt, "C-inbox-replay")
+    await _set_notification_channel(rt, "C-inbox-replay")
 
     workflow_id = await rt.ExternalFlow.start(subject=NotificationProbe(id=9007))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -799,7 +787,7 @@ async def test_replayed_park_notifies_once(rt, deliver_spy):
 
 
 async def test_each_park_round_gets_its_own_notification(rt, deliver_spy):
-    await _set_notice_channel(rt, "C-inbox-rounds")
+    await _set_notification_channel(rt, "C-inbox-rounds")
 
     workflow_id = await rt.DoubleParkFlow.start(subject=NotificationProbe(id=9008))
     first_round = await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -833,24 +821,23 @@ async def test_each_park_round_gets_its_own_notification(rt, deliver_spy):
 
 
 async def test_a_failed_run_with_no_chat_tells_its_owner(rt, deliver_spy):
-    await _set_notice_channel(rt, None)
+    await _set_notification_channel(rt, None)
     settings = get_settings()
     urls = settings.urls.model_copy(update={"endpoint": "https://druks.example"})
     configure_settings(settings.model_copy(update={"urls": urls}))
     workflow_id = await rt.FailingFlow.start(subject=NotificationProbe(id=9016))
     run = await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FAILED)
 
-    (notice,) = await _notifications_for_run(rt, workflow_id)
-    assert notice.account_id == run.account_id
-    assert notice.reason == "run.failed"
-    assert "the disk is full" in notice.body
-    assert notice.deep_link == f"https://druks.example/runs/{workflow_id}"
-    # The unattended account has no Slack sign-in, so its notice stays stored.
-    done = await _wait_for(rt, notice.id, lambda s: s["attempts"] == 1)
-    assert done["state"] == "pending"
+    (notification,) = await _notifications_for_run(rt, workflow_id)
+    assert notification.account_id == run.account_id
+    assert notification.reason == "run.failed"
+    assert "the disk is full" in notification.body
+    assert notification.deep_link == f"https://druks.example/runs/{workflow_id}"
+    # The unattended account has no Slack sign-in, so the bell is where it reads this.
+    await _wait_for(rt, notification.id, lambda s: s["state"] == "delivered")
 
 
-async def test_a_failed_run_a_chat_started_sends_no_notice(rt, deliver_spy):
+async def test_a_failed_run_a_chat_started_sends_no_notification(rt, deliver_spy):
     async def create():
         account = await Account.get_default(db_session())
         conversation = Conversation(
@@ -877,7 +864,7 @@ async def test_a_replayed_failure_tells_the_owner_once(rt, deliver_spy):
     workflow_id = await rt.FailingFlow.start(subject=NotificationProbe(id=9018))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FAILED)
 
-    # A crash after the notice's checkpoints, before DBOS recorded the ERROR, leaves
+    # A crash after the notification's checkpoints, before DBOS recorded the ERROR, leaves
     # the workflow PENDING. DBOS never resumes an ERROR workflow, so put it back there.
     with rt.schema_engine.begin() as connection:
         connection.execute(
@@ -897,7 +884,7 @@ async def test_a_replayed_failure_tells_the_owner_once(rt, deliver_spy):
 
 
 async def test_an_answer_from_elsewhere_closes_the_question_s_message(rt, deliver_spy):
-    await _set_notice_channel(rt, "C-inbox-answered")
+    await _set_notification_channel(rt, "C-inbox-answered")
 
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9020))
     parked = await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -912,7 +899,7 @@ async def test_an_answer_from_elsewhere_closes_the_question_s_message(rt, delive
 
 
 async def test_a_cancelled_run_closes_the_question_s_message(rt, deliver_spy):
-    await _set_notice_channel(rt, "C-inbox-cancelled")
+    await _set_notification_channel(rt, "C-inbox-cancelled")
 
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9021))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -964,7 +951,7 @@ def _dbos_replies(rt, workflow_id) -> int:
 
 
 async def test_respond_round_trip_finishes_the_run(rt, deliver_spy):
-    await _set_notice_channel(rt, "C-inbox-respond")
+    await _set_notification_channel(rt, "C-inbox-respond")
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9009))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
     notification = await _wait_notification(rt, workflow_id, "delivered")
@@ -1017,7 +1004,7 @@ async def test_a_slack_chat_s_review_offers_its_buttons_in_its_thread(rt, delive
         await asyncio.sleep(0.1)
     else:
         raise AssertionError(f"the thread was never notified; {deliver_spy.calls=}")
-    # The chat asks, so the run's account gets no second notice.
+    # The chat asks, so the run's account gets no second notification.
     assert rows == [in_thread]
     assert in_thread.actions == [
         {"id": "approve", "label": "Approve"},
@@ -1060,7 +1047,7 @@ async def test_a_slack_chat_s_review_offers_its_buttons_in_its_thread(rt, delive
 
 
 async def test_concurrent_responds_resolve_to_one_answer(rt, deliver_spy):
-    await _set_notice_channel(rt, "C-inbox-race")
+    await _set_notification_channel(rt, "C-inbox-race")
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9010))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
     notification = await _wait_notification(rt, workflow_id, "delivered")
@@ -1081,7 +1068,7 @@ async def test_a_park_notifies_the_run_s_account_by_its_channel(rt, deliver_spy)
     async def configure():
         await _install_slack()
         account = await Account.get_or_create(db_session(), "explicit@example.com")
-        await account.update_preferences(notice_channel_id="C-explicit")
+        await account.update_preferences(notification_channel_id="C-explicit")
         subject = NotificationProbe(id=9021)
         db_session.add(subject)
         return account.id, subject

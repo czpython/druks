@@ -1,30 +1,22 @@
-from typing import Annotated
-
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
-from druks.core.services import Slack
-from druks.notifications.delivery import deliver
 from druks.notifications.exceptions import (
     AlreadyAcknowledgedError,
     AnswerNotAllowedError,
-    DeliveryError,
     InvalidChoiceError,
     StaleRoundError,
     UnknownTokenError,
 )
-from druks.notifications.models import Destination, Notification
+from druks.notifications.models import Notification
 from druks.notifications.schemas import (
-    CreateDestinationRequest,
-    DestinationResponse,
+    ChannelResponse,
     NotificationResponse,
     RespondRequest,
 )
-from druks.notifications.services import respond_to_notification
-
-CHANNEL_CHECK_MESSAGE = "Druks posts here when a run waits for an answer."
+from druks.notifications.services import list_notification_channels, respond_to_notification
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
@@ -32,81 +24,35 @@ router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 external_router = APIRouter(prefix="/_external/notifications", tags=["notifications"])
 
 
-@router.get("/destinations", response_model=list[DestinationResponse])
-async def list_destinations(session: SessionDep) -> list[Destination]:
-    return await Destination.list_all(session)
-
-
-@router.post("/destinations", response_model=DestinationResponse)
-async def create_destination(session: SessionDep, body: CreateDestinationRequest) -> Destination:
-    if not body.name.strip():
-        raise HTTPException(status_code=422, detail="Destination needs a name.")
-    if await Destination.get_for_name(session, body.name):
-        raise HTTPException(
-            status_code=409, detail=f"Destination {body.name!r} already exists; remove it first."
-        )
-    client = await Slack.get_client()
-    destination = await Destination.create(
-        session, name=body.name, kind=body.kind, channel_id=body.channel_id
-    )
-    try:
-        # A first post proves the bot can post there, while the operator is still here
-        # to fix it. A refusal rolls the row back.
-        await deliver(client, destination.channel_id, CHANNEL_CHECK_MESSAGE)
-    except DeliveryError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    return destination
-
-
-@router.patch("/destinations/{destination_id}", response_model=DestinationResponse)
-async def set_destination_enabled(
-    session: SessionDep, destination_id: str, is_enabled: Annotated[bool, Body(embed=True)]
-) -> Destination:
-    destination = await session.get(Destination, destination_id)
-    if not destination:
-        raise HTTPException(status_code=404, detail=f"Destination {destination_id!r} not found")
-    destination.is_enabled = is_enabled
-    await session.flush()
-    return destination
-
-
-@router.delete("/destinations/{destination_id}", status_code=204)
-async def delete_destination(session: SessionDep, destination_id: str) -> None:
-    destination = await session.get(Destination, destination_id)
-    if not destination:
-        raise HTTPException(status_code=404, detail=f"Destination {destination_id!r} not found")
-    await destination.delete()
+@router.get("/channels", response_model=list[ChannelResponse])
+async def list_channels() -> list[dict]:
+    return await list_notification_channels()
 
 
 @router.get("", response_model=list[NotificationResponse])
 async def list_notifications(
-    session: SessionDep, limit: int = Query(50, ge=1, le=500)
-) -> list[Notification]:
-    return await Notification.list_recent(session, limit)
-
-
-@router.get("/inbox", response_model=list[NotificationResponse])
-async def list_inbox(
     session: SessionDep,
     account: Account = Depends(current_account),
     limit: int = Query(50, ge=1, le=500),
 ) -> list[Notification]:
-    return await Notification.list_for_account(session, account.id, limit)
+    return await Notification.list_for_account(session, account.id, limit=limit)
 
 
-@router.post("/inbox/read", status_code=204)
-async def mark_inbox_read(session: SessionDep, account: Account = Depends(current_account)) -> None:
-    await Notification.mark_read(session, account.id)
+@router.post("/read", status_code=204)
+async def mark_notifications_read(
+    session: SessionDep, account: Account = Depends(current_account)
+) -> None:
+    await Notification.mark_all_read(session, account.id)
 
 
-# Declared after the /destinations and /inbox routes: declaration order is match order,
-# so the id match can't swallow them.
+# Declared after the /channels route: declaration order is match order, so the id match
+# can't swallow it.
 @router.get("/{notification_id}", response_model=NotificationResponse)
 async def get_notification(
     session: SessionDep, notification_id: str, account: Account = Depends(current_account)
 ) -> Notification:
     notification = await session.get(Notification, notification_id)
-    # A person's notice is theirs only. Another account finds no such notification.
+    # A person's notification is theirs only. Another account finds no such notification.
     if not notification or notification.account_id not in (None, account.id):
         raise HTTPException(status_code=404, detail=f"Notification {notification_id!r} not found")
     return notification

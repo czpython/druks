@@ -21,7 +21,7 @@ from druks.durable import Run
 from druks.models import Base
 from druks.notifications.buttons import encode_button
 from druks.notifications.exceptions import AnswerNotAllowedError
-from druks.notifications.models import Destination, Notification
+from druks.notifications.models import Notification
 from druks.testing import configure_app_for_test, make_settings, seed_dbos_status
 from druks.webhooks.router import match_webhook
 from fastapi.testclient import TestClient
@@ -53,12 +53,9 @@ async def _parked_notification(druks_db):
     druks_db.add(run)
     await druks_db.flush()
     await seed_dbos_status(druks_db, run.id, "parked")
-    destination = await Destination.create(
-        druks_db, name=f"slack-{run.id[-8:]}", kind="slack_channel", channel_id="C1"
-    )
     notification = await Notification.create(
         druks_db,
-        destination_id=destination.id,
+        account_id=run.account_id,
         reason="gate.parked",
         body="review the plan",
         subject={"type": "notification_probe", "id": 1},

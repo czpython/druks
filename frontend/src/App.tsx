@@ -18,7 +18,7 @@ import type { UnsavedForm } from './components/settings'
 import { useScreenWakeLock } from './lib/useScreenWakeLock'
 import { useTimezone } from './lib/preferences'
 import { EmptyState } from './components/EmptyState'
-import { NoticeInbox } from './components/NoticeInbox'
+import { NotificationBell } from './components/NotificationBell'
 import { AppGlyph } from './components/AppGlyph'
 import { Page } from './components/Page'
 import { SettingsPages } from './components/SettingsPages'
@@ -418,7 +418,7 @@ function AppShell({
         </div>
         <div className="command-utilities">
           <WakeLockIndicator />
-          <NoticeInbox />
+          <NotificationBell />
           <span className="mono command-timezone">{timezone}</span>
         </div>
       </header>
