@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from druks.chat.models import Conversation
 from druks.core.services import Slack
 from druks.durable.engine import step_session
-from druks.notifications.constants import CLOSE_WORKFLOW, CLOSED_MESSAGE
+from druks.notifications.constants import CLOSE_WORKFLOW, CLOSED_MESSAGE, SEND_WORKFLOW
 from druks.notifications.datastructures import NotificationState
 from druks.notifications.delivery import deliver
 from druks.notifications.exceptions import (
@@ -17,6 +17,8 @@ from druks.notifications.exceptions import (
     NotificationError,
 )
 from druks.notifications.models import Destination, Notification
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.services.exceptions import ServiceNotConnectedError
 
 logger = logging.getLogger(__name__)
@@ -29,7 +31,7 @@ logger = logging.getLogger(__name__)
 _SEND_RETRIES: StepOptions = {"retries_allowed": True, "max_attempts": 5}
 
 
-@DBOS.workflow(name="notifications.send")
+@DBOS.workflow(name=SEND_WORKFLOW)
 async def send_notification(notification_id: str) -> None:
     async def _send() -> None:
         async with step_session() as session:
@@ -52,13 +54,24 @@ async def send_notification(notification_id: str) -> None:
                 )
         else:
             async with step_session() as session:
-                destination = await session.get(Destination, notification.destination_id)
+                if notification.account_id:
+                    # A person's notice goes to their Slack user, which opens the bot's DM.
+                    # A person without a Slack sign-in keeps the notice stored.
+                    sign_ins = await VaultSecret.list_account_connections(
+                        session, Audience.service(Slack.slug), notification.account_id
+                    )
+                    if not sign_ins:
+                        return
+                    channel = sign_ins[0].identity["subject"]
+                else:
+                    destination = await session.get(Destination, notification.destination_id)
+                    if not destination.is_enabled:
+                        raise DisabledDestinationError(destination.name)
+                    channel = destination.channel_id
                 client = await Slack.get_client()
-            if not destination.is_enabled:
-                raise DisabledDestinationError(destination.name)
             posted = await deliver(
                 client,
-                destination.channel_id,
+                channel,
                 notification.body,
                 actions=notification.actions,
                 token=notification.correlation_token,

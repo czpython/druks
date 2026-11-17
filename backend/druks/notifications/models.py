@@ -61,14 +61,14 @@ class Notification(Base, Uuid7Pk):
     __tablename__ = "notifications"
     __table_args__ = (
         CheckConstraint(
-            "num_nonnulls(destination_id, conversation_id) = 1",
+            "num_nonnulls(destination_id, conversation_id, account_id) = 1",
             name="notifications_one_target_check",
         ),
     )
 
-    # What the notification is about ({type, id}) — always present: every
-    # notification is about a run's subject (subjectless parks never notify).
-    subject: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    # The subject ({type, id}) of the run the notification is about. A person's notice
+    # can be about no run. Subjectless parks never notify.
+    subject: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
     # Why it fired — a machine category (e.g. "gate.parked"); the discriminator
     # for per-reason routing later.
     reason: Mapped[str]
@@ -92,6 +92,10 @@ class Notification(Base, Uuid7Pk):
     conversation_id: Mapped[str | None] = mapped_column(
         ForeignKey("chat_conversations.id", ondelete="CASCADE"), default=None
     )
+    # A notice for one person. Only that person sees it.
+    account_id: Mapped[str | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="RESTRICT"), default=None
+    )
     # Minted at flush like the id above — the respond capability handle.
     correlation_token: Mapped[str] = mapped_column(
         String, unique=True, default=mint_correlation_token
@@ -104,6 +108,8 @@ class Notification(Base, Uuid7Pk):
     # Sanitized only — this lands on API responses.
     last_error: Mapped[str | None] = mapped_column(default=None)
     delivered_at: Mapped[datetime | None] = mapped_column(default=None)
+    # When the person marked the notice read in their inbox.
+    read_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
@@ -114,9 +120,10 @@ class Notification(Base, Uuid7Pk):
         *,
         destination_id: str | None = None,
         conversation_id: str | None = None,
+        account_id: str | None = None,
         reason: str,
         body: str,
-        subject: dict[str, Any],
+        subject: dict[str, Any] | None = None,
         actions: list[dict[str, Any]] | None = None,
         run_id: str | None = None,
         run_parked_at: datetime | None = None,
@@ -128,6 +135,7 @@ class Notification(Base, Uuid7Pk):
         notification = cls(
             destination_id=destination_id,
             conversation_id=conversation_id,
+            account_id=account_id,
             reason=reason,
             body=body,
             subject=subject,
@@ -143,8 +151,35 @@ class Notification(Base, Uuid7Pk):
     @classmethod
     async def list_recent(cls, session: AsyncSession, limit: int = 50) -> list["Notification"]:
         # uuid7 ids are time-ordered, breaking created_at ties toward the newest.
-        stmt = select(cls).order_by(cls.created_at.desc(), cls.id.desc()).limit(limit)
+        stmt = (
+            select(cls)
+            .where(cls.account_id.is_(None))
+            .order_by(cls.created_at.desc(), cls.id.desc())
+            .limit(limit)
+        )
         return list(await session.scalars(stmt))
+
+    @classmethod
+    async def list_for_account(
+        cls, session: AsyncSession, account_id: str, limit: int = 50
+    ) -> list["Notification"]:
+        """The notices sent to ``account_id``, newest first: the person's inbox."""
+        stmt = (
+            select(cls)
+            .where(cls.account_id == account_id)
+            .order_by(cls.created_at.desc(), cls.id.desc())
+            .limit(limit)
+        )
+        return list(await session.scalars(stmt))
+
+    @classmethod
+    async def mark_read(cls, session: AsyncSession, account_id: str) -> None:
+        """Mark every unread notice sent to ``account_id`` read."""
+        await session.execute(
+            update(cls)
+            .where(cls.account_id == account_id, cls.read_at.is_(None))
+            .values(read_at=Base.utc_now(), updated_at=Base.utc_now())
+        )
 
     @classmethod
     async def get_for_token(cls, session: AsyncSession, token: str) -> "Notification | None":

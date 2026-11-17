@@ -1005,6 +1005,14 @@ export interface UsageProviderSummary {
   rawOutput: string | null
 }
 
+export interface NotificationResponse {
+  id: string
+  body: string
+  deepLink: string | null
+  readAt: string | null
+  createdAt: string
+}
+
 export interface UsageResponse {
   providers: UsageProviderSummary[]
 }
