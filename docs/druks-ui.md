@@ -424,7 +424,9 @@ ui.TableRow([ui.TextValue(target.name), ui.SubjectStatus(target, working="auditi
 ```
 
 When Druks serves the page, one read gets the status of every subject on it,
-whatever their types. The shell writes the word:
+whatever their types. The status comes only from the runs of the app that serves
+the page. A run of another app on the same subject does not show. The shell writes
+the word:
 
 - "needs you" while the subject waits on the operator,
 - "failed", "cancelled", or "orphaned" when the work stopped, with its message,

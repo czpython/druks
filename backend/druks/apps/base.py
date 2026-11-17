@@ -1,7 +1,7 @@
 import importlib.util
 import json
 import re
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Sequence
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from druks.agents import Agent, Bot
     from druks.doctor import CheckResult
     from druks.durable.datastructures import Subject
+    from druks.durable.schemas import SubjectSummary
     from druks.ui import Page
     from druks.ui.page import PageRoute
     from druks.workflows import Workflow
@@ -511,7 +512,7 @@ class App:
         for subject_class in cls.subjects():
             subject_type = subject_class.subject_type
             label = subject_type.replace("_", " ")
-            summaries = await subject_class.list_summaries(account_id)
+            summaries = await cls._list_summaries(subject_class, account_id)
             facts = [summary.model_dump(exclude={"id", "key"}) for summary in summaries]
             # A nested value has no cell, so the summary's scalars are the columns.
             fields = [
@@ -600,7 +601,9 @@ class App:
                 (part.subject.subject_type, part.subject.subject_id)
                 for part in page.iter_parts(SubjectStatus, GateControls)
             ]
-            statuses = await reads.get_statuses_for_subjects(db_session(), subjects)
+            statuses = await reads.get_statuses_for_subjects(
+                db_session(), subjects, workflows=cls.workflows()
+            )
             return JSONResponse(
                 page.model_dump(mode="json", by_alias=True, context={"statuses": statuses})
             )
@@ -738,6 +741,19 @@ class App:
         return router
 
     @classmethod
+    async def _list_summaries(
+        cls, subject_class: "type[Subject] | type[StoredSubject]", account_id: str | None
+    ) -> "Sequence[SubjectSummary]":
+        """The rows of this app's board for ``subject_class``. A subject declared in
+        another app's package lists that app's work, so the board lists the subjects
+        this app's own runs keep open instead."""
+        module = subject_class.__module__
+        if module == cls.package or module.startswith(cls.package + "."):
+            return await subject_class.list_summaries(account_id)
+        subjects = await subject_class.list_open(workflows=cls.workflows())
+        return [subject.get_summary() for subject in subjects]
+
+    @classmethod
     def _get_subject_routes(
         cls, subject_class: "type[Subject] | type[StoredSubject]"
     ) -> "APIRouter":
@@ -761,9 +777,12 @@ class App:
         router = APIRouter(prefix=f"/{subject_type}", tags=[f"{cls.name}:{subject_type}"])
 
         async def board(session: AsyncSession, account_id: str | None) -> SubjectList:
-            summaries = await subject_class.list_summaries(account_id)
+            summaries = await cls._list_summaries(subject_class, account_id)
             statuses = await reads.get_subject_statuses(
-                session, subject_type, [summary.id for summary in summaries]
+                session,
+                subject_type,
+                [summary.id for summary in summaries],
+                workflows=cls.workflows(),
             )
             return SubjectList(
                 rows=[

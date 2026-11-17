@@ -1318,6 +1318,12 @@ mounts it for each declared subject. Each response contains your summary, run
 status, timeline, agent calls, artifacts, active question, and the sandbox
 phase while a run starts.
 
+A workflow can declare a subject from another app, such as Software Factory's
+`PullRequest`. Your board then lists the subjects that your workflows keep open.
+Your board, your home page, and the `ui.SubjectStatus` and `ui.GateControls` on
+your pages read only your workflows' runs. A subject's detail page shows the runs
+of every app. See [Where the work stands](druks-ui.md#where-the-work-stands).
+
 Pass the subject instance to each component that requires one. This includes a
 workflow start, gate answer, or event:
 
@@ -1358,6 +1364,11 @@ statuses = await Repository.get_statuses([summary.id for summary in summaries])
 
 This is the read the platform's own board uses, so a declared page listing
 fifty rows costs one query rather than fifty.
+
+`get_status()`, `get_statuses()`, `get_phase()`, and `list_open()` count the runs
+of the workflows of the app that defines the subject. A run of another app on the
+same subject does not show. On a subject from another app, pass your workflow:
+`get_status(workflow=Sweep)` or `list_open(workflows=[Sweep])`.
 
 A page needs neither read to show where the work stands.
 `ui.SubjectStatus(repository)` takes the subject, and Druks reads every status

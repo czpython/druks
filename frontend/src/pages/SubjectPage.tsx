@@ -132,7 +132,7 @@ function SubjectDetail({
             key={run.id}
             app={app}
             run={run}
-            newest={index === 0}
+            newest={runs.findIndex((other) => other.kind === run.kind) === index}
             selected={run.id === selectedRun}
             expected={run.id === selectedRun ? parkedAt : undefined}
           />

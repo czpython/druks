@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
+from druks.contrib.software_factory.workflows import PullRequestReview
 from druks.testing import seed_run
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
@@ -167,6 +168,19 @@ async def test_a_page_shows_where_the_work_on_each_subject_stands(
     assert status["working"] == "summarizing"
     assert status["status"]["state"] == "failed"
     assert status["status"]["failure"] == "The model timed out."
+
+
+async def test_a_page_shows_only_its_own_apps_runs_on_a_subject(
+    druks_client: httpx.AsyncClient, druks_db, note: Note
+):
+    # Another app can run on the same subject; its newer run is not this app's work.
+    own = await seed_run(druks_db, kind=Summarize.kind, subject=note, state="failed")
+    await seed_run(druks_db, kind=PullRequestReview.kind, subject=note, state="running")
+
+    page = (await druks_client.get("/api/field_notes/pages/recent")).json()
+
+    table = next(block for block in page["blocks"][0]["blocks"] if block["block"] == "table")
+    assert table["rows"][0]["cells"][2]["status"]["run"] == own.id
 
 
 async def test_the_history_page_shows_the_domain_and_points_at_the_platform(

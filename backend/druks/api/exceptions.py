@@ -65,7 +65,9 @@ class RunNotLatest(AgentApiError):
     code = "RUN_NOT_LATEST"
 
     def __init__(self, run_id: str, latest_id: str) -> None:
-        super().__init__(f"Run {run_id} is not the subject's latest run; {latest_id} is.")
+        super().__init__(
+            f"Run {run_id} is not the latest run of its workflow on the subject; {latest_id} is."
+        )
 
 
 class SubjectBusy(AgentApiError):

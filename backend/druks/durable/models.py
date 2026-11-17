@@ -232,11 +232,16 @@ class Run(Base):
 
     @classmethod
     async def get_latest_for_subjects(
-        cls, session: AsyncSession, identities: list[tuple[str, str]]
+        cls,
+        session: AsyncSession,
+        identities: list[tuple[str, str]],
+        *,
+        kinds: Sequence[str],
     ) -> dict[tuple[str, str], "Run"]:
-        """The driving run of each subject, keyed by its ``(subject_type, subject_id)``:
-        get_latest_for_subject for subjects of any type in one statement. Agent calls
-        come with it: the status read needs the latest agent of every running row."""
+        """The driving run of each subject among ``kinds``, keyed by its
+        ``(subject_type, subject_id)``: get_latest_for_subject for subjects of any type
+        in one statement. Agent calls come with it: the status read needs the latest
+        agent of every running row."""
         subject_type = (
             workflow_status.c.attributes["subject_type"].as_string().label("subject_type")
         )
@@ -254,7 +259,7 @@ class Run(Base):
                 .label("rank"),
             )
             .join_from(cls, workflow_status, workflow_status.c.workflow_uuid == cls.id)
-            .where(tuple_(subject_type, subject_id).in_(identities))
+            .where(tuple_(subject_type, subject_id).in_(identities), cls.kind.in_(kinds))
             .subquery()
         )
         stmt = (
@@ -267,9 +272,9 @@ class Run(Base):
         return {(found_type, found_id): run for found_type, found_id, run in rows}
 
     @classmethod
-    def open_subject_ids(cls, subject_type: str) -> Select:
-        """The subjects of ``subject_type`` whose newest run hasn't handed off, that
-        run's most recent first — a subquery their own read composes."""
+    def open_subject_ids(cls, subject_type: str, *, kinds: Sequence[str]) -> Select:
+        """The subjects of ``subject_type`` whose newest run among ``kinds`` hasn't
+        handed off, that run's most recent first — a subquery their own read composes."""
         state = state_expression(cls.id, cls.input_gate).label("state")
         subject_id = workflow_status.c.attributes["subject_id"].as_string().label("subject_id")
         driving = (
@@ -285,7 +290,10 @@ class Run(Base):
                 .label("rank"),
             )
             .join_from(cls, workflow_status, workflow_status.c.workflow_uuid == cls.id)
-            .where(workflow_status.c.attributes["subject_type"].as_string() == subject_type)
+            .where(
+                workflow_status.c.attributes["subject_type"].as_string() == subject_type,
+                cls.kind.in_(kinds),
+            )
             .subquery()
         )
         return (

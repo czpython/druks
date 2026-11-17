@@ -245,12 +245,27 @@ class StoredSubject(Model):
         statement = select(cls).order_by(*ordering).limit(100)
         return [row.get_summary() for row in await db_session().scalars(statement)]
 
+    @classmethod
+    def _list_app_workflows(cls) -> "list[type[Workflow]]":
+        """The workflows of the app this class belongs to. Its reads count their runs,
+        so another app's run on the same subject does not show."""
+        # Cycle: the loader and its registry are built on this module's Base.
+        from druks.apps.loader import resolve_workflow_app
+        from druks.apps.registry import workflows as workflow_registry
+
+        app_name = resolve_workflow_app(cls.__module__)
+        return [workflow for workflow in workflow_registry.all() if workflow.app == app_name]
+
     async def get_status(self, *, workflow: "type[Workflow] | None" = None) -> "SubjectStatus":
         from druks.db import db_session
         from druks.durable.reads import get_subject_status
 
+        if workflow:
+            workflows = [workflow]
+        else:
+            workflows = self._list_app_workflows()
         return await get_subject_status(
-            db_session(), self.subject_type, str(self.id), workflow=workflow
+            db_session(), self.subject_type, str(self.id), workflows=workflows
         )
 
     @classmethod
@@ -261,26 +276,38 @@ class StoredSubject(Model):
         from druks.durable.reads import get_subject_statuses
 
         return await get_subject_statuses(
-            db_session(), cls.subject_type, [str(subject_id) for subject_id in subject_ids]
+            db_session(),
+            cls.subject_type,
+            [str(subject_id) for subject_id in subject_ids],
+            workflows=cls._list_app_workflows(),
         )
 
     async def get_phase(self) -> str | None:
         from druks.db import db_session
         from druks.durable.reads import get_subject_phase
 
-        return await get_subject_phase(db_session(), self.subject_type, str(self.id))
+        return await get_subject_phase(
+            db_session(), self.subject_type, str(self.id), workflows=self._list_app_workflows()
+        )
 
     @classmethod
-    async def list_open(cls, *, limit: int = 50) -> list[Self]:
-        """The rows whose newest run hasn't handed off — still going, or failed
-        and wanting the operator. What an app's active view lists."""
+    async def list_open(
+        cls, *, limit: int = 50, workflows: "Sequence[type[Workflow]] | None" = None
+    ) -> list[Self]:
+        """The rows whose newest run hasn't handed off — still going, or failed and
+        wanting the operator. It counts the runs of its app's workflows, or of
+        ``workflows`` when given. What an app's active view lists."""
         # Cycle: the durable read side is built on this module's Base.
         from druks.db import db_session
         from druks.durable.models import Run
 
+        # An empty list counts no runs, so only None means the class's own app.
+        if workflows is None:  # ast-grep-ignore: rule-2
+            workflows = cls._list_app_workflows()
+        kinds = [workflow.kind for workflow in workflows]
         # The durable layer keys subjects by string, so the open ids come back as
         # text and cast to this table's integer key.
-        open_ids = Run.open_subject_ids(cls.subject_type).subquery()
+        open_ids = Run.open_subject_ids(cls.subject_type, kinds=kinds).subquery()
         stmt = (
             select(cls)
             .where(cls.id.in_(select(cast(open_ids.c.subject_id, Integer))))

@@ -334,7 +334,8 @@ def test_an_app_without_a_landing_page_gets_the_platform_home(monkeypatch):
 
     class Plain(App):
         name = "plain"
-        package = "plain"
+        # Gadget is declared in this module, so the app's board lists it.
+        package = __name__
         subjects = classmethod(lambda cls: [Gadget])
 
         @classmethod

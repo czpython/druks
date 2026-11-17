@@ -29,7 +29,7 @@ from druks.durable.reads import read_slice
 from druks.mcp.gateway import exceptions, services
 from druks.testing import seed_call, seed_dbos_status, seed_run
 from druks.usage.models import UsageScrape
-from druks_field_notes.workflows import Summarize
+from druks_field_notes.workflows import Summarize, Survey
 
 pytestmark = pytest.mark.usefixtures("tmp_data_dir")
 
@@ -434,6 +434,18 @@ async def test_retry_run_retries_a_failed_run(druks_db, monkeypatch):
 
     assert result.run == "retried-run"
     retry.assert_awaited_once_with()
+
+
+async def test_retry_run_ignores_the_runs_of_another_workflow(druks_db, monkeypatch):
+    item = await make_test_note()
+    failed = await seed_note_run(druks_db, note=item, state="failed")
+    await seed_run(druks_db, kind=Survey.kind, subject=item, state="running")
+    retry = mock.AsyncMock(return_value="retried-run")
+    monkeypatch.setattr(Run, "retry", retry)
+
+    result = await runs.retry_run(druks_db, failed.id)
+
+    assert result.run == "retried-run"
 
 
 async def test_retry_run_refuses_a_missing_run(druks_db):

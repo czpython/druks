@@ -183,6 +183,17 @@ describe('owner navigation', () => {
       expect(Boolean(screen.queryByRole('button', { name: 'Retry run' }))).toBe(state === 'failed')
     },
   )
+  it('offers retry for a failed run when a run of another workflow is newer', async () => {
+    vi.mocked(subjectApi.read).mockResolvedValue({
+      ...subject,
+      timeline: [
+        { ...run('review'), kind: 'reviews.review', state: 'failed', inputRequest: null },
+        { ...run('summary'), state: 'running', inputRequest: null },
+      ],
+    })
+    mount('subject', '/notes/note/7')
+    expect(await screen.findByRole('button', { name: 'Retry run' })).toBeTruthy()
+  })
   it.each(['subject', 'work'] as const)(
     'selects the requested older run in the %s owner and preserves the exact round',
     async (page) => {
