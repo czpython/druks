@@ -773,12 +773,17 @@ export type Billing = 'subscription' | 'api_key'
 export interface PersonalSettings {
   timezone: string
   theme: 'system' | 'light' | 'dark'
-  gateParkDestinationId: string | null
+  noticeChannelId: string | null
   isTagRequired: boolean
 }
 
+/** A Slack channel the bot is a member of: a place a person's notices can go. */
+export interface NoticeChannel {
+  id: string
+  name: string
+}
+
 export interface InstallationSettings {
-  gateParkDestinationId: string | null
   updatedAt: string
   defaultHarness: string
   defaultModel: string
@@ -792,12 +797,11 @@ export interface InstallationSettings {
 export interface UpdatePersonalSettingsRequest {
   timezone?: string
   theme?: PersonalSettings['theme']
-  gateParkDestinationId?: string | null
+  noticeChannelId?: string | null
   isTagRequired?: boolean
 }
 
 export interface UpdateSettingsRequest {
-  gateParkDestinationId?: string | null
   defaultHarness?: string
   defaultModel?: string
   defaultBilling?: Billing

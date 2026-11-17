@@ -18,6 +18,7 @@ import type {
   AppsSettingsResponse,
   Harness,
   Identity,
+  NoticeChannel,
   NotificationResponse,
   Pat,
   PersonalSettings,
@@ -315,6 +316,7 @@ export const api = {
   getPersonalSettings: () => getJSON<PersonalSettings>('/api/settings/personal'),
   updatePersonalSettings: (body: UpdatePersonalSettingsRequest) =>
     patchJSON<PersonalSettings>('/api/settings/personal', body),
+  noticeChannels: () => getJSON<NoticeChannel[]>('/api/settings/personal/channels'),
   harnesses: () => getJSON<Harness[]>('/api/settings/harnesses'),
   agents: () => getJSON<AgentsResponse>('/api/agents'),
   accounts: () => getJSON<Account[]>('/api/auth/accounts'),

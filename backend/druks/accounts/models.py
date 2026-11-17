@@ -25,7 +25,6 @@ from druks.db import db_session
 from druks.models import Base, Model
 from druks.secrets.models import VaultSecret
 from druks.settings import get_settings
-from druks.user_settings.models import InstallationSettings
 
 
 class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
@@ -49,9 +48,8 @@ class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
     theme: Mapped[str] = mapped_column(
         String, default=Theme.SYSTEM, server_default=text("'system'")
     )
-    gate_park_destination_id: Mapped[str | None] = mapped_column(
-        ForeignKey("notification_destinations.id", ondelete="SET NULL"), default=None
-    )
+    # The Slack channel that gets this account's notices. None sends them by DM.
+    notice_channel_id: Mapped[str | None] = mapped_column(String, default=None)
     is_tag_required: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
@@ -98,14 +96,12 @@ class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
         account = await cls.get_for_username(session, username)
         if account:
             return account
-        installation = await InstallationSettings.get_or_create(session)
         await session.execute(
             insert(cls)
             .values(
                 username=username,
                 is_default=~select(cls.id).exists(),
                 timezone=get_settings().timezone,
-                gate_park_destination_id=installation.gate_park_destination_id,
             )
             .on_conflict_do_nothing(index_elements=["username"])
         )

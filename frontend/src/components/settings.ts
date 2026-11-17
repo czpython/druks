@@ -13,6 +13,7 @@ import type {
 
 export const SETTINGS_FIELDS = {
   timezone: { section: 'personal', label: 'Timezone', field: 'timezone', terms: 'time zone clock' },
+  notices: { section: 'personal', label: 'Notices', field: 'notices', terms: 'notifications slack channel direct message' },
   harness: { section: 'agents', label: 'Harness', field: 'harness', terms: 'execution' },
   model: { section: 'agents', label: 'Model', field: 'model', terms: 'execution' },
   billing: { section: 'agents', label: 'Billing', field: 'billing', terms: 'subscription API key' },
