@@ -24,6 +24,7 @@ import {
   type AppSettings,
   type Billing,
   type McpServer,
+  type NoticeChannel,
   type Pat,
   type PersonalSettings,
   type Provider,
@@ -431,6 +432,9 @@ export function PreferencesPane({
   setTimezone,
   theme,
   setTheme,
+  noticeChannelId,
+  setNoticeChannelId,
+  noticeChannels,
   timezones,
   clock,
   busy,
@@ -439,6 +443,9 @@ export function PreferencesPane({
   setTimezone: (timezone: string) => void
   theme: PersonalSettings['theme']
   setTheme: (theme: PersonalSettings['theme']) => void
+  noticeChannelId: string | null
+  setNoticeChannelId: (channelId: string | null) => void
+  noticeChannels: NoticeChannel[]
   timezones: string[]
   clock: string
   busy: boolean
@@ -490,6 +497,33 @@ export function PreferencesPane({
             <option value="light">Light</option>
             <option value="dark">Dark</option>
           </select>
+        </div>
+      </div>
+      <div className="set-group" data-setting={SETTINGS_FIELDS.notices.field}>
+        <label className="set-group-label" htmlFor="personal-notices">
+          Notices
+        </label>
+        <div className="set-field" style={{ maxWidth: 320 }}>
+          <select
+            id="personal-notices"
+            className="set-select"
+            value={noticeChannelId ?? ''}
+            onChange={(event) => setNoticeChannelId(event.target.value || null)}
+            disabled={busy}
+          >
+            <option value="">Slack direct message</option>
+            {noticeChannelId && !noticeChannels.some((channel) => channel.id === noticeChannelId) && (
+              <option value={noticeChannelId}>{noticeChannelId}</option>
+            )}
+            {noticeChannels.map((channel) => (
+              <option key={channel.id} value={channel.id}>
+                #{channel.name}
+              </option>
+            ))}
+          </select>
+          <span className="set-field-help">
+            Where the bot sends your notices. Invite the bot to a channel to see it here.
+          </span>
         </div>
       </div>
     </div>

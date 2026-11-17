@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bell } from 'lucide-react'
+import { Link } from 'wouter'
 
 import { api } from '../api/client'
 import { Menu } from './Menu'
@@ -19,6 +20,22 @@ export function NoticeInbox() {
     refetchOnWindowFocus: true,
     retry: false,
   })
+  const personal = useQuery({
+    queryKey: ['personalSettings'],
+    queryFn: api.getPersonalSettings,
+    enabled: isOpen,
+  })
+  const connections = useQuery({
+    queryKey: ['connections'],
+    queryFn: api.listConnections,
+    enabled: isOpen,
+  })
+  // A notice leaves Druks only by the person's channel, or by a DM to their Slack account.
+  const hasRoute =
+    !personal.isSuccess ||
+    !connections.isSuccess ||
+    Boolean(personal.data.noticeChannelId) ||
+    connections.data.some((connection) => connection.provider === 'slack' && !connection.revokedAt)
   const notices = inbox.data ?? []
   const unreadCount = notices.filter((notice) => !notice.readAt).length
   const label = unreadCount ? `Notices, ${unreadCount} unread` : 'Notices'
@@ -50,6 +67,14 @@ export function NoticeInbox() {
         <Menu anchor={trigger} className="notice-inbox" onClose={close}>
           <div role="group" aria-label="Notices">
             {notices.length === 0 && <p className="notice-empty">No notices yet.</p>}
+            {!hasRoute && (
+              <p className="notice-empty">
+                Your notices stay here until you connect Slack or choose a channel.{' '}
+                <Link href="/settings/personal?field=notices" onClick={close}>
+                  Choose where notices go
+                </Link>
+              </p>
+            )}
             <ul>
               {notices.map((notice) => (
                 <li key={notice.id} className={notice.readAt ? undefined : 'notice-unread'}>

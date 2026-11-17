@@ -13,6 +13,7 @@ from conftest import (
 )
 from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.models import Account
+from druks.core.services import Slack
 from druks.db import db_session
 from druks.durable.models import Run
 from druks.harnesses.config import get_config
@@ -25,58 +26,86 @@ from druks.user_settings.models import InstallationSettings, SettingsOverride
 from druks.workflows import _run_instance
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
+from slack_sdk.errors import SlackApiError
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 
 
 async def test_account_creation_copies_defaults_once(tmp_path, druks_db, monkeypatch):
-    destination = await Destination.create(
-        druks_db, name="New account gates", kind="slack_channel", channel_id="C1"
-    )
     installation = await InstallationSettings.get_or_create(druks_db)
-    await installation.update(gate_park_destination_id=destination.id)
     monkeypatch.setattr(
         "druks.accounts.models.get_settings",
         lambda: make_settings(tmp_path, timezone="Europe/Madrid"),
     )
     alice = await Account.get_or_create(druks_db, "alice@example.com")
-    assert (alice.timezone, alice.gate_park_destination_id) == ("Europe/Madrid", destination.id)
+    assert alice.timezone == "Europe/Madrid"
     assert alice.theme == "system"
-    await alice.update_preferences(timezone="America/New_York", gate_park_destination_id=None)
+    await alice.update_preferences(timezone="America/New_York")
     await installation.update(default_effort="low")
     existing = await Account.get_or_create(druks_db, "alice@example.com")
     assert existing.id == alice.id
-    assert (existing.timezone, existing.gate_park_destination_id) == ("America/New_York", None)
+    assert existing.timezone == "America/New_York"
     with header_client(tmp_path) as client:
         assert client.get(
             "/api/settings/personal", headers={IDENTITY_HEADER: alice.username}
         ).json() == {
             "timezone": "America/New_York",
             "theme": "system",
-            "gateParkDestinationId": None,
+            "noticeChannelId": None,
             "isTagRequired": False,
         }
     assert await druks_db.scalar(select(func.count()).select_from(InstallationSettings)) == 1
 
 
-async def test_personal_notifications_can_be_saved_and_cleared(tmp_path, druks_db):
-    destination = await Destination.create(
-        druks_db, name="Personal gates", kind="slack_channel", channel_id="C1"
-    )
+class _SlackChannels:
+    """The bot's view of the workspace: #alerts has the bot, #random does not."""
+
+    channels = {
+        "C1": {"id": "C1", "name": "alerts", "is_member": True},
+        "C2": {"id": "C2", "name": "random", "is_member": False},
+    }
+
+    async def conversations_info(self, *, channel):
+        if channel not in self.channels:
+            raise SlackApiError("channel_not_found", {"ok": False, "error": "channel_not_found"})
+        return {"channel": self.channels[channel]}
+
+    async def users_conversations(self, **params):
+        async def pages():
+            yield {"channels": [{"id": "C3", "name": "ops"}]}
+            yield {"channels": [{"id": "C1", "name": "alerts"}]}
+
+        return pages()
+
+
+@pytest.fixture
+def slack_channels(monkeypatch):
+    async def get_client():
+        return _SlackChannels()
+
+    monkeypatch.setattr(Slack, "get_client", get_client)
+
+
+async def test_a_person_chooses_a_channel_the_bot_is_in(tmp_path, druks_db, slack_channels):
     with settings_client(tmp_path) as client:
-        saved = client.patch(
-            "/api/settings/personal", json={"gateParkDestinationId": destination.id}
-        )
+        saved = client.patch("/api/settings/personal", json={"noticeChannelId": "C1"})
         assert saved.status_code == 200
-        assert saved.json()["gateParkDestinationId"] == destination.id
-        assert client.get("/api/settings").json()["gateParkDestinationId"] is None
-        cleared = client.patch("/api/settings/personal", json={"gateParkDestinationId": None})
-        assert cleared.status_code == 200
-        assert cleared.json()["gateParkDestinationId"] is None
-        rejected = client.patch("/api/settings/personal", json={"gateParkDestinationId": "missing"})
-        assert rejected.status_code == 422
-        required = client.patch("/api/settings/personal", json={"isTagRequired": True})
-        assert required.json()["isTagRequired"] is True
+        assert saved.json()["noticeChannelId"] == "C1"
+        outside = client.patch("/api/settings/personal", json={"noticeChannelId": "C2"})
+        assert outside.status_code == 422
+        assert "Invite it to the channel" in outside.json()["detail"]
+        unknown = client.patch("/api/settings/personal", json={"noticeChannelId": "C9"})
+        assert unknown.status_code == 422
+        assert client.get("/api/settings/personal").json()["noticeChannelId"] == "C1"
+        direct = client.patch("/api/settings/personal", json={"noticeChannelId": None})
+        assert direct.status_code == 200
+        assert direct.json()["noticeChannelId"] is None
+
+
+async def test_notice_channels_list_the_bot_s_channels_by_name(tmp_path, slack_channels):
+    with settings_client(tmp_path) as client:
+        listed = client.get("/api/settings/personal/channels")
+    assert listed.json() == [{"id": "C1", "name": "alerts"}, {"id": "C3", "name": "ops"}]
 
 
 @pytest.mark.parametrize("has_settings", [False, True])
@@ -92,7 +121,8 @@ async def test_migrations_preserve_preferences_and_installation_execution(druks_
         "DELETE FROM settings",
         "ALTER TABLE accounts DROP COLUMN timezone",
         "ALTER TABLE accounts DROP COLUMN theme",
-        "ALTER TABLE accounts DROP COLUMN gate_park_destination_id",
+        "ALTER TABLE accounts DROP COLUMN notice_channel_id",
+        "ALTER TABLE settings ADD COLUMN gate_park_destination_id varchar",
         "ALTER TABLE settings DROP CONSTRAINT settings_singleton",
         "ALTER TABLE settings ADD COLUMN timezone varchar NOT NULL DEFAULT 'UTC'",
         "ALTER TABLE settings ADD COLUMN account_id varchar REFERENCES accounts(id) "
@@ -132,6 +162,7 @@ async def test_migrations_preserve_preferences_and_installation_execution(druks_
             "7dc609a2d51a_move_preferences_to_accounts.py",
             "b43924bf37db_enforce_installation_settings_singleton.py",
             "d8f6a2c91b47_add_account_theme_preference.py",
+            "c4e8a1f7d2b9_choose_where_notices_go.py",
         ):
             path = (
                 Path(__file__).resolve().parent.parent
@@ -149,14 +180,15 @@ async def test_migrations_preserve_preferences_and_installation_execution(druks_
     await (await druks_db.connection()).run_sync(upgrade)
     preferences = (
         await druks_db.execute(
-            text("SELECT id, timezone, theme, gate_park_destination_id FROM accounts ORDER BY id")
+            text("SELECT id, timezone, theme, notice_channel_id FROM accounts ORDER BY id")
         )
     ).all()
     expected = (
         [
-            (alice.id, "America/New_York", "system", destination.id),
+            # Only the unattended account keeps the channel that it copied.
+            (alice.id, "America/New_York", "system", "C1"),
             (bob.id, "Asia/Tokyo", "system", None),
-            (charlie.id, "Europe/Madrid", "system", destination.id),
+            (charlie.id, "Europe/Madrid", "system", None),
         ]
         if has_settings
         else [(account_id, "UTC", "system", None) for account_id in account_ids]
@@ -272,7 +304,7 @@ async def test_personal_api_is_scoped_and_does_not_retime_schedules(
         alice = {IDENTITY_HEADER: "alice@example.com"}
         bob = {IDENTITY_HEADER: "bob@example.com"}
         inherited = client.get("/api/settings/personal", headers=alice).json()
-        assert set(inherited) == {"timezone", "theme", "gateParkDestinationId", "isTagRequired"}
+        assert set(inherited) == {"timezone", "theme", "noticeChannelId", "isTagRequired"}
         assert inherited["theme"] == "system"
         saved_theme = client.patch("/api/settings/personal", headers=alice, json={"theme": "dark"})
         assert saved_theme.status_code == 200
@@ -331,45 +363,3 @@ async def test_shared_agent_overrides_use_installation_settings_after_a_personal
 
     assert response.status_code == 200
     assert await SettingsOverride.read(druks_db, f"agent_harness:{CONFIG_PROBE.id}") == "claude"
-
-
-async def test_notification_default_only_seeds_new_accounts(tmp_path, druks_db):
-    destination = await Destination.create(
-        druks_db, name="Default gates", kind="slack_channel", channel_id="C1"
-    )
-    with header_client(tmp_path) as client:
-        alice = {IDENTITY_HEADER: "alice@example.com"}
-        bob = {IDENTITY_HEADER: "bob@example.com"}
-        charlie = {IDENTITY_HEADER: "charlie@example.com"}
-        assert (
-            client.get("/api/settings/personal", headers=alice).json()["gateParkDestinationId"]
-            is None
-        )
-        assert (
-            client.patch(
-                "/api/settings", headers=alice, json={"gateParkDestinationId": destination.id}
-            ).status_code
-            == 200
-        )
-        assert (
-            client.get("/api/settings/personal", headers=alice).json()["gateParkDestinationId"]
-            is None
-        )
-        assert (
-            client.get("/api/settings/personal", headers=bob).json()["gateParkDestinationId"]
-            == destination.id
-        )
-        assert (
-            client.patch(
-                "/api/settings", headers=alice, json={"gateParkDestinationId": None}
-            ).status_code
-            == 200
-        )
-        assert (
-            client.get("/api/settings/personal", headers=bob).json()["gateParkDestinationId"]
-            == destination.id
-        )
-        assert (
-            client.get("/api/settings/personal", headers=charlie).json()["gateParkDestinationId"]
-            is None
-        )

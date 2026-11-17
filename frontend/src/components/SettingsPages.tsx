@@ -114,6 +114,13 @@ export function SettingsPages({
   const queryClient = useQueryClient()
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: api.getSettings })
   const personalQuery = useQuery({ queryKey: ['personalSettings'], queryFn: api.getPersonalSettings })
+  // Without a Slack connection the list fails, and the choice offers the direct message only.
+  const noticeChannelsQuery = useQuery({
+    queryKey: ['noticeChannels'],
+    queryFn: api.noticeChannels,
+    enabled: section === 'personal',
+    retry: false,
+  })
   const appsQuery = useQuery({ queryKey: ['appSettings'], queryFn: api.getAppSettings })
   // Live choices can call an outside service, so only the settings page of an app loads them.
   const choicesQuery = useQuery({
@@ -177,6 +184,10 @@ export function SettingsPages({
   const personalTimezone = personalEdits.timezone ?? personalQuery.data?.timezone ?? 'UTC'
   const { theme, previewTheme } = useThemePreference()
   const personalTheme = personalEdits.theme ?? theme
+  const personalNoticeChannelId =
+    'noticeChannelId' in personalEdits
+      ? (personalEdits.noticeChannelId ?? null)
+      : (personalQuery.data?.noticeChannelId ?? null)
   const personalChanges = Object.fromEntries(
     Object.entries(personalEdits).filter(([field, value]) =>
       value !== personalQuery.data?.[field as keyof UpdatePersonalSettingsRequest],
@@ -702,6 +713,11 @@ export function SettingsPages({
                     setPersonalEdits((current) => ({ ...current, theme: value }))
                     previewTheme(value)
                   }}
+                  noticeChannelId={personalNoticeChannelId}
+                  setNoticeChannelId={(value) =>
+                    setPersonalEdits((current) => ({ ...current, noticeChannelId: value }))
+                  }
+                  noticeChannels={noticeChannelsQuery.data ?? []}
                   timezones={timezones}
                   clock={clock}
                   busy={saving}

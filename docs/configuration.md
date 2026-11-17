@@ -188,17 +188,11 @@ take the level as it is. Codex's scale ends at `xhigh`, so it runs `max` as
 subscription it runs on in its sandbox: claude.ai connectors or ChatGPT apps.
 See [Harnesses](#harnesses) for what the switch changes in a sandbox.
 
-**Settings → Preferences** edits the timezone on your `Account`. The personal
-settings API also edits your account's gate notification destination. Druks
-copies the installation timezone and notification default when it creates an
-account. Later installation changes do not change existing account preferences.
-Each page saves its own draft.
-
-`PATCH /api/settings` accepts `gateParkDestinationId` as the notification default
-for **new accounts only**. Set it to a destination ID, or to `null` to start new
-accounts with gate notifications off. This default has no dashboard control.
-Use `PATCH /api/settings/personal` to change an existing account's destination.
-Clearing or replacing the installation default does not change existing accounts.
+**Settings → Preferences** edits the timezone, the theme, and where your
+notices go on your `Account`. Druks copies the installation timezone when it
+creates an account. Later installation changes do not change existing account
+preferences. Each page saves its own draft. See [Your notices](#your-notices)
+for the notices choice.
 
 Set the installation timezone at the top level of `druks.toml`, before any table:
 
@@ -241,8 +235,8 @@ and default account as its scheduled ticks.
 
 The API exposes installation settings at `GET/PATCH /api/settings` and your
 preferences at `GET/PATCH /api/settings/personal`. The personal route uses the
-authenticated account. It returns `timezone` and `gateParkDestinationId`. It
-rejects execution settings. The installation API rejects timezone changes.
+authenticated account. It returns `timezone`, `theme`, `noticeChannelId`, and
+`isTagRequired`. It rejects execution settings. The installation API rejects timezone changes.
 
 ## Core process settings
 
@@ -1028,9 +1022,8 @@ Slack shows the channel ID at the bottom of the channel details. Druks posts a
 first message to the channel before it saves the destination. If Slack refuses
 that message, Druks refuses the destination and shows the reason.
 
-Select one enabled destination as the gate-notification destination through
-the API. A parked subjected run then produces a durable notification. Failure
-to deliver the notification does not unpark or fail the run.
+Nothing sends to a destination yet. A parked run's notice follows the route of
+the run's account. See [Your notices](#your-notices).
 
 ### Your notices
 
@@ -1042,12 +1035,27 @@ Some notices are for one person. Druks sends them to that person's account:
   notice gives the end time in your timezone.
 - **Run failed.** A run that no chat started failed. The notice links to the
   run's page. A run that a chat started reports its failure in that chat.
+- **Run waits for an answer.** A run that no chat started parked on a gate. When
+  you answer the gate in Druks, the notice has its buttons. A run that a chat
+  started asks in that chat. Failure to deliver the notice does not unpark or fail the
+  run.
 
-If you linked your Slack account, the bot sends you the notice as a direct
-message. See [Link your account](chat.md#link-your-account). The bell in the
-dashboard header keeps every notice, with or without Slack. It shows how many
-notices are unread. Opening it marks them read. A notice links to the dashboard
-only when `urls.endpoint` is set.
+**Settings → Preferences → Notices** chooses where the bot sends your notices:
+
+- **A Slack channel.** The list shows the channels that the bot is a member of.
+  Invite the bot to a channel to add it to the list. When you save, Druks
+  refuses a channel that the bot is not in. If the bot leaves the channel later, or
+  the channel is archived or deleted, the bot sends the notice to your direct
+  message instead.
+- **A Slack direct message.** This is the default. The bot needs your linked
+  Slack account. See [Link your account](chat.md#link-your-account).
+
+A run without an account, such as a scheduled run, belongs to the default
+account. Its notices follow the default account's choice. The bell in the dashboard header keeps every notice,
+with or without Slack. It shows how many notices are unread. Opening it marks
+them read. When you have no channel and no linked Slack account, the bell says
+how to choose a route. A notice links to the dashboard only when
+`urls.endpoint` is set.
 
 Each run has its own page at `/runs/<id>`. A run whose app shows it on a work
 item's page opens there. You see your own runs and the runs of the default

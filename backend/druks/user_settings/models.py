@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import CheckConstraint, ForeignKey, select
+from sqlalchemy import CheckConstraint, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +22,7 @@ from .datastructures import ResolvedChoice, ResolvedTimeout
 
 
 class InstallationSettings(Base):
-    """Shared execution settings and the notification default for new accounts."""
+    """Shared execution settings."""
 
     __tablename__ = "settings"
     __table_args__ = (CheckConstraint("id = 1", name="settings_singleton"),)
@@ -36,9 +36,6 @@ class InstallationSettings(Base):
     # Whether a run loads the apps of its subscription: claude.ai connectors or ChatGPT apps.
     include_apps: Mapped[bool] = mapped_column(default=False)
     default_timeout: Mapped[int] = mapped_column(default=DEFAULT_TIMEOUT)
-    gate_park_destination_id: Mapped[str | None] = mapped_column(
-        ForeignKey("notification_destinations.id", ondelete="SET NULL"), default=None
-    )
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @classmethod

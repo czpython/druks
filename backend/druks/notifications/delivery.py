@@ -3,7 +3,7 @@ from slack_sdk.errors import SlackApiError
 
 from druks.core.apis.slack import SlackClient
 from druks.notifications.buttons import encode_button
-from druks.notifications.exceptions import DeliveryError
+from druks.notifications.exceptions import ChannelUnavailableError, DeliveryError
 
 SECTION_LIMIT = 3000
 
@@ -14,6 +14,7 @@ _CHANNEL_REASONS = {
         "Slack finds no channel {channel} for the bot. Check the channel ID. "
         "If the channel is private, invite the bot to it"
     ),
+    "is_archived": "channel {channel} is archived. Choose another channel",
 }
 
 
@@ -74,7 +75,9 @@ async def deliver(
     except SlackApiError as error:
         reason = error.response.get("error") or f"HTTP {error.response.status_code}"
         if reason in _CHANNEL_REASONS:
-            reason = _CHANNEL_REASONS[reason].format(channel=channel)
+            raise ChannelUnavailableError(
+                _CHANNEL_REASONS[reason].format(channel=channel)
+            ) from None
         raise DeliveryError(reason) from None
     except (aiohttp.ClientError, TimeoutError) as error:
         raise DeliveryError(type(error).__name__) from None

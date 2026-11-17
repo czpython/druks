@@ -420,8 +420,8 @@ async def _park(
         },
     )
     if workflow._subject:
-        # Every subjected park notifies the designated destination — no author opt-in.
-        await _notify_designated_destination(workflow.workflow_id, workflow._subject)
+        # Every subjected park notifies the run's account — no author opt-in.
+        await _notify_account(workflow.workflow_id, workflow._subject)
     if workflow.conversation_id:
         if workflow._subject and await _notify_conversation(
             workflow.workflow_id, workflow._subject
@@ -444,15 +444,16 @@ async def _park(
     return reply
 
 
-async def _notify_designated_destination(workflow_id: str, subject: dict[str, Any]) -> None:
-    # The operator's settings select the destination for the recorded request.
+async def _notify_account(workflow_id: str, subject: dict[str, Any]) -> None:
+    # The notice goes by the account's own route. A run that a chat started asks in that
+    # chat instead, so the person does not get the same buttons twice. A gate without an
+    # ask has nothing to show. Every subjected park still runs the step, so a parked run
+    # replays its recorded steps in their order.
     async def _create() -> str | None:
         async with step_session() as session:
             run = await session.get(Run, workflow_id)
-            account = await Account.get_for_run(session, run.account_id)
-            destination_id = account.gate_park_destination_id
-            if destination_id:
-                return await run.create_park_notification(subject, destination_id=destination_id)
+            if run.input_request and not run.conversation_id:
+                return await run.create_park_notification(subject, account_id=run.account_id)
 
     notification_id = await DBOS.run_step_async(
         StepOptions(name="notifications.gate_park", **_IO_RETRIES), _create

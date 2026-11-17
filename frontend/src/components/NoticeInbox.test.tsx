@@ -6,7 +6,9 @@ import { api } from '../api/client'
 import type { NotificationResponse } from '../api/types'
 import { NoticeInbox } from './NoticeInbox'
 
-vi.mock('../api/client', () => ({ api: { inbox: vi.fn(), markInboxRead: vi.fn() } }))
+vi.mock('../api/client', () => ({
+  api: { inbox: vi.fn(), markInboxRead: vi.fn(), getPersonalSettings: vi.fn(), listConnections: vi.fn() },
+}))
 
 const disconnect: NotificationResponse = {
   id: 'n1',
@@ -53,5 +55,22 @@ describe('NoticeInbox', () => {
     const link = await screen.findByRole('link', { name: disconnect.body })
     expect(link.getAttribute('href')).toBe(disconnect.deepLink)
     expect(api.markInboxRead).not.toHaveBeenCalled()
+  })
+
+  it('says how to choose a route to a person with no channel and no Slack account', async () => {
+    vi.mocked(api.inbox).mockResolvedValue([])
+    vi.mocked(api.getPersonalSettings).mockResolvedValue({
+      timezone: 'UTC',
+      theme: 'system',
+      noticeChannelId: null,
+      isTagRequired: false,
+    })
+    vi.mocked(api.listConnections).mockResolvedValue([])
+    renderInbox()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Notices' }))
+
+    const link = await screen.findByRole('link', { name: 'Choose where notices go' })
+    expect(link.getAttribute('href')).toBe('/settings/personal?field=notices')
   })
 })
