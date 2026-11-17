@@ -4,7 +4,7 @@ name: On Pull Request Calls
 # checks run only when it changes.
 on:
   pull_request:
-    branches: [main, "codex/**", personal-notices]
+    branches: [main, "codex/**"]
     paths:
       - "druks-calls/**"
       - "deploy/calls/**"
