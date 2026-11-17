@@ -50,6 +50,8 @@ def inline_checkpoints(monkeypatch):
     sleep = AsyncMock()
     monkeypatch.setattr(DBOS, "run_step_async", run_step)
     monkeypatch.setattr(DBOS, "sleep_async", sleep)
+    # A failed run with no chat queues its owner's notice.
+    monkeypatch.setattr(DBOS, "enqueue_workflow_async", AsyncMock())
     return sleep
 
 
