@@ -30,7 +30,7 @@ def direct_steps(monkeypatch):
         return await function(*args, **kwargs)
 
     monkeypatch.setattr(DBOS, "run_step_async", call_through)
-    monkeypatch.setattr("druks.workflows._notify_designated_destination", AsyncMock())
+    monkeypatch.setattr("druks.workflows._notify_account", AsyncMock())
 
 
 @pytest.fixture(params=["gate", "review"])

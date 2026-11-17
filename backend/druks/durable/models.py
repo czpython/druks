@@ -449,7 +449,7 @@ class Run(Base):
         self,
         subject: dict[str, Any],
         *,
-        destination_id: str | None = None,
+        account_id: str | None = None,
         conversation_id: str | None = None,
     ) -> str:
         # Create the notification for the round this run just parked on — the
@@ -459,7 +459,7 @@ class Run(Base):
         rendered = await self.get_rendered_ask(has_chat=bool(conversation_id))
         notification = await Notification.create(
             self.session,
-            destination_id=destination_id,
+            account_id=account_id,
             conversation_id=conversation_id,
             reason="gate.parked",
             body=rendered["body"],

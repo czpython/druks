@@ -42,6 +42,11 @@ class DeliveryError(NotificationError):
         super().__init__(f"Delivery failed: {reason}.")
 
 
+class ChannelUnavailableError(DeliveryError):
+    """Slack refuses every post to the channel until someone fixes it in Slack: the bot is
+    not in the channel, or the channel is archived or gone."""
+
+
 class MalformedButtonError(NotificationError):
     # A button action_id embeds the respond token, so the message never echoes
     # the input.

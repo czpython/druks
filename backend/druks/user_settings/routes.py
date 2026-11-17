@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from slack_sdk.errors import SlackApiError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.dependencies import current_account, current_session_account
@@ -7,12 +8,12 @@ from druks.agents import Agent
 from druks.api.dependencies import SessionDep
 from druks.apps.loader import get_app, iter_apps
 from druks.apps.registry import agents, bots, channels, workflows
+from druks.core.services import Slack
 from druks.durable.engine import apply_schedules
 from druks.harnesses.base import Harness
 from druks.harnesses.config import check_config
 from druks.harnesses.exceptions import AgentConfigError
 from druks.harnesses.registry import get_harnesses
-from druks.notifications.models import Destination
 
 from . import reads
 from .datastructures import ALLOWED_EFFORTS
@@ -23,6 +24,7 @@ from .schemas import (
     AppsSettingsResponse,
     AppsSettingsUpdate,
     HarnessResponse,
+    NoticeChannelResponse,
     PersonalSettingsResponse,
     SettingsResponse,
     UpdatePersonalSettingsRequest,
@@ -75,6 +77,20 @@ async def get_personal_settings(
     return account
 
 
+@router.get(
+    "/personal/channels", response_model=list[NoticeChannelResponse], response_model_by_alias=True
+)
+async def list_notice_channels() -> list[dict]:
+    """The Slack channels the bot is a member of: the channels a notice can go to."""
+    member_channels = []
+    client = await Slack.get_client()
+    async for page in await client.users_conversations(
+        types="public_channel,private_channel", exclude_archived=True, limit=1000
+    ):
+        member_channels.extend(page["channels"])
+    return sorted(member_channels, key=lambda channel: channel["name"])
+
+
 async def check_agent_configs(session: AsyncSession, settings: InstallationSettings) -> None:
     await check_config(
         session, settings.default_harness, settings.default_model, settings.default_billing
@@ -89,21 +105,9 @@ async def check_agent_configs(session: AsyncSession, settings: InstallationSetti
             raise AgentConfigError(f"{agent.id}: {error}") from error
 
 
-async def _settings_changes(
-    session: AsyncSession, body: UpdateSettingsRequest | UpdatePersonalSettingsRequest
-) -> dict[str, object]:
-    fields = body.model_dump(exclude_unset=True, exclude_none=True)
-    if "gate_park_destination_id" in body.model_fields_set:
-        destination_id = body.gate_park_destination_id
-        if destination_id and not await session.get(Destination, destination_id):
-            raise HTTPException(status_code=422, detail=f"Unknown destination {destination_id!r}")
-        fields["gate_park_destination_id"] = destination_id
-    return fields
-
-
 @router.patch("", response_model=SettingsResponse, response_model_by_alias=True)
 async def update_settings(session: SessionDep, body: UpdateSettingsRequest) -> InstallationSettings:
-    fields = await _settings_changes(session, body)
+    fields = body.model_dump(exclude_unset=True, exclude_none=True)
     settings = await InstallationSettings.get_or_create(session)
     if fields:
         await settings.update(**fields)
@@ -117,10 +121,25 @@ async def update_settings(session: SessionDep, body: UpdateSettingsRequest) -> I
 @router.patch("/personal", response_model=PersonalSettingsResponse, response_model_by_alias=True)
 async def update_personal_settings(
     body: UpdatePersonalSettingsRequest,
-    session: SessionDep,
     account: Account = Depends(current_account),
 ) -> Account:
-    fields = await _settings_changes(session, body)
+    fields = body.model_dump(exclude_unset=True, exclude_none=True)
+    if "notice_channel_id" in body.model_fields_set:
+        channel_id = body.notice_channel_id
+        if channel_id:
+            client = await Slack.get_client()
+            try:
+                channel = (await client.conversations_info(channel=channel_id))["channel"]
+            except SlackApiError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            # The bot posts only in a channel that it is a member of. Slack leaves the field
+            # out for a direct message, which is not a channel.
+            if not channel.get("is_member"):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"The bot is not in {channel_id}. Invite it to the channel first.",
+                )
+        fields["notice_channel_id"] = channel_id or None
     if fields:
         await account.update_preferences(**fields)
     return account

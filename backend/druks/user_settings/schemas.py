@@ -35,14 +35,18 @@ class PersonalSettingsResponse(Schema):
 
     timezone: str
     theme: Theme
-    gate_park_destination_id: str | None
+    notice_channel_id: str | None
     is_tag_required: bool
+
+
+class NoticeChannelResponse(Schema):
+    id: str
+    name: str
 
 
 class SettingsResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
-    gate_park_destination_id: str | None
     updated_at: datetime
     default_harness: str
     default_model: str
@@ -58,19 +62,14 @@ class UpdatePersonalSettingsRequest(BaseModel):
 
     timezone: Annotated[str, AfterValidator(validate_timezone)] | None = None
     theme: Theme | None = None
-    # Absent leaves the destination unchanged. Null turns notifications off.
-    gate_park_destination_id: str | None = Field(
-        default=None, validation_alias="gateParkDestinationId"
-    )
+    # Absent leaves the channel unchanged. Null sends notices by DM.
+    notice_channel_id: str | None = Field(default=None, validation_alias="noticeChannelId")
     is_tag_required: bool | None = Field(default=None, validation_alias="isTagRequired")
 
 
 class UpdateSettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    gate_park_destination_id: str | None = Field(
-        default=None, validation_alias="gateParkDestinationId"
-    )
     default_harness: str | None = Field(default=None, validation_alias="defaultHarness")
     default_model: str | None = Field(default=None, validation_alias="defaultModel")
     default_billing: Billing | None = Field(default=None, validation_alias="defaultBilling")

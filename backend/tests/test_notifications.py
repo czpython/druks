@@ -184,36 +184,6 @@ async def test_destinations_route_still_resolves_after_notifications_mount(tmp_p
         assert listed.json()[0]["channelId"] == "C1"
 
 
-async def test_settings_gate_park_destination_set_clear_and_reject(tmp_path, druks_db):
-    destination = await _destination()
-
-    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        assert client.get("/api/settings").json()["gateParkDestinationId"] is None
-
-        set_response = client.patch("/api/settings", json={"gateParkDestinationId": destination.id})
-        assert set_response.status_code == 200
-        assert set_response.json()["gateParkDestinationId"] == destination.id
-        assert client.get("/api/settings").json()["gateParkDestinationId"] == destination.id
-
-        unknown = client.patch("/api/settings", json={"gateParkDestinationId": "no-such-id"})
-        assert unknown.status_code == 422
-
-        cleared = client.patch("/api/settings", json={"gateParkDestinationId": None})
-        assert cleared.status_code == 200
-        assert cleared.json()["gateParkDestinationId"] is None
-
-
-async def test_deleting_designated_destination_unsets_the_pointer(tmp_path, druks_db):
-    destination = await _destination()
-
-    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        client.patch("/api/settings", json={"gateParkDestinationId": destination.id})
-
-        deleted = client.delete(f"/api/notifications/destinations/{destination.id}")
-        assert deleted.status_code == 204
-        assert client.get("/api/settings").json()["gateParkDestinationId"] is None
-
-
 _IN_APP_ASK = {
     "presentation": "in_app",
     "controls": [

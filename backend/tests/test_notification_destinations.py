@@ -5,7 +5,11 @@ from conftest import bind_ambient_session, install_service
 from druks.core.apis.slack import SlackClient
 from druks.notifications.buttons import decode_button, encode_button
 from druks.notifications.delivery import deliver
-from druks.notifications.exceptions import DeliveryError, MalformedButtonError
+from druks.notifications.exceptions import (
+    ChannelUnavailableError,
+    DeliveryError,
+    MalformedButtonError,
+)
 from druks.notifications.models import Destination
 from druks.testing import asgi_client, configure_app_for_test, make_settings
 from slack_sdk.errors import SlackApiError
@@ -221,7 +225,7 @@ async def test_button_delivery_posts_one_button_per_action(slack):
 async def test_delivery_to_a_channel_the_bot_is_not_in_says_to_invite_it(slack):
     slack.error = "not_in_channel"
 
-    with pytest.raises(DeliveryError) as excinfo:
+    with pytest.raises(ChannelUnavailableError) as excinfo:
         await deliver(SlackClient(token=_BOT_TOKEN), "C1", "hello")
 
     assert "Invite the bot to the channel" in str(excinfo.value)
@@ -231,12 +235,12 @@ async def test_delivery_to_a_channel_the_bot_is_not_in_says_to_invite_it(slack):
 
 
 async def test_a_refused_delivery_names_slack_s_reason(slack):
-    slack.error = "is_archived"
+    slack.error = "restricted_action"
 
     with pytest.raises(DeliveryError) as excinfo:
         await deliver(SlackClient(token=_BOT_TOKEN), "C1", "hello")
 
-    assert str(excinfo.value) == "Delivery failed: is_archived."
+    assert str(excinfo.value) == "Delivery failed: restricted_action."
     assert excinfo.value.__cause__ is None
 
 
