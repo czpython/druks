@@ -220,7 +220,7 @@ describe('ProviderConnect', () => {
       subscription: subscription({ refreshTokenExpiresAt }),
     })
 
-    expect(screen.getByText(/Login ends/)).toBeTruthy()
+    expect(screen.getByText(/Login expires/)).toBeTruthy()
     expect(screen.getByText(/Reconnect before then/)).toBeTruthy()
     expect(view.container.querySelector('time')?.dateTime).toBe(refreshTokenExpiresAt)
     expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
@@ -228,7 +228,7 @@ describe('ProviderConnect', () => {
     view.unmount()
     vi.setSystemTime(new Date('2026-12-03T11:00:00Z'))
     renderCard(provider(), { subscription: subscription({ refreshTokenExpiresAt }) })
-    expect(screen.getByText(/Login ended/)).toBeTruthy()
+    expect(screen.getByText(/Login expired/)).toBeTruthy()
     expect(screen.getByText(/Reconnect now/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
     expect(screen.queryByText(/Reconnect before then/)).toBeNull()
@@ -243,7 +243,7 @@ describe('ProviderConnect', () => {
         revokedReason: 'invalid_grant',
       }),
     })
-    expect(screen.queryByText(/Login end/)).toBeNull()
+    expect(screen.queryByText(/Login expire/)).toBeNull()
   })
 
   it('a shared key shows its tail, who set it, spend today, Replace and Remove', () => {

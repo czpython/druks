@@ -87,6 +87,7 @@ from druks.durable.schemas import (
 from druks.events.models import Event
 from druks.harnesses.exceptions import HarnessError, HarnessSandboxProvisioningError
 from druks.models import StoredSubject, snake_name
+from druks.notifications.constants import RUN_FAILED_MESSAGE
 from druks.notifications.models import Notification
 from druks.notifications.outbox import send_notification
 from druks.sandbox.client import provisioning_key, sandbox_client
@@ -420,7 +421,7 @@ async def _park(
         },
     )
     if workflow._subject:
-        # Every subjected park notifies the run's account — no author opt-in.
+        # Every subjected park runs this step, with no author opt-in.
         await _notify_account(workflow.workflow_id, workflow._subject)
     if workflow.conversation_id:
         if workflow._subject and await _notify_conversation(
@@ -445,15 +446,16 @@ async def _park(
 
 
 async def _notify_account(workflow_id: str, subject: dict[str, Any]) -> None:
-    # The notice goes by the account's own route. A run that a chat started asks in that
-    # chat instead, so the person does not get the same buttons twice. A gate without an
-    # ask has nothing to show. Every subjected park still runs the step, so a parked run
-    # replays its recorded steps in their order.
+    # A run that a chat started asks in that chat, so the person does not get the same
+    # buttons twice. The step still runs for every subjected park, so a parked run replays
+    # its recorded steps in their order.
     async def _create() -> str | None:
         async with step_session() as session:
             run = await session.get(Run, workflow_id)
             if run.input_request and not run.conversation_id:
-                return await run.create_park_notification(subject, account_id=run.account_id)
+                return await run.create_park_notification(
+                    subject, account_id=run.account_id, deep_link=_get_run_link(run.id)
+                )
 
     notification_id = await DBOS.run_step_async(
         StepOptions(name="notifications.gate_park", **_IO_RETRIES), _create
@@ -481,6 +483,40 @@ async def _notify_conversation(workflow_id: str, subject: dict[str, Any]) -> boo
     if notification_id:
         await DBOS.enqueue_workflow_async(NOTIFICATIONS_QUEUE, send_notification, notification_id)
     return bool(notification_id)
+
+
+async def _notify_failure(workflow_id: str, subject: dict[str, Any] | None, failure: str) -> None:
+    notification_id = await DBOS.run_step_async(
+        StepOptions(name="notifications.run_failed", **_IO_RETRIES),
+        _create_failure_notification,
+        workflow_id,
+        subject,
+        failure,
+    )
+    await DBOS.enqueue_workflow_async(NOTIFICATIONS_QUEUE, send_notification, notification_id)
+
+
+async def _create_failure_notification(
+    workflow_id: str, subject: dict[str, Any] | None, failure: str
+) -> str:
+    async with step_session() as session:
+        run = await session.get(Run, workflow_id)
+        notification = await Notification.create(
+            session,
+            account_id=run.account_id,
+            reason="run.failed",
+            body=RUN_FAILED_MESSAGE.format(run=run.subject_key or run.kind, failure=failure),
+            subject=subject,
+            run_id=run.id,
+            deep_link=_get_run_link(run.id),
+        )
+        return notification.id
+
+
+def _get_run_link(run_id: str) -> str | None:
+    # An installation with no endpoint has no address for the link.
+    endpoint = get_settings().urls.endpoint.rstrip("/")
+    return f"{endpoint}/runs/{run_id}" if endpoint else None
 
 
 async def _post_to_chat(workflow_id: str, name: str, post: Callable) -> None:
@@ -805,30 +841,7 @@ async def _execute_run(
             post = partial(report_failure, failure=str(exc))
             await _post_to_chat(workflow_id, "chat.report_failure", post)
         else:
-            # No chat hears about this failure, so the run's owner gets a notice.
-            async def _create() -> str:
-                async with step_session() as session:
-                    run = await session.get(Run, workflow_id)
-                    endpoint = get_settings().urls.endpoint.rstrip("/")
-                    notification = await Notification.create(
-                        session,
-                        account_id=run.account_id,
-                        reason="run.failed",
-                        body=f"Your run {run.subject_key or run.kind} failed: {exc}",
-                        subject=subject,
-                        run_id=run.id,
-                        deep_link=f"{endpoint}/runs/{run.id}" if endpoint else None,
-                    )
-                    return notification.id
-
-            notification_id = await DBOS.run_step_async(
-                StepOptions(name="notifications.run_failed", **_IO_RETRIES), _create
-            )
-            # The step memoized the row; this body-level enqueue is DBOS's deterministic
-            # child-start, so a replayed failure never sends it twice.
-            await DBOS.enqueue_workflow_async(
-                NOTIFICATIONS_QUEUE, send_notification, notification_id
-            )
+            await _notify_failure(workflow_id, subject, str(exc))
 
     try:
         result = await body()

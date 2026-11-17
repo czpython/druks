@@ -3,24 +3,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from druks.notifications.models import DestinationKind
 from druks.schemas import Schema
 
 
-class DestinationResponse(Schema):
-    model_config = ConfigDict(from_attributes=True)
-
+class ChannelResponse(Schema):
     id: str
     name: str
-    kind: str
-    channel_id: str
-    is_enabled: bool
-
-
-class CreateDestinationRequest(BaseModel):
-    name: str
-    kind: DestinationKind
-    channel_id: str = Field(alias="channelId")
 
 
 class NotificationResponse(Schema):
@@ -33,7 +21,6 @@ class NotificationResponse(Schema):
     reason: str
     body: str
     actions: list[dict[str, Any]] | None
-    destination_id: str | None
     state: str
     attempts: int
     last_error: str | None

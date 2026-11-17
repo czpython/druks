@@ -1,11 +1,11 @@
-"""A notification can go to one account, as a notice for that person only, which they
-mark read in their inbox. A person's notice can be about no run, so it has no subject."""
+"""A notification can go to one account. Only that account reads it in Druks, and marks it read.
+It can be about no run, so it can have no subject."""
 
 import sqlalchemy as sa
 from alembic import op
 
 revision = "a7c2e94d1b05"
-down_revision = "c3f9a1d27b64"
+down_revision = "799bc78c94c3"
 branch_labels = None
 depends_on = None
 
@@ -21,6 +21,7 @@ def upgrade() -> None:
         ),
     )
     op.add_column("notifications", sa.Column("read_at", sa.DateTime(timezone=True), nullable=True))
+    op.create_index("notifications_account_idx", "notifications", ["account_id", "created_at"])
     op.alter_column("notifications", "subject", nullable=True)
     op.drop_constraint("notifications_one_target_check", "notifications")
     op.create_check_constraint(
@@ -39,5 +40,6 @@ def downgrade() -> None:
         "notifications",
         "num_nonnulls(destination_id, conversation_id) = 1",
     )
+    op.drop_index("notifications_account_idx", "notifications")
     op.drop_column("notifications", "read_at")
     op.drop_column("notifications", "account_id")

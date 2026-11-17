@@ -1,25 +1,25 @@
 import logging
 from zoneinfo import ZoneInfo
 
-from dbos import EnqueueOptions
-
 from druks.db import db_session
-from druks.durable.constants import NOTIFICATIONS_QUEUE, STALE_PARKED_FAILURE
-from druks.durable.engine import enqueue_in_transaction
+from druks.durable.constants import STALE_PARKED_FAILURE
 from druks.durable.models import Run
 from druks.files.storage import reap_deleted_file_bytes
-from druks.harnesses.constants import SIGN_IN_END_WARNING
+from druks.harnesses.constants import (
+    LOGIN_EXPIRING_MESSAGE,
+    LOGIN_EXPIRING_REASON,
+    LOGIN_WARNING_MARGIN,
+)
 from druks.harnesses.datastructures import RotationResult
 from druks.harnesses.directory import refresh_added_catalogs
 from druks.harnesses.providers import get_provider, get_providers
 from druks.models import Base
-from druks.notifications.constants import SEND_WORKFLOW
 from druks.notifications.models import Notification
+from druks.notifications.outbox import notify_account
 from druks.sandbox import gate
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.models import SandboxIdentity
 from druks.secrets.models import VaultSecret
-from druks.settings import get_settings
 from druks.usage.models import UsageScrape
 from druks.workflows import task
 
@@ -51,37 +51,31 @@ async def refresh_usage() -> None:
 
 
 @task(every="0 * * * *")
-async def warn_ending_sign_ins() -> None:
+async def warn_before_logins_expire() -> None:
     now = Base.utc_now()
-    endpoint = get_settings().urls.endpoint.rstrip("/")
     for subscription in await VaultSecret.list_subscriptions(db_session()):
-        ends_at = subscription.refresh_token_expires_at
-        # No warning once the end has passed: the sign-in cannot be saved by then.
-        if (
-            ends_at
-            and not subscription.sign_in_end_warned_at
-            and now < ends_at <= now + SIGN_IN_END_WARNING
-        ):
-            subscription.sign_in_end_warned_at = now
-            label = get_provider(subscription.audience_name).label
-            local_end = ends_at.astimezone(ZoneInfo(subscription.account.timezone))
-            notification = await Notification.create(
+        expires_at = subscription.refresh_token_expires_at
+        # No warning once the login has expired: nothing can save it by then.
+        if expires_at and now < expires_at <= now + LOGIN_WARNING_MARGIN:
+            # A warning made inside this login's margin is its own, so it goes out once.
+            warnings = await Notification.list_for_account(
                 db_session(),
-                account_id=subscription.account_id,
-                reason="subscription.sign_in_ending",
-                body=(
-                    f"Your {label} sign-in ends on {local_end:%d %b %Y at %H:%M %Z}. "
-                    "Reconnect it in Settings → Providers before then."
-                ),
-                deep_link=f"{endpoint}/settings/providers" if endpoint else None,
+                subscription.account_id,
+                reason=LOGIN_EXPIRING_REASON,
+                since=expires_at - LOGIN_WARNING_MARGIN,
+                limit=1,
             )
-            # The notice and its mark commit with the task's session, so neither goes alone.
-            options: EnqueueOptions = {
-                "workflow_name": SEND_WORKFLOW,
-                "queue_name": NOTIFICATIONS_QUEUE,
-                "workflow_id": f"{SEND_WORKFLOW}:{notification.id}",
-            }
-            await enqueue_in_transaction(db_session(), options, notification.id)
+            if not warnings:
+                await notify_account(
+                    db_session(),
+                    subscription.account_id,
+                    reason=LOGIN_EXPIRING_REASON,
+                    body=LOGIN_EXPIRING_MESSAGE.format(
+                        provider=get_provider(subscription.audience_name).label,
+                        expires_at=expires_at.astimezone(ZoneInfo(subscription.account.timezone)),
+                    ),
+                    path="/settings/providers",
+                )
 
 
 @task(every="0 * * * *")

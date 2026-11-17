@@ -6,7 +6,7 @@ import { SlackPane } from './SlackPane'
 
 const slack = { slug: 'slack', title: 'Slack', connected: true, facts: { team: 'Acme', bot_name: 'druks' } }
 const ana = { id: 'grant-1', provider: 'slack', identity: { subject: 'U100', name: 'ana' }, revokedAt: null }
-const personal = { timezone: 'UTC', theme: 'system' as const, noticeChannelId: null, isTagRequired: false }
+const personal = { timezone: 'UTC', theme: 'system' as const, notificationChannelId: null, isTagRequired: false }
 
 function renderPane(connections: object[]) {
   const fetchMock = vi.fn(async (url: string, request?: RequestInit) => {

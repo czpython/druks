@@ -29,7 +29,7 @@ beforeEach(() => {
       defaultHarness: 'claude', defaultModel: '', defaultBilling: 'subscription',
       defaultEffort: '', defaultTimeout: 1800, fastMode: false,
     }
-    if (url === '/api/settings/personal') response = { timezone: 'UTC', theme: 'system', noticeChannelId: null, isTagRequired: false }
+    if (url === '/api/settings/personal') response = { timezone: 'UTC', theme: 'system', notificationChannelId: null, isTagRequired: false }
     if (url === '/api/settings/apps') response = {
       allowedEfforts: [], channels, apps: [{
         name: 'chat', description: 'Live agent conversations.', icon: 'messages-square',

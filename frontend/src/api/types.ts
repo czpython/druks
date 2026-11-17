@@ -773,14 +773,22 @@ export type Billing = 'subscription' | 'api_key'
 export interface PersonalSettings {
   timezone: string
   theme: 'system' | 'light' | 'dark'
-  noticeChannelId: string | null
+  notificationChannelId: string | null
   isTagRequired: boolean
 }
 
-/** A Slack channel the bot is a member of: a place a person's notices can go. */
-export interface NoticeChannel {
+/** A Slack channel that the bot is a member of. A person can send their notifications to it. */
+export interface NotificationChannel {
   id: string
   name: string
+}
+
+export interface NotificationResponse {
+  id: string
+  body: string
+  deepLink: string | null
+  readAt: string | null
+  createdAt: string
 }
 
 export interface InstallationSettings {
@@ -797,7 +805,7 @@ export interface InstallationSettings {
 export interface UpdatePersonalSettingsRequest {
   timezone?: string
   theme?: PersonalSettings['theme']
-  noticeChannelId?: string | null
+  notificationChannelId?: string | null
   isTagRequired?: boolean
 }
 
@@ -1014,14 +1022,6 @@ export interface UsageProviderSummary {
   stale: boolean
   error: string | null
   rawOutput: string | null
-}
-
-export interface NotificationResponse {
-  id: string
-  body: string
-  deepLink: string | null
-  readAt: string | null
-  createdAt: string
 }
 
 export interface UsageResponse {

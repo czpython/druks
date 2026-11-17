@@ -1,9 +1,8 @@
 import secrets
 from datetime import datetime
-from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, String, select, true, update
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -20,54 +19,18 @@ def mint_correlation_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-class DestinationKind(StrEnum):
-    SLACK_CHANNEL = "slack_channel"
-
-
-class Destination(Base, Uuid7Pk):
-    __tablename__ = "notification_destinations"
-
-    name: Mapped[str] = mapped_column(String, unique=True)
-    kind: Mapped[str] = mapped_column(String)
-    # The bot posts here with the Slack card's token. The row holds no credential.
-    channel_id: Mapped[str] = mapped_column(String)
-    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
-    created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
-    updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
-
-    @classmethod
-    async def list_all(cls, session: AsyncSession) -> list["Destination"]:
-        return list((await session.execute(select(cls).order_by(cls.name))).scalars())
-
-    @classmethod
-    async def get_for_name(cls, session: AsyncSession, name: str) -> "Destination | None":
-        return (await session.execute(select(cls).where(cls.name == name))).scalar_one_or_none()
-
-    @classmethod
-    async def create(
-        cls, session: AsyncSession, *, name: str, kind: DestinationKind, channel_id: str
-    ) -> "Destination":
-        destination = cls(name=name, kind=kind, channel_id=channel_id)
-        session.add(destination)
-        await session.flush()
-        return destination
-
-    async def delete(self) -> None:
-        await self.session.delete(self)
-        await self.session.flush()
-
-
 class Notification(Base, Uuid7Pk):
     __tablename__ = "notifications"
     __table_args__ = (
         CheckConstraint(
-            "num_nonnulls(destination_id, conversation_id, account_id) = 1",
+            "num_nonnulls(conversation_id, account_id) = 1",
             name="notifications_one_target_check",
         ),
+        Index("notifications_account_idx", "account_id", "created_at"),
     )
 
-    # The subject ({type, id}) of the run the notification is about. A person's notice
-    # can be about no run. Subjectless parks never notify.
+    # The subject ({type, id}) of the run the notification is about. None when that run
+    # has no subject, or when the notification is about no run.
     subject: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
     # Why it fired — a machine category (e.g. "gate.parked"); the discriminator
     # for per-reason routing later.
@@ -85,14 +48,11 @@ class Notification(Base, Uuid7Pk):
     run_parked_at: Mapped[datetime | None] = mapped_column(default=None)
     # A human view-link; the buttons carry the respond capability, this never does.
     deep_link: Mapped[str | None] = mapped_column(default=None)
-    destination_id: Mapped[str | None] = mapped_column(
-        ForeignKey("notification_destinations.id"), default=None
-    )
     # A run that a Slack conversation started posts its buttons in that conversation.
     conversation_id: Mapped[str | None] = mapped_column(
         ForeignKey("chat_conversations.id", ondelete="CASCADE"), default=None
     )
-    # A notice for one person. Only that person sees it.
+    # The account that the notification is for. Only that account reads it in Druks.
     account_id: Mapped[str | None] = mapped_column(
         ForeignKey("accounts.id", ondelete="RESTRICT"), default=None
     )
@@ -108,7 +68,7 @@ class Notification(Base, Uuid7Pk):
     # Sanitized only — this lands on API responses.
     last_error: Mapped[str | None] = mapped_column(default=None)
     delivered_at: Mapped[datetime | None] = mapped_column(default=None)
-    # When the person marked the notice read in their inbox.
+    # When the person marked the notification read.
     read_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -118,7 +78,6 @@ class Notification(Base, Uuid7Pk):
         cls,
         session: AsyncSession,
         *,
-        destination_id: str | None = None,
         conversation_id: str | None = None,
         account_id: str | None = None,
         reason: str,
@@ -133,7 +92,6 @@ class Notification(Base, Uuid7Pk):
         # no enqueue — so a workflow step can call it and the body enqueues the
         # outbox afterwards.
         notification = cls(
-            destination_id=destination_id,
             conversation_id=conversation_id,
             account_id=account_id,
             reason=reason,
@@ -149,32 +107,29 @@ class Notification(Base, Uuid7Pk):
         return notification
 
     @classmethod
-    async def list_recent(cls, session: AsyncSession, limit: int = 50) -> list["Notification"]:
-        # uuid7 ids are time-ordered, breaking created_at ties toward the newest.
-        stmt = (
-            select(cls)
-            .where(cls.account_id.is_(None))
-            .order_by(cls.created_at.desc(), cls.id.desc())
-            .limit(limit)
-        )
-        return list(await session.scalars(stmt))
-
-    @classmethod
     async def list_for_account(
-        cls, session: AsyncSession, account_id: str, limit: int = 50
+        cls,
+        session: AsyncSession,
+        account_id: str,
+        *,
+        reason: str = "",
+        since: datetime | None = None,
+        limit: int = 50,
     ) -> list["Notification"]:
-        """The notices sent to ``account_id``, newest first: the person's inbox."""
-        stmt = (
-            select(cls)
-            .where(cls.account_id == account_id)
-            .order_by(cls.created_at.desc(), cls.id.desc())
-            .limit(limit)
-        )
+        """The notifications sent to ``account_id``, newest first: all of them, or those
+        with ``reason`` that were made at or after ``since``."""
+        stmt = select(cls).where(cls.account_id == account_id)
+        if reason:
+            stmt = stmt.where(cls.reason == reason)
+        if since:
+            stmt = stmt.where(cls.created_at >= since)
+        # uuid7 ids are time-ordered, breaking created_at ties toward the newest.
+        stmt = stmt.order_by(cls.created_at.desc(), cls.id.desc()).limit(limit)
         return list(await session.scalars(stmt))
 
     @classmethod
-    async def mark_read(cls, session: AsyncSession, account_id: str) -> None:
-        """Mark every unread notice sent to ``account_id`` read."""
+    async def mark_all_read(cls, session: AsyncSession, account_id: str) -> None:
+        """Mark every unread notification sent to ``account_id`` read."""
         await session.execute(
             update(cls)
             .where(cls.account_id == account_id, cls.read_at.is_(None))
@@ -214,7 +169,7 @@ class Notification(Base, Uuid7Pk):
                 return action
         raise InvalidChoiceError(f"unknown control {action_id!r}")
 
-    async def mark_delivered(self, message_id: str) -> None:
+    async def mark_delivered(self, message_id: str | None = None) -> None:
         self.message_id = message_id
         self.state = NotificationState.DELIVERED.value
         self.delivered_at = Base.utc_now()

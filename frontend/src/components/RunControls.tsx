@@ -55,7 +55,13 @@ export function CancelRun({ runId }: { runId: string }) {
   )
 }
 
-export function RetryRun({ runId }: { runId: string }) {
+export function RetryRun({
+  runId,
+  onRetried,
+}: {
+  runId: string
+  onRetried?: (runId: string) => void
+}) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -63,7 +69,8 @@ export function RetryRun({ runId }: { runId: string }) {
     setPending(true)
     setError(null)
     try {
-      await api.retryRun(runId)
+      const retried = await api.retryRun(runId)
+      onRetried?.(retried.run)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'could not retry')
       setPending(false)

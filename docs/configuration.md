@@ -189,10 +189,9 @@ subscription it runs on in its sandbox: claude.ai connectors or ChatGPT apps.
 See [Harnesses](#harnesses) for what the switch changes in a sandbox.
 
 **Settings → Preferences** edits the timezone, the theme, and where your
-notices go on your `Account`. Druks copies the installation timezone when it
+notifications go on your `Account`. Druks copies the installation timezone when it
 creates an account. Later installation changes do not change existing account
-preferences. Each page saves its own draft. See [Your notices](#your-notices)
-for the notices choice.
+preferences. Each page saves its own draft. See [Notifications](#notifications).
 
 Set the installation timezone at the top level of `druks.toml`, before any table:
 
@@ -235,7 +234,7 @@ and default account as its scheduled ticks.
 
 The API exposes installation settings at `GET/PATCH /api/settings` and your
 preferences at `GET/PATCH /api/settings/personal`. The personal route uses the
-authenticated account. It returns `timezone`, `theme`, `noticeChannelId`, and
+authenticated account. It returns `timezone`, `theme`, `notificationChannelId`, and
 `isTagRequired`. It rejects execution settings. The installation API rejects timezone changes.
 
 ## Core process settings
@@ -806,11 +805,11 @@ Anthropic signs in with `oauth`, the login on the Connect page, or with
 `setup_token`, a token that `claude setup-token` prints and you paste on the
 Providers page. A setup token lasts one year, has no refresh token, and carries
 the `user:inference` scope only: Druks does not refresh it, shows no quota for
-it, and asks for a new token when it expires. An `oauth` login ends on a date
+it, and asks for a new token when it expires. An `oauth` login expires on a date
 that Anthropic sets at each sign-in, about four weeks later. A token refresh
 does not move it. The Providers page shows the date: reconnect before it to
 start a new login. Three days before the date, Druks sends the account a
-notice. The `[providers.anthropic]` table in `druks.toml` selects the method,
+notification. The `[providers.anthropic]` table in `druks.toml` selects the method,
 `oauth` by default. An installation on
 `setup_token` in `none` identity mode gets its first account from another
 provider's login, because the paste needs a signed-in account.
@@ -1010,56 +1009,37 @@ container default timezone.
 
 ## Notifications
 
-The dashboard has no page for destinations yet. Manage them through the API.
-A destination is a Slack channel. Druks posts to it as the bot of the
-[Slack card](#slack), so connect Slack first. A message that asks for an answer
-has buttons. The card's signing secret authenticates the button clicks that
-Slack sends back. Under a manager, the manager's signature authenticates them.
+Druks sends each notification to one account. The bot of the
+[Slack card](#slack) posts it, so connect Slack first. A message that asks for an
+answer has buttons. The card's signing secret authenticates the button clicks
+that Slack sends back. Under a manager, the manager's signature authenticates
+them.
 
-To add a destination, invite the bot to the channel. Then send `name`, `kind`
-set to `slack_channel`, and `channelId` to `POST /api/notifications/destinations`.
-Slack shows the channel ID at the bottom of the channel details. Druks posts a
-first message to the channel before it saves the destination. If Slack refuses
-that message, Druks refuses the destination and shows the reason.
+Druks sends these notifications:
 
-Nothing sends to a destination yet. A parked run's notice follows the route of
-the run's account. See [Your notices](#your-notices).
-
-### Your notices
-
-Some notices are for one person. Druks sends them to that person's account:
-
-- **Subscription disconnected.** The provider ended a subscription's sign-in,
+- **Subscription disconnected.** The provider ended a subscription's login,
   so Druks disconnected it. Reconnect it in **Settings → Providers**.
-- **Sign-in ends soon.** An Anthropic sign-in ends in three days or less. The
-  notice gives the end time in your timezone.
-- **Run failed.** A run that no chat started failed. The notice links to the
+- **Login expires soon.** An Anthropic login expires in three days or less. The
+  notification gives the time in your timezone.
+- **Run failed.** A run that no chat started failed. The notification links to the
   run's page. A run that a chat started reports its failure in that chat.
-- **Run waits for an answer.** A run that no chat started parked on a gate. When
-  you answer the gate in Druks, the notice has its buttons. A run that a chat
-  started asks in that chat. Failure to deliver the notice does not unpark or fail the
-  run.
+- **Run waits for an answer.** A run with a subject, which no chat started, parked
+  on a gate. For a gate that you answer in Druks, the notification has buttons
+  and a link to the run. A run that a chat started asks in that chat. Failure to
+  deliver the notification does not unpark or fail the run.
 
-**Settings → Preferences → Notices** chooses where the bot sends your notices:
+**Settings → Preferences → Notifications** chooses where the bot sends your notifications:
 
-- **A Slack channel.** The list shows the channels that the bot is a member of.
-  Invite the bot to a channel to add it to the list. When you save, Druks
-  refuses a channel that the bot is not in. If the bot leaves the channel later, or
-  the channel is archived or deleted, the bot sends the notice to your direct
-  message instead.
+- **A Slack channel.** The bot must be a member of the channel. If the bot
+  leaves the channel later, or the channel is archived or deleted, the bot sends
+  the notification to your direct message instead.
 - **A Slack direct message.** This is the default. The bot needs your linked
   Slack account. See [Link your account](chat.md#link-your-account).
 
 A run without an account, such as a scheduled run, belongs to the default
-account. Its notices follow the default account's choice. The bell in the dashboard header keeps every notice,
-with or without Slack. It shows how many notices are unread. Opening it marks
-them read. When you have no channel and no linked Slack account, the bell says
-how to choose a route. A notice links to the dashboard only when
-`urls.endpoint` is set.
-
-Each run has its own page at `/runs/<id>`. A run whose app shows it on a work
-item's page opens there. You see your own runs and the runs of the default
-account.
+account, and that account gets its notifications. The bell in the dashboard
+header shows your newest notifications, with or without Slack. A notification
+links to the dashboard only when `urls.endpoint` is set.
 
 ## MCP servers
 

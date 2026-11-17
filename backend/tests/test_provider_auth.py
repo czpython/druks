@@ -209,7 +209,9 @@ async def test_claude_invalid_grant_revokes_the_subscription(monkeypatch, druks_
         await AnthropicProvider.get_subscription(druks_db, account_id)
 
 
-async def test_invalid_grant_queues_a_notice_to_the_subscription_s_account(monkeypatch, druks_db):
+async def test_invalid_grant_queues_a_notification_to_the_subscription_s_account(
+    monkeypatch, druks_db
+):
     connection = await _seed_claude(expires_at=_NOW - timedelta(minutes=1))
     account_id = connection.account_id
     _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
@@ -229,29 +231,29 @@ async def test_invalid_grant_queues_a_notice_to_the_subscription_s_account(monke
     assert queued == NOTIFICATIONS_QUEUE
 
 
-async def _sign_in_notices(account_id: str) -> list[Notification]:
+async def _login_warnings(account_id: str) -> list[Notification]:
     return list(
         await db_session().scalars(
             select(Notification).where(
                 Notification.account_id == account_id,
-                Notification.reason == "subscription.sign_in_ending",
+                Notification.reason == "subscription.login_expiring",
             )
         )
     )
 
 
-async def test_a_sign_in_ending_within_three_days_is_warned_once(druks_db):
-    ends_at = Base.utc_now() + timedelta(days=2)
-    connection = await _seed_claude(refresh_token_expires_at=ends_at)
+async def test_a_login_that_expires_within_three_days_is_warned_once(druks_db):
+    expires_at = Base.utc_now() + timedelta(days=2)
+    connection = await _seed_claude(refresh_token_expires_at=expires_at)
     account_id = connection.account_id
     account = await druks_db.get(Account, account_id)
     await account.update_preferences(timezone="Europe/Madrid")
 
-    await tasks.warn_ending_sign_ins._function()
-    await tasks.warn_ending_sign_ins._function()
+    await tasks.warn_before_logins_expire._function()
+    await tasks.warn_before_logins_expire._function()
 
-    [notification] = await _sign_in_notices(account_id)
-    madrid_end = ends_at.astimezone(ZoneInfo("Europe/Madrid"))
+    [notification] = await _login_warnings(account_id)
+    madrid_end = expires_at.astimezone(ZoneInfo("Europe/Madrid"))
     assert f"{madrid_end:%d %b %Y at %H:%M %Z}" in notification.body
     queued = await druks_db.scalar(
         select(workflow_status.c.queue_name).where(
@@ -264,12 +266,16 @@ async def test_a_sign_in_ending_within_three_days_is_warned_once(druks_db):
 async def test_a_reconnect_is_warned_again_when_its_own_end_nears(druks_db):
     connection = await _seed_claude(refresh_token_expires_at=Base.utc_now() + timedelta(days=2))
     account_id = connection.account_id
-    await tasks.warn_ending_sign_ins._function()
+    await tasks.warn_before_logins_expire._function()
 
+    # The old login was warned long before the last days of the new one.
+    [warning] = await _login_warnings(account_id)
+    warning.created_at -= timedelta(days=26)
+    await db_session().flush()
     await _seed_claude(refresh_token_expires_at=Base.utc_now() + timedelta(days=1))
-    await tasks.warn_ending_sign_ins._function()
+    await tasks.warn_before_logins_expire._function()
 
-    assert len(await _sign_in_notices(account_id)) == 2
+    assert len(await _login_warnings(account_id)) == 2
 
 
 async def test_no_warning_without_an_end_inside_the_next_three_days(druks_db):
@@ -285,10 +291,10 @@ async def test_no_warning_without_an_end_inside_the_next_three_days(druks_db):
     ]
     account_ids = [connection.account_id for connection in connections]
 
-    await tasks.warn_ending_sign_ins._function()
+    await tasks.warn_before_logins_expire._function()
 
     for account_id in account_ids:
-        assert not await _sign_in_notices(account_id)
+        assert not await _login_warnings(account_id)
 
 
 async def test_the_refresh_time_survives_revocation_until_a_reconnect(monkeypatch, druks_db):

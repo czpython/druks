@@ -312,17 +312,14 @@ async def test_a_run_reads_with_its_app_and_work_item(druks_client, druks_db):
     assert body["run"]["failure"] == "the disk is full"
 
 
-async def test_a_person_reads_their_own_runs_and_the_default_accounts(druks_client, druks_db):
-    service = await Account.get_or_create(druks_db, "service@example.invalid")
+async def test_a_person_reads_the_run_of_another_account(druks_client, druks_db):
+    # The first account is the default one, so the second one is another person's.
+    await Account.get_or_create(druks_db, "service@example.invalid")
     other = await Account.get_or_create(druks_db, "another@example.invalid")
-    scheduled = await seed_run(druks_db, kind=Summarize.kind, account_id=service.id)
-    private = await seed_run(druks_db, kind=Summarize.kind, account_id=other.id)
-    # The operator's account comes after the default one, so it is not the default.
-    own = await seed_run(druks_db, kind=Summarize.kind)
+    run = await seed_run(druks_db, kind=Summarize.kind, account_id=other.id)
 
-    response = await druks_client.get(f"/api/runs/{scheduled.id}")
+    response = await druks_client.get(f"/api/runs/{run.id}")
+
     assert response.status_code == 200
     assert response.json()["subject"] is None
-    assert (await druks_client.get(f"/api/runs/{own.id}")).status_code == 200
-    assert (await druks_client.get(f"/api/runs/{private.id}")).status_code == 404
     assert (await druks_client.get("/api/runs/no-such-run")).status_code == 404

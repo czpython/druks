@@ -24,7 +24,7 @@ import {
   type AppSettings,
   type Billing,
   type McpServer,
-  type NoticeChannel,
+  type NotificationChannel,
   type Pat,
   type PersonalSettings,
   type Provider,
@@ -432,9 +432,9 @@ export function PreferencesPane({
   setTimezone,
   theme,
   setTheme,
-  noticeChannelId,
-  setNoticeChannelId,
-  noticeChannels,
+  notificationChannelId,
+  setNotificationChannelId,
+  notificationChannels,
   timezones,
   clock,
   busy,
@@ -443,9 +443,9 @@ export function PreferencesPane({
   setTimezone: (timezone: string) => void
   theme: PersonalSettings['theme']
   setTheme: (theme: PersonalSettings['theme']) => void
-  noticeChannelId: string | null
-  setNoticeChannelId: (channelId: string | null) => void
-  noticeChannels: NoticeChannel[]
+  notificationChannelId: string | null
+  setNotificationChannelId: (channelId: string | null) => void
+  notificationChannels: NotificationChannel[]
   timezones: string[]
   clock: string
   busy: boolean
@@ -499,30 +499,30 @@ export function PreferencesPane({
           </select>
         </div>
       </div>
-      <div className="set-group" data-setting={SETTINGS_FIELDS.notices.field}>
-        <label className="set-group-label" htmlFor="personal-notices">
-          Notices
+      <div className="set-group" data-setting={SETTINGS_FIELDS.notifications.field}>
+        <label className="set-group-label" htmlFor="personal-notifications">
+          Notifications
         </label>
         <div className="set-field" style={{ maxWidth: 320 }}>
           <select
-            id="personal-notices"
+            id="personal-notifications"
             className="set-select"
-            value={noticeChannelId ?? ''}
-            onChange={(event) => setNoticeChannelId(event.target.value || null)}
+            value={notificationChannelId ?? ''}
+            onChange={(event) => setNotificationChannelId(event.target.value || null)}
             disabled={busy}
           >
             <option value="">Slack direct message</option>
-            {noticeChannelId && !noticeChannels.some((channel) => channel.id === noticeChannelId) && (
-              <option value={noticeChannelId}>{noticeChannelId}</option>
+            {notificationChannelId && !notificationChannels.some((channel) => channel.id === notificationChannelId) && (
+              <option value={notificationChannelId}>{notificationChannelId}</option>
             )}
-            {noticeChannels.map((channel) => (
+            {notificationChannels.map((channel) => (
               <option key={channel.id} value={channel.id}>
                 #{channel.name}
               </option>
             ))}
           </select>
           <span className="set-field-help">
-            Where the bot sends your notices. Invite the bot to a channel to see it here.
+            Where the bot sends your notifications. Invite the bot to a channel to see it here.
           </span>
         </div>
       </div>
@@ -1899,9 +1899,9 @@ export function ProviderConnect({
   const connected = Boolean(subscription?.connected)
   const disconnected = Boolean(subscription) && !connected
   const needsSignIn = !subscription || disconnected
-  const loginEnds = subscription?.refreshTokenExpiresAt
+  const loginExpiresAt = subscription?.refreshTokenExpiresAt
   // The subscription stays connected until its next refresh fails.
-  const loginEnded = loginEnds ? secondsUntil(loginEnds) <= 0 : false
+  const loginExpired = loginExpiresAt ? secondsUntil(loginExpiresAt) <= 0 : false
   // A pasted token names no email.
   const pasted = subscription?.providerEmail === null
   const showKeyForm = acceptsApiKey && (keyFormOpen || replacing)
@@ -1915,7 +1915,7 @@ export function ProviderConnect({
               <ServiceStatus connected={connected} label={disconnected ? unavailableLabel : undefined} />
             )}
             <div className="hr-conn-actions">
-              {(needsSignIn || loginEnds) && !pastesToken && !flow.challenge && (
+              {(needsSignIn || loginExpiresAt) && !pastesToken && !flow.challenge && (
                 <button
                   className="set-btn primary"
                   onClick={() => void flow.start()}
@@ -1967,11 +1967,11 @@ export function ProviderConnect({
                   {' · '}Reason: <code>{subscription.revokedReason}</code>
                 </p>
               )}
-              {connected && loginEnds && (
-                <p className={loginEnded ? 'provider-stale' : 'provider-account'}>
-                  {loginEnded ? 'Login ended' : 'Login ends'}{' '}
-                  <time dateTime={loginEnds}>{absTime(loginEnds)}</time>
-                  {loginEnded ? '. Reconnect now.' : '. Reconnect before then.'}
+              {connected && loginExpiresAt && (
+                <p className={loginExpired ? 'provider-stale' : 'provider-account'}>
+                  {loginExpired ? 'Login expired' : 'Login expires'}{' '}
+                  <time dateTime={loginExpiresAt}>{absTime(loginExpiresAt)}</time>
+                  {loginExpired ? '. Reconnect now.' : '. Reconnect before then.'}
                 </p>
               )}
               {subscription.lastRefreshedAt && (

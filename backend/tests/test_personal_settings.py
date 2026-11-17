@@ -1,9 +1,4 @@
-import importlib.util
-from pathlib import Path
-
 import pytest
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from conftest import (
     CONFIG_PROBE,
     IDENTITY_HEADER,
@@ -13,12 +8,12 @@ from conftest import (
 )
 from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.models import Account
+from druks.core.apis.slack import SlackClient
 from druks.core.services import Slack
 from druks.db import db_session
 from druks.durable.models import Run
 from druks.harnesses.config import get_config
 from druks.harnesses.exceptions import HarnessNotConnectedError
-from druks.notifications.models import Destination
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.testing import make_settings
@@ -26,8 +21,7 @@ from druks.user_settings.models import InstallationSettings, SettingsOverride
 from druks.workflows import _run_instance
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
-from slack_sdk.errors import SlackApiError
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 
@@ -51,24 +45,14 @@ async def test_account_creation_copies_defaults_once(tmp_path, druks_db, monkeyp
         ).json() == {
             "timezone": "America/New_York",
             "theme": "system",
-            "noticeChannelId": None,
+            "notificationChannelId": None,
             "isTagRequired": False,
         }
     assert await druks_db.scalar(select(func.count()).select_from(InstallationSettings)) == 1
 
 
-class _SlackChannels:
-    """The bot's view of the workspace: #alerts has the bot, #random does not."""
-
-    channels = {
-        "C1": {"id": "C1", "name": "alerts", "is_member": True},
-        "C2": {"id": "C2", "name": "random", "is_member": False},
-    }
-
-    async def conversations_info(self, *, channel):
-        if channel not in self.channels:
-            raise SlackApiError("channel_not_found", {"ok": False, "error": "channel_not_found"})
-        return {"channel": self.channels[channel]}
+class _SlackChannels(SlackClient):
+    """The bot is a member of #ops and #alerts only."""
 
     async def users_conversations(self, **params):
         async def pages():
@@ -88,126 +72,24 @@ def slack_channels(monkeypatch):
 
 async def test_a_person_chooses_a_channel_the_bot_is_in(tmp_path, druks_db, slack_channels):
     with settings_client(tmp_path) as client:
-        saved = client.patch("/api/settings/personal", json={"noticeChannelId": "C1"})
+        saved = client.patch("/api/settings/personal", json={"notificationChannelId": "C1"})
         assert saved.status_code == 200
-        assert saved.json()["noticeChannelId"] == "C1"
-        outside = client.patch("/api/settings/personal", json={"noticeChannelId": "C2"})
+        assert saved.json()["notificationChannelId"] == "C1"
+        outside = client.patch("/api/settings/personal", json={"notificationChannelId": "C2"})
         assert outside.status_code == 422
         assert "Invite it to the channel" in outside.json()["detail"]
-        unknown = client.patch("/api/settings/personal", json={"noticeChannelId": "C9"})
+        unknown = client.patch("/api/settings/personal", json={"notificationChannelId": "C9"})
         assert unknown.status_code == 422
-        assert client.get("/api/settings/personal").json()["noticeChannelId"] == "C1"
-        direct = client.patch("/api/settings/personal", json={"noticeChannelId": None})
+        assert client.get("/api/settings/personal").json()["notificationChannelId"] == "C1"
+        direct = client.patch("/api/settings/personal", json={"notificationChannelId": None})
         assert direct.status_code == 200
-        assert direct.json()["noticeChannelId"] is None
+        assert direct.json()["notificationChannelId"] is None
 
 
-async def test_notice_channels_list_the_bot_s_channels_by_name(tmp_path, slack_channels):
+async def test_notification_channels_list_the_bot_s_channels_by_name(tmp_path, slack_channels):
     with settings_client(tmp_path) as client:
-        listed = client.get("/api/settings/personal/channels")
+        listed = client.get("/api/notifications/channels")
     assert listed.json() == [{"id": "C1", "name": "alerts"}, {"id": "C3", "name": "ops"}]
-
-
-@pytest.mark.parametrize("has_settings", [False, True])
-async def test_migrations_preserve_preferences_and_installation_execution(druks_db, has_settings):
-    alice = await Account.get_or_create(druks_db, "alice@example.com")
-    bob = await Account.get_or_create(druks_db, "bob@example.com")
-    charlie = await Account.get_or_create(druks_db, "charlie@example.com")
-    account_ids = (alice.id, bob.id, charlie.id)
-    destination = await Destination.create(
-        druks_db, name="Personal gates", kind="slack_channel", channel_id="C1"
-    )
-    for statement in (
-        "DELETE FROM settings",
-        "ALTER TABLE accounts DROP COLUMN timezone",
-        "ALTER TABLE accounts DROP COLUMN theme",
-        "ALTER TABLE accounts DROP COLUMN notice_channel_id",
-        "ALTER TABLE settings ADD COLUMN gate_park_destination_id varchar",
-        "ALTER TABLE settings DROP CONSTRAINT settings_singleton",
-        "ALTER TABLE settings ADD COLUMN timezone varchar NOT NULL DEFAULT 'UTC'",
-        "ALTER TABLE settings ADD COLUMN account_id varchar REFERENCES accounts(id) "
-        "ON DELETE CASCADE",
-        "ALTER TABLE settings ADD CONSTRAINT settings_account_id_key "
-        "UNIQUE NULLS NOT DISTINCT (account_id)",
-    ):
-        await druks_db.execute(text(statement))
-    if has_settings:
-        for row_id, account_id, timezone, destination_id in (
-            (7, None, "Europe/Madrid", destination.id),
-            (1, alice.id, "America/New_York", destination.id),
-            (2, bob.id, "Asia/Tokyo", None),
-        ):
-            await druks_db.execute(
-                text(
-                    "INSERT INTO settings (id, account_id, timezone, gate_park_destination_id, "
-                    "default_harness, default_model, default_billing, default_effort, fast_mode, "
-                    "include_apps, default_timeout, updated_at) VALUES (:id, :account_id, "
-                    ":timezone, :destination_id, 'codex', 'openai/gpt-5.5', 'api_key', "
-                    "'high', true, false, 600, '2026-09-01T12:00:00Z')"
-                ),
-                dict(
-                    id=row_id,
-                    account_id=account_id,
-                    timezone=timezone,
-                    destination_id=destination_id,
-                ),
-            )
-        await druks_db.execute(
-            text("UPDATE settings SET default_effort = 'low' WHERE account_id IS NOT NULL")
-        )
-
-    def upgrade(connection):
-        for filename in (
-            "74b53981122c_add_account_preferences.py",
-            "7dc609a2d51a_move_preferences_to_accounts.py",
-            "b43924bf37db_enforce_installation_settings_singleton.py",
-            "d8f6a2c91b47_add_account_theme_preference.py",
-            "c4e8a1f7d2b9_choose_where_notices_go.py",
-        ):
-            path = (
-                Path(__file__).resolve().parent.parent
-                / "druks"
-                / "migrations"
-                / "versions"
-                / filename
-            )
-            spec = importlib.util.spec_from_file_location("settings_migration", path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            with Operations.context(MigrationContext.configure(connection)):
-                module.upgrade()
-
-    await (await druks_db.connection()).run_sync(upgrade)
-    preferences = (
-        await druks_db.execute(
-            text("SELECT id, timezone, theme, notice_channel_id FROM accounts ORDER BY id")
-        )
-    ).all()
-    expected = (
-        [
-            # Only the unattended account keeps the channel that it copied.
-            (alice.id, "America/New_York", "system", "C1"),
-            (bob.id, "Asia/Tokyo", "system", None),
-            (charlie.id, "Europe/Madrid", "system", None),
-        ]
-        if has_settings
-        else [(account_id, "UTC", "system", None) for account_id in account_ids]
-    )
-    assert preferences == sorted(expected)
-    execution = (
-        await druks_db.execute(
-            text(
-                "SELECT id, default_harness, default_model, default_billing, default_effort, "
-                "fast_mode, default_timeout FROM settings"
-            )
-        )
-    ).all()
-    assert execution == (
-        [(1, "codex", "openai/gpt-5.5", "api_key", "high", True, 600)] if has_settings else []
-    )
-    assert await druks_db.scalar(text("SELECT to_regclass('personal_settings')")) is None
-    druks_db.expunge_all()
-    assert (await InstallationSettings.get_or_create(druks_db)).id == 1
 
 
 async def test_the_database_refuses_duplicate_installation_settings(druks_db):
@@ -304,7 +186,7 @@ async def test_personal_api_is_scoped_and_does_not_retime_schedules(
         alice = {IDENTITY_HEADER: "alice@example.com"}
         bob = {IDENTITY_HEADER: "bob@example.com"}
         inherited = client.get("/api/settings/personal", headers=alice).json()
-        assert set(inherited) == {"timezone", "theme", "noticeChannelId", "isTagRequired"}
+        assert set(inherited) == {"timezone", "theme", "notificationChannelId", "isTagRequired"}
         assert inherited["theme"] == "system"
         saved_theme = client.patch("/api/settings/personal", headers=alice, json={"theme": "dark"})
         assert saved_theme.status_code == 200
