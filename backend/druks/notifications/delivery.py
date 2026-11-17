@@ -5,6 +5,8 @@ from druks.core.apis.slack import SlackClient
 from druks.notifications.buttons import encode_button
 from druks.notifications.exceptions import DeliveryError
 
+SECTION_LIMIT = 3000
+
 # What Slack's answer means when the bot cannot post to the channel, and the fix.
 _CHANNEL_REASONS = {
     "not_in_channel": "the bot is not in channel {channel}. Invite the bot to the channel in Slack",
@@ -32,7 +34,12 @@ async def deliver(
     notification. With ``message_ts``, Druks edits that posted message, and ``outcome``
     takes the place of its buttons. With ``user``, only that person sees the message.
     Returns Slack's answer, which names the message's channel and ts."""
-    text = f"{body}\n{deep_link}" if deep_link else body
+    link = f"\n{deep_link}" if deep_link else ""
+    # Slack refuses a section longer than this, so a long body loses its end and
+    # keeps the link, which leads to the whole story.
+    if len(body) + len(link) > SECTION_LIMIT:
+        body = body[: SECTION_LIMIT - len(link) - 1] + "…"
+    text = body + link
     blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": text}}]
     if actions:
         blocks.append(
