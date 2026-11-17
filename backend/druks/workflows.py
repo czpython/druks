@@ -87,6 +87,7 @@ from druks.durable.schemas import (
 from druks.events.models import Event
 from druks.harnesses.exceptions import HarnessError, HarnessSandboxProvisioningError
 from druks.models import StoredSubject, snake_name
+from druks.notifications.models import Notification
 from druks.notifications.outbox import send_notification
 from druks.sandbox.client import provisioning_key, sandbox_client
 from druks.sandbox.constants import WORKFLOW_HOST_LEASE_SECONDS
@@ -94,6 +95,7 @@ from druks.sandbox.datastructures import Sandbox
 from druks.sandbox.exceptions import HostGone
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
+from druks.settings import get_settings
 from druks.signals import publish
 from druks.user_settings.models import SettingsOverride
 from druks.workspaces import Workspace
@@ -801,6 +803,32 @@ async def _execute_run(
         if conversation_id:
             post = partial(report_failure, failure=str(exc))
             await _post_to_chat(workflow_id, "chat.report_failure", post)
+        else:
+            # No chat hears about this failure, so the run's owner gets a notice.
+            async def _create() -> str:
+                async with step_session() as session:
+                    run = await session.get(Run, workflow_id)
+                    endpoint = get_settings().urls.endpoint.rstrip("/")
+                    notification = await Notification.create(
+                        session,
+                        account_id=run.account_id,
+                        reason="run.failed",
+                        body=f"Your run {run.subject_key or run.kind} failed: {exc}",
+                        subject=subject,
+                        run_id=run.id,
+                        # The dashboard lists failed runs; Druks has no page for one run.
+                        deep_link=f"{endpoint}/" if endpoint else None,
+                    )
+                    return notification.id
+
+            notification_id = await DBOS.run_step_async(
+                StepOptions(name="notifications.run_failed", **_IO_RETRIES), _create
+            )
+            # The step memoized the row; this body-level enqueue is DBOS's deterministic
+            # child-start, so a replayed failure never sends it twice.
+            await DBOS.enqueue_workflow_async(
+                NOTIFICATIONS_QUEUE, send_notification, notification_id
+            )
 
     try:
         result = await body()
