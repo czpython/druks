@@ -3,12 +3,17 @@ from typing import Any
 from dbos import DBOS
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from druks.accounts.models import Account
+from druks.apps.loader import get_app
+from druks.apps.registry import workflows
 from druks.chat.constants import CLICK_ANSWER_MESSAGE
 from druks.chat.models import Conversation
 from druks.chat.service import deliver
 from druks.core.services import Slack
 from druks.durable.enums import RunState
 from druks.durable.models import Run
+from druks.exceptions import ObjectNotFound
+from druks.notifications.constants import TEAM_ONLY_MESSAGE
 from druks.notifications.exceptions import (
     AlreadyAcknowledgedError,
     AnswerNotAllowedError,
@@ -17,6 +22,8 @@ from druks.notifications.exceptions import (
     UnknownTokenError,
 )
 from druks.notifications.models import Notification
+from druks.settings import get_settings
+from druks.teams.models import Team
 
 
 async def list_notification_channels() -> list[dict]:
@@ -45,7 +52,8 @@ async def validate_in_app_answer(
 ) -> dict[str, Any]:
     # The in-app answer contract, shared by the runs resume route, the answer_gate
     # tool, and the notification respond rail. A question that a chat on an app's
-    # channel asked is its admin's alone. The control must be one the ask offered —
+    # channel asked is its admin's alone. A run of an app that a team lists is its team's
+    # and the admins'. The control must be one the ask offered —
     # the vocabulary is workflow-owned, never read from the client, so a spoofed
     # control can't drive control flow.
     if run.conversation_id:
@@ -54,6 +62,19 @@ async def validate_in_app_answer(
             raise AnswerNotAllowedError(
                 "Only the admin of the number that started this run can answer it."
             )
+    workflow = workflows.get(run.kind)
+    if not workflow:
+        raise ObjectNotFound("run", {"id": run.id})
+    app = get_app(workflow.app) if workflow.app else None
+    # A person with no account is on no team.
+    if app and await Team.exists_for_app(session, app):
+        account = await session.get(Account, account_id) if account_id else None
+        if not account or not await account.can_use_app(app):
+            reason = TEAM_ONLY_MESSAGE.format(app=app.name)
+            # An installation with no endpoint has no address for the link.
+            if endpoint := get_settings().urls.endpoint.rstrip("/"):
+                reason += f" Open it in Druks: {endpoint}/runs/{run.id}"
+            raise AnswerNotAllowedError(reason)
     ask = await run.get_ask()
     offered = await get_offered_control(ask, control)
     if offered["note_required"] and not answers and not note.strip():
@@ -73,10 +94,16 @@ async def validate_in_app_answer(
 
 
 async def respond_to_notification(
-    session: AsyncSession, token: str, choice: dict[str, Any], *, user_id: str | None
+    session: AsyncSession,
+    token: str,
+    choice: dict[str, Any],
+    *,
+    user_id: str | None,
+    account_id: str | None,
 ) -> Notification:
-    """Answer the run with a click by ``user_id``, or with a link, which names nobody. In
-    a chat, only its person answers, and a click that needs more goes to its agent."""
+    """Answer the run with a click by ``user_id``, whose account is ``account_id``, or with
+    a link, which names nobody. In a chat, only its person answers, and a click that needs
+    more goes to its agent."""
     notification = await Notification.get_for_token(session, token)
     if not notification:
         raise UnknownTokenError()
@@ -122,11 +149,10 @@ async def respond_to_notification(
             session, CLICK_ANSWER_MESSAGE.format(run=run.id, answer=label), is_internal=True
         )
         return notification
-    # A notification button names no account.
     resume_payload = await validate_in_app_answer(
         session,
         run,
-        account_id=None,
+        account_id=account_id,
         control=control,
         answers=choice.get("answers", {}),
         note=choice.get("note", ""),

@@ -26,6 +26,7 @@ from druks.notifications.services import validate_in_app_answer
 from druks.secrets.models import VaultSecret
 from druks.teams.models import Team
 from druks.testing import seed_run
+from druks_field_notes.workflows import Summarize
 from sqlalchemy import func, select
 
 CALLER = "+15550199"
@@ -378,7 +379,7 @@ async def test_an_operator_answers_a_run_that_a_call_parked(druks_db, twilio):
     conversation = await call(druks_db, await link(druks_db))
     run = await seed_run(
         druks_db,
-        kind="test",
+        kind=Summarize.kind,
         state="parked",
         input_gate="review",
         input_request={

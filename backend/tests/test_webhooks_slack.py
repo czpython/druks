@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 import pytest
 from conftest import bind_ambient_session, install_service
 from druks.accounts.models import Account
+from druks.core.apis.slack import SLACK_AUTHORITY
 from druks.core.webhooks.slack import (
     SlackInteractivity,
     explain_reason,
@@ -22,8 +23,11 @@ from druks.models import Base
 from druks.notifications.buttons import encode_button
 from druks.notifications.exceptions import AnswerNotAllowedError
 from druks.notifications.models import Notification
+from druks.secrets.models import Audience, VaultSecret
+from druks.teams.models import Team
 from druks.testing import configure_app_for_test, make_settings, seed_dbos_status
 from druks.webhooks.router import match_webhook
+from druks_field_notes.workflows import Summarize
 from fastapi.testclient import TestClient
 from uuid_utils import uuid7
 
@@ -45,7 +49,7 @@ async def _parked_notification(druks_db):
     run = Run(
         account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         id=str(uuid7()),
-        kind="notifications.test",
+        kind=Summarize.kind,
         input_gate="review",
         input_request=_IN_APP_ASK,
         input_requested_at=Base.utc_now(),
@@ -76,19 +80,19 @@ def _signed_headers(body: bytes, *, timestamp=None, secret=_SIGNING_SECRET):
     }
 
 
-def _interactivity_payload(action_id: str) -> dict:
+def _interactivity_payload(action_id: str, *, user: str = "U7") -> dict:
     return {
         "type": "block_actions",
         "team": {"id": "T1"},
-        "user": {"id": "U7"},
+        "user": {"id": user},
         "channel": {"id": "C1"},
         "message": {"ts": _MESSAGE_TS, "thread_ts": _THREAD_TS},
         "actions": [{"action_id": action_id}],
     }
 
 
-def _interactivity_body(action_id: str) -> bytes:
-    return urlencode({"payload": json.dumps(_interactivity_payload(action_id))}).encode()
+def _interactivity_body(action_id: str, *, user: str = "U7") -> bytes:
+    return urlencode({"payload": json.dumps(_interactivity_payload(action_id, user=user))}).encode()
 
 
 def _client(tmp_path) -> TestClient:
@@ -333,3 +337,69 @@ async def test_unknown_interactivity_type_is_acknowledged_unhandled(
     assert response.status_code == 200
     assert response.json() == {"accepted": True, "handled": False}
     assert resume_spy == []
+
+
+async def _link_slack_user(druks_db, account, user_id):
+    await VaultSecret.connect(
+        druks_db,
+        Audience.service("slack"),
+        account_id=account.id,
+        refresh_token=f"xoxe-{user_id}",
+        scopes=["users:read"],
+        identity={"authority": SLACK_AUTHORITY.format(team_id="T1"), "subject": user_id},
+    )
+
+
+async def test_a_team_s_app_takes_a_click_only_from_its_team(
+    tmp_path, druks_db, resume_spy, slack_card, started
+):
+    run, notification = await _parked_notification(druks_db)
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    outsider = await Account.get_or_create(druks_db, "outsider@example.com")
+    await Team.create(druks_db, name="Notes", member_ids=[member.id], apps=["field_notes"])
+    await _link_slack_user(druks_db, member, "U8")
+    await _link_slack_user(druks_db, outsider, "U7")
+    await druks_db.commit()
+    button = encode_button(notification.correlation_token, "approve")
+
+    with _client(tmp_path) as client:
+        refused = client.post(
+            "/_external/slack/interactivity/",
+            content=(body := _interactivity_body(button, user="U7")),
+            headers=_signed_headers(body),
+        )
+        assert resume_spy == []
+        answered = client.post(
+            "/_external/slack/interactivity/",
+            content=(body := _interactivity_body(button, user="U8")),
+            headers=_signed_headers(body),
+        )
+
+    assert refused.json() == {"accepted": False}
+    assert answered.json() == {"accepted": True}
+    assert resume_spy == [{"id": run.id, "action": "approve", "answers": {}, "note": ""}]
+    explained = started.await_args_list[0]
+    assert (explained.args[0], explained.kwargs["user"]) == (explain_reason, "U7")
+
+
+async def test_a_click_with_no_account_answers_only_an_app_that_no_team_lists(
+    tmp_path, druks_db, resume_spy, slack_card, started
+):
+    open_run, open_notification = await _parked_notification(druks_db)
+    open_body = _interactivity_body(encode_button(open_notification.correlation_token, "approve"))
+    with _client(tmp_path) as client:
+        opened = client.post(
+            "/_external/slack/interactivity/", content=open_body, headers=_signed_headers(open_body)
+        )
+    await Team.create(druks_db, name="Notes", member_ids=[], apps=["field_notes"])
+    _, listed_notification = await _parked_notification(druks_db)
+    await druks_db.commit()
+    body = _interactivity_body(encode_button(listed_notification.correlation_token, "approve"))
+    with _client(tmp_path) as client:
+        refused = client.post(
+            "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
+        )
+
+    assert opened.json() == {"accepted": True}
+    assert refused.json() == {"accepted": False}
+    assert [call["id"] for call in resume_spy] == [open_run.id]

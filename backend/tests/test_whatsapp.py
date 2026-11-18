@@ -61,6 +61,7 @@ from druks.teams.models import Team
 from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_run
 from druks.user_settings import reads
 from druks.user_settings.models import InstallationSettings, SettingsOverride
+from druks_field_notes.workflows import Summarize
 from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException
 from sqlalchemy import func, select
 
@@ -1137,7 +1138,7 @@ async def test_an_operator_on_a_private_number_keeps_normal_gate_access(druks_db
     )
     run = await seed_run(
         druks_db,
-        kind="test",
+        kind=Summarize.kind,
         state="parked",
         input_gate="review",
         input_request={
@@ -1170,7 +1171,7 @@ async def test_only_the_number_admin_answers_its_questions_or_resumes_its_chats(
     operator = await Account.get_or_create(druks_db, "op@example.com")
     run = await seed_run(
         druks_db,
-        kind="test",
+        kind=Summarize.kind,
         state="parked",
         input_gate="review",
         input_request={

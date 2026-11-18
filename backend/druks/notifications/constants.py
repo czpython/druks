@@ -12,3 +12,6 @@ CLOSE_WORKFLOW = "notifications.close"
 
 # The workflow that sends one notification, by the name a producer queues it.
 SEND_WORKFLOW = "notifications.send"
+
+# What a person reads when they cannot answer a run of an app that a team lists.
+TEAM_ONLY_MESSAGE = "Only an admin or the team that uses {app} can answer this run."
