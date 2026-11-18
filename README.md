@@ -25,38 +25,13 @@
   <a href="#contributors"><img alt="All Contributors" src="https://img.shields.io/github/all-contributors/czpython/druks?color=00677b"></a>
 </p>
 
-<p align="center">
-  <img src="docs/assets/readme/approval-light.png" alt="A Druks security sweep waiting for approval: upgrade 3 packages in acme/api, closes 7 vulnerabilities, cost so far $0.41, with Approve, Change and Stop buttons" width="860">
-</p>
+https://github.com/user-attachments/assets/00bd89b1-8743-47e8-babd-d6e459a1b63e
 
 **Druks is a self-hosted or cloud platform where AI agents such as Claude Code and Codex do a company's recurring engineering work, and a person approves each change.**
 
 - **It finds the work.** A schedule, an alert or a button starts it. Nobody writes a prompt.
 - **It does the work with your tools.** Claude Code or Codex, with your own Claude or OpenAI account, in a sandbox, on your real repositories. You see the cost after every step.
 - **You make the call.** The run stops and asks you: Approve, Change or Stop. You answer in Slack, the dashboard, the Druks chat or Claude Code. It waits up to 14 days and costs nothing while it waits.
-
-## Why Druks
-
-| If you use… | It helps when… | Druks adds… |
-| --- | --- | --- |
-| A coding assistant (Claude Code, Codex, Copilot) | A developer sits down and asks | Work that starts by itself, every week, with nobody at the keyboard |
-| An agent board | You write a ticket and assign it to an agent | Processes that find the work themselves, like a weekly security sweep |
-| A workflow builder | You design each step of the flow | Apps that already work. Build your own only when you want to |
-
-Druks does not replace your coding agent. It puts the agent on a schedule, runs it in a sandbox, and brings you its result as one decision.
-
-## What a run looks like
-
-<!-- Publish this section when the security sweep app ships. Until then, link to the Software Factory example in docs. -->
-
-The **security sweep** checks one repository every Monday:
-
-1. It reads the open Dependabot alerts and checks which ones touch code you actually call.
-2. It upgrades the packages in a sandbox and runs your tests.
-3. It asks you: *"Upgrade 3 packages. Closes 7 vulnerabilities, 2 in code you call. Approve?"* After your yes, it opens a pull request.
-4. You get a summary: the pull request, what was fixed, how long it took and what it cost.
-
-The included **Ticket to pull request** app (`software_factory`) takes a ticket, writes and checks the change, and opens a pull request for review.
 
 ## Get started
 
@@ -98,6 +73,29 @@ curl -fsSL https://druks.ai/install.sh | DRUKS_PROVIDER=exe bash
 
 The [deployment guide](https://docs.druks.ai/deployment) covers access control, upgrades and rollback.
 </details>
+
+## Why Druks
+
+| If you use… | It helps when… | Druks adds… |
+| --- | --- | --- |
+| A coding assistant (Claude Code, Codex, Copilot) | A developer sits down and asks | Work that starts by itself, every week, with nobody at the keyboard |
+| An agent board | You write a ticket and assign it to an agent | Processes that find the work themselves, like a weekly security sweep |
+| A workflow builder | You design each step of the flow | Apps that already work. Build your own only when you want to |
+
+Druks does not replace your coding agent. It puts the agent on a schedule, runs it in a sandbox, and brings you its result as one decision.
+
+## What a run looks like
+
+<!-- Publish this section when the security sweep app ships. Until then, link to the Software Factory example in docs. -->
+
+The **security sweep** checks one repository every Monday:
+
+1. It reads the open Dependabot alerts and checks which ones touch code you actually call.
+2. It upgrades the packages in a sandbox and runs your tests.
+3. It asks you: *"Upgrade 3 packages. Closes 7 vulnerabilities, 2 in code you call. Approve?"* After your yes, it opens a pull request.
+4. You get a summary: the pull request, what was fixed, how long it took and what it cost.
+
+The included **Ticket to pull request** app (`software_factory`) takes a ticket, writes and checks the change, and opens a pull request for review.
 
 ## What runs where
 
@@ -150,6 +148,16 @@ Druks is available under the [Functional Source License](LICENSE) (FSL-1.1-ALv2)
 - Each release becomes Apache 2.0 two years after it ships.
 
 The [licensing page](https://docs.druks.ai/licensing) explains the details.
+
+### Why FSL?
+
+**Why not an MIT or Apache license?** FSL lets everyone read, run and change all of the code, and it stops other companies from selling Druks as a hosted service. Each release still becomes Apache 2.0 after two years.
+
+**Can my company self-host Druks?** Yes. Run it for your own company's work, on your own infrastructure, and change the code.
+
+**Can an agency install Druks for a client?** Yes, in the client's own infrastructure. To host Druks for many clients as a paid service, [contact us](https://druks.ai) about a partner agreement.
+
+**What about older releases?** v0.12.0 and earlier releases stay under the MIT License.
 
 ## Contributors
 
