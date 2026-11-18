@@ -904,6 +904,26 @@ async def test_pairing_refuses_a_member_outside_the_apps_team(druks_db, tmp_path
     assert response.status_code == 403
 
 
+@pytest.mark.parametrize("helpdesk", [BotAccess.PRIVATE], indirect=True)
+async def test_numbers_refuse_a_member_outside_the_apps_team(druks_db, tmp_path, helpdesk):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    await link(druks_db, await bot_account(druks_db), app="helpdesk", access=BotAccess.PRIVATE)
+    # The fixture app is not in the registry that Team.create checks.
+    druks_db.add(Team(name="Helpdesk", members=[], apps=["helpdesk"]))
+    await druks_db.flush()
+    settings = make_settings(tmp_path, identity={"mode": "header", "header": IDENTITY_HEADER})
+    api = configure_app_for_test(settings=settings, authenticated=False)
+
+    async with asgi_client(api) as client:
+        response = await client.get(
+            "/api/chat/services/waha/sessions?app=helpdesk",
+            headers={IDENTITY_HEADER: member.username},
+        )
+
+    assert response.status_code == 403
+
+
 async def test_bot_and_bot_admin_accounts_never_count_as_operators(druks_db):
     operator = await Account.get_or_create(druks_db, "op@example.com")
     await bot_account(druks_db)
@@ -968,6 +988,19 @@ async def test_two_operators_pair_to_one_number_under_their_own_accounts(
             OPERATOR_PAIRED_MESSAGE,
             "Read my runs",
         ]
+
+
+async def test_two_open_codes_of_one_number_each_pair_their_own_account(druks_db):
+    connection = await link(
+        druks_db, await bot_account(druks_db), app="chat", access=BotAccess.PRIVATE
+    )
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    ben = await Account.get_or_create(druks_db, "ben@example.com")
+    ana_code = await bot_service.create_one_time_code(connection, ana.id)
+    ben_code = await bot_service.create_one_time_code(connection, ben.id)
+
+    assert await bot_service.redeem_one_time_code(connection, ana_code) == ana.id
+    assert await bot_service.redeem_one_time_code(connection, ben_code) == ben.id
 
 
 async def test_unpair_removes_only_the_signed_in_operators_phones(druks_db, tmp_path, monkeypatch):

@@ -318,18 +318,19 @@ session's key, and the webhook secret.
   **Add number**. The tab shows only when the app declares a
   [Bot](writing-an-app.md#answer-whatsapp-with-a-bot). Druks creates a bot
   account and a bot admin account for the number. These accounts never sign in.
-- **A private number.** Open **Chat → Channels** and select **Add
-  number**. Scan the QR code. Then select **Pair my phone** and send the
-  one-time code to that number. Send it from your own WhatsApp, or from the
-  phone of the number to itself. You then talk to your agent at that number,
-  under your account and with the whole Druks toolkit. If you use a second
-  number, replies arrive as normal incoming messages, and WAHA never sees your
-  own chats. If you use the phone of the number itself, replies arrive in your
-  chat with yourself. WhatsApp gives no sound for them, and WAHA receives the
-  chats of that phone. Several operators can share the number. Each operator
-  pairs their own phone. Druks ignores every sender that has no paired phone.
-  **Unpair my phone** removes your phones from the number. This number has no
-  take-over.
+- **A private number.** An admin opens **Chat → Channels**, selects **Add
+  number** and scans the QR code. To pair your phone, open **Settings → Phones**
+  and select **Pair my phone** beside the number. The page lists the private
+  Bots of the apps that you can use. Send the one-time code to that number from
+  your own WhatsApp, or from the phone of the number to itself. You then talk to
+  your agent at that number, under your account and with the whole Druks
+  toolkit. If you use a second number, replies arrive as normal incoming
+  messages, and WAHA never sees your own chats. If you use the phone of the
+  number itself, replies arrive in your chat with yourself. WhatsApp gives no
+  sound for them, and WAHA receives the chats of that phone. Several operators
+  can share the number. Each operator pairs their own phone. Druks ignores every
+  sender that has no paired phone. **Unpair my phone** removes your phones from
+  the number. This number has no take-over.
 
 Druks creates the WAHA session and its key, saves the connection, and then
 writes the session's config. Scan the QR code from **Linked devices** in
