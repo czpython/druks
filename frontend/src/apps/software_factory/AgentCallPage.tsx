@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'wouter'
 
+import { subjectApi } from '../../api/client'
 import { buildApi } from './api'
 import type { WorkItemSummary } from './api'
 import type { AgentCallFiles, AgentCallSummary } from '../../api/types'
@@ -20,18 +21,17 @@ interface Props {
 }
 
 export function AgentCallPage({ workItemId, runId }: Props) {
-  // The call lives on its subject's timeline; its files come from the platform's
-  // per-call read-side. Both are app-agnostic platform routes.
+  // The call lives on its subject's timeline; its files come from the transcript
+  // routes of the app that declares its run, which the timeline names.
   const query = useQuery({
     queryKey: ['agent-call', workItemId, runId],
     queryFn: async () => {
-      const [subject, files] = await Promise.all([
-        buildApi.workItem(workItemId),
-        buildApi.transcriptFiles(runId),
-      ])
-      const call = subject.timeline.flatMap((run) => run.agentCalls).find((c) => c.id === runId)
-      if (!call) throw new Error('agent call not found')
-      return { call, files, summary: subject.summary }
+      const subject = await buildApi.workItem(workItemId)
+      const run = subject.timeline.find((r) => r.agentCalls.some((c) => c.id === runId))
+      const call = run?.agentCalls.find((c) => c.id === runId)
+      if (!run || !call) throw new Error('agent call not found')
+      const files = await subjectApi.transcriptFiles(run.app, runId)
+      return { app: run.app, call, files, summary: subject.summary }
     },
   })
   useCanonicalPath(
@@ -55,11 +55,11 @@ function RunView({
   workItemId,
   runId,
 }: {
-  data: { call: AgentCallSummary; files: AgentCallFiles; summary: WorkItemSummary }
+  data: { app: string; call: AgentCallSummary; files: AgentCallFiles; summary: WorkItemSummary }
   workItemId: number
   runId: string
 }) {
-  const { call, files, summary } = data
+  const { app, call, files, summary } = data
   const statusGlyph =
     call.status === 'succeeded'
       ? '✓'
@@ -162,7 +162,7 @@ function RunView({
             </button>
           </div>
           <FilePane
-            url={activeName ? buildApi.transcriptFile(call.id, activeName) : null}
+            url={activeName ? subjectApi.transcriptFile(app, call.id, activeName) : null}
             markdown={leftTab === 'artifact' && files.artifact?.kind === 'markdown'}
           />
         </section>
@@ -181,7 +181,7 @@ function RunView({
             )}
           </div>
           <RunTranscript
-            basePath={buildApi.transcriptBase(runId)}
+            basePath={subjectApi.transcriptBase(app, runId)}
             stream="stdout"
             isLive={call.status === 'running'}
           />

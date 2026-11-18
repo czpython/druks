@@ -20,9 +20,6 @@ export const buildApi = {
   workItem: (id: number) => subjectApi.read<WorkItemSummary>(SOFTWARE_FACTORY, WORK_ITEM, id),
   boardStreamUrl: () => subjectApi.boardStream(SOFTWARE_FACTORY, WORK_ITEM),
   subjectStreamUrl: (id: number) => subjectApi.stream(SOFTWARE_FACTORY, WORK_ITEM, id),
-  transcriptBase: (callId: string) => subjectApi.transcriptBase(SOFTWARE_FACTORY, callId),
-  transcriptFiles: (callId: string) => subjectApi.transcriptFiles(SOFTWARE_FACTORY, callId),
-  transcriptFile: (callId: string, name: string) => subjectApi.transcriptFile(SOFTWARE_FACTORY, callId, name),
   history: (limit?: number) => {
     const qs = limit !== undefined ? `?limit=${limit}` : ''
     return getJSON<WorkItemsHistoryResponse>(`/api/${SOFTWARE_FACTORY}/work-items/history${qs}`)

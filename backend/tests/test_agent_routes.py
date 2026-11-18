@@ -13,8 +13,9 @@ from druks.contrib.software_factory.workflows import Build, PullRequestReview
 from druks.core.apis.exceptions import LinearAPIError, UnknownTicketError
 from druks.db import db_session
 from druks.durable.dbos_state import workflow_status
-from druks.durable.models import AgentCall, Run
+from druks.durable.models import AgentCall, Artifact, Run
 from druks.durable.reads import read_transcript_chunk
+from druks.files.datastructures import File
 from druks.mcp.gateway import services
 from druks.teams.models import Team
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
@@ -428,6 +429,53 @@ async def test_a_member_sees_only_the_runs_of_the_apps_they_can_use(client: Test
     assert [workflow["run"] for subject in open_subjects for workflow in subject["workflows"]] == [
         summarize.id
     ]
+
+
+async def test_call_reads_refuse_a_member_outside_the_apps_team(client: TestClient, druks_db):
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    await Account.get_or_create(druks_db, "op@example.com")
+    await Team.create(druks_db, name="Notes", member_ids=[], apps=["field_notes"])
+    note = await Note.create(body="restricted call")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    call = await seed_call(druks_db, run, "summarize")
+    await Artifact.record(
+        druks_db,
+        call_dir=call.call_dir,
+        call_id=call.id,
+        kind="markdown",
+        title="Summary",
+        content="A private summary.",
+        event={},
+    )
+    artifact = await Artifact.get_for_call(druks_db, call.id)
+    file = await File.create(
+        name="notes.txt",
+        content_type="text/plain",
+        content=b"private",
+        app="field_notes",
+        uploaded_by=admin.id,
+    )
+
+    requests = [
+        client.get(f"/api/agent-calls/{call.id}"),
+        client.get(f"/api/artifacts/{artifact.id}"),
+        client.get(f"/api/files/{file.id}"),
+    ]
+
+    assert [response.status_code for response in requests] == [403] * 3
+
+
+async def test_a_run_of_an_app_that_is_not_installed_reads_as_gone(client: TestClient, druks_db):
+    run = await seed_run(druks_db, kind="removed_app.sweep")
+    call = await seed_call(druks_db, run, "sweep")
+
+    requests = [
+        client.post(f"/api/runs/{run.id}/cancel", json={"reason": "stop"}),
+        client.get(f"/api/agent-calls/{call.id}"),
+        client.get(f"/api/field_notes/transcripts/{call.id}", params={"stream": "stdout"}),
+    ]
+
+    assert [response.status_code for response in requests] == [404] * 3
 
 
 def test_missing_agent_call_uses_the_unified_shape(client: TestClient, druks_db):

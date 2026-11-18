@@ -9,7 +9,7 @@ from druks.api.dependencies import SessionDep
 from druks.api.exceptions import RunNotFound, agent_error_responses
 from druks.mcp.gateway import exceptions as gate_errors
 from druks.mcp.gateway import schemas, services
-from druks.teams.dependencies import require_run_access
+from druks.teams.dependencies import require_call_access, require_run_access
 
 # Docstrings here are the derived tool descriptions and operation_id is the
 # tool name — renaming one is a break, never a refactor side effect.
@@ -78,6 +78,7 @@ async def answer_gate(
 @router.get(
     "/agent-calls/{call}",
     operation_id="get_agent_call",
+    dependencies=[Depends(require_call_access)],
     response_model=schemas.AgentCallDetailResponse,
     response_model_by_alias=True,
     responses=agent_error_responses(gate_errors.AgentCallNotFound("call-123")),

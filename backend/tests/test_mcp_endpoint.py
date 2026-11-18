@@ -654,6 +654,19 @@ async def test_get_agent_call_serves_bounded_tails(app, pat_token, druks_db):
     }
 
 
+async def test_get_agent_call_refuses_a_member_outside_the_apps_team(druks_db, app):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    await Team.create(druks_db, name="Notes", member_ids=[], apps=["field_notes"])
+    _, token = await PersonalAccessToken.create(druks_db, account_id=member.id, name="agent")
+    call = await seed_note_agent_run()
+
+    async with live(app), _client(app, token) as client:
+        error = await _call_error(client, "get_agent_call", {"call": call.id})
+
+    assert error["code"] == "HTTP_403"
+
+
 async def test_every_tool_failure_answers_the_agent_route_shape(app, pat_token):
     async with live(app), _client(app, pat_token) as client:
         invalid = await _call_error(client, "get_agent_call", {"id": "abc"})

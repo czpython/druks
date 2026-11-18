@@ -105,6 +105,23 @@ def test_file_download_unknown_call_returns_unified_404(client: TestClient, druk
     }
 
 
+async def test_a_call_under_another_apps_address_reads_as_unknown(
+    client: TestClient,
+    druks_db,
+):
+    call_id = await _seed_call_id(druks_db)
+
+    for path in ("", "/stream", "/files", "/files/output.json"):
+        response = client.get(
+            f"/api/software_factory/transcripts/{call_id}{path}", params={"stream": "stdout"}
+        )
+        unknown = client.get(
+            f"/api/software_factory/transcripts/missing{path}", params={"stream": "stdout"}
+        )
+        assert response.status_code == 404
+        assert response.json()["code"] == unknown.json()["code"]
+
+
 async def test_transcript_range_fetch_paginates(
     client: TestClient,
     druks_db,
@@ -116,7 +133,7 @@ async def test_transcript_range_fetch_paginates(
         params={"stream": "stdout", "limit": 5},
     )
     assert first.status_code == 200
-    assert first.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert first.headers["cache-control"] == "private, max-age=31536000, immutable"
     data = first.json()
     assert data["offset"] == 0
     assert data["nextOffset"] == 5
@@ -162,7 +179,7 @@ async def test_transcript_of_an_abandoned_call_is_cached_immutably(
     )
 
     assert response.status_code == 200
-    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert response.headers["cache-control"] == "private, max-age=31536000, immutable"
 
 
 async def test_transcript_missing_file_returns_eof(
@@ -219,18 +236,14 @@ async def test_transcript_stream_rejects_a_negative_offset(
     assert response.json()["detail"] == "offset must be >= 0."
 
 
-def test_transcript_stream_unknown_call_closes(
-    client: TestClient,
-    druks_db,
-):
-    # No such call: the stream ends instead of keepaliving forever.
+def test_transcript_stream_unknown_call_returns_unified_404(client: TestClient, druks_db):
     response = client.get(
         "/api/field_notes/transcripts/no-such-call/stream",
         params={"stream": "stdout"},
     )
 
-    assert response.status_code == 200
-    assert response.text == ""
+    assert response.status_code == 404
+    assert response.json()["code"] == "AGENT_CALL_NOT_FOUND"
 
 
 async def test_get_file_serves_inventory_paths(
@@ -246,6 +259,7 @@ async def test_get_file_serves_inventory_paths(
 
     response = client.get(f"/api/field_notes/transcripts/{call_id}/files/{name}")
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "private"
     assert response.json() == {"ok": True}
 
 
@@ -305,7 +319,7 @@ async def test_a_run_reads_with_its_app_and_work_item(druks_client, druks_db):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["app"] == "field_notes"
+    assert body["run"]["app"] == "field_notes"
     assert body["subject"] == {"type": "note", "id": str(note.id)}
     assert body["run"]["id"] == run.id
     assert body["run"]["state"] == "failed"

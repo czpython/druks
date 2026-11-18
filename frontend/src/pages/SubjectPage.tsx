@@ -123,7 +123,6 @@ function SubjectDetail({
         runs.map((run, index) => (
           <RunBlock
             key={run.id}
-            app={app}
             run={run}
             newest={runs.findIndex((other) => other.kind === run.kind) === index}
             selected={run.id === selectedRun}

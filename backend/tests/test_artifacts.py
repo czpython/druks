@@ -182,7 +182,7 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     run = Run(
         account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         id="run-1",
-        kind="build",
+        kind=Summarize.kind,
         state=RunState.PARKED.value,
         input_request={"presentation": "in_app", "controls": ["approve"]},
     )
@@ -221,7 +221,7 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     external = Run(
         account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         id="run-2",
-        kind="build",
+        kind=Summarize.kind,
         state=RunState.PARKED.value,
         input_request={"presentation": "external", "label": "Review implementation"},
     )

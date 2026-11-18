@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { Link, useLocation } from 'wouter'
 
+import { subjectApi } from '../../api/client'
 import { useSSE } from '../../api/sse'
 import { buildApi } from './api'
 import type { Resolution, WorkItemDetail, WorkItemSummary } from './api'
@@ -615,7 +616,7 @@ function RunInspector({
   // operator came for; the transcript is how it got there.
   const files = useQuery({
     queryKey: ['agent-call-files', call?.id],
-    queryFn: () => buildApi.transcriptFiles(call!.id),
+    queryFn: () => subjectApi.transcriptFiles(run.app, call!.id),
     enabled: call != null && call.status !== 'running',
   })
   const artifact = files.data?.artifact ?? null
@@ -663,7 +664,7 @@ function RunInspector({
           <GateControls run={run.id} expected={expected} />
         ) : showResult ? (
           <FilePane
-            url={buildApi.transcriptFile(call.id, artifact.name)}
+            url={subjectApi.transcriptFile(run.app, call.id, artifact.name)}
             markdown={artifact.kind === 'markdown'}
           />
         ) : (
@@ -815,7 +816,7 @@ function TranscriptBody({
       )}
       <div className="ins-xscript">
         <RunTranscript
-          basePath={buildApi.transcriptBase(call.id)}
+          basePath={subjectApi.transcriptBase(run.app, call.id)}
           stream="stdout"
           isLive={Boolean(isLive)}
         />

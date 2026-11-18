@@ -70,6 +70,7 @@ describe('statusLine', () => {
 function run(overrides: Partial<RunSummary> = {}): RunSummary {
   return {
     id: 'r1',
+    app: 'software_factory',
     kind: 'software_factory.build',
     label: 'Build',
     retryFrom: null,
