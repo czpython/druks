@@ -142,11 +142,16 @@ async def test_a_member_outside_the_apps_team_reads_none_of_its_notifications(tm
         notifications[kind] = await Notification.create(
             druks_db, account_id=member.id, reason="gate.parked", body=kind, run_id=run.id
         )
+    runless = await Notification.create(
+        druks_db, account_id=member.id, reason="subscription.disconnected", body="no run"
+    )
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        listed = client.get("/api/notifications").json()
         hidden = client.get(f"/api/notifications/{notifications[Summarize.kind].id}")
         shown = client.get(f"/api/notifications/{notifications[Build.kind].id}")
 
+    assert [item["id"] for item in listed] == [runless.id, notifications[Build.kind].id]
     assert hidden.status_code == 403
     assert shown.status_code == 200
 

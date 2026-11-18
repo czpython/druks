@@ -36,7 +36,9 @@ async def list_notifications(
     account: Account = Depends(current_account),
     limit: int = Query(50, ge=1, le=500),
 ) -> list[Notification]:
-    return await Notification.list_for_account(session, account.id, limit=limit)
+    return await Notification.list_for_account(
+        session, account.id, kinds=await account.list_usable_kinds(), limit=limit
+    )
 
 
 @router.post("/read", status_code=204)
