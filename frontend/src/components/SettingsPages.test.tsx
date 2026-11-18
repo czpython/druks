@@ -489,6 +489,7 @@ describe('SettingsPages app fields', () => {
     renderSettings('/settings/connections?tab=browser', 'member')
 
     expect(await screen.findByRole('heading', { name: 'Services' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Phones' })).toBeTruthy()
     expect(screen.queryByRole('link', { name: 'Agents' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Skills' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Teams' })).toBeNull()

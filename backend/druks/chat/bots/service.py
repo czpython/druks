@@ -1,5 +1,5 @@
-import json
 import secrets
+import string
 
 from dbos import DBOS, SetEnqueueOptions, SetWorkflowAttributes, SetWorkflowID, StepOptions
 from pydantic_core import to_json
@@ -20,6 +20,7 @@ from druks.secrets.models import VaultSecret
 
 from .constants import (
     ADMIN_ADDED_MESSAGE,
+    ONE_TIME_CODE_LENGTH,
     ONE_TIME_CODE_TTL_SECONDS,
     OPERATOR_PAIRED_MESSAGE,
     PAUSE_SECONDS,
@@ -44,23 +45,28 @@ async def get_bot_connection(session: AsyncSession, connection_id: str) -> Vault
 
 
 async def create_one_time_code(connection: VaultSecret, account_id: str) -> str:
-    """A one-time phone proof code, owned by the signed-in operator."""
-    code = f"{secrets.randbelow(10**8):08d}"
-    await get_client().set(
-        f"chat:{connection.id}:one-time-code",
-        json.dumps({"code": code, "account_id": account_id}),
-        ex=ONE_TIME_CODE_TTL_SECONDS,
-    )
-    return code
+    """A one-time phone proof code, owned by the signed-in operator. Each code has its own
+    key, so two people can pair with one number at the same time."""
+    while True:
+        code = "".join(secrets.choice(string.digits) for _ in range(ONE_TIME_CODE_LENGTH))
+        # ``nx`` refuses a code that is already open, so two open codes of a number never match.
+        if await get_client().set(
+            f"chat:{connection.id}:one-time-code:{code}",
+            account_id,
+            ex=ONE_TIME_CODE_TTL_SECONDS,
+            nx=True,
+        ):
+            return code
 
 
 async def redeem_one_time_code(connection: VaultSecret, text: str) -> str | None:
     """Consume a matching code and return its operator account id."""
-    key = f"chat:{connection.id}:one-time-code"
-    if value := await get_client().get(key):
-        proof = json.loads(value)
-        if text.strip() == proof["code"] and await get_client().delete(key):
-            return proof["account_id"]
+    code = text.strip()
+    # Only a text with the form of a code names a key. No other message reaches Redis.
+    if len(code) == ONE_TIME_CODE_LENGTH and code.isascii() and code.isdigit():
+        account_id = await get_client().getdel(f"chat:{connection.id}:one-time-code:{code}")
+        if account_id:
+            return account_id.decode()
 
 
 async def add_admin(session: AsyncSession, connection: VaultSecret, user: dict) -> Conversation:

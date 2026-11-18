@@ -1,19 +1,18 @@
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
+import { Link } from 'wouter'
 
 import { api } from '../api/client'
 import type { AppSettings, WahaSession } from '../api/types'
 import { appLabel } from '../apps/registry'
+import { useOneTimeCodes, type OneTimeCode } from '../lib/useOneTimeCodes'
 
 // WAHA replaces the QR code every 20 to 60 seconds, and the number links when a phone scans it.
 const LINK_POLL_INTERVAL = 5_000
 // WAHA answers 502 while its session starts, so the QR fetch fails for a while before it works.
 const QR_PATIENCE = 30_000
 
-interface OneTimeCode {
-  numberId: string
-  code: string
-  expiresIn: number
+interface AdminCode extends OneTimeCode {
   /** The number's admin when the code opened. A new admin means someone sent the code. */
   admin: string | null
 }
@@ -31,23 +30,18 @@ function isWaiting(number: WahaSession) {
 /** The WhatsApp numbers of an app's Bot. */
 export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | 'botAccess'> }) {
   const isPrivate = app.botAccess === 'private'
-  const queryClient = useQueryClient()
-  const [oneTimeCodes, setOneTimeCodes] = useState<OneTimeCode[]>([])
+  const oneTimeCodes = useOneTimeCodes<AdminCode>(app.name)
   const query = useQuery({
     queryKey: ['wahaSessions', app.name],
     queryFn: () => api.wahaSessions(app.name),
     refetchInterval: (current) =>
-      current.state.data?.some(isWaiting) || oneTimeCodes.length > 0 ? LINK_POLL_INTERVAL : false,
+      current.state.data?.some(isWaiting) || oneTimeCodes.codes.length > 0 ? LINK_POLL_INTERVAL : false,
   })
-  const [isBusy, setIsBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const openCodes = oneTimeCodes.filter((oneTimeCode) => {
+  const { isBusy, error, change: changeNumbers } = oneTimeCodes
+  oneTimeCodes.keep((oneTimeCode) => {
     const number = query.data?.find((number) => number.id === oneTimeCode.numberId)
-    return number && !number.revokedAt && (isPrivate
-      ? !number.isPhonePaired
-      : number.admin === oneTimeCode.admin)
+    return Boolean(number && !number.revokedAt && number.admin === oneTimeCode.admin)
   })
-  if (openCodes.length < oneTimeCodes.length) setOneTimeCodes(openCodes)
   const newest = query.data?.at(-1)
   // A removed number stays in view only if it shows something: the newest one shows why
   // Druks refused it, and a linked one shows which number it held.
@@ -56,19 +50,6 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
       !number.revokedAt || (number === newest && number.revokedReason in REFUSALS) || number.number,
   )
 
-  async function changeNumbers(action: () => Promise<unknown>) {
-    setIsBusy(true)
-    setError(null)
-    try {
-      await action()
-      await queryClient.invalidateQueries({ queryKey: ['wahaSessions', app.name] })
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught))
-    } finally {
-      setIsBusy(false)
-    }
-  }
-
   function remove(number: WahaSession) {
     const label = number.number ?? 'this number'
     if (window.confirm(`Remove ${label}? Its WhatsApp messages stop reaching Druks.`))
@@ -76,20 +57,11 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
   }
 
   function openOneTimeCode(number: WahaSession) {
-    void changeNumbers(async () => {
-      const opened = isPrivate
-        ? await api.pair(number.id)
-        : await api.openOneTimeCode(number.id)
-      const oneTimeCode = { ...opened, numberId: number.id, admin: number.admin }
-      setOneTimeCodes((current) => [
-        ...current.filter((entry) => entry.numberId !== number.id),
-        oneTimeCode,
-      ])
-      window.setTimeout(
-        () => setOneTimeCodes((current) => current.filter((entry) => entry !== oneTimeCode)),
-        opened.expiresIn * 1000,
-      )
-    })
+    oneTimeCodes.open(async () => ({
+      ...(await api.openOneTimeCode(number.id)),
+      numberId: number.id,
+      admin: number.admin,
+    }))
   }
 
   return (
@@ -97,9 +69,17 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
       <header className="mcp-pane-head">
         <h2 className="mcp-pane-title">WhatsApp numbers</h2>
         <p className="mcp-pane-sub">
-          {isPrivate
-            ? 'Only paired phones get an answer. Add a number, then pair your phone with it. If you add a second number, WAHA does not see your own chats, and replies ring like incoming messages. If you add your own number, replies arrive in your chat with yourself, without a sound.'
-            : `Anyone can chat with ${appLabel(app.name)} at these numbers.`}
+          {isPrivate ? (
+            <>
+              Only paired phones get an answer. Add a number. Each person then pairs their own
+              phone in <Link href="/settings/phones">Settings, under Phones</Link>. If you add a
+              second number, WAHA does not see your own chats, and replies ring like incoming
+              messages. If you add your own number, replies arrive in your chat with yourself,
+              without a sound.
+            </>
+          ) : (
+            `Anyone can chat with ${appLabel(app.name)} at these numbers.`
+          )}
         </p>
       </header>
       {query.isPending && <p role="status">Loading numbers…</p>}
@@ -131,7 +111,7 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
         <div className="channel-connections">
           {numbers.map((number) => {
             const isLinked = !number.revokedAt && number.identityStatus === 'resolved'
-            const oneTimeCode = oneTimeCodes.find((entry) => entry.numberId === number.id)
+            const oneTimeCode = oneTimeCodes.codes.find((entry) => entry.numberId === number.id)
             return (
               <div className="set-card channel-connection" key={number.id}>
                 <div className="channel-connection-head">
@@ -145,11 +125,9 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
                       </span>
                     )}
                     {number.name && <span className="connection-context">{number.name}</span>}
-                    {isLinked && (
+                    {isLinked && !isPrivate && (
                       <span className="connection-context">
-                        {isPrivate
-                          ? number.isPhonePaired ? 'Your phone is paired.' : 'Pair your phone to start a conversation.'
-                          : `Admin: ${number.admin ?? 'the phone, in its chat with itself'}`}
+                        Admin: {number.admin ?? 'the phone, in its chat with itself'}
                       </span>
                     )}
                   </div>
@@ -168,23 +146,12 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
                 {oneTimeCode && (
                   <p className="channel-one-time-code" role="status">
                     Send <code>{oneTimeCode.code}</code> to {number.number} within{' '}
-                    {Math.round(oneTimeCode.expiresIn / 60)} minutes.{' '}
-                    {isPrivate
-                      ? 'Use your own WhatsApp, or send it from that phone to itself. Druks pairs the phone that sent the code with your account. Keep this code secret.'
-                      : "Use your own WhatsApp. Druks then makes the sender this number's admin and sends them its questions."}
+                    {Math.round(oneTimeCode.expiresIn / 60)} minutes. Use your own WhatsApp. Druks
+                    then makes the sender this number's admin and sends them its questions.
                   </p>
                 )}
                 {!number.revokedAt && (
                   <div className="svc-actions">
-                    {isPrivate && number.isPhonePaired && (
-                      <button
-                        className="set-btn ghost"
-                        onClick={() => void changeNumbers(() => api.unpair(number.id))}
-                        disabled={isBusy}
-                      >
-                        Unpair my phone
-                      </button>
-                    )}
                     {isWaiting(number) && number.number && (
                       <button
                         className="set-btn ghost"
@@ -194,13 +161,13 @@ export function WhatsAppNumbersPane({ app }: { app: Pick<AppSettings, 'name' | '
                         Link again
                       </button>
                     )}
-                    {isLinked && !(isPrivate && number.isPhonePaired) && (
+                    {isLinked && !isPrivate && (
                       <button
                         className="set-btn ghost"
                         onClick={() => openOneTimeCode(number)}
                         disabled={isBusy}
                       >
-                        {isPrivate ? 'Pair my phone' : 'Add admin'}
+                        Add admin
                       </button>
                     )}
                     <button
