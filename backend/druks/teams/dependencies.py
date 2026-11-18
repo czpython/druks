@@ -9,8 +9,9 @@ from druks.apps import App
 from druks.apps.loader import get_app
 from druks.apps.registry import apps, workflows
 from druks.chat.bots.service import get_bot_connection
-from druks.durable.models import Run
+from druks.durable.models import AgentCall, Artifact, Run
 from druks.exceptions import ObjectNotFound, PermissionDenied
+from druks.files.models import FileRecord
 from druks.notifications.models import Notification
 
 
@@ -37,6 +38,7 @@ async def require_named_app_access(app: str, account: Account = Depends(current_
 
 # Each dependency below finds the app in the request path. A path parameter in its own
 # signature would replace the route's, and the description that a tool shows for it.
+# A thing of an app that is not installed (removed, or `enabled = false`) answers 404.
 
 
 async def require_run_access(
@@ -45,7 +47,56 @@ async def require_run_access(
     """The caller must be able to use the run's app. An unknown run is the route's to answer."""
     run = await session.get(Run, request.path_params["run"])
     if run:
-        app = get_app(workflows.get(run.kind).app)
+        workflow = workflows.get(run.kind)
+        if not workflow:
+            raise ObjectNotFound("run", {"id": run.id})
+        app = get_app(workflow.app)
+        if not await account.can_use_app(app):
+            raise PermissionDenied(f"{account.username} cannot use the app {app.name}.")
+
+
+async def require_call_access(
+    request: Request, session: SessionDep, account: Account = Depends(current_account)
+) -> None:
+    """The caller must be able to use the app of the call's run. An unknown call is the
+    route's to answer."""
+    call = await session.get(AgentCall, request.path_params["call"])
+    if call:
+        workflow = workflows.get(call.run.kind)
+        if not workflow:
+            raise ObjectNotFound("agent call", {"id": call.id})
+        app = get_app(workflow.app)
+        if not await account.can_use_app(app):
+            raise PermissionDenied(f"{account.username} cannot use the app {app.name}.")
+
+
+async def require_artifact_access(
+    request: Request, session: SessionDep, account: Account = Depends(current_account)
+) -> None:
+    """The caller must be able to use the app of the artifact's call. An unknown artifact
+    is the route's to answer."""
+    artifact = await session.get(Artifact, request.path_params["artifact_id"])
+    if artifact:
+        call = await AgentCall.get(session, artifact.agent_call_id)
+        workflow = workflows.get(call.run.kind)
+        if not workflow:
+            raise ObjectNotFound("artifact", {"id": artifact.id})
+        app = get_app(workflow.app)
+        if not await account.can_use_app(app):
+            raise PermissionDenied(f"{account.username} cannot use the app {app.name}.")
+
+
+async def require_file_access(
+    request: Request, session: SessionDep, account: Account = Depends(current_account)
+) -> None:
+    """The caller must be able to use the file's app. An unknown file is the route's to
+    answer."""
+    record = await session.get(FileRecord, request.path_params["file_id"])
+    if record:
+        try:
+            app = get_app(record.app)
+        except KeyError as error:
+            raise ObjectNotFound("file", {"id": record.id}) from error
         if not await account.can_use_app(app):
             raise PermissionDenied(f"{account.username} cannot use the app {app.name}.")
 
@@ -86,6 +137,9 @@ async def require_pairing_access(
     is the route's to answer."""
     connection = await get_bot_connection(session, request.path_params["connection_id"])
     if connection:
-        app = get_app(connection.identity["app"])
+        try:
+            app = get_app(connection.identity["app"])
+        except KeyError as error:
+            raise ObjectNotFound("number", {"id": connection.id}) from error
         if not await account.can_use_app(app):
             raise PermissionDenied(f"{account.username} cannot use the app {app.name}.")

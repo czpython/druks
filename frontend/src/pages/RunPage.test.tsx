@@ -22,10 +22,9 @@ registerAppUI({
 
 const getRun = vi.mocked(api.getRun)
 const failed: RunDetail = {
-  app: 'run_page_notes',
   subject: null,
   run: {
-    id: 'run-1', kind: 'run_page_notes.digest', label: 'Digest', retryFrom: null, state: 'failed',
+    id: 'run-1', app: 'run_page_notes', kind: 'run_page_notes.digest', label: 'Digest', retryFrom: null, state: 'failed',
     failure: 'the disk is full', gate: null, createdAt: '2026-11-17T10:00:00Z',
     updatedAt: '2026-11-17T10:01:00Z', accountUsername: 'op@example.com', agentCalls: [],
   },

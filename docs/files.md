@@ -49,9 +49,9 @@ content = await shot.image.open()
 ```
 
 `url` is `/api/files/{id}`. The route uses the normal Druks identity gate. It
-shows images, PDF, and plain text inline. It downloads all other content. The
-route sends `X-Content-Type-Options: nosniff` and validates the file with its
-SHA-256 ETag.
+serves a file only to a person who can use the file's app. It shows images,
+PDF, and plain text inline. It downloads all other content. The route sends
+`X-Content-Type-Options: nosniff` and validates the file with its SHA-256 ETag.
 
 ## Pass a file to another agent
 

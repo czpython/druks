@@ -10,14 +10,12 @@ import { RunTranscript } from './RunTranscript'
 import { StatusGlyph } from './StatusGlyph'
 
 export function RunBlock({
-  app,
   run,
   newest,
   selected,
   expected,
   onRetried,
 }: {
-  app: string
   run: RunSummary
   newest: boolean
   selected: boolean
@@ -90,7 +88,7 @@ export function RunBlock({
       )}
       {open && call && (
         <RunTranscript
-          basePath={subjectApi.transcriptBase(app, call.id)}
+          basePath={subjectApi.transcriptBase(run.app, call.id)}
           isLive={call.status === 'running'}
         />
       )}

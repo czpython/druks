@@ -39,7 +39,6 @@ async def get_run(
     if not run:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found")
     return RunDetailResponse(
-        app=workflows.get(run.kind).app,
         subject=await run.get_subject(),
         run=await get_run_response(run),
     )

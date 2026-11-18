@@ -622,12 +622,13 @@ class App:
         import mimetypes
         from typing import Literal
 
-        from fastapi import APIRouter, HTTPException, Response, status
+        from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
         from fastapi.responses import FileResponse, StreamingResponse
 
         from druks.api.dependencies import EngineDep, SessionDep
         from druks.durable import reads
         from druks.durable.enums import AgentCallStatus
+        from druks.durable.exceptions import AgentCallNotFound
         from druks.durable.live import SSE_HEADERS
         from druks.durable.models import AgentCall
         from druks.durable.schemas import AgentCallFiles, TranscriptChunk
@@ -635,10 +636,23 @@ class App:
         default_limit = 64 * 1024
         max_limit = 256 * 1024
         # A call that has stopped writing never appends to its log again, so the
-        # byte range this serves is permanent.
-        settled_cache = "public, max-age=31536000, immutable"
+        # byte range this serves is permanent. Private: a shared cache must not keep a
+        # transcript that only some accounts can read.
+        settled_cache = "private, max-age=31536000, immutable"
 
-        router = APIRouter(prefix="/transcripts/{call_id}", tags=[f"{cls.name}:transcripts"])
+        async def require_own_call(request: Request, session: SessionDep) -> None:
+            # The loader gates this router on the app, so a call of another app, or of
+            # an app that is not installed, answers as unknown.
+            call = await AgentCall.get(session, request.path_params["call_id"])
+            workflow = workflow_registry.get(call.run.kind)
+            if not workflow or workflow.app != cls.name:
+                raise AgentCallNotFound(call.id)
+
+        router = APIRouter(
+            prefix="/transcripts/{call_id}",
+            tags=[f"{cls.name}:transcripts"],
+            dependencies=[Depends(require_own_call)],
+        )
 
         @router.get("", response_model=TranscriptChunk, response_model_by_alias=True)
         async def get_transcript(
@@ -697,6 +711,7 @@ class App:
                 resolved,
                 media_type=media_type or "application/octet-stream",
                 filename=resolved.name if disposition == "attachment" else None,
+                headers={"Cache-Control": "private"},
             )
 
         return router
