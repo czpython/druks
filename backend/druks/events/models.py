@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -7,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import UserDefinedType
 
-from druks.apps.loader import iter_apps, resolve_workflow_app
+from druks.apps import App
+from druks.apps.loader import resolve_workflow_app
 from druks.models import Base, StoredSubject
 from druks.signals import publish
 
@@ -59,6 +61,7 @@ class Event(Base):
     def get_history(
         cls,
         *,
+        apps: Sequence[type[App]],
         app: str | None = None,
         search: str | None = None,
         topic: str | None = None,
@@ -66,8 +69,9 @@ class Event(Base):
         until: datetime | None = None,
     ) -> Select[tuple["Event"]]:
         """The recorded Activity that matches these filters, as a query. Search reads the
-        recorded key literally; from is inclusive and until is exclusive."""
-        owners = [owner.name for owner in iter_apps() if not owner.builtin]
+        recorded key literally; from is inclusive and until is exclusive. Only the
+        Activity of ``apps`` matches."""
+        owners = [owner.name for owner in apps if not owner.builtin]
         statement = select(cls).where(cls.app.in_(owners))
         if app:
             statement = statement.where(cls.app == app)

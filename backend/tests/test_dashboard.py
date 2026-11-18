@@ -6,6 +6,7 @@ import pytest
 from dbos import DBOS
 from druks.accounts.models import Account
 from druks.api import dashboard
+from druks.contrib.software_factory.workflows import Build
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import Artifact, Run
 from druks.events.models import Event
@@ -172,6 +173,24 @@ async def test_run_now_refuses_a_member_outside_the_apps_team(client, druks_db, 
     response = client.post(f"/api/dashboard/schedules/{Summarize.kind}/run")
 
     assert response.status_code == 403
+
+
+async def test_a_member_outside_the_apps_team_sees_none_of_its_work(client, druks_db, monkeypatch):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    await Account.get_or_create(druks_db, "op@example.com")
+    await Team.create(druks_db, name="Notes", member_ids=[], apps=["field_notes"])
+    monkeypatch.setattr(Summarize, "every", "0 9 * * *")
+    await seed_run(druks_db, kind=Summarize.kind)
+    build = await seed_run(druks_db, kind=Build.kind)
+
+    running = overview(client)["running"]
+    schedules = client.get("/api/dashboard/schedules").json()["rows"]
+    hidden = client.get("/api/dashboard/overview?app=field_notes")
+
+    assert running["total"] == 1
+    assert [row["run"] for row in running["rows"]] == [build.id]
+    assert Summarize.kind not in {schedule["kind"] for schedule in schedules}
+    assert hidden.status_code == 404
 
 
 @pytest.mark.parametrize("has_artifact", [True, False])

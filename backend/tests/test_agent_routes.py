@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -17,8 +18,9 @@ from druks.durable.reads import read_transcript_chunk
 from druks.mcp.gateway import services
 from druks.teams.models import Team
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
+from druks_field_notes.app import FieldNotes
 from druks_field_notes.models import Note
-from druks_field_notes.workflows import Summarize
+from druks_field_notes.workflows import Summarize, Survey
 from fastapi.testclient import TestClient
 
 _IN_APP_ASK = {
@@ -388,6 +390,46 @@ async def test_run_routes_refuse_a_member_outside_the_apps_team(client: TestClie
     assert [response.status_code for response in requests] == [403] * 6
 
 
+async def test_a_member_on_the_apps_team_sees_its_runs(client: TestClient, druks_db):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "op@example.com")
+    await Team.create(druks_db, name="Builders", member_ids=[member.id], apps=["software_factory"])
+    note = await Note.create(body="two apps")
+    summarize = await seed_run(druks_db, kind=Summarize.kind, subject=note, state="failed")
+    build = await seed_run(druks_db, kind=Build.kind, subject=note)
+
+    detail = client.get(f"/api/field_notes/note/{note.id}").json()
+
+    assert [run["id"] for run in detail["timeline"]] == [summarize.id, build.id]
+
+
+async def test_a_member_sees_only_the_runs_of_the_apps_they_can_use(client: TestClient, druks_db):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "op@example.com")
+    await Team.create(druks_db, name="Builders", member_ids=[], apps=["software_factory"])
+    note = await Note.create(body="two apps")
+    summarize = await seed_run(druks_db, kind=Summarize.kind, subject=note, state="failed")
+    await seed_run(druks_db, kind=Build.kind, subject=note)
+
+    detail = client.get(f"/api/field_notes/note/{note.id}").json()
+    open_subjects = client.get("/api/open-subjects").json()["subjects"]
+    endpoints = {
+        route.path: route.endpoint for route in FieldNotes._get_subject_routes(Note).routes
+    }
+    detail_stream = await endpoints["/note/{subject_id:path}/stream"](
+        subject_id=str(note.id), engine=druks_db.bind, account=member
+    )
+    detail_snapshot = json.loads((await anext(detail_stream.body_iterator)).split("data: ", 1)[1])
+    await detail_stream.body_iterator.aclose()
+
+    assert [run["id"] for run in detail["timeline"]] == [summarize.id]
+    assert [run["id"] for run in detail_snapshot["timeline"]] == [summarize.id]
+    assert detail["status"]["run"] == summarize.id
+    assert [workflow["run"] for subject in open_subjects for workflow in subject["workflows"]] == [
+        summarize.id
+    ]
+
+
 def test_missing_agent_call_uses_the_unified_shape(client: TestClient, druks_db):
     response = client.get("/api/agent-calls/missing")
 
@@ -434,7 +476,7 @@ async def test_list_open_subjects_returns_newest_open_work_and_latest_calls(
     )
 
     callless_note = await Note.create(body="callless")
-    await seed_run(druks_db, kind="field_notes.audit", subject=callless_note)
+    await seed_run(druks_db, kind=Survey.kind, subject=callless_note)
     await seed_run(druks_db, kind="usage.scrape")
 
     response = client.get("/api/open-subjects")
@@ -478,20 +520,20 @@ async def test_list_open_subjects_keeps_type_and_kind_partitions(client: TestCli
     )
 
     multi_kind_note = await Note.create(body="two kinds")
-    scan = await seed_run(druks_db, kind="field_notes.scan", subject=multi_kind_note)
-    audit = await seed_run(druks_db, kind="field_notes.audit", subject=multi_kind_note)
+    scan = await seed_run(druks_db, kind=Summarize.kind, subject=multi_kind_note)
+    audit = await seed_run(druks_db, kind=Survey.kind, subject=multi_kind_note)
 
     terminal_sibling_note = await Note.create(body="terminal sibling")
     failed_scan = await seed_run(
         druks_db,
-        kind="field_notes.scan",
+        kind=Summarize.kind,
         subject=terminal_sibling_note,
         state="failed",
     )
     failed_scan.created_at = datetime(2026, 1, 1, tzinfo=UTC)
     finished_audit = await seed_run(
         druks_db,
-        kind="field_notes.audit",
+        kind=Survey.kind,
         subject=terminal_sibling_note,
         state="finished",
     )

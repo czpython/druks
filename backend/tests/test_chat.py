@@ -31,6 +31,7 @@ from druks.chat.exceptions import (
     ChatSandboxGone,
 )
 from druks.chat.models import Conversation, Message
+from druks.contrib.software_factory.app import SoftwareFactory
 from druks.database import get_session
 from druks.durable.constants import TASK_QUEUE
 from druks.durable.dbos_state import workflow_status
@@ -50,6 +51,7 @@ from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.settings import Urls
+from druks.teams.models import Team
 from druks.testing import (
     asgi_client,
     configure_app_for_test,
@@ -59,6 +61,8 @@ from druks.testing import (
 )
 from druks.user_settings.models import SettingsOverride
 from druks.workflows import Subject
+from druks_field_notes.app import FieldNotes
+from druks_field_notes.workflows import Summarize
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy import delete, select
 
@@ -1096,7 +1100,7 @@ async def test_a_conversation_lists_the_runs_it_started_that_are_still_active(
 async def test_a_cancel_from_the_chat_that_started_the_run_queues_no_report(
     druks_db, conversation, tmp_path
 ):
-    run = await seed_run(druks_db, kind="test", account_id=conversation.account_id)
+    run = await seed_run(druks_db, kind=Summarize.kind, account_id=conversation.account_id)
     run.conversation_id = conversation.id
     await druks_db.flush()
     api = configure_app_for_test(
@@ -1499,3 +1503,16 @@ async def test_each_turn_opens_with_the_local_time(monkeypatch):
         },
         {"type": "text", "text": "Remind me in 5 minutes"},
     ]
+
+
+async def test_the_chat_prompt_names_only_the_apps_the_member_can_use(druks_db):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    await Team.create(druks_db, name="Notes", member_ids=[], apps=["field_notes"])
+    conversation = await Conversation.create(druks_db, account_id=member.id, body="Hi")
+    await druks_db.refresh(conversation, ["account"])
+
+    _, prompt, _ = await service.get_agent(druks_db, conversation)
+
+    assert FieldNotes.description not in prompt
+    assert SoftwareFactory.description in prompt

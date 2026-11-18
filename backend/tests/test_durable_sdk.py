@@ -13,7 +13,7 @@ from dbos._error import DBOSQueueDeduplicatedError
 from druks.accounts.context import Actor, current_account_id, current_actor
 from druks.accounts.models import Account
 from druks.agents import Agent, AgentOutput
-from druks.apps.loader import register_workflow_package
+from druks.apps.loader import iter_apps, register_workflow_package
 from druks.apps.registry import Registry, agents, workflows
 from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
 from druks.browser.exceptions import BrowserSessionSignedOutError
@@ -2014,7 +2014,9 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
     async with session_scope(runtime.engine):
         assert (await Note.get(id=approved_note.id)).gist == "The pump ran hot."
         activity = list(
-            await db_session().scalars(Event.get_history(app="field_notes").order_by(Event.id))
+            await db_session().scalars(
+                Event.get_history(apps=iter_apps(), app="field_notes").order_by(Event.id)
+            )
         )
     kinds = {
         run_id: [event.type for event in activity if event.payload.get("run") == run_id]

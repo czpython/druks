@@ -136,6 +136,25 @@ async def test_app_routes_allow_the_team_and_admin_and_refuse_other_members(tmp_
     assert [response.status_code for response in responses] == [403, 200, 200]
 
 
+async def test_the_app_list_leaves_out_an_app_the_member_cannot_use(tmp_path, druks_db):
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    allowed = await Account.get_or_create(druks_db, "allowed@example.com")
+    refused = await Account.get_or_create(druks_db, "refused@example.com")
+    await Team.create(druks_db, name="Field notes", member_ids=[allowed.id], apps=["field_notes"])
+
+    with header_client(tmp_path) as client:
+        rosters = [
+            {
+                app["name"]
+                for app in client.get("/api/apps", headers={IDENTITY_HEADER: email}).json()
+            }
+            for email in (refused.username, allowed.username, admin.username)
+        ]
+
+    assert ["field_notes" in roster for roster in rosters] == [False, True, True]
+    assert all("software_factory" in roster for roster in rosters)
+
+
 def _routes_module(name: str, **routers: APIRouter) -> ModuleType:
     module = ModuleType(f"{name}.routes")
     module.__dict__.update(routers)

@@ -17,6 +17,7 @@ from druks.notifications.schemas import (
     RespondRequest,
 )
 from druks.notifications.services import list_notification_channels, respond_to_notification
+from druks.teams.dependencies import require_notification_access
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
@@ -35,7 +36,9 @@ async def list_notifications(
     account: Account = Depends(current_account),
     limit: int = Query(50, ge=1, le=500),
 ) -> list[Notification]:
-    return await Notification.list_for_account(session, account.id, limit=limit)
+    return await Notification.list_for_account(
+        session, account.id, kinds=await account.list_usable_kinds(), limit=limit
+    )
 
 
 @router.post("/read", status_code=204)
@@ -47,7 +50,11 @@ async def mark_notifications_read(
 
 # Declared after the /channels route: declaration order is match order, so the id match
 # can't swallow it.
-@router.get("/{notification_id}", response_model=NotificationResponse)
+@router.get(
+    "/{notification_id}",
+    response_model=NotificationResponse,
+    dependencies=[Depends(require_notification_access)],
+)
 async def get_notification(
     session: SessionDep, notification_id: str, account: Account = Depends(current_account)
 ) -> Notification:

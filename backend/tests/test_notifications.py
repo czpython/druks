@@ -8,12 +8,15 @@ from druks.chat.constants import CLICK_ANSWER_MESSAGE
 from druks.chat.enums import ConversationSource
 from druks.chat.models import Conversation, Message
 from druks.chat.service import deliver
+from druks.contrib.software_factory.workflows import Build
 from druks.durable import Run
 from druks.models import Base
 from druks.notifications.exceptions import AnswerNotAllowedError, InvalidChoiceError
 from druks.notifications.models import Notification
 from druks.notifications.services import respond_to_notification
-from druks.testing import configure_app_for_test, make_settings, seed_dbos_status
+from druks.teams.models import Team
+from druks.testing import configure_app_for_test, make_settings, seed_dbos_status, seed_run
+from druks_field_notes.workflows import Summarize
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -127,6 +130,30 @@ async def test_endpoints_list_and_get_omit_the_token(tmp_path, druks_db):
         assert failed.correlation_token not in one.text
 
         assert client.get("/api/notifications/no-such-id").status_code == 404
+
+
+async def test_a_member_outside_the_apps_team_reads_none_of_its_notifications(tmp_path, druks_db):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "op@example.com")
+    await Team.create(druks_db, name="Notes", member_ids=[], apps=["field_notes"])
+    notifications = {}
+    for kind in (Summarize.kind, Build.kind):
+        run = await seed_run(druks_db, kind=kind)
+        notifications[kind] = await Notification.create(
+            druks_db, account_id=member.id, reason="gate.parked", body=kind, run_id=run.id
+        )
+    runless = await Notification.create(
+        druks_db, account_id=member.id, reason="subscription.disconnected", body="no run"
+    )
+
+    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        listed = client.get("/api/notifications").json()
+        hidden = client.get(f"/api/notifications/{notifications[Summarize.kind].id}")
+        shown = client.get(f"/api/notifications/{notifications[Build.kind].id}")
+
+    assert [item["id"] for item in listed] == [runless.id, notifications[Build.kind].id]
+    assert hidden.status_code == 403
+    assert shown.status_code == 200
 
 
 _IN_APP_ASK = {

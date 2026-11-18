@@ -8,6 +8,8 @@ import psycopg
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from druks.accounts.enums import Role
+from druks.accounts.models import Account
 from druks.database import session_scope
 from druks.events import routes
 from druks.events.models import Event
@@ -17,6 +19,9 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
+
+# An admin can use every app, so the stream reads every app's rows.
+ADMIN = Account(role=Role.ADMIN)
 
 
 @pytest.fixture
@@ -49,7 +54,7 @@ def open_stream(activity_engine, monkeypatch):
             headers=headers or {}, is_disconnected=AsyncMock(return_value=False)
         )
         response = await routes.stream_feed(
-            request=request, engine=activity_engine, cursor=cursor, **filters
+            request=request, engine=activity_engine, cursor=cursor, account=ADMIN, **filters
         )
         return response.body_iterator
 
@@ -72,7 +77,7 @@ async def read_batch(stream):
 @pytest.mark.parametrize("resume", ["connected", "cursor", "header"])
 async def test_late_commit_arrives_after_a_higher_sequence(activity_engine, open_stream, resume):
     async with session_scope(activity_engine) as session:
-        page = await routes.list_feed(session=session)
+        page = await routes.list_feed(session=session, account=ADMIN)
     assert page.items == []
     assert page.cursor
 
@@ -114,7 +119,7 @@ async def test_an_interrupted_batch_replays_all_rows_before_its_cursor(
     activity_engine, open_stream, resume
 ):
     async with session_scope(activity_engine) as session:
-        page = await routes.list_feed(session=session)
+        page = await routes.list_feed(session=session, account=ADMIN)
     async with session_scope(activity_engine) as session:
         note = await Note.create(body="Batch")
         for number in range(125):
@@ -158,7 +163,7 @@ async def test_rows_committed_during_the_history_read_are_never_lost(
             return result
 
         monkeypatch.setattr(session, "execute", execute_then_commit)
-        page = await routes.list_feed(session=session)
+        page = await routes.list_feed(session=session, account=ADMIN)
 
     stream = await open_stream(cursor=page.cursor)
     try:

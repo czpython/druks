@@ -1,8 +1,9 @@
 import secrets
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, String, select, update
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -114,15 +115,24 @@ class Notification(Base, Uuid7Pk):
         *,
         reason: str = "",
         since: datetime | None = None,
+        kinds: Sequence[str] | None = None,
         limit: int = 50,
     ) -> list["Notification"]:
         """The notifications sent to ``account_id``, newest first: all of them, or those
-        with ``reason`` that were made at or after ``since``."""
+        with ``reason`` that were made at or after ``since``. With ``kinds``, a
+        notification about a run counts only when the run is of those workflows."""
         stmt = select(cls).where(cls.account_id == account_id)
         if reason:
             stmt = stmt.where(cls.reason == reason)
         if since:
             stmt = stmt.where(cls.created_at >= since)
+        if kinds is not None:  # ast-grep-ignore: rule-2
+            # The durable models import this module, so this import cannot be at the top.
+            from druks.durable.models import Run  # noqa: PLC0415
+
+            stmt = stmt.outerjoin(Run, Run.id == cls.run_id).where(
+                or_(cls.run_id.is_(None), Run.kind.in_(kinds))
+            )
         # uuid7 ids are time-ordered, breaking created_at ties toward the newest.
         stmt = stmt.order_by(cls.created_at.desc(), cls.id.desc()).limit(limit)
         return list(await session.scalars(stmt))

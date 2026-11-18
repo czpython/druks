@@ -5,7 +5,7 @@ from druks.accounts.dependencies import current_account, current_admin_account
 from druks.accounts.models import Account
 from druks.agents import Agent
 from druks.api.dependencies import SessionDep
-from druks.apps.loader import get_app, iter_apps
+from druks.apps.loader import get_app
 from druks.apps.registry import agents, bots, channels, workflows
 from druks.durable.engine import apply_schedules
 from druks.harnesses.base import Harness
@@ -13,6 +13,7 @@ from druks.harnesses.config import check_config
 from druks.harnesses.exceptions import AgentConfigError
 from druks.harnesses.registry import get_harnesses
 from druks.notifications.services import list_notification_channels
+from druks.teams.dependencies import require_named_app_access
 
 from . import reads
 from .datastructures import ALLOWED_EFFORTS
@@ -48,7 +49,9 @@ async def list_harnesses() -> tuple[type[Harness], ...]:
 
 
 @agents_router.get("", response_model=AgentsResponse, response_model_by_alias=True)
-async def list_agents(session: SessionDep) -> AgentsResponse:
+async def list_agents(
+    session: SessionDep, account: Account = Depends(current_account)
+) -> AgentsResponse:
     settings = await InstallationSettings.get_or_create(session)
     overrides = await SettingsOverride.list_by_key(session)
     projected = [
@@ -58,7 +61,7 @@ async def list_agents(session: SessionDep) -> AgentsResponse:
                 session, app, settings=settings, overrides=overrides
             ),
         )
-        for app in iter_apps()
+        for app in await account.list_usable_apps()
     ]
     return AgentsResponse(apps=[app for app in projected if app.agents])
 
@@ -129,12 +132,14 @@ async def update_personal_settings(
 
 
 @router.get("/apps", response_model=AppsSettingsResponse, response_model_by_alias=True)
-async def get_app_settings(session: SessionDep) -> AppsSettingsResponse:
+async def get_app_settings(
+    session: SessionDep, account: Account = Depends(current_account)
+) -> AppsSettingsResponse:
     settings = await InstallationSettings.get_or_create(session)
     overrides = await SettingsOverride.list_by_key(session)
     projected = [
         await reads.get_app_settings(session, app, settings=settings, overrides=overrides)
-        for app in iter_apps()
+        for app in await account.list_usable_apps()
     ]
     return AppsSettingsResponse(
         allowed_efforts=list(ALLOWED_EFFORTS),
@@ -145,24 +150,22 @@ async def get_app_settings(session: SessionDep) -> AppsSettingsResponse:
     )
 
 
-@router.get("/apps/{name}/choices")
-async def get_app_setting_choices(name: str) -> dict[str, list[dict[str, str]]]:
+@router.get("/apps/choices", dependencies=[Depends(require_named_app_access)])
+async def get_app_setting_choices(app: str) -> dict[str, list[dict[str, str]]]:
     """The live choices of an app's settings. The settings page asks when it opens the app."""
-    try:
-        model = get_app(name).settings_model
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"Unknown app {name!r}") from exc
-    return await reads.list_live_choices(model) if model else {}
+    settings_model = get_app(app).settings_model
+    return await reads.list_live_choices(settings_model) if settings_model else {}
 
 
 @router.patch(
     "/apps",
     response_model=AppsSettingsResponse,
     response_model_by_alias=True,
-    dependencies=[Depends(current_admin_account)],
 )
 async def update_app_settings(
-    session: SessionDep, body: AppsSettingsUpdate
+    session: SessionDep,
+    body: AppsSettingsUpdate,
+    account: Account = Depends(current_admin_account),
 ) -> AppsSettingsResponse:
     for name, harness in body.agent_harnesses.items():
         await SettingsOverride.set_agent_harness(session, name, harness)
@@ -225,4 +228,4 @@ async def update_app_settings(
     if body.agent_models or body.agent_billings:
         await Agent.wake_runs_waiting_for_quota(session)
 
-    return await get_app_settings(session)
+    return await get_app_settings(session, account)
