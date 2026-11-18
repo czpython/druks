@@ -25,7 +25,9 @@
   <a href="#contributors"><img alt="All Contributors" src="https://img.shields.io/github/all-contributors/czpython/druks?color=00677b"></a>
 </p>
 
-https://github.com/user-attachments/assets/00bd89b1-8743-47e8-babd-d6e459a1b63e
+
+https://github.com/user-attachments/assets/ebedae68-213a-4ae3-b2e3-ec3b75e8ddcc
+
 
 **Druks is a self-hosted or cloud platform where AI agents such as Claude Code and Codex do a company's recurring engineering work, and a person approves each change.**
 
