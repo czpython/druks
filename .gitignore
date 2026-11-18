@@ -15,6 +15,7 @@ __pycache__/
 /htmlcov/
 /data/
 /frontend/data/
+*.rdb
 secrets/
 # druks/secrets is source (the encrypted-column fields), not stored secrets.
 !backend/druks/secrets/
