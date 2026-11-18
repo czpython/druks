@@ -16,4 +16,7 @@ UNLINKED_REPLY = (
     "<@{user}>, your Slack account is not connected to Druks yet. "
     "I sent you a direct message with the link to connect it."
 )
+UNACCEPTED_AUTOMATION_REPLY = (
+    "I do not answer this automation yet. A Druks admin can accept it here: {url}"
+)
 WELCOME_TEMPLATE = "chat/channels/slack/welcome.md"

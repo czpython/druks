@@ -8,6 +8,14 @@ from druks.ui.blocks import FileSummary
 from .enums import ConversationSource, MessageRole, MessageState
 
 
+class AutomationResponse(Schema):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    is_accepted: bool
+
+
 class ConversationResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 

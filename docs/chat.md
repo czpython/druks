@@ -500,8 +500,8 @@ room.
 You have one conversation with the bot in your direct message. Druks drops a
 repeated event by its event ID. The agent writes Markdown, and Druks
 posts each reply in the direct message, in pieces of at most 12,000 characters.
-Druks ignores the bot's own messages, edits, deletes, joins, hidden events, and
-people from other workspaces.
+Druks ignores the bot's own messages, other bots' direct messages, edits,
+deletes, joins, hidden events, and people from other workspaces.
 
 ### Files
 
@@ -525,6 +525,25 @@ your agent too. Other people must tag it, and a top-level message with no tag
 reaches nobody. When you tag the bot before you connect Slack, it answers in the
 thread that your account is not connected, and sends you the link in a direct
 message.
+
+Another app's bot or a Slack workflow can tag the bot in a room too, after an
+admin accepts it. Druks calls each of them an automation. The first time an
+automation tags the bot, the bot answers in the thread that it does not answer
+this automation yet, with a link to the Slack pane of **Chat → Channels**. Under
+**Automations**, the pane lists each automation that tagged the bot, by its name
+in Slack. An admin selects **Accept**, and the agent answers the tag that waited
+and each later tag of that automation, in the thread. **Remove** makes the
+automation wait for an admin again. Until an admin accepts an automation, its
+later tags reach nobody.
+
+The agent of an accepted automation runs on the
+[default account](configuration.md#personal-and-installation-settings), as
+unattended runs do. That account's subscription pays, and the agent uses its
+connections. Everything that an accepted automation posts with a tag reaches
+that agent, such as the text that a person types into a workflow's form, so
+accept only an automation whose input you trust. An automation's untagged
+message reaches nobody. Nobody can click the buttons of a question from such a
+run, so a person answers it in the dashboard.
 
 Tell the agent to answer only when you tag it, and your untagged replies in that
 thread stop reaching it. The agent records your choice with `chat_require_tag`.

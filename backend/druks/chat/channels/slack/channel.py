@@ -12,7 +12,7 @@ from druks.apps.loader import iter_apps
 from druks.chat.channels.base import Channel
 from druks.chat.enums import ConversationSource
 from druks.chat.exceptions import ChannelHasNoThreadsError, FileNotInThreadError
-from druks.chat.models import Conversation, Message
+from druks.chat.models import Automation, Conversation, Message
 from druks.chat.service import deliver
 from druks.core.apis.slack import SlackClient
 from druks.core.services import Slack
@@ -33,6 +33,7 @@ from .constants import (
     LINK_TTL_SECONDS,
     REPLY_PIECE_CHARACTERS,
     THREAD_MESSAGES,
+    UNACCEPTED_AUTOMATION_REPLY,
     UNLINKED_REPLY,
     WELCOME_KEY,
     WELCOME_TEMPLATE,
@@ -71,8 +72,20 @@ class SlackChannel(Channel):
         """Route a message for the bot. A direct message or a tag reaches the linked
         account's own conversation, or waits under a private link until the person
         connects their Slack account. An untagged reply reaches the thread conversation
-        the person used in the last day, unless they asked for a tag. Everything else is
-        not for the bot."""
+        the person used in the last day, unless they asked for a tag. The tag of an
+        automation, which is another app's bot or a workflow, reaches the default account
+        once an admin accepted the automation, and its first tag waits for that.
+        Everything else is not for the bot."""
+        if bot_id := message.get("bot_id"):
+            automation = await Automation.get_or_none(
+                session, connection_id=row.id, source_id=bot_id
+            )
+            if automation and automation.is_accepted:
+                account = await Account.get_default(session)
+                await cls.save_message(session, row, account, message)
+            elif not automation:
+                await cls.hold_message(session, row, message)
+            return
         thread_id = get_thread_id(message)
         is_addressed = not thread_id or f"<@{row.identity['bot_user_id']}>" in message["text"]
         if not is_addressed and "thread_ts" not in message:
@@ -104,7 +117,8 @@ class SlackChannel(Channel):
             row,
             account.id,
             source=ConversationSource.SLACK,
-            user_id=message["user"],
+            # A workflow's post has no user, so its bot ID stands for the person.
+            user_id=message.get("user") or message["bot_id"],
             user_name="",
             user_phone="",
             thread_id=get_thread_id(message),
@@ -178,6 +192,28 @@ class SlackChannel(Channel):
             await client.post_markdown(
                 room, UNLINKED_REPLY.format(user=message["user"]), thread_ts=thread_ts
             )
+
+    @classmethod
+    async def hold_message(cls, session: AsyncSession, row: VaultSecret, message: dict) -> None:
+        """Keep the first tag of an automation until an admin accepts the automation,
+        and tell the thread where an admin does that."""
+        client = SlackClient(token=await Slack.get_bot_token())
+        bot = (await client.bots_info(bot=message["bot_id"]))["bot"]
+        session.add(
+            Automation(
+                connection_id=row.id, source_id=bot["id"], name=bot["name"], first_message=message
+            )
+        )
+        # Saved before the post: a second first tag of one automation fails here and
+        # posts nothing.
+        await session.flush()
+        endpoint = get_settings().urls.endpoint.rstrip("/")
+        room, _, thread_ts = get_thread_id(message).partition(":")
+        await client.post_markdown(
+            room,
+            UNACCEPTED_AUTOMATION_REPLY.format(url=f"{endpoint}/apps/chat/settings/channels"),
+            thread_ts=thread_ts,
+        )
 
     @classmethod
     async def send_reply(

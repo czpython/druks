@@ -17,7 +17,7 @@ from druks.chat.channels.slack.constants import LINK_KEY
 from druks.chat.constants import CONVERSATION_HEADER
 from druks.chat.enums import ConversationSource, MessageRole
 from druks.chat.exceptions import ChannelHasNoThreadsError
-from druks.chat.models import Conversation
+from druks.chat.models import Automation, Conversation
 from druks.chat.routes import read_file, read_thread, require_tag
 from druks.core.apis.slack import SlackClient
 from druks.core.services import Slack
@@ -68,7 +68,12 @@ def slack(monkeypatch):
 
     async def api_call(client, api_method, *, params=None, json=None, **request):
         calls.append((api_method, json or params or {}))
-        return {"ok": True, "channel": "D1", "ts": f"{len(calls)}.0"}
+        return {
+            "ok": True,
+            "channel": "D1",
+            "ts": f"{len(calls)}.0",
+            "bot": {"id": "B500", "name": "Support form"},
+        }
 
     monkeypatch.setattr(SlackClient, "api_call", api_call)
     return calls
@@ -478,6 +483,86 @@ async def test_an_unlinked_person_who_tags_the_bot_gets_the_link_by_direct_messa
     assert (reply["channel"], reply["thread_ts"]) == ("C1", "10.0")
     assert f"<@{ANA}>" in reply["text"] and "/link/" not in reply["text"]
     delivery.assert_not_awaited()
+
+
+def bot_event(user="U500", **event):
+    """A message from another app's bot, or with no user, from a workflow."""
+    data = room_event(user, bot_id="B500")
+    data["event"].update(event)
+    if not user:
+        del data["event"]["user"]
+        data["event"]["subtype"] = "bot_message"
+    return data
+
+
+async def test_an_automations_first_tag_waits_for_an_admin_and_the_thread_hears_where(
+    card, druks_db, slack, delivery, endpoint
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+
+    await receive(bot_event())
+    await receive(bot_event(ts="11.0"))
+
+    [automation] = await Automation.list_for_connection(druks_db, card.id)
+    assert (automation.source_id, automation.name, automation.is_accepted) == (
+        "B500",
+        "Support form",
+        False,
+    )
+    assert automation.first_message["ts"] == "10.0"
+    assert not await Conversation.list_for_account(druks_db, ana)
+    delivery.assert_not_awaited()
+    [(_, lookup), (_, reply)] = slack
+    assert lookup["bot"] == "B500"
+    assert (reply["channel"], reply["thread_ts"]) == ("C1", "10.0")
+    assert "https://druks.example/apps/chat/settings/channels" in reply["text"]
+
+
+@pytest.mark.parametrize(("user", "conversation_user"), [("U500", "U500"), (None, "B500")])
+async def test_an_admin_accepts_an_automation_and_its_tags_reach_the_default_account(
+    card, druks_db, druks_client, slack, delivery, endpoint, user, conversation_user
+):
+    admin = await Account.get_or_create(druks_db, "op@example.com")
+    await receive(bot_event(user))
+    [automation] = await Automation.list_for_connection(druks_db, card.id)
+
+    accepted = await druks_client.post(
+        f"/api/chat/services/slack/automations/{automation.id}/accept"
+    )
+    await receive(bot_event(user, ts="11.0"))
+
+    assert accepted.json() == {"id": automation.id, "name": "Support form", "isAccepted": True}
+    conversations = await Conversation.list_for_account(druks_db, admin)
+    assert {(conversation.user_id, conversation.thread_id) for conversation in conversations} == {
+        (conversation_user, "C1:10.0"),
+        (conversation_user, "C1:11.0"),
+    }
+    assert delivery.await_count == 2
+
+
+async def test_an_accepted_automation_reaches_the_bot_only_by_a_tag_in_a_room(
+    card, druks_db, slack, delivery
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    druks_db.add(
+        Automation(
+            connection_id=card.id,
+            source_id="B500",
+            name="Support form",
+            is_accepted=True,
+            first_message=bot_event()["event"],
+        )
+    )
+    await druks_db.flush()
+
+    await receive(bot_event(text="read my runs", ts="11.0"))
+    await receive(bot_event(channel="D1", channel_type="im", ts="12.0"))
+    await receive(bot_event(ts="13.0"))
+
+    [conversation] = await Conversation.list_for_account(druks_db, ana)
+    assert conversation.thread_id == "C1:13.0"
+    delivery.assert_awaited_once()
+    assert not slack
 
 
 async def test_a_person_hears_the_welcome_once_before_their_first_link(
