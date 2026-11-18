@@ -204,8 +204,8 @@ async def explain_reason(channel: str, *, user: str, reason: str, thread_ts: str
 
 
 class SlackEvents(SlackWebhook):
-    """Publishes each person's message, and the bot's join to a room, as facts. It
-    knows nothing about conversations."""
+    """Publishes each person's message, another bot's tag in a room, and the bot's join
+    to a room, as facts. It knows nothing about conversations."""
 
     category = "events"
 
@@ -221,20 +221,29 @@ class SlackEvents(SlackWebhook):
         return JSONResponse({"challenge": self.data["challenge"]})
 
     async def on_event_callback(self) -> Response:
-        """Publish a person's message, and the bot's own join to a room. Edits, deletes,
-        other joins, hidden events, the bot's own messages, and people from other
+        """Publish a person's message, another bot's tag in a room, and the bot's own
+        join to a room. Edits, deletes, other joins, hidden events, the bot's own
+        messages, other bots' untagged or direct messages, and senders from other
         workspaces are not facts for anyone."""
         event = self.data["event"]
         bot_user_id = (await Slack.get()).identity["bot_user_id"]
-        is_from_person = (
+        # A bot has no Slack account to link and no direct message to answer in, so it
+        # reaches the bot only by a tag in a room.
+        is_tag = f"<@{bot_user_id}>" in event.get("text", "")
+        is_tag_in_room = is_tag and event.get("channel_type") != "im"
+        sender_team = event.get("user_team") or event.get("bot_profile", {}).get("team_id")
+        is_for_bot = (
             event["type"] == "message"
-            and (not event.get("subtype") or event["subtype"] in ("file_share", "thread_broadcast"))
+            and (
+                not event.get("subtype")
+                or event["subtype"] in ("file_share", "thread_broadcast", "bot_message")
+            )
             and not event.get("hidden")
-            and not event.get("bot_id")
+            and (not event.get("bot_id") or is_tag_in_room)
             and event.get("user") != bot_user_id
-            and event.get("user_team", self.data["team_id"]) == self.data["team_id"]
+            and (sender_team or self.data["team_id"]) == self.data["team_id"]
         )
-        if is_from_person:
+        if is_for_bot:
             await publish("slack.message", message=event)
         elif event["type"] == "member_joined_channel" and event["user"] == bot_user_id:
             await publish("slack.bot_joined", room=event["channel"])

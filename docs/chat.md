@@ -499,8 +499,8 @@ room.
 You have one conversation with the bot in your direct message. Druks drops a
 repeated event by its event ID. The agent writes Markdown, and Druks
 posts each reply in the direct message, in pieces of at most 12,000 characters.
-Druks ignores the bot's own messages, edits, deletes, joins, hidden events, and
-people from other workspaces.
+Druks ignores the bot's own messages, other bots' direct messages, edits,
+deletes, joins, hidden events, and senders from other workspaces.
 
 ### Files
 
@@ -524,6 +524,14 @@ your agent too. Other people must tag it, and a top-level message with no tag
 reaches nobody. When you tag the bot before you connect Slack, it answers in the
 thread that your account is not connected, and sends you the link in a direct
 message.
+
+Another app's bot or a Slack workflow can tag the bot in a room too. Its agent
+answers in the thread and runs on the
+[default account](configuration.md#personal-and-installation-settings), as
+unattended runs do. That account's subscription pays, and the agent uses its
+connections. Anything that can post in the room can start such a run, so invite
+the bot only to rooms whose posters you trust. A bot's untagged message reaches
+nobody.
 
 Tell the agent to answer only when you tag it, and your untagged replies in that
 thread stop reaching it. The agent records your choice with `chat_require_tag`.

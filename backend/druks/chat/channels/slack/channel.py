@@ -71,8 +71,13 @@ class SlackChannel(Channel):
         """Route a message for the bot. A direct message or a tag reaches the linked
         account's own conversation, or waits under a private link until the person
         connects their Slack account. An untagged reply reaches the thread conversation
-        the person used in the last day, unless they asked for a tag. Everything else is
-        not for the bot."""
+        the person used in the last day, unless they asked for a tag. Another bot's tag
+        runs on the default account, as unattended runs do. Everything else is not for
+        the bot."""
+        if message.get("bot_id"):
+            if account := await Account.get_default(session):
+                await cls.save_message(session, row, account, message)
+            return
         thread_id = get_thread_id(message)
         is_addressed = not thread_id or f"<@{row.identity['bot_user_id']}>" in message["text"]
         if not is_addressed and "thread_ts" not in message:
@@ -104,7 +109,8 @@ class SlackChannel(Channel):
             row,
             account.id,
             source=ConversationSource.SLACK,
-            user_id=message["user"],
+            # A bot's post can have no user, so its bot id stands for the person.
+            user_id=message.get("user") or message["bot_id"],
             user_name="",
             user_phone="",
             thread_id=get_thread_id(message),

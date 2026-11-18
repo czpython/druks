@@ -460,6 +460,48 @@ async def test_an_unlinked_person_who_tags_the_bot_gets_the_link_by_direct_messa
     delivery.assert_not_awaited()
 
 
+def bot_event(user="U500", **event):
+    """A message from another app's bot, or with no user, from a workflow."""
+    data = room_event(user, bot_id="B500")
+    data["event"].update(event)
+    if not user:
+        del data["event"]["user"]
+        data["event"]["subtype"] = "bot_message"
+    return data
+
+
+@pytest.mark.parametrize(("user", "conversation_user"), [("U500", "U500"), (None, "B500")])
+async def test_another_bots_tag_in_a_room_runs_on_the_default_account(
+    card, druks_db, slack, delivery, user, conversation_user
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+
+    await receive(bot_event(user))
+
+    [conversation] = await Conversation.list_for_account(druks_db, ana)
+    assert (conversation.user_id, conversation.thread_id) == (conversation_user, "C1:10.0")
+    await druks_db.refresh(conversation, ["messages"])
+    assert [message.body for message in conversation.messages] == ["read my runs"]
+    delivery.assert_awaited_once()
+    assert not slack
+
+
+async def test_another_bot_reaches_the_bot_only_by_a_tag_in_a_room_of_its_workspace(
+    card, druks_db, slack, delivery
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+
+    await receive(bot_event(text="read my runs", ts="11.0"))
+    await receive(bot_event(channel="D1", channel_type="im", ts="12.0"))
+    await receive(bot_event(bot_profile={"team_id": "T2"}, ts="13.0"))
+    await receive(bot_event(ts="14.0"))
+
+    [conversation] = await Conversation.list_for_account(druks_db, ana)
+    assert conversation.thread_id == "C1:14.0"
+    delivery.assert_awaited_once()
+    assert not slack
+
+
 async def test_a_person_hears_the_welcome_once_before_their_first_link(
     card, slack, endpoint, monkeypatch
 ):
