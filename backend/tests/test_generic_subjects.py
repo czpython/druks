@@ -5,6 +5,7 @@ from conftest import installation_key
 from druks.accounts.context import current_account_id
 from druks.accounts.models import Account
 from druks.apps.base import App
+from druks.apps.loader import iter_apps
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.datastructures import PullRequest
 from druks.contrib.software_factory.workflows import PullRequestReview
@@ -16,6 +17,7 @@ from druks.durable.schemas import SubjectSummary
 from druks.models import StoredSubject
 from druks.testing import asgi_client, seed_dbos_status
 from druks.workflows import Workflow
+from druks_field_notes.workflows import Survey
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import event, select
@@ -128,11 +130,15 @@ async def _seed_call(session, run, *, agent, status="succeeded"):
 
 
 @pytest.fixture
-async def client(tmp_path: Path, druks_db):
+async def client(tmp_path: Path, druks_db, monkeypatch):
     # The real app mounts every app's routers before its catch-all 404, so the
     # fake app's router has to slot in there too — appending lands after the
     # catch-all and gets shadowed. Pulled back out on teardown; the app is a singleton.
     from druks.testing import configure_app_for_test, make_settings
+
+    # A subject's timeline lists the runs of installed apps only.
+    installed = iter_apps()
+    monkeypatch.setattr("druks.accounts.models.iter_apps", lambda: [*installed, _ThingApp])
 
     for subject_id in TITLES:
         await druks_db.merge(Thing(id=subject_id))
@@ -186,7 +192,7 @@ async def test_status_aggregates_across_runs_and_timeline_spans_them(client: Tes
     # Subject "1" lived across two runs: an earlier finished one and a current
     # running one. Status is the newest run's, and the timeline is every run,
     # oldest first, each carrying its own agent calls.
-    done = await _seed_run(druks_db, subject_id="1", kind="faketest.prepare", state="finished")
+    done = await _seed_run(druks_db, subject_id="1", kind=Survey.kind, state="finished")
     await _seed_call(druks_db, done, agent="prepare")
     live = await _seed_run(druks_db, subject_id="1", state="running")
     await _seed_call(druks_db, live, agent="implement", status="running")
@@ -194,7 +200,7 @@ async def test_status_aggregates_across_runs_and_timeline_spans_them(client: Tes
     detail = (await client.get("/api/faketest/thing/1")).json()
     assert detail["summary"] == {"id": "1", "key": "thing 1", "title": "First"}
     assert detail["status"]["state"] == "running"
-    assert [entry["kind"] for entry in detail["timeline"]] == ["faketest.prepare", "faketest.flow"]
+    assert [entry["kind"] for entry in detail["timeline"]] == [Survey.kind, Flow.kind]
     # Calls group under their own run, not the subject at large.
     assert [c["agent"] for c in detail["timeline"][0]["agentCalls"]] == ["prepare"]
     assert [c["agent"] for c in detail["timeline"][1]["agentCalls"]] == ["implement"]

@@ -2,11 +2,13 @@ import asyncio
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import AwareDatetime
 from sqlalchemy.exc import DataError
 
+from druks.accounts.dependencies import current_account
+from druks.accounts.models import Account
 from druks.api.dependencies import EngineDep, SessionDep
 from druks.database import session_scope
 from druks.durable.live import SSE_HEADERS
@@ -38,9 +40,17 @@ async def list_feed(
     until: Annotated[AwareDatetime | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
     before: Annotated[int | None, Query(ge=1)] = None,
+    account: Account = Depends(current_account),
 ) -> FeedResponse:
     _check_range(from_at, until)
-    history = Event.get_history(app=app, search=search, topic=topic, from_at=from_at, until=until)
+    history = Event.get_history(
+        apps=await account.list_usable_apps(),
+        app=app,
+        search=search,
+        topic=topic,
+        from_at=from_at,
+        until=until,
+    )
     if before:
         history = history.where(Event.id < before)
     # The cursor comes first. A row that commits between the two reads lands in this
@@ -55,14 +65,20 @@ async def list_feed(
 
 @router.get("/topics")
 async def list_feed_topics(
-    session: SessionDep, app: Annotated[str | None, Query()] = None
+    session: SessionDep,
+    app: Annotated[str | None, Query()] = None,
+    account: Account = Depends(current_account),
 ) -> list[dict[str, str]]:
-    return await reads.list_topics(session, app)
+    return await reads.list_topics(session, app, apps=await account.list_usable_apps())
 
 
 @router.get("/{seq}/destinations", response_model=FeedDestinations, response_model_by_alias=True)
-async def get_feed_destinations(session: SessionDep, seq: int) -> FeedDestinations:
-    event = await session.scalar(Event.get_history().where(Event.id == seq))
+async def get_feed_destinations(
+    session: SessionDep, seq: int, account: Account = Depends(current_account)
+) -> FeedDestinations:
+    event = await session.scalar(
+        Event.get_history(apps=await account.list_usable_apps()).where(Event.id == seq)
+    )
     if not event:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, f"No Activity event {seq}. Use a seq from the feed."
@@ -80,9 +96,17 @@ async def stream_feed(
     from_at: Annotated[AwareDatetime | None, Query(alias="from")] = None,
     until: Annotated[AwareDatetime | None, Query()] = None,
     cursor: Annotated[str | None, Query()] = None,
+    account: Account = Depends(current_account),
 ) -> StreamingResponse:
     _check_range(from_at, until)
-    history = Event.get_history(app=app, search=search, topic=topic, from_at=from_at, until=until)
+    history = Event.get_history(
+        apps=await account.list_usable_apps(),
+        app=app,
+        search=search,
+        topic=topic,
+        from_at=from_at,
+        until=until,
+    )
     try:
         async with session_scope(engine) as session:
             cursor = await Event.get_cursor(session, request.headers.get("last-event-id") or cursor)

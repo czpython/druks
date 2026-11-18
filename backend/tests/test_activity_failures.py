@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from dbos import DBOS
+from druks.accounts.models import Account
 from druks.agents import Agent, AgentOutput
 from druks.durable.models import Run
 from druks.events.models import Event
@@ -110,7 +111,8 @@ async def test_unclassified_application_failure_keeps_its_reason_and_run(
     with pytest.raises(RuntimeError, match="source document"):
         await _execute_run(run.id, run.kind, note.identity, run.account_id, fail)
 
-    feed = await list_feed(session=druks_db, topic="workflow.failed")
+    account = await Account.get_or_create(druks_db, "op@example.com")
+    feed = await list_feed(session=druks_db, topic="workflow.failed", account=account)
     assert len(feed.items) == 1
     assert feed.items[0].payload == {
         "run": run.id,

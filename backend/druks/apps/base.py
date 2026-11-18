@@ -763,10 +763,12 @@ class App:
         workflows declare. Every read here is keyed by identity, so an app that
         keeps no row for its subject gets the same surface as one that does. The board
         reads pass the caller to ``list_summaries``."""
-        from fastapi import APIRouter, HTTPException, status
+        from fastapi import APIRouter, Depends, HTTPException, status
         from fastapi.responses import StreamingResponse
 
         from druks.accounts.context import current_account_id
+        from druks.accounts.dependencies import current_account
+        from druks.accounts.models import Account
         from druks.api.dependencies import EngineDep, SessionDep
         from druks.database import session_scope
         from druks.durable import reads
@@ -792,11 +794,15 @@ class App:
             )
 
         async def subject_response(
-            session: AsyncSession, subject_id: str
+            session: AsyncSession, subject_id: str, kinds: list[str]
         ) -> SubjectResponse | None:
             if subject := await subject_class.get_or_none(id=subject_id):
                 return await reads.get_subject_response(
-                    session, subject_type, subject_id, summary=subject.get_summary()
+                    session,
+                    subject_type,
+                    subject_id,
+                    summary=subject.get_summary(),
+                    kinds=kinds,
                 )
 
         @router.get("", response_model=SubjectList, response_model_by_alias=True)
@@ -821,10 +827,15 @@ class App:
         # pull request — so the id matcher spans separators, and the subject's own
         # ``/stream`` is declared ahead of it to keep the greedy match off it.
         @router.get("/{subject_id:path}/stream", response_class=StreamingResponse)
-        async def stream_subject(subject_id: str, engine: EngineDep) -> StreamingResponse:
+        async def stream_subject(
+            subject_id: str, engine: EngineDep, account: Account = Depends(current_account)
+        ) -> StreamingResponse:
+            # The generator polls after the request context ends. Read the caller's apps here.
+            kinds = await account.list_usable_kinds()
+
             async def snapshot() -> SubjectResponse | None:
                 async with session_scope(engine) as session:
-                    return await subject_response(session, subject_id)
+                    return await subject_response(session, subject_id, kinds)
 
             return StreamingResponse(
                 stream(snapshot), media_type="text/event-stream", headers=SSE_HEADERS
@@ -833,8 +844,12 @@ class App:
         @router.get(
             "/{subject_id:path}", response_model=SubjectResponse, response_model_by_alias=True
         )
-        async def read_subject(session: SessionDep, subject_id: str) -> SubjectResponse:
-            response = await subject_response(session, subject_id)
+        async def read_subject(
+            session: SessionDep, subject_id: str, account: Account = Depends(current_account)
+        ) -> SubjectResponse:
+            response = await subject_response(
+                session, subject_id, await account.list_usable_kinds()
+            )
             if not response:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, f"No {subject_type} {subject_id!r}.")
             return response

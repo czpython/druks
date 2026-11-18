@@ -135,12 +135,19 @@ async def get_subject_phase(
 
 
 async def get_subject_response(
-    session: AsyncSession, subject_type: str, subject_id: str, *, summary: SubjectSummary
+    session: AsyncSession,
+    subject_type: str,
+    subject_id: str,
+    *,
+    summary: SubjectSummary,
+    kinds: Sequence[str],
 ) -> SubjectResponse:
     # list_for_subject is newest-first, so runs[0] is the driving run the status
     # reads — the same row get_latest_for_subject would return, its calls already
     # eager-loaded here.
-    runs = await Run.list_for_subject(session, subject_type, subject_id, include_calls=True)
+    runs = await Run.list_for_subject(
+        session, subject_type, subject_id, kinds=kinds, include_calls=True
+    )
     latest = runs[0] if runs else None
     phase = await get_run_phase(latest.id) if latest and latest.is_running else None
     ends_at = await get_run_phase_ends_at(latest.id) if phase else None

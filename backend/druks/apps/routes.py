@@ -1,15 +1,17 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from .loader import iter_apps
+from druks.accounts.dependencies import current_account
+from druks.accounts.models import Account
+
 from .schemas import AppResponse, PageEntry
 
 router = APIRouter(prefix="/api/apps", tags=["apps"])
 
 
 @router.get("", response_model=list[AppResponse], response_model_by_alias=True)
-async def list_apps() -> list[AppResponse]:
+async def list_apps(account: Account = Depends(current_account)) -> list[AppResponse]:
     roster = []
-    for app in iter_apps():
+    for app in await account.list_usable_apps():
         pages = app.pages()
         # The declaration counter runs across every app, so number it per app.
         declaration_order = {

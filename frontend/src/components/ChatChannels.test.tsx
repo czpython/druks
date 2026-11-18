@@ -44,7 +44,7 @@ beforeEach(() => {
         builtin: false, bot: 'helpdesk.bot', botAccess: 'private', agents: [], workflows: [], settings: [],
       }],
     }
-    if (url === '/api/settings/apps/chat/choices') response = {}
+    if (url === '/api/settings/apps/choices?app=chat') response = {}
     if (url === '/api/agents') response = { apps: [] }
     return new Response(JSON.stringify(response))
   }))

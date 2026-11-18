@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy import Row
 
 from druks.accounts.dependencies import current_admin_account, current_session_account
@@ -11,8 +11,10 @@ from druks.apps.loader import get_app
 from druks.chat.enums import BotAccess, ConversationSource
 from druks.chat.models import Conversation
 from druks.core.services import Twilio
+from druks.exceptions import ObjectNotFound, PermissionDenied
 from druks.secrets.models import VaultSecret
 from druks.settings import get_settings
+from druks.teams.dependencies import require_named_app_access
 
 from .channel import CallsChannel
 from .exceptions import CallsLinkError
@@ -21,7 +23,27 @@ from .schemas import CallResponse, LineResponse, LinkedNumberResponse, UnlinkedN
 router = APIRouter(prefix="/services/twilio", dependencies=[Depends(current_session_account)])
 
 
-@router.get("/numbers", response_model=list[LinkedNumberResponse], response_model_by_alias=True)
+async def require_number_access(
+    request: Request, session: SessionDep, account: Account = Depends(current_session_account)
+) -> None:
+    """The caller must be able to use the app that the phone number answers for. An
+    unknown number is the route's to answer."""
+    connection = await Twilio.get_connection(session, request.path_params["number_id"])
+    if connection:
+        try:
+            app = get_app(connection.identity["app"])
+        except KeyError as error:
+            raise ObjectNotFound("number", {"id": connection.id}) from error
+        if not await account.can_use_app(app):
+            raise PermissionDenied(f"{account.username} cannot use the app {app.name}.")
+
+
+@router.get(
+    "/numbers",
+    response_model=list[LinkedNumberResponse],
+    response_model_by_alias=True,
+    dependencies=[Depends(require_named_app_access)],
+)
 async def list_numbers(session: SessionDep, app: str) -> list[VaultSecret]:
     """An app's phone numbers, removed ones included."""
     return await Twilio.list_connections(session, app)
@@ -80,10 +102,14 @@ async def remove_number(session: SessionDep, number_id: str) -> None:
 
 
 @router.get(
-    "/numbers/{number_id}/calls", response_model=list[CallResponse], response_model_by_alias=True
+    "/numbers/{number_id}/calls",
+    response_model=list[CallResponse],
+    response_model_by_alias=True,
+    dependencies=[Depends(require_number_access)],
 )
 async def list_calls(session: SessionDep, number_id: str) -> list[Row]:
-    """A number's calls. Its bot account owns them, and any operator can read them."""
+    """A number's calls. Its bot account owns them. Every operator who can use the
+    number's app can read them."""
     if await Twilio.get_connection(session, number_id):
         return await CallsChannel.list_calls(session, number_id)
     raise HTTPException(404, "Number not found.")
@@ -93,6 +119,7 @@ async def list_calls(session: SessionDep, number_id: str) -> list[Row]:
     "/numbers/{number_id}/calls/{call_id}",
     response_model=list[LineResponse],
     response_model_by_alias=True,
+    dependencies=[Depends(require_number_access)],
 )
 async def list_lines(session: SessionDep, number_id: str, call_id: str) -> list[Row]:
     """A call's transcript: what the caller and the assistant said, in order."""

@@ -22,6 +22,7 @@ from druks.accounts.constants import (
 )
 from druks.accounts.enums import AccountKind, Role, Theme
 from druks.accounts.exceptions import AuthConfigurationError, InvalidPatError, LastAdminError
+from druks.apps.loader import iter_apps
 from druks.core.models import Uuid7Pk, uuid7_str
 from druks.db import db_session
 from druks.models import Base, Model
@@ -84,6 +85,16 @@ class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
         return bool(
             await self.session.scalar(self.teams.select().where(Team.apps.contains([app.name])))
         )
+
+    async def list_usable_apps(self) -> list["type[App]"]:
+        """Every installed app that this account can use."""
+        return [app for app in iter_apps() if await self.can_use_app(app)]
+
+    async def list_usable_kinds(self) -> list[str]:
+        """The workflow kinds of every installed app that this account can use."""
+        return [
+            workflow.kind for app in await self.list_usable_apps() for workflow in app.workflows()
+        ]
 
     @classmethod
     async def get_default(cls, session: AsyncSession) -> "Account | None":
