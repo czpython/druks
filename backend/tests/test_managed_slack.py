@@ -23,6 +23,7 @@ from druks.secrets.models import VaultSecret
 from druks.services import Service
 from druks.settings import configure_settings
 from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_dbos_status
+from druks_field_notes.workflows import Summarize
 from uuid_utils import uuid7
 
 INSTANCE_ID = "6f2c1c1e-9b8e-4b65-9d3c-7a2b1f4e8d10"
@@ -373,7 +374,7 @@ async def test_a_forwarded_click_answers_its_notification_once(
     run = Run(
         account_id=(await Account.get_or_create(druks_db, "op@example.com")).id,
         id=str(uuid7()),
-        kind="notifications.test",
+        kind=Summarize.kind,
         input_gate="review",
         input_request={
             "presentation": "in_app",

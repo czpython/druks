@@ -513,6 +513,12 @@ class Slack(Service):
             }
 
         @classmethod
+        def get_authority(cls, team_id: str) -> str:
+            """Where the people of the workspace ``team_id`` sign in. A Slack user id means
+            something only within its workspace."""
+            return SLACK_AUTHORITY.format(team_id=team_id)
+
+        @classmethod
         async def get_identity(cls, access_token: str) -> dict[str, Any]:
             """The person behind a user token, keyed the way ``Account.lookup`` finds them."""
             person = await SlackClient(token=access_token).auth_test()
@@ -525,7 +531,7 @@ class Slack(Service):
                     context={},
                 )
             return {
-                "authority": SLACK_AUTHORITY.format(team_id=person["team_id"]),
+                "authority": cls.get_authority(person["team_id"]),
                 "subject": person["user_id"],
                 "name": person["user"],
             }

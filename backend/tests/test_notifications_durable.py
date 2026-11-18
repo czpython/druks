@@ -928,7 +928,7 @@ async def _respond_in_own_session(rt, token, choice, *, user_id=None):
     session = get_session(rt.engine)
     db_session.registry.set(session)
     try:
-        await respond_to_notification(session, token, choice, user_id=user_id)
+        await respond_to_notification(session, token, choice, user_id=user_id, account_id=None)
         await session.commit()
         return "ok"
     except NotificationError as error:
