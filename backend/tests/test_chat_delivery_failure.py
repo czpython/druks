@@ -3,7 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from druks.accounts.enums import AccountKind
+from conftest import connect_anthropic_subscription
+from druks.accounts.enums import AccountKind, Role
 from druks.accounts.models import Account
 from druks.apps.registry import channels, services
 from druks.chat import service
@@ -11,6 +12,7 @@ from druks.chat.constants import DELIVERY_FAILED_MESSAGE
 from druks.chat.enums import MessageRole, MessageState
 from druks.chat.exceptions import ChatBridgeError
 from druks.chat.models import Conversation, Message
+from druks.configured_agents.models import ConfiguredAgent
 from druks.database import session_scope
 from druks.files.datastructures import File
 from druks.files.models import FileRecord
@@ -190,3 +192,55 @@ async def test_retry_requires_ownership_and_a_retryable_message(
 
     assert response.status_code == status
     started.assert_not_awaited()
+
+
+async def test_a_turn_fails_without_a_retry_once_the_agent_has_another_owner(druks_db, monkeypatch):
+    subscription = await connect_anthropic_subscription("owner@example.com")
+    owner = await Account.get(druks_db, id=subscription.account_id)
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    await admin.set_role(Role.ADMIN)
+    agent = await ConfiguredAgent.create(
+        druks_db,
+        owner=owner,
+        name="Security engineer",
+        description="Reviews changes for security problems.",
+        instructions="Answer as a security engineer.",
+        skills=[],
+        harness="claude",
+        model="anthropic/claude-opus-4-7",
+        is_private=True,
+    )
+    conversation = await Conversation.create(
+        druks_db, account_id=owner.id, body="Review this", agent_id=agent.id
+    )
+    await agent.replace(
+        druks_db,
+        editor=admin,
+        owner_id=admin.id,
+        name=agent.name,
+        description=agent.description,
+        instructions=agent.instructions,
+        skills=agent.skills,
+        harness=agent.harness,
+        model=agent.model,
+        is_private=agent.is_private,
+    )
+    message = await conversation.get_unanswered_message(druks_db)
+    await druks_db.commit()
+
+    async def run_inline(options, function, *args):
+        return await function(*args)
+
+    publish = AsyncMock()
+    monkeypatch.setattr(service, "step_session", session_scope)
+    monkeypatch.setattr(service.DBOS, "run_step_async", run_inline)
+    monkeypatch.setattr(service, "publish", publish)
+
+    await inspect.unwrap(service.deliver)(conversation.id)
+
+    await druks_db.refresh(message)
+    assert message.state == MessageState.FAILED
+    assert publish.await_args.args[1] == {
+        "type": "error",
+        "detail": "The agent cannot answer: Only the agent's owner can talk to a private agent.",
+    }
