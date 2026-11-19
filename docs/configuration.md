@@ -535,6 +535,9 @@ one, and it is the last word where it and a prompt disagree. A section heading
 that is a path glob, for example `## frontend/**`, marks the rules for that part
 of the repository.
 
+[Steer Software Factory for a repository](repository-guidance.md) covers the
+other files and settings that guide builds, and when each one takes effect.
+
 ### Review identity (optional)
 
 The bundled `software_factory` app declares an optional service, **Github
@@ -1193,6 +1196,9 @@ requests the recommended set from the repository profile.
 Druks uploads no other
 installed skill. The capability manifest records the delivered
 set for each agent.
+
+After you change the skills, profile the repository again. See
+[change the profile or the skills](repository-guidance.md#change-the-profile-or-the-skills).
 
 ## Credential custody and secrets at rest
 
