@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from conftest import connect_anthropic_subscription
-from druks.accounts.enums import AccountKind, Role
+from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
 from druks.apps.registry import channels, services
 from druks.chat import service
@@ -74,6 +74,14 @@ async def test_a_failed_delivery_ends_the_pending_messages_and_replies_on_a_live
         assert send_reply.await_args.args[2].id == reply.id
 
 
+AGENT = {
+    "name": "Security engineer",
+    "description": "Reviews changes for security problems.",
+    "instructions": "Answer as a security engineer.",
+    "skills": [],
+    "harness": "claude",
+    "model": "anthropic/claude-opus-4-7",
+}
 NOT_CONNECTED_REPLY = (
     "The agent cannot run: connect your Anthropic subscription in Settings → Providers."
 )
@@ -194,37 +202,16 @@ async def test_retry_requires_ownership_and_a_retryable_message(
     started.assert_not_awaited()
 
 
-async def test_a_turn_fails_without_a_retry_once_the_agent_has_another_owner(druks_db, monkeypatch):
-    subscription = await connect_anthropic_subscription("owner@example.com")
-    owner = await Account.get(druks_db, id=subscription.account_id)
-    admin = await Account.get_or_create(druks_db, "admin@example.com")
-    await admin.set_role(Role.ADMIN)
-    agent = await ConfiguredAgent.create(
-        druks_db,
-        owner=owner,
-        name="Security engineer",
-        description="Reviews changes for security problems.",
-        instructions="Answer as a security engineer.",
-        skills=[],
-        harness="claude",
-        model="anthropic/claude-opus-4-7",
-        is_private=True,
-    )
+async def test_a_turn_fails_without_a_retry_once_a_public_agent_turns_private(
+    druks_db, monkeypatch
+):
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    other = await Account.get_or_create(druks_db, "other@example.com")
+    agent = await ConfiguredAgent.create(druks_db, owner=owner, **{**AGENT, "is_private": False})
     conversation = await Conversation.create(
-        druks_db, account_id=owner.id, body="Review this", agent_id=agent.id
+        druks_db, account_id=other.id, body="Review this", agent_id=agent.id
     )
-    await agent.replace(
-        druks_db,
-        editor=admin,
-        owner_id=admin.id,
-        name=agent.name,
-        description=agent.description,
-        instructions=agent.instructions,
-        skills=agent.skills,
-        harness=agent.harness,
-        model=agent.model,
-        is_private=agent.is_private,
-    )
+    await agent.replace(druks_db, editor=owner, owner_id=owner.id, **{**AGENT, "is_private": True})
     message = await conversation.get_unanswered_message(druks_db)
     await druks_db.commit()
 
@@ -243,4 +230,76 @@ async def test_a_turn_fails_without_a_retry_once_the_agent_has_another_owner(dru
     assert publish.await_args.args[1] == {
         "type": "error",
         "detail": "The agent cannot answer: Only the agent's owner can talk to a private agent.",
+    }
+
+
+async def test_a_public_agent_turn_with_no_api_key_and_no_unattended_subscription_names_both_fixes(
+    druks_db, monkeypatch
+):
+    # The first account is the unattended one.
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    await druks_db.commit()
+    # The asker's own subscription must not stand in for the missing ones.
+    asker = await Account.get(
+        druks_db, id=(await connect_anthropic_subscription("ana@example.com")).account_id
+    )
+    agent = await ConfiguredAgent.create(druks_db, owner=owner, **{**AGENT, "is_private": False})
+    conversation = await Conversation.create(
+        druks_db, account_id=asker.id, body="Review this", agent_id=agent.id
+    )
+    message = await conversation.get_unanswered_message(druks_db)
+    await druks_db.commit()
+
+    async def run_inline(options, function, *args):
+        return await function(*args)
+
+    publish = AsyncMock()
+    monkeypatch.setattr(service, "step_session", session_scope)
+    monkeypatch.setattr(service.DBOS, "run_step_async", run_inline)
+    monkeypatch.setattr(service, "publish", publish)
+    monkeypatch.setattr(service, "get_settings", lambda: SimpleNamespace(urls=Urls(endpoint="")))
+
+    await inspect.unwrap(service.deliver)(conversation.id)
+
+    await druks_db.refresh(message)
+    assert message.state == MessageState.FAILED
+    assert publish.await_args.args[1] == {
+        "type": "error",
+        "detail": (
+            "The agent cannot run: add the Anthropic API key, or connect the unattended "
+            "account's Anthropic subscription, in Settings → Providers."
+        ),
+    }
+
+
+async def test_a_public_agent_on_a_harness_with_no_subscription_asks_only_for_the_api_key(
+    druks_db, monkeypatch
+):
+    subscription = await connect_anthropic_subscription("owner@example.com")
+    owner = await Account.get(druks_db, id=subscription.account_id)
+    agent = await ConfiguredAgent.create(
+        druks_db, owner=owner, **{**AGENT, "harness": "opencode", "is_private": False}
+    )
+    conversation = await Conversation.create(
+        druks_db, account_id=owner.id, body="Review this", agent_id=agent.id
+    )
+    message = await conversation.get_unanswered_message(druks_db)
+    await druks_db.commit()
+
+    async def run_inline(options, function, *args):
+        return await function(*args)
+
+    publish = AsyncMock()
+    monkeypatch.setattr(service, "step_session", session_scope)
+    monkeypatch.setattr(service.DBOS, "run_step_async", run_inline)
+    monkeypatch.setattr(service, "publish", publish)
+    monkeypatch.setattr(service, "get_settings", lambda: SimpleNamespace(urls=Urls(endpoint="")))
+
+    await inspect.unwrap(service.deliver)(conversation.id)
+
+    await druks_db.refresh(message)
+    assert message.state == MessageState.FAILED
+    assert publish.await_args.args[1] == {
+        "type": "error",
+        "detail": "The agent cannot run: add the Anthropic API key in Settings → Providers.",
     }

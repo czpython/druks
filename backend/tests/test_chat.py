@@ -1598,6 +1598,57 @@ async def test_an_agent_turn_runs_on_the_agents_harness_in_the_agents_box(druks_
     assert sandbox["config"].subscription.id == subscription.id
 
 
+async def test_a_public_agent_turn_runs_on_the_unattended_subscription_in_the_askers_box(
+    druks_db, monkeypatch
+):
+    unattended = await connect_anthropic_subscription("admin@example.com")
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    agent = await ConfiguredAgent.create(druks_db, owner=owner, **{**AGENT, "is_private": False})
+    get_sandbox = AsyncMock(side_effect=ChatSandboxGone("stop at the box"))
+    monkeypatch.setattr(service, "get_sandbox", get_sandbox)
+    askers = []
+    for email in ["ana@example.com", "ben@example.com"]:
+        # The asker's own subscription must not pay for the turn.
+        asker = await Account.get(
+            druks_db, id=(await connect_anthropic_subscription(email)).account_id
+        )
+        askers.append(asker.id)
+        conversation = await Conversation.create(
+            druks_db, account_id=asker.id, body="Review this", agent_id=agent.id
+        )
+        await druks_db.refresh(conversation, ["account", "agent"])
+        with pytest.raises(ChatSandboxGone):
+            await service.deliver_pending(druks_db, conversation)
+
+    turns = [(call.args[1], call.kwargs) for call in get_sandbox.await_args_list]
+    assert [account_id for account_id, _ in turns] == askers
+    for _, sandbox in turns:
+        assert sandbox["scoped_to"] == f"agent:{agent.id}"
+        assert sandbox["config"].subscription.id == unattended.id
+
+
+async def test_a_public_agent_turn_runs_on_the_install_api_key(druks_db, monkeypatch):
+    await connect_anthropic_subscription("admin@example.com")
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    key = await VaultSecret.paste(
+        druks_db, Audience.provider("anthropic"), "sk-shared", pasted_by=owner
+    )
+    agent = await ConfiguredAgent.create(druks_db, owner=owner, **{**AGENT, "is_private": False})
+    conversation = await Conversation.create(
+        druks_db, account_id=owner.id, body="Review this", agent_id=agent.id
+    )
+    await druks_db.refresh(conversation, ["account", "agent"])
+    get_sandbox = AsyncMock(side_effect=ChatSandboxGone("stop at the box"))
+    monkeypatch.setattr(service, "get_sandbox", get_sandbox)
+
+    with pytest.raises(ChatSandboxGone):
+        await service.deliver_pending(druks_db, conversation)
+
+    config = get_sandbox.await_args.kwargs["config"]
+    assert config.api_key.id == key.id
+    assert config.subscription is None
+
+
 async def test_the_agent_box_and_the_chat_box_never_replace_each_other(
     druks_db, conversation, monkeypatch
 ):
@@ -1641,7 +1692,9 @@ async def test_the_agent_box_and_the_chat_box_never_replace_each_other(
     release.assert_not_awaited()
 
 
-async def test_only_the_owner_starts_a_conversation_with_their_private_agent(druks_db, tmp_path):
+async def test_anyone_talks_to_a_public_agent_and_only_its_owner_to_a_private_one(
+    druks_db, tmp_path
+):
     await Account.get_or_create(druks_db, "admin@example.com")
     owner = await Account.get_or_create(druks_db, "owner@example.com")
     await Account.get_or_create(druks_db, "other@example.com")
@@ -1665,13 +1718,14 @@ async def test_only_the_owner_starts_a_conversation_with_their_private_agent(dru
             json={"body": "Review this", "agentId": private.id},
             headers={"X-User": "other@example.com"},
         )
-        not_private = await client.post(
+        public_started = await client.post(
             "/api/chat/conversations",
             json={"body": "Review this", "agentId": public.id},
-            headers={"X-User": "owner@example.com"},
+            headers={"X-User": "other@example.com"},
         )
 
     assert started.status_code == 201
     assert (await druks_db.get(Conversation, started.json()["id"])).agent_id == private.id
     assert stranger.status_code == 404
-    assert not_private.status_code == 422
+    assert public_started.status_code == 201
+    assert (await druks_db.get(Conversation, public_started.json()["id"])).agent_id == public.id

@@ -8,6 +8,8 @@ from druks.accounts.models import Account
 from druks.core.models import Uuid7Pk
 from druks.exceptions import ObjectNotFound, PermissionDenied, ValidationError
 from druks.harnesses.config import AgentConfig, build_config, check_config
+from druks.harnesses.exceptions import AgentConfigError, HarnessNotConnectedError
+from druks.harnesses.providers import provider_label
 from druks.models import Model
 from druks.skills.models import Skill
 from druks.user_settings.models import InstallationSettings
@@ -119,20 +121,27 @@ class ConfiguredAgent(Model, Uuid7Pk):
         await session.flush()
 
     async def get_config(self, session: AsyncSession) -> AgentConfig:
-        """The agent's harness and model on its owner's subscription, with the
-        installation's other execution defaults."""
-        settings = await InstallationSettings.get_or_create(session)
-        return await build_config(
-            session,
-            self.owner_id,
-            harness_name=self.harness,
-            model=self.model,
-            billing="subscription",
-            effort=settings.default_effort,
-            timeout=settings.default_timeout,
-            fast_mode=settings.fast_mode,
-            include_apps=settings.include_apps,
-        )
+        """A private agent runs on its owner's subscription. A public agent runs on the
+        install's API key or, without one, the unattended account's subscription, so a
+        turn never bills the person who asks."""
+        if self.is_private:
+            return await self._build_config(session, self.owner_id, "subscription")
+        try:
+            return await self._build_config(session, None, "api_key")
+        except HarnessNotConnectedError as error:
+            no_key = error
+        try:
+            return await self._build_config(session, None, "subscription")
+        except AgentConfigError:
+            # The API key attempt already checked that the harness runs the model, so a
+            # config error here says only that the harness takes no subscription.
+            raise no_key from None
+        except HarnessNotConnectedError as error:
+            label = await provider_label(session, self.model.partition("/")[0])
+            raise HarnessNotConnectedError(
+                f"add the {label} API key, or connect the unattended account's {label} "
+                "subscription, in Settings → Providers."
+            ) from error
 
     def check_editor(self, account: Account) -> None:
         """Only the owner or an admin changes or deletes an agent."""
@@ -140,10 +149,9 @@ class ConfiguredAgent(Model, Uuid7Pk):
             raise PermissionDenied("Only the agent's owner or an admin can change it.")
 
     def check_talker(self, account: Account) -> None:
-        """Only the owner talks to their private agent: it runs on their subscription."""
-        if not self.is_private:
-            raise ValidationError("Only a private agent answers a conversation.")
-        if account.id != self.owner_id:
+        """Anyone talks to a public agent. Only the owner talks to their private agent:
+        it runs on their subscription."""
+        if self.is_private and account.id != self.owner_id:
             raise PermissionDenied("Only the agent's owner can talk to a private agent.")
 
     @classmethod
@@ -152,6 +160,24 @@ class ConfiguredAgent(Model, Uuid7Pk):
         if account.is_admin:
             return sqlalchemy.true()
         return sqlalchemy.or_(cls.is_private.is_(False), cls.owner_id == account.id)
+
+    async def _build_config(
+        self, session: AsyncSession, account_id: str | None, billing: str
+    ) -> AgentConfig:
+        """The agent's harness and model on this billing, with the installation's other
+        execution defaults. No account id means the unattended account."""
+        settings = await InstallationSettings.get_or_create(session)
+        return await build_config(
+            session,
+            account_id,
+            harness_name=self.harness,
+            model=self.model,
+            billing=billing,
+            effort=settings.default_effort,
+            timeout=settings.default_timeout,
+            fast_mode=settings.fast_mode,
+            include_apps=settings.include_apps,
+        )
 
     @staticmethod
     async def _check_harness(
