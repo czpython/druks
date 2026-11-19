@@ -21,7 +21,7 @@ from druks.apps.loader import get_app
 from druks.apps.registry import services
 from druks.durable.engine import step_session
 from druks.durable.models import Run
-from druks.exceptions import PermissionDenied, ValidationError
+from druks.exceptions import PermissionDenied
 from druks.files.constants import MAX_UPLOAD_BYTES
 from druks.files.datastructures import File
 from druks.files.storage import get_file_storage
@@ -410,10 +410,10 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                 sign_ins = await list_sign_ins(session, conversation.account_id)
             bot_id, prompt, tools = await get_agent(session, conversation, sign_ins=sign_ins)
             if conversation.agent:
-                # The agent can change owner or turn public after the conversation began.
+                # The agent can change owner or turn private after the conversation began.
                 try:
                     conversation.agent.check_talker(conversation.account)
-                except (PermissionDenied, ValidationError) as error:
+                except PermissionDenied as error:
                     raise ChatAgentRefusedError(f"The agent cannot answer: {error}") from error
             try:
                 if conversation.agent:

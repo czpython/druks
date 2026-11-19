@@ -47,12 +47,20 @@ POST /api/chat/conversations
 {"body": "Your first message", "agentId": "<agent id>"}
 ```
 
-Only the owner of a private agent talks to it. The conversation keeps its
-agent. Once the agent is public or has another owner, its next turn fails.
+Everyone talks to a public agent. Only the owner of a private agent talks to
+it. The conversation keeps its agent. Once a private agent has another owner,
+or a public agent turns private, the next turn of everyone but its current owner
+fails.
 Each turn adds the agent's instructions to the Chat prompt, and runs on the
-agent's harness and model with the owner's subscription and tool sign-ins. A
+agent's harness and model with the tool sign-ins of the person who asks. A
 turn reads the agent when it starts, so an edit to the agent reaches the next
 turn.
+
+A private agent runs on its owner's subscription. A public agent runs on the
+installation's API key for the model's provider or, without one, on the
+unattended account's subscription. It never runs on the subscription of the
+person who asks. A public agent with neither fails its turn and says what to
+connect. Each person who talks to an agent gets a sandbox of their own for it.
 
 ## Find and pin conversations
 
