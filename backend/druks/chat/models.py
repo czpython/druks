@@ -25,6 +25,8 @@ from .enums import ConversationSource, MessageRole, MessageState
 from .exceptions import ReminderError
 
 if TYPE_CHECKING:
+    from druks.configured_agents.models import ConfiguredAgent
+
     from .channels.base import Channel
 
 
@@ -119,6 +121,9 @@ class Conversation(Base, Uuid7Pk):
     # The person asked that only their tagged messages in the thread reach the agent.
     is_tag_required: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     session_file: Mapped[File | None] = FileField()
+    # The saved agent that answers instead of the Bot.
+    agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
+    agent: Mapped["ConfiguredAgent | None"] = relationship(lazy="joined")
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     messages: Mapped[list[Message]] = relationship(
         order_by=(Message.created_at, Message.id), viewonly=True
@@ -128,6 +133,12 @@ class Conversation(Base, Uuid7Pk):
     def channel(self) -> "type[Channel] | None":
         """The channel that the conversation arrives through. A web conversation has none."""
         return channels.get(self.source)
+
+    @property
+    def sandbox_scope(self) -> str:
+        """A conversation with an agent runs in the box for its person and that agent,
+        apart from their chat box."""
+        return f"agent:{self.agent_id}" if self.agent_id else "chat"
 
     @property
     def admin_account_id(self) -> str | None:
@@ -144,9 +155,11 @@ class Conversation(Base, Uuid7Pk):
         return True
 
     @classmethod
-    async def create(cls, session: AsyncSession, *, account_id: str, body: str) -> "Conversation":
+    async def create(
+        cls, session: AsyncSession, *, account_id: str, body: str, agent_id: str | None = None
+    ) -> "Conversation":
         """A new conversation and its first message."""
-        conversation = cls(account_id=account_id)
+        conversation = cls(account_id=account_id, agent_id=agent_id)
         session.add(conversation)
         await session.flush()
         await conversation.create_message(session, body)

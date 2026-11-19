@@ -37,6 +37,23 @@ New lines use Shift + Enter.
 The starter prompts fill the message field. They do not send a message.
 The new conversation page also lists the installed apps.
 
+## Talk to an agent
+
+An agent you saved can answer a conversation instead of the Bot. Start the
+conversation through the API with the agent's id:
+
+```http
+POST /api/chat/conversations
+{"body": "Your first message", "agentId": "<agent id>"}
+```
+
+Only the owner of a private agent talks to it. The conversation keeps its
+agent. Once the agent is public or has another owner, its next turn fails.
+Each turn adds the agent's instructions to the Chat prompt, and runs on the
+agent's harness and model with the owner's subscription and tool sign-ins. A
+turn reads the agent when it starts, so an edit to the agent reaches the next
+turn.
+
 ## Find and pin conversations
 
 Search filters conversation titles. It ignores letter case and does not search
@@ -191,8 +208,9 @@ for the MCP address and edge requirements.
 
 ## Execution and recovery
 
-Each account has one leased sandbox that serves all its conversations. When
-the Chat credentials change, the next turn replaces the sandbox, and a turn
+Each account has one leased sandbox that serves its conversations with the Bot, and one
+more for each agent it talks to. Neither replaces the other. When a sandbox's
+credentials change, the next turn replaces that sandbox, and a turn
 still running in the old sandbox ends as `interrupted`. A detached
 bridge runs in the sandbox and starts one ACP adapter per conversation. Druks
 opens an SSH channel only when it communicates with the bridge.
