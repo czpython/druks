@@ -22,6 +22,7 @@ from druks.apps.loader import get_app
 from druks.apps.registry import services
 from druks.durable.engine import step_session
 from druks.durable.models import Run
+from druks.exceptions import PermissionDenied, ValidationError
 from druks.files.constants import MAX_UPLOAD_BYTES
 from druks.files.datastructures import File
 from druks.files.storage import get_file_storage
@@ -78,6 +79,7 @@ from .constants import (
 )
 from .enums import MessageRole, MessageState
 from .exceptions import (
+    ChatAgentRefusedError,
     ChatBridgeError,
     ChatHarnessError,
     ChatHarnessNotConnectedError,
@@ -159,6 +161,8 @@ async def get_agent(
     if is_shared_thread and account_type in (AccountKind.BOT, AccountKind.BOT_ADMIN):
         tools = (*tools, *THREAD_TOOLS)
         prompt = f"{prompt}\n\n{THREAD_PROMPT}"
+    if conversation.agent:
+        prompt = f"{prompt}\n\n{conversation.agent.instructions}"
     return bot.id, f"{prompt}\n\n{INTERNAL_MESSAGES_PROMPT}", tools
 
 
@@ -194,12 +198,13 @@ async def get_sandbox(
     session: AsyncSession,
     account_id: str,
     *,
+    scoped_to: str,
     config: AgentConfig,
     allowed_tools: AllowedTools,
     secret_refs: list[SecretRef],
 ) -> tuple[Host, SandboxIdentity]:
-    """The account's sandbox for a new turn: a live sandbox that holds the Chat
-    agent's current secrets, or a new one."""
+    """The account's sandbox in this scope for a new turn: a live sandbox that holds
+    the agent's current secrets, or a new one."""
     server = get_druks_mcp_server(allowed_tools=())
     token = await get_druks_account_token(session, account_id, allowed_tools, name=CHAT_KEY_NAME)
     refs = [
@@ -217,16 +222,17 @@ async def get_sandbox(
             session,
             account_id=account_id,
             run_id=None,
-            scoped_to="chat",
+            scoped_to=scoped_to,
             secret_refs=refs,
             secrets_hash=config.secrets_hash,
         )
         if identity:
             with suppress(ChatSandboxGone):
                 return await attach_sandbox(session, identity), identity
-        # One sandbox per account: a sandbox with other secrets gives way to the new one.
+        # One sandbox per account and scope: a sandbox with other secrets gives way to
+        # the new one.
         if previous := await SandboxIdentity.lookup(
-            session, account_id=account_id, run_id=None, scoped_to="chat"
+            session, account_id=account_id, run_id=None, scoped_to=scoped_to
         ):
             await sandbox_client.release(host_id=previous.host_id)
         template = await get_template_id(Bridge.sandbox)
@@ -234,7 +240,7 @@ async def get_sandbox(
             session,
             account_id=account_id,
             run_id=None,
-            scoped_to="chat",
+            scoped_to=scoped_to,
             secret_refs=refs,
             secrets_hash=config.secrets_hash,
         )
@@ -248,10 +254,11 @@ async def get_sandbox(
         return host, identity
 
 
-async def get_running_sandbox(session: AsyncSession, account_id: str) -> Host:
-    """The account's live sandbox, whatever its secrets: the sandbox a sent turn runs in."""
+async def get_running_sandbox(session: AsyncSession, account_id: str, *, scoped_to: str) -> Host:
+    """The account's live sandbox in this scope, whatever its secrets: the sandbox a sent
+    turn runs in."""
     identity = await SandboxIdentity.lookup(
-        session, account_id=account_id, run_id=None, scoped_to="chat"
+        session, account_id=account_id, run_id=None, scoped_to=scoped_to
     )
     if identity:
         return await attach_sandbox(session, identity)
@@ -297,6 +304,8 @@ async def deliver(conversation_id: str) -> None:
                 deliver_turns,
                 conversation_id,
             )
+        except ChatAgentRefusedError as error:
+            await record_failed(conversation_id, str(error))
         except ChatHarnessNotConnectedError as error:
             error_message = str(error)
             if endpoint := get_settings().urls.endpoint.rstrip("/"):
@@ -408,8 +417,17 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                             connections.append(Connection(service, row))
                 sign_ins = await list_sign_ins(session, conversation.account_id)
             bot_id, prompt, tools = await get_agent(session, conversation, sign_ins=sign_ins)
+            if conversation.agent:
+                # The agent can change owner or turn public after the conversation began.
+                try:
+                    conversation.agent.check_talker(conversation.account)
+                except (PermissionDenied, ValidationError) as error:
+                    raise ChatAgentRefusedError(f"The agent cannot answer: {error}") from error
             try:
-                config = await get_config(session, bot_id, conversation.account_id)
+                if conversation.agent:
+                    config = await conversation.agent.get_config(session)
+                else:
+                    config = await get_config(session, bot_id, conversation.account_id)
             except AgentConfigError as error:
                 raise ChatHarnessError(f"The agent cannot run: {error}") from error
             except HarnessNotConnectedError as error:
@@ -425,6 +443,7 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
             host, identity = await get_sandbox(
                 session,
                 conversation.account_id,
+                scoped_to=conversation.sandbox_scope,
                 config=config,
                 allowed_tools=tools,
                 secret_refs=secret_refs,
@@ -459,7 +478,9 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                 await host.aclose()
             continue
         try:
-            host = await get_running_sandbox(session, conversation.account_id)
+            host = await get_running_sandbox(
+                session, conversation.account_id, scoped_to=conversation.sandbox_scope
+            )
         except ChatSandboxGone:
             await conversation.end_turn(session, MessageState.INTERRUPTED)
             await session.commit()
@@ -609,7 +630,9 @@ async def upload_file(
 ) -> str:
     """Put a thread file in the conversation's folder in the agent's sandbox, beside the
     files its messages carry. The path the agent opens."""
-    host = await get_running_sandbox(session, conversation.account_id)
+    host = await get_running_sandbox(
+        session, conversation.account_id, scoped_to=conversation.sandbox_scope
+    )
     try:
         conversation_root = f"{get_work_root(host.ssh_username)}/chat/{conversation.id}"
         # The poster names the file. Only the base name joins the sandbox path.
@@ -887,7 +910,9 @@ async def cancel_turn(session: AsyncSession, conversation: Conversation, message
         await session.refresh(message)
         await session.commit()
         if message.state == MessageState.DELIVERED:
-            host = await get_running_sandbox(session, conversation.account_id)
+            host = await get_running_sandbox(
+                session, conversation.account_id, scoped_to=conversation.sandbox_scope
+            )
             try:
                 await Bridge(host).request(
                     "cancel", conversationId=conversation.id, messageId=message.id

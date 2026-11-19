@@ -13,6 +13,7 @@ from druks.accounts.context import current_conversation_id
 from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
+from druks.configured_agents.models import ConfiguredAgent
 from druks.durable.reads import list_active_runs_for_conversation
 from druks.durable.schemas import ActiveRunResponse
 from druks.redis import get_client
@@ -65,11 +66,18 @@ async def list_conversations(
 async def create_conversation(
     session: SessionDep,
     body: Annotated[str, Body(embed=True)],
+    agent_id: Annotated[str | None, Body(alias="agentId", min_length=1)] = None,
     account: Account = Depends(current_session_account),
 ) -> Conversation:
+    """A new conversation. With an agent id, the agent answers it instead of the Bot."""
     if not body.strip():
         raise HTTPException(422, "Write a message.")
-    conversation = await Conversation.create(session, account_id=account.id, body=body)
+    if agent_id:
+        agent = await ConfiguredAgent.get_for_account(session, agent_id, account)
+        agent.check_talker(account)
+    conversation = await Conversation.create(
+        session, account_id=account.id, body=body, agent_id=agent_id
+    )
     await session.commit()
     await DBOS.start_workflow_async(deliver, conversation.id)
     await session.refresh(

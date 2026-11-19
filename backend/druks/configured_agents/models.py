@@ -7,9 +7,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 from druks.accounts.models import Account
 from druks.core.models import Uuid7Pk
 from druks.exceptions import ObjectNotFound, PermissionDenied, ValidationError
-from druks.harnesses.config import check_config
+from druks.harnesses.config import AgentConfig, build_config, check_config
 from druks.models import Model
 from druks.skills.models import Skill
+from druks.user_settings.models import InstallationSettings
 
 
 class ConfiguredAgent(Model, Uuid7Pk):
@@ -117,10 +118,33 @@ class ConfiguredAgent(Model, Uuid7Pk):
         self.is_private = is_private
         await session.flush()
 
+    async def get_config(self, session: AsyncSession) -> AgentConfig:
+        """The agent's harness and model on its owner's subscription, with the
+        installation's other execution defaults."""
+        settings = await InstallationSettings.get_or_create(session)
+        return await build_config(
+            session,
+            self.owner_id,
+            harness_name=self.harness,
+            model=self.model,
+            billing="subscription",
+            effort=settings.default_effort,
+            timeout=settings.default_timeout,
+            fast_mode=settings.fast_mode,
+            include_apps=settings.include_apps,
+        )
+
     def check_editor(self, account: Account) -> None:
         """Only the owner or an admin changes or deletes an agent."""
         if account.id != self.owner_id and not account.is_admin:
             raise PermissionDenied("Only the agent's owner or an admin can change it.")
+
+    def check_talker(self, account: Account) -> None:
+        """Only the owner talks to their private agent: it runs on their subscription."""
+        if not self.is_private:
+            raise ValidationError("Only a private agent answers a conversation.")
+        if account.id != self.owner_id:
+            raise PermissionDenied("Only the agent's owner can talk to a private agent.")
 
     @classmethod
     def _for_account(cls, account: Account) -> sqlalchemy.ColumnElement[bool]:
