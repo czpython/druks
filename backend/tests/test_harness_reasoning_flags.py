@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 import druks.harnesses.base
+import pytest
 from drukbox_sdk import Secret
 from druks.harnesses.base import Harness
 from druks.harnesses.claude import ClaudeHarness
@@ -22,6 +23,14 @@ _HOOK = Harness.after_agent_hook_path("/home/exedev/work/runs/run-1")
 _HOOK_BODY = (
     Path(druks.harnesses.base.__file__).parent / "hooks" / "druks-after-agent.sh"
 ).read_text()
+_NO_WAITING_HOOK = "/home/exedev/work/runs/run-1/druks-no-waiting.sh"
+_NO_WAITING_HOOK_BODY = (
+    Path(druks.harnesses.base.__file__).parent / "hooks" / "druks-no-waiting.sh"
+).read_text()
+_NO_WAITING_ENTRY = {
+    "matcher": "Bash",
+    "hooks": [{"type": "command", "command": f"sh {_NO_WAITING_HOOK}"}],
+}
 
 
 def _written(wrapper: str) -> dict[str, str]:
@@ -109,14 +118,160 @@ async def test_claude_refuses_the_first_result_of_a_hooked_call():
         "fastMode": True,
         "hooks": {
             "PreToolUse": [
+                _NO_WAITING_ENTRY,
                 {
                     "matcher": "StructuredOutput",
                     "hooks": [{"type": "command", "command": f"sh {_HOOK}", "timeout": 900}],
-                }
+                },
             ]
         },
     }
-    assert _written(inv.args[2])[_HOOK] == _HOOK_BODY
+    assert _written(inv.args[2]) == {
+        _NO_WAITING_HOOK: _NO_WAITING_HOOK_BODY,
+        _HOOK: _HOOK_BODY,
+    }
+
+
+async def test_claude_stages_the_no_waiting_hook_before_every_call():
+    invocation = await ClaudeHarness(
+        model="anthropic/claude-x", fast_mode=False, effort=None
+    ).build_invocation(
+        _MANIFEST,
+        prompt="hello",
+        schema={"type": "object"},
+        run_id="run-1",
+        ssh_username="exedev",
+    )
+
+    parts = shlex.split(invocation.args[2])
+    assert json.loads(parts[parts.index("--settings") + 1]) == {
+        "hooks": {"PreToolUse": [_NO_WAITING_ENTRY]}
+    }
+    assert _written(invocation.args[2]) == {_NO_WAITING_HOOK: _NO_WAITING_HOOK_BODY}
+    assert parts.index(_NO_WAITING_HOOK) < parts.index("claude")
+
+
+@pytest.fixture
+async def ask_no_waiting_hook(tmp_path: Path):
+    """Ask the staged no-waiting hook about a Bash command and return its reply."""
+    invocation = await ClaudeHarness(
+        model="anthropic/claude-x", fast_mode=False, effort=None
+    ).build_invocation(
+        _MANIFEST,
+        prompt="hello",
+        schema={"type": "object"},
+        run_id="run-1",
+        ssh_username="exedev",
+    )
+    hook = tmp_path / "druks-no-waiting.sh"
+    hook.write_text(_written(invocation.args[2])[_NO_WAITING_HOOK])
+
+    def ask(command: str, description: str = "Run it") -> str:
+        call = {
+            "session_id": "session-1",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"description": description, "command": command, "timeout": 120000},
+        }
+        process = subprocess.run(
+            ["sh", hook],
+            input=json.dumps(call),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+        assert process.stderr == ""
+        return process.stdout
+
+    return ask
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # A sleep that waits out CI before it reads the checks.
+        "sleep 300; gh pr checks",
+        "sleep 121",
+        "sleep 120.5",
+        "sleep 5m",
+        "sleep 2.5m",
+        "sleep 1h",
+        "sleep 1m 61s",
+        "sleep $delay",
+        "sleep infinity",
+        # The lengths of every sleep in the command add up.
+        "sleep 110 && sleep 110",
+        "sleep 90; gh pr checks 7; sleep 90",
+        "sleep 1m && sleep 1m && sleep 1m",
+        "--watch, whatever the tool.",
+        "gh pr checks 7 --watch",
+        "git push && gh pr checks 7 && sleep 600",
+        "(sleep 400) && gh pr checks 7",
+        "sleep\t300",
+        "sleep \\\n  300",
+        'git commit -m "Fix the \\"stuck\\" build" && sleep 300',
+        'echo "Café ☕"; sleep 300',
+        'git commit -m "Never sleep 300 in a turn"',
+    ],
+)
+async def test_the_no_waiting_hook_denies_a_command_that_waits(ask_no_waiting_hook, command):
+    reply = json.loads(ask_no_waiting_hook(command))["hookSpecificOutput"]
+
+    assert (reply["hookEventName"], reply["permissionDecision"]) == ("PreToolUse", "deny")
+
+
+async def test_the_no_waiting_hook_names_the_rule_and_the_way_out_of_quoted_text(
+    ask_no_waiting_hook,
+):
+    reply = json.loads(ask_no_waiting_hook('git commit -m "Never sleep 300"'))
+
+    reason = reply["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "Druks" in reason
+    assert "no-waiting rule" in reason
+    assert "file-edit tool" in reason
+    assert "rephrase" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sleep 2",
+        "sleep 120",
+        "sleep 2m",
+        "sleep 1m 60s",
+        "sleep 60 && sleep 60",
+        "sleep 5 && gh pr checks 7",
+        "gh pr checks",
+        "gh run view --log-failed",
+        "gh run watch 123",
+        "for i in 1 2 3; do gh run view $i --log-failed; done",
+        "for i in 1 2 3; do curl -sf localhost:8000 && break; sleep 2; done",
+        "for f in a b; do echo $f; done; gh pr checks 7; sleep 3",
+        'git commit -m "Add support for retries" && git push && sleep 10 && gh pr checks 7',
+        'gh pr create --title "Wait for CI" --body "See the plan." && sleep 3 && gh pr checks 7',
+        "cat > notes.md <<'EOF'\nWait for the build\nEOF\nsleep 5 && gh run list --limit 1",
+        'git commit -m "Retry for flaky tests; do not wait" && sleep 5 && gh pr checks 7',
+        "ng test --watch=false",
+        'git commit -m "Keep the sleep short"',
+        'echo "Café ☕"',
+        "uv run pytest backend/",
+    ],
+)
+async def test_the_no_waiting_hook_lets_other_commands_run(ask_no_waiting_hook, command):
+    assert ask_no_waiting_hook(command) == ""
+
+
+async def test_the_no_waiting_hook_reads_only_the_command(ask_no_waiting_hook):
+    assert ask_no_waiting_hook("gh pr checks 7", description='Run "command": "sleep 300"') == ""
+
+
+async def test_the_no_waiting_hook_never_runs_the_command(ask_no_waiting_hook, tmp_path: Path):
+    marker = tmp_path / "ran"
+
+    assert ask_no_waiting_hook(f"echo ran > {marker}; sleep 300")
+    assert ask_no_waiting_hook(f"echo ran > {marker}") == ""
+    assert not marker.exists()
 
 
 async def test_codex_build_invocation_carries_every_flag():
