@@ -590,7 +590,7 @@ start a new build.
 
 Select **druks** to use the ticket board on this appliance. That choice needs no
 credentials. The status settings stay hidden. The trigger status is
-Ready for Agent, and it is not a setting.
+Ready for Agent and the done status is Done. Neither is a setting.
 
 Select **GitHub** to take work from GitHub Issues in the repositories the
 operator GitHub App is already installed on. That choice needs no second
@@ -643,11 +643,12 @@ dependency, and it is open until the issue gets the done label or closes.
 GitHub lists only the dependencies that the installation of the ticket's repo
 can read. A blocker in a private repo outside that installation does not hold
 the ticket. On Jira, a blocker is an issue link of
-the Blocks type, and it is open until its status category is Done. When a
-blocker moves to the done status, Druks reads each ticket that it blocks. A
-ticket at the trigger status with no other open blocker starts its build. No
-person starts that build, so it uses the account of the ticket assignee.
-**druks** board tickets do not wait for blockers.
+the Blocks type, and it is open until its status category is Done. On the
+**druks** board, a blocker is a ticket in the **Blocked by** field, and it is
+open until it is Done. When a blocker moves to the done status, Druks reads
+each ticket that it blocks. A ticket at the trigger status with no other open
+blocker starts its build. No person starts that build, so it uses the account
+of the ticket assignee.
 
 On Linear, the planner can split a ticket whose work needs more than one pull
 request. It proposes one ticket for each repository, with the "blocked by" links
