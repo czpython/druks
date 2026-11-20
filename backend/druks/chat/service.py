@@ -826,13 +826,15 @@ async def report_result(session: AsyncSession, run: Run, *, result) -> str | Non
         body = NO_RESULT_MESSAGE.format(run=run.id)
     else:
         body = RESULT_MESSAGE.format(run=run.id, result=to_json(result, fallback=str).decode())
-    return await report_outcome(session, run, body)
+    return await report_outcome(session, run.conversation_id, body)
 
 
 async def report_failure(session: AsyncSession, run: Run, *, failure: str) -> str | None:
     """Report a run's failure to the chat that started it, whether or not the run waited
     for an answer. Returns the conversation to deliver."""
-    return await report_outcome(session, run, FAILURE_MESSAGE.format(run=run.id, failure=failure))
+    return await report_outcome(
+        session, run.conversation_id, FAILURE_MESSAGE.format(run=run.id, failure=failure)
+    )
 
 
 @DBOS.workflow(name=POST_CANCEL_WORKFLOW)
@@ -854,7 +856,7 @@ async def report_cancel(run_id: str) -> str | None:
     async with step_session() as session:
         run = await session.get(Run, run_id)
         body = CANCELLED_MESSAGE.format(run=run.id, reason=run.failure or "none given")
-        return await report_outcome(session, run, body)
+        return await report_outcome(session, run.conversation_id, body)
 
 
 async def report_quota_wait(session: AsyncSession, run: Run, *, resumes_at: datetime) -> None:
@@ -874,13 +876,15 @@ async def report_quota_wait(session: AsyncSession, run: Run, *, resumes_at: date
 async def report_quota_resume(session: AsyncSession, run: Run) -> str | None:
     """Tell the chat that started a run that it continues after its usage-limit wait.
     Returns the conversation to deliver."""
-    return await report_outcome(session, run, QUOTA_RESUMED_MESSAGE.format(run=run.id))
+    return await report_outcome(
+        session, run.conversation_id, QUOTA_RESUMED_MESSAGE.format(run=run.id)
+    )
 
 
-async def report_outcome(session: AsyncSession, run: Run, body: str) -> str | None:
-    """Keep the outcome in the run's chat. Returns the conversation to deliver, unless its
+async def report_outcome(session: AsyncSession, conversation_id: str, body: str) -> str | None:
+    """Keep the outcome in the chat. Returns the conversation to deliver, unless its
     channel runs no turns."""
-    conversation = await session.get(Conversation, run.conversation_id)
+    conversation = await session.get(Conversation, conversation_id)
     await conversation.create_message(session, body, is_internal=True)
     channel = conversation.channel
     if not channel or channel.has_turns:

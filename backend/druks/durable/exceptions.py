@@ -77,3 +77,7 @@ class SubjectlessGate(FatalError):
 
 class ScheduleUnavailable(DruksError):
     """DBOS holds no schedule with this name, so there is nothing to trigger."""
+
+
+class ScheduleError(DruksError):
+    """A schedule cannot be made as asked. The message says what to change."""

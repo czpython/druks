@@ -65,6 +65,10 @@ CANCELLED_MESSAGE = (
     "[Internal: Run {run} was cancelled. The reason: {reason}. Tell the person in one short "
     "line. Do not start it again.]"
 )
+SKIPPED_MESSAGE = (
+    "[Internal: Druks skipped the scheduled call of {tool}: {reason} Tell the person in one "
+    "short line, and offer what they can do next. The schedule goes on.]"
+)
 # The workflow that posts a cancelled run's report to its chat, by the name a run queues it.
 POST_CANCEL_WORKFLOW = "chat.post_cancel"
 # A channel turn that ends with no answer gets this once; the next empty turn fails.

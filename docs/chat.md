@@ -352,6 +352,42 @@ lists the caller's reminders with each one's cron and next time.
 `chat_cancel_reminder` stops a reminder, and what it already sent stays in the
 conversation.
 
+## Schedules
+
+A schedule makes one of the agent's tool calls again and again on a cron. Say
+"review pull request 7 in acme/api every morning", and the agent calls
+`create_schedule` with the tool, its arguments, and the cron. The schedule
+belongs to the person who asked and to the conversation where they asked. An
+agent has no schedule of its own.
+
+| Field | What it holds | Example |
+| --- | --- | --- |
+| `tool` | The name of one of the agent's tools | `software_factory_review` |
+| `arguments` | The tool's arguments, the same at every call | `{"repo": "acme/api", "prNumber": 7}` |
+| `cron` | When to call, in local time | `0 9 * * *` |
+
+Druks checks that the tool exists and that the cron has five fields when the
+agent saves the schedule. Local time is the installation `timezone`, as for
+reminders.
+
+Each schedule has its own DBOS schedule, which fires at each due time. Druks then
+makes the tool call through its own MCP server, the way the conversation's agent
+makes it: as the owner, with the tools that agent may use, and from the
+conversation. So the call passes every check it passes in the chat, such as the
+owner's app check, the tool's input check, and the route's own checks. A run that
+the call starts reports to the conversation, the same as a run that the chat
+started. When the tool refuses the call, or Druks cannot reach its own MCP
+server, Druks skips the call, and the agent tells the person why in the
+conversation. The schedule goes on.
+
+A due time makes one call, also when two Druks servers run. An interrupted call
+can run again. A due time that passes while Druks is down is not called later.
+
+`list_schedules` lists the caller's schedules with each one's tool, arguments,
+cron, and next time. `change_schedule` replaces the tool, the arguments, and the
+cron of one of the caller's schedules. `stop_schedule` stops it, and the runs its
+calls already started go on.
+
 ## WhatsApp
 
 WhatsApp is a source for Chat. A person writes to a linked number, and Druks
