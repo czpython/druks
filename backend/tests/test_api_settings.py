@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock
 from conftest import settings_client
 from druks.accounts.enums import Role
 from druks.accounts.models import Account
-from druks.agents import Agent
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.db import db_session
+from druks.instructions import Instruction
 from druks.teams.models import Team
 from druks.user_settings.models import SettingsOverride
 from druks_field_notes.app import FieldNotes
@@ -80,7 +80,7 @@ def test_patch_settings_judges_the_default_triple_together(tmp_path: Path):
 
 def test_a_switched_provider_wakes_the_runs_waiting_out_a_quota(tmp_path: Path, monkeypatch):
     wake = AsyncMock()
-    monkeypatch.setattr(Agent, "wake_runs_waiting_for_quota", wake)
+    monkeypatch.setattr(Instruction, "wake_runs_waiting_for_quota", wake)
     with settings_client(tmp_path) as client:
         client.patch(
             "/api/settings/apps", json={"agentEfforts": {"software_factory.implement": "low"}}
@@ -181,7 +181,7 @@ def test_agents_lists_every_apps_agents_as_they_resolve(tmp_path: Path):
                 "agentModels": {"software_factory.implement": "openai/gpt-5.5"},
             },
         )
-        body = client.get("/api/agents").json()
+        body = client.get("/api/instructions").json()
     apps = {app["name"]: app for app in body["apps"]}
     assert "software_factory" in apps
     assert "field_notes" in apps
@@ -759,12 +759,12 @@ def test_settings_lists_read_the_overrides_in_one_query(tmp_path: Path, monkeypa
     with settings_client(tmp_path) as client:
         event.listen(Engine, "before_cursor_execute", record)
         try:
-            for route in ("/api/settings/apps", "/api/agents"):
+            for route in ("/api/settings/apps", "/api/instructions"):
                 assert client.get(route).status_code == 200
         finally:
             event.remove(Engine, "before_cursor_execute", record)
 
-    assert reads == {"/api/settings/apps": 1, "/api/agents": 1}
+    assert reads == {"/api/settings/apps": 1, "/api/instructions": 1}
 
 
 async def test_a_member_reads_no_settings_of_an_app_they_cannot_use(tmp_path: Path, druks_db):
@@ -774,7 +774,7 @@ async def test_a_member_reads_no_settings_of_an_app_they_cannot_use(tmp_path: Pa
 
     with settings_client(tmp_path) as client:
         settings = client.get("/api/settings/apps").json()["apps"]
-        agents = client.get("/api/agents").json()["apps"]
+        agents = client.get("/api/instructions").json()["apps"]
         choices = client.get("/api/settings/apps/choices?app=field_notes")
 
     assert "field_notes" not in {app["name"] for app in settings + agents}

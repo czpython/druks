@@ -11,8 +11,8 @@ from druks.accounts.dependencies import (
 )
 from druks.accounts.models import Account
 from druks.accounts.schemas import AccountResponse
-from druks.agents import Agent
 from druks.api.dependencies import SessionDep
+from druks.instructions import Instruction
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
@@ -184,7 +184,7 @@ async def sign_in_with_token(
         identity={"email": None},
         expires_at=expires_at,
     )
-    await Agent.wake_runs_waiting_for_quota(session)
+    await Instruction.wake_runs_waiting_for_quota(session)
     return subscription
 
 
@@ -226,7 +226,7 @@ async def _store_connection(
     # refresh can roll back, so both commit before it.
     if provider.has_usage(subscription):
         await provider.poll_usage(session, subscription)
-    await Agent.wake_runs_waiting_for_quota(session)
+    await Instruction.wake_runs_waiting_for_quota(session)
     await session.commit()
     try:
         # The flow is already spent, so a failed refresh only logs.

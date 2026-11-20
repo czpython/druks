@@ -12,11 +12,10 @@ from dbos import DBOS, DBOSClient
 from dbos._error import DBOSQueueDeduplicatedError
 from druks.accounts.context import Actor, current_account_id, current_actor
 from druks.accounts.models import Account, PersonalAccessToken
-from druks.agents import Agent, AgentOutput
 from druks.api.dependencies import request_session
 from druks.api.schedules import router as schedules_router
 from druks.apps.loader import iter_apps, register_workflow_package
-from druks.apps.registry import Registry, agents, workflows
+from druks.apps.registry import Registry, instructions, workflows
 from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
 from druks.browser.exceptions import BrowserSessionSignedOutError
 from druks.browser.models import StoredBrowserSession
@@ -43,6 +42,7 @@ from druks.durable.models import AgentCall, Artifact, Schedule
 from druks.durable.schedules import apply_schedule, run_schedule
 from druks.events.models import Event
 from druks.exceptions import PermissionDenied, SessionNotBoundError
+from druks.instructions import Instruction, InstructionOutput
 from druks.mcp.server import create_mcp_app
 from druks.models import StoredSubject
 from druks.sandbox.datastructures import AgentResult
@@ -82,12 +82,12 @@ pytestmark = [
 ]
 
 
-class Decision(AgentOutput):
+class Decision(InstructionOutput):
     # DBOS must be able to pickle this step result.
     action: str
 
 
-class ReviewResult(AgentOutput):
+class ReviewResult(InstructionOutput):
     action: str
 
     def to_artifact(self) -> dict[str, str]:
@@ -199,7 +199,7 @@ async def runtime():
                 raise FatalError("closed at review")
 
     class AgentFlow(Workflow):
-        DECIDER = Agent(id="decider", contract=Decision, prompt="t")
+        DECIDER = Instruction(id="decider", contract=Decision, prompt="t")
 
         async def run(self, repo: str) -> None:
             decision = await self.DECIDER(body="x")
@@ -393,7 +393,7 @@ async def runtime():
         await engine.dispose()
         schema_engine.dispose()
 
-        agents._items.pop("decider", None)
+        instructions._items.pop("decider", None)
         workflows._items.pop("sample_flow", None)
         workflows._items.pop("agent_flow", None)
         workflows._items.pop("agent_body_flow", None)
@@ -754,7 +754,7 @@ async def test_a_quota_wake_reaches_only_the_runs_waiting_out_a_quota(runtime):
 
         await asyncio.wait_for(waiting(), 15)
         async with session_scope(runtime.engine) as session:
-            await Agent.wake_runs_waiting_for_quota(session)
+            await Instruction.wake_runs_waiting_for_quota(session)
 
         await _wait_for_run(runtime.engine, quota_id, lambda run: run.state == RunState.FINISHED)
         assert (await _get_run(runtime.engine, checks_id)).state == RunState.RUNNING
@@ -980,7 +980,7 @@ async def test_run_agent_step(runtime, monkeypatch):
         "druks.sandbox.client.Client.ephemeral",
         _fake_ephemeral_returning({"action": "stop"}, seen, held),
     )
-    monkeypatch.setattr("druks.agents.get_template", _fake_template)
+    monkeypatch.setattr("druks.instructions.get_template", _fake_template)
 
     workflow_id = await runtime.AgentFlow.start(subject=None, repo="owner/app")
     failed = await _wait_for_run(
@@ -1015,7 +1015,7 @@ async def test_body_level_agent_output_lands_on_the_journal(runtime, monkeypatch
         "druks.sandbox.client.Client.ephemeral",
         _fake_ephemeral_returning({"action": "ship"}, seen, held),
     )
-    monkeypatch.setattr("druks.agents.get_template", _fake_template)
+    monkeypatch.setattr("druks.instructions.get_template", _fake_template)
 
     workflow_id = await runtime.AgentBodyFlow.start(subject=None, repo="owner/app")
     await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
@@ -1819,7 +1819,7 @@ async def test_a_read_on_the_box_holds_no_connection(runtime, monkeypatch, body)
     monkeypatch.setattr(
         "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning({"action": "go"}, [], [])
     )
-    monkeypatch.setattr("druks.agents.get_template", _fake_template)
+    monkeypatch.setattr("druks.instructions.get_template", _fake_template)
     seen: list[tuple[bool, bool]] = []
 
     class ReadingWorkspace(Workspace):
@@ -1937,7 +1937,7 @@ async def test_output_event_survives_completed_step_replay(runtime, monkeypatch)
         "druks.sandbox.client.Client.ephemeral",
         _fake_ephemeral_returning({"action": "reviewed"}, calls, held),
     )
-    monkeypatch.setattr("druks.agents.get_template", _fake_template)
+    monkeypatch.setattr("druks.instructions.get_template", _fake_template)
     completed = []
 
     class OutputFlow(Workflow):
@@ -1982,7 +1982,7 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
         _fake_ephemeral_returning({"gist": "The pump ran hot."}, calls, []),
     )
     monkeypatch.setattr("druks.workflows.get_template_id", AsyncMock(return_value="template-test"))
-    monkeypatch.setattr("druks.agents.get_template", _fake_template)
+    monkeypatch.setattr("druks.instructions.get_template", _fake_template)
     completed = []
     body = Summarize.run_multistep
 

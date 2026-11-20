@@ -175,9 +175,9 @@ Generate migrations with every app enabled. With an app disabled,
 ## Personal and installation settings
 
 One Druks installation serves one organization. Separate organizations use
-separate installations. **Settings → Agents** owns the shared harness, model,
+separate installations. **Settings → Instructions** owns the shared harness, model,
 billing, effort, fast mode, and timeout defaults. Every account uses these
-defaults. Shared agent overrides take priority. A declared agent timeout also
+defaults. Shared instruction overrides take priority. A declared instruction timeout also
 takes priority over the installation default.
 
 Effort is one of `low`, `medium`, `high`, `xhigh`, and `max`. Claude and Pi
@@ -831,7 +831,7 @@ subscription token on a schedule. A sandbox holds a placeholder for the
 subscription token and never the token. Drukbox fetches the token from the
 Druks issuer through the sandbox's identity, and the secrets proxy swaps the
 placeholder on each request to the entry's host. See
-[sandbox identities and the issuer](concepts.md#agents-harnesses-workspaces-and-sandboxes).
+[sandbox identities and the issuer](concepts.md#instructions-harnesses-workspaces-and-sandboxes).
 Druks does not copy a host login. This is a capability connection for the
 requesting account. In a fresh `none`-mode install, the first completed
 subscription connection also creates the operator account. See
@@ -953,7 +953,7 @@ the `mcpServers` block from `.claude.json` before the copy. MCP credentials
 are sandbox entries. Provider credentials do not belong in this root. OpenCode
 and Pi do not read it.
 The default harness, model, billing, effort, and timeout live in
-**Settings → Agents**. Each agent can override any of them on its app's page.
+**Settings → Instructions**. Each instruction can override any of them on its app's page.
 **Unattended runs use** names the default account. Shared execution settings
 select subscription or API key billing. Subscription billing uses the run
 account's subscription. API key billing uses the installation key. A call refuses

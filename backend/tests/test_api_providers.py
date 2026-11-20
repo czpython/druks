@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock
 
 from conftest import connect_provider
 from druks.accounts.models import Account
-from druks.agents import Agent
 from druks.harnesses import directory
 from druks.harnesses.models import ProviderCatalog
 from druks.harnesses.providers import AnthropicProvider
+from druks.instructions import Instruction
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
@@ -270,7 +270,7 @@ async def test_a_pasted_setup_token_is_the_requesting_accounts_subscription(
 def test_a_pasted_token_wakes_the_runs_waiting_out_a_quota(tmp_path: Path, monkeypatch):
     _sign_in_with(monkeypatch, tmp_path, "setup_token")
     wake = AsyncMock()
-    monkeypatch.setattr(Agent, "wake_runs_waiting_for_quota", wake)
+    monkeypatch.setattr(Instruction, "wake_runs_waiting_for_quota", wake)
     with _build_client(tmp_path) as client:
         client.post("/api/providers/anthropic/sign-in/token", json={"token": "sk-ant-oat01-x"})
     wake.assert_awaited_once()

@@ -1,6 +1,6 @@
 ---
 title: "Writing an app"
-description: "Build a separately packaged Druks app with workflows, agents, gates, routes, models, and migrations."
+description: "Build a separately packaged Druks app with workflows, instructions, gates, routes, models, and migrations."
 sidebarTitle: "Author guide"
 icon: "puzzle"
 ---
@@ -12,13 +12,13 @@ before you assign ownership of a capability.
 
 ## Publish useful activity
 
-An agent output declares its saved result and its Activity topic:
+An instruction output declares its saved result and its Activity topic:
 
 ```python
-from druks.agents import AgentOutput
+from druks.instructions import InstructionOutput
 
 
-class GistOutput(AgentOutput):
+class GistOutput(InstructionOutput):
     gist: str
 
     def to_artifact(self) -> dict[str, str]:
@@ -117,16 +117,16 @@ package modules:
 
 | Path | Contract |
 | --- | --- |
-| `app.py` | `App` subclass, agents, app settings |
+| `app.py` | `App` subclass, instructions, app settings |
 | `workflows.py` | durable `Workflow` and `Gate` subclasses |
 | `tasks.py` | Optional `@task` background functions |
 | `models.py` | SQLAlchemy models with `<name>_` table names, `StoredSubject` among them |
-| `contracts.py` | `AgentOutput` contracts |
+| `contracts.py` | `InstructionOutput` contracts |
 | `schemas.py` | HTTP responses and subject summaries |
 | `routes.py` | FastAPI routers |
 | `pages.py` | `@page` declarations that return `Page` objects |
 | `subscribers.py` | signal reactions |
-| `hooks.py` | Optional hooks on agents, this app's or another app's |
+| `hooks.py` | Optional hooks on instructions, this app's or another app's |
 | `webhooks.py` | Optional authenticated provider deliveries |
 | `services.py` | Optional `Service` declarations for appliance credentials at external providers |
 | `migrations/versions/` | this distribution's Alembic history |
@@ -196,8 +196,8 @@ class Sweep(Workflow):
 
 Druks treats `run()` as one step, so it must not carry `@step`.
 DBOS replays `run_multistep()` orchestration, so it must not carry `@step`.
-Decorate its side-effecting operations instead. An agent called directly from
-the orchestration body gets its own step. An agent called inside `@step` or
+Decorate its side-effecting operations instead. An instruction called directly from
+the orchestration body gets its own step. An instruction called inside `@step` or
 `run()` shares that enclosing checkpoint.
 
 ### Declare the sandbox environment
@@ -279,7 +279,7 @@ for an account that a [team](concepts.md) keeps out. A route answers 403. A
 webhook acknowledges the delivery, and the delivery changes nothing. An app
 makes no check and does not catch the refusal.
 
-Each agent call uses the installation execution defaults. Agent overrides take
+Each agent call uses the installation execution defaults. Instruction overrides take
 priority. Subscription billing uses the run account's subscription.
 The call records exactly one billing reference: `subscription_id` or
 `api_key_provider`. Druks uses that selected credential for execution. Missing
@@ -480,19 +480,19 @@ class Sweep(Workflow):
 Reading settings inside a step snapshots them for replay. Reading them directly
 from replayed orchestration allows later edits to change an in-flight run.
 
-## Add an agent
+## Add an instruction
 
-An agent belongs to the app class. Which CLI runs it, which model, which
+An instruction belongs to the app class. Which CLI runs it, which model, which
 login it bills, and at what effort are the operator's choices: defaults in
-**Settings → Agents**, overridden per agent on the app's own page. `timeout`
+**Settings → Instructions**, overridden per instruction on the app's own page. `timeout`
 is the one declarable knob, because how long a step may take is a fact about
 the task.
 
 ```python
-from druks.agents import Agent, AgentOutput
+from druks.instructions import Instruction, InstructionOutput
 
 
-class ReportOutput(AgentOutput):
+class ReportOutput(InstructionOutput):
     title: str
     body: str
 
@@ -500,21 +500,21 @@ class ReportOutput(AgentOutput):
 class NightWatch(App):
     name = "night_watch"
 
-    report = Agent(
+    report = Instruction(
         prompt="night_watch/report.md",
         contract=ReportOutput,
         description="Turns findings into an operator report.",
     )
 ```
 
-The app name and the attribute name form the agent's id: `night_watch.report`.
+The app name and the attribute name form the instruction's id: `night_watch.report`.
 Settings overrides, the timeline, and the step name use that id.
 
-An agent that reads untrusted content, such as email or a web page, gets no
+An instruction that reads untrusted content, such as email or a web page, gets no
 plugin state and no MCP server:
 
 ```python
-    triage = Agent(
+    triage = Instruction(
         prompt="triage.md",
         contract=TriageOutput,
         include_plugins=False,
@@ -523,8 +523,8 @@ plugin state and no MCP server:
 ```
 
 A workflow that sets `steps_reuse_sandbox = True` keeps one sandbox for all its
-agents, and the sandbox takes its entries from the agent call that creates it.
-Give such a workflow agents that all include MCP servers, or none that do.
+instructions, and the sandbox takes its entries from the agent call that creates it.
+Give such a workflow instructions that all include MCP servers, or none that do.
 
 Call it only inside a workflow:
 
@@ -533,11 +533,11 @@ result = await NightWatch.report(repo=repo, findings=findings)
 ```
 
 Druks renders the prompt with the current workflow, workspace, and supplied
-context. It resolves the agent's harness, model, and login in one place,
+context. It resolves the instruction's harness, model, and login in one place,
 refuses before any sandbox work when the login is missing, then provisions or
 attaches a sandbox, executes the CLI, validates the structured output, and
 records the call. Override
-`AgentOutput.to_result()` to map the strict agent contract to a domain value.
+`InstructionOutput.to_result()` to map the strict output contract to a domain value.
 Override `to_artifact()` to publish a reviewable artifact. Override `to_event()`
 to record that saved result in Activity: return a `topic` and an optional
 `summary`. An output that returns an event must also return an artifact.
@@ -550,7 +550,7 @@ same topic. The saved result has its own identity in each row.
 
 Pass `contract=OutputType` on an agent call when its required output fields
 depend on the input. Druks uses that type for the harness schema, validation,
-artifact, and result conversion. The agent's declared contract stays unchanged;
+artifact, and result conversion. The instruction's declared contract stays unchanged;
 `contract` is not prompt context. Build dynamic types with Pydantic `create_model`
 and use `to_result()` to return a stable type for durable storage.
 
@@ -558,10 +558,10 @@ If an agent produces a file, use [`File` and `FileField`](files.md).
 The contract declares the file, Druks transports and serves it, and the app can
 persist its stable reference on an app row.
 
-An app that runs a CLI of its own inside the sandbox reads how a declared agent
-would run, and hands that to the CLI. Declare the agent and never call it; the
-operator configures it in the app's **Settings → Agents**. Shared defaults
-are in **Settings → Agents**:
+An app that runs a CLI of its own inside the sandbox reads how a declared instruction
+would run, and hands that to the CLI. Declare the instruction and never call it; the
+operator configures it in the app's **Settings → Instructions**. Shared defaults
+are in **Settings → Instructions**:
 
 ```python
 config = await NightWatch.auditor.get_config()
@@ -585,9 +585,9 @@ Codex. A nested CLI reads it from the environment. The
 [configuration guide](configuration.md#harnesses) lists the variable, host, and
 header per harness.
 
-### Give an agent a service secret
+### Give an instruction a service secret
 
-An agent that calls a provider from its sandbox lists the secret it needs. The
+An instruction that calls a provider from its sandbox lists the secret it needs. The
 [service](#declare-a-service) declares the one host that its secrets can go to:
 
 ```python
@@ -604,7 +604,7 @@ class Acme(Service):
 class NightWatch(App):
     name = "night_watch"
 
-    report = Agent(
+    report = Instruction(
         prompt="night_watch/report.md",
         contract=ReportOutput,
         secrets=(Acme.fields.api_key,),
@@ -615,14 +615,14 @@ class NightWatch(App):
 `report` call holds a placeholder in `ACME_API_KEY`: the service slug and the
 field name, in upper case. The secrets proxy puts the key in an
 `Authorization: Bearer` header only on requests to `host`. The sandbox never
-holds the key, and it never holds `webhook_secret`, which no agent lists.
+holds the key, and it never holds `webhook_secret`, which no instruction lists.
 
-Druks refuses to load an agent that lists a field that is not a secret, or a
+Druks refuses to load an instruction that lists a field that is not a secret, or a
 field of a service with no `host`. If a service with `required = False` is not
 connected, the sandbox gets no variable for it, so the prompt must handle that.
 
 A workflow that sets `steps_reuse_sandbox = True` binds the secrets of the call
-that creates the sandbox. Give the agents of such a workflow the same `secrets`.
+that creates the sandbox. Give the instructions of such a workflow the same `secrets`.
 
 For a credential that depends on the subject, such as one account's connection,
 override [`get_secrets(subject)`](#customize-the-workspace) on the workspace.
@@ -637,8 +637,8 @@ The prompt or a subsequent explicit step owns those actions.
 
 ### Give an agent one more turn
 
-An app can hook an agent in `hooks.py`. Decorate a function with the agent's
-`after_agent`:
+An app can hook an instruction in `hooks.py`. Decorate a function with the
+instruction's `after_agent`:
 
 ```python
 # hooks.py
@@ -653,13 +653,13 @@ async def review(*, prompt: str, workspace: RepoWorkspace) -> str | None:
     return finding.instruction
 ```
 
-To hook another app's agent, name it with `Agent.get`, so that neither app
+To hook another app's instruction, name it with `Instruction.get`, so that neither app
 imports the other:
 
 ```python
-from druks.agents import Agent
+from druks.instructions import Instruction
 
-implementer = Agent.get("software_factory.implement")
+implementer = Instruction.get("software_factory.implement")
 
 
 @implementer.after_agent
@@ -673,13 +673,13 @@ agent runs in. If the hook returns text, the agent gets the text as one more
 turn in the same session, and its next result is the result of the call. If
 the hook returns `None` or an empty string, the turn ends. A call gets one
 round: Druks asks once, and the next end of turn is final. The hooks of one
-agent run in registration order, and Druks joins their texts.
+instruction run in registration order, and Druks joins their texts.
 
-`Agent.get` loads the class of the owning app first, so `hooks.py` can name an
-agent of an app that Druks has not loaded yet. An unknown id raises
+`Instruction.get` loads the class of the owning app first, so `hooks.py` can name an
+instruction of an app that Druks has not loaded yet. An unknown id raises
 `ObjectNotFound`.
 
-A hook runs inside the step of the hooked call. An agent that a hook calls records
+A hook runs inside the step of the hooked call. An instruction that a hook calls records
 its own call and artifact. It gets its own sandbox, because the hooked
 agent still holds its sandbox. Recovery reuses a completed hooked call, and an
 interrupted one runs again with its hooks. A hook that raises fails the hooked
@@ -701,7 +701,7 @@ Each harness gives the agent the text in its own way:
 ## Answer WhatsApp with a Bot
 
 A Bot answers the connections that an operator links to your app, such as a
-WhatsApp number. It is not an agent: it has no contract, and no workflow awaits
+WhatsApp number. It is not an instruction: it has no contract, and no workflow awaits
 it. Each person who writes gets their own [chat conversation](chat.md#whatsapp).
 The Bot acts only through the app routes that you tag `bot`. An app's number is
 public: it answers anyone who writes, and one person is the number's admin. Only
@@ -710,7 +710,7 @@ Chat's number is private: see [WhatsApp](chat.md#whatsapp).
 Declare the Bot as the `bot` attribute of the app class. An app has one Bot:
 
 ```python
-from druks.agents import Bot
+from druks.instructions import Bot
 from druks.apps import App
 
 
@@ -724,7 +724,7 @@ class Helpdesk(App):
     )
 ```
 
-- `prompt` names a template, like an agent's prompt. Druks renders it with
+- `prompt` names a template, like an instruction's prompt. Druks renders it with
   `source`, the conversation's source (`web` or `whatsapp`), and `thread_id`,
   which names the WhatsApp group of a group conversation and is empty in a
   direct chat. Druks gives the result to the agent as its system prompt, and
@@ -754,7 +754,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body
 
-from druks.agents import BotUser
+from druks.instructions import BotUser
 
 from .workflows import GrantAccess
 
@@ -791,7 +791,7 @@ cancel a request before you start a changed one.
 
 The Bot has a row in the app's **Settings → Bots** under the id
 `<app>.bot`. Its harness, model, billing, effort, and timeout resolve
-like an agent's. The timeout is the longest that one turn can run. `timeout=`
+like an instruction's. The timeout is the longest that one turn can run. `timeout=`
 on the Bot declares its default. The Bot runs on Claude, like Chat.
 
 ## Customize the workspace
@@ -922,7 +922,7 @@ alone.
 
 A vault row with one secret issues it under any name. For the secret of a
 service that does not depend on the subject,
-[list it on the agent](#give-an-agent-a-service-secret) instead.
+[list it on the instruction](#give-an-instruction-a-service-secret) instead.
 
 Override `get_mcp_servers(subject)` to give the sandbox an MCP server with its
 own vault row:
@@ -1053,17 +1053,17 @@ scheduled run can proceed.
 Provider selection is an operator concern. App workspace code targets the
 Druks sandbox contract, not `exe`, AWS, or Docker directly.
 
-### Give an agent a browser session
+### Give an instruction a browser session
 
-An agent can drive a browser session. Name the session and the client:
+An instruction can drive a browser session. Name the session and the client:
 
 ```python
-from druks.agents import Agent, AgentOutput
+from druks.instructions import Instruction, InstructionOutput
 from druks.apps import App
 from druks.browser import BrowserClient, BrowserSession
 
 
-class Balance(AgentOutput):
+class Balance(InstructionOutput):
     amount_due: str
     due_date: str
 
@@ -1072,7 +1072,7 @@ class Payables(App):
     name = "payables"
     supplier = BrowserSession(site="supplier.example", read_only=True)
 
-    read_balance = Agent(
+    read_balance = Instruction(
         prompt="payables/read_balance.md",
         contract=Balance,
         browser=supplier,
@@ -1090,7 +1090,7 @@ account owes and when it is due. browser_snapshot reads the page and
 browser_evaluate runs JavaScript in it. Only read; never submit a form.
 ```
 
-A workflow calls it like any other agent: `await Payables.read_balance()`.
+A workflow calls it like any other instruction: `await Payables.read_balance()`.
 
 Druks borrows the session inside each call and starts PinchTab beside Chrome.
 The call's sandbox gets one MCP server, `browser`, with five tools:
@@ -1104,13 +1104,13 @@ or the bridge's network log.
 The key behind the server allows the five tools and nothing else. Druks mints
 it for the call and revokes it when the call ends, fails, times out, or is
 cancelled. It then releases the browser. The `browser` server comes beside the
-plugins and MCP servers the agent declares. A site the operator does not run
+plugins and MCP servers the instruction declares. A site the operator does not run
 can try to steer the agent through its pages, so declare `include_plugins=False`
 and `include_mcp=False` for such a site. Each of its calls gets its own sandbox,
 also in a workflow that sets `steps_reuse_sandbox = True`. A replay of a completed call
 starts no browser. An interrupted call borrows the browser again. The call gets
 prompt context only, and Druks opens no page for it. `BrowserClient.PINCHTAB`
-is the only client that an agent can use.
+is the only client that an instruction can use.
 
 ## Wait for input
 
@@ -1385,7 +1385,7 @@ on the page when it serves the page. See
 ## Activity facts and signals
 
 Use [announcements](#announcing-domain-events) for facts the app owns.
-Use an agent output's `to_artifact()` and `to_event()` for a saved result.
+Use an instruction output's `to_artifact()` and `to_event()` for a saved result.
 Do not announce that same result again from a completion subscriber. Field Notes
 records `gist.prepared` for each gist that its agent prepares. It announces
 `note.gist_approved` when the operator approves a gist.
@@ -2387,7 +2387,7 @@ call = await seed_call(
 
 `seed_run` writes both the run row and its DBOS workflow status. That status
 determines `Run.state`. `seed_run` requires `kind`. If you seed
-`state="parked"`, pass `input_gate`. `seed_call` accepts an agent's string ID.
+`state="parked"`, pass `input_gate`. `seed_call` accepts an instruction's string ID.
 
 `make_settings(tmp_path, **overrides)` builds isolated Druks settings.
 `configure_app_for_test(settings=..., authenticated=False)` returns the mounted
@@ -2673,7 +2673,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.apps` | `App`, `AppSettings`, `Choices`, `Secret` |
 | `druks.services` | `Service`, `Connection`, `auth`, `Resource`, `ResourceError`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
 | `druks.browser` | `BrowserClient`, `BrowserCommandError`, `BrowserSession`, `BrowserSessionSignedOutError`, `BrowserSessionStatus` |
-| `druks.agents` | `Agent`, `AgentOutput`, `Bot`, `BotUser` |
+| `druks.instructions` | `Instruction`, `InstructionOutput`, `Bot`, `BotUser` |
 | `druks.workflows` | `Workflow`, `Gate`, `GateTimeout`, `WaitTimeout`, `WaitFailed`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox`, `SandboxMcpServer`, `SandboxSecret` |
 | `druks.workspaces` | `Workspace`, `RepoWorkspace` |

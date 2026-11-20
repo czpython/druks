@@ -11,9 +11,9 @@ from druks.accounts.dependencies import resolve_single_operator
 from druks.accounts.enums import AccountKind, Role
 from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.models import Account, PersonalAccessToken
-from druks.agents import Agent
 from druks.harnesses import providers
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
+from druks.instructions import Instruction
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
@@ -609,7 +609,7 @@ def test_a_connect_reads_the_new_subscription_s_usage_before_it_wakes_quota_wait
         calls.append("wake")
 
     monkeypatch.setattr(providers.Provider, "poll_usage", poll_usage)
-    monkeypatch.setattr(Agent, "wake_runs_waiting_for_quota", wake_runs_waiting_for_quota)
+    monkeypatch.setattr(Instruction, "wake_runs_waiting_for_quota", wake_runs_waiting_for_quota)
     with _client(tmp_path) as client:
         assert _connect(client, monkeypatch, email="second@example.com").status_code == 200
 

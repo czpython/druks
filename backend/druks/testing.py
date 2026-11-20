@@ -321,7 +321,7 @@ def druks_without_dispatch() -> Iterator[None]:
 
     with (
         mock.patch.object(Workflow, "start", classmethod(_noop)),
-        mock.patch("druks.agents.set_run_phase", _phase_noop),
+        mock.patch("druks.instructions.set_run_phase", _phase_noop),
         mock.patch("druks.durable.reads.get_run_phase", _phase_noop),
         mock.patch("dbos.DBOS.cancel_workflow_async", _cancel),
     ):
