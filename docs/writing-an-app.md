@@ -526,6 +526,9 @@ A workflow that sets `steps_reuse_sandbox = True` keeps one sandbox for all its
 agents, and the sandbox takes its entries from the agent call that creates it.
 Give such a workflow agents that all include MCP servers, or none that do.
 
+A Claude agent's Bash call cannot sleep for over two minutes in total or use
+`--watch`.
+
 Call it only inside a workflow:
 
 ```python

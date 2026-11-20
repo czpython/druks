@@ -136,7 +136,7 @@ async def test_verification_profile_renders_ci_provenance_per_command():
         "## Verification profile",
         "",
         "**Lint:**",
-        "- `ruff check .` — CI: `Backend / lint`",
+        "- `ruff check .` (CI job `Backend / lint` runs this too)",
         "**Tests:**",
         "- `pytest`",
     ]

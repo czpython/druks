@@ -45,6 +45,10 @@ earns no findings at all: padding a review with nits costs the author more than 
 Do not flag code the diff does not change. Reading the repo is how you judge the change, not an
 invitation to audit it.
 
+CI has usually finished when you start, but some checks can still be running.
+Read its result once; do not poll. In your review, name each check that is still pending, and go
+on without waiting for it.
+
 Severity:
 - **high** — a correctness bug, a security flaw, a data-loss path
 - **medium** — a maintainability problem the next change will trip on: an unsafe default, a
