@@ -50,6 +50,7 @@ from druks.secrets.models import VaultSecret
 from druks.services import Connection
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.settings import get_settings
+from druks.skills.models import Skill
 from druks.workspaces import Workspace
 
 from .bots.constants import ADMIN_PROMPT, ADMIN_TOOLS, THREAD_PROMPT, THREAD_TOOLS
@@ -510,6 +511,23 @@ async def send_turn(
             local=get_file_storage().path(conversation.session_file.id),
             remote=archive_path,
         )
+    skills: list[str] = []
+    if conversation.agent and config.harness_class.skills_folder:
+        enabled = {skill.name for skill in await Skill.list_enabled(session)}
+        skills = [name for name in conversation.agent.skills if name in enabled]
+        folder = f"{sandbox_home}/{config.harness_class.skills_folder}"
+        # The box keeps the names Druks put in it. A skill removed from Druks has no row
+        # left, so only this record says it must leave the box. Nothing else in the
+        # folder is touched.
+        record = f"{folder}.delivered"
+        listed = (await host.exec(["cat", record])).stdout.splitlines()
+        delivered = {name for name in listed if name}
+        if dropped := delivered - set(skills):
+            await host.exec(["rm", "-rf", *(f"{folder}/{name}" for name in sorted(dropped))])
+        if skills:
+            await host.upload_dir(local=get_settings().skills_dir, remote=folder, members=skills)
+        if delivered != set(skills):
+            await host.exec(["sh", "-c", 'printf "%s\\n" "$@" > "$0"', record, *skills])
     server = get_druks_mcp_server(allowed_tools=())
     account_type = conversation.account.kind
     timeout = 0 if account_type == AccountKind.OPERATOR else config.timeout
@@ -521,8 +539,11 @@ async def send_turn(
         }
         for mcp_server in mcp_servers
     ]
-    # The bridge reopens a live session when its instructions or MCP servers change.
-    setup = hashlib.sha256(to_json([prompt, server.url, session_servers])).hexdigest()
+    # The bridge reopens a live session when its instructions, MCP servers or skills change.
+    setup_values = [prompt, server.url, session_servers]
+    if conversation.agent:
+        setup_values.append(skills)
+    setup = hashlib.sha256(to_json(setup_values)).hexdigest()
     await bridge.request(
         "start",
         conversationId=conversation.id,
