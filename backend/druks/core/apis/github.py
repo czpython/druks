@@ -601,6 +601,31 @@ class GitHubClient:
         )
         return [status.model_dump() for status in response.parsed_data.statuses]
 
+    async def list_workflow_runs(self, repo: str, head_sha: str) -> list[dict[str, Any]]:
+        """Every Actions workflow run on ``head_sha``."""
+        owner, name = repo.split("/", 1)
+        runs = self._github.rest.paginate(
+            self._github.rest.actions.async_list_workflow_runs_for_repo,
+            map_func=lambda response: response.parsed_data.workflow_runs,
+            owner=owner,
+            repo=name,
+            head_sha=head_sha,
+            per_page=100,
+        )
+        return [run.model_dump() async for run in runs]
+
+    async def rerun_failed_jobs(self, repo: str, run_id: int) -> bool:
+        """Rerun the failed jobs of Actions run ``run_id`` once. False when the App may
+        not (403), so the caller sends the red to an implement call as today."""
+        owner, name = repo.split("/", 1)
+        try:
+            await self._github.rest.actions.async_re_run_workflow_failed_jobs(owner, name, run_id)
+        except RequestFailed as error:
+            if error.response.status_code == 403:
+                return False
+            raise
+        return True
+
     async def get_file_content(
         self,
         repo: str,

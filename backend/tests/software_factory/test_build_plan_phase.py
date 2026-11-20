@@ -982,6 +982,9 @@ def _implementing_build(
         calls.append(f"ci:{conclusion}")
         return CiReport(head_sha=head_sha, conclusion=conclusion)
 
+    async def rerun_failed_jobs(head_sha):
+        return False
+
     async def review_work():
         calls.append("review")
         return ReviewReport(decision=next(decisions), summary="", findings=[], context_repos=[])
@@ -993,6 +996,7 @@ def _implementing_build(
     monkeypatch.setattr(flow, "_create_branch", create_branch)
     monkeypatch.setattr(flow, "implement", implement)
     monkeypatch.setattr(flow, "_wait_for_ci", wait_for_ci)
+    monkeypatch.setattr(flow, "_rerun_failed_jobs", rerun_failed_jobs)
     monkeypatch.setattr(flow, "_review_work", review_work)
     monkeypatch.setattr(flow, "_work_gate", work_gate)
     return flow, calls

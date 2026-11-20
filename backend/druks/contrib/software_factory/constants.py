@@ -23,5 +23,13 @@ CI_TTL_SECONDS = 60 * 60
 CI_POLL_SECONDS = 60
 # A suite that passed or did not apply.
 CI_GREEN_CONCLUSIONS = frozenset({"success", "neutral", "skipped"})
+# Actions run conclusions a rerun can clear. A flake lands here, so the build reruns
+# once before it sends the red to an implement call.
+RERUN_CONCLUSIONS = frozenset({"failure", "timed_out"})
+# A rerun re-queues its run within seconds. Poll this often for the new attempt before
+# the build reads CI again, so it does not read the old red.
+RERUN_POLL_SECONDS = 5
+# Stop waiting for the rerun to start after this many polls, and read CI anyway.
+RERUN_START_POLLS = 24
 # A Linear issue in a state of these types is finished or dropped, so it blocks nothing.
 LINEAR_CLOSED_STATE_TYPES = frozenset({"completed", "canceled"})
