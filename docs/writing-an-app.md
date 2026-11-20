@@ -2660,7 +2660,7 @@ Bundle other dependencies as usual. Route by reading `location.pathname` under
 The bundled Druks SPA also has a shared React app registry. To join this shell,
 compile the app UI module into the dashboard image. An installed Python wheel
 cannot change an existing JavaScript bundle. See the
-[frontend guide](https://github.com/czpython/druks/blob/main/frontend/README.md)
+[frontend guide](https://github.com/getdruks/druks/blob/main/frontend/README.md)
 for that in-repository path.
 
 ## Stable author imports

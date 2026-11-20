@@ -19,7 +19,7 @@ immutable SHA tag. It does not move `latest`.
 3. Review migrations and workflow replay compatibility. A container rollback
    does not downgrade Postgres or DBOS state.
 4. Update the version in `pyproject.toml`. Add the release section to
-   [the changelog](https://github.com/czpython/druks/blob/main/CHANGELOG.md).
+   [the changelog](https://github.com/getdruks/druks/blob/main/CHANGELOG.md).
 5. Merge the release change and record the resulting full commit SHA.
 
 Create a signed annotated tag from that exact commit:
@@ -55,7 +55,7 @@ downloads. If `DRUKS_TAG` is absent, a `v*` ref selects the related image tag.
 A full commit SHA selects `sha-<full-git-sha>`.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/czpython/druks/v0.1.0/scripts/install.sh \
+curl -fsSL https://raw.githubusercontent.com/getdruks/druks/v0.1.0/scripts/install.sh \
   | DRUKS_REF=v0.1.0 bash
 ```
 

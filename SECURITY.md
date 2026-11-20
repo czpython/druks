@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Do not open a public issue. Use the private GitHub
-[security advisory form](https://github.com/czpython/druks/security/advisories/new)
+[security advisory form](https://github.com/getdruks/druks/security/advisories/new)
 and include this information:
 
 - The affected version or commit

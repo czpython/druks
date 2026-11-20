@@ -30,7 +30,7 @@ readers.
 `druks.toml` is the authority for authored process configuration. Druks reserves
 environment variables for infrastructure that Compose injects, such as database,
 Redis, data, and container paths.
-[`.env.example`](https://github.com/czpython/druks/blob/main/.env.example) is the
+[`.env.example`](https://github.com/getdruks/druks/blob/main/.env.example) is the
 host-run development template for that environment plane.
 
 ## Deployment file
