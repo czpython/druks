@@ -1,3 +1,4 @@
+from dbos import DBOS
 from fastapi import APIRouter, Depends, Query
 from pydantic import AwareDatetime
 
@@ -91,4 +92,8 @@ async def delete_agent(
 ) -> None:
     agent = await ConfiguredAgent.get_for_account(session, agent_id, account)
     agent.check_editor(account)
+    # The cascade deletes the schedule rows, so read them first; their DBOS schedules
+    # would otherwise keep firing.
+    for schedule in await Schedule.list_for_agent(session, agent.id):
+        await DBOS.delete_schedule_async(schedule.schedule_name)
     await agent.delete()
