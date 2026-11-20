@@ -36,8 +36,10 @@ class FakeBrowser:
 @pytest.fixture
 def atlas(druks_db, tmp_path, monkeypatch):
     """A session whose borrow records its client and token instead of launching."""
-    settings = make_settings(tmp_path, urls={"webhook_host": "druks.example"})
-    monkeypatch.setattr(agent_browsers, "get_settings", lambda: settings)
+    settings = make_settings(
+        tmp_path, urls={"webhook_host": "druks.example", "mcp_url": "http://100.64.0.5/mcp"}
+    )
+    monkeypatch.setattr("druks.mcp.inbound.get_settings", lambda: settings)
     session = BrowserSession(site="atlas.example", read_only=True)
     session.borrows = []
 
@@ -115,10 +117,10 @@ async def test_lend_gives_the_box_a_key_for_the_browser_tools(druks_db, atlas, a
         assert borrow["client"] == BrowserClient.PINCHTAB
         assert (server.name, server.url, server.bearer_token_env_var) == (
             "browser",
-            "https://druks.example/mcp",
+            "http://100.64.0.5/mcp",
             "MCP_BROWSER_TOKEN",
         )
-        assert (secret.name, secret.host) == ("mcp_browser_token", "druks.example")
+        assert (secret.name, secret.host) == ("mcp_browser_token", "100.64.0.5")
         key = await key_of(druks_db, secret)
         assert key.allowed_tools == list(BROWSER_TOOLS)
         lent = await AgentBrowser.get_for_key(key.token_prefix)
@@ -146,7 +148,7 @@ async def test_a_cancelled_call_revokes_its_key_and_releases_the_browser(druks_d
 
 
 async def test_lend_needs_an_address_the_box_can_reach(atlas, account, tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_browsers, "get_settings", lambda: make_settings(tmp_path))
+    monkeypatch.setattr("druks.mcp.inbound.get_settings", lambda: make_settings(tmp_path))
 
     with pytest.raises(MissingEndpointError, match="urls.webhook_host"):
         async with AgentBrowser.lend(

@@ -3,6 +3,7 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 import asyncssh
 from jsonpointer import JsonPointer, JsonPointerException
@@ -245,10 +246,25 @@ class Urls(BaseModel):
     endpoint: str = ""
     # The public webhook hostname Caddy serves.
     webhook_host: str = ""
+    # The URL of Druks' own ``/mcp`` that a box and the calls server dial, such as
+    # an address on a private network that the providers do not reach. Empty:
+    # ``/mcp`` on ``webhook_base``.
+    mcp_url: str = ""
+
+    @model_validator(mode="after")
+    def _mcp_url_is_an_absolute_url(self) -> "Urls":
+        # Druks scopes the box's key to the host of this URL, so the URL needs a host.
+        address = urlsplit(self.mcp_url)
+        if self.mcp_url and (address.scheme not in ("http", "https") or not address.hostname):
+            raise ValueError(
+                "urls.mcp_url is not an absolute http or https URL with a host. "
+                "Set a URL such as http://100.64.0.5/mcp, or leave it empty."
+            )
+        return self
 
     @property
     def webhook_base(self) -> str:
-        """The base URL that providers and sandboxes reach: the webhook host, else the endpoint."""
+        """The base URL that providers reach: the webhook host, else the endpoint."""
         if self.webhook_host:
             return f"https://{self.webhook_host}"
         return self.endpoint.rstrip("/")

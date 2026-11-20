@@ -54,7 +54,7 @@ def twilio(monkeypatch):
     """A fake Twilio account that holds one number, PN1, and Druks's public address."""
     calls = []
     settings = SimpleNamespace(
-        urls=SimpleNamespace(webhook_base="https://hooks.test"), timezone="UTC"
+        urls=SimpleNamespace(webhook_base="https://hooks.test", mcp_url=""), timezone="UTC"
     )
     for module in (
         "druks.chat.channels.calls.routes",

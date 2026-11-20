@@ -13,9 +13,12 @@ from druks.settings import get_settings
 
 def get_druks_mcp_server(*, allowed_tools: tuple[str, ...]) -> SandboxMcpServer:
     """Druks' own `/mcp` as a workspace's server, at the address a box reaches."""
-    if endpoint := get_settings().urls.webhook_base:
+    urls = get_settings().urls
+    if urls.mcp_url or urls.webhook_base:
         return SandboxMcpServer(
-            name=DRUKS_SERVER_NAME, url=f"{endpoint}/mcp", allowed_tools=allowed_tools
+            name=DRUKS_SERVER_NAME,
+            url=urls.mcp_url or f"{urls.webhook_base}/mcp",
+            allowed_tools=allowed_tools,
         )
     raise MissingEndpointError(DRUKS_SERVER_NAME)
 

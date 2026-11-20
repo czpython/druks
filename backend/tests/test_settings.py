@@ -185,6 +185,18 @@ def test_only_an_explicit_issuer_url_changes_the_mint_base(tmp_path):
     assert settings.sandbox.issuer_url == "http://10.0.0.5:8001"
 
 
+@pytest.mark.parametrize(
+    "mcp_url", ["druks.internal/mcp", "/mcp", "ftp://druks.internal/mcp", "http://:8000/mcp"]
+)
+def test_an_mcp_url_that_is_not_an_absolute_http_url_stops_startup(tmp_path, monkeypatch, mcp_url):
+    config_path = tmp_path / "druks.toml"
+    config_path.write_text(f'[urls]\nmcp_url = "{mcp_url}"\n')
+    monkeypatch.setenv("DRUKS_CONFIG", str(config_path))
+
+    with pytest.raises(ValidationError, match="urls.mcp_url is not an absolute"):
+        Settings()
+
+
 def test_auth_mode_environment_variable_is_ignored(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DRUKS_CONFIG", raising=False)

@@ -40,7 +40,7 @@ host-run development template for that environment plane.
 | Table | Purpose |
 | --- | --- |
 | `[identity]` | Browser identity mode and header or JWT verification inputs |
-| `[urls]` | Dashboard callback base URL and public webhook hostname |
+| `[urls]` | Dashboard callback base URL, public webhook hostname, and the base URL at which a box reaches Druks |
 | `[apps.<name>]` | An app switched off in this installation |
 | `[services.<slug>]` | Service credentials managed by deployment configuration, or a service switched off |
 | `[paths]` | Host data and harness configuration paths |
@@ -275,8 +275,9 @@ caches, and the sandbox provisioning gate.
 
 | TOML key | Purpose |
 | --- | --- |
-| `urls.endpoint` | Browser-visible dashboard URL and MCP OAuth callback base. It is also the `/mcp` base when `urls.webhook_host` is empty. WebSocket upgrades must come from its host. When it is empty, they must come from the request's `Host` |
-| `urls.webhook_host` | Public webhook hostname and the HTTPS host for this installation's `/mcp` endpoint |
+| `urls.endpoint` | Browser-visible dashboard URL and MCP OAuth callback base. It is also the `/mcp` base of a box when `urls.mcp_url` and `urls.webhook_host` are empty. WebSocket upgrades must come from its host. When it is empty, they must come from the request's `Host` |
+| `urls.webhook_host` | Public webhook hostname and the HTTPS host for this installation's `/mcp` endpoint. A box reaches `/mcp` there when `urls.mcp_url` is empty |
+| `urls.mcp_url` | The URL of this installation's `/mcp` endpoint that a box and the calls server dial, for the Druks tools and the agent browser. When it is empty, the default, they use `/mcp` on the webhook address: `urls.webhook_host`, else `urls.endpoint`. Druks does not start when it is set and is not an absolute `http` or `https` URL |
 | `identity.mode` | `none` (default, no authentication, single operator), `header` (edge-asserted identity), or `jwt` (validated edge-signed assertion) |
 | `identity.header` | The trusted identity header. The shipped Caddy edge also uses it. Header and JWT modes have no default and require it |
 | `identity.jwks_url` | `jwt` mode: where the edge publishes its signing keys |
@@ -294,6 +295,15 @@ and the IPv6 addresses.
 `urls.endpoint` and `urls.webhook_host` are different. The first is where an
 operator's browser reaches Druks. The second is the public ingress host for
 webhook senders. They can share a hostname on exe.dev.
+
+Set `urls.mcp_url` when a box reaches Druks' `/mcp` at an address that the
+providers do not reach, such as a private network. Slack, GitHub, Twilio, and
+WhatsApp keep the webhook address. The key that a box holds for `/mcp` goes
+only to the host of `urls.mcp_url`. The
+[calls server](deployment.md#the-calls-server) must also reach this address.
+The listener at this address must serve only `/mcp`, like the webhook
+listener. It must not be the `:8000` dashboard listener or the web port. A box
+that reaches either one can send the identity header and act as an operator.
 
 Druks does not authenticate browsers. Identity resolves per request, in this
 order:
