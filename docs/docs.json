@@ -38,7 +38,7 @@
     ],
     "primary": {
       "type": "github",
-      "href": "https://github.com/czpython/druks"
+      "href": "https://github.com/getdruks/druks"
     }
   },
   "navigation": {
@@ -96,7 +96,7 @@
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/czpython/druks",
+      "github": "https://github.com/getdruks/druks",
       "website": "https://druks.ai"
     },
     "links": [
@@ -105,15 +105,15 @@
         "items": [
           {
             "label": "GitHub",
-            "href": "https://github.com/czpython/druks"
+            "href": "https://github.com/getdruks/druks"
           },
           {
             "label": "Changelog",
-            "href": "https://github.com/czpython/druks/blob/main/CHANGELOG.md"
+            "href": "https://github.com/getdruks/druks/blob/main/CHANGELOG.md"
           },
           {
             "label": "Security",
-            "href": "https://github.com/czpython/druks/blob/main/SECURITY.md"
+            "href": "https://github.com/getdruks/druks/blob/main/SECURITY.md"
           }
         ]
       }

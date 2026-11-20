@@ -15,7 +15,7 @@ still ships an ESM frontend. See
 
 This page is the V1 contract. It gives the exact Python fields and the exact
 JSON for every public model. The backend, the renderer, and
-[the gallery](https://github.com/czpython/druks-ui-gallery) implement this
+[the gallery](https://github.com/getdruks/druks-ui-gallery) implement this
 page. Nothing else names these shapes.
 
 ## Terms

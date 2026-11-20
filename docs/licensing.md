@@ -5,7 +5,7 @@ icon: "scale"
 ---
 
 Druks uses the [Functional Source License, version 1.1, with an Apache 2.0
-future license](https://github.com/czpython/druks/blob/main/LICENSE)
+future license](https://github.com/getdruks/druks/blob/main/LICENSE)
 (FSL-1.1-ALv2). The license text is the contract. This page explains it.
 
 ## What you can do

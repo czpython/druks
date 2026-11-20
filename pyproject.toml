@@ -54,8 +54,8 @@ dependencies = [
 
 [project.urls]
 Documentation = "https://docs.druks.ai"
-Issues = "https://github.com/czpython/druks/issues"
-Repository = "https://github.com/czpython/druks"
+Issues = "https://github.com/getdruks/druks/issues"
+Repository = "https://github.com/getdruks/druks"
 
 [dependency-groups]
 dev = [

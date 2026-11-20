@@ -7,11 +7,11 @@ webhooks, and the dashboard.
 ## Read map
 
 - App contracts and the full author surface:
-  https://github.com/czpython/druks/blob/main/docs/writing-an-app.md.
+  https://github.com/getdruks/druks/blob/main/docs/writing-an-app.md.
 - Pages, blocks, values, fields, actions, and liveness:
-  https://github.com/czpython/druks/blob/main/docs/druks-ui.md.
+  https://github.com/getdruks/druks/blob/main/docs/druks-ui.md.
 - A worked app to read alongside it:
-  https://github.com/czpython/druks/tree/main/backend/tests/druks-field_notes.
+  https://github.com/getdruks/druks/tree/main/backend/tests/druks-field_notes.
 - Each stub module under `druks_{{ name }}/` documents its own role in comments.
 
 ## Contracts

@@ -262,5 +262,5 @@ shell must already be in the SPA and register through
 `frontend/src/apps/index.ts`; a wheel cannot put routes into that existing
 JavaScript bundle.
 
-See the [frontend guide](https://github.com/czpython/druks/blob/main/frontend/README.md)
+See the [frontend guide](https://github.com/getdruks/druks/blob/main/frontend/README.md)
 before adding dashboard pages.
