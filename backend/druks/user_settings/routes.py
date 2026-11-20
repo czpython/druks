@@ -3,15 +3,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.dependencies import current_account, current_admin_account
 from druks.accounts.models import Account
-from druks.agents import Agent
 from druks.api.dependencies import SessionDep
 from druks.apps.loader import get_app
-from druks.apps.registry import agents, bots, channels, workflows
+from druks.apps.registry import bots, channels, instructions, workflows
 from druks.durable.engine import apply_schedules
 from druks.harnesses.base import Harness
 from druks.harnesses.config import check_config
 from druks.harnesses.exceptions import AgentConfigError
 from druks.harnesses.registry import get_harnesses
+from druks.instructions import Instruction
 from druks.notifications.services import list_notification_channels
 from druks.teams.dependencies import require_named_app_access
 
@@ -31,7 +31,7 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
-agents_router = APIRouter(prefix="/api/agents", tags=["settings"])
+instructions_router = APIRouter(prefix="/api/instructions", tags=["settings"])
 
 _EXECUTION_DEFAULTS = (
     "default_harness",
@@ -48,8 +48,8 @@ async def list_harnesses() -> tuple[type[Harness], ...]:
     return get_harnesses()
 
 
-@agents_router.get("", response_model=AgentsResponse, response_model_by_alias=True)
-async def list_agents(
+@instructions_router.get("", response_model=AgentsResponse, response_model_by_alias=True)
+async def list_instructions(
     session: SessionDep, account: Account = Depends(current_account)
 ) -> AgentsResponse:
     settings = await InstallationSettings.get_or_create(session)
@@ -82,7 +82,7 @@ async def check_agent_configs(session: AsyncSession, settings: InstallationSetti
     await check_config(
         session, settings.default_harness, settings.default_model, settings.default_billing
     )
-    for agent in (*agents.all(), *bots.all()):
+    for agent in (*instructions.all(), *bots.all()):
         harness = await SettingsOverride.agent_harness(session, agent.id, settings=settings)
         model = await SettingsOverride.agent_model(session, agent.id, settings=settings)
         billing = await SettingsOverride.agent_billing(session, agent.id, settings=settings)
@@ -106,7 +106,7 @@ async def update_settings(session: SessionDep, body: UpdateSettingsRequest) -> I
         if any(field in fields for field in _EXECUTION_DEFAULTS):
             await check_agent_configs(session, settings)
         if "default_model" in fields or "default_billing" in fields:
-            await Agent.wake_runs_waiting_for_quota(session)
+            await Instruction.wake_runs_waiting_for_quota(session)
     return settings
 
 
@@ -176,7 +176,7 @@ async def update_app_settings(
     # A cell set alone must still fit the two it inherits, so the check reads
     # the stored triple; a rejection rolls the writes back.
     for name in {*body.agent_harnesses, *body.agent_models, *body.agent_billings}:
-        if name not in agents and name not in bots:
+        if name not in instructions and name not in bots:
             raise HTTPException(status_code=422, detail=f"Unknown agent {name!r}")
     if body.agent_harnesses or body.agent_models or body.agent_billings:
         installation = await InstallationSettings.get_or_create(session)
@@ -226,6 +226,6 @@ async def update_app_settings(
         await apply_schedules(session)
 
     if body.agent_models or body.agent_billings:
-        await Agent.wake_runs_waiting_for_quota(session)
+        await Instruction.wake_runs_waiting_for_quota(session)
 
     return await get_app_settings(session, account)

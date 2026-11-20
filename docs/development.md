@@ -68,7 +68,7 @@ contains the built SPA and serves it from FastAPI.
 | Path | Responsibility |
 | --- | --- |
 | `backend/druks/workflows.py` | Public workflow, step, gate, scheduling, and start API |
-| `backend/druks/agents.py` | Public agent descriptor and output contract |
+| `backend/druks/instructions.py` | Public instruction descriptor and output contract |
 | `backend/druks/durable/` | DBOS integration, run projection, lifecycle internals |
 | `backend/druks/apps/` | Entry-point loading, discovery, author settings |
 | `backend/druks/ui/` | Page declarations, the block/value/field catalog, the page API |

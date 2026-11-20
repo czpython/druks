@@ -2,13 +2,13 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, Field, model_validator
 
-from druks.agents import AgentOutput
 from druks.contrib.software_factory.constants import (
     CI_GREEN_CONCLUSIONS,
     CI_REGISTER_SECONDS,
     CI_TTL_SECONDS,
 )
 from druks.contrib.software_factory.enums import HumanFeedbackAction, ReviewDecision
+from druks.instructions import InstructionOutput
 from druks.workflows import Gate, OperatorReply, Workflow
 
 if TYPE_CHECKING:
@@ -34,12 +34,12 @@ class ReviewWork(Gate):
         await build.request_assignee_review()
 
 
-class VerificationCommandOutput(AgentOutput):
+class VerificationCommandOutput(InstructionOutput):
     command: str
     ci_check: str | None
 
 
-class RepoProfilerOutput(AgentOutput):
+class RepoProfilerOutput(InstructionOutput):
     languages: list[str]
     frameworks: list[str]
     package_managers: list[str]
@@ -80,7 +80,7 @@ class RepoProfilerOutput(AgentOutput):
         }
 
 
-class QuestionOptionOutput(AgentOutput):
+class QuestionOptionOutput(InstructionOutput):
     # Identity and cardinality are contract-capped at the agent boundary so a
     # parked ask (and the gate view built from it) is bounded by construction —
     # an oversized answer fails parse loudly instead of being clipped later.
@@ -89,7 +89,7 @@ class QuestionOptionOutput(AgentOutput):
     recommended: bool
 
 
-class QuestionOutput(AgentOutput):
+class QuestionOutput(InstructionOutput):
     id: str = Field(max_length=64)
     prompt: str = Field(max_length=2048)
     options: list[QuestionOptionOutput] = Field(max_length=16)
@@ -98,13 +98,13 @@ class QuestionOutput(AgentOutput):
         return any(option.recommended and option.id == pick for option in self.options)
 
 
-class AcceptanceCriterionOutput(AgentOutput):
+class AcceptanceCriterionOutput(InstructionOutput):
     id: str
     description: str
     verification: str
 
 
-class TicketOutput(AgentOutput):
+class TicketOutput(InstructionOutput):
     repo: str
     title: str
     description: str
@@ -161,7 +161,7 @@ class PlanData(BaseModel):
         return pairs
 
 
-class PlanOutput(AgentOutput):
+class PlanOutput(InstructionOutput):
     plan_markdown: str
     acceptance_criteria: list[AcceptanceCriterionOutput]
     questions: list[QuestionOutput] = Field(max_length=8)
@@ -213,7 +213,7 @@ class PlanOutput(AgentOutput):
         )
 
 
-class ContractRevisionOutput(AgentOutput):
+class ContractRevisionOutput(InstructionOutput):
     plan_markdown: str
     acceptance_criteria: list[AcceptanceCriterionOutput]
     implementation_instructions: str
@@ -234,7 +234,7 @@ class ContractRevisionOutput(AgentOutput):
         )
 
 
-class ReviewOutput(AgentOutput):
+class ReviewOutput(InstructionOutput):
     # No to_artifact: the plan must stay the parked ask's resolved document.
     decision: Literal[ReviewDecision.APPROVE, ReviewDecision.REQUEST_CHANGES]
     body: str
@@ -248,27 +248,27 @@ class ReviewOutput(AgentOutput):
         return self
 
 
-class TriageOutput(AgentOutput):
+class TriageOutput(InstructionOutput):
     action: HumanFeedbackAction
     body: str
     question: str
     implementation_instructions: str
 
 
-class AcceptanceEvidenceOutput(AgentOutput):
+class AcceptanceEvidenceOutput(InstructionOutput):
     id: str
     status: Literal["implemented", "partial", "not_implemented"]
     evidence: str
 
 
-class CommandCheckOutput(AgentOutput):
+class CommandCheckOutput(InstructionOutput):
     command: str
     status: Literal["pass", "fail", "not_run"]
     exit_code: int | None
     reason: str
 
 
-class ImplementationOutput(AgentOutput):
+class ImplementationOutput(InstructionOutput):
     type: Literal["result"]
     # ``needs_clarification`` = the implementer found a contradiction in the binding
     # requirements and bailed; ``summary`` carries the reason. The workflow turns
@@ -308,7 +308,7 @@ class ImplementationOutput(AgentOutput):
         return self
 
 
-class FindingOutput(AgentOutput):
+class FindingOutput(InstructionOutput):
     severity: Literal["high", "medium", "low"]
     summary: str
     evidence: str
@@ -328,7 +328,7 @@ class FindingOutput(AgentOutput):
         return sections
 
 
-class ReviewReport(AgentOutput):
+class ReviewReport(InstructionOutput):
     decision: Literal["approve", "request_changes", "comment"]
     summary: str
     findings: list[FindingOutput]

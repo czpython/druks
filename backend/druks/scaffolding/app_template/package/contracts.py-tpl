@@ -1,5 +1,5 @@
-from druks.agents import AgentOutput
+from druks.instructions import InstructionOutput
 
 # Every schema sent to or received from an agent — nowhere else. Schemas an agent
-# RETURNS subclass ``AgentOutput`` (the platform unwraps it via to_result()); schemas
+# RETURNS subclass ``InstructionOutput`` (the platform unwraps it via to_result()); schemas
 # sent INTO an agent are plain ``pydantic.BaseModel``.

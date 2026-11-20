@@ -494,7 +494,7 @@ class CodexHarness(Harness):
         # Callers own schema validity: the API behind --output-schema
         # enforces OpenAI's strict rules (additionalProperties: false +
         # all-keys required on every object node). Pydantic-derived
-        # schemas get there via the SDK's AgentOutput base (extra="forbid"
+        # schemas get there via the SDK's InstructionOutput base (extra="forbid"
         # + every field required); build's contracts subclass it. A
         # non-strict schema fails loudly with a 400 naming the offending
         # node.

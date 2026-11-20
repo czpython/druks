@@ -71,12 +71,12 @@ operator scrolls up. See the [Chat guide](../docs/chat.md) for message states
 and recovery limits.
 
 Settings use `/settings/<section>` routes. `/settings/personal` edits the current
-account's preferences through `/api/settings/personal`. `/settings/agents` edits
+account's preferences through `/api/settings/personal`. `/settings/instructions` edits
 shared execution defaults through `/api/settings`. The
 preferences provider uses the personal endpoint for timestamp display and theme
 selection. Preferences does not depend on execution catalogs. All accounts
-use the shared execution defaults in Agents and the app agent overrides. Search
-matches section names and app field labels. Preferences and Agents
+use the shared execution defaults in Instructions and the app instruction overrides. Search
+matches section names and app field labels. Preferences and Instructions
 retain separate drafts across settings pages. Save changes applies only the current page.
 Leaving Settings offers Save, Discard, and Stay. Save applies each dirty page;
 a failed request keeps the operator on that page with its draft. Resource
@@ -89,7 +89,7 @@ and login windows at `/settings/connections?tab=browser`.
 
 App settings use `/apps/<name>/settings` in the work context. A gear beside the
 app name in the header opens this route. Settings search also links to app settings.
-Options, Agents, and Bots appear only when the app declares those controls. These
+Options, Instructions, and Bots appear only when the app declares those controls. These
 sections share one app draft. Leaving the app form offers Save, Discard, and
 Stay. An app without controls has no Settings destination. Backend app schemas
 supply these forms without a frontend module. Schedule controls use the

@@ -45,7 +45,7 @@ beforeEach(() => {
       }],
     }
     if (url === '/api/settings/apps/choices?app=chat') response = {}
-    if (url === '/api/agents') response = { apps: [] }
+    if (url === '/api/instructions') response = { apps: [] }
     return new Response(JSON.stringify(response))
   }))
 })
@@ -64,7 +64,7 @@ it.each(['chat', 'helpdesk'])('uses private access for the number options in %s 
   expect(screen.getByText(/^Only paired phones get an answer\./)).toBeTruthy()
   expect(screen.getByRole('link', { name: 'Bots' }).getAttribute('href'))
     .toBe(`/apps/${app}/settings/bots`)
-  expect(screen.queryByRole('link', { name: 'Agents' })).toBeNull()
+  expect(screen.queryByRole('link', { name: 'Instructions' })).toBeNull()
 })
 
 it('shows no Channels tab on a private Bot when calls are the only channel', async () => {

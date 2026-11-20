@@ -1,10 +1,10 @@
 import os
 from typing import Annotated, Literal
 
-from druks.agents import Agent, Bot
 from druks.apps import App, AppSettings, Choices, Secret
 from druks.browser import BrowserClient, BrowserSession
 from druks.doctor import CheckResult
+from druks.instructions import Bot, Instruction
 from pydantic import Field, SecretStr, field_validator
 
 from druks_field_notes.contracts import GistOutput
@@ -92,12 +92,12 @@ class FieldNotes(App):
                 return {"sync_token": "Required when visibility is public."}
             return {}
 
-    summarize = Agent(
+    summarize = Instruction(
         description="reads a note and writes its one-line gist",
         prompt="field_notes/summarize.md",
         contract=GistOutput,
     )
-    survey = Agent(
+    survey = Instruction(
         description="reads a cloned repository and writes its one-line gist",
         prompt="field_notes/survey.md",
         contract=GistOutput,
@@ -106,7 +106,7 @@ class FieldNotes(App):
     bot = Bot(prompt="field_notes/bot.md", user_tools=("jot_note",))
     # The operator's login on the species atlas. A borrow only reads it.
     atlas = BrowserSession(site="atlas.example", read_only=True)
-    identify = Agent(
+    identify = Instruction(
         description="looks a note's species up in the atlas",
         prompt="field_notes/identify.md",
         contract=GistOutput,

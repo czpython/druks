@@ -14,14 +14,14 @@ import type {
 export const SETTINGS_FIELDS = {
   timezone: { section: 'personal', label: 'Timezone', field: 'timezone', terms: 'time zone clock' },
   notifications: { section: 'personal', label: 'Notifications', field: 'notifications', terms: 'slack channel direct message' },
-  harness: { section: 'agents', label: 'Harness', field: 'harness', terms: 'execution' },
-  model: { section: 'agents', label: 'Model', field: 'model', terms: 'execution' },
-  billing: { section: 'agents', label: 'Billing', field: 'billing', terms: 'subscription API key' },
-  effort: { section: 'agents', label: 'Effort', field: 'effort', terms: 'execution' },
-  timeout: { section: 'agents', label: 'Timeout', field: 'timeout', terms: 'execution' },
-  unattendedAccount: { section: 'agents', label: 'Unattended account', field: 'unattended-account', terms: 'execution' },
-  fastMode: { section: 'agents', label: 'Fast mode', field: 'fast', terms: 'execution' },
-  includeApps: { section: 'agents', label: 'Include apps', field: 'include-apps', terms: 'claude.ai connectors ChatGPT apps MCP sandbox' },
+  harness: { section: 'instructions', label: 'Harness', field: 'harness', terms: 'execution' },
+  model: { section: 'instructions', label: 'Model', field: 'model', terms: 'execution' },
+  billing: { section: 'instructions', label: 'Billing', field: 'billing', terms: 'subscription API key' },
+  effort: { section: 'instructions', label: 'Effort', field: 'effort', terms: 'execution' },
+  timeout: { section: 'instructions', label: 'Timeout', field: 'timeout', terms: 'execution' },
+  unattendedAccount: { section: 'instructions', label: 'Unattended account', field: 'unattended-account', terms: 'execution' },
+  fastMode: { section: 'instructions', label: 'Fast mode', field: 'fast', terms: 'execution' },
+  includeApps: { section: 'instructions', label: 'Include apps', field: 'include-apps', terms: 'claude.ai connectors ChatGPT apps MCP sandbox' },
 } as const
 
 export interface CatalogChoice extends CatalogModel {

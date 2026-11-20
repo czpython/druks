@@ -22,7 +22,7 @@ async def test_a_request_reads_what_startup_learned(druks_client, monkeypatch):
     monkeypatch.setattr(Settings, "__init__", refuse)
     monkeypatch.setattr(loader, "entry_points", refuse)
 
-    for path in ("/api/services", "/api/settings/apps", "/api/agents", "/api/apps"):
+    for path in ("/api/services", "/api/settings/apps", "/api/instructions", "/api/apps"):
         assert (await druks_client.get(path)).status_code == 200, path
 
 

@@ -67,7 +67,7 @@ from druks.settings import (
 from druks.skills.routes import router as skills_router
 from druks.teams.routes import router as teams_router
 from druks.ui.exceptions import PageReadError
-from druks.user_settings.routes import agents_router
+from druks.user_settings.routes import instructions_router
 from druks.user_settings.routes import router as settings_router
 from druks.webhooks import router as webhooks_router
 
@@ -335,7 +335,7 @@ app.include_router(secrets_router)
 app.include_router(browser_sessions_router)
 app.include_router(agent_browser_router, dependencies=_identity_gate)
 app.include_router(settings_router, dependencies=_identity_gate)
-app.include_router(agents_router, dependencies=_identity_gate)
+app.include_router(instructions_router, dependencies=_identity_gate)
 app.include_router(apps_router, dependencies=_identity_gate)
 app.include_router(service_identities_router, dependencies=_identity_gate)
 app.include_router(oauth_router, dependencies=_identity_gate)

@@ -1,5 +1,5 @@
-from druks.agents import Bot
 from druks.apps import App
+from druks.instructions import Bot
 
 from .enums import BotAccess
 

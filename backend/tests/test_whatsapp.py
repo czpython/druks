@@ -14,7 +14,6 @@ from conftest import IDENTITY_HEADER, bind_ambient_session, connect_service
 from druks.accounts.dependencies import current_account, resolve_single_operator
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
-from druks.agents import Bot, BotUser
 from druks.api.dependencies import request_session
 from druks.apps import App, loader
 from druks.apps.exceptions import AppBotError
@@ -49,6 +48,7 @@ from druks.chat.routes import create_reminder, start_conversation
 from druks.chat.schemas import ConversationResponse, ReminderResponse
 from druks.chat.tasks import send_due_reminders
 from druks.harnesses.claude import ClaudeHarness
+from druks.instructions import Bot, BotUser
 from druks.mcp.enums import Toolkit
 from druks.mcp.server import _is_visible, _validate_agent_tools
 from druks.models import Base

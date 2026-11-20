@@ -14,8 +14,8 @@ from .schemas import (
 )
 
 if TYPE_CHECKING:
-    from druks.agents import Agent, Bot
     from druks.apps import App
+    from druks.instructions import Bot, Instruction
     from druks.workflows import Workflow
 
 
@@ -26,8 +26,8 @@ async def list_agent_settings(
     settings: InstallationSettings,
     overrides: dict[str, SettingsOverride],
 ) -> list[AgentSettingResponse]:
-    """The rows of the app's Agents tab: its agents, and then its Bot."""
-    declared = [*app.agents(), app.bot] if app.bot else app.agents()
+    """The rows of the app's Instructions tab: its instructions, and then its Bot."""
+    declared = [*app.instructions(), app.bot] if app.bot else app.instructions()
     return [
         await get_agent_setting(session, agent, settings=settings, overrides=overrides)
         for agent in declared
@@ -36,7 +36,7 @@ async def list_agent_settings(
 
 async def get_agent_setting(
     session: AsyncSession,
-    agent: "Agent | Bot",
+    agent: "Instruction | Bot",
     *,
     settings: InstallationSettings,
     overrides: dict[str, SettingsOverride],
