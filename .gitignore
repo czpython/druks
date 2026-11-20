@@ -23,3 +23,5 @@ secrets/
 /dist/
 # ADRs are private, kept out of the repo.
 /docs/adr/
+# ci-survey.py writes its report beside itself. Reports hold team data.
+/scripts/measure/ci-survey.json

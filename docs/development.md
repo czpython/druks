@@ -82,7 +82,7 @@ contains the built SPA and serves it from FastAPI.
 | `frontend/src/` | Shared dashboard shell and bundled app UI |
 | `frontend/src/druksui/` | The renderer for an app's Python pages |
 | `backend/druks/migrations/` | Core/bundled schema history |
-| `deploy/`, `scripts/` | Images, Compose, Caddy, setup, and deployment |
+| `deploy/`, `scripts/` | Images, Compose, Caddy, setup, deployment, and measurement reporting |
 
 The API process embeds DBOS and executes workflows. App modules register
 capabilities during boot, after DBOS initialization and before launch.
