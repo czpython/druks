@@ -78,7 +78,7 @@ async def create_conversation(
     await DBOS.start_workflow_async(deliver, conversation.id)
     await session.refresh(
         conversation,
-        ["messages", "message_count", "active_message_id", "last_message_at"],
+        ["messages", "message_count", "active_message_id", "last_message_at", "agent"],
     )
     return conversation
 
