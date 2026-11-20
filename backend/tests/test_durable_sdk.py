@@ -11,6 +11,7 @@ import pytest
 from dbos import DBOS, DBOSClient
 from dbos._error import DBOSQueueDeduplicatedError
 from druks.accounts.context import Actor, current_account_id, current_actor, current_conversation_id
+from druks.accounts.dependencies import current_session_account
 from druks.accounts.enums import Role
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.dependencies import request_session
@@ -24,6 +25,7 @@ from druks.browser.models import StoredBrowserSession
 from druks.chat.constants import CANCELLED_MESSAGE, CONVERSATION_HEADER, SKIPPED_MESSAGE
 from druks.chat.models import Conversation, Message
 from druks.configured_agents.models import ConfiguredAgent
+from druks.configured_agents.routes import router as configured_agents_router
 from druks.database import configure_session, get_session, session_scope
 from druks.db import atomic, db_session
 from druks.durable import FatalError, Run, RunState, WorkflowError, engine, get_run_phase
@@ -2284,4 +2286,44 @@ async def test_an_admin_stops_another_persons_schedule(runtime):
         )
 
     assert stopped.status_code == 204
+    assert not await DBOS.get_schedule_async(schedule.schedule_name)
+
+
+async def test_deleting_an_agent_stops_the_schedules_set_in_its_conversations(runtime):
+    api = FastAPI(dependencies=[Depends(request_session)])
+    api.include_router(configured_agents_router)
+    owner_id = await _account_id(runtime.engine, "agent-deleter@example.com")
+    async with session_scope(runtime.engine) as session:
+        owner = await session.get(Account, owner_id)
+        agent = await ConfiguredAgent.create(
+            session,
+            owner=owner,
+            name="Payments scanner",
+            description="Scans payments.",
+            instructions="Scan the repo.",
+            skills=[],
+            harness="claude",
+            model="anthropic/claude-opus-4-7",
+            is_private=False,
+        )
+        conversation = await Conversation.create(
+            session, account_id=owner_id, body="Scan payments", agent_id=agent.id
+        )
+        schedule = await Schedule.create(
+            session,
+            account_id=owner_id,
+            conversation_id=conversation.id,
+            tool="field_notes_scan",
+            arguments={"repo": "payments"},
+            cron="0 */2 * * *",
+            tool_names=["field_notes_scan"],
+        )
+    await apply_schedule(schedule)
+    assert await DBOS.get_schedule_async(schedule.schedule_name)
+    api.dependency_overrides[current_session_account] = lambda: owner
+
+    async with asgi_client(api) as client:
+        deleted = await client.delete(f"/api/configured-agents/{agent.id}")
+
+    assert deleted.status_code == 204
     assert not await DBOS.get_schedule_async(schedule.schedule_name)
