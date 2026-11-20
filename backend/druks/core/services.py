@@ -332,6 +332,9 @@ class Github(GithubApp):
                 "url": f"{webhook_base}/_external/github/events/",
                 "active": True,
             }
+        else:
+            # GitHub refuses an App that subscribes to events without a hook URL.
+            del manifest["default_events"]
         return manifest
 
 
