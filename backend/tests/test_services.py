@@ -382,6 +382,7 @@ async def test_manifest_page_gives_a_local_install_no_webhook(
     manifest = _manifest_from((await druks_client.get("/api/core/services/github/manifest")).text)
 
     assert "hook_attributes" not in manifest
+    assert "default_events" not in manifest
     assert manifest["callback_urls"] == ["http://127.0.0.1:8001/api/oauth/callback"]
 
 
@@ -444,7 +445,7 @@ async def test_manifest_callback_exchanges_the_code_and_connects(
 
     assert response.status_code == 200
     assert exchanged == ["https://api.github.com/app-manifests/fresh-code/conversions"]
-    assert "https://github.com/apps/druks/installations/new" in response.text
+    assert "/api/oauth/github/install" in response.text
     # The connect card listens per service on the shared channel.
     assert "BroadcastChannel('druks-service-connect')" in response.text
     assert 'postMessage("github")' in response.text

@@ -423,8 +423,8 @@ Before you create the app, set `urls.endpoint` to the dashboard base URL. If
 you set `urls.webhook_host`, the webhook uses that host. Otherwise, it uses the
 endpoint host. GitHub refuses a webhook on a local address. Thus, when the
 webhook address is not HTTPS, as on a [local install](full-local.md), Druks
-creates the App with no webhook. GitHub events then do not reach Druks, and work
-starts in the dashboard.
+creates the App with no webhook and no event subscriptions. GitHub events then do
+not reach Druks, and work starts in the dashboard.
 
 You can paste the credentials of an existing GitHub App into the same card.
 Enter the GitHub App ID, client ID, client secret, original PEM private key, and

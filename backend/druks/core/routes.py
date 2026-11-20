@@ -81,6 +81,7 @@ async def github_manifest_callback(slug: str, code: str = "") -> HTMLResponse:
     return render_page(
         "github_manifest_callback.html",
         slug=row.identity["slug"],
-        install_url=await service.Authentication.get_install_endpoint(),
+        # Druks' own install door carries the state the install's sign-in returns with.
+        install_url=f"/api/oauth/{slug}/install",
         service=slug,
     )
