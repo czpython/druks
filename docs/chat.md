@@ -71,8 +71,10 @@ able to use the workflow's app. List the runs an agent started, newest first:
 GET /api/configured-agents/<agent id>/runs?limit=20
 ```
 
-`limit` is 20 when you leave it out, and 100 at most. The list shows only the
-runs of apps you can use.
+`limit` is 20 when you leave it out, and 100 at most. `since` keeps the runs
+that started at or after a time with its timezone, such as
+`since=2026-11-16T00:00:00Z`. The list shows only the runs of apps you can
+use.
 
 ## Find and pin conversations
 
@@ -390,7 +392,7 @@ owner's app check, the tool's input check, and the route's own checks. A run tha
 the call starts reports to the conversation, the same as a run that the chat
 started. When the tool refuses the call, or Druks cannot reach its own MCP
 server, Druks skips the call, and the agent tells the person why in the
-conversation. The schedule goes on.
+conversation. DBOS records that due time as failed. The schedule goes on.
 
 A due time makes one call, also when two Druks servers run. An interrupted call
 can run again. A due time that passes while Druks is down is not called later.
@@ -398,7 +400,15 @@ can run again. A due time that passes while Druks is down is not called later.
 `list_schedules` lists the caller's schedules with each one's tool, arguments,
 cron, and next time. `change_schedule` replaces the tool, the arguments, and the
 cron of one of the caller's schedules. `stop_schedule` stops it, and the runs its
-calls already started go on.
+calls already started go on. An admin can also stop another person's schedule.
+
+An agent's page lists the schedules set in the agent's conversations. Everyone
+who can see the agent sees them, each with its owner and its last due time. The
+page reads them from this route:
+
+```http
+GET /api/configured-agents/<agent id>/schedules
+```
 
 ## WhatsApp
 

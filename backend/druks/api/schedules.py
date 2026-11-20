@@ -126,9 +126,10 @@ async def stop_schedule(
     account: Account = Depends(current_account),
 ) -> None:
     """Stop one of your schedules. The runs its calls already started go on."""
-    schedule = await Schedule.get_for_account(session, schedule_id, account.id)
+    schedule = await session.get(Schedule, schedule_id)
     if not schedule:
         raise HTTPException(404, "Schedule not found. Choose one from list_schedules.")
+    schedule.check_stopper(account)
     await DBOS.delete_schedule_async(schedule.schedule_name)
     await session.delete(schedule)
     await session.commit()

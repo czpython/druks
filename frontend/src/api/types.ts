@@ -683,6 +683,18 @@ export interface ConfiguredAgent extends ConfiguredAgentInput {
   id: string
 }
 
+// A schedule set in one of the agent's conversations; lastRun is its newest due time.
+export interface AgentSchedule {
+  id: string
+  accountId: string
+  conversationId: string
+  tool: string
+  arguments: Record<string, unknown>
+  cron: string
+  nextRunAt: string
+  lastRun: ScheduledRun | null
+}
+
 /** What /api/auth/me answers: how this deployment authenticates, who the
  * request resolved to (null in the none/zero setup state), and whether that
  * identity still needs its first provider credential. */

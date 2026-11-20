@@ -11,9 +11,11 @@ import pytest
 from dbos import DBOS, DBOSClient
 from dbos._error import DBOSQueueDeduplicatedError
 from druks.accounts.context import Actor, current_account_id, current_actor, current_conversation_id
+from druks.accounts.enums import Role
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.dependencies import request_session
 from druks.api.schedules import router as schedules_router
+from druks.api.server import _permission_denied_handler
 from druks.apps.loader import iter_apps, register_workflow_package
 from druks.apps.registry import Registry, instructions, workflows
 from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
@@ -38,7 +40,7 @@ from druks.durable.engine import (
     trigger_schedule,
 )
 from druks.durable.enums import AgentCallStatus, WorkflowEvent
-from druks.durable.exceptions import ScheduleError
+from druks.durable.exceptions import ScheduleError, ScheduleSkipped
 from druks.durable.models import AgentCall, Artifact, Schedule
 from druks.durable.schedules import apply_schedule, run_schedule
 from druks.events.models import Event
@@ -2123,7 +2125,9 @@ async def _make_schedule(runtime, *, owner: str = "op@example.com") -> Schedule:
         return schedule
 
 
-async def test_a_due_time_whose_tool_refuses_the_call_is_told_in_the_chat(runtime, monkeypatch):
+async def test_a_due_time_whose_tool_refuses_the_call_fails_and_is_told_in_the_chat(
+    runtime, monkeypatch
+):
     schedule = await _make_schedule(runtime)
     called = []
 
@@ -2137,7 +2141,8 @@ async def test_a_due_time_whose_tool_refuses_the_call_is_told_in_the_chat(runtim
 
     monkeypatch.setattr("druks.durable.schedules.call_tool", call_tool)
 
-    await run_schedule(datetime.now(UTC), {"schedule_id": schedule.id})
+    with pytest.raises(ScheduleSkipped, match="No repository is named payments."):
+        await run_schedule(datetime.now(UTC), {"schedule_id": schedule.id})
 
     assert called == [schedule.id]
     async with get_session(runtime.engine) as session:
@@ -2201,10 +2206,11 @@ async def test_apply_schedules_keeps_a_persons_schedules_in_the_installation_tim
     await DBOS.delete_schedule_async(schedule.schedule_name)
 
 
-async def test_a_person_makes_their_schedule_in_a_chat_and_only_they_change_or_stop_it(
+async def test_a_person_makes_their_schedule_in_a_chat_and_only_they_change_it(
     runtime,
 ):
     api = FastAPI(dependencies=[Depends(request_session)])
+    api.add_exception_handler(PermissionDenied, _permission_denied_handler)
     api.include_router(schedules_router)
     # The MCP surface names the tools a schedule may call.
     create_mcp_app(api)
@@ -2249,7 +2255,7 @@ async def test_a_person_makes_their_schedule_in_a_chat_and_only_they_change_or_s
     )
     assert [each["id"] for each in listed.json()] == [schedule_id]
     assert hidden.json() == []
-    assert (refused.status_code, kept.status_code) == (404, 404)
+    assert (refused.status_code, kept.status_code) == (404, 403)
     assert (changed.json()["arguments"], changed_in_dbos["schedule"]) == (
         {"page": 2},
         "0 9 * * *",
@@ -2258,3 +2264,24 @@ async def test_a_person_makes_their_schedule_in_a_chat_and_only_they_change_or_s
     assert not await DBOS.get_schedule_async(name)
     async with get_session(runtime.engine) as session:
         assert not await session.get(Schedule, schedule_id)
+
+
+async def test_an_admin_stops_another_persons_schedule(runtime):
+    api = FastAPI(dependencies=[Depends(request_session)])
+    api.include_router(schedules_router)
+    schedule = await _make_schedule(runtime)
+    await apply_schedule(schedule)
+    async with get_session(runtime.engine) as session:
+        admin = Account(username="admin@example.com", role=Role.ADMIN)
+        session.add(admin)
+        await session.flush()
+        _, token = await PersonalAccessToken.create(session, account_id=admin.id, name="a")
+        await session.commit()
+
+    async with asgi_client(api) as client:
+        stopped = await client.delete(
+            f"/api/schedules/{schedule.id}", headers={"Authorization": f"Bearer {token}"}
+        )
+
+    assert stopped.status_code == 204
+    assert not await DBOS.get_schedule_async(schedule.schedule_name)

@@ -1,11 +1,14 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from druks.durable.enums import RunState
 from druks.durable.schemas import RunResponse
 from druks.schemas import Schema
+
+if TYPE_CHECKING:
+    from druks.durable.models import Schedule
 
 
 class ResumeRequest(BaseModel):
@@ -128,3 +131,25 @@ class ScheduleResponse(Schema):
     arguments: dict[str, Any]
     cron: str
     next_run_at: datetime
+
+
+class AgentScheduleResponse(ScheduleResponse):
+    """A schedule on its agent's page: who owns it, and its newest due time."""
+
+    account_id: str
+    last_run: ScheduledRun | None
+
+    @classmethod
+    def from_schedule(
+        cls, schedule: "Schedule", *, last_run: ScheduledRun | None
+    ) -> "AgentScheduleResponse":
+        return cls(
+            id=schedule.id,
+            account_id=schedule.account_id,
+            conversation_id=schedule.conversation_id,
+            tool=schedule.tool,
+            arguments=schedule.arguments,
+            cron=schedule.cron,
+            next_run_at=schedule.next_run_at,
+            last_run=last_run,
+        )

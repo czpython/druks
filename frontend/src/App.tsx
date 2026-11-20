@@ -30,6 +30,7 @@ import { ChatPage } from './pages/ChatPage'
 import { LoginWindowPage } from './pages/LoginWindowPage'
 import { UsagePage } from './pages/UsagePage'
 import { SchedulesPage } from './pages/SchedulesPage'
+import { AgentPage } from './pages/AgentPage'
 import { AgentsPage } from './pages/AgentsPage'
 import './apps'
 import { registerInstalledApps } from './apps/installed'
@@ -290,7 +291,7 @@ function AppShell({
     appLabel(name).toLowerCase().includes(search.toLowerCase().trim()),
   )
   const isChat = location === '/chat' || location.startsWith('/chat/')
-  const title = isChat ? 'Chat' : SHELL_PAGES[location] ?? (app ? appLabel(app) : 'Druks')
+  const title = isChat ? 'Chat' : SHELL_PAGES[location] ?? (location.startsWith('/agents/') ? 'Agents' : app ? appLabel(app) : 'Druks')
 
   return (
     <div className="command-center" hidden={hidden}>
@@ -482,6 +483,9 @@ function AppShell({
           </Route>
           <Route path="/agents">
             <AgentsPage account={account} />
+          </Route>
+          <Route path="/agents/:id">
+            {(params) => <AgentPage id={params.id} account={account} />}
           </Route>
           <Route path="/events">
             <EventsPage />

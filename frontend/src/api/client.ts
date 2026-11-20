@@ -1,5 +1,6 @@
 import type {
   Account,
+  AgentSchedule,
   AccountRole,
   AgentsResponse,
   AgentCallFiles,
@@ -44,6 +45,7 @@ import type {
   McpServerDirectoryEntry,
   McpServerScopes,
   RunDetail,
+  RunSummary,
   Service,
   Provider,
   ProviderCatalog,
@@ -339,6 +341,16 @@ export const api = {
     postJSON<ConfiguredAgent>(`/api/configured-agents/${encodeURIComponent(agentId)}`, body, 'PUT'),
   deleteConfiguredAgent: (agentId: string) =>
     deleteRequest(`/api/configured-agents/${encodeURIComponent(agentId)}`),
+  configuredAgent: (agentId: string) =>
+    getJSON<ConfiguredAgent>(`/api/configured-agents/${encodeURIComponent(agentId)}`),
+  configuredAgentRuns: (agentId: string, query: Record<string, string> = {}) =>
+    getJSON<RunSummary[]>(
+      `/api/configured-agents/${encodeURIComponent(agentId)}/runs?${new URLSearchParams(query)}`,
+    ),
+  configuredAgentSchedules: (agentId: string) =>
+    getJSON<AgentSchedule[]>(`/api/configured-agents/${encodeURIComponent(agentId)}/schedules`),
+  stopSchedule: (scheduleId: string) =>
+    deleteRequest(`/api/schedules/${encodeURIComponent(scheduleId)}`),
   providers: () => getJSON<Provider[]>('/api/providers'),
   providerSubscriptions: () => getJSON<ProviderSubscription[]>('/api/providers/subscriptions'),
   providerKeys: () => getJSON<ProviderKey[]>('/api/providers/keys'),

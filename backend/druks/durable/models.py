@@ -55,6 +55,7 @@ from druks.durable.enums import (
 )
 from druks.durable.exceptions import AgentCallNotFound, ArtifactContentMissing, ScheduleError
 from druks.events.models import Event
+from druks.exceptions import PermissionDenied
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
 from druks.notifications.constants import CLOSE_WORKFLOW
@@ -243,23 +244,31 @@ class Run(Base):
 
     @classmethod
     async def list_for_agent(
-        cls, session: AsyncSession, agent_id: str, *, kinds: Sequence[str], limit: int
+        cls,
+        session: AsyncSession,
+        agent_id: str,
+        *,
+        kinds: Sequence[str],
+        limit: int,
+        since: datetime | None = None,
     ) -> list["Run"]:
         """The runs that the agent's conversations started, newest first, each with its
-        agent calls. ``kinds`` keeps the runs of those workflows."""
+        agent calls. ``kinds`` keeps the runs of those workflows, and ``since`` the runs
+        that started at or after it."""
         # The chat models import the durable package, so this import cannot be at the top.
         from druks.chat.models import Conversation  # noqa: PLC0415
 
-        return list(
-            await session.scalars(
-                select(cls)
-                .join(Conversation, Conversation.id == cls.conversation_id)
-                .where(Conversation.agent_id == agent_id, cls.kind.in_(kinds))
-                .order_by(cls.created_at.desc(), cls.id.desc())
-                .limit(limit)
-                .options(selectinload(cls.agent_calls))
-            )
+        stmt = (
+            select(cls)
+            .join(Conversation, Conversation.id == cls.conversation_id)
+            .where(Conversation.agent_id == agent_id, cls.kind.in_(kinds))
+            .order_by(cls.created_at.desc(), cls.id.desc())
+            .limit(limit)
+            .options(selectinload(cls.agent_calls))
         )
+        if since:
+            stmt = stmt.where(cls.created_at >= since)
+        return list(await session.scalars(stmt))
 
     @classmethod
     async def get_latest_for_subject(
@@ -960,8 +969,8 @@ class Schedule(Base, Uuid7Pk):
     __tablename__ = "schedules"
     __table_args__ = (Index("schedules_account_idx", "account_id", "created_at"),)
 
-    # The account that asked for the schedule. Each call runs as this account, and only
-    # it lists, changes, or stops the schedule.
+    # The account that asked for the schedule. Each call runs as this account. Only it
+    # changes the schedule, and only it or an admin stops it.
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     conversation_id: Mapped[str] = mapped_column(
         ForeignKey("chat_conversations.id", ondelete="CASCADE")
@@ -1022,6 +1031,26 @@ class Schedule(Base, Uuid7Pk):
         return await session.scalar(
             select(cls).where(cls.id == schedule_id, cls.account_id == account_id)
         )
+
+    @classmethod
+    async def list_for_agent(cls, session: AsyncSession, agent_id: str) -> list["Schedule"]:
+        """The schedules set in the agent's conversations, newest first."""
+        # The chat models import the durable package, so this import cannot be at the top.
+        from druks.chat.models import Conversation  # noqa: PLC0415
+
+        return list(
+            await session.scalars(
+                select(cls)
+                .join(Conversation, Conversation.id == cls.conversation_id)
+                .where(Conversation.agent_id == agent_id)
+                .order_by(cls.created_at.desc(), cls.id.desc())
+            )
+        )
+
+    def check_stopper(self, account: Account) -> None:
+        """Only the owner or an admin stops a schedule."""
+        if account.id != self.account_id and not account.is_admin:
+            raise PermissionDenied("Only the schedule's owner or an admin can stop it.")
 
     @property
     def schedule_name(self) -> str:
