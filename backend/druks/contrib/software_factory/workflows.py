@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from typing import Any
@@ -31,6 +32,9 @@ from .constants import (
     CI_TTL_SECONDS,
     GITHUB_MCP_NAME,
     GITHUB_MCP_URL,
+    RERUN_CONCLUSIONS,
+    RERUN_POLL_SECONDS,
+    RERUN_START_POLLS,
     REVIEW_TTL_SECONDS,
     TICKET_TOOLS,
 )
@@ -365,6 +369,10 @@ class Build(Workflow):
             # that head has already been read.
             if not previous_delivery or delivery.head_sha != previous_delivery.head_sha:
                 ci_report = await self._wait_for_ci(delivery.head_sha)
+                if ci_report.conclusion == "red" and await self._rerun_failed_jobs(
+                    delivery.head_sha
+                ):
+                    ci_report = await self._wait_for_ci(delivery.head_sha)
                 if ci_report.conclusion == "red" and can_revise:
                     continue
             review = await self._review_work()
@@ -380,6 +388,40 @@ class Build(Workflow):
             await self.sleep(CI_POLL_SECONDS, label="Waiting for CI", until="check.completed")
         self.journal.add(ci_report)
         return ci_report
+
+    @step(retries=3)
+    async def _rerun_failed_jobs(self, head_sha: str) -> bool:
+        """Rerun every failed or timed-out Actions run on ``head_sha`` once, and wait for
+        the rerun to start so the next CI read sees it, not the old red. Return whether a
+        run was rerun. A red that has no Actions run to rerun (``druks-house-rules``), or
+        a 403 for a repo the App may not rerun, returns False, and the build sends the red
+        to an implement call as today. One ``@step`` so a replay reads the result and does
+        not rerun again."""
+        repo = (await self.subject).repo
+        github = await Github.get_client(repo)
+        attempts = {
+            run["id"]: run["run_attempt"]
+            for run in await github.list_workflow_runs(repo, head_sha)
+            if run["conclusion"] in RERUN_CONCLUSIONS
+        }
+        if not attempts:
+            return False
+        for run_id in attempts:
+            if not await github.rerun_failed_jobs(repo, run_id):
+                return False
+        for _ in range(RERUN_START_POLLS):
+            runs = {run["id"]: run for run in await github.list_workflow_runs(repo, head_sha)}
+            if all(
+                run_id in runs
+                and (
+                    runs[run_id]["run_attempt"] > attempt
+                    or runs[run_id]["status"] in ("queued", "in_progress")
+                )
+                for run_id, attempt in attempts.items()
+            ):
+                break
+            await asyncio.sleep(RERUN_POLL_SECONDS)
+        return True
 
     @step
     async def _now(self) -> float:
