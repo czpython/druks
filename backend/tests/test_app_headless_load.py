@@ -111,7 +111,7 @@ def external_app(tmp_path_factory):
     metadata, signal receivers) so the suite stays clean."""
     from blinker import signal
     from druks.apps import loader as apps_loader
-    from druks.apps.registry import agents, services, webhooks, workflows
+    from druks.apps.registry import instructions, services, webhooks, workflows
     from druks.models import Base
 
     root = tmp_path_factory.mktemp("external")
@@ -120,7 +120,8 @@ def external_app(tmp_path_factory):
 
     tables = set(Base.metadata.tables)
     registries = {
-        registry: dict(registry._items) for registry in (agents, services, webhooks, workflows)
+        registry: dict(registry._items)
+        for registry in (instructions, services, webhooks, workflows)
     }
     packages = dict(apps_loader._workflow_packages)
     finished = signal("workflow.finished")

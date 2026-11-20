@@ -19,9 +19,8 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .accounts.models import Account
-from .agents import Agent
 from .apps.loader import iter_apps, register_apps
-from .apps.registry import _ROLES, agents, autodiscover, services, webhooks, workflows
+from .apps.registry import _ROLES, autodiscover, instructions, services, webhooks, workflows
 from .browser.sessions import BrowserSession
 from .chat.bridge import Bridge
 from .chat.channels.base import Channel
@@ -29,6 +28,7 @@ from .core.services import Github
 from .database import create_async_engine_from_url, create_engine_from_url, session_scope
 from .harnesses.providers import get_providers
 from .harnesses.registry import get_harnesses
+from .instructions import Instruction
 from .sandbox.client import sandbox_client
 from .sandbox.exceptions import TemplateNotFound
 from .sandbox.templates import get_declared_sandboxes
@@ -473,8 +473,8 @@ def _defined_capability(module: ModuleType) -> tuple[str, str] | None:
             and value.__module__ == name
         ):
             return "services", value.slug
-        if isinstance(value, Agent) and value.module == name:
-            return "agents", value.name
+        if isinstance(value, Instruction) and value.module == name:
+            return "instructions", value.name
         if (
             isinstance(value, type)
             and issubclass(value, Channel)
@@ -492,7 +492,7 @@ def check_capability_modules(settings: Settings) -> CheckResult:
     by_role = {
         "workflows": workflows,
         "webhooks": webhooks,
-        "agents": agents,
+        "instructions": instructions,
         "services": services,
     }
     packages = [app.package for app in iter_apps()]

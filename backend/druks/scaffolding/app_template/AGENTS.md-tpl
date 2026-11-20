@@ -30,7 +30,7 @@ webhooks, and the dashboard.
   reconnect, and on a retry, so it must never write, start work, publish an
   event, answer a gate, or depend on process state.
 - Import the concern namespaces — `druks.apps`, `druks.workflows`,
-  `druks.agents`, `druks.db`, `druks.schemas`, `druks.signals`, `druks.events`,
+  `druks.instructions`, `druks.db`, `druks.schemas`, `druks.signals`, `druks.events`,
   `druks.prompts`, `druks.ui`, `druks.webhooks`, `druks.testing` — never
   `druks.durable` or an internal module. The root `druks` package exports only its version.
 - Domain policy lives here. Generic agent, harness, workspace, sandbox, event, gate,

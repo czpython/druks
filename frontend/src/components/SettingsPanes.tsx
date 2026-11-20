@@ -583,12 +583,12 @@ export function AgentsPane({
   return (
     <div className="set-pane mcp-pane settings-agents">
       <header className="mcp-pane-head">
-        <p className="mcp-pane-sub">Shared execution settings for this installation. Agent overrides take priority.</p>
+        <p className="mcp-pane-sub">Shared execution settings for this installation. Instruction overrides take priority.</p>
       </header>
 
       <section className="set-group settings-default-execution">
         <h2>Default execution</h2>
-        <p>All accounts use these defaults unless an agent has an override.</p>
+        <p>All accounts use these defaults unless an instruction has an override.</p>
         <div className="set-defaults">
           <div className="mcp-field" data-setting={SETTINGS_FIELDS.harness.field}>
             <label className="mcp-label" htmlFor={id('harness')}>
@@ -3716,7 +3716,7 @@ export function AppPane({
         </div>
       )}
 
-      {['agents', 'bots'].includes(section) && defaults && (
+      {['instructions', 'bots'].includes(section) && defaults && (
         <div className="set-group">
           <div className="set-group-label">{section}</div>
           <AgentRecords

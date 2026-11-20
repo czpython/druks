@@ -39,7 +39,7 @@ name must match `App.name`. The same name scopes:
 ### Druks owns
 
 - Durable execution, queues, schedules, run state, cancellation, and gates
-- Agent descriptors, harness dispatch, and sandbox access
+- Instruction descriptors, harness dispatch, and sandbox access
 - Subject timelines, the event feed, signals, webhook dispatch, and notifications
 - MCP and skill delivery, settings, MCP secret encryption, and diagnostics
 - The FastAPI server, shared dashboard shell, and app loading.
@@ -47,7 +47,7 @@ name must match `App.name`. The same name scopes:
 ### An app owns
 
 - Domain workflows, their subjects, and their start policy
-- Agents, prompts, and structured output contracts
+- Instructions, prompts, and structured output contracts
 - Domain models, migrations, HTTP routes, and subject summaries
 - Normalized event reactions and provider-specific webhook behavior
 - Provider credentials and prerequisites that are specific to the domain
@@ -195,13 +195,13 @@ invisible wait.
 Cancellation clears the outstanding ask and asks DBOS to cancel the workflow.
 A parked subject then releases its deduplication slot so another run can start.
 
-## Agents, harnesses, workspaces, and sandboxes
+## Instructions, harnesses, workspaces, and sandboxes
 
 These terms describe different ownership layers:
 
 | Layer | Responsibility |
 | --- | --- |
-| Agent | App-owned prompt, output contract, and run timeout |
+| Instruction | App-owned prompt, output contract, and run timeout |
 | Harness | Platform adapter that invokes an agent CLI for a model |
 | Workspace | App customization of what a call receives, such as a cloned repository |
 | Sandbox | Drukbox-provisioned isolated host where the harness process runs |

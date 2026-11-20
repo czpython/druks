@@ -5,12 +5,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from druks.accounts.models import Account
-from druks.agents import AgentOutput
 from druks.durable import AgentCall
 from druks.files import File, FileField
 from druks.files.exceptions import FileTooLargeError, FileUnavailableError
 from druks.files.models import FileRecord
 from druks.files.storage import LocalFileStorage, reap_deleted_file_bytes
+from druks.instructions import InstructionOutput
 from druks.models import Base
 from druks.sandbox.exceptions import SandboxDownloadError
 from druks.sandbox.host import Host
@@ -22,12 +22,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 pytestmark = pytest.mark.usefixtures("tmp_data_dir")
 
 
-class SurveyShot(AgentOutput):
+class SurveyShot(InstructionOutput):
     screen: str
     image: File
 
 
-class SurveyOutput(AgentOutput):
+class SurveyOutput(InstructionOutput):
     shots: list[SurveyShot]
 
 
