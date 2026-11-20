@@ -1,1 +1,12 @@
 on_approval: merge
+verification:
+  lint_commands:
+    - uv run ruff check backend druks-calls
+    - uv run ruff format --check backend druks-calls
+    - npm --prefix frontend run lint
+  typecheck_commands:
+    - npm --prefix frontend run build
+  test_commands:
+    - uv run pytest backend/
+    - npm --prefix frontend test
+    - cd druks-calls && uv run --locked pytest
