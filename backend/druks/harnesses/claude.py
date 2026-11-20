@@ -29,6 +29,8 @@ from .providers import AnthropicProvider
 
 logger = logging.getLogger(__name__)
 
+_NO_WAITING_HOOK = Path(__file__).parent / "hooks" / "druks-no-waiting.sh"
+
 
 class ClaudeHarness(Harness):
     # Claude streams its rollout as JSONL on stdout
@@ -141,24 +143,30 @@ class ClaudeHarness(Harness):
         in_vm_run_dir = f"{get_runs_root(ssh_username)}/{run_id}"
         in_vm_debug = f"{in_vm_run_dir}/debug.log"
         in_vm_session = f"{in_vm_run_dir}/session.jsonl"
-        settings_hooks: dict[str, object] = {}
+        in_vm_no_waiting_hook = f"{in_vm_run_dir}/{_NO_WAITING_HOOK.name}"
+        # The guard denies a long sleep and --watch.
+        no_waiting_command = f"sh {in_vm_no_waiting_hook}"
+        pre_tool_use: list[dict[str, object]] = [
+            {
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": no_waiting_command}],
+            }
+        ]
         write_hook = ""
         if "after_agent" in hooks:
             # Claude Code ignores a Stop hook in a structured run.
             command = f"sh {self.after_agent_hook_path(in_vm_run_dir)}"
-            settings_hooks = {
-                "PreToolUse": [
-                    {
-                        "matcher": "StructuredOutput",
-                        "hooks": [{"type": "command", "command": command, "timeout": timeout}],
-                    }
-                ]
-            }
+            pre_tool_use.append(
+                {
+                    "matcher": "StructuredOutput",
+                    "hooks": [{"type": "command", "command": command, "timeout": timeout}],
+                }
+            )
             write_hook = f"{self.write_after_agent_hook(in_vm_run_dir)} && "
         # Prompt rides as stdin (SFTP-uploaded) to avoid the SSH exec
         # channel's per-request size limit.
         claude_argv = [
-            *self._command_args(settings_hooks),
+            *self._command_args({"PreToolUse": pre_tool_use}),
             "--print",
             "--output-format",
             "stream-json",
@@ -187,6 +195,8 @@ class ClaudeHarness(Harness):
         claude_cmdline = " ".join(shlex.quote(a) for a in claude_argv)
         run_dir_q = shlex.quote(in_vm_run_dir)
         session_q = shlex.quote(in_vm_session)
+        no_waiting_body_q = shlex.quote(_NO_WAITING_HOOK.read_text())
+        no_waiting_hook_q = shlex.quote(in_vm_no_waiting_hook)
         # Drukbox delivers the placeholder as ANTHROPIC_AUTH_TOKEN, and Claude Code loads no
         # connectors from there. A run that loads the person's subscription apps needs
         # CLAUDE_CODE_OAUTH_TOKEN, which ANTHROPIC_API_KEY, set by docker-sbx in every box,
@@ -201,6 +211,7 @@ class ClaudeHarness(Harness):
             )
         wrapper = (
             f"mkdir -p {run_dir_q} && "
+            f"printf %s {no_waiting_body_q} > {no_waiting_hook_q} && "
             f"{write_hook}"
             # The kill stops claude, and the wrapper lives on to copy.
             "trap : TERM && "

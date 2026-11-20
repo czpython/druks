@@ -12,7 +12,7 @@ No lint / typecheck / test / smoke commands are configured for this repo. Take v
 {% for section in sections if section.command_entries -%}
 **{{ section.label }}:**
 {% for entry in section.command_entries -%}
-- `{{ entry.command }}`{{ " — CI: `" ~ entry.ci_check ~ "`" if entry.ci_check else "" }}
+- `{{ entry.command }}`{{ " (CI job `" ~ entry.ci_check ~ "` runs this too)" if entry.ci_check else "" }}
 {% endfor %}
 {% endfor -%}
 {% endif -%}
