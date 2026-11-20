@@ -1,11 +1,14 @@
 import copyreg
-from typing import Any
+from typing import Any, ClassVar
 
 
 class DruksError(Exception):
     """Base of every druks exception. Pickle rebuilds one from its args and
     attributes without a constructor call, so a DBOS step replays the error
     it recorded."""
+
+    # Druks writes the message from identifiers alone, so the message may leave the process.
+    is_message_safe: ClassVar[bool] = False
 
     def __reduce__(self) -> tuple[Any, ...]:
         return copyreg.__newobj__, (type(self),), {"args": self.args, **vars(self)}

@@ -396,6 +396,32 @@ def test_setup_moves_a_secret_that_druks_toml_holds_to_env(tmp_path):
     assert "EXE_API_TOKEN" not in config["sandbox"]["exe"]
 
 
+def test_the_traces_endpoint_stays_in_druks_toml_and_its_headers_move_to_env(tmp_path, monkeypatch):
+    env_path = tmp_path / ".env"
+
+    _run(
+        env_path,
+        provider="docker",
+        set_values=(
+            "traces.endpoint=https://collector.example.com/v1/traces",
+            "traces.headers=x-api-key=collector-key",
+        ),
+    )
+
+    toml_path = tmp_path / "druks.toml"
+    assert _read_toml(toml_path)["traces"] == {
+        "endpoint": "https://collector.example.com/v1/traces"
+    }
+    headers = read_env(env_path)["DRUKS_TRACES_HEADERS"]
+    assert headers == "x-api-key=collector-key"
+    assert f"DRUKS_TRACES_HEADERS={headers}" in _read_secrets(env_path)
+    monkeypatch.setenv("DRUKS_CONFIG", str(toml_path))
+    monkeypatch.setenv("DRUKS_TRACES_HEADERS", headers)
+    settings = Settings()
+    assert settings.traces.endpoint == "https://collector.example.com/v1/traces"
+    assert settings.traces.headers.get_secret_value() == "x-api-key=collector-key"
+
+
 def test_compose_plane_env_additions_survive_rerender(tmp_path):
     env_path = tmp_path / ".env"
     _run(env_path, provider="docker")

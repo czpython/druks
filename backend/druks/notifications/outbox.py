@@ -3,7 +3,6 @@ from datetime import datetime
 from functools import partial
 
 from dbos import DBOS, EnqueueOptions, StepOptions
-from dbos._error import DBOSMaxStepRetriesExceeded
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.models import Account
@@ -20,6 +19,7 @@ from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.settings import get_settings
+from druks.tracing import get_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -85,15 +85,7 @@ async def send_notification(notification_id: str) -> None:
             StepOptions(name="notifications.send.deliver", **_SEND_RETRIES), _send
         )
     except Exception as error:
-        if isinstance(error, DBOSMaxStepRetriesExceeded):
-            error = error.errors[-1]
-        # An unexpected error's text can quote the request; the class name alone is
-        # always safe.
-        reason = (
-            str(error)
-            if isinstance(error, (exceptions.NotificationError, ServiceNotConnectedError))
-            else type(error).__name__
-        )
+        reason = get_error_message(error)
 
         async def _mark_failed() -> None:
             async with step_session() as session:

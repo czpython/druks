@@ -3,13 +3,17 @@ import contextlib
 import inspect
 import os
 from datetime import UTC, datetime, timedelta
+from operator import attrgetter
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import psycopg
 import pytest
+from conftest import capture_spans, make_agent_result, reset_tracing
 from dbos import DBOS, DBOSClient
 from dbos._error import DBOSQueueDeduplicatedError
+from druks import tracing
 from druks.accounts.context import Actor, current_account_id, current_actor
 from druks.accounts.models import Account
 from druks.agents import Agent, AgentOutput
@@ -46,12 +50,17 @@ from druks.secrets.models import VaultSecret
 from druks.settings import Settings, configure_settings, get_settings
 from druks.signals import subscribe
 from druks.teams.models import Team
-from druks.testing import init_db
+from druks.testing import asgi_client, configure_app_for_test, init_db
 from druks.user_settings.models import InstallationSettings, SettingsOverride
 from druks.workflows import GATE_TTL_SECONDS, Gate, OperatorReply, Subject, Workflow, step, task
 from druks.workspaces import Workspace
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
+from opentelemetry import trace
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.sqlalchemy.engine import EngineTracer
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.trace import StatusCode
 from pydantic import ValidationError
 from sqlalchemy import NullPool, column, create_engine, delete, func, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -349,6 +358,8 @@ async def runtime():
                 raise asyncio.CancelledError("Simulated worker interruption")
 
     configure_settings(Settings(database_url=URL))  # pyright: ignore[reportCallIssue]
+    # Before DBOS starts: DBOS spans its workflows only when tracing is on.
+    read_spans = capture_spans(get_settings())
     init_dbos()
     await launch()
     try:
@@ -378,9 +389,11 @@ async def runtime():
             record_task=record_task,
             retry_task=retry_task,
             scheduled_task=scheduled_task,
+            read_spans=read_spans,
         )
     finally:
         shutdown()
+        reset_tracing()
         await engine.dispose()
         schema_engine.dispose()
 
@@ -2031,3 +2044,303 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
         "workflow.finished",
     ]
     assert kinds[failed_id] == ["workflow.scheduled", "workflow.failed"]
+
+
+# What a harness reports for a call, and what the span of the call carries for it.
+USAGE = {
+    "provider": "anthropic",
+    "input_tokens": 100,
+    "output_tokens": 20,
+    "cache_read_input_tokens": 5,
+    "cache_creation_input_tokens": 3,
+}
+USAGE_ATTRIBUTES = {
+    "druks.usage.input_tokens": 108,
+    "druks.usage.output_tokens": 20,
+    "druks.usage.cached_input_tokens": 5,
+    "druks.usage.cache_creation_tokens": 3,
+    "druks.usage.reasoning_tokens": 0,
+    "druks.usage.total_tokens": 128,
+    "druks.cost_usd": 0.42,
+}
+
+
+def _get_spans(runtime, workflow_id: str) -> list[ReadableSpan]:
+    """What leaves the process for a run: each span of the trace of each execution, and
+    the trace of a wait that a cancel ends."""
+    spans = runtime.read_spans()
+    traces = {
+        span.context.trace_id
+        for span in spans
+        if workflow_id
+        in (span.attributes.get("druks.run_id"), span.attributes.get("dbos.operation.workflow_id"))
+    }
+    return [span for span in spans if span.context.trace_id in traces]
+
+
+@pytest.fixture
+def traced_app(runtime):
+    """The app on the runtime's database, as an installation that sends traces serves it."""
+    app = configure_app_for_test(settings=get_settings(), engine=runtime.engine)
+    tracing.instrument_app(app)
+    # The stack that the app built before holds no tracing middleware.
+    app.middleware_stack = None
+    tracing.instrument_engine(runtime.engine)
+    yield app
+    EngineTracer.remove_all_event_listeners()
+    FastAPIInstrumentor.uninstrument_app(app)
+
+
+@pytest.mark.parametrize(
+    ("declaration", "subject", "subject_attributes", "is_recovered"),
+    [
+        (
+            {"subject": Widget},
+            Widget(id=4242),
+            {"druks.subject_type": "widget", "druks.subject_id": "4242"},
+            False,
+        ),
+        ({}, None, {}, False),
+        (
+            {"subject": Widget},
+            Widget(id=4242),
+            {"druks.subject_type": "widget", "druks.subject_id": "4242"},
+            True,
+        ),
+    ],
+    ids=["subject", "subjectless", "recovered"],
+)
+async def test_each_execution_of_a_run_spans_its_run_and_its_steps(
+    runtime, declaration, subject, subject_attributes, is_recovered
+):
+    executions: list[str] = []
+
+    async def plan(self) -> None: ...
+
+    async def deliver(self) -> None: ...
+
+    async def run_multistep(self) -> None:
+        await self.plan()
+        await self.deliver()
+        executions.append(self.workflow_id)
+        if is_recovered and len(executions) == 1:
+            # The process stops after the steps, so recovery runs the body again.
+            raise asyncio.CancelledError
+
+    TwoStepFlow = type(
+        "TwoStepFlow",
+        (Workflow,),
+        {
+            **declaration,
+            "plan": step(plan),
+            "deliver": step(deliver),
+            "run_multistep": run_multistep,
+        },
+    )
+    try:
+        workflow_id = await TwoStepFlow.start(subject=subject)
+        if is_recovered:
+            await _wait_for_run(runtime.engine, workflow_id, lambda run: executions)
+            await DBOS.resume_workflow_async(workflow_id)
+        await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+    finally:
+        workflows._items.pop(TwoStepFlow.kind)
+
+    spans = _get_spans(runtime, workflow_id)
+    kind = TwoStepFlow.kind
+    runs = [span for span in spans if span.name == kind]
+    assert len(runs) == len(executions)
+    for run in runs:
+        attributes = {
+            key: run.attributes[key] for key in run.attributes if key.startswith("druks.")
+        }
+        assert attributes == {
+            "druks.app": TwoStepFlow.app,
+            "druks.run_id": workflow_id,
+            **subject_attributes,
+        }
+        steps = sorted(
+            (
+                span
+                for span in spans
+                if span.name.startswith(f"{kind}.") and span.parent.span_id == run.context.span_id
+            ),
+            key=attrgetter("start_time"),
+        )
+        assert [span.name for span in steps] == [f"{kind}.plan", f"{kind}.deliver"]
+
+
+@pytest.mark.parametrize(
+    ("is_recovered", "ttl_seconds", "end", "status"),
+    [
+        (
+            False,
+            GATE_TTL_SECONDS,
+            lambda flow, subject, run: run.resume(action="go"),
+            StatusCode.UNSET,
+        ),
+        (
+            True,
+            GATE_TTL_SECONDS,
+            lambda flow, subject, run: run.resume(action="go"),
+            StatusCode.UNSET,
+        ),
+        (False, 1, lambda flow, subject, run: asyncio.sleep(0), StatusCode.ERROR),
+        (
+            False,
+            GATE_TTL_SECONDS,
+            lambda flow, subject, run: flow.cancel(subject),
+            StatusCode.ERROR,
+        ),
+    ],
+    ids=["answered", "recovered", "timed-out", "cancelled"],
+)
+async def test_a_gate_wait_spans_from_the_recorded_park_to_its_end(
+    runtime, monkeypatch, is_recovered, ttl_seconds, end, status
+):
+    class Hold(Gate):
+        name = "hold"
+        action: str = ""
+
+    async def run_multistep(self) -> None:
+        await Hold.wait(ttl_seconds=ttl_seconds)
+
+    HoldFlow = type("HoldFlow", (Workflow,), {"subject": Widget, "run_multistep": run_multistep})
+    subject = Widget(id=919191)
+    receive = DBOS.recv_async
+    stops: list[str] = []
+
+    async def stop_at_the_gate_once(topic, timeout_seconds):
+        if is_recovered and not stops:
+            stops.append(topic)
+            # The process stops while the run waits at its gate.
+            raise asyncio.CancelledError
+        return await receive(topic, timeout_seconds=timeout_seconds)
+
+    monkeypatch.setattr(DBOS, "recv_async", stop_at_the_gate_once)
+    try:
+        workflow_id = await HoldFlow.start(subject=subject)
+        if is_recovered:
+            await _wait_for_run(runtime.engine, workflow_id, lambda run: stops)
+            await DBOS.resume_workflow_async(workflow_id)
+        parked = await _wait_for_run(
+            runtime.engine, workflow_id, lambda run: run.input_requested_at
+        )
+        # A person takes a while to answer.
+        await asyncio.sleep(0.2)
+        await end(HoldFlow, subject, parked)
+        await _wait_for_run(runtime.engine, workflow_id, lambda run: not run.is_active)
+    finally:
+        workflows._items.pop(HoldFlow.kind)
+
+    [wait] = [span for span in _get_spans(runtime, workflow_id) if span.name == "gate_wait hold"]
+    assert dict(wait.attributes) == {"druks.gate": "hold", "druks.run_id": workflow_id}
+    assert wait.start_time == int(parked.input_requested_at.timestamp() * 1_000_000_000)
+    assert wait.end_time - wait.start_time > 200_000_000
+    assert wait.status.status_code is status
+
+
+@pytest.mark.parametrize(
+    ("flow_name", "step_name", "outcome", "usage", "failure"),
+    [
+        (
+            "AgentBodyFlow",
+            "agent.decider",
+            make_agent_result(
+                {"action": "ship"}, agent="decider", cost_usd=0.42, cost_metadata=USAGE
+            ),
+            USAGE_ATTRIBUTES,
+            None,
+        ),
+        (
+            "AgentFlow",
+            "run",
+            make_agent_result(
+                {"action": "ship"}, agent="decider", cost_usd=0.42, cost_metadata=USAGE
+            ),
+            USAGE_ATTRIBUTES,
+            None,
+        ),
+        (
+            "AgentBodyFlow",
+            "agent.decider",
+            RuntimeError("the box answered https://box.example/v1?token=secret-token"),
+            {},
+            "RuntimeError",
+        ),
+        ("AgentFlow", "run", make_agent_result({"action": "ship"}, agent="decider"), {}, None),
+    ],
+    ids=["top-level", "inside-step", "failed", "no-usage"],
+)
+async def test_an_agent_call_spans_under_its_run_with_the_usage_it_reports(
+    runtime, monkeypatch, flow_name, step_name, outcome, usage, failure
+):
+    @contextlib.asynccontextmanager
+    async def ephemeral(self, **_kwargs):
+        yield SimpleNamespace(run_agent=AsyncMock(side_effect=[outcome]), id="host-test")
+
+    monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", ephemeral)
+    monkeypatch.setattr("druks.agents.get_template", _fake_template)
+    flow = getattr(runtime, flow_name)
+    workflow_id = await flow.start(subject=None, repo="owner/app")
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: not run.is_active)
+
+    async with get_session(runtime.engine) as session:
+        [recorded] = await AgentCall.list_for_run(session, workflow_id)
+    spans = _get_spans(runtime, workflow_id)
+    [run] = [span for span in spans if span.name == flow.kind]
+    [call] = [span for span in spans if span.name == "agent_call decider"]
+    [call_step] = [span for span in spans if span.context.span_id == call.parent.span_id]
+    assert call_step.name == f"{flow.kind}.{step_name}"
+    assert call_step.parent.span_id == run.context.span_id
+    assert dict(call.attributes) == {
+        "druks.agent": "decider",
+        "druks.run_id": workflow_id,
+        "druks.harness": "claude",
+        "druks.model": recorded.model,
+        **usage,
+    }
+    # The run's span says why the run failed, as the span of its call does.
+    assert run.status.description == call.status.description == failure
+
+
+@pytest.mark.parametrize(
+    ("path", "names"),
+    [
+        ("/api/dashboard/overview", set()),
+        ("/api/chat/conversations", set()),
+        ("/health", set()),
+        ("/api/events", {"GET /api/events", "SELECT"}),
+        ("", {"record_feedback", "record_feedback.note_repo"}),
+    ],
+    ids=[
+        "dashboard-poll",
+        "chat-poll",
+        "health-check",
+        "route",
+        "workflow-under-an-unsampled-caller",
+    ],
+)
+async def test_every_workflow_keeps_its_trace_and_a_poll_or_health_check_sends_none(
+    runtime, traced_app, path, names
+):
+    caller = trace.SpanContext(uuid4().int, 1, is_remote=True)
+    if path:
+        async with asgi_client(traced_app) as client:
+            # A caller that samples its trace.
+            traceparent = f"00-{caller.trace_id:032x}-{caller.span_id:016x}-01"
+            response = await client.get(path, headers={"traceparent": traceparent})
+        assert response.status_code == 200
+    else:
+        # A caller that samples none of its trace.
+        with trace.use_span(trace.NonRecordingSpan(caller)):
+            handle = await DBOS.start_workflow_async(
+                runtime.RecordFeedback._entry, None, {"repo": "owner/unsampled"}
+            )
+        await handle.get_result()
+
+    exported = {
+        span.name for span in runtime.read_spans() if span.context.trace_id == caller.trace_id
+    }
+    # A trace leaves whole, or the poll and the health check drop it whole.
+    assert exported >= names if names else not exported

@@ -1,12 +1,14 @@
 import base64
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import jwt as pyjwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
-from druks import agents
+from druks import agents, tracing
 from druks.accounts import jwt as assertion
 from druks.accounts.models import Account
 from druks.api.server import app
@@ -22,7 +24,7 @@ from druks.sandbox.datastructures import AgentResult
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
-from druks.settings import configure_settings, get_settings
+from druks.settings import Settings, Traces, configure_settings, get_settings
 from druks.testing import (
     TEST_DATABASE_URL,
     configure_app_for_test,
@@ -35,6 +37,11 @@ from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from fastapi.testclient import TestClient
 from fastmcp.server.auth.providers.jwt import JWTVerifier
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.propagate import get_global_textmap, set_global_textmap
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.test.globals_test import reset_trace_globals
 from sqlalchemy import update
 
 # A Workflow class resolves its declaring app at definition time, from
@@ -43,6 +50,9 @@ from sqlalchemy import update
 # collection imports any test module.
 for test_module in ("test_durable_sdk", "test_notifications_durable"):
     register_workflow_package(test_module, "")
+
+# What a process propagates before tracing sets its own.
+_TEXTMAP = get_global_textmap()
 
 
 IDENTITY_HEADER = "X-ExeDev-Email"
@@ -111,6 +121,32 @@ async def installation_key() -> VaultSecret:
     return await VaultSecret.paste(
         db_session(), Audience.provider("anthropic"), "test-key", pasted_by=account
     )
+
+
+def capture_spans(settings: Settings) -> Callable[[], tuple[ReadableSpan, ...]]:
+    """Trace into memory, through the privacy boundary of a real installation, until
+    reset_tracing(). The reader returns the spans that would leave the process."""
+    exporter = InMemorySpanExporter()
+    # The exporter in memory takes the place of the collector that the endpoint names.
+    traces = Traces(endpoint="https://collector.example.com/v1/traces")
+    with patch.object(tracing, "OTLPSpanExporter", return_value=exporter):
+        tracing.init_tracing(settings.model_copy(update={"traces": traces}))
+
+    def read() -> tuple[ReadableSpan, ...]:
+        # The batch holds a span until a flush hands it to the exporter.
+        tracing._provider.force_flush()
+        return exporter.get_finished_spans()
+
+    return read
+
+
+def reset_tracing() -> None:
+    """Leave tracing as a new process finds it."""
+    tracing.shutdown_tracing()
+    HTTPXClientInstrumentor().uninstrument()
+    tracing._provider = None
+    reset_trace_globals()
+    set_global_textmap(_TEXTMAP)
 
 
 @pytest.fixture

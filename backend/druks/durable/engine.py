@@ -18,6 +18,7 @@ from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA, workflow_status
 from druks.durable.exceptions import FatalError, ScheduleUnavailable
 from druks.harnesses.exceptions import HarnessError
 from druks.settings import get_settings
+from druks.tracing import get_trace_attributes, is_tracing
 from druks.user_settings.models import InstallationSettings
 
 if TYPE_CHECKING:
@@ -57,6 +58,12 @@ def init_dbos() -> None:
         # workflow would strand every parked run, because one host cannot drain them.
         "enable_patching": True,
     }
+    if is_tracing():
+        # DBOS spans each workflow and step on the provider that tracing set. Its own
+        # exporter would send them past the privacy boundary.
+        config["enable_otlp"] = True
+        config["otel_attribute_format"] = "semconv"
+        config["otlp_attributes"] = get_trace_attributes(settings)
     # DBOS logs every exception that leaves a workflow, with no opt-out;
     # _execute_run already records a classified failure on the run.
     logging.getLogger("dbos").addFilter(
@@ -66,6 +73,8 @@ def init_dbos() -> None:
                 # ast-grep-ignore: rule-3
                 and isinstance(record.exc_info[1], (FatalError, HarnessError))
             )
+            # Druks sends no logs over OTLP, so this warning of DBOS names no fault.
+            and not record.getMessage().startswith("OTLP is enabled but logger provider not set")
         )
     )
     DBOS(config=config)

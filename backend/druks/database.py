@@ -8,6 +8,7 @@ from sqlalchemy_encrypted_field import configure
 
 from druks.db import db_session
 from druks.settings import get_settings
+from druks.tracing import instrument_engine
 
 _ALEMBIC_INI = Path(__file__).resolve().parent / "alembic.ini"
 _MIGRATION_SUPPORT_ONLY = "migration_support_only"
@@ -116,13 +117,15 @@ def create_async_engine_from_url(database_url: str):
     # overflow connections open on demand and close on return, so the ceiling
     # is high while idle cost is not.
     settings = get_settings()
-    return create_async_engine(
+    engine = create_async_engine(
         database_url,
         pool_pre_ping=True,
         pool_timeout=5,
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_max_overflow,
     )
+    instrument_engine(engine)
+    return engine
 
 
 def get_session(engine, class_: type[AsyncSession] = AsyncSession) -> AsyncSession:

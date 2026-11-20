@@ -64,6 +64,7 @@ from druks.settings import (
 )
 from druks.skills.routes import router as skills_router
 from druks.teams.routes import router as teams_router
+from druks.tracing import init_tracing, instrument_app, shutdown_tracing
 from druks.ui.exceptions import PageReadError
 from druks.user_settings.routes import agents_router
 from druks.user_settings.routes import router as settings_router
@@ -130,6 +131,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if created_engine:
             await created_engine.dispose()
         await close_client()
+        shutdown_tracing()
 
 
 def _mcp_lifespan(app: FastAPI) -> AbstractAsyncContextManager[Mapping[str, Any] | None]:
@@ -141,6 +143,8 @@ def _mcp_lifespan(app: FastAPI) -> AbstractAsyncContextManager[Mapping[str, Any]
 
 settings = load_settings()
 configure_settings(settings)
+# Before DBOS launches: DBOS spans its workflows on the provider that this sets.
+init_tracing(settings)
 register_apps()
 
 app = FastAPI(
@@ -148,6 +152,7 @@ app = FastAPI(
     lifespan=combine_lifespans(lifespan, _mcp_lifespan),
     dependencies=[Depends(commit_before_response, scope="function")],
 )
+instrument_app(app)
 
 
 @app.exception_handler(HTTPException)
