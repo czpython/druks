@@ -1,6 +1,8 @@
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from functools import partial
+from types import SimpleNamespace
 from typing import Literal
 
 import httpx
@@ -21,17 +23,19 @@ from druks.browser.constants import BROWSER_TOOLS
 from druks.chat.channels.whatsapp.constants import WAHA_AUDIENCE
 from druks.chat.constants import CONVERSATION_HEADER
 from druks.chat.enums import ConversationSource
-from druks.chat.models import Conversation
+from druks.chat.models import Conversation, Reminder
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.models import Project, ProjectRepo, Ticket
 from druks.contrib.software_factory.ticketing.base import Tracker
 from druks.contrib.software_factory.workflows import Build
 from druks.core.apis.exceptions import UnknownTicketError
-from druks.durable.models import Artifact, Run
+from druks.durable.models import Artifact, Run, Schedule
+from druks.durable.schedules import call_tool
 from druks.mcp.exceptions import InvalidAgentToolError
 from druks.mcp.server import create_mcp_app
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
+from druks.settings import Urls
 from druks.teams.models import Team
 from druks.testing import asgi_client, configure_app_for_test, make_settings
 from druks.usage.models import UsageScrape
@@ -39,6 +43,7 @@ from druks_field_notes.models import Note
 from fastapi import APIRouter, FastAPI
 from fastmcp.client import Client
 from fastmcp.client.transports import StreamableHttpTransport
+from sqlalchemy import select
 from starlette.routing import Route
 
 _IN_APP_ASK = {
@@ -70,6 +75,10 @@ _WIRE_HEADERS = {
 _TOOL_NAMES = [
     "cancel_run",
     "retry_run",
+    "list_schedules",
+    "create_schedule",
+    "change_schedule",
+    "stop_schedule",
     "list_open_subjects",
     "get_gate",
     "answer_gate",
@@ -194,8 +203,8 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
         assert "parkedAt" in (client.instructions or "")
         tools = {tool.name: tool for tool in await client.list_tools()}
 
-    assert list(tools)[:7] == _TOOL_NAMES
-    assert list(tools)[7:] == [
+    assert list(tools)[:11] == _TOOL_NAMES
+    assert list(tools)[11:] == [
         "chat_list_conversations",
         "chat_read_thread",
         "chat_read_file",
@@ -857,3 +866,94 @@ async def test_mcp_server_registry_routes_stay_untouched(tmp_path, druks_db):
     assert listed.status_code == 200
     # The inbound endpoint never joins the outbound server registry.
     assert "druks" not in {server["name"] for server in listed.json()}
+
+
+def _call_schedules_in_process(app, monkeypatch) -> None:
+    # A schedule reaches Druks' own /mcp at its public address; here that is the test app.
+    def factory(**kwargs):
+        kwargs.pop("verify", None)
+        return httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app), base_url="http://druks.test", **kwargs
+        )
+
+    monkeypatch.setattr(
+        "druks.mcp.inbound.get_settings",
+        lambda: SimpleNamespace(urls=Urls(endpoint="http://druks.test", webhook_host="")),
+    )
+    monkeypatch.setattr(
+        "druks.durable.schedules.StreamableHttpTransport",
+        partial(StreamableHttpTransport, httpx_client_factory=factory),
+    )
+
+
+async def test_a_schedule_calls_its_tool_as_its_owner_from_its_chat(
+    app, account, druks_db, monkeypatch
+):
+    _call_schedules_in_process(app, monkeypatch)
+    conversation = await Conversation.create(druks_db, account_id=account.id, body="Nudge me")
+    schedule = await Schedule.create(
+        druks_db,
+        account_id=account.id,
+        conversation_id=conversation.id,
+        tool="chat_create_reminder",
+        arguments={"body": "Stand up", "delay_seconds": 60},
+        cron="0 9 * * *",
+        tool_names=["chat_create_reminder"],
+    )
+    await druks_db.commit()
+
+    async with live(app):
+        skipped = await call_tool(schedule.id)
+
+    assert skipped is None
+    [reminder] = await druks_db.scalars(select(Reminder))
+    assert (reminder.conversation_id, reminder.account_id, reminder.body) == (
+        conversation.id,
+        account.id,
+        "Stand up",
+    )
+
+
+async def test_a_schedule_whose_tool_refuses_the_call_says_why(app, account, druks_db, monkeypatch):
+    _call_schedules_in_process(app, monkeypatch)
+    conversation = await Conversation.create(druks_db, account_id=account.id, body="Stop it")
+    schedule = await Schedule.create(
+        druks_db,
+        account_id=account.id,
+        conversation_id=conversation.id,
+        tool="cancel_run",
+        arguments={"run": "no-such-run", "reason": "Not needed"},
+        cron="0 9 * * *",
+        tool_names=["cancel_run"],
+    )
+    await druks_db.commit()
+
+    async with live(app):
+        skipped = await call_tool(schedule.id)
+
+    assert skipped["conversation_id"] == conversation.id
+    assert skipped["tool"] == "cancel_run"
+    assert "no-such-run" in skipped["reason"]
+
+
+async def test_a_schedule_whose_call_cannot_reach_druks_says_why(account, druks_db, monkeypatch):
+    monkeypatch.setattr(
+        "druks.mcp.inbound.get_settings",
+        lambda: SimpleNamespace(urls=Urls(endpoint="http://127.0.0.1:1", webhook_host="")),
+    )
+    conversation = await Conversation.create(druks_db, account_id=account.id, body="Nudge me")
+    schedule = await Schedule.create(
+        druks_db,
+        account_id=account.id,
+        conversation_id=conversation.id,
+        tool="chat_list_reminders",
+        arguments={},
+        cron="0 9 * * *",
+        tool_names=["chat_list_reminders"],
+    )
+    await druks_db.commit()
+
+    skipped = await call_tool(schedule.id)
+
+    assert skipped["conversation_id"] == conversation.id
+    assert skipped["reason"].startswith("Druks could not reach its own tools:")

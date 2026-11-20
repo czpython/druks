@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -117,3 +117,14 @@ class ArtifactContent(Schema):
     kind: str
     title: str
     content: str
+
+
+class ScheduleResponse(Schema):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    conversation_id: str
+    tool: str
+    arguments: dict[str, Any]
+    cron: str
+    next_run_at: datetime

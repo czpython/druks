@@ -119,6 +119,9 @@ TOKEN_WRITE_API_ROUTES = {
     ("POST", "/api/runs/{run}/cancel"),
     ("POST", "/api/runs/{run}/resume"),
     ("POST", "/api/runs/{run}/retry"),
+    ("POST", "/api/schedules"),
+    ("PUT", "/api/schedules/{schedule_id}"),
+    ("DELETE", "/api/schedules/{schedule_id}"),
     ("PATCH", "/api/settings/personal"),
 }
 
