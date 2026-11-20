@@ -25,3 +25,9 @@ export const NO_RUN: StateStyle = {
   glyph: '◌',
   label: 'never run',
 }
+
+// The words for a DBOS workflow status, such as a schedule's due time.
+export const RUN_LABELS: Record<string, string> = {
+  SUCCESS: 'Finished', ERROR: 'Failed', MAX_RECOVERY_ATTEMPTS_EXCEEDED: 'Failed',
+  PENDING: 'Running', ENQUEUED: 'Queued', DELAYED: 'Queued', CANCELLED: 'Cancelled',
+}

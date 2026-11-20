@@ -119,6 +119,12 @@ Only an admin changes its owner. The skill choices are the skills enabled in
 Settings → Skills. A private agent offers subscription models, and a public agent
 offers API-key models.
 
+An agent's name opens its page at `/agents/:id`. The page lists the schedules set
+in the agent's conversations, each with its owner and last due time. The owner of
+a schedule or an admin stops it. The page also lists the runs the agent started,
+each with its cost, and the cost of this week's runs since Monday 00:00 in the
+viewer's time. It counts at most 100 runs.
+
 Normal interface text uses IBM Plex Sans at 15 px. Technical values use
 IBM Plex Mono. Phone inputs use at least 16 px.
 

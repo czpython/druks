@@ -1,11 +1,14 @@
 from fastapi import APIRouter, Depends, Query
+from pydantic import AwareDatetime
 
 from druks.accounts.dependencies import current_session_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
+from druks.api.schemas import AgentScheduleResponse, ScheduledRun
 from druks.configured_agents.models import ConfiguredAgent
 from druks.configured_agents.schemas import AgentRequest, AgentResponse, AgentUpdateRequest
-from druks.durable.models import Run
+from druks.durable.dbos_state import latest_invocations
+from druks.durable.models import Run, Schedule
 from druks.durable.reads import get_run_response
 from druks.durable.schemas import RunResponse
 
@@ -39,12 +42,35 @@ async def list_agent_runs(
     session: SessionDep,
     account: Account = Depends(current_session_account),
     limit: int = Query(20, ge=1, le=100),
+    since: AwareDatetime | None = None,
 ) -> list[RunResponse]:
     agent = await ConfiguredAgent.get_for_account(session, agent_id, account)
     runs = await Run.list_for_agent(
-        session, agent.id, kinds=await account.list_usable_kinds(), limit=limit
+        session, agent.id, kinds=await account.list_usable_kinds(), limit=limit, since=since
     )
     return [await get_run_response(run) for run in runs]
+
+
+@router.get(
+    "/{agent_id}/schedules",
+    response_model=list[AgentScheduleResponse],
+    response_model_by_alias=True,
+)
+async def list_agent_schedules(
+    agent_id: str, session: SessionDep, account: Account = Depends(current_session_account)
+) -> list[AgentScheduleResponse]:
+    agent = await ConfiguredAgent.get_for_account(session, agent_id, account)
+    schedules = await Schedule.list_for_agent(session, agent.id)
+    history = await session.execute(
+        latest_invocations([schedule.schedule_name for schedule in schedules], limit=1)
+    )
+    last_runs = {row.schedule_name: ScheduledRun.model_validate(row) for row in history}
+    return [
+        AgentScheduleResponse.from_schedule(
+            schedule, last_run=last_runs.get(schedule.schedule_name)
+        )
+        for schedule in schedules
+    ]
 
 
 @router.put("/{agent_id}", response_model=AgentResponse, response_model_by_alias=True)

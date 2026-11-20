@@ -10,6 +10,7 @@ from druks.chat.models import Conversation
 from druks.chat.service import deliver, get_agent, report_outcome
 from druks.durable.constants import RUN_SCHEDULE_WORKFLOW, SCHEDULE_KEY_NAME
 from druks.durable.engine import step_session
+from druks.durable.exceptions import ScheduleSkipped
 from druks.durable.models import Schedule
 from druks.mcp.constants import BEARER_PREFIX
 from druks.mcp.exceptions import MissingEndpointError
@@ -36,7 +37,7 @@ async def apply_schedule(schedule: Schedule) -> None:
 @DBOS.workflow(name=RUN_SCHEDULE_WORKFLOW)
 async def run_schedule(scheduled_at: datetime, context: dict[str, Any]) -> None:
     """Make the schedule's tool call at a due time. When the tool refuses it, the
-    conversation hears that Druks skipped the call."""
+    conversation hears that Druks skipped the call, and the due time fails."""
     skipped = await DBOS.run_step_async(
         StepOptions(name=f"{RUN_SCHEDULE_WORKFLOW}.call"), call_tool, context["schedule_id"]
     )
@@ -46,6 +47,7 @@ async def run_schedule(scheduled_at: datetime, context: dict[str, Any]) -> None:
         )
         if conversation_id:
             await DBOS.start_workflow_async(deliver, conversation_id)
+        raise ScheduleSkipped(skipped["reason"])
 
 
 async def call_tool(schedule_id: str) -> dict[str, str] | None:

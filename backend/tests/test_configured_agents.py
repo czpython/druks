@@ -1,8 +1,11 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from conftest import IDENTITY_HEADER, header_client, seed_note_run
 from druks.accounts.models import Account
 from druks.chat.models import Conversation
+from druks.durable.dbos_state import workflow_status
+from druks.durable.models import Schedule
 from druks.skills.datastructures import InstalledSkill
 from druks.skills.models import Skill, SkillCollection
 from druks.teams.models import Team
@@ -191,13 +194,69 @@ async def test_an_agent_lists_its_runs_that_a_person_can_open(tmp_path: Path, dr
             run = await seed_note_run(druks_db, account_id=owner.id)
             run.conversation_id = conversation.id
             runs.append(run)
+        runs[0].created_at = datetime.now(UTC) - timedelta(days=8)
         await druks_db.flush()
         url = f"/api/configured-agents/{agent['id']}/runs"
         seen = client.get(url, headers={IDENTITY_HEADER: owner.username})
+        this_week = client.get(
+            url,
+            params={"since": (datetime.now(UTC) - timedelta(days=7)).isoformat()},
+            headers={IDENTITY_HEADER: owner.username},
+        )
+        local = client.get(
+            url, params={"since": "2026-11-16T00:00:00"}, headers={IDENTITY_HEADER: owner.username}
+        )
         hidden = client.get(url, headers={IDENTITY_HEADER: outsider.username})
 
+    assert local.status_code == 422
     assert [(run["id"], run["accountUsername"]) for run in seen.json()] == [
         (runs[1].id, owner.username),
         (runs[0].id, owner.username),
     ]
+    assert [run["id"] for run in this_week.json()] == [runs[1].id]
     assert hidden.json() == []
+
+
+async def test_an_agent_lists_the_schedules_set_in_its_conversations(tmp_path: Path, druks_db):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    await druks_db.flush()
+
+    with header_client(tmp_path) as client:
+        agent = client.post(
+            "/api/configured-agents", json=AGENT, headers={IDENTITY_HEADER: owner.username}
+        ).json()
+        schedules = []
+        for agent_id in (agent["id"], None):
+            conversation = await Conversation.create(
+                druks_db, account_id=owner.id, body="Scan payments", agent_id=agent_id
+            )
+            schedule = await Schedule.create(
+                druks_db,
+                account_id=owner.id,
+                conversation_id=conversation.id,
+                tool="field_notes_scan",
+                arguments={"repo": "payments"},
+                cron="0 9 * * *",
+                tool_names=["field_notes_scan"],
+            )
+            schedules.append(schedule)
+        due_time = int(datetime(2026, 11, 2, 9, tzinfo=UTC).timestamp() * 1000)
+        for index, status in enumerate(["SUCCESS", "ERROR"]):
+            await druks_db.execute(
+                workflow_status.insert().values(
+                    workflow_uuid=f"due-time-{index}",
+                    schedule_name=schedules[0].schedule_name,
+                    status=status,
+                    created_at=due_time + index * 86_400_000,
+                )
+            )
+        listed = client.get(
+            f"/api/configured-agents/{agent['id']}/schedules",
+            headers={IDENTITY_HEADER: member.username},
+        )
+
+    [shown] = listed.json()
+    assert (shown["id"], shown["accountId"]) == (schedules[0].id, owner.id)
+    assert (shown["lastRun"]["run"], shown["lastRun"]["status"]) == ("due-time-1", "ERROR")
