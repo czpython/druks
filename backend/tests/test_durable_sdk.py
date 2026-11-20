@@ -10,7 +10,7 @@ import psycopg
 import pytest
 from dbos import DBOS, DBOSClient
 from dbos._error import DBOSQueueDeduplicatedError
-from druks.accounts.context import Actor, current_account_id, current_actor
+from druks.accounts.context import Actor, current_account_id, current_actor, current_conversation_id
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.dependencies import request_session
 from druks.api.schedules import router as schedules_router
@@ -21,6 +21,7 @@ from druks.browser.exceptions import BrowserSessionSignedOutError
 from druks.browser.models import StoredBrowserSession
 from druks.chat.constants import CANCELLED_MESSAGE, CONVERSATION_HEADER, SKIPPED_MESSAGE
 from druks.chat.models import Conversation, Message
+from druks.configured_agents.models import ConfiguredAgent
 from druks.database import configure_session, get_session, session_scope
 from druks.db import atomic, db_session
 from druks.durable import FatalError, Run, RunState, WorkflowError, engine, get_run_phase
@@ -1218,6 +1219,67 @@ async def test_a_run_starts_only_as_an_account_that_can_use_the_app(runtime, mon
         await tick(datetime.now(UTC), None)
 
     assert SINK.count("swept") == swept
+
+
+async def test_an_ask_to_an_agent_starts_a_run_as_the_asker_who_can_use_the_app(
+    runtime, monkeypatch
+):
+    owner_id = await _account_id(runtime.engine, "agent-owner@example.com")
+    asker_id = await _account_id(runtime.engine, "agent-asker@example.com")
+    outsider_id = await _account_id(runtime.engine, "agent-outsider@example.com")
+    monkeypatch.setattr(runtime.RecordFeedback, "app", "field_notes")
+    async with session_scope(runtime.engine) as session:
+        agent = await ConfiguredAgent.create(
+            session,
+            owner=await session.get(Account, owner_id),
+            name="Feedback recorder",
+            description="Records feedback.",
+            instructions="Record the feedback you are given.",
+            skills=[],
+            harness="claude",
+            model="anthropic/claude-opus-4-7",
+            is_private=False,
+        )
+        asked = await Conversation.create(
+            session, account_id=asker_id, body="Record it", agent_id=agent.id
+        )
+        refused = await Conversation.create(
+            session, account_id=outsider_id, body="Record it", agent_id=agent.id
+        )
+        team = await Team.create(
+            session, name="Feedback", member_ids=[asker_id], apps=["field_notes"]
+        )
+
+    # A tool call from the agent's box binds the asker and the conversation, as
+    # current_account does for its request.
+    try:
+        account_token = current_account_id.set(asker_id)
+        conversation_token = current_conversation_id.set(asked.id)
+        try:
+            workflow_id = await runtime.RecordFeedback.start(subject=None, repo="owner/asked")
+        finally:
+            current_account_id.reset(account_token)
+            current_conversation_id.reset(conversation_token)
+        account_token = current_account_id.set(outsider_id)
+        conversation_token = current_conversation_id.set(refused.id)
+        try:
+            with pytest.raises(PermissionDenied):
+                await runtime.RecordFeedback.start(subject=None, repo="owner/refused")
+        finally:
+            current_account_id.reset(account_token)
+            current_conversation_id.reset(conversation_token)
+    finally:
+        # The runtime's database outlives this test. A team that lists field_notes would
+        # keep every later account outside it out of the app.
+        async with session_scope(runtime.engine) as session:
+            await (await Team.get(session, id=team.id)).delete()
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+
+    async with session_scope(runtime.engine) as session:
+        runs = await Run.list_for_agent(
+            session, agent.id, kinds=[runtime.RecordFeedback.kind], limit=20
+        )
+    assert [(run.id, run.account_id) for run in runs] == [(workflow_id, asker_id)]
 
 
 async def test_an_event_actor_account_wins_over_the_supplied_account(runtime):

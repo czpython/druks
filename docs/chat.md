@@ -62,6 +62,16 @@ unattended account's subscription. It never runs on the subscription of the
 person who asks. A public agent with neither fails its turn and says what to
 connect. Each person who talks to an agent gets a sandbox of their own for it.
 
+A workflow that an agent starts runs as the person who asks. That person must be
+able to use the workflow's app. List the runs an agent started, newest first:
+
+```http
+GET /api/configured-agents/<agent id>/runs?limit=20
+```
+
+`limit` is 20 when you leave it out, and 100 at most. The list shows only the
+runs of apps you can use.
+
 ## Find and pin conversations
 
 Search filters conversation titles. It ignores letter case and does not search
