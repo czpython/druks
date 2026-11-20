@@ -10,6 +10,8 @@ import type {
   CallLine,
   ConnectChallenge,
   Connection,
+  ConfiguredAgent,
+  ConfiguredAgentInput,
   App,
   FeedResponse,
   FeedDestinations,
@@ -330,6 +332,13 @@ export const api = {
   updateTeam: (teamId: string, body: TeamInput) =>
     postJSON<Team>(`/api/teams/${encodeURIComponent(teamId)}`, body, 'PUT'),
   deleteTeam: (teamId: string) => deleteRequest(`/api/teams/${encodeURIComponent(teamId)}`),
+  configuredAgents: () => getJSON<ConfiguredAgent[]>('/api/configured-agents'),
+  createConfiguredAgent: (body: Omit<ConfiguredAgentInput, 'ownerId'>) =>
+    postJSON<ConfiguredAgent>('/api/configured-agents', body),
+  updateConfiguredAgent: (agentId: string, body: ConfiguredAgentInput) =>
+    postJSON<ConfiguredAgent>(`/api/configured-agents/${encodeURIComponent(agentId)}`, body, 'PUT'),
+  deleteConfiguredAgent: (agentId: string) =>
+    deleteRequest(`/api/configured-agents/${encodeURIComponent(agentId)}`),
   providers: () => getJSON<Provider[]>('/api/providers'),
   providerSubscriptions: () => getJSON<ProviderSubscription[]>('/api/providers/subscriptions'),
   providerKeys: () => getJSON<ProviderKey[]>('/api/providers/keys'),

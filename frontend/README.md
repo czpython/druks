@@ -34,7 +34,7 @@ them, copy the same files from a newer release.
 
 - The work sidebar and searchable installed app roster
 - Settings
-- Dashboard, Chat, Activity, Usage, and Schedules
+- Dashboard, Chat, Activity, Usage, Schedules, and Agents
 - Shared routing and fallback behavior.
 
 `src/components/Page.tsx` owns page width, outer spacing, and scrolling. Use
@@ -56,8 +56,8 @@ Import the module one time from `src/apps/index.ts`. The shell finds the
 registration and does not hardcode the app name.
 
 The work sidebar keeps the same destinations across app pages. The Dashboard
-opens at `/`. Activity, Usage, and Schedules have shared routes. Schedules appears
-directly below Usage. App-declared navigation appears below the page
+opens at `/`. Activity, Usage, Schedules, and Agents have shared routes. Schedules appears
+directly below Usage, and Agents below Schedules. App-declared navigation appears below the page
 header. Settings opens from the bottom of the sidebar. Below 650 px, a
 navigation button opens a modal drawer. Escape closes the drawer and returns
 focus to the button.
@@ -112,6 +112,12 @@ does. The page shows the installation timezone. Next-run estimates use that time
 Each row shows the latest eight DBOS schedule invocations, including dispatch ticks.
 These records exclude downstream runs. Run now calls
 `POST /api/dashboard/schedules/{kind}/run` and works while a schedule is paused.
+
+Agents at `/agents` lists the configured agents a person can see and edits them
+through `/api/configured-agents`. The owner or an admin edits or deletes an agent.
+Only an admin changes its owner. The skill choices are the skills enabled in
+Settings → Skills. A private agent offers subscription models, and a public agent
+offers API-key models.
 
 Normal interface text uses IBM Plex Sans at 15 px. Technical values use
 IBM Plex Mono. Phone inputs use at least 16 px.
