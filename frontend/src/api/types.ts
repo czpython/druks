@@ -668,6 +668,21 @@ export interface TeamInput {
   apps: string[]
 }
 
+export interface ConfiguredAgentInput {
+  name: string
+  description: string
+  instructions: string
+  skills: string[]
+  harness: string
+  model: string
+  isPrivate: boolean
+  ownerId: string
+}
+
+export interface ConfiguredAgent extends ConfiguredAgentInput {
+  id: string
+}
+
 /** What /api/auth/me answers: how this deployment authenticates, who the
  * request resolved to (null in the none/zero setup state), and whether that
  * identity still needs its first provider credential. */

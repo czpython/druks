@@ -125,7 +125,7 @@ function MenuOption({
   )
 }
 
-function ModelChooser({
+export function ModelChooser({
   id,
   value,
   displayValue,
@@ -193,7 +193,7 @@ function ModelChooser({
         <span className="cell-val">
           {inheritLabel && !isOverride && <span className="cell-inherit">Inherit</span>}
           <span>{selected?.label ?? displayValue}</span>
-          <code>{value ?? displayValue}</code>
+          {selected && <code>{selected.id}</code>}
         </span>
         <span className="cell-arrow" aria-hidden="true">
           ▾
