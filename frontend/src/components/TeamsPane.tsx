@@ -1,15 +1,17 @@
-import { useState } from 'react'
+import { useState, type Ref } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { UsersRound } from 'lucide-react'
 
 import { api } from '../api/client'
 import { appLabel } from '../apps/registry'
 import type { Team, TeamInput } from '../api/types'
 import { Button, Field, TextInput } from './Control'
+import { PageHeading } from './PageHeading'
 import { Switch } from './SettingsPanes'
 
 const EMPTY_TEAM: TeamInput = { name: '', memberIds: [], apps: [] }
 
-export function TeamsPane() {
+export function TeamsPane({ headingRef }: { headingRef?: Ref<HTMLHeadingElement> }) {
   const queryClient = useQueryClient()
   const teamsQuery = useQuery({ queryKey: ['teams'], queryFn: api.teams })
   const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
@@ -96,14 +98,19 @@ export function TeamsPane() {
 
   return (
     <div className="set-pane mcp-pane">
-      <header className="mcp-pane-head">
-        <p className="mcp-pane-sub">A team is a group of people with a list of apps.</p>
-        <div className="mcp-actions">
+      <PageHeading
+        className="settings-page-heading"
+        title="Teams"
+        description="A team is a group of people with a list of apps."
+        icon={<UsersRound aria-hidden="true" />}
+        headingRef={headingRef}
+        titleTabIndex={-1}
+        actions={
           <Button variant="primary" onClick={addTeam} disabled={busy || Boolean(draft)}>
             Add team
           </Button>
-        </div>
-      </header>
+        }
+      />
 
       {teamsQuery.isPending && <p role="status">Loading teams…</p>}
       {teamsQuery.isError && (
@@ -119,7 +126,7 @@ export function TeamsPane() {
       )}
 
       {draft && (
-        <section className="set-card mcp-custom-body" aria-label={editingTeamId ? 'Edit team' : 'Add team'}>
+        <section className="druks-panel mcp-custom-body" aria-label={editingTeamId ? 'Edit team' : 'Add team'}>
           <Field label="Name">
             <TextInput
               aria-label="Team name"

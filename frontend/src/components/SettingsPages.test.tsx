@@ -509,6 +509,10 @@ describe('SettingsPages app fields', () => {
     expect(screen.queryByRole('button', { name: 'Add provider' })).toBeNull()
 
     cleanup()
+    renderSettings('/settings/phones', 'member')
+    expect(await screen.findByRole('heading', { name: 'Phones' })).toBeTruthy()
+
+    cleanup()
     renderSettings('/settings/providers')
     await screen.findByRole('heading', { name: 'Providers' })
     expect(screen.getByRole('link', { name: 'Teams' })).toBeTruthy()
@@ -541,7 +545,7 @@ describe('SettingsPages app fields', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Browser' }))
 
     expect(await screen.findByRole('heading', { name: 'Browser profiles' })).toBeTruthy()
-    expect(await screen.findByText('No installed app declares a browser profile.')).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'No browser profiles' })).toBeTruthy()
     expect(window.location.search).toBe('?tab=browser')
 
     fireEvent.click(screen.getByRole('link', { name: 'Accounts' }))
@@ -563,12 +567,12 @@ describe('SettingsPages app fields', () => {
     stubFetch()
     renderSettings('/field_notes')
 
-    const settings = await screen.findByRole('link', { name: 'Field Notes settings' })
+    const settings = await screen.findByRole('link', { name: 'Field Notes app settings' })
     expect(settings.getAttribute('href')).toBe('/apps/field_notes/settings')
     fireEvent.click(settings)
 
     expect(await screen.findByText('Field Notes options')).toBeTruthy()
-    expect(settings.getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('link', { name: 'Back to Field Notes' })).toBeTruthy()
   })
 
   it('renders every 422 message under the field named by the backend', async () => {
@@ -733,10 +737,9 @@ describe('SettingsPages agents', () => {
     }
     fireEvent.click(screen.getByRole('button', { name: 'Open Software Factory' }))
     fireEvent.click(await screen.findByRole('link', { name: 'Agents' }))
-    const harness = await screen.findByRole('button', { name: /^harness:/ })
-    fireEvent.click(harness)
+    const harness = await screen.findByRole('combobox', { name: /^harness for / })
     for (const name of ['pi', 'opencode']) {
-      const choice = screen.getByRole('button', { name: new RegExp(`^${name}`) }) as HTMLButtonElement
+      const choice = within(harness).getByRole('option', { name: new RegExp(`^${name}`) }) as HTMLOptionElement
       expect(choice.disabled).toBe(!hasKey)
     }
   })
@@ -796,12 +799,13 @@ describe('SettingsPages agents', () => {
     renderSettings('/apps/software_factory/settings')
     fireEvent.click(await screen.findByRole('link', { name: 'Agents' }))
     await screen.findByText('coder')
-    const harnessCell = screen.getByText('codex').closest('button')!
-    expect(harnessCell.className).toContain('override')
-    fireEvent.click(harnessCell)
-    fireEvent.click(await screen.findByText('opencode'))
-    expect(screen.getByText('API key')).toBeTruthy()
-    expect(screen.getByText('API key').closest('button')!.hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: /^Model for coder:/ })).toBeTruthy()
+    const harnessCell = screen.getByRole('combobox', { name: /^harness for / }) as HTMLSelectElement
+    expect(harnessCell.value).toBe('codex')
+    fireEvent.change(harnessCell, { target: { value: 'opencode' } })
+    const billingCell = screen.getByRole('combobox', { name: /^billing for / }) as HTMLSelectElement
+    expect(billingCell.disabled).toBe(true)
+    expect(billingCell.selectedOptions[0]?.textContent).toContain('API key')
   })
 
   it('searches the Models.dev directory for an unconfigured provider', async () => {
@@ -828,8 +832,8 @@ describe('SettingsPages agents', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^Model:/ }))
     const search = screen.getByLabelText('Search models')
     fireEvent.change(search, { target: { value: 'groq' } })
-    expect(screen.getByRole('listbox', { name: 'Model choices' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('option', { name: /Llama 4/ }))
+    expect(screen.getByRole('dialog', { name: 'Model choices' })).toBeTruthy()
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Model choices' })).getByRole('button', { name: /Llama 4/ }))
     expect(screen.getByRole('button', { name: /^Model:/ }).textContent).toContain('Llama 4')
   })
 
@@ -904,6 +908,7 @@ describe('SettingsPages agents', () => {
     fireEvent.keyDown(search, { key: 'Escape' })
 
     expect(screen.queryByLabelText('Search models')).toBeNull()
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Model:/ }))
     expect(window.location.pathname.startsWith('/settings/')).toBe(true)
   })
 })
@@ -1353,11 +1358,9 @@ describe('canonical app settings', () => {
       target: { value: 'Agent Queue' },
     })
     fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
-    fireEvent.click(await screen.findByText('high'))
-    fireEvent.click(await screen.findByText('low'))
+    fireEvent.change(await screen.findByRole('combobox', { name: /^effort for / }), { target: { value: 'low' } })
     fireEvent.click(screen.getByRole('link', { name: 'Bots' }))
-    fireEvent.click(await screen.findByText('high'))
-    fireEvent.click(await screen.findByText('medium'))
+    fireEvent.change(await screen.findByRole('combobox', { name: /^effort for / }), { target: { value: 'medium' } })
     fireEvent.click(screen.getByRole('link', { name: 'Options' }))
     expect((screen.getByLabelText('Trigger status') as HTMLInputElement).value).toBe(
       'Agent Queue',
@@ -1384,10 +1387,10 @@ describe('canonical app settings', () => {
       'Agent Queue',
     )
     fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
-    const savedEffort = await screen.findByText('low')
-    expect(savedEffort.closest('button')?.classList.contains('override')).toBe(true)
+    const savedEffort = await screen.findByRole('combobox', { name: /^effort for / }) as HTMLSelectElement
+    expect(savedEffort.value).toBe('low')
     fireEvent.click(screen.getByRole('link', { name: 'Bots' }))
-    expect((await screen.findByText('medium')).closest('button')?.classList.contains('override')).toBe(true)
+    expect((await screen.findByRole('combobox', { name: /^effort for / }) as HTMLSelectElement).value).toBe('medium')
   })
 
   it('asks before leaving a dirty app and keeps its draft after Stay', async () => {
@@ -1437,8 +1440,7 @@ describe('canonical app settings', () => {
   it('restores app settings from shared settings and guards new edits after return', async () => {
     stubFetch(false)
     renderSettings('/apps/software_factory/settings/agents')
-    const settings = await screen.findByRole('link', { name: 'Software Factory settings' })
-    expect(settings.getAttribute('aria-current')).toBe('page')
+    await screen.findByRole('link', { name: 'Back to Software Factory' })
     fireEvent.click(screen.getByRole('link', { name: 'Shared agents' }))
     await screen.findByRole('heading', { name: 'Agents' })
     fireEvent.click(screen.getByRole('link', { name: 'Back to Druks' }))
@@ -1561,7 +1563,7 @@ describe('settings resource read failures', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
     fireEvent.change(await screen.findByLabelText('Harness'), { target: { value: 'opencode' } })
     fireEvent.click(screen.getByRole('button', { name: /^Model:/ }))
-    expect((await screen.findByRole('option', { name: /GPT OSS 120B/ }) as HTMLButtonElement).disabled).toBe(false)
+    expect((within(await screen.findByRole('dialog', { name: 'Model choices' })).getByRole('button', { name: /GPT OSS 120B/ }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('lets an app integer be cleared, replaced, and saved as an integer', async () => {
@@ -1715,22 +1717,6 @@ it('finds model defaults, agent and bot overrides, and timezone with working fie
 })
 
 
-it('closes an agent menu on surrounding scroll or resize, but keeps internal scroll', async () => {
-  stubFetch(false)
-  renderSettings('/apps/software_factory/settings/agents')
-  const harness = await screen.findByRole('button', { name: /^harness:/ })
-  fireEvent.click(harness)
-  const menu = screen.getByRole('button', { name: 'opencode' }).closest('.set-menu')!
-  fireEvent.scroll(menu)
-  expect(harness.getAttribute('aria-expanded')).toBe('true')
-  fireEvent.scroll(screen.getByRole('main'))
-  expect(harness.getAttribute('aria-expanded')).toBe('false')
-  fireEvent.click(harness)
-  fireEvent(window, new Event('resize'))
-  expect(harness.getAttribute('aria-expanded')).toBe('false')
-})
-
-
 it.each(Object.values(SETTINGS_FIELDS))('opens the shared $label field from search', async (field) => {
   stubFetch(false)
   mockScroll()
@@ -1778,9 +1764,8 @@ it('keeps focus on another agent field after saving an app reached through searc
   const scroll = mockScroll()
   renderSettings('/apps/software_factory/settings/agents?field=agent.software_factory.coder.model')
   await waitFor(() => expect(document.activeElement?.closest('[data-setting]')?.getAttribute('data-setting')).toBe('agent.software_factory.coder.model'))
-  fireEvent.click(screen.getByRole('button', { name: /^effort:/ }))
-  fireEvent.click(screen.getByRole('button', { name: 'low' }))
-  const harness = screen.getByRole('button', { name: /^harness:/ })
+  fireEvent.change(screen.getByRole('combobox', { name: /^effort for / }), { target: { value: 'low' } })
+  const harness = screen.getByRole('combobox', { name: /^harness for / })
   harness.focus()
   scroll.mockClear()
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))

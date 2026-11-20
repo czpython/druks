@@ -1,15 +1,17 @@
 import { Fragment, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
-import { ArrowDown, ArrowUpRight, CalendarDays, ChevronDown, ChevronRight, CircleDot, Pause, Play, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react'
+import { Activity, ArrowDown, ArrowUpRight, CalendarDays, ChevronDown, ChevronRight, CircleDot, Pause, Play, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react'
 import { Link, useLocation } from 'wouter'
 
 import { api, eventQuery } from '../api/client'
 import { useSSE } from '../api/sse'
 import type { EventFilters, FeedItem, FeedResponse } from '../api/types'
 import { appLabel, getAppUI } from '../apps/registry'
+import { Select } from '../components/Control'
 import { Markdown } from '../components/Markdown'
 import { Menu } from '../components/Menu'
 import { Page } from '../components/Page'
+import { PageHeading } from '../components/PageHeading'
 import { activityDay, activityTypeLabel, eventLine } from '../lib/feed'
 import { useFormatters } from '../lib/preferences'
 import { useRawLocation } from '../lib/useRawLocation'
@@ -203,13 +205,15 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
   }, [selectedSeq])
 
   return (
-    <Page scroll="internal" className={`activity-page${selectedSeq ? ' activity-selected' : ''}`}>
-      <div className="activity-layout">
-        <div className="activity-list" ref={feed} onScroll={(event) => {
-          setIsReadingHistory(event.currentTarget.scrollTop > 32)
-        }}>
-          <header className="activity-header">
-            <h1>Activity</h1>
+    <Page
+      scroll="internal"
+      className={`activity-page${selectedSeq ? ' activity-selected' : ''}`}
+      header={
+        <PageHeading
+          className="activity-page-heading"
+          title="Activity"
+          icon={<Activity aria-hidden="true" />}
+          actions={
             <div className="activity-connection">
               <span role="status" className={isPaused ? '' : connection === 'Live' ? 'activity-live' : ''}>
                 <CircleDot size={12} aria-hidden="true" />{isPaused ? 'Paused' : connection}
@@ -221,28 +225,35 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
                     setConnection('Connecting')
                   }
                   setIsPaused(!isPaused)
-                }}>
+                }} className="druks-button druks-button--compact druks-button--icon-only">
                 {isPaused ? <Play size={16} /> : <Pause size={16} />}
               </button>
             </div>
-          </header>
+          }
+        />
+      }
+    >
+      <div className="activity-layout">
+        <div className="activity-list" ref={feed} onScroll={(event) => {
+          setIsReadingHistory(event.currentTarget.scrollTop > 32)
+        }}>
           <div className="activity-toolbar">
-            <label className="activity-search">
+            <label className="activity-search druks-field druks-field--compact">
               <Search size={16} aria-hidden="true" />
               <input type="search" aria-label="Search work" placeholder="Search work…"
                 value={searchText} onChange={(event) => setSearchText(event.target.value)} />
             </label>
-            <button type="button" className="activity-filter-trigger" aria-expanded={control?.name === 'filters'}
+            <button type="button" className="activity-filter-trigger druks-button druks-button--compact" aria-expanded={control?.name === 'filters'}
               aria-controls="activity-filters" onClick={(event) => toggleControl('filters', event.currentTarget)}>
               <SlidersHorizontal size={16} aria-hidden="true" />Filters
               {(filters.app || filters.topic) && <span className="activity-filter-count">{[filters.app, filters.topic].filter(Boolean).length}</span>}
               <ChevronDown size={14} aria-hidden="true" />
             </button>
-            <button type="button" className="activity-filter-trigger" aria-expanded={control?.name === 'dates'}
+            <button type="button" className="activity-filter-trigger druks-button druks-button--compact" aria-expanded={control?.name === 'dates'}
               aria-controls="activity-dates" onClick={(event) => toggleControl('dates', event.currentTarget)}>
               <CalendarDays size={16} aria-hidden="true" />Date range<ChevronDown size={14} aria-hidden="true" />
             </button>
-            <button type="button" className="activity-refresh" aria-label="Refresh activity" disabled={history.isFetching}
+            <button type="button" className="activity-refresh druks-button druks-button--compact druks-button--icon-only" aria-label="Refresh activity" disabled={history.isFetching}
               onClick={() => {
                 setPending([])
                 void history.refetch()
@@ -256,23 +267,23 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
               {filters.app && filters.topic && <span>{activityTypeLabel({ app: filters.app, topic: filters.topic })}</span>}
               {params.get('start') && <span>From {params.get('start')}</span>}
               {params.get('end') && <span>Through {params.get('end')}</span>}
-              <button type="button" onClick={() => navigate('/events', { replace: true })}>Clear filters<X size={14} aria-hidden="true" /></button>
+              <button type="button" onClick={() => navigate('/events', { replace: true })} className="druks-button">Clear filters<X size={14} aria-hidden="true" /></button>
             </div>}
           {control && <Menu anchor={control.trigger} className="activity-control" onClose={closeControl}>
             <div ref={controlPanel} id={`activity-${control.name}`} role="group"
               aria-label={control.name === 'filters' ? 'Activity filters' : 'Activity date range'}>
             <header><strong>{control.name === 'filters' ? 'Filters' : 'Date range'}</strong>
-              <button type="button" aria-label="Close filter control" onClick={closeControl}><X size={16} /></button>
+              <button type="button" aria-label="Close filter control" onClick={closeControl} className="druks-button druks-button--compact druks-button--icon-only"><X size={16} /></button>
             </header>
             {control.name === 'filters' ? <>
-            <label>App<select aria-label="App" value={filters.app ?? ''}
+            <label>App<Select aria-label="App" value={filters.app ?? ''}
               onChange={(event) => updateParams('app', event.target.value)}>
               <option value="">All apps</option>
               {apps.map((app) => <option key={app.name} value={app.name}>{appLabel(app.name)}</option>)}
               {filters.app && !apps.some((app) => app.name === filters.app) &&
                 <option value={filters.app}>{appLabel(filters.app)}</option>}
-            </select></label>
-            <label>Activity type<select aria-label="Activity type" value={filters.app && filters.topic ? JSON.stringify([filters.app, filters.topic]) : ''}
+            </Select></label>
+            <label>Activity type<Select aria-label="Activity type" value={filters.app && filters.topic ? JSON.stringify([filters.app, filters.topic]) : ''}
               onChange={(event) => {
                 const next = new URLSearchParams(params)
                 next.delete('selected')
@@ -292,20 +303,20 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
                 <option value={JSON.stringify([filters.app, filters.topic])}>
                   {activityTypeLabel({ app: filters.app, topic: filters.topic })}
                 </option>}
-            </select></label>
-              <button type="button" className="activity-clear" onClick={() => {
+            </Select></label>
+              <button type="button" className="activity-clear druks-button druks-button--compact" onClick={() => {
                 const next = new URLSearchParams(params)
                 for (const key of ['app', 'topic', 'selected']) next.delete(key)
                 navigate(`/events${next.size ? `?${next}` : ''}`, { replace: true })
               }}>Clear app and type</button>
             </> : <>
             <div className="activity-dates">
-              <label>From<input type="date" value={params.get('start') ?? ''}
-                max={params.get('end') ?? undefined} onChange={(event) => updateParams('start', event.target.value)} /></label>
-              <label>Through<input type="date" value={params.get('end') ?? ''}
-                min={params.get('start') ?? undefined} onChange={(event) => updateParams('end', event.target.value)} /></label>
+              <label>From<span className="druks-field druks-field--compact"><input type="date" value={params.get('start') ?? ''}
+                max={params.get('end') ?? undefined} onChange={(event) => updateParams('start', event.target.value)} /></span></label>
+              <label>Through<span className="druks-field druks-field--compact"><input type="date" value={params.get('end') ?? ''}
+                min={params.get('start') ?? undefined} onChange={(event) => updateParams('end', event.target.value)} /></span></label>
             </div>
-              <button type="button" className="activity-clear" onClick={() => {
+              <button type="button" className="activity-clear druks-button druks-button--compact" onClick={() => {
                 const next = new URLSearchParams(params)
                 for (const key of ['start', 'end', 'selected']) next.delete(key)
                 navigate(`/events${next.size ? `?${next}` : ''}`, { replace: true })
@@ -314,22 +325,32 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
             </div>
           </Menu>}
           {installed.isError && <p role="alert">Could not load app choices.{' '}
-            <button type="button" onClick={() => void installed.refetch()}>Retry apps</button></p>}
+            <button type="button" onClick={() => void installed.refetch()} className="druks-button">Retry apps</button></p>}
           {topics.isError && <p role="alert">Could not load activity types.{' '}
-            <button type="button" onClick={() => void topics.refetch()}>Retry types</button></p>}
+            <button type="button" onClick={() => void topics.refetch()} className="druks-button">Retry types</button></p>}
           {history.isPending && <p className="activity-message" role="status">Loading activity…</p>}
           {history.isError && <div className="activity-message" role="alert">
             <p>Could not load activity. {events.length > 0 && 'The last read remains visible.'}</p>
-            <button type="button" onClick={() => void (history.isFetchNextPageError ? history.fetchNextPage() : history.refetch())}>Retry</button>
+            <button type="button" onClick={() => void (history.isFetchNextPageError ? history.fetchNextPage() : history.refetch())} className="druks-button">Retry</button>
           </div>}
-          {pending.length > 0 && <button type="button" className="activity-new" onClick={() => {
+          {pending.length > 0 && <button type="button" className="activity-new druks-button druks-button--primary" onClick={() => {
             addEvents(pending)
             setPending([])
             feed.current?.scrollTo({ top: 0 })
           }}>New activity · {pending.length}</button>}
-          {history.data && events.length === 0 && <div className="activity-message">
-            <h2>No activity matches these filters.</h2><p>Change the filters to show more history.</p>
-          </div>}
+          {history.data && !history.isError && events.length === 0 && (
+            <section className="activity-empty druks-panel druks-empty-state">
+              {Object.values(filters).some(Boolean) ? <>
+                <h2>No activity matches these filters</h2>
+                <p>Try a different search or show all activity.</p>
+                <Link href="/events" className="druks-button">Clear filters</Link>
+              </> : <>
+                <h2>Your work will appear here</h2>
+                <p>After you give Druks a task, this page will show what happened along the way.</p>
+                <Link href="/chat" className="druks-button druks-button--primary">Open Chat</Link>
+              </>}
+            </section>
+          )}
           {events.length > 0 && <div className="activity-order">
             <span>{events.length} {events.length === 1 ? 'activity' : 'activities'} shown</span><span>Newest first</span>
           </div>}
@@ -357,15 +378,15 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
               </Fragment>
             })}
           </ol>
-          {history.hasNextPage && <button type="button" className="activity-older" disabled={history.isFetchingNextPage}
+          {history.hasNextPage && <button type="button" className="activity-older druks-button" disabled={history.isFetchingNextPage}
             onClick={() => void history.fetchNextPage()}><ArrowDown size={16} aria-hidden="true" />{history.isFetchingNextPage ? 'Loading older activity…' : 'Load older activity'}</button>}
         </div>
         {selectedSeq > 0 && <aside className="activity-detail" aria-label="Activity details">
-          <button type="button" className="activity-close" aria-label="Close details" onClick={closeDetails}><X size={18} /></button>
+          <button type="button" className="activity-close druks-button druks-button--icon-only" aria-label="Close details" onClick={closeDetails}><X size={18} /></button>
           {selectedEvent ? <ActivityDetail key={selectedEvent.id} event={selectedEvent} /> :
             <div className="activity-message">
               <p role="status">{selectedRead.isFetching ? 'Loading activity detail…' : 'This activity is unavailable in the current filters.'}</p>
-              {selectedRead.isError && <button type="button" onClick={() => void selectedRead.refetch()}>Retry detail</button>}
+              {selectedRead.isError && <button type="button" onClick={() => void selectedRead.refetch()} className="druks-button">Retry detail</button>}
             </div>}
         </aside>}
       </div>
@@ -419,7 +440,7 @@ function ActivityDetail({ event }: { event: FeedItem }) {
     {event.payload.artifact_id ? <section className="activity-result" aria-label="Saved result">
       {available && !available.isArtifactAvailable ? <p role="status">This saved result is no longer available.</p> :
         artifact.isError ? <p role="alert">Could not load the saved result.{' '}
-          <button type="button" onClick={() => void artifact.refetch()}>Retry result</button></p> :
+          <button type="button" onClick={() => void artifact.refetch()} className="druks-button">Retry result</button></p> :
           artifact.isPending ? <p role="status">Loading saved result…</p> :
             <><h3>{artifact.data.title}</h3>{artifact.data.kind === 'markdown'
               ? <Markdown source={artifact.data.content} /> : <pre>{artifact.data.content}</pre>}</>}
@@ -441,13 +462,13 @@ function ActivityDetail({ event }: { event: FeedItem }) {
       <dl className="activity-reply-values">{replyLines.map(([name, value]) => <Fragment key={name}>
         <dt>{name.replaceAll('_', ' ')}</dt><dd>{value}</dd>
       </Fragment>)}</dl>
-      <details><summary>Recorded response</summary><pre>{JSON.stringify(event.payload.result, null, 2)}</pre></details>
+      <details className="druks-disclosure"><summary><ChevronRight className="druks-disclosure__indicator" aria-hidden="true" />Recorded response</summary><div className="druks-disclosure__content"><pre>{JSON.stringify(event.payload.result, null, 2)}</pre></div></details>
     </section>}
     <dl className="activity-metadata">
       <dt>Recorded</dt><dd><time dateTime={event.at}>{absTime(event.at)}</time></dd>
       <dt>App</dt><dd>{appLabel(event.app || 'druks')}</dd>
     </dl>
-      <details className="activity-technical"><summary>Technical details</summary>
+      <details className="activity-technical druks-disclosure"><summary><ChevronRight className="druks-disclosure__indicator" aria-hidden="true" />Technical details</summary><div className="druks-disclosure__content">
         {event.payload.failure && <pre>{event.payload.failure}</pre>}
         <dl>
         <dt>Activity type</dt><dd>{event.topic}</dd>
@@ -455,16 +476,16 @@ function ActivityDetail({ event }: { event: FeedItem }) {
         {event.payload.gate && <><dt>Gate</dt><dd>{event.payload.gate}</dd></>}
         {event.payload.input_requested_at && <><dt>Request round</dt><dd>{event.payload.input_requested_at}</dd></>}
         {event.payload.artifact_id && <><dt>Artifact</dt><dd>{event.payload.artifact_id}</dd></>}
-      </dl></details>
+      </dl></div></details>
     <div className="activity-destinations">
       {externalRequest ?
-        <a className="activity-primary" href={externalRequest} target="_blank" rel="noreferrer">View request<ArrowUpRight size={16} aria-hidden="true" /></a> :
-        workPath ? <Link className="activity-primary" href={workPath}>Open work<ArrowUpRight size={16} aria-hidden="true" /></Link> :
+        <a className="activity-primary druks-button druks-button--primary" href={externalRequest} target="_blank" rel="noreferrer">View request<ArrowUpRight size={16} aria-hidden="true" /></a> :
+        workPath ? <Link className="activity-primary druks-button druks-button--primary" href={workPath}>Open work<ArrowUpRight size={16} aria-hidden="true" /></Link> :
           available && <p className="activity-muted">Work destination unavailable.</p>}
       {runPath && runPath !== (externalRequest || workPath) && <Link href={runPath}>Open run<ArrowUpRight size={16} aria-hidden="true" /></Link>}
       {event.payload.run && available && !available.isRunAvailable && <p className="activity-muted">This run is no longer available.</p>}
       {destinations.isError && <p role="alert">Could not check these destinations.{' '}
-        <button type="button" onClick={() => void destinations.refetch()}>Retry destinations</button></p>}
+        <button type="button" onClick={() => void destinations.refetch()} className="druks-button">Retry destinations</button></p>}
     </div>
     <p className="activity-source">Recorded activity · {timezone}</p>
   </>

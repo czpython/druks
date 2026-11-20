@@ -88,6 +88,15 @@ afterEach(() => {
 })
 
 describe('UsagePanel', () => {
+  it('invites provider setup when no provider is connected', async () => {
+    stubFetch({ providers: [{ ...usage.providers[0]!, connected: false, available: false }] })
+    renderPanel()
+
+    expect(await screen.findByRole('heading', { name: 'Connect an AI provider to see usage' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Connect provider' }).getAttribute('href')).toBe('/settings/providers')
+    expect(screen.queryByRole('heading', { name: 'Anthropic' })).toBeNull()
+  })
+
   it('labels a connected panel with the subscription email', async () => {
     stubFetch()
     renderPanel()

@@ -107,7 +107,7 @@ export function LoginWindowPage({ name }: Props) {
         <div className="login-window-actions">
           <button
             type="button"
-            className="set-btn ghost"
+            className="druks-button"
             onClick={() => void cancel()}
             disabled={!windowOpen || busy}
           >
@@ -115,7 +115,7 @@ export function LoginWindowPage({ name }: Props) {
           </button>
           <button
             type="button"
-            className="set-btn primary"
+            className="druks-button druks-button--primary"
             onClick={() => void save()}
             disabled={!windowOpen || busy}
           >

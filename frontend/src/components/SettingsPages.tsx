@@ -6,10 +6,27 @@ import {
   useRef,
   useState,
   type ComponentType,
+  type ReactNode,
   type RefObject,
 } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowUpRight, Search } from 'lucide-react'
+import {
+  ArrowLeft,
+  ArrowUpRight,
+  BookOpen,
+  Bot,
+  Cpu,
+  KeyRound,
+  Link as LinkIcon,
+  Plus,
+  Search,
+  Server,
+  SlidersHorizontal,
+  Smartphone,
+  Users,
+  UsersRound,
+  type LucideIcon,
+} from 'lucide-react'
 import { Link, useLocation, useSearch } from 'wouter'
 
 import { ApiError, api } from '../api/client'
@@ -30,6 +47,7 @@ import { Page } from './Page'
 import { PeoplePane } from './PeoplePane'
 import { PhonesPane } from './PhonesPane'
 import { TeamsPane } from './TeamsPane'
+import { PageHeading } from './PageHeading'
 import { Sidebar } from './Sidebar'
 import { BrowserProfilesPane } from './BrowserProfilesPane'
 import { CallsPane } from './CallsPane'
@@ -57,17 +75,17 @@ import {
   type UnsavedForm,
 } from './settings'
 
-const SECTIONS = [
-  { id: 'providers', label: 'Providers', group: 'AI execution' },
-  { id: 'agents', label: 'Agents', group: 'AI execution' },
-  { id: 'connections', label: 'Connections', group: 'Tools & access' },
-  { id: 'mcp', label: 'MCP servers', group: 'Tools & access' },
-  { id: 'skills', label: 'Skills', group: 'Tools & access' },
-  { id: 'people', label: 'People', group: 'Organization' },
-  { id: 'teams', label: 'Teams', group: 'Organization' },
-  { id: 'personal', label: 'Preferences', group: 'Personal' },
-  { id: 'api-tokens', label: 'API tokens', group: 'Personal' },
-  { id: 'phones', label: 'Phones', group: 'Personal' },
+const SECTIONS: { id: string; label: string; group: string; icon: LucideIcon }[] = [
+  { id: 'providers', label: 'Providers', group: 'AI execution', icon: Cpu },
+  { id: 'agents', label: 'Agents', group: 'AI execution', icon: Bot },
+  { id: 'connections', label: 'Connections', group: 'Tools & access', icon: LinkIcon },
+  { id: 'mcp', label: 'MCP servers', group: 'Tools & access', icon: Server },
+  { id: 'skills', label: 'Skills', group: 'Tools & access', icon: BookOpen },
+  { id: 'people', label: 'People', group: 'Organization', icon: Users },
+  { id: 'teams', label: 'Teams', group: 'Organization', icon: UsersRound },
+  { id: 'personal', label: 'Preferences', group: 'Personal', icon: SlidersHorizontal },
+  { id: 'api-tokens', label: 'API tokens', group: 'Personal', icon: KeyRound },
+  { id: 'phones', label: 'Phones', group: 'Personal', icon: Smartphone },
 ]
 
 const CONNECTION_TABS = [
@@ -101,12 +119,14 @@ export function SettingsPages({
   returnTo,
   unsavedFormRef,
   appName,
+  headingActions,
   active = true,
 }: {
   account: Account
   returnTo: string
   unsavedFormRef: RefObject<UnsavedForm | null>
   appName?: string
+  headingActions?: ReactNode
   active?: boolean
 }) {
   const [location, navigate] = useLocation()
@@ -120,6 +140,7 @@ export function SettingsPages({
   const connectionsTab =
     connectionTabs.find((tab) => tab.id === searchParams.get('tab'))?.id ?? 'services'
   const content = useRef<HTMLElement>(null)
+  const [addingProvider, setAddingProvider] = useState(false)
   const section = appName ? `apps/${appName}` : location.slice('/settings/'.length) || 'providers'
   const formPath = `${import.meta.env.BASE_URL.replace(/\/$/, '')}${appName ? `/apps/${appName}/settings` : '/settings'}`
   const queryClient = useQueryClient()
@@ -182,6 +203,9 @@ export function SettingsPages({
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const desktopSearchInput = useRef<HTMLInputElement>(null)
+  const drawerSearchInput = useRef<HTMLInputElement>(null)
   const [visited, setVisited] = useState([section])
   if (!visited.includes(section)) setVisited([...visited, section])
   const tick = useTicker()
@@ -256,6 +280,7 @@ export function SettingsPages({
   const title =
     sections.find((entry) => entry.id === section)?.label ??
     (app && validAppPage ? appLabel(app.name) : 'Settings')
+  const SectionIcon = sections.find((entry) => entry.id === section)?.icon
   const formPage = (isAdmin && section === 'agents') || section === 'personal' || Boolean(app && validAppPage)
   const executionChanged =
     defaults &&
@@ -549,13 +574,43 @@ export function SettingsPages({
           <a className="skip-navigation" href="#settings-content">
             Skip to content
           </a>
-          <header className="command-header">
-            <Sidebar account={account} home={returnTo}>
+          <header className="command-header command-header--main">
+            <Sidebar account={account} home={returnTo}>{(surface) => <>
               <Link className="settings-back sidebar-link" href={returnTo}>
                 <ArrowLeft size={17} aria-hidden="true" />
                 Back to Druks
               </Link>
-              <h2 className="settings-sidebar-title">Settings</h2>
+              <div className="settings-sidebar-heading">
+                <h2 className="settings-sidebar-title">Settings</h2>
+                <button
+                  type="button"
+                  className="druks-button druks-button--quiet druks-button--compact"
+                  aria-label={searchOpen ? 'Hide settings search' : 'Show settings search'}
+                  aria-expanded={searchOpen}
+                  aria-controls={`settings-sidebar-search-${surface}`}
+                  onClick={() => {
+                    if (searchOpen) setSearch('')
+                    else requestAnimationFrame(() => (surface === 'desktop' ? desktopSearchInput : drawerSearchInput).current?.focus())
+                    setSearchOpen(!searchOpen)
+                  }}
+                >
+                  <Search size={17} aria-hidden="true" />
+                </button>
+              </div>
+              <div id={`settings-sidebar-search-${surface}`} className={`settings-sidebar-search${searchOpen || search ? ' is-open' : ''}`}>
+                <label className="settings-search druks-field druks-field--compact">
+                  <Search size={17} aria-hidden="true" />
+                  <input
+                    ref={surface === 'desktop' ? desktopSearchInput : drawerSearchInput}
+                    type="search"
+                    aria-label={surface === 'desktop' ? 'Search settings' : 'Search settings in navigation'}
+                    placeholder="Search settings"
+                    value={search}
+                    tabIndex={searchOpen ? 0 : -1}
+                    onChange={(event) => setSearch(event.target.value)}
+                  />
+                </label>
+              </div>
               <nav className="settings-navigation" aria-label="Settings">
                 {['AI execution', 'Tools & access', 'Organization', 'Personal'].map((group) => (
                   <div key={group}>
@@ -571,18 +626,15 @@ export function SettingsPages({
                         className="sidebar-link"
                         aria-current={section === entry.id ? 'page' : undefined}
                       >
-                        {entry.label}
+                        <entry.icon size={16} aria-hidden="true" />
+                        <span>{entry.label}</span>
                         {dirtyPages.includes(entry.id) && <span aria-hidden="true">•</span>}
                       </Link>
                     ))}
                   </div>
                 ))}
               </nav>
-            </Sidebar>
-            <div className="command-breadcrumb">
-              <span>Settings /</span>
-              <strong>{title}</strong>
-            </div>
+            </>}</Sidebar>
           </header>
         </>
       )}
@@ -593,33 +645,28 @@ export function SettingsPages({
         tabIndex={-1}
       >
         <Page inset>
-          <div className="settings-page-head">
-            <div>
-              <h1 tabIndex={-1} ref={heading}>
-                {title}
-              </h1>
-            </div>
-            {!appName && (
-              <label className="settings-search">
-                <Search size={17} aria-hidden="true" />
-                <input
-                  type="search"
-                  aria-label="Search settings"
-                  placeholder="Search settings"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                />
-              </label>
-            )}
-          </div>
+          {section !== 'teams' && <PageHeading
+            className="settings-page-heading"
+            title={title}
+            description={appName && app ? app.description : section === 'providers' ? 'Connect the accounts your agents use.' : undefined}
+            icon={appName || !SectionIcon ? undefined : <SectionIcon aria-hidden="true" />}
+            headingRef={heading}
+            titleTabIndex={-1}
+            actions={appName ? headingActions : isAdmin && section === 'providers' ? (
+              <button type="button" className="druks-button druks-button--primary" aria-expanded={addingProvider} aria-controls="provider-add-panel" onClick={() => setAddingProvider((open) => !open)}>
+                <Plus size={14} aria-hidden="true" />
+                Add provider
+              </button>
+            ) : undefined}
+          />}
           {appName && app && validAppPage && (
             <>
-              <p className="app-settings-description">{app.description}</p>
               {(app.bot || (hasOptions && hasAgents)) && (
-                <nav className="settings-tabs" aria-label="App settings sections">
+                <nav className="settings-tabs druks-tabs" aria-label="App settings sections">
                   {hasOptions && (
                     <Link
                       href={`/apps/${app.name}/settings`}
+                      className="druks-tab"
                       aria-current={paneSection === 'options' ? 'page' : undefined}
                     >
                       Options
@@ -628,6 +675,7 @@ export function SettingsPages({
                   {hasAgents && (
                     <Link
                       href={`/apps/${app.name}/settings/agents`}
+                      className="druks-tab"
                       aria-current={paneSection === 'agents' ? 'page' : undefined}
                     >
                       Agents
@@ -636,6 +684,7 @@ export function SettingsPages({
                   {app.bot && (
                     <Link
                       href={`/apps/${app.name}/settings/bots`}
+                      className="druks-tab"
                       aria-current={paneSection === 'bots' ? 'page' : undefined}
                     >
                       Bots
@@ -644,6 +693,7 @@ export function SettingsPages({
                   {hasChannels && (
                     <Link
                       href={`/apps/${app.name}/settings/channels`}
+                      className="druks-tab"
                       aria-current={paneSection === 'channels' ? 'page' : undefined}
                     >
                       Channels
@@ -683,7 +733,7 @@ export function SettingsPages({
           {section === 'personal' && personalQuery.isError && (
             <p role="alert" className="settings-error">
               Could not load preferences.{' '}
-              <button onClick={() => void personalQuery.refetch()}>Try again</button>
+              <button onClick={() => void personalQuery.refetch()} className="druks-button">Try again</button>
             </p>
           )}
           {executionPage && !executionReady &&
@@ -694,7 +744,7 @@ export function SettingsPages({
                   onClick={() => {
                     for (const query of executionQueries) if (query.isError) void query.refetch()
                   }}
-                >
+                 className="druks-button">
                   Try again
                 </button>
               </p>
@@ -712,7 +762,7 @@ export function SettingsPages({
                     void settingsQuery.refetch()
                     void appsQuery.refetch()
                   }}
-                >
+                 className="druks-button">
                   Try again
                 </button>
               </p>
@@ -755,6 +805,8 @@ export function SettingsPages({
               )}
               {page === 'providers' && (
                 <ProvidersPane
+                  adding={addingProvider}
+                  onAddingChange={setAddingProvider}
                   providers={providers}
                   registeredProviders={providersQuery.data ?? []}
                   subscriptions={subscriptionsQuery.data ?? []}
@@ -782,11 +834,12 @@ export function SettingsPages({
               )}
               {page === 'connections' && (
                 <>
-                  <nav className="settings-tabs" aria-label="Connections">
+                  <nav className="settings-tabs druks-tabs" aria-label="Connections">
                     {connectionTabs.map((tab) => (
                       <Link
                         key={tab.id}
                         href={`/settings/connections?tab=${tab.id}`}
+                        className="druks-tab"
                         aria-current={connectionsTab === tab.id ? 'page' : undefined}
                       >
                         {tab.label}
@@ -812,9 +865,9 @@ export function SettingsPages({
               {page === 'mcp' && <McpServersPane isAdmin={isAdmin} />}
               {isAdmin && page === 'skills' && <SkillsPane />}
               {page === 'people' && <PeoplePane account={account} />}
-              {isAdmin && page === 'teams' && <TeamsPane />}
+              {isAdmin && page === 'teams' && <TeamsPane headingRef={heading} />}
               {page === 'api-tokens' && <AgentAccessPane />}
-              {page === 'phones' && <PhonesPane />}
+              {page === 'phones' && <PhonesPane isAdmin={isAdmin} />}
               {app && hasChannels && validAppPage && paneSection === 'channels' &&
                 page === `apps/${app.name}` &&
                 channels.map((channel) => {
@@ -835,7 +888,6 @@ export function SettingsPages({
                       section={paneSection}
                       edits={appEdits[entry.name] ?? {}}
                       fieldErrors={appProblems[entry.name] ?? {}}
-                      harnessColor={harnessColor}
                       catalog={catalog}
                       harnessByName={harnessByName}
                       defaults={savedDefaults}
@@ -917,14 +969,14 @@ export function SettingsPages({
           <span role="status">{saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved'}</span>
           <div>
             <button
-              className="set-btn ghost"
+              className="druks-button"
               onClick={() => discard(section)}
               disabled={saving || !dirty}
             >
               Discard
             </button>
             <button
-              className="set-btn primary"
+              className="druks-button druks-button--primary"
               onClick={() => void save([section])}
               disabled={
                 saving ||
@@ -941,7 +993,7 @@ export function SettingsPages({
         </footer>
       )}
       <dialog
-        className="settings-leave-dialog"
+        className="settings-leave-dialog druks-dialog"
         ref={confirmation}
         aria-labelledby={confirmationTitle}
         onCancel={(event) => {
@@ -959,7 +1011,7 @@ export function SettingsPages({
         </p>
         <div>
           <button
-            className="set-btn ghost"
+            className="druks-button"
             disabled={saving}
             onClick={() => {
               pending.current = null
@@ -969,7 +1021,7 @@ export function SettingsPages({
             Stay
           </button>
           <button
-            className="set-btn ghost"
+            className="druks-button"
             disabled={saving}
             onClick={() => {
               dirtyPages.forEach(discard)
@@ -979,7 +1031,7 @@ export function SettingsPages({
             Discard
           </button>
           <button
-            className="set-btn primary"
+            className="druks-button druks-button--primary"
             disabled={saving}
             onClick={() => void save(dirtyPages, finishLeaving)}
           >

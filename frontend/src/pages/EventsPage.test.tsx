@@ -206,10 +206,21 @@ it('resumes an interrupted batch and shows each replayed row once', async () => 
 it('starts live updates on an empty feed from its read snapshot', async () => {
   history.mockResolvedValue({ items: [], cursor: '10:20:10', nextCursor: null })
   mount()
-  await screen.findByText('No activity matches these filters.')
+  await screen.findByRole('heading', { name: 'Your work will appear here' })
+  expect(screen.getByRole('link', { name: 'Open Chat' }).getAttribute('href')).toBe('/chat')
   expect(new URL(source().url, window.location.origin).searchParams.get('cursor')).toBe('10:20:10')
   act(() => source().emit('message', result))
   expect(await screen.findByRole('button', { name: /Pump A.*Gist prepared/ })).toBeTruthy()
+})
+
+it('offers to clear filters instead of onboarding when a search has no matches', async () => {
+  window.history.replaceState(null, '', '/events?q=missing')
+  history.mockResolvedValue({ items: [], cursor: '10:20:10', nextCursor: null })
+  mount()
+
+  await screen.findByRole('heading', { name: 'No activity matches these filters' })
+  expect(screen.getByRole('link', { name: 'Clear filters' }).getAttribute('href')).toBe('/events')
+  expect(screen.queryByRole('link', { name: 'Open Chat' })).toBeNull()
 })
 
 it('retries failed reads and shows missing destinations without hiding historical facts', async () => {

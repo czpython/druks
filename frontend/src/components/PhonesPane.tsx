@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { Link } from 'wouter'
 
 import { api } from '../api/client'
 import type { AppSettings, WahaSession } from '../api/types'
@@ -10,7 +11,7 @@ import { Button } from './Control'
 const PAIRING_POLL_INTERVAL = 5_000
 
 /** The numbers of the private Bots that the person can use. Each person pairs their own phone. */
-export function PhonesPane() {
+export function PhonesPane({ isAdmin = false }: { isAdmin?: boolean }) {
   // The app settings hold only the apps that the person can use.
   const settingsQuery = useQuery({ queryKey: ['appSettings'], queryFn: api.getAppSettings })
   const bots = settingsQuery.data?.channels.includes('whatsapp')
@@ -32,15 +33,20 @@ export function PhonesPane() {
           <Button onClick={() => void settingsQuery.refetch()}>Try again</Button>
         </p>
       )}
-      {settingsQuery.isSuccess && !bots.length && <p>No private Bot has a WhatsApp number.</p>}
+      {settingsQuery.isSuccess && !bots.length && (
+        <div className="druks-empty-state">
+          <h3>No private Bot numbers</h3>
+          <p>A private Bot with a WhatsApp number will appear here for pairing.</p>
+        </div>
+      )}
       {bots.map((app) => (
-        <BotNumbers key={app.name} app={app} />
+        <BotNumbers key={app.name} app={app} isAdmin={isAdmin} />
       ))}
     </div>
   )
 }
 
-function BotNumbers({ app }: { app: AppSettings }) {
+function BotNumbers({ app, isAdmin }: { app: AppSettings; isAdmin: boolean }) {
   const pairingCodes = useOneTimeCodes(app.name)
   const query = useQuery({
     queryKey: ['wahaSessions', app.name],
@@ -72,13 +78,23 @@ function BotNumbers({ app }: { app: AppSettings }) {
           {error}
         </div>
       )}
-      {query.isSuccess && !numbers.length && <p>An admin has not linked a number yet.</p>}
+      {query.isSuccess && !numbers.length && (
+        <div className="druks-empty-state">
+          <h3>No number to pair</h3>
+          <p>{isAdmin ? 'Add a WhatsApp number to this Bot, then pair your phone here.' : 'An admin needs to add a WhatsApp number to this Bot before you can pair your phone.'}</p>
+          {isAdmin && (
+            <Link className="druks-button druks-button--primary" href={`/apps/${app.name}/settings/channels`}>
+              Add a number
+            </Link>
+          )}
+        </div>
+      )}
       {numbers.length > 0 && (
         <div className="channel-connections">
           {numbers.map((number) => {
             const pairingCode = pairingCodes.codes.find((entry) => entry.numberId === number.id)
             return (
-              <div className="set-card channel-connection" key={number.id}>
+              <div className="druks-panel channel-connection" key={number.id}>
                 <div className="channel-connection-head">
                   <div>
                     <span className="connection-name">{number.number}</span>

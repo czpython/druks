@@ -1,7 +1,7 @@
-import { EmptyState, Page, PageHeader } from '@druks/ui'
+import { Page, PageHeader } from '@druks/ui'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { useLocation } from 'wouter'
+import { Link, useLocation } from 'wouter'
 
 import { buildApi } from './api'
 import type { Resolution } from './api'
@@ -63,13 +63,15 @@ export function HistoryPage() {
       }
       right={
         <div className="active-filters mono">
-          <input
-            type="text"
-            className="history-search mono"
-            placeholder="filter by ticket or title…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <label className="history-search mono druks-field druks-field--compact">
+            <input
+              type="search"
+              aria-label="Filter history"
+              placeholder="filter by ticket or title…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
           <span className="filter-sep mono dim">·</span>
           <FilterChip<ResolutionFilter>
             value="all"
@@ -103,11 +105,17 @@ export function HistoryPage() {
   return (
     <Page scroll="internal" className="page-history" header={head}>
       {filtered.length === 0 ? (
-        <EmptyState
-          glyph="∅"
-          msg="no matches"
-          sub={query ? `for "${query}"` : 'clear filters to see more'}
-        />
+        <section className="druks-panel druks-empty-state">
+          <h2>{items.length === 0 ? 'No completed work yet' : 'No history matches these filters'}</h2>
+          <p>{items.length === 0
+            ? 'Finished Software Factory work will appear here. You can check active work now.'
+            : 'Change the search or resolution filter to see more work.'}</p>
+          {items.length === 0 ? (
+            <Link className="druks-button druks-button--primary" href="/software_factory">View active work</Link>
+          ) : (
+            <button type="button" className="druks-button druks-button--primary" onClick={() => { setQuery(''); setResolutionFilter('all') }}>Clear filters</button>
+          )}
+        </section>
       ) : (
         <div className="history-list">
           <div className="table-head mono dim table-head-history">

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Box, Play, RotateCcw } from 'lucide-react'
+import { CalendarDays, Box, Play, RotateCcw } from 'lucide-react'
 import { Link, useLocation, useSearch } from 'wouter'
 
 import { api } from '../api/client'
@@ -9,6 +9,7 @@ import { appLabel } from '../apps/registry'
 import { Button, Select } from '../components/Control'
 import { CronField } from '../components/CronField'
 import { Page } from '../components/Page'
+import { PageHeading } from '../components/PageHeading'
 import type { UnsavedForm } from '../components/settings'
 import { absTime, absTimeCompact, dur, timeAway } from '../lib/format'
 import '../schedules.css'
@@ -69,26 +70,28 @@ export function SchedulesPage({ apps, unsavedFormRef, isAdmin }: {
   const next = rows.filter((row) => row.nextRunAt).sort((a, b) => Date.parse(a.nextRunAt!) - Date.parse(b.nextRunAt!))[0]
 
   return (
-    <Page inset className="schedules-page">
-      <header className="schedules-head">
-        <div>
-          <h1>Schedules</h1>
-          <p>
-            {isAdmin
-              ? 'Change cadence, pause a declared schedule, or trigger a run outside it. Changes save automatically.'
-              : 'View declared schedules or trigger a run outside them.'}
-          </p>
-        </div>
-        <Select
-          aria-label="Filter by app"
-          value={app}
-          onChange={(event) => navigate(event.target.value ? `/schedules?app=${encodeURIComponent(event.target.value)}` : '/schedules')}
-        >
-          <option value="">All apps</option>
-          {apps.map((name) => <option key={name} value={name}>{appLabel(name)}</option>)}
-          {app && !apps.includes(app) && <option value={app}>{appLabel(app)}</option>}
-        </Select>
-      </header>
+    <Page inset className="schedules-page" header={
+      <PageHeading
+        className="schedules-heading"
+        title="Schedules"
+        description={isAdmin
+          ? 'Change cadence, pause a declared schedule, or trigger a run outside it. Changes save automatically.'
+          : 'View declared schedules or trigger a run outside them.'}
+        icon={<CalendarDays aria-hidden="true" />}
+        actions={
+          <Select
+            compact
+            aria-label="Filter by app"
+            value={app}
+            onChange={(event) => navigate(event.target.value ? `/schedules?app=${encodeURIComponent(event.target.value)}` : '/schedules')}
+          >
+            <option value="">All apps</option>
+            {apps.map((name) => <option key={name} value={name}>{appLabel(name)}</option>)}
+            {app && !apps.includes(app) && <option value={app}>{appLabel(app)}</option>}
+          </Select>
+        }
+      />
+    }>
       {schedules.isError && (
         <div className="schedules-alert" role="alert">
           <p>Cannot refresh schedules. {schedules.data ? 'The last successful read remains visible.' : 'No schedule data is available.'}</p>
@@ -103,7 +106,19 @@ export function SchedulesPage({ apps, unsavedFormRef, isAdmin }: {
         {next && <span>Next up <a href={`#schedule-${next.kind}`}>{appLabel(next.app)} / {appLabel(next.kind.split('.').at(-1)!)}</a> {timeAway(next.nextRunAt!)}</span>}
         {allRows[0] && <span className="schedules-timezone">{allRows[0].timezone}</span>}
       </div>}
-      {schedules.data && rows.length === 0 && <p className="schedules-empty">{app ? 'No declared schedules for this app.' : 'No app declares a workflow schedule.'}</p>}
+      {schedules.data && !schedules.isError && rows.length === 0 && (
+        <section className="schedules-empty druks-panel druks-empty-state">
+          {app ? <>
+            <h2>No schedules for this app</h2>
+            <p>This app has no recurring work to manage here. You can check other apps.</p>
+            <Link href="/schedules" className="druks-button">Show all apps</Link>
+          </> : <>
+            <h2>No schedules to show yet</h2>
+            <p>Apps add schedules when they support recurring work. You can still give Druks a task in Chat.</p>
+            <Link href="/chat" className="druks-button druks-button--primary">Open Chat</Link>
+          </>}
+        </section>
+      )}
       {rows.length > 0 && <div className="schedule-columns" aria-hidden="true">
         <span /> <span>Cadence</span> <span>Next run</span> <span>Last run</span> <span>Last runs</span> <span />
       </div>}
@@ -216,16 +231,18 @@ function ScheduleRow({ schedule, edits, onEdit, onSaving, isAdmin }: {
     >
       <div className="schedule-identity">
         {isAdmin ? (
-          <button
-            type="button"
-            className="schedule-switch"
-            role="switch"
-            aria-checked={isEnabled}
-            aria-label={`${label} enabled`}
-            title={isEnabled ? 'Pause schedule' : 'Enable schedule'}
-            disabled={Boolean(pending)}
-            onClick={() => void save({ schedule_enabled: !isEnabled })}
-          ><span /></button>
+          <label className="schedule-switch-control">
+            <input
+              type="checkbox"
+              className="druks-switch"
+              role="switch"
+              checked={isEnabled}
+              aria-label={`${label} enabled`}
+              title={isEnabled ? 'Pause schedule' : 'Enable schedule'}
+              disabled={Boolean(pending)}
+              onChange={() => void save({ schedule_enabled: !isEnabled })}
+            />
+          </label>
         ) : (
           <span>{isEnabled ? 'Enabled' : 'Paused'}</span>
         )}
@@ -283,7 +300,7 @@ function ScheduleRow({ schedule, edits, onEdit, onSaving, isAdmin }: {
       </div>
       <div className="schedule-actions">
         {isAdmin && (
-          <button type="button" className="schedule-reset" aria-label={`Use defaults for ${label}`} title="Use defaults" disabled={Boolean(pending)} onClick={() => void save({ schedule: null, schedule_enabled: null })}>
+          <button type="button" className="schedule-reset druks-button druks-button--compact druks-button--icon-only" aria-label={`Use defaults for ${label}`} title="Use defaults" disabled={Boolean(pending)} onClick={() => void save({ schedule: null, schedule_enabled: null })}>
             <RotateCcw size={14} aria-hidden="true" />
           </button>
         )}

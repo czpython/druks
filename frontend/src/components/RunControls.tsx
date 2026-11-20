@@ -23,7 +23,7 @@ export function CancelRun({ runId }: { runId: string }) {
 
   if (!confirming) {
     return (
-      <button type="button" className="ins-run-link ins-cancel" onClick={() => setConfirming(true)}>
+      <button type="button" className="ins-run-link ins-cancel druks-button druks-button--danger druks-button--quiet druks-button--compact" onClick={() => setConfirming(true)}>
         cancel run
       </button>
     )
@@ -39,12 +39,12 @@ export function CancelRun({ runId }: { runId: string }) {
         value={reason}
         onChange={(e) => setReason(e.target.value)}
       />
-      <button type="button" className="ins-run-link ins-cancel" disabled={pending} onClick={cancel}>
+      <button type="button" className="ins-run-link ins-cancel druks-button druks-button--danger druks-button--quiet druks-button--compact" disabled={pending} onClick={cancel}>
         confirm cancel
       </button>
       <button
         type="button"
-        className="ins-run-link"
+        className="ins-run-link druks-button druks-button--quiet druks-button--compact"
         disabled={pending}
         onClick={() => setConfirming(false)}
       >
@@ -79,7 +79,7 @@ export function RetryRun({
 
   return (
     <>
-      <button type="button" className="ins-run-link" disabled={pending} onClick={retry}>
+      <button type="button" className="ins-run-link druks-button druks-button--quiet druks-button--compact" disabled={pending} onClick={retry}>
         {pending ? 'retrying…' : 'retry run'}
       </button>
       {error && <span className="review-error">{error}</span>}
@@ -164,7 +164,7 @@ export function InAppReview({
         (artifactFailed ? (
           <div className="review-error" role="alert">
             Could not load the review artifact.{' '}
-            <button className="set-btn ghost" onClick={() => setAttempt((current) => current + 1)}>
+            <button className="druks-button" onClick={() => setAttempt((current) => current + 1)}>
               Retry
             </button>
           </div>
@@ -225,7 +225,7 @@ export function InAppReview({
           return (
             <button
               key={control.id}
-              className={`review-btn review-btn-${control.id}`}
+              className={`review-btn review-btn-${control.id} druks-button ${control.id === 'approve' ? 'druks-button--primary' : control.id === 'cancel' ? 'druks-button--danger' : ''}`}
               disabled={disabled || pending !== null || needsGuidance}
               title={needsGuidance ? 'add an answer or a note first' : undefined}
               onClick={() => choose(control.id)}

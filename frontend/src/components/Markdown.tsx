@@ -18,7 +18,7 @@ interface Props {
  */
 export function Markdown({ source, className }: Props) {
   return (
-    <div className={className ? `markdown-content ${className}` : 'markdown-content'}>
+    <div className={['markdown-content', 'druks-prose', className].filter(Boolean).join(' ')}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{

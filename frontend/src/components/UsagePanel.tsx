@@ -1,6 +1,9 @@
 import { useEffect, useState, type CSSProperties } from 'react'
+import { ChartNoAxesCombined } from 'lucide-react'
+import { Link } from 'wouter'
 
 import { harnessColors } from '../lib/harnessColors'
+import { PageHeading } from './PageHeading'
 import { usageTone, type UsageTone } from '../lib/usageHealth'
 import { useUsage, useUsageHistory, useUsageToday } from '../lib/useUsage'
 import type {
@@ -25,10 +28,7 @@ export function UsagePanel() {
   if (isLoading) {
     return (
       <section className="us-col">
-        <header className="us-head mono dim">
-          <h1 className="us-head-title">Usage</h1>
-          <span>loading…</span>
-        </header>
+        <PageHeading title="Usage" icon={<ChartNoAxesCombined aria-hidden="true" />} actions={<span className="us-head-updated" role="status">Loading…</span>} />
       </section>
     )
   }
@@ -55,49 +55,60 @@ export function UsagePanel() {
   const ages = providers.map((h) => h.ageSeconds).filter((v): v is number => v !== null)
   const updatedLabel = ages.length > 0 ? `updated ${formatAge(Math.min(...ages))} ago` : ''
   const harnessColor = harnessColors(providers.map((provider) => provider.id))
+  const needsProvider = Boolean(data && !isError && providers.every((provider) => !provider.connected))
 
   return (
     <section className="us-col">
-      <header className="us-head">
-        <h1 className="us-head-title">Usage</h1>
-        <span className="us-head-spacer" />
-        <span className="us-head-updated mono">{updatedLabel}</span>
-        <button
-          type="button"
-          className="us-refresh mono"
-          onClick={() => void handleRefresh()}
-          disabled={refreshing || isFetching}
-          title="run a scrape now"
-        >
-          <span className="us-refresh-glyph">↻</span>
-          {refreshing ? 'scraping…' : 'refresh'}
-        </button>
-      </header>
+      <PageHeading
+        title="Usage"
+        icon={<ChartNoAxesCombined aria-hidden="true" />}
+        actions={
+          <>
+            <span className="us-head-updated mono">{updatedLabel}</span>
+            <button
+              type="button"
+              className="us-refresh mono druks-button druks-button--compact"
+              onClick={() => void handleRefresh()}
+              disabled={refreshing || isFetching}
+              title="run a scrape now"
+            >
+              <span className="us-refresh-glyph">↻</span>
+              {refreshing ? 'scraping…' : 'refresh'}
+            </button>
+          </>
+        }
+      />
 
       {(isError || refreshError) && (
         <div className="us-read-error" role="alert">
           <p>Could not refresh Usage. {data ? 'The last successful read remains visible.' : 'No usage data is available.'}</p>
-          <button className="us-refresh" disabled={isFetching || refreshing} onClick={() => {
+          <button className="us-refresh druks-button" disabled={isFetching || refreshing} onClick={() => {
             if (refreshError) void handleRefresh()
             else void refetch()
           }}>Retry</button>
         </div>
       )}
-      <ExhaustionAlert providers={providers} />
-
-      <div className="us-grid">
-        {providers.map((usage) => (
-          <ProviderPanel
-            key={usage.id}
-            usage={usage}
-            color={harnessColor[usage.id]}
-            history={history?.providers.find((h) => h.id === usage.id)}
-            today={today?.providers.find((t) => t.id === usage.id)}
-          />
-        ))}
-      </div>
-
-      {today && <TodaySection today={today} />}
+      {needsProvider ? (
+        <div className="druks-empty-state">
+          <h2>Connect an AI provider to see usage</h2>
+          <p>Once connected, your provider capacity and Druks activity will appear here.</p>
+          <Link href="/settings/providers" className="druks-button druks-button--primary">Connect provider</Link>
+        </div>
+      ) : <>
+        <ExhaustionAlert providers={providers} />
+        <div className="us-grid">
+          {providers.map((usage) => (
+            <ProviderPanel
+              key={usage.id}
+              usage={usage}
+              color={harnessColor[usage.id]}
+              history={history?.providers.find((h) => h.id === usage.id)}
+              today={today?.providers.find((t) => t.id === usage.id)}
+            />
+          ))}
+        </div>
+        {today && <TodaySection today={today} />}
+      </>}
     </section>
   )
 }
@@ -163,7 +174,7 @@ function ExhaustionAlert({ providers }: { providers: ProviderUsage[] }) {
       <div className="us-alert-body">
         <div className="us-alert-line1">
           <span className="us-alert-title">{title}</span>
-          <span className="us-alert-tag mono">
+          <span className="us-alert-tag druks-badge druks-badge--danger druks-badge--tinted">
             {exhausted.model ? 'model exhausted' : 'main limit reached'}
           </span>
         </div>
@@ -216,16 +227,30 @@ function ProviderPanel({
 }) {
   const [rawOpen, setRawOpen] = useState(false)
 
+  if (!usage.connected) {
+    return (
+      <section className="us-prov" aria-label={usage.label}>
+        <div className="us-prov-empty druks-empty-state">
+          <span className="us-prov-dot" aria-hidden="true" />
+          <h2>{usage.label}</h2>
+          <p>Connect {usage.label} to see your quota.</p>
+          <Link href="/settings/providers" className="druks-button druks-button--primary">
+            Connect {usage.label}
+          </Link>
+        </div>
+      </section>
+    )
+  }
+
   return (
     <section className="us-prov" style={{ '--fam': color } as CSSProperties}>
       <header className="us-prov-head">
-        <span className="us-prov-dot" />
+        <span className="us-prov-dot" aria-hidden="true" />
         <div className="us-prov-identity">
           <h2 className="us-prov-name">{usage.label}</h2>
-          {usage.connected && usage.providerEmail && <span>{usage.providerEmail}</span>}
+          {usage.providerEmail && <span>{usage.providerEmail}</span>}
         </div>
-        {usage.planTier && <span className="us-prov-plan mono">{usage.planTier}</span>}
-        <span className="us-prov-spacer" />
+        {usage.planTier && <span className="us-prov-plan druks-badge druks-badge--tinted">{usage.planTier}</span>}
         <span className="us-prov-scraped mono">
           {usage.scrapedAt ? `scraped ${formatAge(usage.ageSeconds)} ago` : describeIdle(usage)}
         </span>
@@ -336,7 +361,7 @@ function WeeklyCarousel({
         <div className="us-week-pages">
           <button
             type="button"
-            className="us-week-arrow"
+            className="us-week-arrow druks-button druks-button--compact druks-button--icon-only"
             aria-label="Previous weekly window"
             onClick={() => setSelectedIndex(previousIndex)}
           >
@@ -356,7 +381,7 @@ function WeeklyCarousel({
           </div>
           <button
             type="button"
-            className="us-week-arrow"
+            className="us-week-arrow druks-button druks-button--compact druks-button--icon-only"
             aria-label="Next weekly window"
             onClick={() => setSelectedIndex(nextIndex)}
           >

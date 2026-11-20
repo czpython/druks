@@ -8,7 +8,7 @@ import { api } from '../api/client'
 import { Menu } from './Menu'
 import { RelTime } from './RelTime'
 
-/** The bell in the header: the viewer's own notifications, newest first. Opening it marks them read. */
+/** The bell in the sidebar: the viewer's own notifications, newest first. Opening it marks them read. */
 export function NotificationBell() {
   const queryClient = useQueryClient()
   const [trigger, setTrigger] = useState<HTMLButtonElement | null>(null)

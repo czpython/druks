@@ -112,7 +112,7 @@ export function Controls({ controls }: { controls: (Action | Link)[] }) {
         control.block === 'action' ? (
           <ActionButton key={index} action={control} />
         ) : (
-          <LinkControl key={index} link={control} className="dui-action" />
+          <LinkControl key={index} link={control} className="dui-action druks-button" />
         ),
       )}
     </div>
@@ -466,7 +466,7 @@ function Row({
               {row.detail && (
                 <button
                   type="button"
-                  className="dui-row-more"
+                  className="dui-row-more druks-button druks-button--quiet druks-button--compact"
                   aria-expanded={open}
                   onClick={() => setOpen(!open)}
                 >

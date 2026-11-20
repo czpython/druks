@@ -53,11 +53,11 @@ function stubDruks(numbers: WahaSession[]) {
   return fetchMock
 }
 
-function renderPane() {
+function renderPane(isAdmin = false) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={queryClient}>
-      <PhonesPane />
+      <PhonesPane isAdmin={isAdmin} />
     </QueryClientProvider>,
   )
   return queryClient
@@ -69,6 +69,14 @@ afterEach(() => {
 })
 
 describe('PhonesPane', () => {
+  it('points an admin to the Bot settings when no number can be paired', async () => {
+    stubDruks([])
+    renderPane(true)
+
+    const action = await screen.findByRole('link', { name: 'Add a number' })
+    expect(action.getAttribute('href')).toBe('/apps/chat/settings/channels')
+  })
+
   it('lists the numbers of the private Bots only', async () => {
     stubDruks([linked])
     renderPane()

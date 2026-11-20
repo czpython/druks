@@ -44,6 +44,8 @@ function renderProviders(snapshot: UsageProviderSummary = usage) {
     <QueryClientProvider client={queryClient}>
       <ProvidersPane
         isAdmin
+        adding={false}
+        onAddingChange={() => {}}
         providers={[provider]}
         registeredProviders={[provider]}
         subscriptions={[
@@ -290,7 +292,7 @@ describe('Account grant groups', () => {
     const current = within(screen.getByRole('region', { name: 'Current accounts' }))
     const history = within(screen.getByRole('region', { name: 'Grant history' }))
     await current.findByText(/mailbox@example.invalid/)
-    expect(await current.findByRole('cell', { name: 'Gmail' })).toBeTruthy()
+    expect(await current.findByText('Gmail')).toBeTruthy()
     expect(current.queryByText(/old@example.invalid/)).toBeNull()
     expect(history.getByText(/old@example.invalid/)).toBeTruthy()
     expect(history.queryByRole('button', { name: 'Disconnect' })).toBeNull()
@@ -302,7 +304,7 @@ describe('Account grant groups', () => {
     confirm.mockReturnValue(true)
     fireEvent.click(current.getByRole('button', { name: 'Disconnect' }))
     await waitFor(() => expect(disconnect).toHaveBeenCalledWith('account-1'))
-    expect(await current.findByText('No connected accounts.')).toBeTruthy()
+    expect(await current.findByRole('heading', { name: 'No connected accounts' })).toBeTruthy()
     expect(current.queryByRole('table')).toBeNull()
     expect(history.getByText(/mailbox@example.invalid/)).toBeTruthy()
     expect(current.getByRole('status').textContent).toContain('disconnected')

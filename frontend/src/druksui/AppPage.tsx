@@ -294,7 +294,7 @@ function appError(app: string, detail: string, retry: () => void): ReactNode {
         msg={`${appLabel(app)} could not render this page`}
         sub={detail || undefined}
         action={
-          <button type="button" className="dui-retry" onClick={retry}>
+          <button type="button" className="dui-retry druks-button" onClick={retry}>
             try again
           </button>
         }

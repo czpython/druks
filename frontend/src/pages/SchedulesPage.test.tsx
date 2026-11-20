@@ -79,7 +79,7 @@ it('saves preset cadence and pause changes without a save button', async () => {
   fireEvent.click(within(form).getByRole('switch', { name: 'Daily Digest enabled' }))
   await screen.findByText('Schedule saved.')
   expect(save).toHaveBeenLastCalledWith({ workflowSettings: { 'notes.daily_digest': { schedule_enabled: true } } })
-  expect(within(form).getByRole('switch').getAttribute('aria-checked')).toBe('true')
+  expect(within(form).getByRole('switch')).toHaveProperty('checked', true)
   expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull()
 })
 
@@ -143,7 +143,7 @@ it('keeps custom edits and keyboard focus during refresh and app filtering', asy
   expect(input).toHaveProperty('value', '7 3 * * 1')
   expect(document.activeElement).toBe(input)
   fireEvent.change(screen.getByRole('combobox', { name: 'Filter by app' }), { target: { value: 'other' } })
-  await screen.findByText('No declared schedules for this app.')
+  await screen.findByRole('heading', { name: 'No schedules for this app' })
   fireEvent.change(screen.getByRole('combobox', { name: 'Filter by app' }), { target: { value: '' } })
   expect(await screen.findByRole('textbox')).toHaveProperty('value', '7 3 * * 1')
   expect(save).not.toHaveBeenCalled()
@@ -154,7 +154,7 @@ it('restores both declared defaults in one request', async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Use defaults for Daily Digest' }))
   await screen.findByText('Schedule saved.')
   expect(screen.getByRole('combobox', { name: 'Daily Digest cadence' })).toHaveProperty('value', '*/15 * * * *')
-  expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('true')
+  expect(screen.getByRole('switch')).toHaveProperty('checked', true)
   expect(save).toHaveBeenCalledWith({ workflowSettings: { 'notes.daily_digest': { schedule: null, schedule_enabled: null } } })
 })
 
@@ -201,7 +201,7 @@ it('pauses without sending an unsaved cron draft', async () => {
   await screen.findByText('Press Enter or leave the field to save.')
   expect(save).toHaveBeenCalledWith({ workflowSettings: { 'notes.daily_digest': { schedule_enabled: false } } })
   expect(input).toHaveProperty('value', 'not a cron')
-  expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('false')
+  expect(screen.getByRole('switch')).toHaveProperty('checked', false)
 })
 
 it('saves a custom expression on form submission', async () => {
@@ -217,7 +217,7 @@ it('shows loading, initial error, stale data, and recovery separately', async ()
   schedules.mockReturnValueOnce(new Promise(() => {}))
   const { client } = mount()
   expect(screen.getByRole('status').textContent).toBe('Loading schedules…')
-  expect(screen.queryByText('No app declares a workflow schedule.')).toBeNull()
+  expect(screen.queryByRole('heading', { name: 'No schedules to show yet' })).toBeNull()
   await act(() => client.cancelQueries({ queryKey: ['dashboard', 'schedules'] }))
   schedules.mockRejectedValueOnce(new Error('Offline'))
   await act(() => client.refetchQueries({ queryKey: ['dashboard', 'schedules'] }))
@@ -236,7 +236,7 @@ it('filters by URL and restores the previous filter with browser Back', async ()
   mount()
   await screen.findByRole('form', { name: 'Daily Digest' })
   fireEvent.change(screen.getByRole('combobox', { name: 'Filter by app' }), { target: { value: 'other' } })
-  expect(await screen.findByText('No declared schedules for this app.')).toBeTruthy()
+  expect(await screen.findByRole('heading', { name: 'No schedules for this app' })).toBeTruthy()
   expect(window.location.search).toBe('?app=other')
   expect(screen.queryByRole('form', { name: 'Daily Digest' })).toBeNull()
   await act(async () => { window.history.back() })
@@ -268,7 +268,7 @@ it('triggers a paused schedule without changing its settings and allows retry', 
   expect(trigger).toHaveBeenCalledTimes(2)
   expect(trigger).toHaveBeenCalledWith('notes.daily_digest')
   expect(save).not.toHaveBeenCalled()
-  expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('false')
+  expect(screen.getByRole('switch')).toHaveProperty('checked', false)
 })
 
 it('disables row actions while a request is pending', async () => {
@@ -288,6 +288,7 @@ it('disables row actions while a request is pending', async () => {
 it('shows an empty installation without edit controls', async () => {
   savedRows = []
   mount([])
-  await screen.findByText('No app declares a workflow schedule.')
+  await screen.findByRole('heading', { name: 'No schedules to show yet' })
+  expect(screen.getByRole('link', { name: 'Open Chat' }).getAttribute('href')).toBe('/chat')
   expect(screen.queryByRole('switch')).toBeNull()
 })

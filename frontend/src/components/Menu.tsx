@@ -13,7 +13,8 @@ export function Menu({
 }) {
   const menu = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState<{
-    top: number
+    top?: number
+    bottom?: number
     left: number
   } | null>(null)
   useLayoutEffect(() => {
@@ -21,14 +22,15 @@ export function Menu({
     const bounds = anchor.getBoundingClientRect()
     const menuHeight = menu.current ? menu.current.offsetHeight : 240
     const below = window.innerHeight - bounds.bottom
-    const top =
-      below < menuHeight + 12 && bounds.top > menuHeight + 12
-        ? bounds.top - menuHeight - 4
-        : bounds.bottom + 4
     let left = bounds.left
     const menuWidth = menu.current ? menu.current.offsetWidth : 200
     if (left + menuWidth > window.innerWidth - 12) left = window.innerWidth - menuWidth - 12
-    setPosition({ top, left: Math.max(12, left) })
+    // A menu that opens upward keeps its bottom edge at the anchor, so content that loads later grows it upward.
+    setPosition(
+      below < menuHeight + 12 && bounds.top > menuHeight + 12
+        ? { bottom: window.innerHeight - bounds.top + 4, left: Math.max(12, left) }
+        : { top: bounds.bottom + 4, left: Math.max(12, left) },
+    )
   }, [anchor])
   useEffect(() => {
     const onDown = (event: MouseEvent) => {
@@ -65,7 +67,7 @@ export function Menu({
     <div
       className={className ? `set-menu ${className}` : 'set-menu'}
       ref={menu}
-      style={position ? { top: position.top, left: position.left } : { visibility: 'hidden' }}
+      style={position ?? { visibility: 'hidden' }}
     >
       {children}
     </div>

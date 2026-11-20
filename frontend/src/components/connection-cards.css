@@ -1,0 +1,11 @@
+.connection-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: var(--druks-spacing-content-gap); margin: 0 0 28px; }
+.connection-onboarding { margin-block-start: var(--druks-spacing-step-7); }
+.connection-onboarding-heading { margin-block-end: var(--druks-spacing-step-6); }
+.connection-card { display: flex; align-items: stretch; gap: var(--druks-spacing-icon-gap); min-width: 0; padding: var(--druks-spacing-dialog-inset-block) var(--druks-spacing-control-inline); }
+.connection-card-copy { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.connection-card h2 { margin: 0 0 4px; font-size: 15px; line-height: 1.4; font-weight: 500; }
+.connection-card p { flex: 1; margin: 0 0 12px; color: var(--druks-color-text-secondary); font-size: 13px; line-height: 1.5; }
+.connection-card-description { flex: 1; }
+.connection-cards-error { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--druks-spacing-content-gap); color: var(--druks-color-status-danger); }
+.connection-cards-error p { margin: 0; }
+.connection-cards-loading { grid-column: 1 / -1; margin: 0; color: var(--druks-color-text-tertiary); }
