@@ -16,6 +16,7 @@ jwt_identity_claim = "/email"
 [urls]
 endpoint = ""
 webhook_host = ""
+mcp_url = ""
 
 [sandbox]
 service_url = ""

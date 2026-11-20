@@ -56,8 +56,8 @@ class MissingTokenError(McpServerError):
 class MissingEndpointError(McpServerError):
     def __init__(self, name: str):
         super().__init__(
-            f"MCP server {name!r} has no address. Set urls.webhook_host or urls.endpoint "
-            "to an address its sandboxes can reach."
+            f"MCP server {name!r} has no address. Set urls.mcp_url, urls.webhook_host, "
+            "or urls.endpoint to an address its sandboxes can reach."
         )
         self.name = name
 

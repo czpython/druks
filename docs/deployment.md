@@ -239,7 +239,9 @@ services:
 
 It listens on `127.0.0.1:8002`. Its one setting is `DRUKS_URL`, the address
 where it reaches Druks. It keeps no files and no keys: Druks gives it what each
-call needs when the call starts.
+call needs when the call starts. That includes the `/mcp` address that a box
+reaches: `urls.mcp_url`, else `/mcp` on the webhook address. The calls server
+must reach that address too.
 
 Caddy passes `/_calls/*` to the calls server, on the webhook host and on the
 `:8000` listener, with the WebSocket upgrade. The call token in the path

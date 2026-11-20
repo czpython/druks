@@ -46,6 +46,7 @@ def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
     values = read_env(env_path)
     config = _read_toml(tmp_path / "druks.toml")
     assert config["identity"]["jwt_identity_claim"] == "/email"
+    assert config["urls"]["mcp_url"] == ""
     assert values["DEFAULT_HOST_PROVIDER"] == "exe"
     assert values["TAILSCALE_ENABLED"] == "true"
     assert values["EXE_API_URL"] == "https://exe.dev"
@@ -525,6 +526,7 @@ def test_setup_toml_and_env_are_the_settings_source(tmp_path, monkeypatch):
         set_values=(
             "urls.endpoint=https://druks.example",
             "urls.webhook_host=hooks.druks.example",
+            "urls.mcp_url=http://100.64.0.5/mcp",
             "sandbox.image=druks-sandbox:test",
             "sandbox.proxy_url=http://100.64.0.10:8880",
             "sandbox.issuer_url=http://10.0.0.5:8001",

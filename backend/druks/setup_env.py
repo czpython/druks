@@ -99,7 +99,7 @@ _KNOWN_TOML_KEYS = {
         "jwt_audience",
         "jwt_identity_claim",
     ),
-    "urls": ("endpoint", "webhook_host"),
+    "urls": ("endpoint", "webhook_host", "mcp_url"),
     "paths": ("data_dir", "harness_config_root"),
     "sandbox": (
         "provider",
@@ -213,10 +213,14 @@ jwt_issuer = ""
 jwt_audience = ""
 jwt_identity_claim = "/email"
 
-# Public dashboard and webhook ingress addresses.
+# The addresses at which browsers, providers, and boxes reach Druks.
 [urls]
 endpoint = ""
 webhook_host = ""
+# The URL of Druks' own /mcp that a box and the calls server dial, for example
+# an address on a private network that the providers do not reach. If it is
+# empty, they use /mcp on the webhook address.
+mcp_url = ""
 
 # Host paths.
 [paths]

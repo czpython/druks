@@ -12,16 +12,14 @@ from druks.browser.pinchtab import PinchTab
 from druks.database import session_scope
 from druks.locks import lock
 from druks.mcp.constants import BROWSER_SERVER_NAME
-from druks.mcp.exceptions import MissingEndpointError
 from druks.mcp.helpers import get_bearer_token_env_var
-from druks.mcp.inbound import get_druks_account_token
+from druks.mcp.inbound import get_druks_account_token, get_druks_mcp_server
 from druks.redis import get_client
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.datastructures import McpServer
 from druks.sandbox.models import SecretRef
 from druks.secrets.models import VaultSecret
-from druks.settings import get_settings
 
 if TYPE_CHECKING:
     from druks.browser.sessions import BrowserSession
@@ -49,12 +47,11 @@ class AgentBrowser:
         """Borrow ``session`` for the call under a key that allows the browser
         tools. Yields the server and the secret that the call's box gets. After
         the block, the key is revoked and the browser is released."""
-        endpoint = get_settings().urls.webhook_base
-        if not endpoint:
-            raise MissingEndpointError(BROWSER_SERVER_NAME)
         variable = get_bearer_token_env_var(BROWSER_SERVER_NAME)
         server = McpServer(
-            name=BROWSER_SERVER_NAME, url=f"{endpoint}/mcp", bearer_token_env_var=variable
+            name=BROWSER_SERVER_NAME,
+            url=get_druks_mcp_server(allowed_tools=BROWSER_TOOLS).url,
+            bearer_token_env_var=variable,
         )
         # The key is committed on its own: the box's entry issues from the row
         # whatever the agent step's transaction does, and so does the revoke.

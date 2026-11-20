@@ -148,17 +148,20 @@ async def test_new_conversation_is_unnamed_private_and_answers_in_order(druks_db
 
 
 @pytest.mark.parametrize(
-    "webhook_host,expected",
+    "mcp_url,webhook_host,expected",
     [
-        ("hooks.example.com", "https://hooks.example.com/mcp"),
-        ("", "http://127.0.0.1:8000/mcp"),
+        ("http://100.64.0.5/mcp", "hooks.example.com", "http://100.64.0.5/mcp"),
+        ("", "hooks.example.com", "https://hooks.example.com/mcp"),
+        ("", "", "http://127.0.0.1:8000/mcp"),
     ],
 )
-def test_mcp_address_uses_the_public_host_or_endpoint(monkeypatch, webhook_host, expected):
+def test_mcp_address_uses_the_mcp_url_else_the_public_host_or_endpoint(
+    monkeypatch, mcp_url, webhook_host, expected
+):
     monkeypatch.setattr(
         "druks.mcp.inbound.get_settings",
         lambda: SimpleNamespace(
-            urls=Urls(webhook_host=webhook_host, endpoint="http://127.0.0.1:8000/")
+            urls=Urls(mcp_url=mcp_url, webhook_host=webhook_host, endpoint="http://127.0.0.1:8000/")
         ),
     )
     assert get_druks_mcp_server(allowed_tools=()).url == expected

@@ -22,12 +22,14 @@ from druks.chat.routes import read_file, read_thread, require_tag
 from druks.core.apis.slack import SlackClient
 from druks.core.services import Slack
 from druks.core.webhooks.slack import SlackEvents, SlackInteractivity
+from druks.mcp.inbound import get_druks_mcp_server
 from druks.models import Base
 from druks.redis import close_client, get_client
 from druks.sandbox.exceptions import SandboxUploadError
 from druks.sandbox.layout import get_work_root
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
+from druks.settings import configure_settings
 from druks.testing import asgi_client, configure_app_for_test, make_settings
 from druks.webhooks.router import match_webhook
 from fastapi import Depends, FastAPI
@@ -339,6 +341,24 @@ def test_create_slack_app_opens_slack_with_the_whole_manifest(tmp_path):
     query = dict(parse_qsl(location.query))
     assert (location.netloc, location.path, query["new_app"]) == ("api.slack.com", "/apps", "1")
     assert json.loads(query["manifest_json"]) == manifest
+
+
+def test_the_manifest_keeps_the_webhook_host_when_a_box_reaches_druks_elsewhere(tmp_path):
+    settings = make_settings(
+        tmp_path,
+        urls={"webhook_host": "hooks.druks.example", "mcp_url": "http://100.64.0.5/mcp"},
+    )
+    configure_settings(settings)
+
+    manifest = Slack.get_manifest()
+
+    assert get_druks_mcp_server(allowed_tools=()).url == "http://100.64.0.5/mcp"
+    assert manifest["settings"]["event_subscriptions"]["request_url"] == (
+        "https://hooks.druks.example/_external/slack/events/"
+    )
+    assert manifest["settings"]["interactivity"]["request_url"] == (
+        "https://hooks.druks.example/_external/slack/interactivity/"
+    )
 
 
 def test_the_manifest_sends_button_clicks_to_the_interactivity_webhook():
