@@ -11,14 +11,10 @@ import { CronField } from '../components/CronField'
 import { Page } from '../components/Page'
 import type { UnsavedForm } from '../components/settings'
 import { absTime, absTimeCompact, dur, timeAway } from '../lib/format'
+import { RUN_LABELS } from '../lib/states'
 import '../schedules.css'
 
 const POLL = { refetchInterval: 30_000, refetchOnWindowFocus: true, retry: false } as const
-const RUN_LABELS: Record<string, string> = {
-  SUCCESS: 'Finished', ERROR: 'Failed', MAX_RECOVERY_ATTEMPTS_EXCEEDED: 'Failed',
-  PENDING: 'Running', ENQUEUED: 'Queued', DELAYED: 'Queued', CANCELLED: 'Cancelled',
-}
-
 // A null edit removes the override, which restores the declared value.
 type ScheduleEdits = {
   schedule?: string | null

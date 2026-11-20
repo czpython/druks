@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useLocation } from 'wouter'
+import { Link, useLocation } from 'wouter'
 
 import { api } from '../api/client'
 import type { Account, ConfiguredAgent, ConfiguredAgentInput } from '../api/types'
@@ -318,7 +318,9 @@ export function AgentsPage({ account }: { account: Account }) {
             {agents.map((agent) => (
               <tr key={agent.id}>
                 <th scope="row">
-                  <span className="connection-name">{agent.name}</span>
+                  <Link className="connection-name" href={`/agents/${agent.id}`}>
+                    {agent.name}
+                  </Link>
                 </th>
                 <td data-label="Description">{agent.description}</td>
                 <td data-label="Owner">{usernames.get(agent.ownerId)}</td>

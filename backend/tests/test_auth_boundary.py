@@ -38,6 +38,7 @@ SESSION_ONLY_API_ROUTES = {
     ("PUT", "/api/configured-agents/{agent_id}"),
     ("DELETE", "/api/configured-agents/{agent_id}"),
     ("GET", "/api/configured-agents/{agent_id}/runs"),
+    ("GET", "/api/configured-agents/{agent_id}/schedules"),
     ("GET", "/api/chat/services/waha/sessions"),
     ("GET", "/api/chat/services/twilio/numbers"),
     ("GET", "/api/chat/services/twilio/numbers/{number_id}/calls"),
