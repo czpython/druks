@@ -242,6 +242,26 @@ class Run(Base):
         )
 
     @classmethod
+    async def list_for_agent(
+        cls, session: AsyncSession, agent_id: str, *, kinds: Sequence[str], limit: int
+    ) -> list["Run"]:
+        """The runs that the agent's conversations started, newest first, each with its
+        agent calls. ``kinds`` keeps the runs of those workflows."""
+        # The chat models import the durable package, so this import cannot be at the top.
+        from druks.chat.models import Conversation  # noqa: PLC0415
+
+        return list(
+            await session.scalars(
+                select(cls)
+                .join(Conversation, Conversation.id == cls.conversation_id)
+                .where(Conversation.agent_id == agent_id, cls.kind.in_(kinds))
+                .order_by(cls.created_at.desc(), cls.id.desc())
+                .limit(limit)
+                .options(selectinload(cls.agent_calls))
+            )
+        )
+
+    @classmethod
     async def get_latest_for_subject(
         cls,
         session: AsyncSession,
