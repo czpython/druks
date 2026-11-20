@@ -11,14 +11,16 @@ import pytest
 from dbos import DBOS, DBOSClient
 from dbos._error import DBOSQueueDeduplicatedError
 from druks.accounts.context import Actor, current_account_id, current_actor
-from druks.accounts.models import Account
+from druks.accounts.models import Account, PersonalAccessToken
 from druks.agents import Agent, AgentOutput
+from druks.api.dependencies import request_session
+from druks.api.schedules import router as schedules_router
 from druks.apps.loader import iter_apps, register_workflow_package
 from druks.apps.registry import Registry, agents, workflows
 from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
 from druks.browser.exceptions import BrowserSessionSignedOutError
 from druks.browser.models import StoredBrowserSession
-from druks.chat.constants import CANCELLED_MESSAGE
+from druks.chat.constants import CANCELLED_MESSAGE, CONVERSATION_HEADER, SKIPPED_MESSAGE
 from druks.chat.models import Conversation, Message
 from druks.database import configure_session, get_session, session_scope
 from druks.db import atomic, db_session
@@ -29,15 +31,19 @@ from druks.durable.engine import (
     _workflow_schedules,
     apply_schedules,
     configure_engine,
+    get_dbos_client,
     init_dbos,
     launch,
     shutdown,
     trigger_schedule,
 )
 from druks.durable.enums import AgentCallStatus, WorkflowEvent
-from druks.durable.models import AgentCall, Artifact
+from druks.durable.exceptions import ScheduleError
+from druks.durable.models import AgentCall, Artifact, Schedule
+from druks.durable.schedules import apply_schedule, run_schedule
 from druks.events.models import Event
 from druks.exceptions import PermissionDenied, SessionNotBoundError
+from druks.mcp.server import create_mcp_app
 from druks.models import StoredSubject
 from druks.sandbox.datastructures import AgentResult
 from druks.secrets.datastructures import Audience
@@ -46,12 +52,13 @@ from druks.secrets.models import VaultSecret
 from druks.settings import Settings, configure_settings, get_settings
 from druks.signals import subscribe
 from druks.teams.models import Team
-from druks.testing import init_db
+from druks.testing import asgi_client, init_db
 from druks.user_settings.models import InstallationSettings, SettingsOverride
 from druks.workflows import GATE_TTL_SECONDS, Gate, OperatorReply, Subject, Workflow, step, task
 from druks.workspaces import Workspace
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
+from fastapi import Depends, FastAPI
 from pydantic import ValidationError
 from sqlalchemy import NullPool, column, create_engine, delete, func, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -349,6 +356,8 @@ async def runtime():
                 raise asyncio.CancelledError("Simulated worker interruption")
 
     configure_settings(Settings(database_url=URL))  # pyright: ignore[reportCallIssue]
+    # An earlier module may have built the client on its own database.
+    get_dbos_client.cache_clear()
     init_dbos()
     await launch()
     try:
@@ -2031,3 +2040,159 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
         "workflow.finished",
     ]
     assert kinds[failed_id] == ["workflow.scheduled", "workflow.failed"]
+
+
+async def _make_schedule(runtime, *, owner: str = "op@example.com") -> Schedule:
+    account_id = await _account_id(runtime.engine, owner)
+    async with get_session(runtime.engine) as session:
+        conversation = await Conversation.create(
+            session, account_id=account_id, body="Scan payments every 2 hours"
+        )
+        schedule = await Schedule.create(
+            session,
+            account_id=account_id,
+            conversation_id=conversation.id,
+            tool="field_notes_scan",
+            arguments={"repo": "payments"},
+            cron="0 */2 * * *",
+            tool_names=["field_notes_scan"],
+        )
+        await session.commit()
+        return schedule
+
+
+async def test_a_due_time_whose_tool_refuses_the_call_is_told_in_the_chat(runtime, monkeypatch):
+    schedule = await _make_schedule(runtime)
+    called = []
+
+    async def call_tool(schedule_id):
+        called.append(schedule_id)
+        return {
+            "conversation_id": schedule.conversation_id,
+            "tool": schedule.tool,
+            "reason": "No repository is named payments.",
+        }
+
+    monkeypatch.setattr("druks.durable.schedules.call_tool", call_tool)
+
+    await run_schedule(datetime.now(UTC), {"schedule_id": schedule.id})
+
+    assert called == [schedule.id]
+    async with get_session(runtime.engine) as session:
+        notes = list(
+            await session.scalars(
+                select(Message.body).where(
+                    Message.conversation_id == schedule.conversation_id, Message.is_internal
+                )
+            )
+        )
+    assert notes == [
+        SKIPPED_MESSAGE.format(tool="field_notes_scan", reason="No repository is named payments.")
+    ]
+    deliveries = await DBOS.list_workflows_async(name="chat.deliver")
+    assert [each.input["args"] for each in deliveries].count((schedule.conversation_id,)) == 1
+
+
+async def test_a_schedule_needs_a_five_field_cron():
+    # DBOS would read a sixth field as seconds at the start.
+    with pytest.raises(ScheduleError, match="is not a cron"):
+        await Schedule.create(
+            SimpleNamespace(),
+            account_id="a",
+            conversation_id="c",
+            tool="field_notes_scan",
+            arguments={},
+            cron="0 */2 * * * 0",
+            tool_names=["field_notes_scan"],
+        )
+
+
+async def test_a_schedule_needs_a_tool_that_exists():
+    with pytest.raises(ScheduleError, match="No tool is named 'field_notes_scna'"):
+        await Schedule.create(
+            SimpleNamespace(),
+            account_id="a",
+            conversation_id="c",
+            tool="field_notes_scna",
+            arguments={},
+            cron="0 9 * * *",
+            tool_names=["field_notes_scan"],
+        )
+
+
+async def test_apply_schedules_keeps_a_persons_schedules_in_the_installation_timezone(
+    runtime, monkeypatch
+):
+    schedule = await _make_schedule(runtime)
+    await apply_schedule(schedule)
+    async with session_scope(runtime.engine) as session:
+        await apply_schedules(session)
+    assert await DBOS.get_schedule_async(schedule.schedule_name)
+    settings = engine.get_settings().model_copy(update={"timezone": "Europe/Madrid"})
+    monkeypatch.setattr(engine, "get_settings", lambda: settings)
+
+    async with session_scope(runtime.engine) as session:
+        await apply_schedules(session)
+
+    row = await DBOS.get_schedule_async(schedule.schedule_name)
+    assert (row["cron_timezone"], row["context"]) == ("Europe/Madrid", {"schedule_id": schedule.id})
+    await DBOS.delete_schedule_async(schedule.schedule_name)
+
+
+async def test_a_person_makes_their_schedule_in_a_chat_and_only_they_change_or_stop_it(
+    runtime,
+):
+    api = FastAPI(dependencies=[Depends(request_session)])
+    api.include_router(schedules_router)
+    # The MCP surface names the tools a schedule may call.
+    create_mcp_app(api)
+    owner_id = await _account_id(runtime.engine, "planner@example.com")
+    other_id = await _account_id(runtime.engine, "other@example.com")
+    async with get_session(runtime.engine) as session:
+        chat = await Conversation.create(session, account_id=owner_id, body="Scan payments")
+        _, owner_token = await PersonalAccessToken.create(session, account_id=owner_id, name="o")
+        _, other_token = await PersonalAccessToken.create(session, account_id=other_id, name="x")
+        await session.commit()
+    owner = {"Authorization": f"Bearer {owner_token}"}
+    other = {"Authorization": f"Bearer {other_token}"}
+    scan = {"tool": "list_schedules", "arguments": {}, "cron": "0 */2 * * *"}
+    change = {"tool": "list_schedules", "arguments": {"page": 2}, "cron": "0 9 * * *"}
+
+    async with asgi_client(api) as client:
+        nowhere = await client.post("/api/schedules", json=scan, headers=owner)
+        unknown = await client.post(
+            "/api/schedules",
+            json={**scan, "tool": "list_schedulez"},
+            headers={**owner, CONVERSATION_HEADER: chat.id},
+        )
+        made = await client.post(
+            "/api/schedules", json=scan, headers={**owner, CONVERSATION_HEADER: chat.id}
+        )
+        schedule_id = made.json()["id"]
+        name = f"schedule:{schedule_id}"
+        made_in_dbos = await DBOS.get_schedule_async(name)
+        listed = await client.get("/api/schedules", headers=owner)
+        hidden = await client.get("/api/schedules", headers=other)
+        refused = await client.put(f"/api/schedules/{schedule_id}", json=change, headers=other)
+        changed = await client.put(f"/api/schedules/{schedule_id}", json=change, headers=owner)
+        changed_in_dbos = await DBOS.get_schedule_async(name)
+        kept = await client.delete(f"/api/schedules/{schedule_id}", headers=other)
+        stopped = await client.delete(f"/api/schedules/{schedule_id}", headers=owner)
+
+    assert (nowhere.status_code, unknown.status_code, made.status_code) == (422, 422, 201)
+    assert made.json()["conversationId"] == chat.id
+    assert (made_in_dbos["schedule"], made_in_dbos["context"]) == (
+        "0 */2 * * *",
+        {"schedule_id": schedule_id},
+    )
+    assert [each["id"] for each in listed.json()] == [schedule_id]
+    assert hidden.json() == []
+    assert (refused.status_code, kept.status_code) == (404, 404)
+    assert (changed.json()["arguments"], changed_in_dbos["schedule"]) == (
+        {"page": 2},
+        "0 9 * * *",
+    )
+    assert stopped.status_code == 204
+    assert not await DBOS.get_schedule_async(name)
+    async with get_session(runtime.engine) as session:
+        assert not await session.get(Schedule, schedule_id)
