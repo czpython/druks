@@ -8,7 +8,10 @@ const slack = { slug: 'slack', title: 'Slack', connected: true, facts: { team: '
 const ana = { id: 'grant-1', provider: 'slack', identity: { subject: 'U100', name: 'ana' }, revokedAt: null }
 const personal = { timezone: 'UTC', theme: 'system' as const, notificationChannelId: null, isTagRequired: false }
 
-function renderPane(connections: object[]) {
+function renderPane(
+  connections: object[],
+  automations: { id: string; name: string; isAccepted: boolean }[] = [],
+) {
   const fetchMock = vi.fn(async (url: string, request?: RequestInit) => {
     if (url === '/api/services') return new Response(JSON.stringify([slack]))
     if (url === '/api/oauth/connections') return new Response(JSON.stringify(connections))
@@ -18,6 +21,17 @@ function renderPane(connections: object[]) {
     }
     if (url === '/api/oauth/connections/grant-1' && request?.method === 'DELETE') {
       connections.length = 0
+      return new Response(null, { status: 204 })
+    }
+    if (url === '/api/chat/services/slack/automations') {
+      return new Response(JSON.stringify(automations))
+    }
+    if (url === '/api/chat/services/slack/automations/a1/accept' && request?.method === 'POST') {
+      automations[0]!.isAccepted = true
+      return new Response(JSON.stringify(automations[0]))
+    }
+    if (url === '/api/chat/services/slack/automations/a1' && request?.method === 'DELETE') {
+      automations.length = 0
       return new Response(null, { status: 204 })
     }
     return new Response('{}', { status: 404 })
@@ -73,4 +87,17 @@ it('saves the tag preference as soon as it flips', async () => {
     url === '/api/settings/personal' && request?.method === 'PATCH',
   )
   expect(JSON.parse(String(patch![1]!.body))).toEqual({ isTagRequired: true })
+})
+
+it('accepts an automation that waits for an admin, then removes it', async () => {
+  renderPane([ana], [{ id: 'a1', name: 'Support form', isAccepted: false }])
+
+  expect(await screen.findByText('Support form')).toBeTruthy()
+  expect(screen.getByText('Waits for an admin')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Accept' }))
+
+  expect(await screen.findByText('Accepted')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+
+  await waitFor(() => expect(screen.queryByText('Support form')).toBeNull())
 })

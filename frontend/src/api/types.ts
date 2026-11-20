@@ -734,6 +734,13 @@ export interface WahaSession {
   revokedReason: string
 }
 
+/** A sender on a channel with no person behind it, such as another app's bot or a workflow. */
+export interface Automation {
+  id: string
+  name: string
+  isAccepted: boolean
+}
+
 /** A Twilio number linked to an app's Bot. A removed one keeps its calls. */
 export interface LinkedNumber {
   id: string

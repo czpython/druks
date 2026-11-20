@@ -2,14 +2,17 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '../api/client'
+import { Button } from './Control'
 import { Switch } from './SettingsPanes'
 
-/** The Slack workspace the bot answers in, and the signed-in person's Slack account. */
+/** The Slack workspace the bot answers in, the signed-in person's Slack account, and the
+ * automations that tagged the bot. */
 export function SlackPane() {
   const queryClient = useQueryClient()
   const services = useQuery({ queryKey: ['services'], queryFn: api.services, staleTime: 60_000 })
   const connections = useQuery({ queryKey: ['connections'], queryFn: api.listConnections })
   const personal = useQuery({ queryKey: ['personalSettings'], queryFn: api.getPersonalSettings })
+  const automations = useQuery({ queryKey: ['slackAutomations'], queryFn: api.slackAutomations })
   const [isBusy, setIsBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const slack = services.data?.find((service) => service.slug === 'slack')
@@ -33,6 +36,15 @@ export function SlackPane() {
     void api
       .updatePersonalSettings({ isTagRequired })
       .then((saved) => queryClient.setQueryData(['personalSettings'], saved))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setIsBusy(false))
+  }
+
+  function changeAutomation(change: Promise<unknown>) {
+    setIsBusy(true)
+    setError(null)
+    void change
+      .then(() => queryClient.invalidateQueries({ queryKey: ['slackAutomations'] }))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setIsBusy(false))
   }
@@ -105,6 +117,44 @@ export function SlackPane() {
               disabled={isBusy}
               label="Answer only when I tag the bot"
             />
+          </div>
+        </div>
+      )}
+      {automations.data && automations.data.length > 0 && (
+        <div className="set-group" data-setting="slack-automations">
+          <span className="mcp-label">Automations</span>
+          <span className="set-field-help">
+            Each one is another app's bot or a workflow that tagged the bot in a room. The agent
+            answers an accepted one on the default account.
+          </span>
+          <div className="set-card svc-facts">
+            {automations.data.map((automation) => (
+              <div className="svc-fact" key={automation.id}>
+                <span className="svc-fact-key">{automation.name}</span>
+                <span className="svc-fact-val">
+                  {automation.isAccepted ? 'Accepted' : 'Waits for an admin'}
+                </span>
+                <span className="svc-actions">
+                  {automation.isAccepted ? (
+                    <Button
+                      variant="danger"
+                      onClick={() => changeAutomation(api.removeSlackAutomation(automation.id))}
+                      disabled={isBusy}
+                    >
+                      Remove
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      onClick={() => changeAutomation(api.acceptSlackAutomation(automation.id))}
+                      disabled={isBusy}
+                    >
+                      Accept
+                    </Button>
+                  )}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}

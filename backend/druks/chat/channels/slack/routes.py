@@ -4,9 +4,11 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends
 from fastapi.responses import RedirectResponse
 
-from druks.accounts.dependencies import current_session_account
+from druks.accounts.dependencies import current_admin_account, current_session_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
+from druks.chat.models import Automation
+from druks.chat.schemas import AutomationResponse
 from druks.core.services import Slack
 from druks.redis import get_client
 from druks.services.exceptions import OauthPageError
@@ -41,3 +43,45 @@ async def link_account(
         await get_client().delete(LINK_KEY.format(token=token))
         return RedirectResponse(f"/chat/{conversation.id}")
     return RedirectResponse("/chat")
+
+
+@router.get(
+    "/automations",
+    response_model=list[AutomationResponse],
+    response_model_by_alias=True,
+    dependencies=[Depends(current_admin_account)],
+)
+async def list_automations(session: SessionDep) -> list[Automation]:
+    """Every automation that tagged the bot: the ones an admin accepted, and the ones
+    that wait."""
+    return await Automation.list_for_connection(session, (await Slack.get()).id)
+
+
+@router.post(
+    "/automations/{automation_id}/accept",
+    response_model=AutomationResponse,
+    response_model_by_alias=True,
+    dependencies=[Depends(current_admin_account)],
+)
+async def accept_automation(session: SessionDep, automation_id: str) -> Automation:
+    """Let the automation's tags reach the default account's agent, and answer the tag
+    that waited."""
+    card = await Slack.get()
+    automation = await Automation.get(session, id=automation_id, connection_id=card.id)
+    if not automation.is_accepted:
+        automation.is_accepted = True
+        account = await Account.get_default(session)
+        await SlackChannel.save_message(session, card, account, automation.first_message)
+    return automation
+
+
+@router.delete(
+    "/automations/{automation_id}",
+    status_code=204,
+    dependencies=[Depends(current_admin_account)],
+)
+async def remove_automation(session: SessionDep, automation_id: str) -> None:
+    """Forget the automation. Its next tag waits for an admin again."""
+    card = await Slack.get()
+    automation = await Automation.get(session, id=automation_id, connection_id=card.id)
+    await automation.delete()

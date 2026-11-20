@@ -17,7 +17,7 @@ from druks.durable.dbos_state import workflow_status
 from druks.files import FileField
 from druks.files.datastructures import File
 from druks.files.models import FileRecord
-from druks.models import Base
+from druks.models import Base, Model
 from druks.secrets.models import VaultSecret
 from druks.settings import get_settings
 
@@ -555,3 +555,32 @@ class Reminder(Base, Uuid7Pk):
         else:
             await session.delete(self)
         return message
+
+
+class Automation(Model, Uuid7Pk):
+    """A sender on a channel with no person behind it, such as another app's bot or a
+    workflow. Its messages reach the default account's agent once an admin accepts it."""
+
+    __tablename__ = "chat_automations"
+    __table_args__ = (
+        Index("chat_automations_source_idx", "connection_id", "source_id", unique=True),
+    )
+
+    # The channel connection that the automation writes on.
+    connection_id: Mapped[str] = mapped_column(ForeignKey("vault.id", ondelete="CASCADE"))
+    # The automation's id at its source.
+    source_id: Mapped[str]
+    name: Mapped[str]
+    is_accepted: Mapped[bool] = mapped_column(default=False)
+    # The automation's first message, as the source sent it. It waits here for an admin.
+    first_message: Mapped[dict]
+
+    @classmethod
+    async def list_for_connection(
+        cls, session: AsyncSession, connection_id: str
+    ) -> list["Automation"]:
+        return list(
+            await session.scalars(
+                select(cls).where(cls.connection_id == connection_id).order_by(cls.name)
+            )
+        )

@@ -4,6 +4,7 @@ import type {
   AgentsResponse,
   AgentCallFiles,
   ArtifactContent,
+  Automation,
   BrowserSession,
   Call,
   CallLine,
@@ -366,6 +367,15 @@ export const api = {
   listConnections: () => getJSON<Connection[]>('/api/oauth/connections'),
   disconnectConnection: (connectionId: string) =>
     deleteRequest(`/api/oauth/connections/${encodeURIComponent(connectionId)}`),
+  // The automations that tagged the Slack bot in a room.
+  slackAutomations: () => getJSON<Automation[]>('/api/chat/services/slack/automations'),
+  acceptSlackAutomation: (id: string) =>
+    postJSON<Automation>(
+      `/api/chat/services/slack/automations/${encodeURIComponent(id)}/accept`,
+      {},
+    ),
+  removeSlackAutomation: (id: string) =>
+    deleteRequest(`/api/chat/services/slack/automations/${encodeURIComponent(id)}`),
   // An app's linked WhatsApp numbers.
   wahaSessions: (app: string) =>
     getJSON<WahaSession[]>(`/api/chat/services/waha/sessions?app=${encodeURIComponent(app)}`),
