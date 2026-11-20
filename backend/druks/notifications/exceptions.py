@@ -2,7 +2,7 @@ from druks.exceptions import DruksError
 
 
 class NotificationError(DruksError):
-    pass
+    is_message_safe = True
 
 
 class UnknownTokenError(NotificationError):

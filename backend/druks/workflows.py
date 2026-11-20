@@ -34,6 +34,7 @@ from dbos._error import (
     DBOSWorkflowCancelledError,
 )
 from drukbox_sdk import Secret
+from opentelemetry import trace
 from pydantic import BaseModel, Field, create_model
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_utils import uuid7
@@ -101,6 +102,7 @@ from druks.secrets.models import VaultSecret
 from druks.settings import get_settings
 from druks.signals import publish
 from druks.teams.models import Team
+from druks.tracing import record_gate_wait
 from druks.user_settings.models import SettingsOverride
 from druks.workspaces import Workspace
 
@@ -710,7 +712,10 @@ async def _emit_run_event(
     # DBOS commits the terminal status — subscribers stay idempotent and read
     # the payload, never derived Run.state. subject comes from the workflow's
     # own arguments, so a replay stamps the same routing every time.
+    left_gate: tuple[str, datetime] | None = None
+
     async def _transition() -> dict[str, Any] | None:
+        nonlocal left_gate
         async with step_session() as session:
             run = await session.get(Run, workflow_id)
             # Read before the flush: flushing the update unloads the row's
@@ -721,6 +726,7 @@ async def _emit_run_event(
             # step runs again already sees its own gate, so a park never closes one.
             if run.input_gate and state != RunState.PARKED:
                 await run.close_park_notifications()
+                left_gate = (run.input_gate, run.input_requested_at)
             if facts:
                 for field, value in facts.items():
                     setattr(run, field, value)
@@ -736,6 +742,9 @@ async def _emit_run_event(
     transition = await DBOS.run_step_async(
         StepOptions(name=f"run.{state.value}", **_IO_RETRIES), _transition
     )
+    # Only the execution that records the step traces the wait, so a replay adds none.
+    if left_gate:
+        record_gate_wait(workflow_id, *left_gate, is_answered=state == RunState.RUNNING)
     if not transition:
         return
 
@@ -838,6 +847,8 @@ async def _execute_run(
     await _emit_run_event(workflow_id, RunState.RUNNING, subject=subject)
 
     async def record_failed(exc: BaseException, code: str) -> None:
+        # DBOS records no exception on the workflow's span.
+        trace.get_current_span().record_exception(exc)
         facts = {**_GATE_CLEARED, "failure": str(exc), "failure_code": code}
         await _emit_run_event(workflow_id, RunState.FAILED, subject=subject, facts=facts)
         if conversation_id:
@@ -1562,6 +1573,15 @@ async def _run_instance(
         account = await Account.get_for_run(session, (input or {}).get(_ACCOUNT_INPUT_KEY))
     instance, run_kwargs = _bind_instance(cls, subject, input, account=account)
     instance._workflow_id = DBOS.workflow_id  # type: ignore[assignment]
+    # The workflow's span names what the run works on, so a trace store adds up the
+    # runs of a subject.
+    attributes = {"druks.app": cls.app, "druks.run_id": instance._workflow_id}
+    if subject:
+        attributes |= {
+            "druks.subject_type": subject["type"],
+            "druks.subject_id": str(subject["id"]),
+        }
+    trace.get_current_span().set_attributes(attributes)
     token = current_workflow.set(instance)
     # The run's account is ambient, as a request's is: a workspace reads the
     # dispatcher from it, and a child run started from the body attributes to it.

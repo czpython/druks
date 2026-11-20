@@ -114,6 +114,7 @@ _KNOWN_TOML_KEYS = {
         "timeout",
     ),
     "browser": ("proxy_scope", "timezone"),
+    "traces": ("endpoint",),
     "env": (),
 }
 
@@ -264,6 +265,14 @@ proxy_scope = ""
 # "Europe/Madrid", in the region of the proxy. If it is empty, the browser
 # keeps the container default.
 timezone = ""
+
+# Where Druks sends its traces over OTLP: the collector's endpoint with its path,
+# for example https://collector.example.com/v1/traces. Empty leaves the endpoint to
+# the standard OTEL_EXPORTER_OTLP_* variables. Without one, Druks sends no trace.
+# Put the headers of the export, such as an API key, in the secret
+# DRUKS_TRACES_HEADERS in the secrets section of .env.
+[traces]
+endpoint = ""
 
 # Raw environment for processes druks does not model (drukbox, Caddy, libraries
 # reading os.environ); keys render verbatim unless owned by druks.

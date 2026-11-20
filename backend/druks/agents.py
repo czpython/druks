@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from dbos import DBOS, StepOptions
+from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +32,7 @@ from druks.exceptions import ObjectNotFound
 from druks.files.datastructures import File
 from druks.files.exceptions import FileUnavailableError
 from druks.files.models import FileRecord
+from druks.harnesses.artifacts import normalize_token_usage
 from druks.harnesses.config import AgentConfig, get_config
 from druks.harnesses.exceptions import (
     HarnessError,
@@ -215,7 +217,14 @@ class Agent:
             )
 
         async def _invoke() -> Any:
-            return await self._run(workflow_id=workflow.workflow_id, contract=contract, **context)
+            with trace.get_tracer(__name__).start_as_current_span(
+                f"agent_call {self.id}",
+                # A call inside a @step names its run as well.
+                attributes={"druks.agent": self.id, "druks.run_id": workflow.workflow_id},
+            ):
+                return await self._run(
+                    workflow_id=workflow.workflow_id, contract=contract, **context
+                )
 
         if _in_step.get():
             transient_retry_index = 0
@@ -345,6 +354,8 @@ class Agent:
             raise WorkflowError(f"agent {self.id!r} has no prompt template to render")
         contract = contract or self.contract
         workflow = current_workflow.get()
+        # The span that __call__ opened for this call.
+        span = trace.get_current_span()
         if db_session.registry.has():
             # An agent call is a durability boundary — its effects don't roll
             # back — so the enclosing step's work commits now instead of waiting
@@ -360,6 +371,7 @@ class Agent:
             call_id = config.harness_class.mint_run_id(None)
             running = await AgentCall.lookup_running(session, workflow_id, self.id)
         model = config.model
+        span.set_attributes({"druks.harness": config.harness, "druks.model": model})
         subscription_id = config.subscription.id if config.subscription else None
         api_key_id = config.api_key.id if config.api_key else None
 
@@ -519,6 +531,14 @@ class Agent:
                 except BaseException as error:
                     await AgentCall.fail(engine, call_id=call_id, error=error)
                     raise
+                if usage := normalize_token_usage(result.cost_metadata):
+                    span.set_attributes(
+                        {f"druks.usage.{name}": count for name, count in usage.items()}
+                    )
+                # A call can cost nothing, and it says so with 0.0.
+                # ast-grep-ignore: rule-2
+                if result.cost_usd is not None:
+                    span.set_attribute("druks.cost_usd", result.cost_usd)
                 if result.error:
                     await AgentCall.finish(engine, call_id=call_id, result=result)
                     raise result.error

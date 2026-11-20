@@ -139,6 +139,7 @@ timeout = 180
     [
         ('secrets_key = "key"', "secrets_key is a secret"),
         ('[sandbox]\nservice_token = "token"', "sandbox.service_token is a secret"),
+        ('[traces]\nheaders = "x-api-key=key"', "traces.headers is a secret"),
         ('data_dir = "/home/op/druks-data"', "data_dir is not a druks.toml key"),
     ],
 )

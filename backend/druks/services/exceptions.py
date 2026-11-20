@@ -5,6 +5,8 @@ class ServiceNotConnectedError(DruksError):
     """No identity is connected for this service — the appliance has nothing to
     act as there. The message names the service so any refusal is actionable."""
 
+    is_message_safe = True
+
     def __init__(self, service: str, message: str = "") -> None:
         self.service = service
         super().__init__(

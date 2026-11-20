@@ -289,6 +289,15 @@ class Providers(BaseModel):
     anthropic: Anthropic = Anthropic()
 
 
+class Traces(BaseModel):
+    # The OTLP endpoint that takes the traces, with its path:
+    # https://collector.example.com/v1/traces. Empty leaves the endpoint to the
+    # standard OTLP variables. Without one, Druks sends no trace.
+    endpoint: str = ""
+    # The headers of each export, as name=value pairs separated by commas.
+    headers: SecretStr = SecretStr("")
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         populate_by_name=True,
@@ -312,6 +321,7 @@ class Settings(BaseSettings):
     sandbox: Sandbox = Sandbox()
     browser: Browser = Browser()
     providers: Providers = Providers()
+    traces: Traces = Traces()
     # An [apps.<name>] table with enabled = false leaves that app out of this installation.
     apps: dict[str, dict] = {}
     # A [services.<slug>] table makes the card of that service managed, or leaves the

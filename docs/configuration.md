@@ -1,6 +1,6 @@
 ---
 title: "Configuration"
-description: "Configure deployment settings, access control, harnesses, services, sandboxes, notifications, MCP servers, and skills."
+description: "Configure deployment settings, access control, traces, harnesses, services, sandboxes, notifications, MCP servers, and skills."
 icon: "settings"
 ---
 
@@ -47,6 +47,7 @@ host-run development template for that environment plane.
 | `[sandbox]` | Drukbox provider, service URL, image override, registry host and user name, and the proxy and issuer addresses |
 | `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
 | `[browser]` | Browser egress proxy scope and timezone |
+| `[traces]` | The OTLP endpoint that takes the [traces](#traces) |
 | `[providers.anthropic]` | The Claude sign-in method the installation offers |
 | `[env]` | Additional deployment environment settings rendered verbatim |
 
@@ -70,8 +71,8 @@ scripted writes.
 ## Secrets
 
 `druks.toml` holds no secret. The secrets of Druks are `secrets_key`,
-`database_url`, `redis_url`, `sandbox.service_token`, and
-`browser.proxy`.
+`database_url`, `redis_url`, `sandbox.service_token`, `browser.proxy`, and
+`traces.headers`.
 Druks takes each one from an environment variable. The name is `DRUKS_` and the
 key path, with `_` for each dot: `DRUKS_SECRETS_KEY`,
 `DRUKS_SANDBOX_SERVICE_TOKEN`. Druks does not start when `druks.toml` holds a
@@ -89,6 +90,7 @@ The installer keeps the secrets in the last section of `~/druks/.env`:
 | `SECRETS_KEY` | Drukbox | The installer. The Drukbox key |
 | `REGISTRY_PASSWORD` | Drukbox | You, for private sandbox images |
 | `DRUKS_BROWSER_PROXY` | Druks | You, for a browser egress proxy |
+| `DRUKS_TRACES_HEADERS` | Druks | You, for the headers that your [trace collector](#traces) requires |
 | `DRUKS_DATABASE_URL`, `DRUKS_REDIS_URL` | Druks | You, only for a database or a Redis that Compose does not run |
 | A provider secret, for example `EXE_API_TOKEN` | Drukbox | You |
 
@@ -270,6 +272,104 @@ is 71 of the 100 connections that Postgres allows by default.
 Postgres stores durable state. Redis does not store workflow state. It supports
 short-lived concerns including webhook delivery claims, OAuth state and token
 caches, and the sandbox provisioning gate.
+
+## Traces
+
+Druks sends traces over OTLP when you name an endpoint. Without an endpoint,
+Druks records no span and sends nothing.
+
+```toml
+[traces]
+endpoint = "https://collector.example.com/v1/traces"
+```
+
+`traces.endpoint` is the full URL of the traces endpoint of your collector,
+with its path. Any collector that takes OTLP works. The headers that the
+collector requires, such as an API key, are the secret `traces.headers`. Set
+`DRUKS_TRACES_HEADERS` in the [secrets](#secrets-of-an-installation) section of
+`.env`, or write the file `traces.headers` in `DRUKS_SECRETS_DIR`. Druks does
+not start when both hold the headers. Write them as `name=value` pairs
+separated by commas:
+
+```text
+DRUKS_TRACES_HEADERS=x-api-key=<key>,x-team=<team>
+```
+
+Druks also reads the standard OTLP variables of OpenTelemetry. `[traces]` comes
+before them:
+
+| Value | Sources, in order |
+| --- | --- |
+| Endpoint | `traces.endpoint`, then `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, then `OTEL_EXPORTER_OTLP_ENDPOINT` |
+| Headers | `traces.headers`, then `OTEL_EXPORTER_OTLP_TRACES_HEADERS`, then `OTEL_EXPORTER_OTLP_HEADERS` |
+
+Druks uses the first endpoint that is set. `OTEL_EXPORTER_OTLP_ENDPOINT` is the
+base URL of the collector, and Druks adds `/v1/traces` to it. When no source
+sets an endpoint, traces are off. Druks sends the headers of `traces.headers`
+and the headers of the first of the two variables that is set. When both name
+the same header, the value in `traces.headers` wins. Put a variable in the
+`[env]` table of `druks.toml`. Put a variable that holds a key in the secrets
+section of `.env`.
+
+Druks sends protobuf over HTTP, never JSON. It ignores
+`OTEL_EXPORTER_OTLP_PROTOCOL` and `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`. It sends
+the spans in batches, and it sends the last batch when the process stops.
+
+A trace shows:
+
+- A span for each execution of a run, named after the workflow. It carries
+  `druks.app` and `druks.run_id`. A run about a subject also carries
+  `druks.subject_type` and `druks.subject_id`, so one query adds up the runs of
+  a work item.
+- A span for each durable step of the run, under the span of the run. DBOS
+  makes these spans.
+- A `gate_wait <gate>` span for each wait at a gate, from the park to the
+  answer. It carries `druks.gate` and `druks.run_id`. A wait that a timeout or a
+  cancel ends shows as an error. A person spends the time at a gate, so subtract
+  it from a run to get the run's working time.
+- An `agent_call <agent>` span for each agent call, also for a call inside a
+  `@step`. It carries `druks.agent`, `druks.run_id`, `druks.harness`, and
+  `druks.model`. When the harness reports usage, the span also carries the
+  token counts as `druks.usage.*` and the cost in US dollars as
+  `druks.cost_usd`.
+- A span for each request to Druks, each database statement, and each call
+  that Druks makes through httpx. The work in a sandbox has no spans: the span
+  of the step that waits for it covers it.
+
+Each span names its service, `druks`, as `service.name`, and the host of the
+webhook URL as `druks.host`, so a collector can tell one installation from
+another. Druks keeps the trace of every run. A
+[recovered run](concepts.md#durability-and-recovery) shows in a second trace.
+
+The health check and the reads that the pages of the dashboard repeat on a
+timer send no spans, and neither do their statements and calls:
+
+- `GET /health`
+- `GET /api/dashboard/overview` and `GET /api/dashboard/schedules`
+- `GET /api/runs/{run}`
+- `GET /api/chat/conversations` and
+  `GET /api/chat/conversations/{conversation_id}/active-runs`
+- `GET /api/notifications`
+- `GET /api/usage`, `GET /api/usage/history`, and `GET /api/usage/today`
+
+A span leaves the process with identifiers, route templates, and the attributes
+above only. Druks removes the rest before the export:
+
+- A request shows its method, its route template, and its status code. Its
+  path and its query do not leave.
+- A call through httpx shows its method, the host that it reached, and its
+  status code. Its URL does not leave, with its path, its query, and its user.
+- A statement shows its SQL without the values of its parameters.
+- No header and no request or response body leaves.
+- An exception shows its type and a message. An error whose message Druks
+  writes from identifiers alone, such as a failed notification or a service
+  that is not connected, shows that message without credentials. A harness
+  error shows its class name and its code, because its message can quote the
+  output of an agent. Any other error shows its class name only, because its
+  text can quote a request or a response. No traceback leaves.
+
+A call through httpx sends only `traceparent`, never the `tracestate` or the
+`baggage` of a caller.
 
 ## Public URLs and access control
 

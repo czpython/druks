@@ -78,6 +78,10 @@ boundaries. This has several consequences:
 - External side effects inside a step require stable idempotency keys.
 - A workflow structure change can affect active runs. Treat the change as a
   deployment compatibility decision.
+- A recovered run shows in [traces](configuration.md#traces) as a second trace.
+  Each completed step shows again there as a short span: Druks reads its
+  checkpoint. Code outside a step runs again, so the spans of that code show
+  twice.
 
 An agent process in a sandbox survives a worker crash. The recovered agent
 call finds the sandbox of the call that was running through the run's identity,
