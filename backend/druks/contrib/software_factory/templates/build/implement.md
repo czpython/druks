@@ -66,7 +66,7 @@ git commit -m "<concise subject describing this diff>"
 git push
 ```
 
-Stage only the paths your implementation changed; explicit staging is what keeps stray artifacts (caches, downloaded toolchains, editor files) out of the PR. The commit subject must describe what THIS commit's diff actually contains — not work that landed in earlier commits. When the repo's AGENTS.md or contributing guide gives a commit message format, the subject follows it; otherwise it carries no ticket or issue prefix.
+Stage only the paths your implementation changed; explicit staging is what keeps stray artifacts (caches, downloaded toolchains, editor files) out of the PR. The commit subject must describe what THIS commit's diff actually contains — not work that landed in earlier commits. When the repo's AGENTS.md or contributing guide gives commit rules — a message format, or how many commits a pull request may carry — follow them, amending the existing commit and force-pushing when they require a single commit; otherwise the subject carries no ticket or issue prefix.
 
 The PR body carries the plan block — the plan document reviewers review the diff against. The block is exactly these lines, in order:
 
