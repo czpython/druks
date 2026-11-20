@@ -39,8 +39,10 @@ The new conversation page also lists the installed apps.
 
 ## Talk to an agent
 
-An agent you saved can answer a conversation instead of the Bot. Start the
-conversation through the API with the agent's id:
+An agent you saved can answer a conversation instead of the Bot. In a new web
+conversation, choose the agent in **Talk to**. The list shows only the agents
+you can talk to. The conversation list and the conversation header show the
+agent's name. Through the API, start the conversation with the agent's id:
 
 ```http
 POST /api/chat/conversations

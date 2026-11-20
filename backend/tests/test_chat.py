@@ -2171,3 +2171,27 @@ async def test_anyone_talks_to_a_public_agent_and_only_its_owner_to_a_private_on
     assert stranger.status_code == 404
     assert public_started.status_code == 201
     assert (await druks_db.get(Conversation, public_started.json()["id"])).agent_id == public.id
+
+
+async def test_the_conversation_list_names_the_agent_that_answers(druks_db, tmp_path):
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    agent = await ConfiguredAgent.create(druks_db, owner=owner, **AGENT)
+    await druks_db.commit()
+    api = configure_app_for_test(
+        settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-User"}),
+        authenticated=False,
+    )
+    headers = {"X-User": "owner@example.com"}
+    async with asgi_client(api) as client:
+        started = await client.post(
+            "/api/chat/conversations",
+            json={"body": "Review this", "agentId": agent.id},
+            headers=headers,
+        )
+        await client.post("/api/chat/conversations", json={"body": "Hello"}, headers=headers)
+        listed = await client.get("/api/chat/conversations", headers=headers)
+
+    assert (started.json()["agentId"], started.json()["agentName"]) == (agent.id, agent.name)
+    plain, with_agent = sorted(listed.json(), key=lambda entry: bool(entry["agentId"]))
+    assert (with_agent["agentId"], with_agent["agentName"]) == (agent.id, agent.name)
+    assert (plain["agentId"], plain["agentName"]) == (None, None)

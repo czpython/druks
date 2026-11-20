@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import ConfigDict, Field
+from pydantic import AliasPath, ConfigDict, Field
 
 from druks.schemas import Schema
 from druks.ui.blocks import FileSummary
@@ -31,6 +31,8 @@ class ConversationResponse(Schema):
     last_message_at: datetime
     message_count: int
     active_message_id: str | None
+    agent_id: str | None
+    agent_name: str | None = Field(default=None, validation_alias=AliasPath("agent", "name"))
 
 
 class MessageResponse(Schema):
