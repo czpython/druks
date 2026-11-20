@@ -31,6 +31,7 @@ from druks.ui import (
     TextValue,
     TimeValue,
 )
+from pydantic import ValidationError
 
 AT = datetime(2026, 8, 29, 9, 14, 2, tzinfo=UTC)
 
@@ -255,6 +256,49 @@ def test_metrics_hold_metrics_and_a_list_holds_values():
     assert metrics["metrics"][0]["label"] == "Open"
     assert metrics["metrics"][0]["description"] == "d"
     assert items["items"][0]["text"] == "Fan noise."
+
+
+@pytest.mark.parametrize(
+    "plain, typed",
+    [
+        ("Platform", TextValue("Platform")),
+        ("", TextValue("")),
+        (41, NumberValue(41)),
+        (0, NumberValue(0)),
+        (-3, NumberValue(-3)),
+        (0.25, NumberValue(0.25)),
+    ],
+)
+def test_a_plain_string_or_number_reads_as_its_value(plain, typed):
+    assert Fact("Owner", plain).value == typed
+    assert Metric("Open", plain).value == typed
+    assert TableRow([plain]).cells == [typed]
+    assert List([plain]).items == [typed]
+
+
+def test_a_table_row_mixes_plain_typed_and_wire_cells():
+    status = StatusValue("parked", tone="warning")
+
+    row = TableRow(["acme/api", 41, status, {"value": "time", "when": AT.isoformat()}])
+
+    assert row.cells == [TextValue("acme/api"), NumberValue(41), status, TimeValue(AT)]
+
+
+@pytest.mark.parametrize(
+    "bad, error_type",
+    [
+        (True, "value_error"),
+        (None, "value_error"),
+        (float("nan"), "finite_number"),
+        (float("inf"), "finite_number"),
+    ],
+)
+def test_a_value_refuses_what_is_not_a_string_a_number_or_a_value(bad, error_type):
+    with pytest.raises(ValidationError) as refused:
+        Fact("Done", bad)
+
+    assert refused.value.title == "Fact"
+    assert [error["type"] for error in refused.value.errors()] == [error_type]
 
 
 def test_layout_blocks_hold_every_block_including_each_other():

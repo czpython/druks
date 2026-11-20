@@ -67,10 +67,10 @@ async def recent_notes():
                 [
                     ui.Metrics(
                         [
-                            ui.Metric("Captured", value=ui.NumberValue(len(recent))),
+                            ui.Metric("Captured", len(recent)),
                             ui.Metric(
                                 "Summarized",
-                                value=ui.NumberValue(len(summarized)),
+                                len(summarized),
                                 description="Notes an agent has read.",
                             ),
                         ]
@@ -79,8 +79,8 @@ async def recent_notes():
                         [
                             ui.Facts(
                                 [
-                                    ui.Fact("Body", value=ui.TextValue(note.body)),
-                                    ui.Fact("Captured", value=ui.TimeValue(note.created_at)),
+                                    ui.Fact("Body", note.body),
+                                    ui.Fact("Captured", ui.TimeValue(note.created_at)),
                                 ],
                                 title="Latest",
                             )
@@ -114,7 +114,7 @@ async def recent_notes():
                         ],
                         empty=ui.EmptyState("No notes yet."),
                     ),
-                    ui.List([ui.TextValue(note.body) for note in recent], title="Bodies"),
+                    ui.List([note.body for note in recent], title="Bodies"),
                 ]
             )
         ],
