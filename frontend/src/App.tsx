@@ -469,7 +469,7 @@ function AppShell({
             <UsagePage />
           </Route>
           <Route path="/chat/:id?">
-            {(params) => <ChatPage id={params.id} />}
+            {(params) => <ChatPage id={params.id} account={account} />}
           </Route>
           <Route path="/schedules">
             <SchedulesPage
