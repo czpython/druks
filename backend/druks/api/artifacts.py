@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from druks.api.dependencies import SessionDep
 from druks.api.schemas import ArtifactContent
-from druks.durable.models import AgentCall, Artifact
+from druks.durable.exceptions import ArtifactContentMissing
+from druks.durable.models import Artifact
 from druks.teams.dependencies import require_artifact_access
 
 router = APIRouter(prefix="/api/artifacts", tags=["artifacts"])
@@ -19,8 +20,8 @@ async def get_artifact(session: SessionDep, artifact_id: str) -> ArtifactContent
     artifact = await session.get(Artifact, artifact_id)
     if not artifact:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "artifact not found")
-    call = await AgentCall.get(session, artifact.agent_call_id)
-    path = call.get_file_path(artifact.path)
-    if not path:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "artifact content missing")
-    return ArtifactContent(kind=artifact.kind, title=artifact.title, content=path.read_text())
+    try:
+        content = await artifact.read_content()
+    except ArtifactContentMissing as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "artifact content missing") from error
+    return ArtifactContent(kind=artifact.kind, title=artifact.title, content=content)

@@ -657,8 +657,8 @@ async def test_in_app_park_notifies_with_actions(rt, deliver_spy):
     notification = await _wait_notification(rt, workflow_id, "delivered")
     assert len(await _notifications_for_run(rt, workflow_id)) == 1
     assert notification.reason == "gate.parked"
-    assert notification.body.startswith("Review")
-    assert "Which database?" in notification.body
+    assert notification.body.startswith("# Review")
+    assert "Which database?\n- Postgres" in notification.body
     # A click sends only its control: a bare request_changes or an option is refused.
     assert notification.actions == [{"id": "approve", "label": "Approve"}]
     assert notification.deep_link == f"https://druks.example/runs/{workflow_id}"
@@ -669,6 +669,7 @@ async def test_in_app_park_notifies_with_actions(rt, deliver_spy):
     (call,) = deliver_spy.calls
     assert call["actions"] == notification.actions
     assert call["token"] == notification.correlation_token
+    assert call["deep_link"] == notification.deep_link
 
 
 async def test_external_park_notifies_without_actions(rt, deliver_spy):
@@ -687,6 +688,9 @@ async def test_external_park_notifies_without_actions(rt, deliver_spy):
 
 async def test_external_park_with_declared_url_sets_deep_link(rt, deliver_spy):
     await _set_notification_channel(rt, "C-inbox-url")
+    settings = get_settings()
+    urls = settings.urls.model_copy(update={"endpoint": "https://druks.example"})
+    configure_settings(settings.model_copy(update={"urls": urls}))
 
     workflow_id = await rt.ExternalUrlFlow.start(subject=NotificationProbe(id=9003))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -956,6 +960,7 @@ async def test_respond_round_trip_finishes_the_run(rt, deliver_spy):
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
     notification = await _wait_notification(rt, workflow_id, "delivered")
     token = notification.correlation_token
+    assert notification.deep_link is None
 
     first = await _respond_in_own_session(
         rt, token, {"control": "approve", "answers": {"q1": "postgres"}, "note": ""}
@@ -974,6 +979,10 @@ async def test_respond_round_trip_finishes_the_run(rt, deliver_spy):
 
 
 async def test_a_slack_chat_s_review_offers_its_buttons_in_its_thread(rt, deliver_spy):
+    settings = get_settings()
+    urls = settings.urls.model_copy(update={"endpoint": "https://druks.example"})
+    configure_settings(settings.model_copy(update={"urls": urls}))
+
     async def create():
         await _install_slack()
         account = await Account.get_default(db_session())
@@ -1010,8 +1019,10 @@ async def test_a_slack_chat_s_review_offers_its_buttons_in_its_thread(rt, delive
         {"id": "approve", "label": "Approve"},
         {"id": "request_changes", "label": "Request changes"},
     ]
+    assert in_thread.deep_link == f"https://druks.example/runs/{workflow_id}"
     (call,) = [call for call in deliver_spy.calls if call["token"] == in_thread.correlation_token]
     assert (call["channel"], call["thread_ts"]) == ("C9", "1700000000.000100")
+    assert call["deep_link"] == in_thread.deep_link
 
     session = get_session(rt.engine)
     try:

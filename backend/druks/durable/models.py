@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -45,7 +46,7 @@ from druks.durable.enums import (
     RunState,
     WorkflowEvent,
 )
-from druks.durable.exceptions import AgentCallNotFound
+from druks.durable.exceptions import AgentCallNotFound, ArtifactContentMissing
 from druks.events.models import Event
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
@@ -429,21 +430,34 @@ class Run(Base):
         }
 
     async def get_rendered_ask(self, *, has_chat: bool) -> dict[str, Any]:
-        # The parked ask as notification content. The body is the ask's own
-        # prose (plain text, never a template); actions are data — deliver()
+        # The parked ask as notification content. The body is the ask as
+        # markdown (never a template); actions are data — deliver()
         # renders the buttons and encodes the token. Shape-dispatch on
         # presentation happens before any subscripting, so the external branch
         # never touches in-app-only keys.
         ask = await self.get_ask()
         if ask["presentation"] == "in_app":
-            lines = [ask["label"], *(question["prompt"] for question in ask["questions"])]
+            sections = [f"# {ask['label']}"]
+            if context := ask.get("context"):
+                sections.append(context)
+            for question in ask["questions"]:
+                lines = [question["prompt"]]
+                for option in question["options"]:
+                    mark = " (recommended)" if option.get("recommended") else ""
+                    lines.append(f"- {option['label']}{mark}")
+                sections.append("\n".join(lines))
+            body = "\n\n".join(sections)
+            if ask["artifact_id"]:
+                artifact = await self.session.get(Artifact, ask["artifact_id"])
+                with suppress(ArtifactContentMissing):
+                    body = f"{body}\n\n{await artifact.read_content()}"
             # A click sends only its control. In a chat, the chat's agent asks for the note.
             actions = [
                 {"id": control["id"], "label": control["id"].replace("_", " ").capitalize()}
                 for control in ask["controls"]
                 if has_chat or not control["note_required"]
             ]
-            return {"body": "\n".join(lines), "actions": actions, "deep_link": None}
+            return {"body": body, "actions": actions, "deep_link": None}
         # External asks are informational — answered on their source, so no
         # actions; url is an optional gate-author-declared view-link.
         return {"body": ask["label"], "actions": None, "deep_link": ask.get("url")}
@@ -901,3 +915,12 @@ class Artifact(Base, Uuid7Pk):
             .order_by(AgentCall.created_at.desc(), AgentCall.id.desc())
             .limit(1)
         )
+
+    async def read_content(self) -> str:
+        """The content in the directory of the artifact's call. Raises
+        ArtifactContentMissing when the file is gone or its name leads out of it."""
+        call = await AgentCall.get(self.session, self.agent_call_id)
+        path = call.get_file_path(self.path)
+        if not path:
+            raise ArtifactContentMissing(self.id)
+        return path.read_text()

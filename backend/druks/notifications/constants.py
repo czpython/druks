@@ -4,8 +4,11 @@ CLOSED_MESSAGE = "This question is closed."
 # What the run's account reads when the run fails and no chat reports it.
 RUN_FAILED_MESSAGE = "Your run {run} failed: {failure}"
 
-# Slack's limit for the text of one section of a message.
-SECTION_TEXT_LIMIT = 3000
+# Slack's limit for the text of all the markdown blocks of one message.
+MARKDOWN_TEXT_LIMIT = 12_000
+
+# What ends a message that Druks cut to fit, in a paragraph of its own.
+TRUNCATION_MARKER = "\n\n…"
 
 # The workflow that closes the messages of a run's question, by the name a run queues it.
 CLOSE_WORKFLOW = "notifications.close"

@@ -76,12 +76,16 @@ export function NotificationBell() {
               </p>
             )}
             <ul>
-              {notifications.map((notification) => (
-                <li key={notification.id} className={notification.readAt ? undefined : 'notification-unread'}>
-                  {notification.deepLink ? <a href={notification.deepLink}>{notification.body}</a> : <span>{notification.body}</span>}
-                  <time dateTime={notification.createdAt}><RelTime iso={notification.createdAt} /></time>
-                </li>
-              ))}
+              {notifications.map((notification) => {
+                // An approval opens with its label as a markdown heading.
+                const text = /^# (.*)/.exec(notification.body)?.[1] ?? notification.body
+                return (
+                  <li key={notification.id} className={notification.readAt ? undefined : 'notification-unread'}>
+                    {notification.deepLink ? <a href={notification.deepLink}>{text}</a> : <span>{text}</span>}
+                    <time dateTime={notification.createdAt}><RelTime iso={notification.createdAt} /></time>
+                  </li>
+                )
+              })}
             </ul>
           </div>
         </Menu>

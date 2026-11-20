@@ -18,7 +18,7 @@ from druks.core.apis.slack import SlackClient
 from druks.core.services import Slack
 from druks.files.datastructures import File
 from druks.models import Base
-from druks.notifications.constants import CLOSED_MESSAGE
+from druks.notifications.constants import CLOSED_MESSAGE, MARKDOWN_TEXT_LIMIT
 from druks.notifications.delivery import deliver as deliver_notification
 from druks.notifications.models import Notification
 from druks.prompts import render_prompt
@@ -31,7 +31,6 @@ from .constants import (
     LINK_KEY,
     LINK_MESSAGE,
     LINK_TTL_SECONDS,
-    REPLY_PIECE_CHARACTERS,
     THREAD_MESSAGES,
     UNACCEPTED_AUTOMATION_REPLY,
     UNLINKED_REPLY,
@@ -226,10 +225,10 @@ class SlackChannel(Channel):
         posted = [
             await client.post_markdown(
                 room or conversation.user_id,
-                reply.answer[start : start + REPLY_PIECE_CHARACTERS],
+                reply.answer[start : start + MARKDOWN_TEXT_LIMIT],
                 thread_ts=thread_ts,
             )
-            for start in range(0, len(reply.answer), REPLY_PIECE_CHARACTERS)
+            for start in range(0, len(reply.answer), MARKDOWN_TEXT_LIMIT)
         ]
         reply.source_id = f"{posted[0]['channel']}:{posted[0]['ts']}"
         await session.commit()
