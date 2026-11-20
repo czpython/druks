@@ -131,10 +131,23 @@ uv run pytest backend/
 The suite collects the proof app, so `pytest backend/` fails at collection
 until that editable install has run.
 
-Before you push, run `druks-house-rules check --base origin/main`. Druks runs
-the same check on every pull request and posts it as the `druks-house-rules`
-check. Install the command with
-`uv tool install git+https://github.com/getdruks/druks-house-rules@v0.0.5`.
+Before you push, install and run the house-rules checker. Pin the version Druks
+runs on every pull request, so a local pass means a CI pass; move this pin and
+the CI pin together whenever either changes:
+
+```bash
+uv tool install git+https://github.com/getdruks/druks-house-rules@v0.0.8
+druks-house-rules check --base origin/main
+# Write the ticket and plan to task.md first:
+druks-house-rules nudge --base origin/main --task-file task.md
+# Once the PR exists, check its title and body too, as Druks does on CI:
+druks-house-rules check --base origin/main \
+  --pr-title "$(gh pr view --json title -q .title)" \
+  --pr-body "$(gh pr view --json body -q .body)"
+```
+
+Druks runs the same check on every pull request and posts it as the
+`druks-house-rules` check.
 
 If the public app surface changed, also install and exercise the proof
 app as described in `docs/development.md`.
@@ -170,6 +183,10 @@ Use `<linear-ticket> -- <commit-msg>` for each commit message, for example
 `DRU-547 -- Deliver GitHub MCP to review workspaces`. If no Linear ticket
 exists, use only `<commit-msg>`. Do not add an issue or pull request number.
 GitHub adds the pull request number.
+
+Keep each pull request to a single commit. On every revision, fold the change
+into that commit with `git commit --amend`, then `git push --force-with-lease`.
+Do not add a second commit to squash later.
 
 ## Documentation discipline
 
