@@ -55,7 +55,9 @@ from druks.sandbox.host import Host
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
-from druks.settings import Urls
+from druks.settings import Urls, get_settings
+from druks.skills.datastructures import InstalledSkill
+from druks.skills.models import Skill, SkillCollection
 from druks.teams.models import Team
 from druks.testing import (
     asgi_client,
@@ -1952,6 +1954,90 @@ async def test_an_agent_turn_runs_on_the_agents_harness_in_the_agents_box(druks_
     assert sandbox["config"].harness_class is ClaudeHarness
     assert sandbox["config"].model == "anthropic/claude-opus-4-7"
     assert sandbox["config"].subscription.id == subscription.id
+
+
+async def start_turn(session, conversation, host, monkeypatch):
+    """Send the conversation's turn until the bridge starts the session, and return the
+    start request."""
+    starts = []
+
+    async def request(self, method, **values):
+        if method == "start":
+            starts.append(values)
+            raise ChatBridgeError("stop after the start")
+        return {"status": "missing", "sessionId": ""}
+
+    monkeypatch.setattr(Bridge, "request", request)
+    message = await conversation.get_unanswered_message(session)
+    config = await service.get_config(session, "chat.bot", conversation.account_id)
+    with pytest.raises(ChatBridgeError):
+        await service.send_turn(
+            session,
+            conversation,
+            message,
+            bridge=Bridge(host),
+            identity=None,
+            config=config,
+            prompt="Be kind.",
+            mcp_servers=(),
+        )
+    [start] = starts
+    return start
+
+
+async def test_an_agent_box_holds_only_the_agents_enabled_skills(
+    druks_db, conversation, sandbox, monkeypatch
+):
+    collection = await SkillCollection.create(
+        druks_db,
+        source="https://github.com/o/r",
+        name="o/r",
+        skills=[
+            InstalledSkill(name=name, description="", path=f"/p/{name}", content_hash=name)
+            for name in ("alpha", "beta")
+        ],
+    )
+    agent = await ConfiguredAgent.create(
+        druks_db, owner=conversation.account, **{**AGENT, "skills": ["alpha", "beta"]}
+    )
+    (await Skill.get(druks_db, "beta")).enabled = False
+    agent_conversation = await Conversation.create(
+        druks_db, account_id=conversation.account_id, body="Review this", agent_id=agent.id
+    )
+    await druks_db.refresh(agent_conversation, ["account", "agent"])
+    folder = "/home/druks/.claude/skills"
+    files = {}
+    removed = []
+
+    async def exec(command, **values):
+        if command[0] == "cat":
+            return SimpleNamespace(returncode=0, stdout=files.get(command[1], ""))
+        if command[0] == "rm":
+            removed.extend(command[2:])
+        if command[0] == "sh":
+            files[command[3]] = "".join(f"{name}\n" for name in command[4:])
+        return SimpleNamespace(returncode=0, stdout="")
+
+    host, _identity = sandbox
+    host.exec = exec
+    host.upload_dir = AsyncMock()
+
+    first = await start_turn(druks_db, agent_conversation, host, monkeypatch)
+
+    host.upload_dir.assert_awaited_once_with(
+        local=get_settings().skills_dir, remote=folder, members=["alpha"]
+    )
+    assert removed == []
+
+    # Removing the collection deletes its rows, and the box still holds alpha.
+    await collection.delete()
+    host.upload_dir.reset_mock()
+    second = await start_turn(druks_db, agent_conversation, host, monkeypatch)
+
+    host.upload_dir.assert_not_awaited()
+    assert removed == [f"{folder}/alpha"]
+    # The bridge reopens the session, so the agent stops seeing the removed skill.
+    assert first["setup"] != second["setup"]
 
 
 async def test_a_public_agent_turn_runs_on_the_unattended_subscription_in_the_askers_box(

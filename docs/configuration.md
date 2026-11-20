@@ -1204,6 +1204,13 @@ Druks uploads no other
 installed skill. The capability manifest records the delivered
 set for each agent.
 
+A conversation with an agent follows its own rule. Before each turn, Druks
+copies the enabled skills picked on the agent into the agent's box. An agent
+with no picked skills gets none, and an agent on OpenCode gets none. Druks
+removes from the box each skill it copied earlier that the agent no longer
+gets, including a skill removed from Druks. A chat without an agent gets no
+skills.
+
 ## Credential custody and secrets at rest
 
 Druks keeps every secret it holds in one table, the vault. A vault row has a

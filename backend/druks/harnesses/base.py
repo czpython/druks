@@ -55,6 +55,8 @@ class Harness(ABC):
     first_byte_seconds: ClassVar[int | None] = 90
     # The argv of the ACP adapter a chat conversation runs on. Empty for a harness without one.
     adapter_command: ClassVar[tuple[str, ...]] = ()
+    # Where this CLI finds a person's skills, under the home. Empty for a CLI Druks gives none.
+    skills_folder: ClassVar[str] = ""
     # The argv that answers one prompt and exits.
     reply_command: ClassVar[tuple[str, ...]]
 
