@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from druks.accounts.dependencies import current_session_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.configured_agents.models import ConfiguredAgent
 from druks.configured_agents.schemas import AgentRequest, AgentResponse, AgentUpdateRequest
+from druks.durable.models import Run
+from druks.durable.reads import get_run_response
+from druks.durable.schemas import RunResponse
 
 router = APIRouter(prefix="/api/configured-agents", tags=["agents"])
 
@@ -28,6 +31,20 @@ async def get_agent(
     agent_id: str, session: SessionDep, account: Account = Depends(current_session_account)
 ) -> ConfiguredAgent:
     return await ConfiguredAgent.get_for_account(session, agent_id, account)
+
+
+@router.get("/{agent_id}/runs", response_model=list[RunResponse], response_model_by_alias=True)
+async def list_agent_runs(
+    agent_id: str,
+    session: SessionDep,
+    account: Account = Depends(current_session_account),
+    limit: int = Query(20, ge=1, le=100),
+) -> list[RunResponse]:
+    agent = await ConfiguredAgent.get_for_account(session, agent_id, account)
+    runs = await Run.list_for_agent(
+        session, agent.id, kinds=await account.list_usable_kinds(), limit=limit
+    )
+    return [await get_run_response(run) for run in runs]
 
 
 @router.put("/{agent_id}", response_model=AgentResponse, response_model_by_alias=True)

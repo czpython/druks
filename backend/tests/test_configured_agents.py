@@ -1,9 +1,11 @@
 from pathlib import Path
 
-from conftest import IDENTITY_HEADER, header_client
+from conftest import IDENTITY_HEADER, header_client, seed_note_run
 from druks.accounts.models import Account
+from druks.chat.models import Conversation
 from druks.skills.datastructures import InstalledSkill
 from druks.skills.models import Skill, SkillCollection
+from druks.teams.models import Team
 
 AGENT = {
     "name": "Security engineer",
@@ -80,6 +82,7 @@ async def test_another_member_cannot_see_or_change_a_private_agent(tmp_path: Pat
             client.get(private_url, headers=other_headers),
             client.put(private_url, json=update, headers=other_headers),
             client.delete(private_url, headers=other_headers),
+            client.get(f"{private_url}/runs", headers=other_headers),
         ]
         public_requests = [
             client.put(public_url, json={**update, "name": "Reviewer"}, headers=other_headers),
@@ -89,7 +92,7 @@ async def test_another_member_cannot_see_or_change_a_private_agent(tmp_path: Pat
 
     assert [agent["id"] for agent in listed_by_other.json()] == [public["id"]]
     assert {agent["id"] for agent in listed_by_admin.json()} == {private["id"], public["id"]}
-    assert [response.status_code for response in private_requests] == [404, 404, 404]
+    assert [response.status_code for response in private_requests] == [404, 404, 404, 404]
     assert [response.status_code for response in public_requests] == [403, 403]
     assert deleted_by_owner.status_code == 204
 
@@ -166,3 +169,35 @@ async def test_an_agent_takes_enabled_skills_and_a_harness_that_runs_it(tmp_path
     assert public_on_api_key_harness.status_code == 201
     assert private_on_api_key_harness.status_code == 422
     assert wrong_model.status_code == 422
+
+
+async def test_an_agent_lists_its_runs_that_a_person_can_open(tmp_path: Path, druks_db):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    outsider = await Account.get_or_create(druks_db, "outsider@example.com")
+    await Team.create(druks_db, name="Notes", member_ids=[owner.id], apps=["field_notes"])
+    await druks_db.flush()
+
+    with header_client(tmp_path) as client:
+        agent = client.post(
+            "/api/configured-agents", json=AGENT, headers={IDENTITY_HEADER: owner.username}
+        ).json()
+        asked = await Conversation.create(
+            druks_db, account_id=owner.id, body="Summarize", agent_id=agent["id"]
+        )
+        plain = await Conversation.create(druks_db, account_id=owner.id, body="Summarize")
+        runs = []
+        for conversation in (asked, asked, plain):
+            run = await seed_note_run(druks_db, account_id=owner.id)
+            run.conversation_id = conversation.id
+            runs.append(run)
+        await druks_db.flush()
+        url = f"/api/configured-agents/{agent['id']}/runs"
+        seen = client.get(url, headers={IDENTITY_HEADER: owner.username})
+        hidden = client.get(url, headers={IDENTITY_HEADER: outsider.username})
+
+    assert [(run["id"], run["accountUsername"]) for run in seen.json()] == [
+        (runs[1].id, owner.username),
+        (runs[0].id, owner.username),
+    ]
+    assert hidden.json() == []
