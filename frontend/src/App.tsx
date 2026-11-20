@@ -8,7 +8,7 @@ import {
   type RefObject,
 } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, CalendarDays, ChartNoAxesCombined, LayoutGrid, MessageSquare, Search, Settings } from 'lucide-react'
+import { Activity, Bot, CalendarDays, ChartNoAxesCombined, LayoutGrid, MessageSquare, Search, Settings } from 'lucide-react'
 import { Link, Route, Router, Switch, useLocation, type RouterProps } from 'wouter'
 import { navigate as browserNavigate, useLocationProperty } from 'wouter/use-browser-location'
 
@@ -30,13 +30,14 @@ import { ChatPage } from './pages/ChatPage'
 import { LoginWindowPage } from './pages/LoginWindowPage'
 import { UsagePage } from './pages/UsagePage'
 import { SchedulesPage } from './pages/SchedulesPage'
+import { AgentsPage } from './pages/AgentsPage'
 import './apps'
 import { registerInstalledApps } from './apps/installed'
 import { appHome, appLabel, appOwning, getAppUI, registeredApps } from './apps/registry'
 
 const ROUTER_BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 const SHELL_PAGES: Record<string, string> = {
-  '/': 'Dashboard', '/events': 'Activity', '/usage': 'Usage', '/schedules': 'Schedules',
+  '/': 'Dashboard', '/events': 'Activity', '/usage': 'Usage', '/schedules': 'Schedules', '/agents': 'Agents',
 }
 
 export function App({ account }: { account: Account }) {
@@ -260,7 +261,7 @@ function AppShell({
       const isInField = event.target instanceof HTMLElement
         && (event.target.isContentEditable || event.target.matches('input, select, textarea'))
       if (event.key === 'Escape' && !isInField) {
-        const sharedDetail = location === '/usage' || location === '/events' || location === '/schedules'
+        const sharedDetail = location === '/usage' || location === '/events' || location === '/schedules' || location === '/agents'
         const parent = ui?.parentPath?.(location) ?? (sharedDetail && app ? appHome(app) : undefined)
         if (parent) {
           if (navCount.current > 0) window.history.back()
@@ -334,6 +335,14 @@ function AppShell({
             >
               <CalendarDays size={17} aria-hidden="true" />
               Schedules
+            </Link>
+            <Link
+              href="/agents"
+              className="sidebar-link"
+              aria-current={location === '/agents' ? 'page' : undefined}
+            >
+              <Bot size={17} aria-hidden="true" />
+              Agents
             </Link>
           </nav>
           <div className="sidebar-apps">
@@ -470,6 +479,9 @@ function AppShell({
               unsavedFormRef={unsavedFormRef}
               isAdmin={account.role === 'admin'}
             />
+          </Route>
+          <Route path="/agents">
+            <AgentsPage account={account} />
           </Route>
           <Route path="/events">
             <EventsPage />
