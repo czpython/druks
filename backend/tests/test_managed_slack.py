@@ -196,7 +196,7 @@ def _click(button: str, action_ts: str) -> bytes:
         "user": {"id": "U7"},
         "channel": {"id": "C1"},
         "message": {"ts": "1700000000.000200"},
-        "actions": [{"action_id": button, "action_ts": action_ts}],
+        "actions": [{"type": "button", "action_id": button, "action_ts": action_ts}],
     }
     return urlencode({"payload": json.dumps(payload)}).encode()
 

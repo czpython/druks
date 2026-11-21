@@ -22,6 +22,21 @@ _CHANNEL_REASONS = {
 # tildes, then the rest.
 _FENCE = re.compile(r"(\s*)(`{3,}|~{3,})(.*)")
 
+SUBMIT_ACTION = {"id": "submit", "label": "Submit"}
+
+# A number field takes text: Slack's number input works only in a modal.
+FIELD_ELEMENTS = {
+    "text": "plain_text_input",
+    "text_area": "plain_text_input",
+    "number": "plain_text_input",
+    "select": "static_select",
+    "multi_select": "multi_static_select",
+    "radio": "radio_buttons",
+    "checkbox": "checkboxes",
+}
+
+SECTION_TEXT_LIMIT = 3000
+
 
 def cut_markdown(text: str, limit: int) -> str:
     """``text`` when it fits in ``limit`` characters. Otherwise, the most whole lines of
@@ -59,34 +74,64 @@ def cut_markdown(text: str, limit: int) -> str:
     return text[: room - len(closing)] + closing + TRUNCATION_MARKER
 
 
-async def deliver(
-    client: SlackClient,
-    channel: str,
-    body: str,
+def get_input(field: dict) -> dict:
+    """The input block that shows a form's ``field``: its label, its help text as the hint,
+    whether it is optional, and an element that holds its default. The block's id is the
+    field's name, so the answer in the element comes back under that name."""
+    element: dict = {"type": FIELD_ELEMENTS[field["field"]]}
+    options = [
+        {"text": {"type": "plain_text", "text": option["label"]}, "value": option["value"]}
+        for option in field.get("options", [])
+    ]
+    match field:
+        case {"field": "text" | "text_area", "value": value, "placeholder": placeholder}:
+            element["multiline"] = field["field"] == "text_area"
+            if value:
+                element["initial_value"] = value
+            if placeholder:
+                element["placeholder"] = {"type": "plain_text", "text": placeholder}
+        case {"field": "number", "value": value} if value is not None:  # ast-grep-ignore: rule-2
+            element["initial_value"] = str(value).removesuffix(".0")
+        case {"field": "multi_select", "value": value}:
+            element["options"] = options
+            if chosen := [option for option in options if option["value"] in value]:
+                element["initial_options"] = chosen
+        case {"field": "select" | "radio", "value": value}:
+            element["options"] = options
+            if chosen := [option for option in options if option["value"] == value]:
+                element["initial_option"] = chosen[0]
+        case {"field": "checkbox", "value": value}:
+            box = {"text": {"type": "plain_text", "text": "Yes"}, "value": "yes"}
+            element["options"] = [box]
+            if value:
+                element["initial_options"] = [box]
+    block = {
+        "type": "input",
+        "block_id": field["name"],
+        "label": {"type": "plain_text", "text": field["label"]},
+        "optional": not field["is_required"],
+        "element": element,
+    }
+    if field["help_text"]:
+        block["hint"] = {"type": "plain_text", "text": field["help_text"]}
+    return block
+
+
+def get_blocks(
+    text: str,
     *,
-    thread_ts: str = "",
-    message_ts: str = "",
-    user: str = "",
     actions: list[dict] | None = None,
+    fields: list[dict] | None = None,
     token: str | None = None,
-    deep_link: str | None = None,
     outcome: str = "",
-    question_offset: int | None = None,
-) -> dict:
-    """Post ``body`` as markdown, with ``deep_link`` on the line after it. Each action
-    becomes a button that carries ``token``, so a click answers this notification. With
-    ``message_ts``, Druks edits that posted message, and ``outcome`` takes the place of its
-    buttons. With ``user``, only that person sees the message. ``question_offset`` is where
-    a chat agent's question starts in ``body``. Returns Slack's answer, which names the
-    message's channel and ts."""
-    link = f"\n{deep_link}" if deep_link else ""
-    reply, question = body, ""
-    if question_offset:
-        reply, question = body[:question_offset], body[question_offset:]
-    # Slack refuses markdown longer than this, so a long body loses its end and
-    # keeps the link, which opens the full text.
-    text = cut_markdown(reply, MARKDOWN_TEXT_LIMIT - len(question) - len(link)) + question + link
+) -> list[dict]:
+    """The blocks of a notification's message: ``text`` as markdown, an input for each of
+    ``fields``, a button that carries ``token`` for each action, then ``outcome``. A form's
+    one button is its Submit button."""
     blocks = [{"type": "markdown", "text": text}]
+    if fields:
+        blocks += [get_input(field) for field in fields]
+        actions = [SUBMIT_ACTION]
     if actions:
         blocks.append(
             {
@@ -102,7 +147,41 @@ async def deliver(
             }
         )
     if outcome:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": outcome}})
+        section = {"type": "mrkdwn", "text": cut_markdown(outcome, SECTION_TEXT_LIMIT)}
+        blocks.append({"type": "section", "text": section})
+    return blocks
+
+
+async def deliver(
+    client: SlackClient,
+    channel: str,
+    body: str,
+    *,
+    thread_ts: str = "",
+    message_ts: str = "",
+    user: str = "",
+    actions: list[dict] | None = None,
+    fields: list[dict] | None = None,
+    token: str | None = None,
+    deep_link: str | None = None,
+    outcome: str = "",
+    question_offset: int | None = None,
+) -> dict:
+    """Post ``body`` as markdown, with ``deep_link`` on the line after it. Each action
+    becomes a button that carries ``token``, so a click answers this notification. Each of
+    ``fields`` becomes an input, and the Submit button below them carries ``token``. With
+    ``message_ts``, Druks edits that posted message, and ``outcome`` takes the place of its
+    buttons and inputs. With ``user``, only that person sees the message.
+    ``question_offset`` is where a chat agent's question starts in ``body``. Returns
+    Slack's answer, which names the message's channel and ts."""
+    link = f"\n{deep_link}" if deep_link else ""
+    reply, question = body, ""
+    if question_offset:
+        reply, question = body[:question_offset], body[question_offset:]
+    # Slack refuses markdown longer than this, so a long body loses its end and
+    # keeps the link, which opens the full text.
+    text = cut_markdown(reply, MARKDOWN_TEXT_LIMIT - len(question) - len(link)) + question + link
+    blocks = get_blocks(text, actions=actions, fields=fields, token=token, outcome=outcome)
     # from None: these errors can keep the request, and its headers carry the bot token.
     try:
         if message_ts:

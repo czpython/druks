@@ -8,8 +8,12 @@ from unittest.mock import AsyncMock, call
 from urllib.parse import urlencode
 
 import pytest
-from conftest import bind_ambient_session, install_service
+from conftest import FORM_TEXT, bind_ambient_session, install_service
 from druks.accounts.models import Account
+from druks.chat.enums import ConversationSource
+from druks.chat.forms import parse_fields
+from druks.chat.models import Conversation, Message
+from druks.chat.service import deliver
 from druks.core.apis.slack import SLACK_AUTHORITY
 from druks.core.webhooks.slack import (
     SlackInteractivity,
@@ -29,6 +33,7 @@ from druks.testing import configure_app_for_test, make_settings, seed_dbos_statu
 from druks.webhooks.router import match_webhook
 from druks_field_notes.workflows import Summarize
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from uuid_utils import uuid7
 
 _SIGNING_SECRET = "slack-test-signing-secret"
@@ -87,7 +92,7 @@ def _interactivity_payload(action_id: str, *, user: str = "U7") -> dict:
         "user": {"id": user},
         "channel": {"id": "C1"},
         "message": {"ts": _MESSAGE_TS, "thread_ts": _THREAD_TS},
-        "actions": [{"action_id": action_id}],
+        "actions": [{"type": "button", "action_id": action_id}],
     }
 
 
@@ -292,6 +297,141 @@ async def test_click_that_is_not_the_clickers_to_answer_explains_it_to_the_click
         reason="Only the person who started it answers.",
         thread_ts=_THREAD_TS,
     )
+
+
+async def _form_question(druks_db) -> Notification:
+    """A form that the agent of a Slack chat with U7 asked, as its turn left it."""
+    account = await Account.get_or_create(druks_db, "op@example.com")
+    conversation = Conversation(
+        account_id=account.id,
+        source=ConversationSource.SLACK,
+        user_id="U7",
+        thread_id=f"C1:{_THREAD_TS}",
+    )
+    druks_db.add(conversation)
+    await druks_db.flush()
+    return await Notification.create(
+        druks_db,
+        conversation_id=conversation.id,
+        reason="question.asked",
+        body="Where does it ship?",
+        question_offset=0,
+        fields=parse_fields(FORM_TEXT),
+    )
+
+
+def _option(label: str, value: str) -> dict:
+    return {"text": {"type": "plain_text", "text": label}, "value": value}
+
+
+# Slack names each input's action itself.
+_STATE = {
+    "title": {"a1": {"type": "plain_text_input", "value": "Fix <!here> & go"}},
+    "notes": {"a2": {"type": "plain_text_input", "value": None}},
+    "budget": {"a3": {"type": "plain_text_input", "value": "15"}},
+    "where": {
+        "a4": {"type": "static_select", "selected_option": _option("Production", "production")}
+    },
+    "tags": {
+        "a5": {
+            "type": "multi_static_select",
+            "selected_options": [_option("Shelf", "shelf"), _option("Rack", "rack")],
+        }
+    },
+    "size": {"a6": {"type": "radio_buttons", "selected_option": _option("Large", "l")}},
+    "notify": {"a7": {"type": "checkboxes", "selected_options": [_option("Yes", "yes")]}},
+}
+
+
+def _form_body(action: dict, state: dict) -> bytes:
+    payload = {**_interactivity_payload(""), "actions": [action], "state": {"values": state}}
+    return urlencode({"payload": json.dumps(payload)}).encode()
+
+
+def _submit(question: Notification) -> dict:
+    return {"type": "button", "action_id": encode_button(question.correlation_token, "submit")}
+
+
+async def test_a_submit_reads_the_inputs_and_shows_the_answers_in_their_place(
+    tmp_path, druks_db, slack_card, started
+):
+    question = await _form_question(druks_db)
+    body = _form_body(_submit(question), _STATE)
+
+    with _client(tmp_path) as client:
+        response = client.post(
+            "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
+        )
+
+    assert response.json() == {"accepted": True}
+    answers = (
+        "Title: Fix <!here> & go\nNotes: (no answer)\nBudget: 15\nWhere: Production\n"
+        "Tags: Rack, Shelf\nSize: Large\nNotify the owner: Yes"
+    )
+    messages = await ambient_db_session().execute(
+        select(Message.body, Message.is_internal, Message.state).where(
+            Message.conversation_id == question.conversation_id
+        )
+    )
+    assert messages.all() == [(answers, False, "pending")]
+    shown = answers.replace("<!here> & go", "&lt;!here&gt; &amp; go")
+    assert started.await_args_list == [
+        call(deliver, question.conversation_id),
+        call(
+            replace_buttons,
+            question.id,
+            channel="C1",
+            message_ts=_MESSAGE_TS,
+            outcome=f"<@U7> answered:\n{shown}",
+        ),
+    ]
+
+
+async def test_a_submit_that_its_fields_refuse_tells_the_person_why_and_keeps_the_form(
+    tmp_path, druks_db, slack_card, started
+):
+    question = await _form_question(druks_db)
+    state = {**_STATE, "budget": {"a3": {"type": "plain_text_input", "value": "a lot"}}}
+    body = _form_body(_submit(question), state)
+
+    with _client(tmp_path) as client:
+        response = client.post(
+            "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
+        )
+
+    assert response.json() == {"accepted": False}
+    started.assert_awaited_once_with(
+        explain_reason,
+        "C1",
+        user="U7",
+        reason='Write a number in "Budget". The minimum is 0. The maximum is 100. The step is 5.',
+        thread_ts=_THREAD_TS,
+    )
+    ambient_db_session().expunge_all()
+    assert (await ambient_db_session().get(Notification, question.id)).state == "pending"
+
+
+async def test_a_change_in_an_input_of_a_form_submits_nothing(
+    tmp_path, druks_db, slack_card, started
+):
+    question = await _form_question(druks_db)
+    change = {
+        "type": "static_select",
+        "action_id": "a4",
+        "block_id": "where",
+        "selected_option": _option("Production", "production"),
+    }
+    body = _form_body(change, _STATE)
+
+    with _client(tmp_path) as client:
+        response = client.post(
+            "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
+        )
+
+    assert response.json() == {"accepted": False}
+    started.assert_not_awaited()
+    ambient_db_session().expunge_all()
+    assert (await ambient_db_session().get(Notification, question.id)).state == "pending"
 
 
 async def test_malformed_payloads_400_never_500_never_resume(

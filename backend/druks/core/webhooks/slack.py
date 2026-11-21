@@ -8,6 +8,7 @@ from dbos import DBOS
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
 
+from druks.chat.forms import get_answer
 from druks.core.services import Slack
 from druks.db import db_session
 from druks.durable.engine import step_session
@@ -35,6 +36,9 @@ _TIMESTAMP_TOLERANCE_SECONDS = 300
 
 # What a clicked message says in place of its buttons.
 CHOICE_MESSAGE = "<@{user}> chose {choice}."
+
+# What a submitted form's message says in place of its inputs.
+ANSWER_MESSAGE = "<@{user}> answered:\n{answers}"
 
 
 def verify_slack_signature(
@@ -113,15 +117,41 @@ class SlackInteractivity(SlackWebhook):
         except (TypeError, KeyError) as error:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Malformed Slack payload.") from error
 
+    def get_values(self) -> dict:
+        """The answers in the inputs of the clicked message, by field name, in the shapes
+        that a form's fields read. Slack keys the state of an input by its block, and Druks
+        names the block of a form's input for its field. A message without inputs has no
+        state."""
+        values = {}
+        for block_id, inputs in self.data.get("state", {}).get("values", {}).items():
+            for element in inputs.values():
+                match element["type"]:
+                    case "plain_text_input":
+                        values[block_id] = element.get("value") or ""
+                    case "static_select" | "radio_buttons":
+                        values[block_id] = (element.get("selected_option") or {}).get("value", "")
+                    case "multi_static_select":
+                        selected = element.get("selected_options") or []
+                        values[block_id] = [option["value"] for option in selected]
+                    case "checkboxes":
+                        values[block_id] = bool(element.get("selected_options"))
+        return values
+
     async def on_block_actions(self) -> Response:
         try:
+            action_type = self.data["actions"][0]["type"]
             action_id = self.data["actions"][0]["action_id"]
             channel = self.data["channel"]["id"]
             message = self.data["message"]
             message_ts = message["ts"]
             user = self.data["user"]["id"]
-        except (TypeError, KeyError, IndexError) as error:
+            values = self.get_values()
+        except (TypeError, KeyError, IndexError, AttributeError) as error:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Malformed Slack payload.") from error
+        if action_type != "button":
+            # A change in an input of a form answers nothing. Its Submit button does.
+            self.log_ignored(event="block_actions", reason="input_changed")
+            return JSONResponse({"accepted": False})
         try:
             token, choice_id = decode_button(action_id)
         except MalformedButtonError as error:
@@ -139,7 +169,12 @@ class SlackInteractivity(SlackWebhook):
         # add up to a second before the person sees it.
         try:
             notification = await respond_to_notification(
-                db_session(), token, {"control": choice_id}, user_id=user, account_id=account_id
+                db_session(),
+                token,
+                {"control": choice_id},
+                user_id=user,
+                account_id=account_id,
+                values=values,
             )
         except StaleRoundError as error:
             # The round is over, so the clicked message loses its buttons.
@@ -171,14 +206,21 @@ class SlackInteractivity(SlackWebhook):
                 thread_ts=message.get("thread_ts", ""),
             )
             return JSONResponse({"accepted": False})
+        if notification.fields:
+            # Escaped, the person's words cannot mention anyone or link anywhere in the message.
+            answers = get_answer(notification.fields, values)
+            answers = answers.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            outcome = ANSWER_MESSAGE.format(user=user, answers=answers)
+        else:
+            outcome = CHOICE_MESSAGE.format(
+                user=user, choice=notification.get_action(choice_id)["label"]
+            )
         await DBOS.start_workflow_async(
             replace_buttons,
             notification.id,
             channel=channel,
             message_ts=message_ts,
-            outcome=CHOICE_MESSAGE.format(
-                user=user, choice=notification.get_action(choice_id)["label"]
-            ),
+            outcome=outcome,
         )
         return JSONResponse({"accepted": True})
 
@@ -190,7 +232,7 @@ async def replace_buttons(
     notification_id: str, *, channel: str, message_ts: str, outcome: str
 ) -> None:
     """Edit the notification's message in Slack: ``outcome`` takes the place of its
-    buttons."""
+    buttons and inputs."""
     async with step_session() as session:
         notification = await session.get(Notification, notification_id)
         client = await Slack.get_client()

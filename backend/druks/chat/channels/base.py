@@ -22,6 +22,8 @@ class Channel:
     has_readable_threads: ClassVar[bool] = False
     # Whether the channel shows a parked run's controls and the agent's choices as buttons.
     has_buttons: ClassVar[bool] = False
+    # Whether the channel shows the fields of the agent's form as inputs, with a Submit button.
+    has_inputs: ClassVar[bool] = False
     # The reaction that acknowledges a person's message, as the channel names it.
     reaction_ack: ClassVar[str]
 
@@ -42,12 +44,18 @@ class Channel:
         raise NotImplementedError
 
     @classmethod
+    def validate_fields(cls, fields: list[dict]) -> None:
+        """Refuse the fields of the agent's form that the channel cannot show, with a
+        FormError that says why. A channel takes every form unless it says otherwise."""
+
+    @classmethod
     async def post_buttons(
         cls, session: AsyncSession, conversation: Conversation, notification: Notification
     ) -> str:
-        """Post the notification with its actions as buttons where the conversation lives.
-        A notification that an answer closed before the post says that its question is
-        closed instead. Returns the posted message's id, as the channel names it."""
+        """Post the notification with its actions as buttons, or its fields as inputs with a
+        Submit button, where the conversation lives. A notification that an answer closed
+        before the post says that its question is closed instead. Returns the posted
+        message's id, as the channel names it."""
         raise NotImplementedError
 
     @classmethod

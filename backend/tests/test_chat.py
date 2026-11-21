@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import asyncssh
 import pytest
+from conftest import FORM_TEXT
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.apps.registry import channels, services
@@ -31,6 +32,7 @@ from druks.chat.exceptions import (
     ChatHarnessError,
     ChatSandboxGone,
 )
+from druks.chat.forms import parse_fields
 from druks.chat.models import Conversation, Message
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.database import get_session, session_scope
@@ -572,12 +574,14 @@ async def test_a_channel_turn_with_no_answer_is_asked_once(druks_db, conversatio
     assert not await conversation.get_unanswered_message(druks_db)
 
 
-QUESTION = {"question": "Which database?", "choices": ["Postgres", "MySQL", "SQLite"]}
+CHOICES_CALL = {"question": "Which database?", "choices": ["Postgres", "MySQL", "SQLite"]}
+QUESTION = {**CHOICES_CALL, "fields": []}
+FORM = {"question": "Where does it ship?", "choices": [], "fields": parse_fields(FORM_TEXT)}
 
 
-async def record_question(conversation, message):
+async def record_question(conversation, message, question=QUESTION):
     """What chat_ask leaves for the end of the turn of ``message``."""
-    await get_client().set(service.question_key(conversation.id, message.id), json.dumps(QUESTION))
+    await get_client().set(service.question_key(conversation.id, message.id), json.dumps(question))
 
 
 @pytest.fixture
@@ -633,23 +637,133 @@ async def test_a_question_waits_on_the_newest_message_of_the_turn(druks_db, conv
 
 async def test_a_question_needs_a_turn_that_runs(druks_db, conversation, tmp_path):
     # The conversation's only message waits for its turn.
-    before_the_turn = await put_question(tmp_path, QUESTION, conversation.id)
-    outside_a_chat = await put_question(tmp_path, QUESTION, "")
+    before_the_turn = await put_question(tmp_path, CHOICES_CALL, conversation.id)
+    outside_a_chat = await put_question(tmp_path, CHOICES_CALL, "")
 
     assert (before_the_turn.status_code, outside_a_chat.status_code) == (409, 409)
     assert not await get_client().keys("chat:*:question:*")
 
 
+async def start_turn(session, conversation):
+    """The conversation's message, delivered to the agent, so its turn runs."""
+    message = await conversation.get_unanswered_message(session)
+    assert await message.mark_delivered(session)
+    await session.commit()
+    return message
+
+
+async def test_a_form_waits_on_the_turn_as_the_fields_that_druks_read(
+    druks_db, conversation, tmp_path
+):
+    message = await start_turn(druks_db, conversation)
+
+    response = await put_question(
+        tmp_path, {"question": "Where does it ship?", "fields": FORM_TEXT}, conversation.id
+    )
+
+    assert response.status_code == 204
+    saved = await get_client().get(service.question_key(conversation.id, message.id))
+    assert json.loads(saved) == FORM
+
+
 @pytest.mark.parametrize(
-    ("body", "offset", "notice", "question_offset"),
+    "body",
     [
-        ("Let me check.I read both.", 13, "I read both.\n\nWhich database?", 12),
-        ("Let me check.", 13, "Which database?", 0),
+        {"question": "Which database?"},
+        {**CHOICES_CALL, "fields": FORM_TEXT},
     ],
+    ids=["neither", "both"],
+)
+async def test_a_question_takes_choices_or_fields_and_not_both(
+    druks_db, conversation, tmp_path, body
+):
+    message = await start_turn(druks_db, conversation)
+    await record_question(conversation, message)
+
+    response = await put_question(tmp_path, body, conversation.id)
+
+    assert (response.status_code, response.json()["detail"]) == (
+        422,
+        "Give choices or fields. Give only one of them.",
+    )
+    saved = await get_client().get(service.question_key(conversation.id, message.id))
+    assert json.loads(saved) == QUESTION
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["", ConversationSource.WHATSAPP, ConversationSource.SLACK],
+    ids=["web", "whatsapp", "slack"],
+)
+@pytest.mark.parametrize("refused", ["SecretField", "UploadField", "MultiUploadField"])
+async def test_every_channel_refuses_a_secret_or_an_upload_and_keeps_the_question(
+    druks_db, conversation, tmp_path, source, refused
+):
+    if source:
+        conversation.source = source
+    message = await start_turn(druks_db, conversation)
+    await record_question(conversation, message)
+
+    response = await put_question(
+        tmp_path,
+        {"question": "Which file?", "fields": f'[{refused}(name="f", label="F")]'},
+        conversation.id,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"].startswith(f"A form takes no {refused}.")
+    saved = await get_client().get(service.question_key(conversation.id, message.id))
+    assert json.loads(saved) == QUESTION
+
+
+@pytest.mark.parametrize(
+    ("source", "status"),
+    [("", 204), (ConversationSource.WHATSAPP, 204), (ConversationSource.SLACK, 422)],
+    ids=["web", "whatsapp", "slack"],
+)
+async def test_only_a_channel_that_refuses_the_form_refuses_it(
+    druks_db, conversation, tmp_path, source, status
+):
+    if source:
+        conversation.source = source
+    message = await start_turn(druks_db, conversation)
+    # The question, 49 inputs, and the Submit button are one block more than Slack shows.
+    fields = ", ".join(f'TextField(name="f{index}", label="F{index}")' for index in range(49))
+
+    response = await put_question(
+        tmp_path, {"question": "Which ones?", "fields": f"[{fields}]"}, conversation.id
+    )
+
+    assert response.status_code == status
+    is_staged = await get_client().exists(service.question_key(conversation.id, message.id))
+    assert bool(is_staged) == (status == 204)
+    if status == 422:
+        assert response.json()["detail"].startswith("A Slack message holds 50 blocks")
+
+
+@pytest.mark.parametrize(
+    ("asked", "actions", "fields"),
+    [
+        (
+            QUESTION,
+            [
+                {"id": "1", "label": "Postgres"},
+                {"id": "2", "label": "MySQL"},
+                {"id": "3", "label": "SQLite"},
+            ],
+            None,
+        ),
+        (FORM, None, FORM["fields"]),
+    ],
+    ids=["choices", "form"],
+)
+@pytest.mark.parametrize(
+    ("body", "offset", "reply"),
+    [("Let me check.I read both.", 13, "I read both."), ("Let me check.", 13, "")],
     ids=["reply-then-question", "question-only"],
 )
-async def test_a_question_goes_out_with_the_reply_as_one_message_with_buttons(
-    druks_db, slack_conversation, monkeypatch, body, offset, notice, question_offset
+async def test_a_question_goes_out_with_the_reply_as_one_message(
+    druks_db, slack_conversation, monkeypatch, asked, actions, fields, body, offset, reply
 ):
     send_reply = AsyncMock()
     monkeypatch.setattr(channels.get("slack"), "send_reply", send_reply)
@@ -657,7 +771,7 @@ async def test_a_question_goes_out_with_the_reply_as_one_message_with_buttons(
     monkeypatch.setattr(Bridge, "reply", AsyncMock(return_value=(body, tool_calls)))
     message = await slack_conversation.get_unanswered_message(druks_db)
     message.state = MessageState.DELIVERED
-    await record_question(slack_conversation, message)
+    await record_question(slack_conversation, message, asked)
 
     await service.finish_turn(
         druks_db,
@@ -674,12 +788,10 @@ async def test_a_question_goes_out_with_the_reply_as_one_message_with_buttons(
         None,
         None,
     )
-    assert (question.body, question.question_offset) == (notice, question_offset)
-    assert question.actions == [
-        {"id": "1", "label": "Postgres"},
-        {"id": "2", "label": "MySQL"},
-        {"id": "3", "label": "SQLite"},
-    ]
+    notice = f"{reply}\n\n{asked['question']}" if reply else asked["question"]
+    assert (question.body, question.question_offset) == (notice, len(reply))
+    assert (question.actions, question.fields) == (actions, fields)
+    assert not await get_client().exists(service.question_key(slack_conversation.id, message.id))
     queued = await druks_db.scalars(
         select(workflow_status.c.workflow_uuid).where(
             workflow_status.c.queue_name == NOTIFICATIONS_QUEUE
@@ -721,6 +833,69 @@ async def test_a_web_reply_ends_with_the_question_and_its_numbered_choices(
     )
 
     assert (await list_messages(druks_db, conversation))[-1].body == saved
+
+
+@pytest.mark.parametrize("has_channel", [False, True], ids=["web", "buttons-without-inputs"])
+async def test_a_reply_where_no_inputs_show_ends_with_the_numbered_fields(
+    druks_db, slack_conversation, monkeypatch, has_channel
+):
+    send_reply = AsyncMock()
+    monkeypatch.setattr(channels.get("slack"), "send_reply", send_reply)
+    monkeypatch.setattr(channels.get("slack"), "has_inputs", False)
+    if not has_channel:
+        slack_conversation.source = ConversationSource.WEB
+        slack_conversation.connection = None
+    tool_calls = [{"toolCallId": "ask-1", "textOffset": 13}]
+    reply = ("Let me check.I read both.", tool_calls)
+    monkeypatch.setattr(Bridge, "reply", AsyncMock(return_value=reply))
+    message = await slack_conversation.get_unanswered_message(druks_db)
+    message.state = MessageState.DELIVERED
+    fields = parse_fields(
+        '[TextField(name="title", label="Title"), SelectField(name="where", label="Where", '
+        'options=[Option("Staging", value="staging"), Option("Production", value="production")])]'
+    )
+    await record_question(slack_conversation, message, {**FORM, "fields": fields})
+
+    await service.finish_turn(
+        druks_db,
+        slack_conversation,
+        message,
+        Bridge(None),
+        {"status": "replied", "archivePath": ""},
+    )
+
+    saved = (await list_messages(druks_db, slack_conversation))[-1]
+    assert saved.body == (
+        "Let me check.I read both.\n\nWhere does it ship?\n1. Title\n2. Where\n"
+        "    - Staging\n    - Production"
+    )
+    assert not list(await druks_db.scalars(select(Notification)))
+    assert send_reply.await_count == has_channel
+
+
+@pytest.mark.parametrize(
+    ("status", "is_held"), [("cancelled", False), ("replied", True)], ids=["stopped", "held"]
+)
+async def test_a_stopped_or_held_turn_sends_no_form(
+    druks_db, slack_conversation, monkeypatch, status, is_held
+):
+    send_reply = AsyncMock()
+    monkeypatch.setattr(channels.get("slack"), "send_reply", send_reply)
+    monkeypatch.setattr(Conversation, "is_held", AsyncMock(return_value=is_held))
+    tool_calls = [{"toolCallId": "ask-1", "textOffset": 13}]
+    reply = ("Let me check.I read both.", tool_calls)
+    monkeypatch.setattr(Bridge, "reply", AsyncMock(return_value=reply))
+    message = await slack_conversation.get_unanswered_message(druks_db)
+    message.state = MessageState.DELIVERED
+    await record_question(slack_conversation, message, FORM)
+
+    await service.finish_turn(
+        druks_db, slack_conversation, message, Bridge(None), {"status": status, "archivePath": ""}
+    )
+
+    assert (await list_messages(druks_db, slack_conversation))[-1].body == reply[0]
+    assert not list(await druks_db.scalars(select(Notification)))
+    send_reply.assert_not_awaited()
 
 
 @pytest.mark.parametrize("is_internal", [False, True], ids=["person", "druks"])

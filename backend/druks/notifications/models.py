@@ -46,6 +46,8 @@ class Notification(Base, Uuid7Pk):
     question_offset: Mapped[int | None] = mapped_column(default=None)
     # The offered choices [{id, label}]; None for a one-way notification.
     actions: Mapped[list[dict] | None] = mapped_column(JSONB, default=None)
+    # The fields of a chat agent's form, for the check of a Submit's answers.
+    fields: Mapped[list[dict] | None] = mapped_column(JSONB, default=None)
     # Reply-routing back to a parked run: (run_id, run_parked_at) is the exact
     # round a click answers — stored on the row because a run can re-park a new
     # round before the human acts.
@@ -92,6 +94,7 @@ class Notification(Base, Uuid7Pk):
         question_offset: int | None = None,
         subject: dict | None = None,
         actions: list[dict] | None = None,
+        fields: list[dict] | None = None,
         run_id: str | None = None,
         run_parked_at: datetime | None = None,
         deep_link: str | None = None,
@@ -107,6 +110,7 @@ class Notification(Base, Uuid7Pk):
             question_offset=question_offset,
             subject=subject,
             actions=actions,
+            fields=fields,
             run_id=run_id,
             run_parked_at=run_parked_at,
             deep_link=deep_link,

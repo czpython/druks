@@ -18,3 +18,19 @@ UNACCEPTED_AUTOMATION_REPLY = (
     "I do not answer this automation yet. A Druks admin can accept it here: {url}"
 )
 WELCOME_TEMPLATE = "chat/channels/slack/welcome.md"
+# Slack's limits for a message of inputs, from the Block Kit reference.
+MESSAGE_BLOCKS_LIMIT = 50
+BLOCK_ID_LIMIT = 255
+LABEL_LIMIT = 2000
+HINT_LIMIT = 2000
+PLACEHOLDER_LIMIT = 150
+INITIAL_VALUE_LIMIT = 3000
+OPTION_TEXT_LIMIT = 75
+OPTION_VALUE_LIMIT = 150
+OPTIONS_LIMITS = {
+    "plain_text_input": 0,
+    "static_select": 100,
+    "multi_static_select": 100,
+    "radio_buttons": 10,
+    "checkboxes": 10,
+}

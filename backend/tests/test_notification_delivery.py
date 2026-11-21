@@ -1,10 +1,14 @@
+import re
 from types import SimpleNamespace
 
 import pytest
-from conftest import bind_ambient_session, install_service
+from conftest import FORM_TEXT, bind_ambient_session, install_service
+from druks import ui
 from druks.accounts.models import Account
 from druks.chat.channels.slack.channel import SlackChannel
 from druks.chat.enums import ConversationSource
+from druks.chat.exceptions import FormError
+from druks.chat.forms import parse_fields
 from druks.chat.models import Conversation
 from druks.core.apis.slack import SlackClient
 from druks.core.webhooks.slack import replace_buttons
@@ -110,6 +114,231 @@ async def test_a_long_reply_before_a_question_loses_its_end_and_the_question_sta
         assert edit["blocks"][1:] == [
             {"type": "section", "text": {"type": "mrkdwn", "text": outcome}}
         ]
+
+
+async def _form_question(druks_db) -> tuple[Conversation, Notification]:
+    """A Slack chat, and the form of FORM_TEXT that its agent asked."""
+    bind_ambient_session(druks_db)
+    await install_service(
+        "slack",
+        access_token=_BOT_TOKEN,
+        identity={"client_id": "c1"},
+        secrets={"client_secret": "s"},
+    )
+    account = await Account.get_or_create(druks_db, "op@example.com")
+    conversation = Conversation(
+        account_id=account.id,
+        source=ConversationSource.SLACK,
+        user_id="U1",
+        thread_id="C1:1700000000.000100",
+    )
+    druks_db.add(conversation)
+    await druks_db.flush()
+    question = await Notification.create(
+        druks_db,
+        conversation_id=conversation.id,
+        reason="question.asked",
+        body="Where does it ship?",
+        question_offset=0,
+        fields=parse_fields(FORM_TEXT),
+    )
+    return conversation, question
+
+
+def _label(text: str) -> dict:
+    return {"type": "plain_text", "text": text}
+
+
+def _option(label: str, value: str) -> dict:
+    return {"text": _label(label), "value": value}
+
+
+async def test_a_form_posts_an_input_for_each_field_and_one_submit_button(druks_db, slack):
+    conversation, question = await _form_question(druks_db)
+
+    await SlackChannel.post_buttons(druks_db, conversation, question)
+
+    (post,) = slack.posts
+    staging, production = _option("Staging", "staging"), _option("Production", "production")
+    rack, shelf = _option("Rack", "rack"), _option("Shelf", "shelf")
+    box = _option("Yes", "yes")
+    assert post["blocks"] == [
+        {"type": "markdown", "text": "Where does it ship?"},
+        {
+            "type": "input",
+            "block_id": "title",
+            "label": _label("Title"),
+            "optional": False,
+            "element": {
+                "type": "plain_text_input",
+                "multiline": False,
+                "placeholder": _label("A short title"),
+            },
+        },
+        {
+            "type": "input",
+            "block_id": "notes",
+            "label": _label("Notes"),
+            "hint": _label("Anything else to know."),
+            "optional": True,
+            "element": {"type": "plain_text_input", "multiline": True},
+        },
+        {
+            "type": "input",
+            "block_id": "budget",
+            "label": _label("Budget"),
+            "optional": True,
+            "element": {"type": "plain_text_input", "initial_value": "10"},
+        },
+        {
+            "type": "input",
+            "block_id": "where",
+            "label": _label("Where"),
+            "optional": True,
+            "element": {
+                "type": "static_select",
+                "options": [staging, production],
+                "initial_option": staging,
+            },
+        },
+        {
+            "type": "input",
+            "block_id": "tags",
+            "label": _label("Tags"),
+            "optional": True,
+            "element": {
+                "type": "multi_static_select",
+                "options": [rack, shelf],
+                "initial_options": [rack],
+            },
+        },
+        {
+            "type": "input",
+            "block_id": "size",
+            "label": _label("Size"),
+            "optional": False,
+            "element": {
+                "type": "radio_buttons",
+                "options": [_option("Small", "s"), _option("Large", "l")],
+            },
+        },
+        {
+            "type": "input",
+            "block_id": "notify",
+            "label": _label("Notify the owner"),
+            "optional": True,
+            "element": {"type": "checkboxes", "options": [box], "initial_options": [box]},
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": _label("Submit"),
+                    "action_id": encode_button(question.correlation_token, "submit"),
+                }
+            ],
+        },
+    ]
+
+
+async def test_a_closed_or_answered_form_shows_its_question_without_inputs_or_buttons(
+    druks_db, slack
+):
+    conversation, question = await _form_question(druks_db)
+    await question.mark_acknowledged()
+
+    # An answer closed the form before its post, then after it, and the person answered it.
+    await SlackChannel.post_buttons(druks_db, conversation, question)
+    question.message_id = "C1:1.0"
+    await SlackChannel.remove_buttons(druks_db, conversation, question)
+    await replace_buttons(question.id, channel="C1", message_ts="1.0", outcome="<@U1> answered:")
+
+    outcomes = [CLOSED_MESSAGE, CLOSED_MESSAGE, "<@U1> answered:"]
+    assert [post["blocks"] for post in slack.posts] == [
+        [
+            {"type": "markdown", "text": "Where does it ship?"},
+            {"type": "section", "text": {"type": "mrkdwn", "text": outcome}},
+        ]
+        for outcome in outcomes
+    ]
+
+
+async def test_slack_takes_a_form_of_48_fields_in_one_message_and_refuses_49(slack):
+    fields = [ui.TextField(name=f"f{index}", label="F").model_dump() for index in range(49)]
+
+    SlackChannel.validate_fields(fields[:48])
+    await deliver(SlackClient(token=_BOT_TOKEN), "C1", "Which ones?", fields=fields[:48], token="t")
+
+    assert len(slack.posts[0]["blocks"]) == 50
+    with pytest.raises(FormError, match="A Slack message holds 50 blocks"):
+        SlackChannel.validate_fields(fields)
+
+
+def _text_field(**arguments) -> list[dict]:
+    return [ui.TextField(**{"name": "title", "label": "Title", **arguments}).model_dump()]
+
+
+def _choice_field(field: type, options: list) -> list[dict]:
+    return [field(name="choice", label="Choice", options=options).model_dump()]
+
+
+def _options(count: int) -> list:
+    return [ui.Option(f"Option {index}", value=f"option-{index}") for index in range(count)]
+
+
+@pytest.mark.parametrize(
+    ("make", "limit", "refusal"),
+    [
+        (lambda size: _text_field(name="n" * size), 255, "for the name of a field"),
+        (lambda size: _text_field(label="L" * size), 2000, "for the label of a field"),
+        (lambda size: _text_field(help_text="h" * size), 2000, "for the help text of a field"),
+        (lambda size: _text_field(placeholder="p" * size), 150, "for the placeholder of a field"),
+        (lambda size: _text_field(value="v" * size), 3000, "for the value of a field"),
+        (
+            lambda size: _choice_field(ui.SelectField, [ui.Option("O" * size, value="o")]),
+            75,
+            "for the option label of a field",
+        ),
+        (
+            lambda size: _choice_field(ui.RadioField, [ui.Option("O", value="o" * size)]),
+            150,
+            "for the option value of a field",
+        ),
+        (
+            lambda size: _choice_field(ui.SelectField, _options(size)),
+            100,
+            "has 101 options. Slack shows 100",
+        ),
+        (
+            lambda size: _choice_field(ui.MultiSelectField, _options(size)),
+            100,
+            "has 101 options. Slack shows 100",
+        ),
+        (
+            lambda size: _choice_field(ui.RadioField, _options(size)),
+            10,
+            "has 11 options. Slack shows 10",
+        ),
+    ],
+    ids=[
+        "name",
+        "label",
+        "help-text",
+        "placeholder",
+        "default",
+        "option-label",
+        "option-value",
+        "select-options",
+        "multi-select-options",
+        "radio-options",
+    ],
+)
+def test_slack_takes_a_form_at_each_limit_and_refuses_it_one_past(make, limit, refusal):
+    SlackChannel.validate_fields(make(limit))
+
+    with pytest.raises(FormError, match=re.escape(refusal)):
+        SlackChannel.validate_fields(make(limit + 1))
 
 
 @pytest.mark.parametrize(

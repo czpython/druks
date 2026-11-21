@@ -5,6 +5,7 @@ from druks.accounts.models import Account
 from druks.apps.loader import get_app
 from druks.apps.registry import workflows
 from druks.chat.constants import CLICK_ANSWER_MESSAGE
+from druks.chat.forms import get_answer
 from druks.chat.models import Conversation
 from druks.chat.service import deliver
 from druks.core.services import Slack
@@ -98,11 +99,13 @@ async def respond_to_notification(
     *,
     user_id: str | None,
     account_id: str | None,
+    values: dict | None = None,
 ) -> Notification:
     """Answer the notification with a click by ``user_id``, whose account is
     ``account_id``, or with a link, which names nobody. In a chat, only its person answers.
     A click on the question of the chat's agent, or one that needs more, goes to the agent
-    as the person's message."""
+    as the person's message. The Submit of a form carries ``values``, the answers in its
+    inputs by field name, and a form takes them only when its fields take them."""
     notification = await Notification.get_for_token(session, token)
     if not notification:
         raise UnknownTokenError()
@@ -125,7 +128,7 @@ async def respond_to_notification(
             # and an ask that doesn't declare in_app isn't answerable either
             # (the same declared-key read get_ask itself dispatches on).
             raise InvalidChoiceError("this notification is informational; answer on its source")
-    elif not notification.conversation_id or not notification.actions:
+    elif not notification.conversation_id or not (notification.actions or notification.fields):
         # Without a run, only the question of a chat's agent takes an answer.
         raise InvalidChoiceError("this notification does not take an answer")
     control = choice["control"]
@@ -134,7 +137,11 @@ async def respond_to_notification(
         # A link names nobody, so it answers no chat.
         if not user_id or user_id != conversation.user_id:
             raise AnswerNotAllowedError("Only the person of this conversation can answer it.")
-        label = notification.get_action(control)["label"]
+        # The answers are checked before the claim, so a wrong one leaves the form open.
+        if notification.fields:
+            answer = get_answer(notification.fields, values or {})
+        else:
+            answer = notification.get_action(control)["label"]
         if (
             not run
             or (await get_offered_control(ask, control))["note_required"]
@@ -144,7 +151,7 @@ async def respond_to_notification(
             # chat's agent as the person's message.
             if not await notification.mark_acknowledged():
                 raise AlreadyAcknowledgedError()
-            await conversation.create_message(session, label)
+            await conversation.create_message(session, answer)
             await session.commit()
             await DBOS.start_workflow_async(deliver, conversation.id)
             return notification
@@ -155,7 +162,7 @@ async def respond_to_notification(
             raise AlreadyAcknowledgedError()
         await run.resume(**resume_payload)
         await conversation.create_message(
-            session, CLICK_ANSWER_MESSAGE.format(run=run.id, answer=label), is_internal=True
+            session, CLICK_ANSWER_MESSAGE.format(run=run.id, answer=answer), is_internal=True
         )
         return notification
     resume_payload = await validate_in_app_answer(

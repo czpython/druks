@@ -50,3 +50,8 @@ class TranscriptionError(ChatError):
 
 class ReminderError(ChatError):
     """A reminder cannot be made as asked. The message says what to change."""
+
+
+class FormError(ChatError):
+    """The agent's fields make no form that the conversation can show. The message says
+    what to change."""

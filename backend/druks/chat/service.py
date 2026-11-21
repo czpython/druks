@@ -726,8 +726,9 @@ async def finish_turn(
 ) -> None:
     """Save the reply and the agent's session files, and send a channel's reply to its
     person. The question that the agent asked in the turn follows the reply. A channel
-    with buttons gets both in one message, with a button for each choice. Elsewhere the
-    reply ends with the question and its numbered choices."""
+    with buttons gets both in one message, with a button for each choice, and a channel
+    with inputs gets a form's fields as inputs. Elsewhere the reply ends with the question
+    and its numbered choices or fields."""
     body, tool_calls = await bridge.reply(conversation.id, message.id)
     state = MessageState(status["status"])
     await conversation.end_turn(session, state)
@@ -742,12 +743,20 @@ async def finish_turn(
         ask = json.loads(saved)
     separator = "\n\n" if reply.answer else ""
     channel = conversation.channel
-    if ask and not (channel and channel.has_buttons):
-        # The person can answer with a choice's number.
+    is_shown = False
+    if ask and channel:
+        is_shown = channel.has_inputs if ask["fields"] else channel.has_buttons
+    if ask and not is_shown:
+        # The person answers in their own words, with a choice's number or field by field.
+        questions = ask["choices"] or [
+            field["label"]
+            + "".join(f"\n    - {option['label']}" for option in field.get("options", []))
+            for field in ask["fields"]
+        ]
         reply.body += (
             separator
             + ask["question"]
-            + "".join(f"\n{number}. {choice}" for number, choice in enumerate(ask["choices"], 1))
+            + "".join(f"\n{number}. {question}" for number, question in enumerate(questions, 1))
         )
     if status["archivePath"]:
         session_file = File(path=status["archivePath"])
@@ -762,7 +771,11 @@ async def finish_turn(
         and state == MessageState.REPLIED
         and not await conversation.is_held(session)
     ):
-        if ask and channel.has_buttons:
+        if is_shown:
+            choices = [
+                {"id": str(number), "label": choice}
+                for number, choice in enumerate(ask["choices"], 1)
+            ]
             # The question starts where the reply ends, so a cut to fit takes only the reply.
             notification = await Notification.create(
                 session,
@@ -770,10 +783,8 @@ async def finish_turn(
                 reason="question.asked",
                 body=reply.answer + separator + ask["question"],
                 question_offset=len(reply.answer),
-                actions=[
-                    {"id": str(number), "label": choice}
-                    for number, choice in enumerate(ask["choices"], 1)
-                ],
+                actions=choices or None,
+                fields=ask["fields"] or None,
             )
             await queue_send(session, notification)
             await session.commit()

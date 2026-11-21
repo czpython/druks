@@ -26,8 +26,10 @@ from .exceptions import (
     ChannelStartsNoConversationsError,
     ChatSandboxGone,
     FileNotInThreadError,
+    FormError,
     ReminderError,
 )
+from .forms import parse_fields
 from .models import Conversation, Message, Reminder
 from .schemas import (
     ConversationDetailResponse,
@@ -301,20 +303,35 @@ async def ask(
     choices: Annotated[
         list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=75)]],
         Body(
+            default_factory=list,
             min_length=2,
             max_length=4,
             description="Two to four short labels, in the order to show them.",
         ),
     ],
+    fields: Annotated[
+        str, Body(description="The fields of a form, as one Python list of field calls.")
+    ] = "",
     account: Account = Depends(current_account),
 ) -> None:
     """Ask the person of the conversation this call comes from one question, with two to
-    four choices. Druks sends it after your reply, when your turn ends. A channel with
-    buttons shows a button for each choice. Elsewhere the choices are a numbered list.
-    Make this your last tool call, and write any reply after it: the text before it stays
-    your notes. Do not repeat the question or its choices in the reply. Then end your
-    turn, and do not wait for the answer. The person's choice, or what they write instead,
-    reaches you as their next message. A second call in the turn replaces the question."""
+    four choices or with a form of fields. Give choices or fields, not both. Druks sends
+    the question after your reply, when your turn ends. A channel with buttons shows a
+    button for each choice. A channel with inputs shows an input for each field and a
+    Submit button. Elsewhere the choices or the fields are a numbered list, and the person
+    answers in their own words. Write the fields as one Python list of TextField,
+    TextAreaField, NumberField, SelectField, MultiSelectField, RadioField, and
+    CheckboxField calls of druks.ui. Give each argument by its druks.ui name, except the
+    label of an Option, as in [TextField(name="title", label="Title"), SelectField(name="where",
+    label="Where", options=[Option("Staging", value="staging")])]. Druks reads the fields
+    and runs no code. A form takes no SecretField, UploadField, or MultiUploadField. Make
+    this your last tool call, and write any reply after it: the text before it stays your
+    notes. Do not repeat the question, its choices, or its fields in the reply. Then end
+    your turn, and do not wait for the answer. The person's choice, their answers with one
+    line for each field, or what they write instead, reaches you as their next message. A
+    second call in the turn replaces the question."""
+    if bool(choices) == bool(fields):
+        raise HTTPException(422, "Give choices or fields. Give only one of them.")
     conversation_id = current_conversation_id.get()
     if not conversation_id:
         raise HTTPException(409, "This tool asks in a conversation. Call it from one.")
@@ -322,9 +339,17 @@ async def ask(
     message = await conversation.get_unanswered_message(session)
     if not message or message.state != MessageState.DELIVERED:
         raise HTTPException(409, "No turn runs in this conversation. Call it during a turn.")
+    form = []
+    if fields:
+        try:
+            form = parse_fields(fields)
+            if conversation.channel:
+                conversation.channel.validate_fields(form)
+        except FormError as error:
+            raise HTTPException(422, str(error)) from error
     await get_client().set(
         question_key(conversation.id, message.id),
-        json.dumps({"question": question, "choices": choices}),
+        json.dumps({"question": question, "choices": choices, "fields": form}),
         ex=SANDBOX_HOST_LEASE_SECONDS,
     )
 

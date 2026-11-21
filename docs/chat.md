@@ -130,19 +130,23 @@ messages. **Latest message** returns to the bottom.
 
 ## Questions
 
-The agent can ask you a question with two to four short choices. It calls
-`chat_ask` during its turn, and the call returns at once: the agent does not wait
-for your answer. `chat_ask` is a tool of the Druks toolkit, so the agent of an
-operator has it, on the web and on each channel. The agents of a public WhatsApp
-number have only the tools that their Bot names, so they do not have it.
+The agent can ask you a question with two to four short choices, or with a
+[form](#forms) of fields. It calls `chat_ask` during its turn, and the call
+returns at once: the agent does not wait for your answer. `chat_ask` is a tool of
+the Druks toolkit, so the agent of an operator has it, on the web and on each
+channel. The agents of a public WhatsApp number have only the tools that their Bot
+names, so they do not have it.
 
 When the turn ends, Druks sends the question after the agent's reply:
 
 - In Slack, the reply, the question, and a button for each choice come in one
-  message. A reply too long for one message loses its end. The question and the
-  buttons stay whole.
+  message. A form comes the same way, with an input for each field and a
+  **Submit** button. A reply too long for one message loses its end. The question,
+  the buttons, and the inputs stay whole.
 - In the web chat, WhatsApp, and GitHub, the reply ends with the question and its
-  choices as a numbered list. Answer with a number or in your own words.
+  choices or fields as a numbered list, with the options of a field below it.
+  Answer with a number or in your own words. The agent reads your message as your
+  answer.
 
 Select a button, and its choice reaches the agent as your next message. The
 message then shows your choice in place of the buttons. Only the person of the
@@ -153,6 +157,37 @@ question is closed. When you write while the agent asks, your message can close
 the question before Druks posts it. Druks then posts the reply and the question
 with no buttons, and the message says that the question is closed. A turn that you
 stop asks nothing, and neither does a turn of a paused conversation.
+
+### Forms
+
+The agent asks with a form when it needs several answers, or an answer in your own
+words. It writes the fields as one Python list of `druks.ui` field calls, as app
+pages do:
+
+```python
+[TextField(name="title", label="Title"), SelectField(name="where", label="Where", options=[Option("Staging", value="staging")])]
+```
+
+A form takes `TextField`, `TextAreaField`, `NumberField`, `SelectField`,
+`MultiSelectField`, `RadioField`, and `CheckboxField`, by their bare names or with
+the `ui.` prefix. Each argument has the name that `druks.ui` gives it, such as
+`help_text`. Only the label of an `Option` goes without its name. Druks reads the
+list with Python's `ast` module and runs no code: it takes literals, lists, and
+these calls, and Pydantic checks each field. A form takes no `SecretField`,
+because a secret that you type in Slack stays in Slack. It takes no `UploadField`
+or `MultiUploadField`, because Slack shows a file input only in a modal. Druks
+also refuses a form that Slack cannot show in one message, such as a form of more
+than 48 fields. The agent gets the reason in the same turn.
+
+In Slack, fill in the inputs and select **Submit**. Druks checks your answers: a
+required field needs an answer, a number field takes a number within its minimum,
+its maximum, and its step, and a choice takes one of its options. When an answer
+does not fit, only you see why, and the form stays open for you to correct it.
+Your answers reach the agent as your next message, with one line for each field:
+its label, then your answer. A checkbox reads Yes or No, and a field that you
+leave empty reads (no answer). The message then shows your answers in place of
+the inputs. Only the person of the conversation can submit the form. When you
+write an answer instead, the form closes as a question with buttons does.
 
 ## Agent access
 
