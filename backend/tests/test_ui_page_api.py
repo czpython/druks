@@ -113,6 +113,31 @@ async def test_a_static_child_of_the_landing_page_answers(druks_client: httpx.As
     assert response.json()["title"] == "Recent notes"
 
 
+async def test_a_page_of_plain_values_serves_typed_values(
+    druks_client: httpx.AsyncClient, note: Note
+):
+    response = await druks_client.get("/api/field_notes/pages/recent")
+
+    assert response.status_code == 200
+    metrics, columns, _, _ = response.json()["blocks"][0]["blocks"]
+    assert metrics["metrics"] == [
+        {
+            "label": "Captured",
+            "value": {"value": "number", "number": 1.0, "unit": "", "tone": "neutral"},
+            "description": "",
+        },
+        {
+            "label": "Summarized",
+            "value": {"value": "number", "number": 0.0, "unit": "", "tone": "neutral"},
+            "description": "Notes an agent has read.",
+        },
+    ]
+    assert columns["blocks"][0]["facts"][0] == {
+        "label": "Body",
+        "value": {"value": "text", "text": note.body, "description": "", "link": None},
+    }
+
+
 async def test_an_undeclared_page_path_answers_404(druks_client: httpx.AsyncClient):
     response = await druks_client.get("/api/field_notes/pages/nowhere/at/all")
 

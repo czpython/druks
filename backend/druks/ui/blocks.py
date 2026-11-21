@@ -436,9 +436,23 @@ class ControlsValue(PageValue):
             control.check_placement(followed=followed, regions=regions, region=region)
 
 
+def _typed_value(value):
+    if isinstance(value, str):
+        return TextValue(value)
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return NumberValue(value)
+    if isinstance(value, PageValue | dict):
+        return value
+    raise ValueError(
+        f"this takes a string, a number, or a Value, not {type(value).__name__}. "
+        "Give the words to show, or a Value such as a StatusValue or a TimeValue."
+    )
+
+
 Value = Annotated[
     TextValue | NumberValue | StatusValue | SubjectStatus | TimeValue | ControlsValue,
     Discriminator("value"),
+    BeforeValidator(_typed_value),
 ]
 
 
@@ -586,8 +600,8 @@ class Metric(Schema):
     value: Value
     description: str = ""
 
-    def __init__(self, label, **data):
-        super().__init__(label=label, **data)
+    def __init__(self, label, value, **data):
+        super().__init__(label=label, value=value, **data)
 
 
 class Metrics(PageBlock):
@@ -607,8 +621,8 @@ class Fact(Schema):
     label: str
     value: Value
 
-    def __init__(self, label, **data):
-        super().__init__(label=label, **data)
+    def __init__(self, label, value, **data):
+        super().__init__(label=label, value=value, **data)
 
 
 class Facts(PageBlock):

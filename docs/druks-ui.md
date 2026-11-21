@@ -420,7 +420,7 @@ away.
 `SubjectStatus` shows where the work on one subject stands:
 
 ```python
-ui.TableRow([ui.TextValue(target.name), ui.SubjectStatus(target, working="auditing")])
+ui.TableRow([target.name, ui.SubjectStatus(target, working="auditing")])
 ```
 
 When Druks serves the page, one read gets the status of every subject on it,
@@ -594,14 +594,22 @@ the discriminator.
 **Wire names are camelCase.** `alternative_text` serializes as
 `alternativeText`. `Schema` does that for every model here.
 
-**Druks coerces author input to the wire type.** Three fields take a friendlier
+**Druks coerces author input to the wire type.** These fields take a friendlier
 input than they store:
 
 | Field | Author passes | Druks stores |
 | --- | --- | --- |
 | `Page.follows`, `Section.follows`, `Link.subject` | a subject | `Follows` |
 | `Files.files` | `druks.files.File` objects | `list[FileSummary]` |
+| `Metric.value`, `Fact.value`, `TableRow.cells`, `List.items` | a `str` | `TextValue` |
+| `Metric.value`, `Fact.value`, `TableRow.cells`, `List.items` | an `int` or a `float` | `NumberValue` |
 | `Metric.value`, `Fact.value`, `TableRow.cells`, `List.items` | any `Value` | the same value |
+
+A `str`, an `int`, or a `float` is the short form of a value. The short form
+gets the defaults of its `Value`: a `TextValue` with no description and no
+link, or a `NumberValue` with no unit and a neutral tone. Give the `Value`
+itself for anything more. A number must be finite. Druks refuses a `bool`,
+because Python counts it as a number and a reader does not.
 
 ## The three unions
 
@@ -654,12 +662,13 @@ ui.Link("Open", page="note", arguments={"note_id": "7"})
 A container that holds one list takes that list positionally too:
 
 ```python
-ui.Metrics([ui.Metric("Captured", value=ui.NumberValue(12))], title="Counts")
+ui.Metrics([ui.Metric("Captured", 12)], title="Counts")
 ui.Stack([ui.Text("one"), ui.Divider()], gap="large")
 ```
 
 `Metrics`, `Facts`, `List`, `Timeline`, `Files`, `ImageGallery`, `Stack`,
-`Columns`, and `TableRow` all read that way. A block that holds more than one
+`Columns`, and `TableRow` all read that way. A label-and-value pair, `Metric`
+or `Fact`, takes both positionally. A block that holds more than one
 thing names every argument: `Card`, `Section`, `Table`, `Chart`, and `Cards`.
 `Cards` is on that list because its `empty` is content, not decoration. So is
 `Form`: its required value is the action that sends it, not something it shows,
