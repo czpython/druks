@@ -14,8 +14,10 @@ from druks.chat.enums import ConversationSource
 from druks.chat.exceptions import ChannelHasNoThreadsError, FileNotInThreadError
 from druks.chat.models import Conversation, Message
 from druks.chat.service import deliver
+from druks.configured_agents.models import ConfiguredAgent
 from druks.core.apis.slack import SlackClient
 from druks.core.services import Slack
+from druks.exceptions import PermissionDenied
 from druks.files.datastructures import File
 from druks.models import Base
 from druks.notifications.constants import CLOSED_MESSAGE
@@ -70,17 +72,43 @@ class SlackChannel(Channel):
     async def route_message(cls, session: AsyncSession, row: VaultSecret, message: dict) -> None:
         """Route a message for the bot. A direct message or a tag reaches the linked
         account's own conversation, or waits under a private link until the person
-        connects their Slack account. An untagged reply reaches the thread conversation
-        the person used in the last day, unless they asked for a tag. Everything else is
-        not for the bot."""
+        connects their Slack account. A tag followed by an agent's name reaches the
+        person's conversation with that agent. A tag in a thread that names
+        none reaches the person's latest conversation there. An untagged reply reaches
+        the thread conversation the person used in the last day, unless they asked for a
+        tag. Everything else is not for the bot."""
         thread_id = get_thread_id(message)
-        is_addressed = not thread_id or f"<@{row.identity['bot_user_id']}>" in message["text"]
+        mention = f"<@{row.identity['bot_user_id']}>"
+        is_tagged = mention in message["text"]
+        is_addressed = not thread_id or is_tagged
         if not is_addressed and "thread_ts" not in message:
             # Most of a room's traffic: a top-level message that names nobody.
             return
         linked_account = await cls.lookup_account(session, row, message)
         if is_addressed and linked_account:
-            await cls.save_message(session, row, linked_account, message)
+            agent = None
+            if is_tagged:
+                # "@Druks, Security engineer" and "@Druks: Security engineer" name it too.
+                text = message["text"].partition(mention)[2].lstrip(",: \n")
+                agent = await ConfiguredAgent.get_for_text(session, text)
+                if not agent and thread_id:
+                    latest = await Conversation.get_for_user(
+                        session, row, user_id=message["user"], thread_id=thread_id
+                    )
+                    agent = latest.agent if latest else None
+            if agent:
+                try:
+                    agent.check_talker(linked_account)
+                except PermissionDenied as error:
+                    room, _, thread_ts = thread_id.partition(":")
+                    client = SlackClient(token=await Slack.get_bot_token())
+                    await client.post_markdown(
+                        room or message["user"], str(error), thread_ts=thread_ts
+                    )
+                    return
+            await cls.save_message(
+                session, row, linked_account, message, agent_id=agent.id if agent else None
+            )
         elif is_addressed:
             await cls.send_link(message)
         elif linked_account:
@@ -89,16 +117,24 @@ class SlackChannel(Channel):
             )
             since = Base.utc_now() - timedelta(seconds=JOINED_THREAD_SECONDS)
             if joined and not joined.is_tag_required and joined.last_message_at > since:
-                await cls.save_message(session, row, linked_account, message)
+                await cls.save_message(
+                    session, row, linked_account, message, agent_id=joined.agent_id
+                )
 
     @classmethod
     async def save_message(
-        cls, session: AsyncSession, row: VaultSecret, account: Account, message: dict
+        cls,
+        session: AsyncSession,
+        row: VaultSecret,
+        account: Account,
+        message: dict,
+        *,
+        agent_id: str | None,
     ) -> Conversation:
-        """Save the message in the account's conversation for its place, and start its
-        turn. Each file the message carries is a Druks file: the first on the message,
-        each further one on a message of its own. A message with no text and no file
-        gives the agent nothing to read."""
+        """Save the message in the account's conversation with the agent, or with the
+        Bot, for its place, and start its turn. Each file the message carries is a Druks
+        file: the first on the message, each further one on a message of its own. A
+        message with no text and no file gives the agent nothing to read."""
         conversation = await Conversation.get_or_create_for_user(
             session,
             row,
@@ -109,6 +145,7 @@ class SlackChannel(Channel):
             user_phone="",
             thread_id=get_thread_id(message),
             is_tag_required=account.is_tag_required,
+            agent_id=agent_id,
         )
         client = SlackClient(token=await Slack.get_bot_token())
         shares = message.get("files", [])
