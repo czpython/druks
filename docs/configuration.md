@@ -653,8 +653,10 @@ dependency, and it is open until the issue gets the done label or closes.
 GitHub lists only the dependencies that the installation of the ticket's repo
 can read. A blocker in a private repo outside that installation does not hold
 the ticket. On Jira, a blocker is an issue link of
-the Blocks type, and it is open until its status category is Done. When a
-blocker moves to the done status, Druks reads each ticket that it blocks. A
+the Blocks type, and it is open until its status category is Done. A blocker
+whose pull request is open does not hold the ticket. When a blocker's pull
+request opens, or when it moves to the done status, Druks reads each ticket that
+it blocks. A
 ticket at the trigger status with no other open blocker starts its build. No
 person starts that build, so it uses the account of the ticket assignee.
 **druks** board tickets do not wait for blockers.
