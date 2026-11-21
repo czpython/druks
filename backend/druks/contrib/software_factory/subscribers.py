@@ -12,6 +12,8 @@ from druks.contrib.software_factory.exceptions import (
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Build, Profile, PullRequestReview
+from druks.core.apis.exceptions import GitHubMergeConflictError
+from druks.core.services import Github
 from druks.db import atomic
 from druks.models import Base
 from druks.services.exceptions import ServiceNotConnectedError
@@ -49,6 +51,44 @@ async def pr_open_fills_the_item(*, repo: str, pr_number: int, payload: dict) ->
 async def pr_open_starts_the_tickets_it_blocks(*, repo: str, pr_number: int, **_: object) -> None:
     item = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number)
     await _start_tickets_blocked_by(item.source, item.ticket_key)
+
+
+@subscribe("pr.synchronized", payload__is_fork=False)
+async def blocker_push_updates_the_prs_built_on_it(
+    *, repo: str, pr_number: int, payload: dict
+) -> None:
+    """New commits on a blocker's branch go into each PR that targets that branch. A
+    conflict stops that ticket's build and leaves its PR as it is."""
+    blocker = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number)
+    if (
+        blocker
+        and blocker.has_open_pr
+        and (tracker := await SoftwareFactory.get_tracker(blocker.source))
+    ):
+        async with tracker:
+            tickets = await tracker.get_blocking(blocker.ticket_key)
+        github = await Github.get_client(repo)
+        for ticket in tickets:
+            item = await WorkItem.get_for_ticket_key(
+                source=ticket["source"], ticket_key=ticket["identifier"]
+            )
+            if not (item and item.has_open_pr and item.repo == repo):
+                continue
+            pull_request = await github.get_pull_request(repo, item.pr_number)
+            if pull_request["base"]["ref"] != payload["branch"]:
+                continue
+            try:
+                await github.update_pull_request_branch(repo, item.pr_number)
+            except GitHubMergeConflictError:
+                await Build.cancel(
+                    item,
+                    failure=(
+                        f"merge conflict with {blocker.ticket_key} (#{blocker.pr_number}), "
+                        f"whose branch {payload['branch']} has new commits"
+                    ),
+                )
+            else:
+                await item.announce("build.base_updated", blocker=blocker.ticket_key)
 
 
 @subscribe(WorkflowEvent.RUNNING, workflow=Build)

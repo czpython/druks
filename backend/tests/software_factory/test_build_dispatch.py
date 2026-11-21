@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from conftest import connect_service
@@ -12,8 +13,10 @@ from druks.contrib.software_factory.exceptions import (
     TicketBlocked,
     TicketNotRoutable,
 )
+from druks.contrib.software_factory.models import WorkItem
 from druks.contrib.software_factory.ticketing.base import Tracker
 from druks.contrib.software_factory.workflows import Build
+from druks.core.apis.exceptions import GitHubMergeConflictError
 from druks.events.models import Event
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.signals import publish
@@ -537,3 +540,81 @@ async def test_dispatch_starts_with_one_open_pr_in_its_repo_and_one_in_another(
     await Build.dispatch(ticket=_ticket(item))
 
     assert started == ["ACME-75"]
+
+
+async def _dependent_of_a_blocker(monkeypatch, *, base: str):
+    """A blocker and a dependent, both with open PRs, and a GitHub client whose PR of the
+    dependent targets ``base``."""
+    settings = await SoftwareFactory.settings()
+    blocker = await make_test_work_item(
+        repo="o/r", title="t", ticket_key="ACME-80", source=settings.tracker
+    )
+    await blocker.update(branch="agent/ACME-80", pr_number=81)
+    dependent = await make_test_work_item(
+        repo="o/r", title="t", ticket_key="ACME-82", source=settings.tracker
+    )
+    await dependent.update(branch="agent/ACME-82", pr_number=83)
+    _use_tracker(
+        monkeypatch,
+        _FakeTracker(
+            blocked_by={},
+            blocking={"ACME-82": _ticket(dependent, status=settings.in_review_status)},
+        ),
+    )
+    github = SimpleNamespace(
+        get_pull_request=AsyncMock(return_value={"base": {"ref": base}}),
+        update_pull_request_branch=AsyncMock(),
+    )
+
+    async def get_client(repo):
+        return github
+
+    monkeypatch.setattr("druks.contrib.software_factory.subscribers.Github.get_client", get_client)
+    return github
+
+
+async def _push_to_the_blocker() -> None:
+    await publish(
+        "pr.synchronized",
+        repo="o/r",
+        pr_number=81,
+        payload={"branch": "agent/ACME-80", "is_fork": False},
+    )
+
+
+async def test_a_push_to_a_blocker_updates_the_pr_that_targets_its_branch(
+    druks_db, monkeypatch
+) -> None:
+    github = await _dependent_of_a_blocker(monkeypatch, base="agent/ACME-80")
+
+    await _push_to_the_blocker()
+
+    github.update_pull_request_branch.assert_awaited_once_with("o/r", 83)
+    [event] = await druks_db.scalars(select(Event).where(Event.type == "build.base_updated"))
+    assert event.payload == {"blocker": "ACME-80"}
+
+
+async def test_a_push_to_a_blocker_leaves_a_pr_that_targets_another_branch(
+    druks_db, monkeypatch
+) -> None:
+    github = await _dependent_of_a_blocker(monkeypatch, base="main")
+
+    await _push_to_the_blocker()
+
+    github.update_pull_request_branch.assert_not_awaited()
+
+
+async def test_a_conflicting_update_stops_the_dependent_build_with_a_reason(
+    druks_db, monkeypatch
+) -> None:
+    github = await _dependent_of_a_blocker(monkeypatch, base="agent/ACME-80")
+    github.update_pull_request_branch.side_effect = GitHubMergeConflictError("o/r#83")
+    dependent = await WorkItem.get_for_ticket_key(source="linear", ticket_key="ACME-82")
+    run = await seed_build_run(druks_db, work_item_id=dependent.id, state="running")
+
+    await _push_to_the_blocker()
+
+    await druks_db.refresh(run)
+    assert run.failure == (
+        "merge conflict with ACME-80 (#81), whose branch agent/ACME-80 has new commits"
+    )

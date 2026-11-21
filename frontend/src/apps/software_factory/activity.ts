@@ -11,6 +11,7 @@ const TOPICS: Record<string, string> = {
   closed: 'Pull request closed',
   'build.rejected': 'Build could not start',
   'build.waiting': 'Waiting on blockers',
+  'build.base_updated': 'Updated from its blocker',
 }
 
 function label(event: ActivityEvent): string | undefined {
@@ -43,6 +44,7 @@ const TOPIC_ICONS: Record<string, LucideIcon> = {
   closed: GitPullRequestClosed,
   'build.rejected': OctagonX,
   'build.waiting': Hourglass,
+  'build.base_updated': GitPullRequest,
 }
 
 const REPLY_ACTIONS: Record<string, string> = {
@@ -53,7 +55,7 @@ const REPLY_ACTIONS: Record<string, string> = {
 }
 
 // The shared payload types app facts as unknown; Factory names its own once.
-type FactoryFacts = FeedItem['payload'] & { repo?: string; pr_number?: number; blockers?: string[]; result?: { action?: string } | null }
+type FactoryFacts = FeedItem['payload'] & { repo?: string; pr_number?: number; blockers?: string[]; blocker?: string; result?: { action?: string } | null }
 
 export function activity(event: ActivityEvent): ActivityPresentation {
   const facts: FactoryFacts = event.payload ?? {}
@@ -62,6 +64,8 @@ export function activity(event: ActivityEvent): ActivityPresentation {
     context = [facts.repo, facts.pr_number && `#${facts.pr_number}`].filter(Boolean).join(' · ') || undefined
   } else if (event.topic === 'build.waiting') {
     context = facts.blockers?.join(', ')
+  } else if (event.topic === 'build.base_updated') {
+    context = facts.blocker
   } else if (event.topic === 'workflow.running' && facts.gate) {
     const gateName = facts.gate === 'review_work' ? 'Implementation review' : facts.gate === 'review' ? 'Plan review' : undefined
     const action = facts.result?.action && REPLY_ACTIONS[facts.result.action]
